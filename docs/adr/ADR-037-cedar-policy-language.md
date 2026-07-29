@@ -94,17 +94,14 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   denied the call. A diagnostic can therefore never turn an authored
   invocation forbid or the absence of an invocation permit into
   user-overridable confirmation.
-- Bound every evaluator call by a harness-independent deadline and treat a
-  panic, process crash, signal, nonzero exit, EOF, transport closure, timeout,
-  cancellation without a complete decision, or structurally incomplete
-  response as a typed evaluator-unavailable result that executes nothing.
-  Failure before a complete positive invocation authorization is never
-  user-confirmable: it fails closed directly because no permit was proven.
-  Failure at the confirmation-free gate may use the explicit escalation path
-  only because the same immutable snapshots already produced positive
-  invocation authorization. Per-harness adapters may translate presentation,
-  but they may neither inherit a native fail-open default nor wait without a
-  finite deadline.
+- Bound every evaluator call by a harness-independent deadline. A panic,
+  process crash, signal, nonzero exit, EOF, transport closure, timeout,
+  cancellation without a complete decision, or incomplete response is a typed
+  evaluator-unavailable result that executes nothing. Failure before positive
+  invocation authorization is never user-confirmable because no permit was
+  proven. Failure at the confirmation-free gate may use explicit escalation
+  only after the same snapshots produced positive invocation authorization.
+  Harness adapters may translate presentation but never fail open or wait forever.
 - Publish policy bundles atomically only after they parse, validate against the
   Cedar schema, and pass the deterministic policy fixture suite. Publication
   is a privileged control-plane operation, not an agent tool: the publisher
@@ -157,6 +154,13 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   symlink to an allowed temporary file cannot authorize deletion from a
   protected directory, and a protected referent does not by itself forbid
   removing an otherwise allowed symlink entry.
+- Hard links are multi-resource operations. `link`/`ln` authorizes the source
+  referent's stable identity plus the destination parent and entry; an allowed
+  destination cannot launder a protected inode. Later access carries device
+  and inode into authorization, so protected classification is not pathname-only.
+  The privileged boundary maintains an authoritative protected-inode mapping
+  and denies when it cannot disprove aliasing, including aliases that predate
+  the request.
 - The lexical input may be retained only as audit context; policies receive
   the operation-appropriate canonical identities. Failure to obtain every
   required identity is deny, and no per-harness interceptor may evaluate the
@@ -221,14 +225,11 @@ tests must prove all of the following:
    and a missing leaf beneath a symlinked ancestor is resolved through that
    ancestor. Canonicalization failures deny before Cedar is called.
 8. Positively invocation-authorized interactive `policy_unavailable` requests
-   enter the harness confirmation path; non-interactive requests fail closed
-   with a distinct evaluator error. Separately, every harness must force an
-   evaluator panic, process crash, signal, nonzero exit, EOF, timeout, and
-   incomplete response at each ordered gate. Before positive invocation
-   authorization, each case returns a typed non-confirmable unavailable result
-   within the configured deadline and executes nothing; after positive
-   invocation authorization, only confirmation-free-gate failure may enter the
-   explicit interactive escalation path.
+   enter confirmation; non-interactive requests fail closed. Every harness
+   forces panic, crash, signal, nonzero exit, EOF, timeout, and incomplete
+   responses at each gate. Before positive invocation authorization these
+   return typed non-confirmable unavailability by the deadline and execute
+   nothing; only later confirmation-free-gate failure may enter escalation.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
@@ -246,12 +247,14 @@ tests must prove all of the following:
     invalidations than the configured limit and observe a typed
     `policy_churn` result, no dispatch, and a bounded evaluation count; a
     non-churning request still makes progress while publications occur.
-13. Entry-mutating operations use no-follow resource projection: tests cover
-    unlinking an allowed-directory symlink whose referent is protected,
-    rejecting deletion of a protected-directory symlink whose referent is
-    allowed, and rename/replacement across independently authorized source and
-    destination parents. Concurrent leaf swaps cannot change the entry or
-    parent consumed through the pinned directory handles.
+13. Entry mutations use no-follow projection: tests unlink an allowed-directory
+    symlink with a protected referent, reject a protected-directory symlink
+    with an allowed referent, and cover rename/replacement across independently
+    authorized parents. Leaf swaps cannot change pinned entries or parents.
+14. Hard-link creation authorizes source inode and destination entry; protected-source/allowed-destination and inverse cases are denied. Reads
+    and writes through pre-existing allowed-path aliases are denied. Tests
+    retain the inode across aliases, include links created outside the harness,
+    and prove pathname allow cannot override protected-inode identity.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
