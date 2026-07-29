@@ -76,7 +76,6 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
-	// Initialize history logger
 	hist := history.New(projectDir)
 
 	// Validate phase can be started
@@ -92,6 +91,17 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
+	// Initialize tracker
+	tr, err := tracker.New(st.GetSessionID())
+	if err != nil {
+		return fmt.Errorf("failed to initialize tracker: %w", err)
+	}
+	defer func() { _ = tr.Close(context.Background()) }()
+
+	if err := hist.EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for phase transition: %w", err)
+	}
+
 	// Update phase status
 	st.UpdatePhase(phaseName, status.PhaseStatusInProgress, "")
 	st.SetCurrentPhase(phaseName)
@@ -102,13 +112,6 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	if shouldEnsureSessionBead(st, phaseName) {
 		ensureSessionBead(cmd.Context(), st)
 	}
-
-	// Initialize tracker
-	tr, err := tracker.New(st.GetSessionID())
-	if err != nil {
-		return fmt.Errorf("failed to initialize tracker: %w", err)
-	}
-	defer func() { _ = tr.Close(context.Background()) }()
 
 	// Publish phase.started event
 	if err := tr.StartPhase(phaseName); err != nil {
@@ -127,7 +130,7 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Auto-commit the marker files written above so the worktree stays clean.
 	// Without this, the next start-phase call sees WAYFINDER-STATUS.md and
-	// WAYFINDER-HISTORY.md as uncommitted and refuses (ce-fvkz recurrence).
+	// WAYFINDER-HISTORY.jsonl as uncommitted and refuses (ce-fvkz recurrence).
 	// This mirrors the auto-commit that complete-phase already performs.
 	gitIntegrator := git.New(projectDir)
 	if gitIntegrator.IsGitRepo() {

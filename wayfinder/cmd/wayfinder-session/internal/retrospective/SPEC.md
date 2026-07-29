@@ -18,7 +18,7 @@
 
 **WFR-05** When a rewind entry is persisted, the system shall append it to `RETRO-retrospective.md` without rewriting existing entries.
 
-**WFR-06** When a rewind entry is persisted, the system shall also append a structured event to `WAYFINDER-HISTORY.md`.
+**WFR-06** When a rewind entry is persisted, the system shall also append a structured event to `WAYFINDER-HISTORY.jsonl`.
 
 **WFR-07** When git or context capture fails, the system shall preserve the rewind operation and record available diagnostic context.
 

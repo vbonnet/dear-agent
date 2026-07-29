@@ -7,7 +7,7 @@
 // # Architecture
 //
 // The package uses a dual-logging strategy:
-//   - WAYFINDER-HISTORY.md: Structured JSON events for programmatic analysis
+//   - WAYFINDER-HISTORY.jsonl: Structured JSON Lines events for programmatic analysis
 //   - RETRO-retrospective.md: Human-readable markdown for reflection and review
 //
 // # Main Entry Point
