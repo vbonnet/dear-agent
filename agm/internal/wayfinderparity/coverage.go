@@ -156,19 +156,43 @@ func validatePiSkillRoot(root, declared string) error {
 	if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
 	}
-	info, err := os.Stat(skillRoot)
+	// The lexical check above cannot see through an intermediate symlink, so
+	// resolve both sides before trusting containment and before loading any
+	// entrypoint. Otherwise a declared root that links outside the repository
+	// lets Wayfinder parity pass on assets absent from a clone.
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve repository root for pi skill discovery path %q: %w", declared, err)
+	}
+	resolvedSkillRoot, err := filepath.EvalSymlinks(skillRoot)
+	if err != nil {
+		return fmt.Errorf("pi skill discovery path %q: %w", declared, err)
+	}
+	resolvedRelative, relErr := filepath.Rel(resolvedRoot, resolvedSkillRoot)
+	if relErr != nil || resolvedRelative == ".." || strings.HasPrefix(resolvedRelative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
+	}
+	info, err := os.Stat(resolvedSkillRoot)
 	if err != nil {
 		return fmt.Errorf("pi skill discovery path %q: %w", declared, err)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("pi skill discovery path %q is not a directory", declared)
 	}
-	entrypoints, err := filepath.Glob(filepath.Join(skillRoot, "*", "SKILL.md"))
+	entrypoints, err := filepath.Glob(filepath.Join(resolvedSkillRoot, "*", "SKILL.md"))
 	if err != nil {
 		return fmt.Errorf("glob Pi skill entrypoints under %q: %w", declared, err)
 	}
 	for _, entrypoint := range entrypoints {
-		if info, statErr := os.Stat(entrypoint); statErr == nil && info.Mode().IsRegular() {
+		resolvedEntrypoint, resolveErr := filepath.EvalSymlinks(entrypoint)
+		if resolveErr != nil {
+			continue
+		}
+		entrypointRelative, entrypointRelErr := filepath.Rel(resolvedRoot, resolvedEntrypoint)
+		if entrypointRelErr != nil || entrypointRelative == ".." || strings.HasPrefix(entrypointRelative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if info, statErr := os.Stat(resolvedEntrypoint); statErr == nil && info.Mode().IsRegular() {
 			return nil
 		}
 	}
