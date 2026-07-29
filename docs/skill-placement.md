@@ -80,14 +80,15 @@ skill actually discovers and triggers.
 |---|---|---|
 | `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
 | `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
-| `.agents/skills/` | Codex, AGY, OpenCode, and Pi fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
+| `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
 | `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
 
 `.dear-agent/marketplace.json` is the neutral catalog: it declares
 `native-claude-plugin-marketplace` for Claude Code and `agents-md-skill-fallback`
-for Codex, AGY, OpenCode, and Pi.
+for Codex, AGY, and OpenCode. Pi instead loads only the paths declared in
+`.pi/settings.json`.
 
 ### The canonical packaging pattern
 
