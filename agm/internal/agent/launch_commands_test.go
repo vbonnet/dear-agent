@@ -314,3 +314,18 @@ func TestPastedLaunchRejectsTerminalControlsBeforeTmux(t *testing.T) {
 		t.Fatalf("terminal paste payload executed or sentinel check failed: %v", err)
 	}
 }
+
+func TestPastedLaunchSeamRejectsTerminalControlsBeforeConfiguredSender(t *testing.T) {
+	called := false
+	send := func(string, string) error {
+		called = true
+		return nil
+	}
+	err := sendPastedShellCommandWith(send, "session", "quoted command", "unsafe\nvalue")
+	if err == nil || !strings.Contains(err.Error(), "terminal control character") {
+		t.Fatalf("sendPastedShellCommandWith() error = %v, want terminal-control rejection", err)
+	}
+	if called {
+		t.Fatal("configured tmux sender was called before terminal-control validation")
+	}
+}

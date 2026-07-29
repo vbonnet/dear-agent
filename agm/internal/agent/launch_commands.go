@@ -32,10 +32,14 @@ import (
 // prevents shell metacharacter injection, but cannot make terminal controls
 // safe: ESC can end bracketed paste and a newline can then submit a new command.
 func sendPastedShellCommand(sessionName, command string, values ...string) error {
+	return sendPastedShellCommandWith(tmux.SendCommand, sessionName, command, values...)
+}
+
+func sendPastedShellCommandWith(send func(string, string) error, sessionName, command string, values ...string) error {
 	if err := validatePastedShellValues(values...); err != nil {
 		return err
 	}
-	return tmux.SendCommand(sessionName, command)
+	return send(sessionName, command)
 }
 
 func validatePastedShellValues(values ...string) error {

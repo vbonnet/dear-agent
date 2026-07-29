@@ -132,6 +132,36 @@ func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) 
 	}
 }
 
+func TestPiAdapterCreateRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
+	codingAgentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", codingAgentDir)
+	sent := false
+	piSendShellCommand = func(string, string) error { sent = true; return nil }
+	rolledBack := false
+	piKillSession = func(string) error { rolledBack = true; return nil }
+
+	adapter, err := NewPiAdapter(&MockSessionStore{sessions: map[SessionID]*SessionMetadata{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.CreateSession(SessionContext{
+		Name:             "pi\nworker",
+		WorkingDirectory: t.TempDir(),
+		Model:            "sonnet",
+	})
+	if err == nil || !strings.Contains(err.Error(), "pasted shell value") {
+		t.Fatalf("CreateSession() error = %v, want terminal-control rejection", err)
+	}
+	if sent {
+		t.Fatal("Pi create contacted its configured tmux sender before validation")
+	}
+	if !rolledBack {
+		t.Fatal("Pi create did not roll back the tmux session after validation failure")
+	}
+}
+
 func TestPiAdapterCreatePrefersPerSessionCodingAgentDirectory(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -392,6 +422,30 @@ func TestPiAdapterResumeValidatesConfigBeforeCreatingRelaunchTmux(t *testing.T) 
 	}
 	if created {
 		t.Fatal("ResumeSession created tmux before validating relaunch configuration")
+	}
+}
+
+func TestPiAdapterColdResumeRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("TMUX", "fixture")
+	store := piResumeFixtureStore(t, "pi\nrelaunch")
+	store.sessions["agm-id"].CodingAgentDir = t.TempDir()
+	store.sessions["agm-id"].CodingAgentDirSet = true
+	sent := false
+	piSendShellCommand = func(string, string) error { sent = true; return nil }
+	rolledBack := false
+	piKillSession = func(string) error { rolledBack = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	err := adapter.ResumeSession("agm-id")
+	if err == nil || !strings.Contains(err.Error(), "pasted shell value") {
+		t.Fatalf("ResumeSession() error = %v, want terminal-control rejection", err)
+	}
+	if sent {
+		t.Fatal("Pi resume contacted its configured tmux sender before validation")
+	}
+	if !rolledBack {
+		t.Fatal("Pi resume did not roll back the tmux session after validation failure")
 	}
 }
 
