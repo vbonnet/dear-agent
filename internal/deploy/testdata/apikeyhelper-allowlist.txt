@@ -33,7 +33,7 @@ c8f96be19438874a  # \
 f507b8ede53de32e  # uninstall-token-refresher-launchagent:
 
 # cmd/token-refresher/README.md
-a9b0448e2ed64731  # (This is *not* an invitation to wire it up as an `apiKeyHelper` — see
+10a53fef5fa0d7da  # (This is *not* an invitation to wire it up as an `apiKeyHelper` — see
 44ca89ab2c5af622  # ### Retired wiring: `apiKeyHelper` — do not reintroduce
 f9d5de49f76a0783  # **That wiring was removed from the host on
 bbf66e0ee73d6003  # It also masked real errors: with the helper in front, a dead token fam

@@ -61,15 +61,57 @@ it keeps the access token so fresh that other clients rarely need to refresh at
 all. Removing it without evidence would widen the window in which some other
 client decides to refresh on its own.
 
-Both observed deaths instead sit across a **machine sleep/wake boundary**, which
-is consistent with a wake-time thundering herd: every client wakes with an
-expired access token, they all read the same refresh token before any of them
-writes back, one wins and the rest replay. This is a hypothesis, not a confirmed
-cause — see "Identifying the culprit" below.
+An earlier sleep/wake thundering-herd hypothesis was superseded by the
+fingerprint evidence below. The many-client structure is a standing risk, but
+it was not the cause of either observed death.
+
+## The confirmed cause (2026-07-21, ce-77ip.7)
+
+**The refresher was killing its own token family.** The fingerprint post-mortem
+found no third-party rotation at all — across 98 instrumented ticks over ~48h,
+including a sleep/wake gap, every `credentials_mtime` was our own previous
+tick's timestamp. The many-clients structure below is real, but it did not cause
+either observed death.
+
+What did: a refresh request that **reaches the server but whose response is
+lost**. The server consumes the single-use token and issues a replacement that
+never arrives, so the on-disk token is spent but still looks valid. The next tick
+presents it again — a replay — and the family is revoked.
+
+The 2026-07-18 death, from the audit log:
+
+```
+07:27:46Z  force/ok     refreshed=true            last good rotation
+07:57:57Z  force/error  TLS handshake timeout     request never sent (harmless)
+08:28:07Z  force/error  TLS handshake timeout     request never sent (harmless)
+08:58:37Z  force/error  Client.Timeout ... headers REQUEST SENT, reply lost  <-- token spent here
+09:28:50Z  force/error  TLS handshake timeout     request never sent (harmless)
+09:59:02Z  force/error  TLS handshake timeout     request never sent (harmless)
+10:29:06Z  force/token_family_dead  invalid_grant <-- replay; family revoked
+```
+
+That `Client.Timeout exceeded while awaiting headers` is the only occurrence in
+33 days of log, and it sits 90 minutes before the only clean death onset.
+
+**Fixed by the refresh-token quarantine.** The refresher now distinguishes the
+two failure modes by observing whether the transport consumed the refresh-token
+body (a conservative signal, not proof of wire transmission) and
+refuses to re-present a token whose fate is unknown. See
+`cmd/token-refresher/README.md`. If you see exit code 4 or a `refresh_quarantined`
+audit outcome, that is the protection working — the family is alive *because* the
+token was withheld.
+
+```sh
+token-refresher -check              # shows an active quarantine
+token-refresher -clear-quarantine   # override, if you are confident the token is unspent
+```
+
+A quarantine clears itself once the on-disk token changes, so no action is
+usually needed.
 
 ## Identifying the culprit
 
-Every audit line in `~/.local/state/dear-agent/token-refresher-audit.jsonl` now
+Every audit line in `~/.local/state/dear-agent/token-refresher-audit.jsonl`
 carries `refresh_token_fp` (a short SHA-256 prefix of the refresh token that was
 on disk when the tick started) and `credentials_mtime`. Compare the lines around
 a `token_family_dead` outcome:
@@ -115,7 +157,10 @@ Two compounding failures, both fixed by `-cadence`:
 
 ## Open work
 
-Restoring a genuine single-writer guarantee needs one of:
+The lost-response replay is fixed. Restoring a genuine single-writer guarantee is
+still desirable — it reduces how often *any* client refreshes, and no other
+client has the quarantine protection — but it is no longer the known cause of
+these outages. It needs one of:
 
 - a supported Claude Code setting that disables per-session refresh (read the
   shared credentials file, never rotate) — does not exist today;

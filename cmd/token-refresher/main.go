@@ -40,6 +40,7 @@
 //	1  generic / usage error
 //	2  token family dead (invalid_grant) — re-authentication required
 //	3  refresh succeeded on the server but could not be persisted (critical)
+//	4  refresh token quarantined — an earlier refresh may have spent it
 package main
 
 import (
@@ -67,6 +68,7 @@ const (
 	exitError           = 1
 	exitTokenFamilyDead = 2
 	exitNotPersisted    = 3
+	exitQuarantined     = 4
 
 	httpTimeout = 30 * time.Second
 	// forceSkew, applied in -force mode, makes any on-disk token read as stale
@@ -91,10 +93,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cadence     = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
 		lockTimeout = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
 		auditPath   = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
+		quarPath    = fs.String("quarantine", defaultQuarantinePath(), "refresh-token quarantine marker path (empty to disable quarantine)")
+		clearQuar   = fs.Bool("clear-quarantine", false, "clear the refresh-token quarantine and exit (operator override)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
+	quarantineExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		quarantineExplicit = quarantineExplicit || f.Name == "quarantine"
+	})
+	if !quarantineExplicit {
+		*quarPath = defaultQuarantinePathForCredentials(*credPath)
+	}
+	if *check && *clearQuar {
+		fmt.Fprintln(stderr, "token-refresher: -check and -clear-quarantine are mutually exclusive")
+		return exitError
+	}
+	resolvedCredPath := canonicalCredentialsPath(*credPath)
 
 	var logger *slog.Logger
 	if !*quiet {
@@ -113,23 +129,65 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer span.End()
 
 	r := auth.OAuthResolver{
-		CredentialsPath: *credPath,
+		CredentialsPath: resolvedCredPath,
 		TokenEndpoint:   *endpoint,
 		ClientID:        *clientID,
 		LockTimeout:     *lockTimeout,
+		QuarantinePath:  *quarPath,
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
+	}
+	clearProtectionsCommand := clearRefreshProtectionsCommand(resolvedCredPath, *quarPath)
+
+	if *clearQuar {
+		if err := clearCadenceSentinel(defaultStateDir(), cadenceSentinelName(*quarPath)); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
+			return exitError
+		}
+		if err := r.ClearRefreshProtections(); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not clear refresh protections: %v\n", err)
+			return exitError
+		}
+		fmt.Fprintln(stderr, "token-refresher: refresh-token quarantine cleared; automatic refresh re-armed.")
+		writeAudit(*auditPath, auditRecord{Mode: "clear-quarantine", Outcome: "ok"})
+		return exitOK
 	}
 
 	// Fingerprint the on-disk refresh token BEFORE doing anything, so the audit
 	// line records the token this tick was about to present. See fingerprint.go.
-	fp, credMod := credentialsFingerprint(*credPath)
+	fp, credMod := credentialsFingerprint(resolvedCredPath)
 
 	// finish adapts the exit code for the unattended cadence caller. See
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
-			return cadenceExit(code, defaultStateDir(), stderr)
+			if code == exitNotPersisted {
+				stateDir := defaultStateDir()
+				sentinelName := cadenceSentinelName(*quarPath)
+				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
+				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
+				if _, _, _, quarantined := r.QuarantineStatus(); quarantined && sharedQuarantine {
+					notifyCadenceOnce(stateDir, sentinelName,
+						"Claude auth AT RISK",
+						"Credential persistence failed; the refresh-token quarantine is active. Run "+clearProtectionsCommand+" after remediation.")
+					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
+					return exitOK
+				}
+				stopped, stopErr := r.RefreshStopped()
+				if stopErr == nil && stopped {
+					notifyCadenceOnce(stateDir, sentinelName,
+						"Claude auth AT RISK",
+						"Refresh quarantine could not be persisted; the durable refresh stop is active. Run "+clearProtectionsCommand+" after remediation.")
+					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
+					return exitOK
+				}
+				notifyCadenceOnce(stateDir, sentinelName,
+					"Claude auth AT RISK",
+					"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
+				fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
+				return exitNotPersisted
+			}
+			return cadenceExit(code, defaultStateDir(), cadenceSentinelName(*quarPath), stderr)
 		}
 		return code
 	}
@@ -141,13 +199,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 			attribute.Bool("fresh", st.Fresh),
 		)
 		printStatus(stderr, st)
+		// A marker naming a token that is no longer on disk holds nothing back,
+		// so it must not be reported as if it did — that would send the operator
+		// to -clear-quarantine for no reason. See CTR-13.
+		if qfp, qat, qreason, active := r.QuarantineStatus(); active {
+			fmt.Fprintf(stderr, "token-refresher: QUARANTINED refresh token %s since %s (%s)\n"+
+				"  Automatic refresh is held back. Clear with: %s\n", qfp, qat, qreason, clearProtectionsCommand)
+		} else if qfp != "" {
+			fmt.Fprintf(stderr, "token-refresher: stale quarantine marker for %s (token has since rotated); "+
+				"it is inert and the next refresh will remove it.\n", qfp)
+		}
+		stopped, stopErr := r.InspectRefreshStop()
+		if stopErr != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not inspect durable refresh stop: %v\n", stopErr)
+			return exitError
+		}
+		if stopped {
+			fmt.Fprintln(stderr, "token-refresher: REFRESH STOPPED after a non-persisted refresh outcome.")
+			fmt.Fprintf(stderr, "  Automatic refresh is disabled. Clear with: %s\n", clearProtectionsCommand)
+		}
 		writeAudit(*auditPath, auditRecord{
 			Mode: "check", Outcome: "ok", Fresh: st.Fresh, ExpiresAt: msOrZero(st.ExpiresAt),
 			RefreshTokenFP: fp, CredentialsModTime: credMod,
 		})
 		return exitOK
 	}
-
 	if *force {
 		r.ExpirySkew = forceSkew
 		span.SetAttributes(attribute.Bool("forced", true))
@@ -160,7 +236,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		return finish(handleRefreshError(err, mode, *auditPath, stderr, fp, credMod))
+		return finish(handleRefreshError(err, mode, *auditPath, stderr, fp, credMod, *quarPath, clearProtectionsCommand))
 	}
 
 	span.SetAttributes(
@@ -181,7 +257,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // handleRefreshError maps a refresh error to a clear stderr message, an audit
 // record, and an exit code. The typed errors get distinct codes so a wrapper
 // (or operator) can escalate the unrecoverable ones.
-func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp, credMod string) int {
+func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp, credMod, quarPath, clearProtectionsCommand string) int {
 	switch {
 	case errors.Is(err, auth.ErrTokenFamilyDead):
 		fmt.Fprintf(stderr, "token-refresher: refresh token rejected (invalid_grant). The token family is dead.\n"+
@@ -195,6 +271,76 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 			RefreshTokenFP: fp, CredentialsModTime: credMod,
 		})
 		return exitTokenFamilyDead
+	case errors.Is(err, auth.ErrQuarantineNotPersisted):
+		if errors.Is(err, auth.ErrRefreshStopNotPersisted) {
+			fmt.Fprintf(stderr, "token-refresher: CRITICAL — neither the quarantine nor the durable refresh stop could be written.\n"+
+				"  The next tick may present the token again and revoke the whole token family.\n"+
+				"  Fix the credential/state directories now, or re-authenticate with `claude /login`.\n  cause: %v\n", err)
+		} else {
+			fmt.Fprintf(stderr, "token-refresher: the refresh token could not be quarantined at %s.\n"+
+				"  A credential-scoped durable refresh stop was requested; unattended cadence verifies that marker before reporting STOPPED.\n"+
+				"  Quarantine is DISABLED or unavailable; run -clear-quarantine only after remediation.\n  cause: %v\n",
+				quarPath, err)
+		}
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "quarantine_not_persisted", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitNotPersisted
+
+	case errors.Is(err, auth.ErrQuarantineUnreadable):
+		fmt.Fprintf(stderr, "token-refresher: refresh SKIPPED — a quarantine marker exists but could not be read.\n"+
+			"  It may name the token on disk, so presenting it could revoke the token family. Failing closed.\n"+
+			"  Inspect %s, then either repair it or run: %s\n  cause: %v\n",
+			quarPath, clearProtectionsCommand, err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "quarantine_unreadable", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
+	case errors.Is(err, auth.ErrRefreshOutcomeUnknown):
+		if quarPath == "" {
+			fmt.Fprintf(stderr, "token-refresher: refresh outcome UNKNOWN — the request may have reached the server but the response did not.\n"+
+				"  Quarantine is DISABLED, so the next tick may re-present this possibly spent token.\n"+
+				"  Re-run with a quarantine path or re-authenticate with `claude /login` before retrying.\n  cause: %v\n", err)
+			writeAudit(auditPath, auditRecord{
+				Mode: mode, Outcome: "refresh_outcome_unknown_unquarantined", Error: err.Error(),
+				RefreshTokenFP: fp, CredentialsModTime: credMod,
+			})
+			return exitNotPersisted
+		}
+		fmt.Fprintf(stderr, "token-refresher: refresh outcome UNKNOWN — the request reached the server but the response did not.\n"+
+			"  The refresh token may already be spent. It has been quarantined (fingerprint %s) so the next tick will NOT\n"+
+			"  present it again; replaying a spent token is what revokes the whole token family.\n"+
+			"  If the access token expires before another client refreshes, re-authenticate with `claude /login`.\n"+
+			"  To override and retry anyway: %s\n  cause: %v\n", fpOrUnknown(fp), clearProtectionsCommand, err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "refresh_outcome_unknown", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
+	case errors.Is(err, auth.ErrRefreshQuarantined):
+		fmt.Fprintf(stderr, "token-refresher: refresh SKIPPED — the on-disk refresh token is quarantined.\n"+
+			"  An earlier refresh may have spent it, so presenting it again risks killing the token family.\n"+
+			"  This clears itself as soon as any client rotates the token successfully.\n"+
+			"  To override: %s\n  detail: %v\n", clearProtectionsCommand, err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "refresh_quarantined", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
+	case errors.Is(err, auth.ErrRefreshStopped):
+		fmt.Fprintf(stderr, "token-refresher: refresh SKIPPED — this credential set has a durable refresh stop after a non-persisted outcome.\n"+
+			"  Inspect the credential-scoped quarantine and stop markers, then run %s after remediation.\n  detail: %v\n", clearProtectionsCommand, err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "refresh_stopped", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
 	case errors.Is(err, auth.ErrRefreshNotPersisted):
 		fmt.Fprintf(stderr, "token-refresher: CRITICAL — refresh succeeded but new credentials could not be written.\n"+
 			"  The rotated refresh token is not on disk; the next refresh may fail. Investigate disk/permissions now.\n  cause: %v\n", err)
@@ -211,6 +357,10 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 		})
 		return exitError
 	}
+}
+
+func clearRefreshProtectionsCommand(credentialsPath, quarantinePath string) string {
+	return fmt.Sprintf("token-refresher -credentials %q -quarantine %q -clear-quarantine", credentialsPath, quarantinePath)
 }
 
 // fpOrUnknown and credModOrUnknown keep the operator-facing death message
@@ -308,6 +458,49 @@ func defaultAuditPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".local", "state", "dear-agent", "token-refresher-audit.jsonl")
+}
+
+// defaultQuarantinePath puts the quarantine marker alongside the audit log and
+// the death sentinel, so all refresher state lives in one directory.
+func defaultQuarantinePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent", "refresh-token-quarantine.json")
+}
+
+// defaultQuarantinePathForCredentials keeps separate credentials files from
+// clearing one another's quarantine marker. An explicitly supplied
+// -quarantine path remains an operator-controlled shared marker when needed.
+func defaultQuarantinePathForCredentials(credentialsPath string) string {
+	credentialsPath = canonicalCredentialsPath(credentialsPath)
+	if credentialsPath == canonicalCredentialsPath(defaultCredentialsPath()) {
+		return defaultQuarantinePath()
+	}
+	return credentialsPath + ".refresh-quarantine.json"
+}
+
+func defaultCredentialsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", ".credentials.json")
+}
+
+func canonicalCredentialsPath(path string) string {
+	if path == "" {
+		path = defaultCredentialsPath()
+	}
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return path
 }
 
 func msOrZero(t time.Time) int64 {

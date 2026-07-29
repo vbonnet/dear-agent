@@ -229,11 +229,15 @@ func TestRefresh_PersistFailureSurfaces(t *testing.T) {
 		Now:             fixedClock(),
 		HTTPClient:      srv.Client(),
 		TokenEndpoint:   srv.URL,
+		QuarantinePath:  filepath.Join(t.TempDir(), "quarantine.json"),
 	}
 
 	_, err := r.Refresh(context.Background())
 	if !errors.Is(err, ErrRefreshNotPersisted) {
 		t.Fatalf("Refresh() error = %v, want ErrRefreshNotPersisted", err)
+	}
+	if _, statErr := os.Stat(r.QuarantinePath); statErr != nil {
+		t.Fatalf("rotated on-disk refresh token was not quarantined before returning: %v", statErr)
 	}
 }
 
