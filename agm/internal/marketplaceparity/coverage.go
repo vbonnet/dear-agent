@@ -113,6 +113,29 @@ func ValidateHarnessSurfaces(root string) error {
 		if _, err := os.Stat(filepath.Join(root, surface.Catalog)); err != nil {
 			return fmt.Errorf("%s marketplace catalog %q: %w", harness, surface.Catalog, err)
 		}
+		if err := validateNativeSkillCoverage(root, catalog, surface); err != nil {
+			return fmt.Errorf("%s marketplace catalog %q: %w", harness, surface.Catalog, err)
+		}
+	}
+	return nil
+}
+
+func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSurface) error {
+	if surface.Mode != "native-codex-skill" && surface.Mode != "native-opencode-skill" {
+		return nil
+	}
+	for _, plugin := range catalog.Plugins {
+		if !slices.Contains(plugin.Capabilities, "skills") {
+			continue
+		}
+		entrypoint := filepath.Join(root, surface.Catalog, plugin.Name, "SKILL.md")
+		info, err := os.Lstat(entrypoint)
+		if err != nil {
+			return fmt.Errorf("skill-capable plugin %q missing native entrypoint: %w", plugin.Name, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("skill-capable plugin %q native entrypoint %q is not a regular file", plugin.Name, entrypoint)
+		}
 	}
 	return nil
 }
