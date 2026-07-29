@@ -25,6 +25,8 @@ func TestContainsCodexUpdatePromptPattern(t *testing.T) {
 		"post-skip banner": "✨ Update available! 0.145.0 -> 0.146.0\nRun brew upgrade --cask codex to update.",
 		"transcript":       "the release notes mention Update now and Skip until next version",
 		"composer":         "OpenAI Codex (v0.145.0)\nmodel: gpt-5.6 xhigh   /model to change\n›",
+		"stale selector above current composer": livePane +
+			"\nOpenAI Codex (v0.145.0)\nmodel: gpt-5.6 xhigh   /model to change\n›",
 	} {
 		if containsCodexUpdatePromptPattern(content) {
 			t.Errorf("%s was misread as the update selector", name)

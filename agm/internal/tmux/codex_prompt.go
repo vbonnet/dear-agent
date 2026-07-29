@@ -339,31 +339,14 @@ func IsCodexIdle(sessionName string) (bool, error) {
 // containsCodexTrustPromptPattern reports whether content contains a Codex
 // first-run trust / onboarding consent prompt.
 func containsCodexTrustPromptPattern(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return false
-	}
-	for _, pattern := range CodexTrustPromptPatterns {
-		if strings.Contains(trimmed, pattern) {
-			return true
-		}
-	}
-	return false
+	return codexSelectorOwnsInput(content, CodexTrustPromptPatterns, false)
 }
 
-// containsCodexModelUpgradePromptPattern reports whether content contains the
-// Codex model-upgrade interstitial.
+// containsCodexModelUpgradePromptPattern reports whether the Codex
+// model-upgrade interstitial currently owns input. A composer or working
+// footer below a retained selector supersedes it.
 func containsCodexModelUpgradePromptPattern(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return false
-	}
-	for _, pattern := range CodexModelUpgradePromptPatterns {
-		if strings.Contains(trimmed, pattern) {
-			return true
-		}
-	}
-	return false
+	return codexSelectorOwnsInput(content, CodexModelUpgradePromptPatterns, false)
 }
 
 // containsCodexUpdatePromptPattern reports whether the Codex update-available
@@ -371,16 +354,46 @@ func containsCodexModelUpgradePromptPattern(content string) bool {
 // banner or transcript line mentioning an update must not be mistaken for the
 // selector, because answering it sends keystrokes into whatever owns the pane.
 func containsCodexUpdatePromptPattern(content string) bool {
+	return codexSelectorOwnsInput(content, CodexUpdatePromptPatterns, true)
+}
+
+// codexSelectorOwnsInput recognizes an actionable startup selector and rejects
+// retained selector text once newer Codex UI owns the pane. Some selectors
+// have multiple compatible phrasings and match any one; the update prompt
+// requires its complete control set to avoid treating release text as
+// interactive UI.
+func codexSelectorOwnsInput(content string, patterns []string, requireAll bool) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
-	for _, pattern := range CodexUpdatePromptPatterns {
-		if !strings.Contains(trimmed, pattern) {
-			return false
+	latestPattern := ""
+	latestIndex := -1
+	matched := 0
+	for _, pattern := range patterns {
+		index := strings.LastIndex(trimmed, pattern)
+		if index < 0 {
+			if requireAll {
+				return false
+			}
+			continue
+		}
+		matched++
+		if index > latestIndex {
+			latestPattern = pattern
+			latestIndex = index
 		}
 	}
-	return true
+	if matched == 0 {
+		return false
+	}
+	if requireAll && matched != len(patterns) {
+		return false
+	}
+	return !hasCodexPaneOwnership(styledContentAfterLastLineContaining(
+		trimmed,
+		strings.ToLower(latestPattern),
+	))
 }
 
 // WaitForCodexPrompt polls the pane until the Codex TUI shows its composer
