@@ -348,6 +348,19 @@ func TestCheckFile_UnclosedNestedFenceEndsWithItsContainer(t *testing.T) {
 	}
 }
 
+func TestCheckFile_UnclosedFenceEndsWhenNestedListLevelEnds(t *testing.T) {
+	const content = "# Doc\n\n- - ~~~md\n  **Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "nested-list-fence.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 4 {
+		t.Fatalf("want outer-list fields visible after inner fence ends, got %v", violations)
+	}
+}
+
 func TestCheckFile_UnclosedListFenceEndsAtSiblingItem(t *testing.T) {
 	const content = "# Doc\n\n" +
 		"- ```markdown\n" +
