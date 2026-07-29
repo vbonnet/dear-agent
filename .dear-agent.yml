@@ -125,8 +125,6 @@ instruction-policy:
       owner: wayfinder
     - match: .agents/skills/**/SKILL.md
       owner: repository-skills
-    - match: .codex/skills/**/SKILL.md
-      owner: repository-skills
     - match: .opencode/skills/**/SKILL.md
       owner: repository-skills
     - match: .agents/skills/**/agents/*.yaml

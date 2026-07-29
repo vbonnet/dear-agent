@@ -64,7 +64,7 @@ func TestClaudeMarketplaceMirrorsNeutralCatalog(t *testing.T) {
 
 func TestValidateNativeSkillCoverageRequiresEverySkillPlugin(t *testing.T) {
 	root := t.TempDir()
-	surface := HarnessSurface{Mode: "native-codex-skill", Catalog: ".codex/skills"}
+	surface := HarnessSurface{Mode: "native-codex-skill", Catalog: ".agents/skills"}
 	catalog := Catalog{Plugins: []PluginEntry{
 		{Name: "agm", Source: "./plugins/agm", Capabilities: []string{"commands", "skills"}},
 		{Name: "wayfinder", Source: "./plugins/wayfinder", Capabilities: []string{"skills"}},
