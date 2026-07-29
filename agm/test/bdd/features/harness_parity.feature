@@ -6,7 +6,6 @@
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
 # RELATED-SPEC: agm/internal/agent/openai/SPEC.md
 # RELATED-SPEC: agm/internal/harnessexec/SPEC.md
-# RELATED-SPEC: agm/internal/codexhooks/SPEC.md
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md

@@ -141,24 +141,6 @@ type SandboxConfig struct {
 	// host paths, which is what lets a worker commit to a real worktree or close
 	// a bead in the real Beads DB. Empty by default.
 	WritableDirs []string `yaml:"writable_dirs,omitempty"`
-
-	// BypassCodexHookTrust launches Codex with --dangerously-bypass-hook-trust.
-	//
-	// Codex persists hook trust keyed by the ABSOLUTE path of hooks.json. A
-	// sandboxed session runs from a fresh per-session workspace, so the hooks
-	// reflinked into it always present at a never-before-seen path and Codex
-	// blocks startup on "Hooks need review" — every time, unrecoverably, because
-	// the path is different on the next spawn too.
-	//
-	// Enabling this requires an explicit Repos entry for the reviewed golden
-	// checkout. AGM pins the source commit, reads hooks.json and every
-	// project-referenced hook from immutable Git objects, verifies their
-	// SHA-256 digest against the sandbox copy, and repeats that verification
-	// immediately before each launch and cold resume. Any missing, uncommitted,
-	// symlinked, or changed asset fails closed. It still runs every ENABLED hook
-	// without per-path review, so it does not honour per-hook "enabled = false"
-	// decisions recorded against the golden path. Off by default.
-	BypassCodexHookTrust bool `yaml:"bypass_codex_hook_trust,omitempty"`
 }
 
 // OnboardingConfig controls CLAUDE.md injection into sandboxed sessions

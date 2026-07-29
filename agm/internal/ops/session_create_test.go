@@ -1760,17 +1760,13 @@ func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
 
 func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
 	sandbox := &manifest.SandboxConfig{
-		Enabled:               true,
-		ID:                    "sandbox-session",
-		CodexHookSourceRepo:   "/src/reviewed",
-		CodexHookSourceCommit: strings.Repeat("a", 40),
-		CodexHookDigest:       strings.Repeat("b", 64),
+		Enabled: true,
+		ID:      "sandbox-session",
 	}
 	req := &CreateSessionRequest{
-		Cwd:                  "/tmp/sandbox",
-		ExtraAddDirs:         []string{"/tmp/worktree", "/tmp/beads"},
-		BypassCodexHookTrust: true,
-		Metadata:             CreateSessionMetadata{Sandbox: sandbox},
+		Cwd:          "/tmp/sandbox",
+		ExtraAddDirs: []string{"/tmp/worktree", "/tmp/beads"},
+		Metadata:     CreateSessionMetadata{Sandbox: sandbox},
 	}
 	params := &createSessionParams{name: "sandbox", harness: "codex-cli", model: "gpt-5.5"}
 
@@ -1779,68 +1775,11 @@ func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t 
 	if got.Sandbox == sandbox {
 		t.Fatal("Sandbox aliases request metadata")
 	}
-	if !got.Sandbox.BypassCodexHookTrust {
-		t.Fatal("BypassCodexHookTrust = false, want true")
-	}
-	if got.Sandbox.CodexHookSourceRepo != sandbox.CodexHookSourceRepo ||
-		got.Sandbox.CodexHookSourceCommit != sandbox.CodexHookSourceCommit ||
-		got.Sandbox.CodexHookDigest != sandbox.CodexHookDigest {
-		t.Fatalf("persisted Codex hook evidence = %#v, want %#v", got.Sandbox, sandbox)
-	}
 	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
 		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
 	}
 	req.ExtraAddDirs[0] = "/tmp/mutated"
 	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
 		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
-	}
-}
-
-func TestVerifyCreateCodexHookTrustRechecksSandboxAssets(t *testing.T) {
-	worktreePath, hookTrust := resumeCodexHookFixture(t)
-	req := &CreateSessionRequest{
-		Cwd:                  worktreePath,
-		BypassCodexHookTrust: true,
-		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{
-			Enabled:               true,
-			CodexHookSourceRepo:   hookTrust.SourceRepo,
-			CodexHookSourceCommit: hookTrust.SourceCommit,
-			CodexHookDigest:       hookTrust.Digest,
-		}},
-	}
-	params := &createSessionParams{harness: "codex-cli"}
-	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err != nil {
-		t.Fatalf("verifyCreateCodexHookTrust() error: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(worktreePath, ".codex", "hooks.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err == nil {
-		t.Fatal("verifyCreateCodexHookTrust() error = nil after manifest mutation")
-	}
-}
-
-func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing.T) {
-	params := &createSessionParams{name: "codex", harness: "codex-cli", model: "gpt-5.5"}
-	for _, tt := range []struct {
-		name    string
-		sandbox *manifest.SandboxConfig
-		want    bool
-	}{
-		{name: "no sandbox"},
-		{name: "disabled sandbox", sandbox: &manifest.SandboxConfig{}},
-		{name: "enabled sandbox", sandbox: &manifest.SandboxConfig{Enabled: true}, want: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			req := &CreateSessionRequest{
-				Cwd:                  "/tmp/work",
-				BypassCodexHookTrust: true,
-				Metadata:             CreateSessionMetadata{Sandbox: tt.sandbox},
-			}
-			got := buildHarnessLaunchSpec(req, params, "session-id", nil)
-			if got.BypassCodexHookTrust != tt.want {
-				t.Fatalf("BypassCodexHookTrust = %v, want %v", got.BypassCodexHookTrust, tt.want)
-			}
-		})
 	}
 }

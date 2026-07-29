@@ -7,32 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vbonnet/dear-agent/agm/internal/config"
-	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
-
-func TestPrepareCodexHookTrustBypassRequiresExplicitReviewedRepo(t *testing.T) {
-	originalCfg := cfg
-	originalHarness := harnessName
-	t.Cleanup(func() {
-		cfg = originalCfg
-		harnessName = originalHarness
-	})
-	cfg = &config.Config{Sandbox: config.SandboxConfig{
-		BypassCodexHookTrust: true,
-	}}
-	harnessName = "codex-cli"
-
-	enabled, err := prepareCodexHookTrustBypass(t.Context(), &manifest.SandboxConfig{
-		Enabled:             true,
-		CodexHookSourceRepo: "/dynamic/unreviewed",
-	})
-	if err == nil || !strings.Contains(err.Error(), "requires an explicit sandbox.repos source") {
-		t.Fatalf("prepareCodexHookTrustBypass() = %v, %v; want explicit-source rejection", enabled, err)
-	}
-}
 
 func TestResolveCreateLifecyclePromptLoadsAgyPromptFileBeforeMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt.txt")

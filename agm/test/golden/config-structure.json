@@ -68,8 +68,7 @@
       "Enabled": false,
       "TemplatePath": ""
     },
-    "WritableDirs": null,
-    "BypassCodexHookTrust": false
+    "WritableDirs": null
   },
   "Budget": {
     "Enabled": false,
