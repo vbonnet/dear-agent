@@ -306,6 +306,49 @@ func TestConfiguredWorkspaceConfigsAtResolvesPerWorkspaceDoltEndpoints(t *testin
 	}
 }
 
+func TestConfiguredWorkspaceConfigsAtComposesSharedEndpointWithWorkspaceOverrides(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+    dolt:
+      database: personal_sessions
+  - name: oss
+    enabled: true
+    dolt:
+      host: dolt-oss.internal
+      database: oss_sessions
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"DOLT_PORT":             "3307",
+			"DOLT_PASSWORD":         "shared-secret",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("workspace endpoints = %#v, want 2", configs)
+	}
+	if got := configs[0]; got.Port != "3307" || got.Database != "personal_sessions" || got.Password != "shared-secret" {
+		t.Errorf("personal endpoint = %#v, want shared port/password plus personal database", got)
+	}
+	if got := configs[1]; got.Host != "dolt-oss.internal" || got.Port != "3307" || got.Database != "oss_sessions" || got.Password != "shared-secret" {
+		t.Errorf("oss endpoint = %#v, want host/database overrides plus shared port/password", got)
+	}
+}
+
 func TestConfiguredWorkspaceConfigsAllowsExplicitDatabaseForOneWorkspace(t *testing.T) {
 	originalLookupEnv := lookupEnv
 	originalAgmConfigPath := agmConfigPath

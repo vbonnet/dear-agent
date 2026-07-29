@@ -360,9 +360,9 @@ func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*C
 		seen[workspace] = true
 		workspaceConfig := *base
 		workspaceConfig.Workspace = workspace
-		if endpoint := endpoints[workspace]; endpoint.Port != "" {
-			applyWorkspaceDoltEndpoint(&workspaceConfig, endpoint)
-		} else if len(enabled) > 1 && !sharedPortExplicit {
+		endpoint := endpoints[workspace]
+		applyWorkspaceDoltEndpoint(&workspaceConfig, endpoint)
+		if endpoint.Port == "" && len(enabled) > 1 && !sharedPortExplicit {
 			return
 		}
 		if databaseIsExplicit {
@@ -382,14 +382,18 @@ func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*C
 }
 
 func applyWorkspaceDoltEndpoint(config *Config, endpoint workspaceDoltEndpoint) {
-	config.Port = endpoint.Port
+	if endpoint.Port != "" {
+		config.Port = endpoint.Port
+	}
 	if endpoint.Host != "" {
 		config.Host = endpoint.Host
 	}
 	if endpoint.User != "" {
 		config.User = endpoint.User
 	}
-	config.Password = endpoint.Password
+	if endpoint.Password != "" {
+		config.Password = endpoint.Password
+	}
 	if endpoint.StartScript != "" {
 		config.StartScript = expandTilde(endpoint.StartScript)
 	}
