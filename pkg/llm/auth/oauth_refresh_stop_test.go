@@ -71,3 +71,26 @@ func TestRefreshStopIsCredentialScopedAndExplicitlyCleared(t *testing.T) {
 		t.Fatalf("refresh stop survived explicit clear: %v", err)
 	}
 }
+
+func TestCredentialsPathCanonicalizesImplicitDefaultSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defaultPath := filepath.Join(home, claudeCredentialsRelPath)
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, defaultPath); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := (OAuthResolver{}).credentialsPath(); got != filepath.Clean(resolved) {
+		t.Fatalf("credentialsPath() = %q, want canonical target %q", got, resolved)
+	}
+}

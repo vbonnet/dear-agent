@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -162,6 +163,29 @@ func TestRefresh_ConnectionNeverEstablished_IsOrdinaryError(t *testing.T) {
 	}
 	if _, statErr := os.Stat(quarPath); !os.IsNotExist(statErr) {
 		t.Error("an untransmitted request must not quarantine the token")
+	}
+}
+
+type asynchronousBodyErrorTransport struct{}
+
+func (asynchronousBodyErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	go func() {
+		_, _ = io.ReadAll(req.Body)
+		_ = req.Body.Close()
+	}()
+	return nil, errors.New("response lost while request body is still in flight")
+}
+
+func TestRefresh_AsynchronousBodyConsumptionIsOutcomeUnknown(t *testing.T) {
+	r, _, quarPath := quarantineResolver(t, "http://token.invalid", "rt-maybe-spent")
+	r.HTTPClient = &http.Client{Transport: asynchronousBodyErrorTransport{}}
+
+	_, err := r.Refresh(context.Background())
+	if !errors.Is(err, ErrRefreshOutcomeUnknown) {
+		t.Fatalf("error = %v, want ErrRefreshOutcomeUnknown", err)
+	}
+	if _, statErr := os.Stat(quarPath); statErr != nil {
+		t.Fatalf("asynchronously consumed token was not quarantined: %v", statErr)
 	}
 }
 

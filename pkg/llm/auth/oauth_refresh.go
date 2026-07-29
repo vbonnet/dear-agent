@@ -108,14 +108,15 @@ func (r OAuthResolver) readFullCredentials() (fullCredentials, string, bool) {
 
 // credentialsPath returns the resolved credentials file path.
 func (r OAuthResolver) credentialsPath() string {
-	if r.CredentialsPath != "" {
-		return r.CredentialsPath
+	path := r.CredentialsPath
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		path = filepath.Join(home, claudeCredentialsRelPath)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, claudeCredentialsRelPath)
+	return canonicalRefreshCredentialsPath(path)
 }
 
 // nowFn returns the resolver's clock, defaulting to time.Now.
@@ -348,9 +349,11 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
-		if body.read.Load() {
+		if body.read.Load() || !body.closed.Load() {
 			// The refresh-token body reached the transport and we will never
-			// learn what the server did with it. Treat it as possibly spent.
+			// learn what the server did with it, or a conforming transport is
+			// still consuming/closing the body asynchronously after returning.
+			// Either case is unresolved and must not make the token retryable.
 			return tokenResponse{}, fmt.Errorf("%w: %w", ErrRefreshOutcomeUnknown, err)
 		}
 		return tokenResponse{}, fmt.Errorf("token refresh request failed: %w", err)
@@ -389,7 +392,8 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 
 type observedReadCloser struct {
 	io.ReadCloser
-	read atomic.Bool
+	read   atomic.Bool
+	closed atomic.Bool
 }
 
 func (r *observedReadCloser) Read(p []byte) (int, error) {
@@ -398,6 +402,12 @@ func (r *observedReadCloser) Read(p []byte) (int, error) {
 		r.read.Store(true)
 	}
 	return n, err
+}
+
+func (r *observedReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.closed.Store(true)
+	return err
 }
 
 // backupCredentials copies the credentials file to <path>.bak (mode 0600)
