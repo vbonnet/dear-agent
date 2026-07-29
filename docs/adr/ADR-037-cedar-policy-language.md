@@ -51,15 +51,14 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   The policy decision is made outside the agent's own reasoning, the same
   "deterministic enforcement over agent judgment" principle already on
   dear-agent's anti-pattern watchlist.
-- Put one versioned, typed **tool-action projector** in front of Cedar. Its
-  shared registry owns all harness aliases/argument spellings and emits a
-  canonical action plus typed resources/context; adapters never send raw maps.
-  It distinguishes file read, directory list, filesystem search, write/create,
-  delete/rename, process execution, and network access. Pi `find` and `Glob`
-  map to search, `ls` maps to directory-list, and `path`/`file_path` normalize
-  identically. Multi-resource operations emit every resource. Unknown aliases,
-  unsupported/conflicting shapes, missing fields, or lossy projection deny
-  before Cedar; adapter-local fallback aliases are nonconforming.
+- Put one versioned, typed **tool-action projector** before Cedar; its shared
+  registry owns aliases/arguments, emits canonical action/resources/context,
+  and forbids raw maps or adapter-local aliases. It distinguishes file read,
+  directory list, search, mutations, process execution, and network access.
+  Network identity includes canonical hostname, resolved IP, and port; every
+  DNS answer/redirect is separately authorized and dispatch binds approved
+  IP/port at the socket or trusted proxy, preventing rebinding. Pi `find`/`Glob`
+  map to search, `ls` to directory-list, and `path`/`file_path` normalize; multi-resource calls emit all resources; invalid/lossy shapes deny before Cedar.
 - Treat the interceptor executable and its harness registration as privileged
   enforcement assets, not project files. Each blocking integration must load
   both from an operator-managed location outside the workspace and every
@@ -90,12 +89,12 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   even when another policy emits diagnostics; a Deny with no applicable
   permit also remains **deny**, regardless of diagnostics. Only after positive
   invocation authorization may confirmation-free diagnostics produce
-  `policy_unavailable`. Escalation requires a nonce-bearing receipt bound to the request, policy/input digests, expiry, authenticated approver identity and
-  capability, and the trusted channel's presentation digest. That channel displays the principal, action, canonical resource, and policy/input versions; any
-  display/request/receipt or approver-scope mismatch denies. Tmux input, harness UI callbacks, and agent-addressable messages cannot prove human approval;
-  without an integrity-protected channel, confirmation is unavailable and execution fails closed. A harness-independent pre-receipt deadline makes
-  silence/cancellation return typed `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is not that
-  bound. Diagnostics never make a forbid or missing permit user-overridable.
+  `policy_unavailable`. Escalation requires a nonce receipt bound to the request, policy/input digests, expiry, approver identity/capability, and presentation
+  digest. The trusted channel displays principal, action, every canonical resource, all decision-relevant typed context (including effect flags), and versions;
+  any display/request/receipt, context, or approver-scope mismatch denies. Tmux input, harness callbacks, and agent-addressable messages cannot prove approval;
+  without an integrity-protected channel, confirmation fails closed. A harness-independent pre-receipt deadline makes silence/cancellation return typed
+  `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is not that bound. Diagnostics never make a
+  forbid or missing permit user-overridable.
 - Bound every evaluator call by a harness-independent deadline. A panic,
   process crash, signal, nonzero exit, EOF, transport closure, timeout,
   cancellation without a complete decision, or incomplete response is a typed
@@ -218,13 +217,13 @@ tests must prove all of the following:
    encountered after positive invocation authorization may return
    `policy_unavailable`.
    All paths record the bundle version and sanitized diagnostics.
-7. Every harness produces the same typed action/resources for equivalent tool
-   aliases and input keys. Fixtures cover `find`/`Glob`, `ls`/directory-list,
-   `path`/`file_path`, and unknown/unsupported/conflicting/missing input failing
-   closed before Cedar. Equivalent absolute, relative, and traversal paths
-   produce one resource; worktree symlinks into protected source and missing
-   leaves below symlinked ancestors resolve to protected targets.
-   Canonicalization failure denies before Cedar.
+7. Every harness produces the same typed action/resources/context for equivalent
+   aliases and inputs. Fixtures cover `find`/`Glob`, `ls`, `path`/`file_path`,
+   and unknown/unsupported/conflicting/missing input failing closed before Cedar.
+   Network fixtures prove a live allowed external endpoint while private and
+   control-plane IP/ports remain denied after DNS, redirect, and rebinding.
+   Equivalent path spellings produce one resource; symlinks into protected
+   source and missing leaves below symlinked ancestors deny before Cedar.
 8. After positive invocation authorization, every harness drives an authored
    confirmation-free Deny: interactive mode enters `ask`, while non-interactive
    mode fails closed and dispatches nothing. Positively authorized interactive
@@ -234,10 +233,11 @@ tests must prove all of the following:
    invocation authorization these return typed non-confirmable unavailability
    by the deadline and execute nothing; only later confirmation-free failure
    may escalate. Every harness rejects an authenticated but unauthorized signer
-   and any mismatch among displayed canonical inputs, request, and receipt;
-   terminal keys, callbacks, and agent messages cannot mint a human receipt.
-   Trusted out-of-band display and approval for each harness's authored-Deny `ask`, with unchanged authorization snapshots,
-   reauthorizes exactly one dispatch; silence/cancellation returns the bounded typed result, releases the wait, and dispatches nothing.
+   and any mismatch among displayed canonical inputs, context, request, and
+   receipt; changing only context (such as a force flag) rejects the approval.
+   Terminal keys, callbacks, and agent messages cannot mint a human receipt.
+   Trusted display and approval of unchanged snapshots reauthorizes one dispatch;
+   silence/cancellation returns the bounded result and dispatches nothing.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
