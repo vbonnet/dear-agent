@@ -1,0 +1,73 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
+	"testing"
+)
+
+func TestRefreshStopBlocksEveryRefreshingEntrypoint(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(`{"access_token":"fresh","expires_in":3600,"refresh_token":"rotated"}`))
+	}))
+	defer srv.Close()
+
+	credsPath := writeFullCreds(t, "stale", staleMillis(), "refresh-token")
+	r := OAuthResolver{
+		CredentialsPath: credsPath,
+		Getenv:          envGetter(map[string]string{OAuthEnvVar: "fallback"}),
+		Now:             fixedClock(),
+		HTTPClient:      srv.Client(),
+		TokenEndpoint:   srv.URL,
+		QuarantinePath:  filepath.Join(t.TempDir(), "quarantine.json"),
+	}
+	if err := r.WriteRefreshStop("operator review required"); err != nil {
+		t.Fatalf("WriteRefreshStop: %v", err)
+	}
+
+	if _, err := r.Refresh(context.Background()); !errors.Is(err, ErrRefreshStopped) {
+		t.Fatalf("Refresh() error = %v, want ErrRefreshStopped", err)
+	}
+	if _, _, err := r.EnsureFresh(context.Background()); !errors.Is(err, ErrRefreshStopped) {
+		t.Fatalf("EnsureFresh() error = %v, want ErrRefreshStopped", err)
+	}
+	if got := r.resolveWithRefresh(); got != "fallback" {
+		t.Fatalf("resolveWithRefresh() = %q, want fallback token", got)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("token endpoint called %d times while durable stop was active", got)
+	}
+}
+
+func TestRefreshStopIsCredentialScopedAndExplicitlyCleared(t *testing.T) {
+	firstPath := writeFullCreds(t, "stale", staleMillis(), "first")
+	secondPath := writeFullCreds(t, "stale", staleMillis(), "second")
+	first := OAuthResolver{CredentialsPath: firstPath}
+	second := OAuthResolver{CredentialsPath: secondPath}
+
+	if err := first.WriteRefreshStop("first only"); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := first.RefreshStopped(); err != nil || !stopped {
+		t.Fatalf("first RefreshStopped() = %v, %v; want true, nil", stopped, err)
+	}
+	if stopped, err := second.RefreshStopped(); err != nil || stopped {
+		t.Fatalf("second RefreshStopped() = %v, %v; want false, nil", stopped, err)
+	}
+	if err := first.ClearRefreshStop(); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := first.RefreshStopped(); err != nil || stopped {
+		t.Fatalf("first RefreshStopped() after clear = %v, %v; want false, nil", stopped, err)
+	}
+	if _, err := os.Stat(first.RefreshStopPath()); !os.IsNotExist(err) {
+		t.Fatalf("refresh stop survived explicit clear: %v", err)
+	}
+}

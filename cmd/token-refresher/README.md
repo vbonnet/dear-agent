@@ -23,16 +23,14 @@ stderr), so it composes cleanly with any caller that wants to capture the token.
 
 ## Flags
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `-credentials` | `~/.claude/.credentials.json` | credentials file path |
-| `-endpoint` | built-in / `$CLAUDE_OAUTH_TOKEN_ENDPOINT` | OAuth token endpoint |
-| `-client-id` | built-in / `$CLAUDE_OAUTH_CLIENT_ID` | OAuth client ID |
-| `-lock-timeout` | `10s` | max wait for the cross-process credentials lock |
-| `-quiet` | `false` | suppress structured stderr logs |
-| `-audit-log` | `~/.local/state/dear-agent/token-refresher-audit.jsonl` | JSONL audit (empty disables) |
-| `-quarantine` | `~/.local/state/dear-agent/refresh-token-quarantine.json` | refresh-token quarantine marker (empty disables) |
-| `-clear-quarantine` | `false` | clear the quarantine and exit (operator override) |
+Run `token-refresher -help` for the current option inventory and defaults.
+Refresh safety state is credential-scoped: the default Claude credentials use
+the managed dear-agent state directory for their quarantine, while a
+non-default credentials file uses `<credentials>.refresh-quarantine.json`.
+Every credential set also has a durable `<credentials>.refresh-stop` marker
+beside its canonical credentials path. That stop is honored by the CLI and
+in-process `auth` callers alike until the operator remediates the persistence
+failure and explicitly clears the quarantine.
 
 ## Exit codes
 
@@ -74,6 +72,11 @@ possibly-spent token cannot be *recorded*, that is reported as a critical
 non-persistence failure (exit 3) rather than logged and forgotten — the
 protection lives in that file, not in the running process, so a failed write
 means the next tick would replay the token.
+
+If a server-successful refresh cannot persist the rotated credentials, the
+refresher writes the credential-scoped quarantine before returning the critical
+error. Every shared resolver entry point consults that quarantine, preventing
+another process using `auth.ResolveOAuthToken()` from replaying the token.
 
 A quarantine clears itself as soon as the on-disk token changes, so if any client
 rotates successfully, refreshing resumes with no intervention. To inspect or

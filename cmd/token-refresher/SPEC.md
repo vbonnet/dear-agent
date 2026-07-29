@@ -1,7 +1,5 @@
 # Claude OAuth Token Refresher Specification
 
-<!-- Last audited at: 2026-07-09 -->
-
 ## Overview
 
 `cmd/token-refresher` is the single-owner refresh adapter for Claude Code OAuth
@@ -39,6 +37,10 @@ provider credential handling.
 **CTR-15** When a possibly-spent refresh token cannot be recorded in the quarantine marker, the command shall report a critical non-persistence failure and return exit code 3.
 
 **CTR-16** When reporting status in check mode, the command shall treat a quarantine marker naming a token other than the one on disk as inactive, and shall not mutate it.
+
+**CTR-17** When a server-successful refresh cannot persist rotated credentials, the system shall quarantine the on-disk refresh token before returning the non-persistence error, and every shared resolver entry point shall honor that quarantine.
+
+**CTR-18** While a credential-scoped refresh-stop marker exists, every shared resolver entry point shall decline to present that credential set's refresh token until an operator explicitly clears the stop.
 
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 

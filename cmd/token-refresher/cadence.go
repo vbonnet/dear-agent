@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // deathSentinelName marks an in-progress token-family death. Its presence means
@@ -36,32 +38,17 @@ func clearCadenceSentinel(stateDir, name string) error {
 	return err
 }
 
-// cadenceStopPath lives beside credentials, which were readable for the tick
-// that discovered the ambiguous refresh. It is deliberately independent of
-// the quarantine directory: that directory is unavailable in the failure this
-// marker protects against.
-func cadenceStopPath(credentialsPath string) string {
-	return canonicalCredentialsPath(credentialsPath) + ".refresh-stop"
-}
-
 func writeCadenceStop(credentialsPath string) error {
-	return os.WriteFile(cadenceStopPath(credentialsPath), []byte("refresh outcome unknown; operator must clear quarantine\n"), 0o600)
+	return (auth.OAuthResolver{CredentialsPath: canonicalCredentialsPath(credentialsPath)}).
+		WriteRefreshStop("refresh outcome unknown; operator must clear quarantine")
 }
 
 func clearCadenceStop(credentialsPath string) error {
-	err := os.Remove(cadenceStopPath(credentialsPath))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
+	return (auth.OAuthResolver{CredentialsPath: canonicalCredentialsPath(credentialsPath)}).ClearRefreshStop()
 }
 
 func cadenceStopped(credentialsPath string) (bool, error) {
-	_, err := os.Stat(cadenceStopPath(credentialsPath))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	return err == nil, err
+	return (auth.OAuthResolver{CredentialsPath: canonicalCredentialsPath(credentialsPath)}).RefreshStopped()
 }
 
 // cadenceExit adapts a run's exit code for the unattended launchd cadence job.

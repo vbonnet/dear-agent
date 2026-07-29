@@ -155,6 +155,14 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 
 	var token string
 	err := withCredentialsLock(ctx, path, r.LockTimeout, func() error {
+		stopped, stopErr := r.RefreshStopped()
+		if stopErr != nil {
+			return stopErr
+		}
+		if stopped {
+			return ErrRefreshStopped
+		}
+
 		// Re-read under the lock: a sibling pane may have just refreshed.
 		creds, _, ok := r.readFullCredentials()
 		if !ok {
@@ -191,8 +199,11 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 					// a human intervenes, so it is escalated rather than logged
 					// and swallowed.
 					r.log("oauth.refresh.quarantine_write_failed", "error", qerr.Error())
-					return fmt.Errorf("%w: %w (original refresh failure: %w)",
-						ErrQuarantineNotPersisted, qerr, err)
+					stopErr := r.WriteRefreshStop(err.Error())
+					return errors.Join(
+						fmt.Errorf("%w: %w (original refresh failure: %w)", ErrQuarantineNotPersisted, qerr, err),
+						wrapRefreshStopWriteError(stopErr),
+					)
 				}
 			}
 			return err
@@ -215,10 +226,16 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 
 		if werr := atomicWriteCredentials(path, updated); werr != nil {
 			// CRITICAL: the server already rotated the refresh token, but we
-			// could not persist it. Surface loudly — never swallow this, or the
-			// next refresh will use the dead on-disk token and kill the family.
+			// could not persist it. Quarantine the now-spent on-disk token
+			// before returning; every resolver entry point consults that
+			// credential-scoped marker before presenting the token again.
 			r.log("oauth.refresh.persist_failed", "error", werr.Error())
-			return fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr)
+			reason := fmt.Sprintf("%s: %v", ErrRefreshNotPersisted, werr)
+			qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, reason)
+			return errors.Join(
+				fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr),
+				wrapQuarantineWriteError(qerr),
+			)
 		}
 
 		// The rotation completed and is on disk, so any earlier quarantine is
@@ -235,6 +252,20 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return token, nil
+}
+
+func wrapQuarantineWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrQuarantineNotPersisted, err)
+}
+
+func wrapRefreshStopWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrRefreshStopNotPersisted, err)
 }
 
 // endpoint resolves the token endpoint: explicit field, then env override, then
