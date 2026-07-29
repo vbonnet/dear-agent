@@ -83,9 +83,14 @@ rotates successfully, refreshing resumes with no intervention. To inspect or
 override:
 
 ```sh
-token-refresher -check              # reports an active quarantine
-token-refresher -clear-quarantine   # override: re-arm automatic refresh
+# Reuse the exact selectors printed by the failing invocation:
+token-refresher -credentials "/path/to/credentials.json" -quarantine "/path/to/quarantine.json" -check
+token-refresher -credentials "/path/to/credentials.json" -quarantine "/path/to/quarantine.json" -clear-quarantine
 ```
+
+For the default credential set and default quarantine path, the selectors may
+be omitted. For any non-default credentials file or explicit quarantine path,
+omitting them inspects or clears a different protection set.
 
 Holding back is the safer failure. If the server did rotate, replaying guarantees
 family revocation and takes down every OAuth client on the host at once;
