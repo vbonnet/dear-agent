@@ -1,6 +1,7 @@
 package wayfinderparity
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -54,6 +55,39 @@ func TestValidateAssets(t *testing.T) {
 func TestValidatePiSkillDiscovery(t *testing.T) {
 	if err := ValidatePiSkillDiscovery(repoRoot(t)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestValidatePiSkillDiscoveryRequiresResolvedSkillTrees(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".pi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"skills":["../agm/plugins","../wayfinder/skills","../research-pipeline/skills"]}`
+	if err := os.WriteFile(filepath.Join(root, ".pi", "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, entrypoint := range []string{
+		"agm/plugins/agm/SKILL.md",
+		"wayfinder/skills/wayfinder/SKILL.md",
+		"research-pipeline/skills/research-pipeline/SKILL.md",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(entrypoint))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# Skill\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidatePiSkillDiscovery(root); err != nil {
+		t.Fatalf("complete skill trees: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "agm", "plugins", "agm", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePiSkillDiscovery(root); err == nil {
+		t.Fatal("expected missing AGM Pi skill entrypoint to fail")
 	}
 }
 

@@ -160,9 +160,12 @@ dependency edges, and parallel work-streams with the canonical Beads
 subcommands. Do not route bead creation to Wayfinder's PLAN phase:
 `wayfinder-session start_phase` creates a single session-level bead during
 SETUP or BUILD, and PLAN cannot start until SPEC; it is not a research-plan
-decomposition API. A Wayfinder session may be started separately after the
-reviewed bead graph exists when the project merits the full multi-phase SDLC,
-but it does not replace or own Stage 4 filing.
+decomposition API. After the reviewed bead graph exists, inspect the target
+repository's delivery policy. If its `safe-pr` (or equivalent) gate requires
+an in-progress Wayfinder session, start that session before any Stage 5
+execution; if Wayfinder is optional, the operator may still choose it for a
+multi-phase initiative. In either case, Wayfinder does not replace or own
+Stage 4 filing.
 
 Every bead, however filed, needs:
 
@@ -190,6 +193,9 @@ no beads at all.
 
 Codex agents pick up beads and execute through the normal `safe-pr` /
 `safe-merge` gates — no shortcuts because the bead came from this pipeline.
+Before dispatching the first bead, satisfy every target-repository prerequisite
+for those gates, including establishing the required in-progress Wayfinder
+session when `safe-pr` mandates one.
 The plan's own proposed gates (if the initiative is about enforcement, e.g.
 an eval or lint gate) should apply to the PRs this stage produces, not just
 to future work — dogfood the thing you just designed.

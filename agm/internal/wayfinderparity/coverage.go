@@ -141,6 +141,28 @@ func ValidatePiSkillDiscovery(root string) error {
 		if !slices.Contains(settings.Skills, required) {
 			return fmt.Errorf("pi settings missing native skill discovery path %q", required)
 		}
+		skillRoot := filepath.Clean(filepath.Join(root, ".pi", filepath.FromSlash(required)))
+		info, err := os.Stat(skillRoot)
+		if err != nil {
+			return fmt.Errorf("pi skill discovery path %q: %w", required, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("pi skill discovery path %q is not a directory", required)
+		}
+		entrypoints, err := filepath.Glob(filepath.Join(skillRoot, "*", "SKILL.md"))
+		if err != nil {
+			return fmt.Errorf("glob Pi skill entrypoints under %q: %w", required, err)
+		}
+		found := false
+		for _, entrypoint := range entrypoints {
+			if info, statErr := os.Stat(entrypoint); statErr == nil && info.Mode().IsRegular() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("pi skill discovery path %q contains no skill entrypoint", required)
+		}
 	}
 	return nil
 }
