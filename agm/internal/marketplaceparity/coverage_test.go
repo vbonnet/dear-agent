@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
@@ -59,16 +60,51 @@ func TestValidateNativeSkillCoverageRequiresEverySkillPlugin(t *testing.T) {
 		{Name: "youtube", Capabilities: []string{"commands"}},
 	}}
 	for _, name := range []string{"agm", "wayfinder"} {
+		canonical := canonicalSkillEntrypoints[name]
+		canonicalPath := filepath.Join(root, filepath.FromSlash(canonical))
+		if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(canonicalPath, []byte("# canonical\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		dir := filepath.Join(root, surface.Catalog, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: "+name+"\n---\n"), 0o644); err != nil {
+		content := "---\nname: " + name + "\ndescription: Use when native discovery needs the canonical workflow.\n---\n" +
+			"# Native entrypoint\n\n## Workflow\n\n1. Read `../../../" + canonical + "` completely.\n" +
+			"2. Follow the canonical workflow and all of its gates.\n\n## Verification\n\nVerify every canonical exit condition.\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := validateNativeSkillCoverage(root, catalog, surface); err != nil {
 		t.Fatalf("complete native catalog: %v", err)
+	}
+	agmEntrypoint := filepath.Join(root, surface.Catalog, "agm", "SKILL.md")
+	data, err := os.ReadFile(agmEntrypoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agmEntrypoint, []byte(strings.Replace(string(data), "name: agm", "name: wrong", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil {
+		t.Fatal("expected mismatched native skill name to fail")
+	}
+	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withoutCanonical := strings.Replace(string(data), "../../../"+canonicalSkillEntrypoints["agm"], "../../../wrong/SKILL.md", 1)
+	if err := os.WriteFile(agmEntrypoint, []byte(withoutCanonical), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil {
+		t.Fatal("expected missing canonical skill reference to fail")
+	}
+	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(root, surface.Catalog, "wayfinder", "SKILL.md")); err != nil {
 		t.Fatal(err)

@@ -8,8 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/pkg/skilllint"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -18,6 +21,12 @@ const (
 	// ClaudeCatalogPath is the native Claude marketplace mirror path.
 	ClaudeCatalogPath = ".claude-plugin/marketplace.json"
 )
+
+var canonicalSkillEntrypoints = map[string]string{
+	"agm":               "agm/plugins/agm/SKILL.md",
+	"wayfinder":         "wayfinder/skills/wayfinder/SKILL.md",
+	"research-pipeline": "research-pipeline/skills/research-pipeline/SKILL.md",
+}
 
 // Owner describes the marketplace owner metadata.
 type Owner struct {
@@ -136,6 +145,45 @@ func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSu
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return fmt.Errorf("skill-capable plugin %q native entrypoint %q is not a regular file", plugin.Name, entrypoint)
 		}
+		if err := validateNativeSkillEntrypoint(entrypoint, plugin.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNativeSkillEntrypoint(entrypoint, pluginName string) error {
+	violations, err := skilllint.CheckFile(entrypoint)
+	if err != nil {
+		return fmt.Errorf("skill-capable plugin %q native entrypoint: %w", pluginName, err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("skill-capable plugin %q native entrypoint invalid: %s", pluginName, violations[0].Reason)
+	}
+	data, err := os.ReadFile(entrypoint)
+	if err != nil {
+		return fmt.Errorf("read skill-capable plugin %q native entrypoint: %w", pluginName, err)
+	}
+	var metadata struct {
+		Name string `yaml:"name"`
+	}
+	parts := strings.SplitN(string(data), "\n---", 2)
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], "---\n") {
+		return fmt.Errorf("skill-capable plugin %q native entrypoint has no parseable frontmatter", pluginName)
+	}
+	if err := yaml.Unmarshal([]byte(strings.TrimPrefix(parts[0], "---\n")), &metadata); err != nil {
+		return fmt.Errorf("parse skill-capable plugin %q native entrypoint metadata: %w", pluginName, err)
+	}
+	if metadata.Name != pluginName {
+		return fmt.Errorf("skill-capable plugin %q native entrypoint names %q", pluginName, metadata.Name)
+	}
+	canonical, ok := canonicalSkillEntrypoints[pluginName]
+	if !ok {
+		return fmt.Errorf("skill-capable plugin %q has no canonical skill entrypoint mapping", pluginName)
+	}
+	wantReference := "../../../" + filepath.ToSlash(canonical)
+	if !strings.Contains(string(data), wantReference) {
+		return fmt.Errorf("skill-capable plugin %q native entrypoint does not reference canonical %q", pluginName, canonical)
 	}
 	return nil
 }
