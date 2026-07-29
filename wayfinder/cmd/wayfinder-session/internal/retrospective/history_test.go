@@ -46,7 +46,7 @@ func TestLogToHistory(t *testing.T) {
 	}
 
 	// Verify HISTORY file was created
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	historyContent, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatalf("Failed to read HISTORY file: %v", err)
@@ -127,7 +127,7 @@ func TestLogToHistory_MultipleEvents(t *testing.T) {
 	}
 
 	// Verify both events in file
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	historyContent, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatalf("Failed to read HISTORY file: %v", err)
@@ -188,7 +188,7 @@ func TestLogToHistory_JSONMarshaling(t *testing.T) {
 	}
 
 	// Verify file was written
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	historyContent, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatalf("Failed to read HISTORY file: %v", err)

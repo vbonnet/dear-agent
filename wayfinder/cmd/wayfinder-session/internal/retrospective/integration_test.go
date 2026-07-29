@@ -35,7 +35,7 @@ func TestIntegration_Magnitude0_NoLogging(t *testing.T) {
 	}
 
 	// Verify HISTORY was NOT created
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if _, err := os.Stat(historyPath); !os.IsNotExist(err) {
 		t.Errorf("HISTORY file should not exist for magnitude 0 rewind")
 	}
@@ -83,7 +83,7 @@ func TestIntegration_Magnitude1_WithFlags(t *testing.T) {
 	}
 
 	// Verify HISTORY exists
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	historyContent, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatalf("Failed to read HISTORY file: %v", err)
@@ -149,7 +149,7 @@ func TestIntegration_ParallelDualLogging(t *testing.T) {
 
 	// Verify BOTH files exist
 	s11Path := filepath.Join(tmpDir, RetroFilename)
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 
 	if _, err := os.Stat(s11Path); os.IsNotExist(err) {
 		t.Errorf("RETRO file was not created")

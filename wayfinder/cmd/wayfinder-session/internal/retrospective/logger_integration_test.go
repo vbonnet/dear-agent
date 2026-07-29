@@ -12,8 +12,8 @@ func TestLogRewindEvent_FullFlow(t *testing.T) {
 
 	createStatusFile(t, tmpDir, "RETRO")
 
-	// Create WAYFINDER-HISTORY.md for history logging
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	// Create WAYFINDER-HISTORY.jsonl for history logging
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("# History\n\n"), 0644); err != nil {
 		t.Fatalf("Failed to write HISTORY file: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestLogRewindEvent_WithPrompting(t *testing.T) {
 
 	createStatusFile(t, tmpDir, "BUILD")
 
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("# History\n\n"), 0644); err != nil {
 		t.Fatalf("Failed to write HISTORY file: %v", err)
 	}
