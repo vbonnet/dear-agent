@@ -439,9 +439,11 @@ func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig) ([]string, bool) {
 		// Sandboxed sessions are otherwise confined to their workspace, so any
 		// real worktree or shared task database is read-only to them. Without
 		// these a worker can do the work but cannot land it.
-		for _, dir := range cfg.Sandbox.WritableDirs {
-			extraAddDirs = append(extraAddDirs, dir)
-			debug.Log("Will pre-authorize writable dir via --add-dir: %s", dir)
+		if harnessName == "codex-cli" {
+			for _, dir := range cfg.Sandbox.WritableDirs {
+				extraAddDirs = append(extraAddDirs, dir)
+				debug.Log("Will pre-authorize writable dir via --add-dir: %s", dir)
+			}
 		}
 	}
 	return extraAddDirs, true
