@@ -167,7 +167,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			if code == exitNotPersisted {
 				stateDir := defaultStateDir()
 				sentinelName := cadenceSentinelName(*quarPath)
-				if _, _, _, quarantined := r.QuarantineStatus(); quarantined {
+				canonicalQuarantine := defaultQuarantinePathForCredentials(resolvedCredPath)
+				sharedQuarantine := filepath.Clean(*quarPath) == filepath.Clean(canonicalQuarantine)
+				if _, _, _, quarantined := r.QuarantineStatus(); quarantined && sharedQuarantine {
 					notifyCadenceOnce(stateDir, sentinelName,
 						"Claude auth AT RISK",
 						"Credential persistence failed; the refresh-token quarantine is active. Run token-refresher -clear-quarantine after remediation.")

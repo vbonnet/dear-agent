@@ -98,10 +98,7 @@ func TestClearCadenceSentinel(t *testing.T) {
 }
 
 func TestCadenceStopPersistsBesideCredentialsAndRearmsExplicitly(t *testing.T) {
-	credentials := filepath.Join(t.TempDir(), "credentials.json")
-	if err := os.WriteFile(credentials, []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	credentials := writeCreds(t, "access", staleMs(), "refresh")
 	if err := writeCadenceStop(credentials); err != nil {
 		t.Fatal(err)
 	}

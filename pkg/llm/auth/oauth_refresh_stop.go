@@ -1,11 +1,17 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+type refreshStopRecord struct {
+	RefreshTokenFP string `json:"refresh_token_fp"`
+	Reason         string `json:"reason"`
+}
 
 // ErrRefreshStopped signals that an earlier refresh crossed a boundary where
 // the on-disk token may already be spent and the operator has not explicitly
@@ -34,12 +40,25 @@ func (r OAuthResolver) RefreshStopped() (bool, error) {
 	if path == "" {
 		return false, errors.New("cannot resolve refresh stop path")
 	}
-	_, err := os.Stat(path)
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("inspect refresh stop marker %s: %w", path, err)
+	}
+	var rec refreshStopRecord
+	if json.Unmarshal(data, &rec) == nil && rec.RefreshTokenFP != "" {
+		creds, _, ok := r.readFullCredentials()
+		if ok {
+			currentFP := RefreshTokenFingerprint(creds.ClaudeAIOAuth.RefreshToken)
+			if currentFP != "" && currentFP != rec.RefreshTokenFP {
+				if err := r.ClearRefreshStop(); err != nil {
+					return false, fmt.Errorf("clear rotated refresh stop marker %s: %w", path, err)
+				}
+				return false, nil
+			}
+		}
 	}
 	return true, nil
 }
@@ -54,7 +73,18 @@ func (r OAuthResolver) WriteRefreshStop(reason string) error {
 	if reason == "" {
 		reason = ErrRefreshStopped.Error()
 	}
-	return os.WriteFile(path, []byte(reason+"\n"), 0o600)
+	creds, _, ok := r.readFullCredentials()
+	if !ok || creds.ClaudeAIOAuth.RefreshToken == "" {
+		return errors.New("cannot fingerprint credentials for refresh stop")
+	}
+	data, err := json.Marshal(refreshStopRecord{
+		RefreshTokenFP: RefreshTokenFingerprint(creds.ClaudeAIOAuth.RefreshToken),
+		Reason:         reason,
+	})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
 }
 
 // ClearRefreshStop explicitly re-arms refreshing for this credential set.

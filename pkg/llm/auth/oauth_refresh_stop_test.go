@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -69,6 +70,27 @@ func TestRefreshStopIsCredentialScopedAndExplicitlyCleared(t *testing.T) {
 	}
 	if _, err := os.Stat(first.RefreshStopPath()); !os.IsNotExist(err) {
 		t.Fatalf("refresh stop survived explicit clear: %v", err)
+	}
+}
+
+func TestRefreshStopSelfClearsAfterCredentialRotation(t *testing.T) {
+	credentials := writeFullCreds(t, "stale", staleMillis(), "before")
+	resolver := OAuthResolver{CredentialsPath: credentials}
+	if err := resolver.WriteRefreshStop("ambiguous refresh"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credentials, []byte(strings.Replace(string(data), "before", "after", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := resolver.RefreshStopped(); err != nil || stopped {
+		t.Fatalf("RefreshStopped() after rotation = %v, %v; want false, nil", stopped, err)
+	}
+	if _, err := os.Stat(resolver.RefreshStopPath()); !os.IsNotExist(err) {
+		t.Fatalf("rotated stop marker survived: %v", err)
 	}
 }
 
