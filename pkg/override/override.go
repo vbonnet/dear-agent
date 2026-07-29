@@ -13,8 +13,8 @@
 //  1. Reason — the caller states WHY, in its own words. Missing, trivial, or
 //     boilerplate reasons are refused. The reason is what a later audit reads.
 //  2. Grant — a human approved this override kind, recently, with an expiry.
-//     Grants are minted only through an interactive terminal, so an unattended
-//     agent cannot mint one for itself.
+//     Grants require an interactive confirmation and root-owned storage, so a
+//     same-user unattended agent cannot mint one for itself.
 //  3. Ledger — every authorized use is appended durably: kind, reason, actor,
 //     session, timestamp.
 //  4. Audit — the ledger is reviewed on a schedule, and an alert fires when
@@ -73,6 +73,7 @@ var (
 	ErrNoGrant         = errors.New("no human approval on file for this override")
 	ErrGrantExpired    = errors.New("human approval for this override has expired")
 	ErrGrantKind       = errors.New("human approval is for a different override kind")
+	ErrGrantUntrusted  = errors.New("override approval is not in operator-owned storage")
 )
 
 // boilerplateReasons are refused outright. A reason that survives this list is
@@ -107,7 +108,7 @@ func ValidateReason(reason string) (string, error) {
 
 // Grant records that a human approved an override kind for a bounded window.
 // It is the only gate an unattended agent cannot satisfy on its own: grants are
-// minted exclusively through an interactive terminal.
+// minted through an interactive confirmation into root-owned storage.
 type Grant struct {
 	Kind          Kind      `json:"kind"`
 	ApprovedBy    string    `json:"approved_by"`
@@ -148,9 +149,8 @@ type Request struct {
 	Now     time.Time
 }
 
-// Dir is the root for override state. AGM_CONFIG_DIR keeps it beside the rest
-// of AGM's state so a relocated config directory does not silently split the
-// grant from the ledger that audits it.
+// Dir is the root for the user-owned override ledger. AGM_CONFIG_DIR keeps the
+// ledger beside the rest of AGM's state when the config directory is relocated.
 func Dir() string {
 	if dir := os.Getenv("AGM_CONFIG_DIR"); dir != "" {
 		return filepath.Join(dir, "overrides")
@@ -162,9 +162,24 @@ func Dir() string {
 	return filepath.Join(home, ".agm", "overrides")
 }
 
-// GrantPath is where the human approval for kind lives.
+const (
+	operatorGrantDir    = "/etc"
+	operatorGrantPrefix = "dear-agent-override-"
+)
+
+var (
+	grantDirPath             = operatorGrantDir
+	enforceOperatorOwnership = true
+)
+
+// GrantDir is the operator-owned approval store. It is deliberately outside
+// ~/.agm: an unattended agent runs as the same user that owns ~/.agm and could
+// otherwise mint the JSON that is supposed to prove human approval.
+func GrantDir() string { return grantDirPath }
+
+// GrantPath is where the operator-owned approval for kind lives.
 func GrantPath(kind Kind) string {
-	return filepath.Join(Dir(), "grants", string(kind)+".json")
+	return filepath.Join(GrantDir(), operatorGrantPrefix+string(kind)+".json")
 }
 
 // LedgerPath is the append-only record of authorized overrides.
@@ -173,7 +188,14 @@ func LedgerPath() string { return filepath.Join(Dir(), "ledger.jsonl") }
 // LoadGrant reads the approval for kind. A missing grant is (nil, nil) so the
 // caller can report "not approved" distinctly from "could not tell".
 func LoadGrant(kind Kind) (*Grant, error) {
-	data, err := os.ReadFile(GrantPath(kind))
+	path := GrantPath(kind)
+	if err := validateGrantPath(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -182,32 +204,70 @@ func LoadGrant(kind Kind) (*Grant, error) {
 	}
 	var grant Grant
 	if err := json.Unmarshal(data, &grant); err != nil {
-		return nil, fmt.Errorf("parse override grant %s: %w", GrantPath(kind), err)
+		return nil, fmt.Errorf("parse override grant %s: %w", path, err)
 	}
 	return &grant, nil
 }
 
-// SaveGrant persists a human approval. Callers must confirm interactively
-// first; this function does not and cannot verify that.
+// SaveGrant persists a human approval in the operator-owned store. Production
+// callers need elevated privileges to create or replace the file; the CLI adds
+// the separate interactive confirmation gate before calling this function.
 func SaveGrant(grant Grant) error {
 	if !grant.Kind.Valid() {
 		return fmt.Errorf("%w: %q", ErrUnknownKind, grant.Kind)
 	}
 	path := GrantPath(grant.Kind)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := prepareGrantDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create override grant dir: %w", err)
 	}
 	data, err := json.MarshalIndent(grant, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode override grant: %w", err)
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".staging-*")
+	if err != nil {
+		return fmt.Errorf("stage override grant: %w", err)
+	}
+	tmpPath := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(grantFileMode()); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("secure staged override grant: %w", err)
+	}
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		closeErr := tmp.Close()
+		return errors.Join(fmt.Errorf("write staged override grant: %w", err), closeErr)
+	}
+	if err := tmp.Sync(); err != nil {
+		closeErr := tmp.Close()
+		return errors.Join(fmt.Errorf("sync staged override grant: %w", err), closeErr)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close staged override grant: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("install override grant: %w", err)
+	}
+	removeTmp = false
+	if err := validateGrantPath(path); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RevokeGrant removes the approval for kind. Removing an absent grant is not
 // an error: the caller wanted no grant, and there is none.
 func RevokeGrant(kind Kind) error {
-	err := os.Remove(GrantPath(kind))
+	path := GrantPath(kind)
+	if err := validateGrantPath(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	err := os.Remove(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("revoke override grant: %w", err)
 	}
@@ -226,13 +286,23 @@ func Record(use Use) error {
 	if err != nil {
 		return fmt.Errorf("encode override use: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// O_RDWR is intentional: append authorization must fail when the audit
+	// cannot read the existing ledger, even if a write-only ACL would permit
+	// adding another invisible record.
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("open override ledger: %w", err)
 	}
-	defer file.Close()
 	if _, err := file.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("append override ledger: %w", err)
+		closeErr := file.Close()
+		return errors.Join(fmt.Errorf("append override ledger: %w", err), closeErr)
+	}
+	if err := file.Sync(); err != nil {
+		closeErr := file.Close()
+		return errors.Join(fmt.Errorf("sync override ledger: %w", err), closeErr)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close override ledger: %w", err)
 	}
 	return nil
 }

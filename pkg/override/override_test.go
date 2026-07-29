@@ -36,7 +36,7 @@ func TestValidateReasonRefusesUnauditableReasons(t *testing.T) {
 // An override with no human approval must refuse, and must not leave a ledger
 // entry: a refused attempt is not a use.
 func TestAuthorizeRefusesWithoutGrant(t *testing.T) {
-	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
+	configureTestStore(t)
 
 	_, err := Authorize(Request{
 		Kind:   KindCodexHookTrust,
@@ -51,7 +51,7 @@ func TestAuthorizeRefusesWithoutGrant(t *testing.T) {
 }
 
 func TestAuthorizeRefusesExpiredAndMismatchedGrants(t *testing.T) {
-	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
+	configureTestStore(t)
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 
 	if err := SaveGrant(Grant{
@@ -85,7 +85,7 @@ func TestAuthorizeRefusesExpiredAndMismatchedGrants(t *testing.T) {
 }
 
 func TestAuthorizeRecordsGrantedUse(t *testing.T) {
-	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
+	configureTestStore(t)
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
@@ -123,6 +123,7 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 func TestAuthorizeFailsClosedWhenLedgerUnwritable(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AGM_CONFIG_DIR", dir)
+	configureTestGrantDir(t, filepath.Join(dir, "operator-grants"))
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	if err := SaveGrant(Grant{Kind: KindAdmissionBrake, ApprovedBy: "v", ExpiresUTC: now.Add(time.Hour)}); err != nil {
 		t.Fatalf("save grant: %v", err)
@@ -138,6 +139,36 @@ func TestAuthorizeFailsClosedWhenLedgerUnwritable(t *testing.T) {
 		Now:    now,
 	}); err == nil {
 		t.Fatal("override was authorized despite an unrecordable ledger")
+	}
+}
+
+// A write-only ledger is not auditable. O_APPEND|O_WRONLY used to authorize
+// this case even though every subsequent audit failed to read the record.
+func TestAuthorizeFailsClosedWhenLedgerUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the mode-bit read denial")
+	}
+	dir := t.TempDir()
+	t.Setenv("AGM_CONFIG_DIR", dir)
+	configureTestGrantDir(t, filepath.Join(dir, "operator-grants"))
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	if err := SaveGrant(Grant{Kind: KindAdmissionBrake, ApprovedBy: "v", ExpiresUTC: now.Add(time.Hour)}); err != nil {
+		t.Fatalf("save grant: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(LedgerPath()), 0o700); err != nil {
+		t.Fatalf("create ledger dir: %v", err)
+	}
+	if err := os.WriteFile(LedgerPath(), nil, 0o200); err != nil {
+		t.Fatalf("stage write-only ledger: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(LedgerPath(), 0o600) })
+
+	if _, err := Authorize(Request{
+		Kind:   KindAdmissionBrake,
+		Reason: "disk watchdog clobbered the SRE hold, verifying the fix once",
+		Now:    now,
+	}); err == nil {
+		t.Fatal("override was authorized despite an unreadable ledger")
 	}
 }
 
@@ -172,15 +203,68 @@ func TestAuditAlertsPerKindAndRanksRepeatedReasons(t *testing.T) {
 	}
 }
 
-func TestGrantPathsLiveUnderConfigDir(t *testing.T) {
+func TestGrantAndLedgerUseSeparateTrustRoots(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AGM_CONFIG_DIR", dir)
-	if want := filepath.Join(dir, "overrides", "grants", "codex-hook-trust.json"); GrantPath(KindCodexHookTrust) != want {
+	operatorDir := filepath.Join(dir, "operator-grants")
+	configureTestGrantDir(t, operatorDir)
+	if want := filepath.Join(operatorDir, "dear-agent-override-codex-hook-trust.json"); GrantPath(KindCodexHookTrust) != want {
 		t.Fatalf("GrantPath = %q, want %q", GrantPath(KindCodexHookTrust), want)
 	}
 	if want := filepath.Join(dir, "overrides", "ledger.jsonl"); LedgerPath() != want {
 		t.Fatalf("LedgerPath = %q, want %q", LedgerPath(), want)
 	}
+}
+
+func TestProductionGrantDirIgnoresAgentConfigDir(t *testing.T) {
+	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
+	oldDir, oldEnforcement := grantDirPath, enforceOperatorOwnership
+	grantDirPath, enforceOperatorOwnership = operatorGrantDir, true
+	t.Cleanup(func() {
+		grantDirPath, enforceOperatorOwnership = oldDir, oldEnforcement
+	})
+	if got := GrantDir(); got != operatorGrantDir {
+		t.Fatalf("GrantDir = %q, want operator-owned %q", got, operatorGrantDir)
+	}
+}
+
+func TestLoadGrantRejectsSameUserJSON(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("cannot create a non-root-owned fixture while running as root")
+	}
+	dir := t.TempDir()
+	oldDir, oldEnforcement := grantDirPath, enforceOperatorOwnership
+	grantDirPath, enforceOperatorOwnership = dir, true
+	t.Cleanup(func() {
+		grantDirPath, enforceOperatorOwnership = oldDir, oldEnforcement
+	})
+	grant := Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "unattended-agent",
+		ExpiresUTC: time.Now().Add(time.Hour),
+	}
+	if err := os.WriteFile(GrantPath(grant.Kind), mustJSON(t, grant), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadGrant(grant.Kind); !errors.Is(err, ErrGrantUntrusted) {
+		t.Fatalf("LoadGrant error = %v, want ErrGrantUntrusted", err)
+	}
+}
+
+func configureTestStore(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("AGM_CONFIG_DIR", dir)
+	configureTestGrantDir(t, filepath.Join(dir, "operator-grants"))
+}
+
+func configureTestGrantDir(t *testing.T, dir string) {
+	t.Helper()
+	oldDir, oldEnforcement := grantDirPath, enforceOperatorOwnership
+	grantDirPath, enforceOperatorOwnership = dir, false
+	t.Cleanup(func() {
+		grantDirPath, enforceOperatorOwnership = oldDir, oldEnforcement
+	})
 }
 
 func mustJSON(t *testing.T, grant Grant) []byte {

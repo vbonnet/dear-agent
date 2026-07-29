@@ -473,16 +473,24 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 
 func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
-	// Resume re-runs both controls, so the launch needs attested hooks AND a
-	// live human approval on file.
-	if err := override.SaveGrant(override.Grant{
-		Kind:       override.KindCodexHookTrust,
-		ApprovedBy: "test",
-		ExpiresUTC: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("approve override: %v", err)
-	}
+	configDir := t.TempDir()
+	t.Setenv("AGM_CONFIG_DIR", configDir)
+	// The override package exhaustively tests root-owned grants. This operation
+	// test isolates the resume invariant: resume must invoke authorization and
+	// persist the returned use instead of inheriting an earlier decision.
+	replaceOverrideAuthorizer(t, func(req override.Request) (override.Use, error) {
+		use := override.Use{
+			Kind:    req.Kind,
+			Reason:  req.Reason,
+			Actor:   req.Actor,
+			Session: req.Session,
+			AtUTC:   time.Now().UTC(),
+		}
+		if err := override.Record(use); err != nil {
+			return override.Use{}, err
+		}
+		return use, nil
+	})
 	worktreePath, hookTrust := resumeCodexHookFixture(t)
 	extraAddDir := filepath.Join(t.TempDir(), "real worktree")
 	m := &manifest.Manifest{
@@ -530,7 +538,11 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 // persisted launch policy must not outlive the approval it was granted under.
 func TestPrepareResumeLaunchRefusesUnapprovedCodexHookTrust(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
+	configDir := t.TempDir()
+	t.Setenv("AGM_CONFIG_DIR", configDir)
+	replaceOverrideAuthorizer(t, func(override.Request) (override.Use, error) {
+		return override.Use{}, override.ErrNoGrant
+	})
 	// Hooks attest cleanly here, isolating the governance gate: unchanged hooks
 	// are still hooks running unreviewed, so attestation alone must not admit
 	// them without a live approval.
@@ -561,6 +573,13 @@ func TestPrepareResumeLaunchRefusesUnapprovedCodexHookTrust(t *testing.T) {
 	if !errors.Is(err, override.ErrNoGrant) {
 		t.Fatalf("err = %v, want ErrNoGrant", err)
 	}
+}
+
+func replaceOverrideAuthorizer(t *testing.T, fn func(override.Request) (override.Use, error)) {
+	t.Helper()
+	old := authorizeOverride
+	authorizeOverride = fn
+	t.Cleanup(func() { authorizeOverride = old })
 }
 
 func TestPrepareResumeLaunchRejectsChangedSandboxCodexHooks(t *testing.T) {

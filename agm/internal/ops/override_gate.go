@@ -7,6 +7,8 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
+var authorizeOverride = override.Authorize
+
 // AuthorizeCodexHookTrust runs the shared dangerous-override gates for the
 // Codex hook-trust bypass and records the use.
 //
@@ -15,7 +17,7 @@ import (
 // manifest, so skipping it there would turn "approve once, resume forever" into
 // the loophole the gates exist to close.
 func AuthorizeCodexHookTrust(reason, sessionName string) error {
-	if _, err := override.Authorize(override.Request{
+	if _, err := authorizeOverride(override.Request{
 		Kind:    override.KindCodexHookTrust,
 		Reason:  reason,
 		Actor:   OverrideActor(),
@@ -33,7 +35,7 @@ func AuthorizeCodexHookTrust(reason, sessionName string) error {
 // fit to spawn. Crossing it is therefore always a claim a human should be able
 // to read back later, which is exactly what the ledger preserves.
 func AuthorizeAdmissionBrakeOverride(reason, sessionName string) error {
-	if _, err := override.Authorize(override.Request{
+	if _, err := authorizeOverride(override.Request{
 		Kind:    override.KindAdmissionBrake,
 		Reason:  reason,
 		Actor:   OverrideActor(),

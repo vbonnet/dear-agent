@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # PreToolUse hook: dangerous overrides require a stated reason and a human approval.
 #
-# WHAT: blocks a Bash tool call that reaches for a dangerous override —
-# Codex's --dangerously-bypass-hook-trust, or AGM's --brake-override — unless
-# the shared override gates would pass: a reason is supplied AND a human has
-# approved that override kind through an interactive terminal.
+# WHAT: routes a raw Codex --dangerously-bypass-hook-trust tool call through
+# AGM's shared authorization gate. Normal AGM commands authorize inside the
+# binary; this hook covers the only native flag that could otherwise go around
+# that binary.
 #
 # WHY a block, not a nudge: these flags switch off a safety control. An agent
 # that can set one unattended can silently disable the control and nobody finds
@@ -40,35 +40,41 @@ tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 
-kind=""
 case "$cmd" in
-  *--dangerously-bypass-hook-trust*) kind="codex-hook-trust" ;;
-  *--brake-override*) kind="admission-brake" ;;
+  *--dangerously-bypass-hook-trust*) ;;
   *) exit 0 ;;
 esac
 
-grants_dir="${AGM_CONFIG_DIR:-$HOME/.agm}/overrides/grants"
-grant="$grants_dir/$kind.json"
-
-if [ ! -f "$grant" ]; then
-  deny "$kind is a dangerous override with no human approval on file. It switches off a safety control, so an agent may not enable it unattended. Ask the operator to run, at an interactive terminal: agm override approve $kind --ttl 1h — then state why in the request itself (--dangerously-bypass-hook-trust=\"<reason>\" or --brake-override=\"<reason>\"). Every authorized use is reviewed by: agm override audit"
+# A single, unambiguous invocation of the installed AGM binary owns its own
+# authorization. Do not record it twice in the hook. Compound commands are not
+# accepted as this exception: `agm ...; codex --dangerously...` must take the
+# raw path below.
+trusted_agm="$HOME/go/bin/agm"
+resolved_agm="$(command -v agm 2>/dev/null || true)"
+simple_command=1
+case "$cmd" in
+  *";"*|*"&&"*|*"||"*|*"|"*|*'`'*|*'$('*|*$'\n'*) simple_command=0 ;;
+esac
+if [ "$simple_command" -eq 1 ] && [ "$resolved_agm" = "$trusted_agm" ]; then
+  case "$cmd" in
+    "agm "*|"$trusted_agm "*) exit 0 ;;
+  esac
 fi
 
-# An approval is time-bounded. Expired is not approved.
-expires="$(jq -r '.expires_utc // empty' "$grant" 2>/dev/null || true)"
-if [ -n "$expires" ]; then
-  now_epoch="$(date -u +%s)"
-  exp_epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "${expires%%.*}" +%s 2>/dev/null \
-    || date -u -d "$expires" +%s 2>/dev/null || echo 0)"
-  if [ "$exp_epoch" -ne 0 ] && [ "$exp_epoch" -le "$now_epoch" ]; then
-    deny "the human approval for $kind expired at $expires. Re-approve with: agm override approve $kind"
-  fi
+# A raw Codex flag is boolean, so the justification cannot ride on the flag.
+# The operator must place it in the parent Codex environment. A tool command
+# cannot retroactively alter this hook's environment, which keeps the reason
+# outside the unattended command being authorized.
+reason="${AGM_CODEX_HOOK_TRUST_REASON:-}"
+if [ -z "$reason" ]; then
+  deny "raw codex --dangerously-bypass-hook-trust requires AGM_CODEX_HOOK_TRUST_REASON in the parent Codex environment. Stop and ask the operator to restart Codex with that auditable reason after running: $trusted_agm override approve codex-hook-trust --ttl 1h"
+fi
+if [ ! -x "$trusted_agm" ]; then
+  deny "cannot authorize raw codex hook-trust bypass: trusted AGM binary is missing at $trusted_agm"
 fi
 
-# Approved kinds still need a non-empty reason on the flag itself: the reason is
-# what the recurring audit reads, and a bare flag records nothing.
-if printf '%s' "$cmd" | grep -qE -- '--(dangerously-bypass-hook-trust|brake-override)(\s|$|=(\s|$|"\s*"|'"''"'))'; then
-  deny "$kind requires a reason: --<flag>=\"why you are overriding\". A bare flag leaves the audit nothing to review."
-fi
+auth_error="$("$trusted_agm" override authorize codex-hook-trust \
+  --reason "$reason" --actor codex-pretool-hook 2>&1 >/dev/null)" || \
+  deny "raw codex hook-trust override refused by the shared authorization gate: $auth_error"
 
 exit 0

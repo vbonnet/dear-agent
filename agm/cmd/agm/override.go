@@ -17,6 +17,9 @@ import (
 var (
 	overrideTTL            time.Duration
 	overrideNote           string
+	overrideReason         string
+	overrideActor          string
+	overrideSession        string
 	overrideAuditWindow    time.Duration
 	overrideAuditThreshold int
 	overrideAuditJSON      bool
@@ -32,9 +35,10 @@ var overrideCmd = &cobra.Command{
 	Short: "Approve, inspect, and audit dangerous overrides",
 	Long: `Manage the dangerous overrides that switch off a safety control.
 
-Every override requires a stated reason, a human approval that expires, and a
-ledger entry. Approvals are minted only from an interactive terminal, so an
-unattended agent cannot approve its own override.
+Every override requires a stated reason, an operator-owned approval that
+expires, and a ledger entry. Approvals require both an interactive terminal
+and elevated access to the system approval store, so a same-user unattended
+agent cannot approve its own override.
 
 Kinds:
   codex-hook-trust   run Codex hooks without per-path trust review
@@ -53,6 +57,18 @@ var overrideRevokeCmd = &cobra.Command{
 	Short: "Revoke an override approval",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runOverrideRevoke,
+}
+
+var overrideAuthorizeCmd = &cobra.Command{
+	Use:   "authorize <kind>",
+	Short: "Run every authorization gate and record one override use",
+	Long: `Authorize one dangerous override use through the shared gate.
+
+This is the canonical entry point for enforcement surfaces that cannot import
+pkg/override directly, including the Codex PreToolUse guard. It never creates
+an approval: the operator-owned grant must already exist.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runOverrideAuthorize,
 }
 
 var overrideStatusCmd = &cobra.Command{
@@ -76,11 +92,14 @@ the fix is either to remove that cause or to close the loophole.`,
 func init() {
 	overrideApproveCmd.Flags().DurationVar(&overrideTTL, "ttl", time.Hour, "How long the approval remains valid")
 	overrideApproveCmd.Flags().StringVar(&overrideNote, "note", "", "Optional note recorded with the approval")
+	overrideAuthorizeCmd.Flags().StringVar(&overrideReason, "reason", "", "Why this safety control must be overridden")
+	overrideAuthorizeCmd.Flags().StringVar(&overrideActor, "actor", "", "Actor recorded in the audit ledger")
+	overrideAuthorizeCmd.Flags().StringVar(&overrideSession, "session", "", "Optional session recorded in the audit ledger")
 	overrideAuditCmd.Flags().DurationVar(&overrideAuditWindow, "window", 7*24*time.Hour, "Window to review")
 	overrideAuditCmd.Flags().IntVar(&overrideAuditThreshold, "threshold", 5, "Alert when a kind reaches this many uses (0 disables)")
 	overrideAuditCmd.Flags().BoolVar(&overrideAuditJSON, "json", false, "Emit the report as JSON")
 
-	overrideCmd.AddCommand(overrideApproveCmd, overrideRevokeCmd, overrideStatusCmd, overrideAuditCmd)
+	overrideCmd.AddCommand(overrideApproveCmd, overrideAuthorizeCmd, overrideRevokeCmd, overrideStatusCmd, overrideAuditCmd)
 	rootCmd.AddCommand(overrideCmd)
 }
 
@@ -100,9 +119,9 @@ func joinKinds() string {
 	return strings.Join(names, ", ")
 }
 
-// interactiveStdin reports whether a human is at the keyboard. This is the gate
-// an unattended agent cannot pass: a piped or redirected stdin is not a
-// character device, so an approval cannot be scripted.
+// interactiveStdin requires the typed confirmation to happen at a terminal.
+// The separate OS authorization prompt and root-owned destination are the
+// authority boundary; a TTY alone is not treated as proof of a human.
 func interactiveStdin() bool {
 	info, err := os.Stdin.Stat()
 	if err != nil {
@@ -122,8 +141,12 @@ func runOverrideApprove(cmd *cobra.Command, args []string) error {
 	if overrideTTL <= 0 {
 		return fmt.Errorf("--ttl must be positive")
 	}
+	if _, err := override.LoadGrant(kind); err != nil {
+		return fmt.Errorf("inspect existing override grant before approval: %w", err)
+	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nApproving dangerous override %q for %s.\n", kind, overrideTTL)
+	fmt.Fprintf(cmd.OutOrStdout(), "The approval is installed in operator-owned storage at %s.\n", override.GrantPath(kind))
 	fmt.Fprintf(cmd.OutOrStdout(), "This disables a safety control. Every use is recorded to %s.\n", override.LedgerPath())
 	fmt.Fprintf(cmd.OutOrStdout(), "\nType the override kind to confirm: ")
 
@@ -138,15 +161,66 @@ func runOverrideApprove(cmd *cobra.Command, args []string) error {
 	now := time.Now().UTC()
 	grant := override.Grant{
 		Kind:          kind,
-		ApprovedBy:    ops.OverrideActor(),
+		ApprovedBy:    approvalActor(),
 		ApprovedAtUTC: now,
 		ExpiresUTC:    now.Add(overrideTTL),
 		Note:          overrideNote,
 	}
-	if err := override.SaveGrant(grant); err != nil {
+	if err := installConfirmedGrant(grant); err != nil {
 		return err
 	}
 	ui.PrintSuccess(fmt.Sprintf("Approved %s until %s", kind, grant.ExpiresUTC.Format(time.RFC3339)))
+	return nil
+}
+
+func installConfirmedGrant(grant override.Grant) error {
+	data, err := json.MarshalIndent(grant, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode override grant: %w", err)
+	}
+	if err := installOperatorGrant(append(data, '\n'), override.GrantPath(grant.Kind)); err != nil {
+		return err
+	}
+	installed, err := override.LoadGrant(grant.Kind)
+	if err != nil {
+		return fmt.Errorf("verify installed override grant: %w", err)
+	}
+	if installed == nil || installed.Kind != grant.Kind ||
+		!installed.ApprovedAtUTC.Equal(grant.ApprovedAtUTC) ||
+		!installed.ExpiresUTC.Equal(grant.ExpiresUTC) ||
+		installed.ApprovedBy != grant.ApprovedBy ||
+		installed.Note != grant.Note {
+		return fmt.Errorf("verify installed override grant: installed content does not match the confirmed approval")
+	}
+	if err := installed.Active(grant.Kind, time.Now()); err != nil {
+		return fmt.Errorf("verify installed override grant: %w", err)
+	}
+	return nil
+}
+
+func approvalActor() string {
+	if user := os.Getenv("SUDO_USER"); user != "" && user != "root" {
+		return user
+	}
+	return ops.OverrideActor()
+}
+
+func runOverrideAuthorize(cmd *cobra.Command, args []string) error {
+	kind, err := parseOverrideKind(args[0])
+	if err != nil {
+		return err
+	}
+	use, err := override.Authorize(override.Request{
+		Kind:    kind,
+		Reason:  overrideReason,
+		Actor:   overrideActor,
+		Session: overrideSession,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Authorized %s at %s; use recorded in %s\n",
+		use.Kind, use.AtUTC.Format(time.RFC3339), override.LedgerPath())
 	return nil
 }
 
@@ -155,8 +229,13 @@ func runOverrideRevoke(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := override.RevokeGrant(kind); err != nil {
+	if err := removeOperatorGrant(override.GrantPath(kind)); err != nil {
 		return err
+	}
+	if grant, err := override.LoadGrant(kind); err != nil {
+		return fmt.Errorf("verify revoked override grant: %w", err)
+	} else if grant != nil {
+		return fmt.Errorf("verify revoked override grant: approval remains at %s", override.GrantPath(kind))
 	}
 	ui.PrintSuccess(fmt.Sprintf("Revoked approval for %s", kind))
 	return nil

@@ -164,7 +164,7 @@ type SandboxConfig struct {
 	// Governance asks whether anyone agreed to run them unreviewed. Setting this
 	// is a request, not a grant: the launch still refuses unless a human has
 	// approved override kind "codex-hook-trust" through an interactive terminal
-	// (`agm override approve`), and every authorized launch is recorded to the
+	// into root-owned storage (`agm override approve`), and every authorized launch is recorded to the
 	// override ledger. See pkg/override.
 	//
 	// It is a reason rather than a bool on purpose: a bool is exactly the switch

@@ -19,9 +19,10 @@
   this from a report into an alert. A generic non-zero exit would be
   indistinguishable from a broken job, so 3 is reserved for "used too often".
 
-  The plist is a TEMPLATE: the install target substitutes __HOME__ for the real
-  home directory before staging it into ~/Library/LaunchAgents (launchd does
-  not expand ~ or shell variables).
+  The plist is a TEMPLATE: `make install-override-audit-launchagent` creates
+  the log directory, substitutes __HOME__ for the real home directory, and
+  stages it through deploy/manifest.yaml into ~/Library/LaunchAgents (launchd
+  does not expand ~ or shell variables).
 
   Activate (ask-gated host action):
     launchctl bootstrap gui/$(id -u) \

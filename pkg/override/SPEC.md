@@ -17,7 +17,7 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-01** When a dangerous override is requested, the system shall refuse it unless the caller supplied a reason that is present, long enough to audit, and not boilerplate.
 
-**OVR-02** When a dangerous override is requested, the system shall refuse it unless an unexpired human approval exists for that override kind.
+**OVR-02** When a dangerous override is requested, the system shall refuse it unless an unexpired human approval exists for that override kind in root-owned storage that the agent user cannot modify.
 
 **OVR-03** When a human approval is minted, the system shall require an interactive terminal and a typed confirmation naming the override kind.
 
@@ -35,6 +35,8 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-10** When override use is aggregated, the system shall evaluate the alert threshold separately for each override kind.
 
+**OVR-11** When a raw Codex hook-trust bypass is requested outside AGM, the system shall route it through the canonical authorization entry point and shall record the authorized use.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
@@ -51,9 +53,12 @@ to run is exactly how a guardrail becomes decorative (see
 
 `.codex/hooks/pretool-dangerous-override-guard` is defence in depth for the
 case where an agent shells out to a raw `codex --dangerously-bypass-hook-trust`
-instead of going through AGM. It refuses via Codex's `permissionDecision:
-"deny"` wire form; a non-zero hook exit is **not** a refusal in Codex and is
-logged as a failed hook while the tool call proceeds.
+instead of going through AGM. Raw Codex's flag is boolean, so its reason comes
+from `AGM_CODEX_HOOK_TRUST_REASON` in the parent Codex environment; a tool
+command cannot set that environment retroactively. The hook invokes `agm
+override authorize`, which validates the root-owned grant and appends the same
+ledger as in-process callers. It refuses via Codex's `permissionDecision:
+"deny"` wire form; a non-zero hook exit is **not** a refusal in Codex.
 
 For the Codex hook-trust kind, authorization composes with attestation
 (`agm/internal/codexhooks`). They answer different questions — whether the
@@ -62,12 +67,22 @@ them unreviewed — and both fail closed.
 
 ## Operations
 
-    agm override approve <kind> --ttl 1h   # interactive terminal only
+    agm override approve <kind> --ttl 1h
     agm override status                    # approvals and recent use
     agm override audit --window 168h --threshold 5
     agm override revoke <kind>
 
-The recurring audit ships as `deploy/launchd/com.dear-agent.override-audit.plist`.
+Approvals are stored as `/etc/dear-agent-override-<kind>.json`, owned by root
+and not writable by group or others. On macOS, `agm override approve` streams
+the confirmed bytes to the system `authopen` authorization service; on other
+Unix systems it streams them across the system `sudo` boundary. AGM itself is
+never elevated, so an agent-writable AGM binary is not executed as root. The
+OS authentication and the command's interactive typed confirmation form the
+human boundary. The use ledger remains under `~/.agm/overrides` so the
+scheduled user agent can append and audit it.
+
+The recurring audit ships as `deploy/launchd/com.dear-agent.override-audit.plist`
+and is staged with `make install-override-audit-launchagent`.
 
 ## BDD Traceability
 
