@@ -4,24 +4,18 @@ Status: Proposed (2026-07-27; implementation and migration pending)
 
 ## Context
 
-Stage 1 of the agent-persona-system research (`research/2026-07-21-agent-persona-system-research.md`,
-engram-research PR #163) left open how the persona system's policy-enforcement
-layer — tool allow/deny/ask, path/resource guards — should be authored and
-cross-harness enforced. A companion research pass
-(`research/2026-07-21-agent-persona-policy-language-research.md`) answered
-that question directly, evaluating EARS/Gherkin, Rego/OPA (Valentin's own
-named candidate), CEL, Cerbos, and Cedar against the actual problem shape:
-runtime interception of a live tool call (principal acting via action on
-resource in context), not spec-time or test-time verification.
+Stage 1 of the agent-persona-system research
+(`research/2026-07-21-agent-persona-system-research.md`, engram-research PR
+#163) left open how tool and resource policy should be authored and enforced
+across harnesses. Its companion policy-language research evaluated
+EARS/Gherkin, Rego/OPA, CEL, Cerbos, and Cedar for runtime interception of a
+live principal/action/resource/context request, not spec-time verification.
 
-EARS/Gherkin were ruled out outright — they operate one layer up
-(requirements/test authoring) and never evaluate a live request. Among the
-runtime candidates, Rego/OPA is the most mature and has the largest
-ecosystem, but the field is visibly moving away from it for
-authorization-shaped problems specifically (the "Rego tax" — see Kyverno's
-move off Rego, Kubernetes' own move to CEL-based admission control). Cerbos
-has the strongest built-in testing story but is service-first by design,
-which fights an embeddable, in-process, per-harness interception model.
+EARS/Gherkin operate one layer up and never evaluate a live request. Rego/OPA
+is the most mature runtime candidate, but authorization-shaped systems are
+moving away from its "Rego tax" (Kyverno off Rego; Kubernetes toward CEL).
+Cerbos has strong built-in testing but its service-first design fights an
+embeddable, in-process, per-harness interceptor.
 
 Cedar was not on the original candidate list but surfaced directly from
 researching "policy engines for AI agent tool calls": AWS chose Cedar for
@@ -57,6 +51,15 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   The policy decision is made outside the agent's own reasoning, the same
   "deterministic enforcement over agent judgment" principle already on
   dear-agent's anti-pattern watchlist.
+- Put one versioned, typed **tool-action projector** in front of Cedar. Its
+  shared registry owns all harness aliases/argument spellings and emits a
+  canonical action plus typed resources/context; adapters never send raw maps.
+  It distinguishes file read, directory list, filesystem search, write/create,
+  delete/rename, process execution, and network access. Pi `find` and `Glob`
+  map to search, `ls` maps to directory-list, and `path`/`file_path` normalize
+  identically. Multi-resource operations emit every resource. Unknown aliases,
+  unsupported/conflicting shapes, missing fields, or lossy projection deny
+  before Cedar; adapter-local fallback aliases are nonconforming.
 - Treat the interceptor executable and its harness registration as privileged
   enforcement assets, not project files. Each blocking integration must load
   both from an operator-managed location outside the workspace and every
@@ -215,11 +218,13 @@ tests must prove all of the following:
    encountered after positive invocation authorization may return
    `policy_unavailable`.
    All paths record the bundle version and sanitized diagnostics.
-7. Every harness interceptor produces the same canonical resource for
-   equivalent absolute, relative, and traversal-containing paths. A worktree
-   symlink into a protected source tree is evaluated as the protected target,
-   and a missing leaf beneath a symlinked ancestor is resolved through that
-   ancestor. Canonicalization failures deny before Cedar is called.
+7. Every harness produces the same typed action/resources for equivalent tool
+   aliases and input keys. Fixtures cover `find`/`Glob`, `ls`/directory-list,
+   `path`/`file_path`, and unknown/unsupported/conflicting/missing input failing
+   closed before Cedar. Equivalent absolute, relative, and traversal paths
+   produce one resource; worktree symlinks into protected source and missing
+   leaves below symlinked ancestors resolve to protected targets.
+   Canonicalization failure denies before Cedar.
 8. After positive invocation authorization, every harness drives an authored
    confirmation-free Deny: interactive mode enters `ask`, while non-interactive
    mode fails closed and dispatches nothing. Positively authorized interactive
@@ -259,10 +264,13 @@ tests must prove all of the following:
     They deny protected-source/allowed-destination, the inverse, and protected-inode aliases; a complete catalog permits fully allowed aliases.
     An external uncorrelated link makes it incomplete and fail closed until
     rescan; pathname allow never overrides protected-inode identity.
-15. Every harness runs an unrecognized binary, runtime-computed shell read/write
-    targets, and a `cd` sequence whose relative path reaches a protected tree;
-    when cwd/resources cannot all be projected and pinned, an OS sandbox blocks
-    protected reads/writes or dispatch is denied before launch. Raw-string authorization and post-hoc detection do not pass.
+15. Every harness runs an unrecognized binary, runtime-computed shell targets,
+    and a `cd` reaching protected source; unprojectable/unpinned resources are
+    sandbox-blocked or denied before launch. It also dispatches a projectable,
+    policy-allowed read-only command including `git status --short` in an
+    allowed worktree and observes the result. Raw-string/post-hoc enforcement,
+    classifying every shell call opaque, or rejecting every projected command
+    does not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
@@ -270,14 +278,11 @@ these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
 ## Alternatives
 
 **Rego/OPA** — rejected despite greater maturity because Cedar is purpose-built
-for this authorization shape and the newest on-point AWS/Microsoft prior art
-chose Cedar over it.
-
-**CEL** — rejected as a canonical authoring layer because it is an expression
-primitive, not a policy system. Reconsider it inside a bespoke format if needed.
-
+for this shape and the newest on-point AWS/Microsoft prior art chose it.
+**CEL** — rejected as a canonical layer because it is an expression primitive,
+not a policy system. Reconsider it inside a bespoke format if needed.
 **Cerbos** — rejected because its service-first posture mismatches in-process
-interceptors. Revisit only if a centralized policy service becomes desirable.
+interceptors; revisit if a centralized policy service becomes desirable.
 
 **Per-harness native-config codegen** (compile canonical policy directly
 into each harness's own settings format) — rejected; no researched
@@ -286,14 +291,10 @@ matches Stage 1's own finding for the Pi adapter.
 
 ## Consequences
 
-If accepted after migration, the persona/policy layer gets one deterministic,
-formally-analyzable source of truth instead of N harness-specific permission
-configs to keep in sync. Implementation work is scoped as: a Cedar policy schema for
-tool/resource/context, a shared evaluation library, and one interceptor per
-harness hook point (starting with dear-agent's own pretool hooks). Cedar's
-thinner ecosystem and unproven testing tooling (relative to `opa test` or
-Cerbos's YAML test suites) are accepted risks, bounded by atomic validation,
-last-known-good recovery, and the executable liveness gates above. Rego/OPA is
-the fallback if Cedar blocks implementation. The historical `0d1b3ed0` Rego
-re-evaluation identifier could not be resolved in the canonical Beads store;
-this ADR supersedes that unverified follow-up as the durable decision record.
+After migration, the persona/policy layer gets one deterministic source of
+truth instead of N harness configs. Work comprises a Cedar schema, shared
+evaluator, and interceptor per harness hook. Cedar's thinner ecosystem and
+unproven testing tooling are bounded by atomic validation, last-known-good
+recovery, and the gates above; Rego/OPA remains fallback. The historical
+`0d1b3ed0` Rego follow-up was absent from canonical Beads, so this ADR
+supersedes that unverified reference.
