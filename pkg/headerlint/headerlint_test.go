@@ -3,10 +3,11 @@ package headerlint
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func writeTemp(t *testing.T, dir, name, content string) string {
@@ -492,6 +493,24 @@ func TestCheckFile_NonOneOrderedListHeadingAfterBlankEndsHeaderZone(t *testing.T
 	}
 }
 
+func TestCheckFile_LeadingZeroOneOrderedMarkerInterruptsParagraph(t *testing.T) {
+	const content = "# Design options\n" +
+		"\n" +
+		"Introductory paragraph\n" +
+		"01. ## Nested body heading\n" +
+		"**Complexity:** Low. **Timeline:** Comparable.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want numeric-one list marker to end header zone, got %v", violations)
+	}
+}
+
 func TestCheckFile_CRLFHeadingEndsHeaderZone(t *testing.T) {
 	const content = "# Design options\r\n" +
 		"\r\n" +
@@ -608,10 +627,7 @@ func TestCheckRepository_TrackedFilesOnly(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
+	gittest.Run(t, dir, args...)
 }
 
 func TestViolation_String(t *testing.T) {
@@ -692,6 +708,26 @@ func TestCheckFile_InlineCodeDoesNotCrossHTMLBlock(t *testing.T) {
 	}
 	if len(violations) != 1 || violations[0].Line != 5 {
 		t.Fatalf("want visible header-field violation after HTML block, got %v", violations)
+	}
+}
+
+func TestCheckFile_HeadingsInsideRawHTMLDoNotEndHeaderZone(t *testing.T) {
+	for name, block := range map[string]string{
+		"comment": "<!--\n## literal comment content\n-->\n",
+		"script":  "<script>\n## literal script content\n</script>\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := "# Doc\n\n" + block + "**Status:** draft · **Owner:** docs\n"
+			dir := t.TempDir()
+			path := writeTemp(t, dir, name+".md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 {
+				t.Fatalf("want header-field violation after raw HTML, got %v", violations)
+			}
+		})
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -178,6 +179,7 @@ func checkData(path string, data []byte) []Violation {
 		lines[i] = strings.TrimSuffix(lines[i], "\r")
 	}
 	var fences fenceState
+	var htmlBlocks htmlBlockState
 	var inlineCode inlineCodeSpanState
 	paragraphOpen := false
 	for i, line := range lines {
@@ -186,6 +188,11 @@ func checkData(path string, data []byte) []Violation {
 			// A fenced block is a Markdown block boundary. An inline-code
 			// opener in earlier prose cannot consume a closer from this block
 			// or retain span state across it.
+			inlineCode = inlineCodeSpanState{}
+			paragraphOpen = false
+			continue
+		}
+		if htmlBlocks.consume(line) {
 			inlineCode = inlineCodeSpanState{}
 			paragraphOpen = false
 			continue
@@ -632,6 +639,66 @@ func isInterruptingHTMLBlockStart(line string, container fenceContainerContext) 
 	return isHTMLBlockStart(content)
 }
 
+type htmlBlockState struct {
+	endMarker  string
+	untilBlank bool
+}
+
+func (s *htmlBlockState) consume(line string) bool {
+	if s.endMarker != "" {
+		if strings.Contains(strings.ToLower(line), s.endMarker) {
+			*s = htmlBlockState{}
+		}
+		return true
+	}
+	if s.untilBlank {
+		if strings.TrimSpace(line) == "" {
+			*s = htmlBlockState{}
+		}
+		return true
+	}
+
+	content, ok := commonMarkBlockContent(line)
+	if !ok {
+		return false
+	}
+	lower := strings.ToLower(content)
+	endMarker := htmlBlockEndMarker(content, lower)
+	if endMarker != "" {
+		if !strings.Contains(lower, endMarker) {
+			s.endMarker = endMarker
+		}
+		return true
+	}
+	if htmlBlockTag.MatchString(content) {
+		s.untilBlank = true
+		return true
+	}
+	return false
+}
+
+func htmlBlockEndMarker(content, lower string) string {
+	for _, tag := range []string{"script", "pre", "style", "textarea"} {
+		prefix := "<" + tag
+		if strings.HasPrefix(lower, prefix) && htmlTagBoundary(lower, len(prefix)) {
+			return "</" + tag + ">"
+		}
+	}
+	switch {
+	case strings.HasPrefix(content, "<!--"):
+		return "-->"
+	case strings.HasPrefix(content, "<?"):
+		return "?>"
+	case strings.HasPrefix(lower, "<![cdata["):
+		return "]]>"
+	case len(content) > 2 && strings.HasPrefix(content, "<!") &&
+		content[2] >= 'A' && content[2] <= 'Z':
+		return ">"
+	default:
+		return ""
+	}
+}
+
 func commonMarkBlockContent(content string) (string, bool) {
 	indent := 0
 	for indent < len(content) && indent < 4 && content[indent] == ' ' {
@@ -756,7 +823,8 @@ func nonInterruptingOrderedListMarker(line string, offset int) bool {
 	if _, ok := terminatedListMarkerEnd(line, markerEnd+1); !ok {
 		return false
 	}
-	return string(line[offset:markerEnd]) != "1"
+	start, err := strconv.Atoi(line[offset:markerEnd])
+	return err == nil && start != 1
 }
 
 func fenceContainerMarkerEnd(line string, offset int) (int, bool) {
