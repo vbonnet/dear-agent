@@ -135,3 +135,47 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePluginManifestAssetRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	pluginRoot := filepath.Join(root, "research-pipeline")
+	manifestDir := filepath.Join(pluginRoot, ".claude-plugin")
+	if err := os.MkdirAll(filepath.Join(pluginRoot, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "SKILL.md"), []byte("# escaped\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(pluginRoot, "skills", "research-pipeline")); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestPath := filepath.Join(manifestDir, "plugin.json")
+	data := []byte(`{"name":"research-pipeline","version":"1.0.0","skills":["./skills/"]}`)
+	err := validatePluginManifestAsset(manifestPath, data)
+	if err == nil || !strings.Contains(err.Error(), "outside its plugin root") {
+		t.Fatalf("validatePluginManifestAsset() error = %v, want symlink-escape rejection", err)
+	}
+}
+
+func TestValidateEvalCasesAssetRejectsUnsupportedChecks(t *testing.T) {
+	for name, check := range map[string]string{
+		"type":   `{"type":"regx","target":"trace","pattern":"skill"}`,
+		"target": `{"type":"regex","target":"output","pattern":"skill"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := []byte(`{"cases":[{"id":"case","prompt":"run research","harness":["claude"],"should_trigger":true,"trials":1,"expected_checks":[` + check + `]}]}`)
+			err := validateEvalCasesAsset("evals.json", data)
+			if err == nil || !strings.Contains(err.Error(), "unsupported") {
+				t.Fatalf("validateEvalCasesAsset() error = %v, want unsupported-check rejection", err)
+			}
+		})
+	}
+}

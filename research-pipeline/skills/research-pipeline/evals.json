@@ -1,5 +1,5 @@
 {
-  "$schema_note": "Trigger/behavior eval cases for the research-pipeline skill. Positive cases assert the skill fires; negative cases assert it stays silent so a narrower path (single-shot research, plain transcript extraction) owns the task instead. Not yet wired into an automated eval runner in this repo (see docs/skill-verification-criteria.md) — kept as executable-spec documentation of the trigger surface for review.",
+  "$schema_note": "Trigger/behavior eval cases for the research-pipeline skill. Positive cases assert the skill fires; negative cases assert it stays silent so a narrower path (single-shot research, plain transcript extraction) owns the task instead. Not yet wired into an automated eval runner in this repo (see ../../docs/skill-verification-criteria.md) — kept as executable-spec documentation of the trigger surface for review.",
   "cases": [
     {
       "id": "research-pipeline-trigger-01",

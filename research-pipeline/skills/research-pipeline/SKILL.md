@@ -180,7 +180,7 @@ Every bead, however filed, needs:
 
 - a crisp, single-sentence goal
 - **testable acceptance criteria** (artifact / exit-code / observable — see
-  `docs/skill-verification-criteria.md` for the schema; vague "looks
+  `../../docs/skill-verification-criteria.md` for the packaged schema; vague "looks
   correct" criteria are a rejected pattern here too)
 - a size (S/M/L) small enough for one Codex `/goal` run
 - explicit sequencing/phase if beads depend on each other
@@ -264,7 +264,7 @@ after this pipeline runs to completion for a given source:
 - `evals.json` (co-located) — trigger/behavior eval cases: this skill
   should fire on multi-stage "research → plan → execute" requests and stay
   silent on one-off research questions or bare transcript grabs.
-- `docs/skill-verification-criteria.md` — the Form 2 verification-criteria
+- `../../docs/skill-verification-criteria.md` — the packaged Form 2 verification-criteria
   schema this skill follows.
 - `docs/skill-placement.md` — the placement framework that assigned this
   skill to dear-agent (cross-model verification, human gate before

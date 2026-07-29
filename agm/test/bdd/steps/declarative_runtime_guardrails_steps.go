@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -282,29 +283,63 @@ func validatePluginManifestAsset(path string, data []byte) error {
 		return fmt.Errorf("declarative runtime asset %s lacks name, version, or skills", path)
 	}
 	pluginRoot := filepath.Dir(filepath.Dir(path))
+	resolvedPluginRoot, err := filepath.EvalSymlinks(pluginRoot)
+	if err != nil {
+		return fmt.Errorf("resolve declarative runtime plugin root %s: %w", pluginRoot, err)
+	}
 	for _, declared := range manifest.Skills {
-		skillDir := filepath.Clean(filepath.Join(pluginRoot, filepath.FromSlash(declared)))
-		relative, err := filepath.Rel(pluginRoot, skillDir)
-		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("declarative runtime asset %s declares skill path outside its plugin root: %q", path, declared)
-		}
-		candidates := []string{
-			filepath.Join(skillDir, "SKILL.md"),
-			filepath.Join(skillDir, manifest.Name, "SKILL.md"),
-		}
-		found := false
-		for _, candidate := range candidates {
-			info, statErr := os.Stat(candidate)
-			if statErr == nil && !info.IsDir() {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("declarative runtime asset %s skill path %q does not contain canonical %s/SKILL.md", path, declared, manifest.Name)
+		if err := validatePluginSkillDeclaration(path, pluginRoot, resolvedPluginRoot, manifest.Name, declared); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validatePluginSkillDeclaration(path, pluginRoot, resolvedPluginRoot, pluginName, declared string) error {
+	skillDir := filepath.Clean(filepath.Join(pluginRoot, filepath.FromSlash(declared)))
+	if pathEscapesRoot(pluginRoot, skillDir) {
+		return fmt.Errorf("declarative runtime asset %s declares skill path outside its plugin root: %q", path, declared)
+	}
+	candidates := []string{
+		filepath.Join(skillDir, "SKILL.md"),
+		filepath.Join(skillDir, pluginName, "SKILL.md"),
+	}
+	for _, candidate := range candidates {
+		found, err := validatePluginSkillEntrypoint(path, resolvedPluginRoot, candidate)
+		if err != nil {
+			return err
+		}
+		if found {
+			return nil
+		}
+	}
+	return fmt.Errorf("declarative runtime asset %s skill path %q does not contain canonical %s/SKILL.md", path, declared, pluginName)
+}
+
+func validatePluginSkillEntrypoint(path, resolvedPluginRoot, candidate string) (bool, error) {
+	info, err := os.Lstat(candidate)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat declarative runtime skill entrypoint %s: %w", candidate, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("declarative runtime asset %s skill entrypoint %s must be a regular file, not a symlink or special file", path, candidate)
+	}
+	resolvedCandidate, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return false, fmt.Errorf("resolve declarative runtime skill entrypoint %s: %w", candidate, err)
+	}
+	if pathEscapesRoot(resolvedPluginRoot, resolvedCandidate) {
+		return false, fmt.Errorf("declarative runtime asset %s skill entrypoint resolves outside its plugin root: %s", path, candidate)
+	}
+	return true, nil
+}
+
+func pathEscapesRoot(root, target string) bool {
+	relative, err := filepath.Rel(root, target)
+	return err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 type evalExpectedCheck struct {
@@ -349,10 +384,14 @@ func validateEvalCase(path string, index int, evalCase declarativeEvalCase) erro
 		if check.Type == "" || check.Target == "" || check.Pattern == "" {
 			return fmt.Errorf("declarative runtime asset %s eval case %d check %d lacks required fields", path, index, checkIndex)
 		}
-		if check.Type == "regex" {
-			if _, err := regexp.Compile(check.Pattern); err != nil {
-				return fmt.Errorf("declarative runtime asset %s eval case %d check %d has invalid regex: %w", path, index, checkIndex, err)
-			}
+		if check.Type != "regex" {
+			return fmt.Errorf("declarative runtime asset %s eval case %d check %d has unsupported type %q", path, index, checkIndex, check.Type)
+		}
+		if check.Target != "trace" {
+			return fmt.Errorf("declarative runtime asset %s eval case %d check %d has unsupported target %q", path, index, checkIndex, check.Target)
+		}
+		if _, err := regexp.Compile(check.Pattern); err != nil {
+			return fmt.Errorf("declarative runtime asset %s eval case %d check %d has invalid regex: %w", path, index, checkIndex, err)
 		}
 	}
 	return nil
