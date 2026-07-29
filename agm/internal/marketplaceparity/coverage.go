@@ -284,6 +284,9 @@ func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 	if err != nil || relSource == ".." || strings.HasPrefix(relSource, ".."+string(filepath.Separator)) {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q escapes its source", pluginName, declared)
 	}
+	if err := requireResolvedWithin(source, declaredPath); err != nil {
+		return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", pluginName, declared, err)
+	}
 	info, err := os.Stat(declaredPath)
 	if err != nil {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", pluginName, declared, err)
@@ -301,6 +304,9 @@ func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 			return walkErr
 		}
 		if !entry.IsDir() && entry.Name() == "SKILL.md" {
+			if err := requireResolvedWithin(source, path); err != nil {
+				return err
+			}
 			skillFiles = append(skillFiles, path)
 		}
 		return nil
@@ -311,6 +317,22 @@ func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", pluginName, declared)
 	}
 	return skillFiles, nil
+}
+
+func requireResolvedWithin(root, path string) error {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve source: %w", err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("resolve exported skill path: %w", err)
+	}
+	relative, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("resolved exported skill path %q escapes its source", path)
+	}
+	return nil
 }
 
 func exportedSkillFromFile(root, pluginName, skillFile string) (exportedSkill, error) {

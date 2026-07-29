@@ -213,3 +213,41 @@ func TestValidateNativeSkillCoverageRejectsSymlink(t *testing.T) {
 		t.Fatal("expected symlinked native entrypoint to fail")
 	}
 }
+
+func TestExportedSkillFilesRejectsOnlyEscapingSymlinks(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "plugin")
+	exportDir := filepath.Join(source, "skills", "example")
+	if err := os.MkdirAll(exportDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside-SKILL.md")
+	if err := os.WriteFile(outside, []byte("# Outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := filepath.Join(exportDir, "SKILL.md")
+	if err := os.Symlink(outside, entrypoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exportedSkillFiles(source, "example", "./skills/"); err == nil {
+		t.Fatal("expected exported SKILL.md symlink escaping its plugin source to fail")
+	}
+
+	if err := os.Remove(entrypoint); err != nil {
+		t.Fatal(err)
+	}
+	contained := filepath.Join(source, "SKILL.md")
+	if err := os.WriteFile(contained, []byte("# Contained\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "SKILL.md"), entrypoint); err != nil {
+		t.Fatal(err)
+	}
+	files, err := exportedSkillFiles(source, "example", "./skills/")
+	if err != nil {
+		t.Fatalf("contained exported skill symlink: %v", err)
+	}
+	if len(files) != 1 || files[0] != entrypoint {
+		t.Fatalf("exportedSkillFiles() = %v, want [%s]", files, entrypoint)
+	}
+}

@@ -137,21 +137,26 @@ func ValidatePiSkillDiscovery(root string) error {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return fmt.Errorf("parse Pi settings: %w", err)
 	}
-	for _, required := range []string{"../agm/plugins", "../wayfinder/skills", "../research-pipeline/skills"} {
-		if !slices.Contains(settings.Skills, required) {
-			return fmt.Errorf("pi settings missing native skill discovery path %q", required)
+	const sharedSkillRoot = "../.agents/skills"
+	if !slices.Contains(settings.Skills, sharedSkillRoot) {
+		return fmt.Errorf("pi settings missing shared native skill discovery path %q", sharedSkillRoot)
+	}
+	for _, declared := range settings.Skills {
+		skillRoot := filepath.Clean(filepath.Join(root, ".pi", filepath.FromSlash(declared)))
+		relative, relErr := filepath.Rel(root, skillRoot)
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
 		}
-		skillRoot := filepath.Clean(filepath.Join(root, ".pi", filepath.FromSlash(required)))
 		info, err := os.Stat(skillRoot)
 		if err != nil {
-			return fmt.Errorf("pi skill discovery path %q: %w", required, err)
+			return fmt.Errorf("pi skill discovery path %q: %w", declared, err)
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("pi skill discovery path %q is not a directory", required)
+			return fmt.Errorf("pi skill discovery path %q is not a directory", declared)
 		}
 		entrypoints, err := filepath.Glob(filepath.Join(skillRoot, "*", "SKILL.md"))
 		if err != nil {
-			return fmt.Errorf("glob Pi skill entrypoints under %q: %w", required, err)
+			return fmt.Errorf("glob Pi skill entrypoints under %q: %w", declared, err)
 		}
 		found := false
 		for _, entrypoint := range entrypoints {
@@ -161,7 +166,7 @@ func ValidatePiSkillDiscovery(root string) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("pi skill discovery path %q contains no skill entrypoint", required)
+			return fmt.Errorf("pi skill discovery path %q contains no skill entrypoint", declared)
 		}
 	}
 	return nil
