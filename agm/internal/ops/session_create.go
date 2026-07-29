@@ -599,6 +599,18 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 	return spec
 }
 
+func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
+	if req.Metadata.Sandbox == nil {
+		return nil
+	}
+	sandbox := *req.Metadata.Sandbox
+	sandbox.ExtraAddDirs = nil
+	if sandbox.Enabled {
+		sandbox.ExtraAddDirs = append([]string{}, req.ExtraAddDirs...)
+	}
+	return &sandbox
+}
+
 func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
 	if req.ManifestDir == "" {
 		return "", true, false, nil
@@ -792,7 +804,7 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 		ModelTier:        req.Metadata.ModelTier,
 		Claude:           manifest.Claude{},
 		PermissionPolicy: cloneCreatePermissionPolicy(req.Metadata.PermissionPolicy),
-		Sandbox:          req.Metadata.Sandbox,
+		Sandbox:          cloneCreateSandbox(req),
 		IsTest:           req.Metadata.IsTest,
 		Disposable:       req.Metadata.Disposable,
 		DisposableTTL:    req.Metadata.DisposableTTL,

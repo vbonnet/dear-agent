@@ -1757,3 +1757,29 @@ func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
+	sandbox := &manifest.SandboxConfig{
+		Enabled: true,
+		ID:      "sandbox-session",
+	}
+	req := &CreateSessionRequest{
+		Cwd:          "/tmp/sandbox",
+		ExtraAddDirs: []string{"/tmp/worktree", "/tmp/beads"},
+		Metadata:     CreateSessionMetadata{Sandbox: sandbox},
+	}
+	params := &createSessionParams{name: "sandbox", harness: "codex-cli", model: "gpt-5.5"}
+
+	got := buildCreateSessionManifest(req, params, "sandbox-session", nil)
+
+	if got.Sandbox == sandbox {
+		t.Fatal("Sandbox aliases request metadata")
+	}
+	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
+		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
+	}
+	req.ExtraAddDirs[0] = "/tmp/mutated"
+	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
+		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
+	}
+}
