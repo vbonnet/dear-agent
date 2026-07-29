@@ -511,8 +511,21 @@ func hasPositiveCanonicalLoadDirective(directive, token string) bool {
 
 func hasPositiveCanonicalFollowDirective(directive string) bool {
 	normalized := strings.Join(strings.Fields(directive), " ")
-	return strings.HasPrefix(normalized, "follow the canonical workflow") ||
-		strings.HasPrefix(normalized, "follow that canonical workflow")
+	if !strings.HasPrefix(normalized, "follow the canonical workflow") &&
+		!strings.HasPrefix(normalized, "follow that canonical workflow") {
+		return false
+	}
+	if !strings.Contains(normalized, "gate") {
+		return false
+	}
+	for _, qualifier := range []string{
+		" but ", " except", " if ", " only ", " unless", " when ", " subject to ",
+	} {
+		if strings.Contains(normalized, qualifier) {
+			return false
+		}
+	}
+	return true
 }
 
 func directiveVerbIsPositive(directive string, location []int) bool {

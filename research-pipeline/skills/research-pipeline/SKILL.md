@@ -221,19 +221,19 @@ Codex agents pick up beads and execute through the target repository's
 documented delivery interface—without shortcuts because the bead came from
 this pipeline. Use `safe-pr` / `safe-merge` only when that repository actually
 provides and requires those wrappers; otherwise use its documented equivalent
-commit, push, review, and merge-readiness gates. Before dispatching the first
-bead, satisfy every target-repository prerequisite for that interface,
-including establishing an in-progress Wayfinder session when its delivery
-policy mandates one.
+commit, push, review, and merge-readiness gates. Before dispatching, record the
+exact approved set of in-scope bead IDs, then satisfy every target-repository
+prerequisite for that interface, including establishing an in-progress
+Wayfinder session when its delivery policy mandates one.
 The plan's own proposed gates (if the initiative is about enforcement, e.g.
 an eval or lint gate) should apply to the PRs this stage produces, not just
 to future work — dogfood the thing you just designed.
 
 ## Rules
 
-- **Cross-model, not self-review.** Stages 3 and 4 must each be a model that
-  did not author the artifact it's checking. A single model verifying its
-  own research is not verification.
+- **Cross-model, not self-review.** Stage 3 must differ from the Stage 2
+  research author; Stage 4 must differ from both the Stage 2 and Stage 3
+  models. A model never verifies an artifact derived from its own pipeline work.
 - **Provider routing needs a receipt.** See Stage 1 — a silent fallback
   defeats the entire point of naming a provider.
 - **Human approval before decomposition commits resources.** Stop after
@@ -269,6 +269,8 @@ after this pipeline runs to completion for a given source:
       one that wrote the research doc, and its verification section names
       at least one correction or explicit confirmation (not silent
       pass-through)
+- [ ] The Stage 4 review names a model distinct from both the Stage 2 research
+      author and the Stage 3 planner
 - [ ] Every bead filed from Stage 4 has a non-vague acceptance criterion
       (grep for "looks correct", "is complete", "works well" in bead
       descriptions returns zero matches)
@@ -282,11 +284,12 @@ after this pipeline runs to completion for a given source:
       receipt bound to the corrected revision, and a follow-up review
       confirming they're resolved (no bead trail that jumps from "blocked"
       straight to bead filing with no fix, reapproval, and reverify step)
-- [ ] If the requested scope includes Stage 5, every dispatched bead satisfies
-      the target repository's documented merge, deploy, and real-surface
-      definition of done. A handoff with open PRs, incomplete implementation,
-      or unresolved delivery proof is recorded as a partial Stage 4 stop with
-      the remaining status and blockers, not pipeline completion
+- [ ] If the requested scope includes Stage 5, every bead in the recorded
+      approved execution set is dispatched and satisfies the target repository's
+      documented merge, deploy, and real-surface definition of done. No in-scope
+      bead remains undispatched. Open PRs, incomplete work, or unresolved proof
+      are recorded as a partial Stage 4 stop with status and blockers, not
+      pipeline completion
 
 ## References
 
