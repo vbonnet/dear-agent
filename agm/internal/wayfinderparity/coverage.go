@@ -137,14 +137,14 @@ func ValidatePiSkillDiscovery(root string) error {
 		return fmt.Errorf("resolve Pi settings: %w", err)
 	}
 	if !containedWithin(resolvedRoot, resolvedSettings) {
-		return fmt.Errorf("Pi settings escape the repository")
+		return fmt.Errorf("pi settings escape the repository")
 	}
 	info, err := os.Stat(resolvedSettings)
 	if err != nil {
 		return fmt.Errorf("stat Pi settings: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("Pi settings are not a regular file")
+		return fmt.Errorf("pi settings are not a regular file")
 	}
 	data, err := os.ReadFile(resolvedSettings)
 	if err != nil {
