@@ -23,6 +23,12 @@ type GeminiCLIAdapter struct {
 	sessionStore SessionStore
 }
 
+var (
+	geminiResumeHasSession       = tmux.HasSession
+	geminiResumeNewSession       = tmux.NewSession
+	geminiResumeIsProcessRunning = tmux.IsProcessRunning
+)
+
 // NewGeminiCLIAdapter creates a new Gemini CLI adapter instance.
 //
 // If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
@@ -136,26 +142,17 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
-	if err := validatePastedShellValues(metadata.WorkingDir, metadata.UUID); err != nil {
-		return fmt.Errorf("validate Gemini resume: %w", err)
-	}
 
 	// Check if tmux session exists
-	exists, err := tmux.HasSession(metadata.TmuxName)
+	exists, err := geminiResumeHasSession(metadata.TmuxName)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 
-	sendCommands := false
-	if !exists {
-		// Create new tmux session
-		if err := tmux.NewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-		sendCommands = true
-	} else {
+	sendCommands := !exists
+	if exists {
 		// Check if Gemini is already running
-		geminiRunning, err := tmux.IsProcessRunning(metadata.TmuxName, "gemini")
+		geminiRunning, err := geminiResumeIsProcessRunning(metadata.TmuxName, "gemini")
 		if err != nil {
 			// Detection failed - skip commands for safety
 			sendCommands = false
@@ -165,6 +162,18 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 	}
 
 	if sendCommands {
+		if err := validatePastedShellValues(metadata.WorkingDir, metadata.UUID); err != nil {
+			return fmt.Errorf("validate Gemini resume: %w", err)
+		}
+		if !exists {
+			// Validate every value that can reach the terminal before creating
+			// a replacement session. A healthy existing Gemini process needs no
+			// paste and therefore does not reject legacy metadata unnecessarily.
+			if err := geminiResumeNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
+				return fmt.Errorf("failed to create tmux session: %w", err)
+			}
+		}
+
 		// Build resume command with UUID.
 		// If UUID is stored, use it. Otherwise fall back to "latest".
 		resumeCmd := buildGeminiResumeCommand(metadata.WorkingDir, metadata.UUID)
