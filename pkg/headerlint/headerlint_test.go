@@ -509,6 +509,25 @@ func TestCheckFile_CRLFHeadingEndsHeaderZone(t *testing.T) {
 	}
 }
 
+func TestCheckFile_ListContinuationHeadingEndsHeaderZone(t *testing.T) {
+	const content = "# Design options\n" +
+		"\n" +
+		"- parent\n" +
+		"  - child\n" +
+		"    ## Details\n" +
+		"    **Complexity:** Low. **Timeline:** Comparable.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want nested-list continuation heading to end header zone, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotFlagPastHeaderZoneLineCap(t *testing.T) {
 	// No heading at all, but the violation line is well past the header-zone
 	// line cap — treated as body text, not a metadata block.
@@ -656,6 +675,23 @@ func TestCheckFile_InlineCodeDoesNotCrossThematicBreak(t *testing.T) {
 				t.Fatalf("want one visible header-field violation across %q, got %v", delimiter, violations)
 			}
 		})
+	}
+}
+
+func TestCheckFile_InlineCodeDoesNotCrossHTMLBlock(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"Unmatched ` opener\n" +
+		"<script></script>\n" +
+		"**Status:** draft · **Owner:** docs\n" +
+		"` later\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "html-block.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want visible header-field violation after HTML block, got %v", violations)
 	}
 }
 

@@ -63,6 +63,7 @@ var (
 	atxHeading    = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
 	setextHeading = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
 	thematicBreak = regexp.MustCompile(`^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$`)
+	htmlBlockTag  = regexp.MustCompile(`(?i)^</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -190,7 +191,8 @@ func checkData(path string, data []byte) []Violation {
 			continue
 		}
 		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode)
-		if matchesContainerATXHeading(scannable, headingH2Plus, paragraphOpen) {
+		if matchesContainerATXHeading(scannable, headingH2Plus, paragraphOpen) ||
+			matchesListContinuationATXHeading(scannable, headingH2Plus, fences.listContinuation) {
 			break
 		}
 		if lineNo > headerZoneMaxLines {
@@ -544,6 +546,9 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 	if matchesContainerBlockPattern(line, container, thematicBreak) {
 		return true
 	}
+	if isInterruptingHTMLBlockStart(line, container) {
+		return true
+	}
 	if _, _, isFence := fenceDelimiter(line); isFence {
 		return true
 	}
@@ -605,6 +610,58 @@ func matchesContainerATXHeading(line string, pattern *regexp.Regexp, paragraphOp
 		return false
 	}
 	return pattern.MatchString(line[offset:])
+}
+
+func matchesListContinuationATXHeading(line string, pattern *regexp.Regexp, container fenceContainerContext) bool {
+	if !container.hasList {
+		return false
+	}
+	offset, ok := container.contentStart(line)
+	return ok && pattern.MatchString(line[offset:])
+}
+
+func isInterruptingHTMLBlockStart(line string, container fenceContainerContext) bool {
+	offset, ok := inlineCodeContentStart(container, line)
+	if !ok {
+		return false
+	}
+	content := line[offset:]
+	indent := 0
+	for indent < len(content) && indent < 4 && content[indent] == ' ' {
+		indent++
+	}
+	if indent > 3 {
+		return false
+	}
+	content = content[indent:]
+	lower := strings.ToLower(content)
+	for _, tag := range []string{"script", "pre", "style", "textarea"} {
+		prefix := "<" + tag
+		if strings.HasPrefix(lower, prefix) && htmlTagBoundary(lower, len(prefix)) {
+			return true
+		}
+	}
+	if strings.HasPrefix(content, "<!--") || strings.HasPrefix(content, "<?") ||
+		strings.HasPrefix(lower, "<![cdata[") {
+		return true
+	}
+	if len(content) > 2 && strings.HasPrefix(content, "<!") &&
+		content[2] >= 'A' && content[2] <= 'Z' {
+		return true
+	}
+	return htmlBlockTag.MatchString(content)
+}
+
+func htmlTagBoundary(value string, offset int) bool {
+	if offset == len(value) {
+		return true
+	}
+	switch value[offset] {
+	case ' ', '\t', '>', '/':
+		return true
+	default:
+		return false
+	}
 }
 
 func lineLeavesParagraphOpen(line string) bool {
