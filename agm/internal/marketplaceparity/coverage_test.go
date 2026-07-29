@@ -82,6 +82,20 @@ func TestValidateNativeSkillCoverageRequiresEverySkillPlugin(t *testing.T) {
 	if err := validateNativeSkillCoverage(root, catalog, surface); err != nil {
 		t.Fatalf("complete native catalog: %v", err)
 	}
+	agmCanonical := filepath.Join(root, filepath.FromSlash(canonicalSkillEntrypoints["agm"]))
+	canonicalData, err := os.ReadFile(agmCanonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(agmCanonical); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil {
+		t.Fatal("expected missing canonical skill entrypoint to fail")
+	}
+	if err := os.WriteFile(agmCanonical, canonicalData, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	agmEntrypoint := filepath.Join(root, surface.Catalog, "agm", "SKILL.md")
 	data, err := os.ReadFile(agmEntrypoint)
 	if err != nil {

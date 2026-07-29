@@ -145,14 +145,14 @@ func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSu
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return fmt.Errorf("skill-capable plugin %q native entrypoint %q is not a regular file", plugin.Name, entrypoint)
 		}
-		if err := validateNativeSkillEntrypoint(entrypoint, plugin.Name); err != nil {
+		if err := validateNativeSkillEntrypoint(root, entrypoint, plugin.Name); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateNativeSkillEntrypoint(entrypoint, pluginName string) error {
+func validateNativeSkillEntrypoint(root, entrypoint, pluginName string) error {
 	violations, err := skilllint.CheckFile(entrypoint)
 	if err != nil {
 		return fmt.Errorf("skill-capable plugin %q native entrypoint: %w", pluginName, err)
@@ -180,6 +180,14 @@ func validateNativeSkillEntrypoint(entrypoint, pluginName string) error {
 	canonical, ok := canonicalSkillEntrypoints[pluginName]
 	if !ok {
 		return fmt.Errorf("skill-capable plugin %q has no canonical skill entrypoint mapping", pluginName)
+	}
+	canonicalPath := filepath.Join(root, filepath.FromSlash(canonical))
+	info, err := os.Stat(canonicalPath)
+	if err != nil {
+		return fmt.Errorf("skill-capable plugin %q canonical entrypoint %q: %w", pluginName, canonical, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("skill-capable plugin %q canonical entrypoint %q is not a regular file", pluginName, canonical)
 	}
 	wantReference := "../../../" + filepath.ToSlash(canonical)
 	if !strings.Contains(string(data), wantReference) {
