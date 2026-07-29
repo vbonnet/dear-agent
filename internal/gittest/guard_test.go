@@ -64,6 +64,16 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
+		if strings.HasSuffix(d.Name(), ".bats") {
+			lines, scanErr := batsGitCommandLines(path)
+			if scanErr != nil {
+				return scanErr
+			}
+			if len(lines) > 0 {
+				unexpected[rel] = lines
+			}
+			return nil
+		}
 		if !strings.HasSuffix(d.Name(), "_test.go") && !isBDDStepSource(rel) {
 			return nil
 		}
@@ -110,6 +120,36 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 			"execute a host hook, or add a reviewed entry to allowedUnsandboxedGitTests",
 			rel, unexpected[rel])
 	}
+}
+
+// batsGitCommandLines returns raw Git command lines only when the Bats file
+// does not disable both global and system Git configuration. Shell fixtures
+// cannot use the Go helper, but they must establish the same hooks isolation
+// before creating repositories.
+func batsGitCommandLines(path string) ([]int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	source := string(data)
+	if strings.Contains(source, "GIT_CONFIG_GLOBAL=/dev/null") &&
+		strings.Contains(source, "GIT_CONFIG_SYSTEM=/dev/null") {
+		return nil, nil
+	}
+
+	var lines []int
+	for index, line := range strings.Split(source, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "git ") ||
+			strings.HasPrefix(trimmed, "run git ") ||
+			strings.Contains(trimmed, "$(git ") {
+			lines = append(lines, index+1)
+		}
+	}
+	return lines, nil
 }
 
 // gitCommandLines returns the lines in path that build a Git command directly

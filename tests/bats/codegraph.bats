@@ -8,6 +8,9 @@
 # command without paying for a real graph build.
 
 setup() {
+    export GIT_CONFIG_GLOBAL=/dev/null
+    export GIT_CONFIG_SYSTEM=/dev/null
+
     load '../test_helper/bats-support/load'
     load '../test_helper/bats-assert/load'
     load '../test_helper/bats-file/load'

@@ -10,6 +10,9 @@ setup() {
     load '../test_helper/bats-assert/load'
     load '../test_helper/bats-file/load'
 
+    export GIT_CONFIG_GLOBAL=/dev/null
+    export GIT_CONFIG_SYSTEM=/dev/null
+
     TEST_DIR="$(mktemp -d)"
     BATS_TEST_DIRNAME="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
     PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
