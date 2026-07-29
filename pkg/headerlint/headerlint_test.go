@@ -227,6 +227,7 @@ func TestCheckFile_DoesNotFlagFencesNestedInMarkdownContainers(t *testing.T) {
 func TestCheckFile_InlineCodeDoesNotCrossMarkdownBlockBoundaries(t *testing.T) {
 	tests := map[string]string{
 		"blank-line":   "# Doc\n\nUnmatched ` opener\n\n**Status:** draft · **Owner:** docs\n` later\n",
+		"blockquote":   "# Doc\n\nUnmatched ` opener\n> **Status:** draft · **Owner:** docs\n> ` later\n",
 		"fenced-block": "# Doc\n\nUnmatched ` opener\n```text\n`\n```\n**Status:** draft · **Owner:** docs\n",
 	}
 	for name, content := range tests {
@@ -241,6 +242,19 @@ func TestCheckFile_InlineCodeDoesNotCrossMarkdownBlockBoundaries(t *testing.T) {
 				t.Fatalf("want one visible header-field violation, got %v", violations)
 			}
 		})
+	}
+}
+
+func TestCheckFile_InlineCodeContinuesWithinBlockquote(t *testing.T) {
+	const content = "# Doc\n\n> Unmatched ` opener\n> **Status:** draft · **Owner:** docs\n> ` closer\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
 	}
 }
 

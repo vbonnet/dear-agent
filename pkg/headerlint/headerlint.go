@@ -408,11 +408,16 @@ func consumeQuotePrefix(line string, depth int) (int, bool) {
 
 type inlineCodeSpanState struct {
 	delimiterLength int
+	container       fenceContainerContext
 }
 
 func stripInlineCodeSpans(line string, followingLines []string, state *inlineCodeSpanState) string {
 	masked := []byte(line)
 	cursor := 0
+	if state.delimiterLength > 0 && inlineCodeBlockBoundary(line, state.container) {
+		state.delimiterLength = 0
+		state.container = fenceContainerContext{}
+	}
 	if state.delimiterLength > 0 {
 		closer := matchingBacktickRun(line, 0, state.delimiterLength)
 		if closer < 0 {
@@ -427,6 +432,7 @@ func stripInlineCodeSpans(line string, followingLines []string, state *inlineCod
 		}
 		cursor = spanEnd
 		state.delimiterLength = 0
+		state.container = fenceContainerContext{}
 	}
 	for opener := cursor; opener < len(line); {
 		if line[opener] != '`' || escapedAt(line, opener) {
@@ -440,7 +446,8 @@ func stripInlineCodeSpans(line string, followingLines []string, state *inlineCod
 		runLength := runEnd - opener
 		closer := matchingBacktickRun(line, runEnd, runLength)
 		if closer < 0 {
-			if !hasMatchingBacktickRun(followingLines, runLength) {
+			container := parseFenceContainerContext(line)
+			if !hasMatchingBacktickRun(followingLines, runLength, container) {
 				// Without a closer before the inline block ends, CommonMark
 				// treats the opener as literal text.
 				opener = runEnd
@@ -450,6 +457,7 @@ func stripInlineCodeSpans(line string, followingLines []string, state *inlineCod
 				masked[index] = ' '
 			}
 			state.delimiterLength = runLength
+			state.container = container
 			break
 		}
 		spanEnd := closer + runLength
@@ -481,9 +489,9 @@ func matchingBacktickRun(line string, offset, length int) int {
 	return -1
 }
 
-func hasMatchingBacktickRun(lines []string, length int) bool {
+func hasMatchingBacktickRun(lines []string, length int, container fenceContainerContext) bool {
 	for _, line := range lines {
-		if inlineCodeBlockBoundary(line) {
+		if inlineCodeBlockBoundary(line, container) {
 			return false
 		}
 		if matchingBacktickRun(line, 0, length) >= 0 {
@@ -493,8 +501,11 @@ func hasMatchingBacktickRun(lines []string, length int) bool {
 	return false
 }
 
-func inlineCodeBlockBoundary(line string) bool {
+func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool {
 	if strings.TrimSpace(line) == "" {
+		return true
+	}
+	if !sameInlineCodeContainer(container, line) {
 		return true
 	}
 	if matchesContainerATXHeading(line, atxHeading) {
@@ -506,6 +517,14 @@ func inlineCodeBlockBoundary(line string) bool {
 	trimmed := strings.TrimLeft(line, " \t")
 	_, _, _, isFence := parseFenceDelimiter(trimmed, 0)
 	return isFence
+}
+
+func sameInlineCodeContainer(container fenceContainerContext, line string) bool {
+	if container.quoteDepth == 0 && !container.hasList {
+		lineContainer := parseFenceContainerContext(line)
+		return lineContainer.quoteDepth == 0 && !lineContainer.hasList
+	}
+	return container.contains(line)
 }
 
 func matchesContainerATXHeading(line string, pattern *regexp.Regexp) bool {
