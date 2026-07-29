@@ -121,35 +121,72 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 }
 
 func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
-	fields := []struct{ name, value string }{
-		{"harness", spec.Harness},
-		{"model", spec.Model},
-		{"session name", spec.SessionName},
-		{"session id", spec.SessionID},
-		{"resume id", spec.ResumeID},
-		{"workdir", spec.WorkDir},
-		{"permission mode", spec.PermissionMode},
-		{"pi launch id", spec.PiLaunchID},
-		{"pi extension", spec.PiExtension},
-		{"pi policy file", spec.PiPolicyFile},
-	}
-	if spec.Codex != nil {
-		fields = append(fields, struct{ name, value string }{"codex session id", spec.Codex.SessionID})
-	}
-	if spec.Pi != nil {
-		fields = append(fields,
-			struct{ name, value string }{"pi session id", spec.Pi.SessionID},
-			struct{ name, value string }{"pi session dir", spec.Pi.SessionDir},
-			struct{ name, value string }{"pi coding-agent dir", spec.Pi.CodingAgentDir},
-		)
+	type field struct{ name, value string }
+	var fields []field
+	validateAddDirs := false
+	switch agent.NormalizeHarnessName(spec.Harness) {
+	case "claude-code":
+		fields = []field{
+			{"model", spec.Model},
+			{"session name", spec.SessionName},
+			{"session id", spec.SessionID},
+			{"resume id", spec.ResumeID},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+		}
+		validateAddDirs = true
+	case "codex-cli":
+		fields = []field{
+			{"model", spec.Model},
+			{"session name", spec.SessionName},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+		}
+		if spec.Codex != nil {
+			fields = append(fields, field{"codex session id", spec.Codex.SessionID})
+		}
+		validateAddDirs = true
+	case "agy":
+		fields = []field{
+			{"model", spec.Model},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+		}
+		validateAddDirs = true
+	case "pi-cli":
+		fields = []field{
+			{"model", spec.Model},
+			{"session name", spec.SessionName},
+			{"session id", spec.SessionID},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+			{"pi launch id", spec.PiLaunchID},
+			{"pi extension", spec.PiExtension},
+			{"pi policy file", spec.PiPolicyFile},
+		}
+		if spec.Pi != nil {
+			fields = append(fields,
+				field{"pi session id", spec.Pi.SessionID},
+				field{"pi session dir", spec.Pi.SessionDir},
+				field{"pi coding-agent dir", spec.Pi.CodingAgentDir},
+			)
+		}
+	case "opencode-cli":
+		fields = []field{{"workdir", spec.WorkDir}}
+	case "gemini-cli":
+		fields = []field{{"model", spec.Model}}
+	default:
+		fields = []field{{"harness", spec.Harness}}
 	}
 	for _, field := range fields {
 		if err := harnessexec.ValidatePastedText(field.name, field.value); err != nil {
 			return fmt.Errorf("validate harness launch: %w", err)
 		}
 	}
-	if err := harnessexec.ValidatePastedTextList("add-dir", spec.ExtraAddDirs); err != nil {
-		return fmt.Errorf("validate harness launch: %w", err)
+	if validateAddDirs {
+		if err := harnessexec.ValidatePastedTextList("add-dir", spec.ExtraAddDirs); err != nil {
+			return fmt.Errorf("validate harness launch: %w", err)
+		}
 	}
 	return nil
 }

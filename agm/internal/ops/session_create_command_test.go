@@ -64,6 +64,29 @@ func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing
 	}
 }
 
+func TestPrepareGeminiLaunchCommandValidatesOnlyPastedModel(t *testing.T) {
+	command, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness: "gemini-cli",
+		Model:   "gemini-2.5-pro",
+		WorkDir: "/unused\x1b[201~\nworkdir",
+	})
+	if err != nil {
+		t.Fatalf("unused Gemini workdir rejected: %v", err)
+	}
+	if strings.Contains(command.Command, "unused") {
+		t.Fatalf("Gemini command unexpectedly contains workdir: %q", command.Command)
+	}
+
+	_, err = PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness: "gemini-cli",
+		Model:   "gemini-2.5-pro\x1b[201~\nunsafe",
+		WorkDir: "/safe",
+	})
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want model control rejection", err)
+	}
+}
+
 func TestPrepareAgyResumeCommandRejectsConversationControls(t *testing.T) {
 	_, err := PrepareAgyResumeCommand(HarnessLaunchSpec{
 		Harness: "agy",
