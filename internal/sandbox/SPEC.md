@@ -26,6 +26,8 @@
 
 **SNDBR-12** While a process monitor alert callback is still running, the system shall suppress duplicate alert callback launches and allow a later callback after the in-flight callback completes.
 
+**SNDBR-13** While a process monitor alert callback from a prior monitor run is still running, the system shall keep restart attempts on the prior lifecycle until that callback drains.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
