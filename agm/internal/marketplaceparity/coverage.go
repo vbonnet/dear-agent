@@ -189,7 +189,11 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 		if surface.Mode == "agents-md-skill-fallback" {
 			entrypointRoot = ".agents/skills"
 		}
-		return requireNativeSkillEntrypoint(filepath.Join(root, entrypointRoot, skillName, "SKILL.md"), pluginName, skillName)
+		declaredRoot := filepath.Join(root, filepath.FromSlash(entrypointRoot))
+		if _, err := resolvedPathWithin(root, declaredRoot); err != nil {
+			return "", fmt.Errorf("native skill root %q: %w", entrypointRoot, err)
+		}
+		return requireNativeSkillEntrypoint(filepath.Join(declaredRoot, skillName, "SKILL.md"), pluginName, skillName)
 	}
 
 	settingsPath := filepath.Join(root, surface.Catalog)

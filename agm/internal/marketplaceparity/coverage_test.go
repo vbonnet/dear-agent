@@ -214,6 +214,59 @@ func TestValidateNativeSkillCoverageRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestNativeSkillEntrypointRejectsCatalogRootOutsideRepository(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		catalog func(t *testing.T, root, outside string) string
+	}{
+		{
+			name: "dot-dot",
+			catalog: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				relative, err := filepath.Rel(root, outside)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return filepath.ToSlash(relative)
+			},
+		},
+		{
+			name: "intermediate-symlink",
+			catalog: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				if err := os.Symlink(outside, filepath.Join(root, ".agents")); err != nil {
+					t.Fatal(err)
+				}
+				return ".agents/skills"
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			outside := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(outside, "skills", "example"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(outside, "skills", "example", "SKILL.md"),
+				[]byte("# Outside\n"),
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
+			catalog := test.catalog(t, root, outside)
+			if test.name == "dot-dot" {
+				catalog = filepath.ToSlash(filepath.Join(catalog, "skills"))
+			}
+			surface := HarnessSurface{Mode: "native-codex-skill", Catalog: catalog}
+			if _, err := nativeSkillEntrypoint(root, surface, "example", "example"); err == nil ||
+				!strings.Contains(err.Error(), "escapes") {
+				t.Fatalf("nativeSkillEntrypoint() error = %v, want escaping catalog rejection", err)
+			}
+		})
+	}
+}
+
 func TestPiConfiguredSkillRootRejectsSymlinkOutsideRepository(t *testing.T) {
 	root := t.TempDir()
 	settingsDir := filepath.Join(root, ".pi")
