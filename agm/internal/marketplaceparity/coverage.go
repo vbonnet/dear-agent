@@ -31,6 +31,11 @@ var requiredPluginCapabilities = map[string][]string{
 	"youtube":           {"commands"},
 	"research-pipeline": {"skills"},
 }
+var canonicalFollowWeakening = regexp.MustCompile(
+	`(?:\b(?:do not|don't|never|not)\s+(?:follow|enforce|apply|honou?r|obey|use|require)\b[^.;]*(?:workflow|gates?|requirements?)|` +
+		`\b(?:skip|ignore|omit|bypass|disable|weaken|relax)\b[^.;]*(?:workflow|gates?|requirements?)|` +
+		`\b(?:workflow|gates?|requirements?)\s+(?:are|is)\s+(?:optional|advisory)\b)`,
+)
 
 // Owner describes the marketplace owner metadata.
 type Owner struct {
@@ -525,7 +530,7 @@ func hasPositiveCanonicalFollowDirective(directive string) bool {
 			return false
 		}
 	}
-	return true
+	return !canonicalFollowWeakening.MatchString(normalized)
 }
 
 func directiveVerbIsPositive(directive string, location []int) bool {
