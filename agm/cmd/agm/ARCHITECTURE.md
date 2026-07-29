@@ -561,25 +561,32 @@ defer unlock()
 
 ### Agent Integration
 
-The CLI selects and starts agents via `internal/agent`:
+The CLI uses `internal/agent` for immutable harness discovery and concrete
+adapter metadata. Shared lifecycle transactions are owned by `internal/ops`;
+there is no universal lifecycle facade on `agent.Harness`:
 
 ```go
-// Get agent by name
-agent, err := agent.Get(agentName)
+// Discover immutable metadata for a known harness.
+harness, err := agent.GetHarness(harnessName)
+if err != nil {
+    return err
+}
+capabilities := harness.Capabilities()
+health := agent.CheckHarnessHealth(harnessName)
 
-// Check availability (API keys, CLI installation)
-available := agent.IsAvailable()
-
-// Start agent CLI
-err := agent.Start(ctx, sessionID, &agent.StartOptions{
-    WorkingDir: projectDir,
-    Resume:     true,
-    UUID:       claudeUUID,
+// Run the cross-surface creation transaction through shared operations.
+result, err := ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
+    Cwd:     projectDir,
+    Harness: harnessName,
+    Prompt:  initialPrompt,
 })
 
-// Get command translator
-translator := agent.GetTranslator()
-err := translator.RenameSession(ctx, sessionID, newName)
+// Use a concrete adapter only for a harness-specific compatibility operation.
+gemini, err := agent.NewGeminiCLIAdapter(store)
+err = gemini.ExecuteCommand(agent.Command{
+    Type:   agent.CommandRename,
+    Params: map[string]interface{}{"session_id": sessionID, "name": newName},
+})
 ```
 
 ### UI Integration
