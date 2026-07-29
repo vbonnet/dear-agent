@@ -449,29 +449,27 @@ func validateNativeSkillEntrypoint(root, entrypoint, pluginName string, skill ex
 
 func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 	const heading = "## Workflow"
-	start := strings.Index(markdown, heading)
-	if start < 0 {
+	_, section, ok := strings.Cut(markdown, heading)
+	if !ok {
 		return false
 	}
-	section := markdown[start+len(heading):]
-	if next := strings.Index(section, "\n## "); next >= 0 {
-		section = section[:next]
+	if workflow, _, found := strings.Cut(section, "\n## "); found {
+		section = workflow
 	}
 	normalized := strings.Join(strings.Fields(section), " ")
 	lower := strings.ToLower(normalized)
 	token := "`" + strings.ToLower(reference) + "`"
-	referenceAt := strings.Index(lower, token)
-	if referenceAt < 0 {
+	before, after, ok := strings.Cut(lower, token)
+	if !ok {
 		return false
 	}
-	before := lower[:referenceAt]
 	if len(before) > 120 {
 		before = before[len(before)-120:]
 	}
 	if !strings.Contains(before, "read") && !strings.Contains(before, "load") {
 		return false
 	}
-	return strings.Contains(lower[referenceAt+len(token):], "follow")
+	return strings.Contains(after, "follow")
 }
 
 // ExpectedMarketplaceMode returns the executable skill-discovery mode owned by
