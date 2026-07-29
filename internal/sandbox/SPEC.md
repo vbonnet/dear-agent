@@ -20,6 +20,10 @@
 
 **SNDBR-09** When a process monitor parent context is canceled, the system shall clear active lifecycle state so the monitor can be started again.
 
+**SNDBR-10** When a process monitor starts after a prior run, the system shall reset the process-count baseline before sampling descendant counts.
+
+**SNDBR-11** When a process monitor emits an alert, the system shall invoke the external alert callback without blocking the monitor loop on callback-owned lifecycle actions.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
