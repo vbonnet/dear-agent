@@ -143,12 +143,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
-		if err := r.ClearQuarantine(); err != nil {
-			fmt.Fprintf(stderr, "token-refresher: could not clear quarantine: %v\n", err)
-			return exitError
-		}
-		if err := r.ClearRefreshStop(); err != nil {
-			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence refresh: %v\n", err)
+		if err := r.ClearRefreshProtections(); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not clear refresh protections: %v\n", err)
 			return exitError
 		}
 		fmt.Fprintln(stderr, "token-refresher: refresh-token quarantine cleared; automatic refresh re-armed.")

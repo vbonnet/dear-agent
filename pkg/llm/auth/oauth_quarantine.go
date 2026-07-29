@@ -148,9 +148,10 @@ func (r OAuthResolver) writeQuarantine(refreshToken, reason string) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// ClearQuarantine removes the quarantine marker, re-arming automatic refresh.
-// Called on every successful exchange (the token moved on, so the quarantined
-// fingerprint is moot) and by the operator override.
+// ClearQuarantine removes only the quarantine marker. It does not clear the
+// independent durable refresh stop written after an ambiguous exchange;
+// operator recovery must use ClearRefreshProtections so both fail-closed
+// markers are removed together.
 func (r OAuthResolver) ClearQuarantine() error {
 	path := r.quarantinePath()
 	if path == "" {
@@ -160,6 +161,13 @@ func (r OAuthResolver) ClearQuarantine() error {
 		return err
 	}
 	return nil
+}
+
+// ClearRefreshProtections is the operator recovery override. It clears both
+// persisted protections so a caller cannot appear to re-arm refresh while the
+// credential-scoped stop still rejects every entrypoint.
+func (r OAuthResolver) ClearRefreshProtections() error {
+	return errors.Join(r.ClearQuarantine(), r.ClearRefreshStop())
 }
 
 // QuarantineStatus reports whether a quarantine is actually holding back

@@ -118,6 +118,30 @@ func TestRefreshStopFingerprintsAttemptedTokenAfterConcurrentRotation(t *testing
 	}
 }
 
+func TestClearRefreshProtectionsClearsQuarantineAndDurableStop(t *testing.T) {
+	credentials := writeFullCreds(t, "stale", staleMillis(), "ambiguous")
+	quarantinePath := filepath.Join(t.TempDir(), "quarantine.json")
+	resolver := OAuthResolver{
+		CredentialsPath: credentials,
+		QuarantinePath:  quarantinePath,
+	}
+	if err := resolver.writeQuarantine("ambiguous", "unknown outcome"); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.WriteRefreshStop("unknown outcome"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := resolver.ClearRefreshProtections(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{quarantinePath, resolver.RefreshStopPath()} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("refresh protection %s survived override: %v", path, err)
+		}
+	}
+}
+
 func TestInspectRefreshStopLeavesRotatedMarkerUntouched(t *testing.T) {
 	credentials := writeFullCreds(t, "stale", staleMillis(), "before")
 	resolver := OAuthResolver{CredentialsPath: credentials}
