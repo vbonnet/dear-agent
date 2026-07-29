@@ -184,7 +184,7 @@ func checkData(path string, data []byte) []Violation {
 	paragraphOpen := false
 	for i, line := range lines {
 		lineNo := i + 1
-		if fences.consume(line) {
+		if fences.consume(line, paragraphOpen) {
 			// A fenced block is a Markdown block boundary. An inline-code
 			// opener in earlier prose cannot consume a closer from this block
 			// or retain span state across it.
@@ -220,7 +220,7 @@ type fenceState struct {
 	listContinuation fenceContainerContext
 }
 
-func (s *fenceState) consume(line string) bool {
+func (s *fenceState) consume(line string, paragraphOpen bool) bool {
 	if s.marker != 0 {
 		if s.container.contains(line) {
 			marker, length, trailing, isFence := s.container.delimiter(line)
@@ -238,7 +238,7 @@ func (s *fenceState) consume(line string) bool {
 		s.container = fenceContainerContext{}
 	}
 	s.updateListContinuation(line)
-	marker, length, container, isFence := s.openingDelimiter(line)
+	marker, length, container, isFence := s.openingDelimiter(line, paragraphOpen)
 	if !isFence {
 		return false
 	}
@@ -248,8 +248,8 @@ func (s *fenceState) consume(line string) bool {
 	return true
 }
 
-func (s *fenceState) openingDelimiter(line string) (byte, int, fenceContainerContext, bool) {
-	marker, length, isFence := fenceDelimiter(line)
+func (s *fenceState) openingDelimiter(line string, paragraphOpen bool) (byte, int, fenceContainerContext, bool) {
+	marker, length, isFence := fenceDelimiterWithParagraph(line, paragraphOpen)
 	if isFence {
 		container := parseFenceContainerContext(line)
 		if !container.hasList && s.listContinuation.hasList {
@@ -258,6 +258,9 @@ func (s *fenceState) openingDelimiter(line string) (byte, int, fenceContainerCon
 			}
 		}
 		return marker, length, container, true
+	}
+	if paragraphOpen && lineStartsNonInterruptingOrderedList(line) {
+		return 0, 0, fenceContainerContext{}, false
 	}
 	if !s.listContinuation.hasList {
 		return 0, 0, fenceContainerContext{}, false
@@ -383,7 +386,11 @@ func parseFenceContainerContext(line string) fenceContainerContext {
 }
 
 func fenceDelimiter(line string) (byte, int, bool) {
-	offset, ok := fenceContentOffset(line)
+	return fenceDelimiterWithParagraph(line, false)
+}
+
+func fenceDelimiterWithParagraph(line string, paragraphOpen bool) (byte, int, bool) {
+	offset, ok := containerContentOffset(line, paragraphOpen)
 	if !ok || offset == len(line) {
 		return 0, 0, false
 	}
@@ -556,7 +563,7 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 	if isInterruptingHTMLBlockStart(line, container) {
 		return true
 	}
-	if _, _, isFence := fenceDelimiter(line); isFence {
+	if _, _, isFence := fenceDelimiterWithParagraph(line, true); isFence {
 		return true
 	}
 	trimmed := strings.TrimLeft(line, " \t")
@@ -581,6 +588,9 @@ func unescapedBoldFieldCount(line string) int {
 
 func sameInlineCodeContainer(container fenceContainerContext, line string) bool {
 	if container.quoteDepth == 0 && !container.hasList {
+		if lineStartsNonInterruptingOrderedList(line) {
+			return true
+		}
 		lineContainer := parseFenceContainerContext(line)
 		return lineContainer.quoteDepth == 0 && !lineContainer.hasList
 	}
@@ -658,7 +668,11 @@ func (s *htmlBlockState) consume(line string) bool {
 		return true
 	}
 
-	content, ok := commonMarkBlockContent(line)
+	offset, ok := containerContentOffset(line, false)
+	if !ok {
+		return false
+	}
+	content, ok := commonMarkBlockContent(line[offset:])
 	if !ok {
 		return false
 	}
@@ -768,12 +782,6 @@ func escapedAt(line string, offset int) bool {
 	return backslashes%2 == 1
 }
 
-// fenceContentOffset skips the indentation and block/list container markers
-// that Markdown permits before a fenced code delimiter.
-func fenceContentOffset(line string) (int, bool) {
-	return containerContentOffset(line, false)
-}
-
 // headingContentOffset applies CommonMark's paragraph-interruption rule while
 // stripping block/list containers before an ATX heading. An ordered list whose
 // start is not 1 cannot interrupt a paragraph, so text such as "2. ## literal"
@@ -825,6 +833,11 @@ func nonInterruptingOrderedListMarker(line string, offset int) bool {
 	}
 	start, err := strconv.Atoi(line[offset:markerEnd])
 	return err == nil && start != 1
+}
+
+func lineStartsNonInterruptingOrderedList(line string) bool {
+	offset, ok := skipFenceIndent(line, 0)
+	return ok && nonInterruptingOrderedListMarker(line, offset)
 }
 
 func fenceContainerMarkerEnd(line string, offset int) (int, bool) {

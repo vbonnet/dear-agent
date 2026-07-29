@@ -731,6 +731,42 @@ func TestCheckFile_HeadingsInsideRawHTMLDoNotEndHeaderZone(t *testing.T) {
 	}
 }
 
+func TestCheckFile_HeadingsInsideContainerRawHTMLDoNotEndHeaderZone(t *testing.T) {
+	for name, block := range map[string]string{
+		"blockquote": "> <!--\n> ## literal comment content\n> -->\n> ",
+		"list":       "- <script>\n  ## literal script content\n  </script>\n  ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := "# Doc\n\n" + block + "**Status:** draft · **Owner:** docs\n"
+			dir := t.TempDir()
+			path := writeTemp(t, dir, name+".md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 || violations[0].Line != 6 {
+				t.Fatalf("want header-field violation after container raw HTML, got %v", violations)
+			}
+		})
+	}
+}
+
+func TestCheckFile_NonInterruptingListShapedFencePreservesInlineCode(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"Intro ` opener\n" +
+		"2. ~~~\n" +
+		"**Status:** draft · **Owner:** docs`\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "noninterrupting-fence.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want multiline code-span fields ignored, got %v", violations)
+	}
+}
+
 func TestCheckFile_PreservesLazyContainerInlineCodeContinuation(t *testing.T) {
 	for name, content := range map[string]string{
 		"blockquote": "# Doc\n\n> old form is `example\n**Status:** draft · **Owner:** docs\n> continues here`\n",
