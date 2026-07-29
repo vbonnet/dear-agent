@@ -10,7 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// OpenCodeAdapter implements Agent interface for OpenCode.
+// OpenCodeAdapter is the concrete harness adapter for OpenCode.
 //
 // OpenCode uses a client-server architecture where the server (opencode serve)
 // runs independently on localhost:4096, and clients attach via `opencode attach`.
@@ -48,7 +48,7 @@ type OpenCodeConfig struct {
 // If config.ServerURL is empty, uses default http://localhost:4096.
 //
 // Returns error if session store creation fails.
-func NewOpenCodeAdapter(config *OpenCodeConfig) (Agent, error) {
+func NewOpenCodeAdapter(config *OpenCodeConfig) (*OpenCodeAdapter, error) {
 	if config == nil {
 		config = &OpenCodeConfig{}
 	}

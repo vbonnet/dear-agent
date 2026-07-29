@@ -8,7 +8,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
-// TestSendViaAgent tests sending messages via the Agent interface (for API-based sessions)
+// TestSendViaAgent tests sending messages via the pure API delivery adapter.
 func TestSendViaAgent(t *testing.T) {
 	// Create mock OpenAI adapter
 	mockAdapter := &mockAgentAdapter{
@@ -149,7 +149,7 @@ func TestDetectAgentType(t *testing.T) {
 	}
 }
 
-// mockAgentAdapter is a mock implementation of the Agent interface for testing
+// mockAgentAdapter is a context-aware API delivery fake.
 type mockAgentAdapter struct {
 	sentMessages  []agent.Message
 	sendError     error

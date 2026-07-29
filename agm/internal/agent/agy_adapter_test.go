@@ -73,8 +73,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	})
 }
 
-// TestAgyAdapterImplementsAgentInterface verifies AgyAdapter implements Agent interface.
-func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
+func TestAgyAdapterImplementsHarnessContract(t *testing.T) {
 	// Create adapter with mock store
 	mockStore := &MockSessionStore{
 		sessions: make(map[SessionID]*SessionMetadata),
@@ -85,8 +84,7 @@ func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
 		t.Fatalf("NewAgyAdapter failed: %v", err)
 	}
 
-	// Verify adapter implements Agent interface (type already Agent from NewAgyAdapter)
-	_ = adapter
+	var _ Harness = adapter
 }
 
 // TestAgyAdapterName tests Name() method.

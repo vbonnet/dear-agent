@@ -17,7 +17,7 @@ import (
 //
 //	workflow := registry.Get("deep-research")
 //	result, err := workflow.Execute(WorkflowContext{
-//	    Agent:     geminiAgent,
+//	    Harness:   geminiHarness,
 //	    SessionID: "session-123",
 //	    Prompt:    "Research https://example.com and suggest improvements",
 //	})
@@ -49,9 +49,10 @@ type Workflow interface {
 
 // WorkflowContext contains execution parameters for a workflow.
 type WorkflowContext struct {
-	// Harness is the AI harness to use for this workflow.
+	// Harness describes the AI harness selected for this workflow. Lifecycle
+	// behavior is owned by the operation that executes the workflow.
 	// Required.
-	Harness agent.Agent
+	Harness agent.Harness
 
 	// SessionID is the agent session identifier.
 	// Required.

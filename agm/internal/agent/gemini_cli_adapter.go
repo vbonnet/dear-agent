@@ -15,9 +15,9 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// GeminiCLIAdapter implements Agent interface for Gemini CLI.
+// GeminiCLIAdapter is the concrete compatibility adapter for Gemini CLI.
 //
-// It runs Gemini CLI in tmux (like Claude) and provides the Agent interface
+// It runs Gemini CLI in tmux (like Claude) and provides concrete lifecycle
 // abstraction for Gemini sessions.
 type GeminiCLIAdapter struct {
 	sessionStore SessionStore
@@ -26,7 +26,7 @@ type GeminiCLIAdapter struct {
 // NewGeminiCLIAdapter creates a new Gemini CLI adapter instance.
 //
 // If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
-func NewGeminiCLIAdapter(sessionStore SessionStore) (Agent, error) {
+func NewGeminiCLIAdapter(sessionStore SessionStore) (*GeminiCLIAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {

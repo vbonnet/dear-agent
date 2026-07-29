@@ -595,8 +595,8 @@ agm new my-session --no-color --screen-reader
     │         │         │
     ▼         ▼         ▼
 ┌────────┬────────┬────────┐
-│ Claude │ Gemini │  GPT   │ Agent Adapters
-│Adapter │Adapter │Adapter │ (implement Agent interface)
+│ Claude │ Codex  │  AGY   │ Harness Adapters
+│Adapter │Adapter │Adapter │ (concrete behavior)
 └────┬───┴────┬───┴────┬───┘
      │        │        │
      └────────┴────────┘
@@ -626,11 +626,11 @@ agm new my-session --no-color --screen-reader
 - Environment validation
 - Workflow orchestration
 
-**Layer 3: Agent Abstraction** (`internal/agent/`)
-- Agent interface definition
-- Agent-specific adapters (Claude, Gemini, GPT)
-- Command translator per agent
-- Capability detection
+**Layer 3: Harness Adapters** (`internal/agent/`)
+- Metadata-only `Harness` discovery contract
+- Concrete harness-specific adapters
+- Consumer-owned capability interfaces for shared operations
+- Model and descriptive capability discovery
 
 **Layer 4: Integration** (`internal/tmux/`, `internal/manifest/`)
 - Tmux control mode integration

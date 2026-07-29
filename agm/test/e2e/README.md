@@ -138,7 +138,8 @@ exec csm command
 
 ### Phase 0 BDD Tests
 
-The following tests validate Phase 0 deliverables (Agent interface, Claude adapter, JSONL format, Manifest v3):
+The following tests validate the original Phase 0 deliverables (harness
+contracts, Claude adapter, JSONL format, Manifest v3):
 
 1. **session-creation.txtar** - Validates session creation with Manifest v3 and JSONL format
 2. **session-resumption.txtar** - Validates resume command and Claude adapter initialization
@@ -164,7 +165,7 @@ go test -v ./test/e2e
 #### Test Coverage
 
 - **Core commands**: new, resume, list, archive
-- **Phase 0 deliverables**: Agent interface, Claude adapter, JSONL format, Manifest v3
+- **Phase 0 deliverables**: Harness contracts, Claude adapter, JSONL format, Manifest v3
 - **Regression prevention**: UUID format validation, no XML files for new sessions
 
 ### TODO

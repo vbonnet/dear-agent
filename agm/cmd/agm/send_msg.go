@@ -663,17 +663,17 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 }
 
 func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
-	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, newAPIHarnessAdapter)
+	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, newAPIDeliveryAdapter)
 }
 
-type apiAgentFactory = ops.APISessionAgentFactory
+type apiDeliveryFactory = ops.APISessionDeliveryFactory
 
-func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
+func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIDelivery apiDeliveryFactory) error {
 	if adapter == nil {
 		return fmt.Errorf("verified delivery requires session storage")
 	}
 	policy := currentCLIInputDeliveryPolicy()
-	result, err := sendViaSharedOperationsWithFactory(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, policy.Force, policy.Autonomous, adapter, tmuxClient, newAPIAgent)
+	result, err := sendViaSharedOperationsWithFactory(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, policy.Force, policy.Autonomous, adapter, tmuxClient, newAPIDelivery)
 	if err != nil {
 		return err
 	}
@@ -697,10 +697,9 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	return nil
 }
 
-func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agent, error) {
-	return ops.NewAPISessionAgent(ctx, m)
+func newAPIDeliveryAdapter(ctx context.Context, m *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
+	return ops.NewAPISessionDeliveryAdapter(ctx, m)
 }
-
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
 	if err := wait(ctx, sessionName, 60*time.Second); err != nil {
 		if ctx.Err() != nil {
@@ -715,11 +714,11 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 // supplied tmux capability must atomically prove harness ownership and send to
 // the exact verified pane; weaker transports fail closed inside shared ops.
 func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
-	_, err := sendViaSharedOperationsWithFactory(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, force, autonomous, storage, tmuxClient, newAPIHarnessAdapter)
+	_, err := sendViaSharedOperationsWithFactory(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, force, autonomous, storage, tmuxClient, newAPIDeliveryAdapter)
 	return err
 }
 
-func sendViaSharedOperationsWithFactory(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) (*ops.SendMessageResult, error) {
+func sendViaSharedOperationsWithFactory(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface, newAPIDelivery apiDeliveryFactory) (*ops.SendMessageResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -728,10 +727,10 @@ func sendViaSharedOperationsWithFactory(ctx context.Context, recipientSession, s
 	}
 
 	result, err := ops.SendMessage(&ops.OpContext{
-		Context:         ctx,
-		Storage:         storage,
-		Tmux:            tmuxClient,
-		APIAgentFactory: newAPIAgent,
+		Context:            ctx,
+		Storage:            storage,
+		Tmux:               tmuxClient,
+		APIDeliveryFactory: newAPIDelivery,
 	}, &ops.SendMessageRequest{
 		Recipient:  recipientSession,
 		Message:    formattedMessage,
@@ -1008,13 +1007,13 @@ func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 }
 
 func deliveryFuncWithDependencies(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
-	return deliveryFuncWithAgentFactory(ctx, job, adapter, tmuxClient, newAPIHarnessAdapter)
+	return deliveryFuncWithDeliveryFactory(ctx, job, adapter, tmuxClient, newAPIDeliveryAdapter)
 }
 
-func deliveryFuncWithAgentFactory(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
+func deliveryFuncWithDeliveryFactory(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIDelivery apiDeliveryFactory) error {
 	// Multi-recipient sends intentionally use the same manifest resolution and
 	// final readiness boundary as single-recipient sends.
-	return sendDirectlyWithDependencies(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient, newAPIAgent)
+	return sendDirectlyWithDependencies(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient, newAPIDelivery)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.

@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// Agent defines the interface all AI agents must implement.
-//
-// AGM uses this interface to give supported AI command-line harnesses a unified
-// session management contract.
+// Harness describes one adapter for heterogeneous discovery and conformance.
+// Lifecycle and message behavior stays on concrete adapters or behind narrow
+// interfaces defined by the consumer that owns the operation.
 //
 // Example usage:
 //
@@ -16,104 +15,38 @@ import (
 //	if err != nil {
 //	    return err
 //	}
-//	sessionID, err := harness.CreateSession(SessionContext{
-//	    Name:             "my-session",
-//	    WorkingDirectory: "~/project",
-//	})
-//	if err != nil {
-//	    return err
-//	}
-//	err = harness.SendMessage(sessionID, Message{
-//	    Role:    RoleUser,
-//	    Content: "Hello, can you help me?",
-//	})
+//	fmt.Printf("%s %s\n", harness.Name(), harness.Version())
 //
-// Implementations handle harness-specific command construction, authentication,
-// process control, and session storage while conforming to this interface.
-type Agent interface {
+// Concrete adapters continue to expose harness-specific lifecycle mechanisms,
+// while internal/ops owns cross-surface lifecycle transactions.
+type Harness interface {
 	// Name returns the canonical harness identifier.
 	Name() string
 
 	// Version returns the adapter's reported version or model identifier.
 	Version() string
 
-	// CreateSession creates a new agent session with the given context.
-	//
-	// The session context includes working directory, project info, and
-	// pre-authorized directories. The returned SessionID is adapter-specific.
-	//
-	// Returns error if session creation fails (authentication, network,
-	// invalid context).
-	CreateSession(ctx SessionContext) (SessionID, error)
-
-	// ResumeSession resumes an existing agent session by SessionID.
-	//
-	// An adapter may attach to an existing process or start its CLI resume path.
-	//
-	// Returns error if session not found or cannot be resumed.
-	ResumeSession(sessionID SessionID) error
-
-	// TerminateSession terminates an agent session.
-	//
-	// Active adapters terminate or detach their managed CLI process as defined by
-	// the adapter's lifecycle contract.
-	//
-	// Returns error if session cannot be terminated.
-	TerminateSession(sessionID SessionID) error
-
-	// GetSessionStatus returns the current status of a session.
-	//
-	// Returns StatusActive, StatusIdle, StatusSuspended, or StatusTerminated.
-	// Returns error if session not found.
-	GetSessionStatus(sessionID SessionID) (Status, error)
-
-	// SendMessage sends a message to the agent in the given session.
-	//
-	// Current adapters deliver through their managed CLI/tmux transport.
-	//
-	// Returns error if message cannot be sent.
-	SendMessage(sessionID SessionID, message Message) error
-
-	// GetHistory retrieves conversation history for a session.
-	//
-	// Returns all messages in the session's conversation history.
-	// Returns error if history cannot be retrieved.
-	GetHistory(sessionID SessionID) ([]Message, error)
-
-	// ExportConversation exports conversation in the specified format.
-	//
-	// Supported formats: jsonl (universal), html (Claude), markdown (readable).
-	// Returns serialized conversation data.
-	// Returns error if format unsupported or export fails.
-	ExportConversation(sessionID SessionID, format ConversationFormat) ([]byte, error)
-
-	// ImportConversation imports conversation from serialized data.
-	//
-	// Creates new session from exported conversation data.
-	// Returns new SessionID and error if import fails.
-	ImportConversation(data []byte, format ConversationFormat) (SessionID, error)
-
-	// Capabilities returns the agent's feature capabilities.
-	//
-	// Used for runtime feature detection and graceful degradation.
+	// Capabilities returns descriptive feature and model metadata.
 	Capabilities() Capabilities
-
-	// ExecuteCommand executes a generic command with agent-specific translation.
-	//
-	// Examples: rename_session, set_directory, authorize_directory.
-	// Command translation happens in adapter implementation.
-	// Returns error if command unsupported or execution fails.
-	ExecuteCommand(cmd Command) error
 }
 
-// ContextMessageSender is implemented by agents whose delivery surface can
-// honor caller cancellation and deadlines. Callers should prefer this optional
-// interface and fall back to Agent.SendMessage for legacy CLI adapters.
+var (
+	_ Harness = (*ClaudeAdapter)(nil)
+	_ Harness = (*GeminiCLIAdapter)(nil)
+	_ Harness = (*CodexCLIAdapter)(nil)
+	_ Harness = (*OpenCodeAdapter)(nil)
+	_ Harness = (*AgyAdapter)(nil)
+	_ Harness = (*PiAdapter)(nil)
+	_ Harness = (*OpenAIAdapter)(nil)
+)
+
+// ContextMessageSender is implemented by adapters whose delivery surface can
+// honor caller cancellation and deadlines.
 type ContextMessageSender interface {
 	SendMessageContext(ctx context.Context, sessionID SessionID, message Message) error
 }
 
-// ContextSessionStatusGetter is implemented by agents whose readiness lookup
+// ContextSessionStatusGetter is implemented by adapters whose readiness lookup
 // can honor caller cancellation and deadlines. Pure API delivery requires this
 // contract so a contended adapter store cannot pin the outer lifecycle lock.
 type ContextSessionStatusGetter interface {

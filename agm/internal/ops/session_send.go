@@ -90,7 +90,7 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 				"source": "ops_send_message",
 			},
 		}
-		current, err := DeliverAPISessionMessage(callCtx, ctx.Storage, m, message, ctx.APIAgentFactory)
+		current, err := DeliverAPISessionMessage(callCtx, ctx.Storage, m, message, ctx.APIDeliveryFactory)
 		if err != nil {
 			return newSendMessageResult(m, req, false), err
 		}

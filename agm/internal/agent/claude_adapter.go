@@ -13,10 +13,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// ClaudeAdapter implements Agent interface for Claude CLI.
+// ClaudeAdapter is the concrete harness adapter for Claude CLI.
 //
 // It wraps existing AGM tmux-based session management and provides
-// the Agent interface abstraction for Claude sessions.
+// Claude session mechanisms used by operation-specific consumers.
 type ClaudeAdapter struct {
 	sessionStore SessionStore
 }
@@ -33,7 +33,7 @@ var (
 // NewClaudeAdapter creates a new Claude adapter instance.
 //
 // If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
-func NewClaudeAdapter(sessionStore SessionStore) (Agent, error) {
+func NewClaudeAdapter(sessionStore SessionStore) (*ClaudeAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {

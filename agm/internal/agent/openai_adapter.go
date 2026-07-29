@@ -14,7 +14,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
 )
 
-// OpenAIAdapter implements Agent interface for OpenAI API.
+// OpenAIAdapter is the concrete compatibility adapter for the OpenAI API.
 //
 // It uses the OpenAI API (via go-openai SDK) and manages conversation
 // sessions through the SessionManager. Unlike CLI adapters (Claude, Gemini),
@@ -27,7 +27,6 @@ type OpenAIAdapter struct {
 }
 
 var (
-	_ Agent                      = (*OpenAIAdapter)(nil)
 	_ ContextMessageSender       = (*OpenAIAdapter)(nil)
 	_ ContextSessionStatusGetter = (*OpenAIAdapter)(nil)
 )
@@ -71,7 +70,7 @@ type OpenAIConfig struct {
 //
 // If config is nil, uses default configuration (gpt-4-turbo-preview).
 // Returns error if API key is missing or client initialization fails.
-func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) {
+func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (*OpenAIAdapter, error) {
 	resolvedConfig := resolveOpenAIConfig(config)
 	return newOpenAIAdapter(ctx, resolvedConfig)
 }
@@ -79,7 +78,7 @@ func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) 
 // NewOpenAIAdapterForSession reconstructs an adapter from a session's
 // persisted non-secret runtime configuration. API credentials are intentionally
 // resolved from config or the environment on each process invocation.
-func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config *OpenAIConfig) (Agent, error) {
+func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config *OpenAIConfig) (*OpenAIAdapter, error) {
 	resolvedConfig := resolveOpenAIConfig(config)
 	sessionManager, info, err := openai.NewSessionManagerForSession(ctx, resolvedConfig.SessionsDir, string(sessionID))
 	if err != nil {

@@ -174,7 +174,7 @@ go test ./internal/session -run TestManifestGeneration_NewSession -v
 
 ## Related Documentation
 
-- Agent Interface: `internal/agent/interface.go`
+- Harness Contracts: `internal/agent/interface.go`
 - Manifest Schema: `internal/manifest/manifest.go`
 - Config Schema: `internal/config/config.go`
 
