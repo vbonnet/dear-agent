@@ -136,7 +136,7 @@ Feature: Harness parity
     When AGM validates harness requirement identifiers and lifecycle ownership
     Then harness requirement identifiers should be unique
     And CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations
-    And CLI resume should retain its focused transactional owner
+    And CLI resume should delegate its transaction to shared operations
 
   Scenario Outline: Active harness launch commands preserve startup mode and persistence
     Given active harness "<harness>" uses startup mode "<mode>"
@@ -514,7 +514,7 @@ Feature: Harness parity
 
   Scenario: Failed Codex resume is rolled back before success effects
     Given a stopped Codex CLI session without a tmux pane
-    When AGM validates the Codex resume transaction
+    When AGM validates the shared Codex resume operation
     Then Codex resume, state, and prompt waits should preserve process and styled composer readiness
     And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
     And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts

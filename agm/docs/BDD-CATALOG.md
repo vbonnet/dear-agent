@@ -302,8 +302,9 @@ creation, and terminal state detection.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - The Codex factory uses `CodexCLIAdapter`, while the OpenAI API adapter
   remains independent of Codex tmux state.
-- CLI and MCP create, kill, archive, and message-delivery surfaces delegate to
-  shared operations, while CLI resume retains its focused transaction owner.
+- CLI and MCP lifecycle surfaces delegate to shared operations. Resume uses one
+  stable-ID `internal/ops.ResumeSession` transaction; the CLI retains only
+  identifier and prompt-file input, presentation, and post-operation attach.
 - Harness parity requirement identifiers are unique.
 - Active harness launch commands preserve native startup mode and persistence.
 - Imported AGY conversations preserve unknown native-model provenance through
