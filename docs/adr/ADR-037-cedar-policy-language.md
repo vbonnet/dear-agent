@@ -198,15 +198,14 @@ tests must prove all of the following:
 4. A reload forced between the invocation and confirmation-free decisions does
    not change the request's pinned bundle version; both decisions use the same
    immutable snapshot.
-5. A reload that adds an invocation `forbid` while a request waits for
-   confirmation invalidates the old confirmation and denies final dispatch.
-   A reload at the final dispatch boundary likewise causes reevaluation; tests
-   must prove there is no stale-version check/use window. Separately, changing
-   a principal's role/entity membership or any authorization context without a
-   policy reload invalidates the old confirmation and reruns both decisions
-   against the new input snapshot. Agent-authored role/context data in a
-   writable manifest is rejected; only authenticated control-plane updates can
-   advance the authoritative input revision.
+5. A reload adding an invocation `forbid` while a request waits for confirmation
+   invalidates it and denies final dispatch. Bundle or authoritative-input
+   revision changes at the final dispatch boundary cause reevaluation for both
+   direct `allow` and `ask`; tests prove no stale snapshot check/use window and
+   that revoked direct authorization cannot dispatch. Role/entity/context
+   changes without policy reload also invalidate confirmation and rerun both
+   decisions. Agent-authored role/context data in a writable manifest is
+   rejected; only authenticated control-plane updates advance the input revision.
 6. A Cedar response containing both a proven invocation `forbid` reason and
    diagnostics remains `deny`; an invocation response with no proven
    applicable `permit` also remains `deny`. An invocation Allow whose
