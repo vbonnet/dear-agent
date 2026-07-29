@@ -441,10 +441,37 @@ func validateNativeSkillEntrypoint(root, entrypoint, pluginName string, skill ex
 	if err != nil {
 		return fmt.Errorf("read plugin %q exported skill %q native entrypoint: %w", pluginName, skill.Name, err)
 	}
-	if !strings.Contains(string(data), wantReference) {
-		return fmt.Errorf("plugin %q exported skill %q native entrypoint does not reference canonical %q", pluginName, skill.Name, skill.CanonicalPath)
+	if !hasActionableCanonicalWorkflow(string(data), wantReference) {
+		return fmt.Errorf("plugin %q exported skill %q native entrypoint does not actionably load and follow canonical %q from its Workflow section", pluginName, skill.Name, skill.CanonicalPath)
 	}
 	return nil
+}
+
+func hasActionableCanonicalWorkflow(markdown, reference string) bool {
+	const heading = "## Workflow"
+	start := strings.Index(markdown, heading)
+	if start < 0 {
+		return false
+	}
+	section := markdown[start+len(heading):]
+	if next := strings.Index(section, "\n## "); next >= 0 {
+		section = section[:next]
+	}
+	normalized := strings.Join(strings.Fields(section), " ")
+	lower := strings.ToLower(normalized)
+	token := "`" + strings.ToLower(reference) + "`"
+	referenceAt := strings.Index(lower, token)
+	if referenceAt < 0 {
+		return false
+	}
+	before := lower[:referenceAt]
+	if len(before) > 120 {
+		before = before[len(before)-120:]
+	}
+	if !strings.Contains(before, "read") && !strings.Contains(before, "load") {
+		return false
+	}
+	return strings.Contains(lower[referenceAt+len(token):], "follow")
 }
 
 // ExpectedMarketplaceMode returns the executable skill-discovery mode owned by
