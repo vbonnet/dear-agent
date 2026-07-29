@@ -200,6 +200,21 @@ func TestValidateNativeSkillCoverageRequiresEverySkillPlugin(t *testing.T) {
 	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	unboundFollow := strings.Replace(
+		string(data),
+		"2. Follow the canonical workflow and all of its gates.",
+		"2. Follow this wrapper's local rules instead.",
+		1,
+	)
+	if err := os.WriteFile(agmEntrypoint, []byte(unboundFollow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil || !strings.Contains(err.Error(), "actionably load and follow") {
+		t.Fatalf("unbound follow directive unexpectedly passed: %v", err)
+	}
+	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	negatedWorkflow := strings.Replace(
 		string(data),
 		"1. Read `../../../"+canonicalBySkill["scan-health"]+"` completely.\n2. Follow the canonical workflow and all of its gates.",

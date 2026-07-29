@@ -476,7 +476,7 @@ func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 		}
 		for _, following := range directives[index:] {
 			following = strings.ToLower(following)
-			if hasPositiveDirectiveVerb(following, "follow", len(following)) {
+			if hasPositiveCanonicalFollowDirective(following) {
 				return true
 			}
 		}
@@ -502,24 +502,38 @@ func workflowDirectives(section string) []string {
 func hasPositiveDirectiveVerb(directive, verb string, before int) bool {
 	locations := regexp.MustCompile(`\b`+regexp.QuoteMeta(verb)+`\b`).FindAllStringIndex(directive[:before], -1)
 	for _, location := range slices.Backward(locations) {
-		clause := directive[:location[0]]
-		if separator := strings.LastIndexAny(clause, ".,;:"); separator >= 0 {
-			clause = clause[separator+1:]
-		}
-		negated := false
-		for _, word := range strings.FieldsFunc(clause, func(r rune) bool {
-			return !unicode.IsLetter(r) && r != '\''
-		}) {
-			switch word {
-			case "not", "never", "avoid", "don't", "cannot", "can't":
-				negated = true
-			}
-		}
-		if !negated {
+		if directiveVerbIsPositive(directive, location) {
 			return true
 		}
 	}
 	return false
+}
+
+func hasPositiveCanonicalFollowDirective(directive string) bool {
+	locations := regexp.MustCompile(`\bfollow\b`).FindAllStringIndex(directive, -1)
+	for _, location := range slices.Backward(locations) {
+		if directiveVerbIsPositive(directive, location) &&
+			strings.Contains(directive[location[1]:], "canonical workflow") {
+			return true
+		}
+	}
+	return false
+}
+
+func directiveVerbIsPositive(directive string, location []int) bool {
+	clause := directive[:location[0]]
+	if separator := strings.LastIndexAny(clause, ".,;:"); separator >= 0 {
+		clause = clause[separator+1:]
+	}
+	for _, word := range strings.FieldsFunc(clause, func(r rune) bool {
+		return !unicode.IsLetter(r) && r != '\''
+	}) {
+		switch word {
+		case "not", "never", "avoid", "don't", "cannot", "can't":
+			return false
+		}
+	}
+	return true
 }
 
 // ExpectedMarketplaceMode returns the executable skill-discovery mode owned by

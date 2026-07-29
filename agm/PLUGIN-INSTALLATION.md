@@ -88,8 +88,12 @@ work until you also install:
   github.com/vbonnet/dear-agent/agm/cmd/agm@latest`) and `tmux`.
 - **`youtube` plugin** — `yt-dlp` (`brew install yt-dlp` /
   `pipx install yt-dlp`).
-- **`research-pipeline` plugin** — the Beads `bd` CLI on `PATH`; Stage 4 uses
-  it to validate and file the approved decomposition. Stage 5 additionally
+- **`research-pipeline` plugin** — access to a second model for Stage 3
+  verification/planning and a different third model for Stage 4 decomposition,
+  plus the Beads `bd` CLI on `PATH` for filing that decomposition. If either
+  independent model is unavailable, the plugin stops at the last completed
+  artifact, reports the next-stage external handoff, and never substitutes the
+  authoring model or claims the blocked stage ran. Stage 5 additionally
   requires a reachable Codex execution surface: either a configured `codex`
   CLI/account or a repository-approved dispatcher that can launch Codex
   `/goal` runs. Without that surface, the plugin stops after the reviewed bead

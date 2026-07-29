@@ -10,7 +10,7 @@ This regular-file entrypoint supplies OpenCode's native repository discovery.
 ## Workflow
 
 1. Read `../../../agm/agm-plugin/skills/scan-health/SKILL.md` completely.
-2. Follow that exported plugin workflow without substituting this discovery
+2. Follow that canonical workflow without substituting this discovery
    entrypoint for any of its requirements or gates.
 
 ## Verification

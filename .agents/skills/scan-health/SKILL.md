@@ -8,7 +8,7 @@ description: Use when an AGENTS.md-compatible harness needs typed AGM session he
 ## Workflow
 
 1. Read `../../../agm/agm-plugin/skills/scan-health/SKILL.md` completely.
-2. Follow the exported plugin workflow and all of its gates.
+2. Follow the canonical workflow and all of its gates.
 
 ## Verification
 
