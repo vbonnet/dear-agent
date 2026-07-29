@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 )
 
 const helperMarker = "AGM_HARNESSEXEC_HELPER"
@@ -482,7 +482,7 @@ func runExecutorCanary(t *testing.T, executable, protocol string, args, extraEnv
 	}
 	envPath := filepath.Join(dir, executable+"-env.txt")
 	argvPath := filepath.Join(dir, executable+"-argv.txt")
-	script := fmt.Sprintf("#!/bin/sh\nenv | sort > %s\nprintf '%%s\\n' \"$@\" > %s\n", launchparity.ShellQuote(envPath), launchparity.ShellQuote(argvPath))
+	script := fmt.Sprintf("#!/bin/sh\nenv | sort > %s\nprintf '%%s\\n' \"$@\" > %s\n", shellquote.Quote(envPath), shellquote.Quote(argvPath))
 	if err := os.WriteFile(filepath.Join(binDir, executable), []byte(script), 0700); err != nil {
 		t.Fatalf("write fake %s: %v", executable, err)
 	}

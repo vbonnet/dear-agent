@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -105,7 +105,7 @@ func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) 
 	if metadata.NativeSessionDir == "" || !strings.HasPrefix(metadata.NativeSessionDir, os.Getenv("AGM_PI_SESSION_ROOT")) {
 		t.Fatalf("native session dir = %q", metadata.NativeSessionDir)
 	}
-	if metadata.CodingAgentDir != codingAgentDir || !metadata.CodingAgentDirSet || !strings.Contains(gotCommand, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
+	if metadata.CodingAgentDir != codingAgentDir || !metadata.CodingAgentDirSet || !strings.Contains(gotCommand, "PI_CODING_AGENT_DIR="+shellquote.Quote(codingAgentDir)) {
 		t.Fatalf("Pi coding agent persistence/command = %q / %q", metadata.CodingAgentDir, gotCommand)
 	}
 	for _, token := range []string{"pi", "--session-id", string(sessionID), "PI_SESSION_ID='" + string(sessionID) + "'", "AGM_PI_PROJECT_DIR=", "--session-dir", metadata.NativeSessionDir, "--name", "pi-worker", "--model", "anthropic/claude-sonnet-4-6", "--extension", "agm-authorization.js", "AGM_PI_PERMISSION_MODE='plan'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--tools", "read,grep,find,ls"} {
@@ -209,7 +209,7 @@ func TestPiAdapterCreatePrefersPerSessionCodingAgentDirectory(t *testing.T) {
 			if metadata.CodingAgentDir != sessionConfig || !metadata.CodingAgentDirSet {
 				t.Fatalf("persisted session config = %q, set=%t; want %q, true", metadata.CodingAgentDir, metadata.CodingAgentDirSet, sessionConfig)
 			}
-			assignment := "PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(sessionConfig)
+			assignment := "PI_CODING_AGENT_DIR=" + shellquote.Quote(sessionConfig)
 			if test.wantAssigned != strings.Contains(command, assignment) {
 				t.Fatalf("session assignment presence = %t, want %t: %s", strings.Contains(command, assignment), test.wantAssigned, command)
 			}
@@ -272,7 +272,7 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 			t.Fatalf("resume command omits %q: %s", token, command)
 		}
 	}
-	if !strings.Contains(command, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
+	if !strings.Contains(command, "PI_CODING_AGENT_DIR="+shellquote.Quote(codingAgentDir)) {
 		t.Fatalf("Pi resume omitted persisted coding-agent directory: %s", command)
 	}
 	if strings.Contains(command, "Bash(git:*)") {

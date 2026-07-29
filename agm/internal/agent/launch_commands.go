@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -17,7 +17,7 @@ import (
 // that also created tmux sessions and blocked on harness readiness, which made
 // the escaping untestable and let hand-written quotes drift in unnoticed.
 //
-// Every caller-controlled value goes through launchparity.ShellQuote — the same
+// Every caller-controlled value goes through shellquote.Quote — the same
 // primitive the modern spawn path in internal/ops uses. Values that reach here
 // are not all human-typed: working directories arrive from bead text, worktree
 // paths and MCP callers, and UUIDs are read back from the session store.
@@ -56,14 +56,14 @@ func validatePastedShellValues(values ...string) error {
 func buildGeminiStartCommand(workDir string, authorizedDirs []string) string {
 	var b strings.Builder
 	b.WriteString("gemini --include-directories ")
-	b.WriteString(launchparity.ShellQuote(workDir))
+	b.WriteString(shellquote.Quote(workDir))
 
 	for _, dir := range authorizedDirs {
 		if dir == workDir {
 			continue
 		}
 		b.WriteString(" --include-directories ")
-		b.WriteString(launchparity.ShellQuote(dir))
+		b.WriteString(shellquote.Quote(dir))
 	}
 
 	b.WriteString(" && exit")
@@ -76,9 +76,9 @@ func buildGeminiStartCommand(workDir string, authorizedDirs []string) string {
 func buildGeminiResumeCommand(workDir, uuid string) string {
 	resumeTarget := "latest"
 	if uuid != "" {
-		resumeTarget = launchparity.ShellQuote(uuid)
+		resumeTarget = shellquote.Quote(uuid)
 	}
-	return "cd " + launchparity.ShellQuote(workDir) +
+	return "cd " + shellquote.Quote(workDir) +
 		" && gemini --resume " + resumeTarget +
 		" && exit"
 }
@@ -87,7 +87,7 @@ func buildGeminiResumeCommand(workDir, uuid string) string {
 // after its tmux session has been recreated. OpenCode keeps session state
 // server-side, so there is no per-session resume token to pass.
 func buildOpenCodeResumeCommand(workDir string) string {
-	return "cd " + launchparity.ShellQuote(workDir) + " && opencode attach && exit"
+	return "cd " + shellquote.Quote(workDir) + " && opencode attach && exit"
 }
 
 // buildSetDirCommand returns the `cd` line sent to a harness pane when a
@@ -95,5 +95,5 @@ func buildOpenCodeResumeCommand(workDir string) string {
 // ValidateSendDirPath first; the quoting here is deliberate defense in depth so
 // that relaxing that validator cannot by itself reopen an injection.
 func buildSetDirCommand(path string) string {
-	return "cd " + launchparity.ShellQuote(path) + "\r"
+	return "cd " + shellquote.Quote(path) + "\r"
 }

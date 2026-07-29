@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSingleQuote(t *testing.T) {
-	assert.Equal(t, "'/tmp/plain'", singleQuote("/tmp/plain"))
-	assert.Equal(t, `'/tmp/it'\''s here'`, singleQuote("/tmp/it's here"))
-	assert.Equal(t, "''", singleQuote(""))
+func TestCorrectiveWorkDirCommandQuotesWorkDir(t *testing.T) {
+	got, err := correctiveWorkDirCommand("/tmp/it's here")
+	require.NoError(t, err)
+	assert.Equal(t, `cd '/tmp/it'"'"'s here'`, got)
 }
 
 func TestCorrectiveWorkDirCommandRejectsControls(t *testing.T) {

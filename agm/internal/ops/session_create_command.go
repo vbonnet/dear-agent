@@ -9,6 +9,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 )
 
 // HarnessLaunchSpec is the harness-neutral launch contract used by every
@@ -79,12 +80,12 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	case "pi-cli":
 		return buildPiLaunchCommand(spec)
 	case "opencode-cli":
-		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", launchparity.ShellQuote(spec.WorkDir), exitSuffix)}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", shellquote.Quote(spec.WorkDir), exitSuffix)}
 	case "gemini-cli":
 		resolvedModel := agent.ResolveModelFullName("gemini-cli", spec.Model)
-		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", launchparity.ShellQuote(resolvedModel), exitSuffix)}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", shellquote.Quote(resolvedModel), exitSuffix)}
 	default:
-		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", launchparity.ShellQuote("Unknown harness: "+spec.Harness))}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", shellquote.Quote("Unknown harness: "+spec.Harness))}
 	}
 }
 
@@ -312,7 +313,7 @@ func PrepareFallbackResumeCommand(workdir string) (HarnessLaunchCommand, error) 
 		return HarnessLaunchCommand{}, fmt.Errorf("validate fallback resume: %w", err)
 	}
 	return HarnessLaunchCommand{
-		Command: fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(workdir)),
+		Command: fmt.Sprintf("cd %s && exit", shellquote.Quote(workdir)),
 	}, nil
 }
 

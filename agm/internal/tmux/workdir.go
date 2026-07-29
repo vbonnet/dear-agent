@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 )
 
 // Workdir verification/repair tuning knobs. Package-level vars (not consts) so
@@ -98,7 +99,7 @@ func correctiveWorkDirCommand(workDir string) (string, error) {
 	if err := ValidatePastedText("workdir", workDir); err != nil {
 		return "", fmt.Errorf("validate corrective workdir paste: %w", err)
 	}
-	return "cd " + singleQuote(workDir), nil
+	return "cd " + shellquote.Quote(workDir), nil
 }
 
 // PaneCurrentPath returns the current working directory of the session's
@@ -133,10 +134,4 @@ func canonicalPath(p string) string {
 		return filepath.Clean(resolved)
 	}
 	return filepath.Clean(p)
-}
-
-// singleQuote wraps s in single quotes for safe inclusion in a shell command
-// line, escaping embedded single quotes.
-func singleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

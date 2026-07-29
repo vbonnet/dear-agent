@@ -656,8 +656,8 @@ func TestCheckHealth_DefaultHarness(t *testing.T) {
 }
 
 // Shell quoting is no longer implemented here — this package's local copy was
-// removed in ce-93lw.1 in favour of launchparity.ShellQuote. Its test moved
-// with it to internal/launchparity/launch_test.go.
+// removed in ce-93lw.1 in favour of shellquote.Quote. Its test moved
+// with it to internal/shellquote/quote_test.go.
 
 // TestDisplayTranscriptContext tests the transcript context display function
 func TestDisplayTranscriptContext(t *testing.T) {

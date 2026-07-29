@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
@@ -192,7 +192,7 @@ func appendShellFlag(b *strings.Builder, name, value string) {
 	b.WriteByte(' ')
 	b.WriteString(name)
 	b.WriteByte(' ')
-	b.WriteString(launchparity.ShellQuote(value))
+	b.WriteString(shellquote.Quote(value))
 }
 
 func privateCommandPrefix(executable, protocol string) string {
@@ -200,7 +200,7 @@ func privateCommandPrefix(executable, protocol string) string {
 	if resolved == "agm" {
 		return "agm " + protocol
 	}
-	return launchparity.ShellQuote(resolved) + " " + protocol
+	return shellquote.Quote(resolved) + " " + protocol
 }
 
 // Run validates a private protocol request and replaces the current AGM

@@ -1,4 +1,4 @@
-package launchparity
+package shellquote
 
 import (
 	"os"
@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-// ShellQuote is the single shell-quoting primitive for the agm module. Before
+// Quote is the single shell-quoting primitive for the agm module. Before
 // ce-93lw.1 three copies existed — here, in internal/agent, and in
 // internal/session — and they had already drifted into two different escape
 // styles ('"'"' versus '\''). The other two were deleted; this is the one that
 // survives, so this is where its tests live.
 
-func TestShellQuote(t *testing.T) {
+func TestQuote(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -33,18 +33,18 @@ func TestShellQuote(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := ShellQuote(tt.input); got != tt.want {
-				t.Errorf("ShellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := Quote(tt.input); got != tt.want {
+				t.Errorf("Quote(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestShellQuoteRoundTripsThroughRealShell checks the property the golden
+// TestQuoteRoundTripsThroughRealShell checks the property the golden
 // strings above only approximate: whatever goes in must come back out as
 // exactly one shell word, byte for byte. A hand-written expectation can encode
 // a subtly wrong escape and still look right; /bin/sh cannot.
-func TestShellQuoteRoundTripsThroughRealShell(t *testing.T) {
+func TestQuoteRoundTripsThroughRealShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires a POSIX shell")
 	}
@@ -71,21 +71,21 @@ func TestShellQuoteRoundTripsThroughRealShell(t *testing.T) {
 
 			// printf %s writes the argument with no interpretation, so stdout
 			// is exactly the word the shell parsed.
-			out, err := exec.Command("/bin/sh", "-c", "printf %s "+ShellQuote(in)).Output()
+			out, err := exec.Command("/bin/sh", "-c", "printf %s "+Quote(in)).Output()
 			if err != nil {
-				t.Fatalf("shell rejected ShellQuote(%q) = %s: %v", in, ShellQuote(in), err)
+				t.Fatalf("shell rejected Quote(%q) = %s: %v", in, Quote(in), err)
 			}
 			if string(out) != in {
-				t.Errorf("round trip: ShellQuote(%q) parsed back as %q", in, string(out))
+				t.Errorf("round trip: shellquote.Quote(%q) parsed back as %q", in, string(out))
 			}
 		})
 	}
 }
 
-// TestShellQuoteProducesOneWord guards the failure mode that matters most for
+// TestQuoteProducesOneWord guards the failure mode that matters most for
 // callers: a value must never split into multiple arguments, however much
 // whitespace or syntax it contains.
-func TestShellQuoteProducesOneWord(t *testing.T) {
+func TestQuoteProducesOneWord(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires a POSIX shell")
 	}
@@ -94,12 +94,12 @@ func TestShellQuoteProducesOneWord(t *testing.T) {
 	const hostile = `x'; touch pwned; echo '`
 
 	// $# is the argument count after the shell has parsed the command line.
-	out, err := exec.Command("/bin/sh", "-c", "set -- "+ShellQuote(hostile)+`; printf %s "$#"`).Output()
+	out, err := exec.Command("/bin/sh", "-c", "set -- "+Quote(hostile)+`; printf %s "$#"`).Output()
 	if err != nil {
 		t.Fatalf("shell rejected quoted value: %v", err)
 	}
 	if got := strings.TrimSpace(string(out)); got != "1" {
-		t.Errorf("ShellQuote(%q) parsed as %s words, want 1", hostile, got)
+		t.Errorf("Quote(%q) parsed as %s words, want 1", hostile, got)
 	}
 
 	if _, err := os.Stat("pwned"); err == nil {

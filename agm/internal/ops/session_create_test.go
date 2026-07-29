@@ -15,9 +15,9 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -701,24 +701,24 @@ func TestCreateSession_RejectsRelativeCwd(t *testing.T) {
 	}
 }
 
-func TestCreateSession_RejectsWorkdirControlsBeforeTmuxCreation(t *testing.T) {
-	workdir := filepath.Join(t.TempDir(), "unsafe\x1b[201~\npath")
+func TestCreateSession_GeminiAllowsControlWorkdirWhenNoRepairIsNeeded(t *testing.T) {
+	workdir := filepath.Join(t.TempDir(), "valid\tpath")
 	if err := os.Mkdir(workdir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	tmuxMock := session.NewMockTmux()
 
-	_, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
 		Cwd:     workdir,
 		Prompt:  "test",
 		Title:   "safe-title",
-		Harness: "claude-code",
+		Harness: "gemini-cli",
 	})
-	if err == nil || !strings.Contains(err.Error(), "control characters") {
-		t.Fatalf("CreateSession() error = %v, want terminal-control rejection", err)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want healthy non-repair creation", err)
 	}
-	if len(tmuxMock.CreatedSessions) != 0 {
-		t.Fatalf("tmux sessions created before workdir rejection: %v", tmuxMock.CreatedSessions)
+	if result == nil || len(tmuxMock.CreatedSessions) != 1 {
+		t.Fatalf("CreateSession() result = %#v, sessions = %v", result, tmuxMock.CreatedSessions)
 	}
 }
 
@@ -1741,7 +1741,7 @@ func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
 }
 
 func TestSharedShellQuote(t *testing.T) {
-	got := launchparity.ShellQuote("a'b")
+	got := shellquote.Quote("a'b")
 	if got != `'a'"'"'b'` {
 		t.Errorf("ShellQuote = %q", got)
 	}

@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 )
 
 // TestResumeCommandFlags verifies that the resume command properly parses flags
@@ -443,7 +443,7 @@ func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing
 		"--session-id 'native.pi-id'", "--session-dir '" + sessionDir + "'", "--name 'pi-worker'",
 		"PI_SESSION_ID='native.pi-id'", "AGM_PI_PROJECT_DIR='/tmp/work'",
 		"AGM_PI_LAUNCH_ID='launch-resume'",
-		"PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(codingAgentDir),
+		"PI_CODING_AGENT_DIR=" + shellquote.Quote(codingAgentDir),
 		"--model 'openai/gpt-5.6-terra'", "AGM_PI_PERMISSION_MODE='auto'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--extension",
 	} {
 		if !strings.Contains(command, want) {
@@ -464,7 +464,7 @@ func TestBuildPiResumeCommandUsesCurrentCodingAgentDirectoryForLegacyMetadata(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(command, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
+	if !strings.Contains(command, "PI_CODING_AGENT_DIR="+shellquote.Quote(codingAgentDir)) {
 		t.Fatalf("legacy Pi resume omitted current coding-agent directory: %s", command)
 	}
 }

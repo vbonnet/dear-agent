@@ -14,7 +14,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
@@ -325,12 +324,6 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		if err != nil {
 			return nil, err
 		}
-	}
-	// Tmux may repair a freshly created pane's working directory by pasting a
-	// corrective cd before the harness launch command is prepared. Validate
-	// that paste input before any session can be created.
-	if err := harnessexec.ValidatePastedText("workdir", req.Cwd); err != nil {
-		return nil, ErrInvalidInput("cwd", fmt.Sprintf("Working directory cannot be safely pasted into tmux: %v", err))
 	}
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string
