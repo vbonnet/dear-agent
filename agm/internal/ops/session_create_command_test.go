@@ -73,3 +73,10 @@ func TestPrepareAgyResumeCommandRejectsConversationControls(t *testing.T) {
 		t.Fatalf("PrepareAgyResumeCommand() error = %v, want terminal-control rejection", err)
 	}
 }
+
+func TestPrepareFallbackResumeCommandRejectsWorkdirControls(t *testing.T) {
+	_, err := PrepareFallbackResumeCommand("/safe\x1b[201~\nunsafe")
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("PrepareFallbackResumeCommand() error = %v, want terminal-control rejection", err)
+	}
+}

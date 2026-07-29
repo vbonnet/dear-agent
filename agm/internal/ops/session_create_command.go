@@ -268,6 +268,17 @@ func PrepareAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) (Har
 	return buildAgyCommand(spec, conversationID), nil
 }
 
+// PrepareFallbackResumeCommand validates the working directory used by the
+// compatibility path for a stored harness that has no native resume command.
+func PrepareFallbackResumeCommand(workdir string) (HarnessLaunchCommand, error) {
+	if err := harnessexec.ValidatePastedText("workdir", workdir); err != nil {
+		return HarnessLaunchCommand{}, fmt.Errorf("validate fallback resume: %w", err)
+	}
+	return HarnessLaunchCommand{
+		Command: fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(workdir)),
+	}, nil
+}
+
 func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
 	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
 	command := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{

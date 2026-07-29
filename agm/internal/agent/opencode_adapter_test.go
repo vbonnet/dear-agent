@@ -59,6 +59,16 @@ func TestOpenCodeResumeRejectsTerminalControlsBeforeTmux(t *testing.T) {
 	}
 }
 
+func TestOpenCodeResumeValidationAppliesOnlyToColdRelaunch(t *testing.T) {
+	invalid := "/tmp/safe\x1b[201~\nunsafe"
+	if err := validateOpenCodeResume(false, invalid); err == nil {
+		t.Fatal("cold relaunch accepted terminal controls")
+	}
+	if err := validateOpenCodeResume(true, invalid); err != nil {
+		t.Fatalf("existing session rejected despite requiring no shell paste: %v", err)
+	}
+}
+
 // TestOpenCodeAdapterName tests Name() method.
 func TestOpenCodeAdapterName(t *testing.T) {
 	mockStore := &MockSessionStore{

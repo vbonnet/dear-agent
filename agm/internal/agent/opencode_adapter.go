@@ -188,14 +188,14 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
-	if err := validatePastedShellValues(metadata.WorkingDir); err != nil {
-		return fmt.Errorf("invalid resume metadata: %w", err)
-	}
 
 	// 2. Check if tmux session exists
 	exists, err := tmux.HasSession(metadata.TmuxName)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
+	}
+	if err := validateOpenCodeResume(exists, metadata.WorkingDir); err != nil {
+		return err
 	}
 
 	// 3. If tmux session doesn't exist, recreate it
@@ -226,6 +226,16 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 		}
 	}
 
+	return nil
+}
+
+func validateOpenCodeResume(existingSession bool, workdir string) error {
+	if existingSession {
+		return nil
+	}
+	if err := validatePastedShellValues(workdir); err != nil {
+		return fmt.Errorf("invalid resume metadata: %w", err)
+	}
 	return nil
 }
 

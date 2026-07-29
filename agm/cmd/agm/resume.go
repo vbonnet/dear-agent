@@ -1199,7 +1199,12 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		preparedLaunch = &launch
 		fullCmd = launch.Command
 	default:
-		fullCmd = fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(health.WorktreePath))
+		launch, err := ops.PrepareFallbackResumeCommand(health.WorktreePath)
+		if err != nil {
+			return err
+		}
+		preparedLaunch = &launch
+		fullCmd = launch.Command
 		ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
 	}
 	launch := ops.HarnessLaunchCommand{Command: fullCmd}
