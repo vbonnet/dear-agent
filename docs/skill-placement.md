@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-07-22 -->
+<!-- Last audited at: 2026-07-28 -->
 
 # Skill Placement — which repo owns a skill, and how it reaches a session
 
@@ -115,6 +115,19 @@ re-installing the plugin and restarting the harness.
 | writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
 | a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |
+
+### Research-pipeline workflow boundary
+
+Placement in dear-agent does not make Wayfinder the skill's decomposition
+engine. The research pipeline owns its decomposition contract and creates every
+execution unit through the configured canonical Beads store. Wayfinder's PLAN
+phase records a project plan; its Beads adapter creates project tracking
+identity and does not turn that plan into sized, dependency-linked tasks.
+
+Wayfinder is an optional downstream workflow for an execution unit whose scope
+justifies the full SDLC. When used, its status and history artifacts follow the
+repository routing policy into the configured Engram research store; they do
+not make the temporal research or run record living dear-agent documentation.
 
 ---
 
