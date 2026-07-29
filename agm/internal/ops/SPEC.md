@@ -233,6 +233,10 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
 
+**OPS-48** If `Sweep` is asked to execute without a caller-confirmed active-session set, then the system shall return `ErrActiveSessionsUnknown` before discovering or removing any worktree.
+
+**OPS-49** When `Sweep` runs in dry-run mode without a caller-confirmed active-session set, the system shall still classify every worktree and shall remove nothing.
+
 ---
 
 ## Key Invariants

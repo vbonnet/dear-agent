@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 	"github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
 )
@@ -42,16 +43,10 @@ func skipUnlessBwrapFunctional(t *testing.T) {
 
 func commitBubblewrapFixtureRepo(t *testing.T, dir string) {
 	t.Helper()
-	commands := [][]string{
-		{"init", "-q", "-b", "main", dir},
-		{"-C", dir, "add", "-A"},
-		{"-C", dir, "-c", "user.name=AGM Test", "-c", "user.email=agm-test@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture"},
-	}
-	for _, args := range commands {
-		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
-		}
-	}
+	gittest.Run(t, "", "init", "-q", "-b", "main", dir)
+	gittest.HardenRepo(t, dir)
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "-c", "user.name=AGM Test", "-c", "user.email=agm-test@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture")
 }
 
 // TestBubblewrap_E2E tests end-to-end Bubblewrap lifecycle

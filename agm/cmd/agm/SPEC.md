@@ -121,6 +121,12 @@ Provide a production-ready CLI that:
 
 **CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; after initial ID, name, tmux-name, or conversation-UUID resolution, preview and execution shall address the same stable AGM session ID so aliases and concurrent renames cannot redirect or invalidate the operation; active asynchronous execution shall carry that stable ID separately from the resolved tmux identity across the detached reaper boundary; active and stopped `--async` validation shall remain enforced, both text and JSON output shall name the exact resolved target, successful archive and restore guidance shall use the resolved session identity rather than the original alias, and JSON previews shall honor the global `--fields` projection contract.
 
+**CLI-46** If `agm worktree sweep --execute` cannot query the complete active-session set, then the system shall fail the command without removing any worktree and shall name the failed lookup and the dry-run alternative.
+
+**CLI-47** When `agm worktree sweep` runs without `--execute` and the complete active-session lookup fails, the system shall classify and report normally and shall warn that `--execute` would refuse to run.
+
+**CLI-48** When destructive worktree maintenance scans repositories across the shared worktree base, the system shall aggregate active lifecycle records from every enabled configured workspace store and shall refuse execution if any configured store cannot be queried.
+
 ## Requirements
 
 ### Functional Requirements

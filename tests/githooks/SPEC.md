@@ -20,6 +20,8 @@
 
 **GITHOOK-06** When optional tools, remotes, manifests, or tracked beads are absent, the system shall complete as a no-op instead of blocking the merge lifecycle.
 
+**GITHOOK-07** When a post-merge hook runs in a repository outside every managed root, the system shall complete without invoking any maintenance stage.
+
 ## Test Traceability
 
 - Package tests: `tests/githooks/post_merge_test.go`

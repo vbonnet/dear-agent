@@ -2,34 +2,26 @@ package stophook
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // initRepo creates an empty git repo at dir with a known identity and an
 // initial commit so branch / log / status commands behave deterministically.
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
-	mustRun(t, dir, "git", "init", "-q", "--initial-branch=main")
-	mustRun(t, dir, "git", "config", "user.email", "test@example.com")
-	mustRun(t, dir, "git", "config", "user.name", "Test User")
-	mustRun(t, dir, "git", "config", "commit.gpgsign", "false")
+	gittest.Run(t, dir, "init", "-q", "--initial-branch=main")
+	gittest.Run(t, dir, "config", "user.email", "test@example.com")
+	gittest.Run(t, dir, "config", "user.name", "Test User")
+	gittest.Run(t, dir, "config", "commit.gpgsign", "false")
 	if err := writeFile(filepath.Join(dir, "README.md"), "init\n"); err != nil {
 		t.Fatalf("write README: %v", err)
 	}
-	mustRun(t, dir, "git", "add", "README.md")
-	mustRun(t, dir, "git", "commit", "-q", "-m", "init")
-}
-
-func mustRun(t *testing.T, dir, name string, args ...string) {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
-	}
+	gittest.Run(t, dir, "add", "README.md")
+	gittest.Run(t, dir, "commit", "-q", "-m", "init")
 }
 
 func writeFile(path, body string) error {
@@ -94,8 +86,8 @@ func TestGitUnpushedCommits_NoUpstream_NotAnError(t *testing.T) {
 func TestGitExtraBranches(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
-	mustRun(t, dir, "git", "branch", "feature-a")
-	mustRun(t, dir, "git", "branch", "feature-b")
+	gittest.Run(t, dir, "branch", "feature-a")
+	gittest.Run(t, dir, "branch", "feature-b")
 
 	extras, err := GitExtraBranches(dir)
 	if err != nil {

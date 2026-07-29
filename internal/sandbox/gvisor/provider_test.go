@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
@@ -263,9 +264,7 @@ func newLockedGVisorWorktree(t *testing.T) (repo, mergedDir, upperDir, workDir s
 	mergedDir = filepath.Join(workspace, "merged")
 	upperDir = filepath.Join(workspace, "upper")
 	workDir = filepath.Join(workspace, "work")
-	runGVisorGit(t, "", "init", "-q", "-b", "main", repo)
-	runGVisorGit(t, repo, "config", "user.name", "gVisor Test")
-	runGVisorGit(t, repo, "config", "user.email", "gvisor@example.invalid")
+	runGVisorGit(t, base, "init", "-q", "-b", "main", repo)
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("locked provider cleanup\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -285,15 +284,11 @@ func newLockedGVisorWorktree(t *testing.T) (repo, mergedDir, upperDir, workDir s
 func runGVisorGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	commandArgs := slices.Clone(args)
-	if dir != "" {
-		commandArgs = append([]string{"-C", dir}, commandArgs...)
-	}
-	cmd := exec.Command("git", commandArgs...)
-	out, err := cmd.CombinedOutput()
+	out, err := gittest.Output(t, dir, commandArgs...)
 	if err != nil {
-		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(string(out)))
+		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(out))
 	}
-	return string(out)
+	return out
 }
 
 func TestProvider_Validate_NotFound(t *testing.T) {

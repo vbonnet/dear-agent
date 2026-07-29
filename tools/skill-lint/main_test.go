@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestRunRepository(t *testing.T) {
@@ -68,7 +69,7 @@ func TestRunHelpSucceeds(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := gittest.Command(t, dir, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git failed: %v\n%s", err, output)
 	}

@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +106,282 @@ func TestDefaultConfig(t *testing.T) {
 
 	if config2.Host != "127.0.0.1" {
 		t.Errorf("Expected default host '127.0.0.1', got '%s'", config2.Host)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsIncludesEveryEnabledStore(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`version: 1
+default_workspace: personal
+workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+  - name: retired
+    enabled: false
+  - name: dormant
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigs()
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("configured stores = %d, want 2: %#v", len(configs), configs)
+	}
+	for index, want := range []string{"personal", "oss"} {
+		if configs[index].Workspace != want || configs[index].Database != want {
+			t.Errorf("config[%d] = workspace %q database %q, want %q/%q",
+				index, configs[index].Workspace, configs[index].Database, want, want)
+		}
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtUsesCustomRegistry(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+	})
+
+	configPath := t.TempDir() + "/custom-workspaces.yaml"
+	if err := os.WriteFile(configPath, []byte(`version: 1
+default_workspace: custom
+workspaces:
+  - name: custom
+    enabled: true
+  - name: api-only
+    enabled: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		switch key {
+		case "ENGRAM_TEST_MODE":
+			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "custom", true
+		case "DOLT_PORT":
+			return "3307", true
+		default:
+			return "", false
+		}
+	}
+
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigsAt: %v", err)
+	}
+	got := make(map[string]bool, len(configs))
+	for _, config := range configs {
+		got[config.Workspace] = true
+	}
+	for _, workspace := range []string{"custom", "api-only"} {
+		if !got[workspace] {
+			t.Errorf("custom registry omitted %q: %#v", workspace, got)
+		}
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtDoesNotRequireDefaultForEnabledRegistry(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigsAt: %v", err)
+	}
+	if len(configs) != 2 || configs[0].Workspace != "personal" || configs[1].Workspace != "oss" {
+		t.Fatalf("configured stores = %#v, want enabled personal and oss", configs)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsRejectsExplicitDatabaseAcrossWorkspaces(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`default_workspace: personal
+workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_DATABASE":         "agm_test",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	_, err := ConfiguredWorkspaceConfigs()
+	if err == nil || !strings.Contains(err.Error(), "cannot prove a complete cross-workspace") {
+		t.Fatalf("ConfiguredWorkspaceConfigs error = %v, want explicit-database isolation failure", err)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtResolvesPerWorkspaceDoltEndpoints(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+    dolt:
+      host: 127.0.0.1
+      port: "3307"
+  - name: oss
+    enabled: true
+    dolt:
+      host: dolt-oss.internal
+      port: "3308"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 2 || configs[0].Port != "3307" || configs[1].Port != "3308" || configs[1].Host != "dolt-oss.internal" {
+		t.Fatalf("workspace endpoints = %#v", configs)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtComposesSharedEndpointWithWorkspaceOverrides(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+    dolt:
+      database: personal_sessions
+  - name: oss
+    enabled: true
+    dolt:
+      host: dolt-oss.internal
+      database: oss_sessions
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"DOLT_PORT":             "3307",
+			"DOLT_PASSWORD":         "shared-secret",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("workspace endpoints = %#v, want 2", configs)
+	}
+	if got := configs[0]; got.Port != "3307" || got.Database != "personal_sessions" || got.Password != "shared-secret" {
+		t.Errorf("personal endpoint = %#v, want shared port/password plus personal database", got)
+	}
+	if got := configs[1]; got.Host != "dolt-oss.internal" || got.Port != "3307" || got.Database != "oss_sessions" || got.Password != "shared-secret" {
+		t.Errorf("oss endpoint = %#v, want host/database overrides plus shared port/password", got)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAllowsExplicitDatabaseForOneWorkspace(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_DATABASE":         "agm_test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigs()
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
+	}
+	if len(configs) != 1 || configs[0].Workspace != "personal" || configs[0].Database != "agm_test" {
+		t.Fatalf("configured stores = %#v, want personal/agm_test", configs)
 	}
 }
 

@@ -2,9 +2,10 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // initRepo creates a throwaway git repo with two commits and returns the repo
@@ -13,19 +14,12 @@ import (
 func initRepo(t *testing.T, secondFileContent string) (dir, base, head string) {
 	t.Helper()
 	dir = t.TempDir()
+	sandbox := gittest.Default(t)
 	run := func(args ...string) string {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-		return string(out)
+		return sandbox.Run(t, dir, args...)
 	}
 	run("init", "-q")
+	sandbox.HardenRepo(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -145,17 +139,9 @@ func TestRun_OversizeDiffWithOverridePasses(t *testing.T) {
 func TestGitMergeBase_ExcludesBaseOnlyChanges(t *testing.T) {
 	dir, base, _ := initRepo(t, "feature change\n")
 	chdir(t, dir)
+	sandbox := gittest.Default(t)
 	git := func(args ...string) string {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-		return string(out)
+		return sandbox.Run(t, dir, args...)
 	}
 	feature := trim(git("rev-parse", "HEAD"))
 	git("checkout", "-q", "-b", "base-advanced", base)
@@ -187,19 +173,12 @@ func TestGitMergeBase_ExcludesBaseOnlyChanges(t *testing.T) {
 // the protected SOURCE path to escalation scanning.
 func TestGitChangedPaths_IncludesRenameSource(t *testing.T) {
 	dir := t.TempDir()
+	sandbox := gittest.Default(t)
 	git := func(args ...string) string {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-		return string(out)
+		return sandbox.Run(t, dir, args...)
 	}
 	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
 	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}

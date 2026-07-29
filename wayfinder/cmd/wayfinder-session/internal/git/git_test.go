@@ -2,10 +2,11 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func setupGitRepo(t *testing.T) string {
@@ -14,25 +15,18 @@ func setupGitRepo(t *testing.T) string {
 	// Create temp directory
 	tmpDir := t.TempDir()
 
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("git init failed: %v", err)
-	}
+	// Initialize git repo (hermetically: no host hooks, no host config)
+	gittest.Run(t, tmpDir, "init")
+	// The package under test starts its own Git processes, so persist the
+	// sandbox hook path in this repository as well as applying it to setup.
+	gittest.HardenRepo(t, tmpDir)
 
-	// Configure git user (required for commits)
-	configUser := exec.Command("git", "config", "user.name", "Test User")
-	configUser.Dir = tmpDir
-	if err := configUser.Run(); err != nil {
-		t.Fatalf("git config user.name failed: %v", err)
-	}
-
-	configEmail := exec.Command("git", "config", "user.email", "test@example.com")
-	configEmail.Dir = tmpDir
-	if err := configEmail.Run(); err != nil {
-		t.Fatalf("git config user.email failed: %v", err)
-	}
+	// Configure git user (required for commits). The gittest sandbox already
+	// supplies an identity to the Git commands this file runs, but the package
+	// under test shells out to `git commit` with the ambient environment, so
+	// the identity also has to live in the repository's own config.
+	gittest.Run(t, tmpDir, "config", "user.name", "Test User")
+	gittest.Run(t, tmpDir, "config", "user.email", "test@example.com")
 
 	return tmpDir
 }
@@ -128,7 +122,7 @@ func TestIsGitWorktree(t *testing.T) {
 			name: "bare repository",
 			setup: func() string {
 				dir := t.TempDir()
-				cmd := exec.Command("git", "init", "--bare", dir)
+				cmd := gittest.Command(t, "", "init", "--bare", dir)
 				if err := cmd.Run(); err != nil {
 					t.Fatalf("git init --bare: %v", err)
 				}
@@ -157,13 +151,11 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if err := os.WriteFile(readmePath, []byte("# Test Project\n"), 0644); err != nil {
 		t.Fatalf("failed to write README: %v", err)
 	}
-	addCmd := exec.Command("git", "add", "README.md")
-	addCmd.Dir = repoDir
+	addCmd := gittest.Command(t, repoDir, "add", "README.md")
 	if err := addCmd.Run(); err != nil {
 		t.Fatalf("git add README failed: %v", err)
 	}
-	commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
-	commitCmd.Dir = repoDir
+	commitCmd := gittest.Command(t, repoDir, "commit", "-m", "Initial commit")
 	if err := commitCmd.Run(); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
@@ -184,7 +176,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "user-notes.md"), []byte("private notes\n"), 0644); err != nil {
 		t.Fatalf("failed to write unrelated file: %v", err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatalf("stage unrelated file: %v", err)
 	}
 
@@ -195,8 +187,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 
 	// Verify commit was created
-	logCmd := exec.Command("git", "log", "--format=%s", "-n", "1")
-	logCmd.Dir = repoDir
+	logCmd := gittest.Command(t, repoDir, "log", "--format=%s", "-n", "1")
 	output, err := logCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log failed: %v", err)
@@ -209,8 +200,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 
 	// Verify commit message body
-	msgCmd := exec.Command("git", "log", "--format=%B", "-n", "1")
-	msgCmd.Dir = repoDir
+	msgCmd := gittest.Command(t, repoDir, "log", "--format=%B", "-n", "1")
 	msgOutput, err := msgCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log failed: %v", err)
@@ -226,7 +216,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if !strings.Contains(commitMsg, "Wayfinder-Outcome: success") {
 		t.Errorf("commit message missing outcome metadata: %q", commitMsg)
 	}
-	showCmd := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=")
+	showCmd := gittest.Command(t, repoDir, "show", "--name-only", "--format=")
 	showOutput, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git show: %v", err)
@@ -238,7 +228,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if strings.Contains(committed, "user-notes.md") {
 		t.Errorf("unrelated staged file was swept into phase commit:\n%s", committed)
 	}
-	stagedOutput, err := exec.Command("git", "-C", repoDir, "diff", "--cached", "--name-only").CombinedOutput()
+	stagedOutput, err := gittest.Command(t, repoDir, "diff", "--cached", "--name-only").CombinedOutput()
 	if err != nil {
 		t.Fatalf("git diff --cached: %v", err)
 	}
@@ -252,10 +242,10 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test Project\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "README.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "README.md").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -271,14 +261,14 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := New(repoDir).CommitPhaseCompletion("DESIGN", "success", "Reviewed design documents"); err != nil {
 		t.Fatalf("CommitPhaseCompletion(DESIGN): %v", err)
 	}
-	showOutput, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=").CombinedOutput()
+	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,10 +288,10 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "README.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "README.md").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial").Run(); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
@@ -314,13 +304,13 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := New(repoDir).CommitRewind("BUILD", "DESIGN"); err != nil {
 		t.Fatalf("CommitRewind: %v", err)
 	}
-	showOutput, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=").CombinedOutput()
+	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,8 +344,8 @@ func TestCommitSessionInit_CommitsStatusFile(t *testing.T) {
 
 	// Seed the repo with an initial commit (git requires a HEAD before committing).
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
-	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+	gittest.Command(t, repoDir, "add", "README.md").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run()
 
 	// Write the STATUS file (mirrors what `wayfinder session start` does).
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
@@ -365,7 +355,7 @@ func TestCommitSessionInit_CommitsStatusFile(t *testing.T) {
 	}
 
 	// Commit subject must contain the project name.
-	out, err := exec.Command("git", "-C", repoDir, "log", "--format=%s", "-n", "1").Output()
+	out, err := gittest.Command(t, repoDir, "log", "--format=%s", "-n", "1").Output()
 	if err != nil {
 		t.Fatalf("git log failed: %v", err)
 	}
@@ -374,7 +364,7 @@ func TestCommitSessionInit_CommitsStatusFile(t *testing.T) {
 	}
 
 	// Worktree must be clean after CommitSessionInit so start-phase CHARTER succeeds.
-	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	statusOut, err := gittest.Command(t, repoDir, "status", "--porcelain").Output()
 	if err != nil {
 		t.Fatalf("git status failed: %v", err)
 	}
@@ -390,8 +380,8 @@ func TestCommitSessionInit_NothingToCommit(t *testing.T) {
 	g := New(repoDir)
 
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", ".").Run()
-	exec.Command("git", "-C", repoDir, "commit", "-m", "Add status").Run()
+	gittest.Command(t, repoDir, "add", ".").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "Add status").Run()
 
 	if err := g.CommitSessionInit("my-project"); err != nil {
 		t.Errorf("CommitSessionInit() with nothing to commit should not error, got: %v", err)
@@ -407,8 +397,8 @@ func TestCommitSessionInit_MissingStatusFile(t *testing.T) {
 	// Bootstrap git (git requires a HEAD for non-initial commits, but this test
 	// never reaches the commit path so no HEAD is needed).
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
-	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+	gittest.Command(t, repoDir, "add", "README.md").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run()
 
 	// No STATUS file written — CommitSessionInit should be a silent no-op.
 	if err := g.CommitSessionInit("my-project"); err != nil {
@@ -428,8 +418,8 @@ func TestCommitPhaseStart(t *testing.T) {
 	if err := os.WriteFile(readmePath, []byte("# Test Project\n"), 0644); err != nil {
 		t.Fatalf("failed to write README: %v", err)
 	}
-	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
-	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+	gittest.Command(t, repoDir, "add", "README.md").Run()
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
 		t.Fatalf("initial commit failed: %v", err)
 	}
 
@@ -446,7 +436,7 @@ func TestCommitPhaseStart(t *testing.T) {
 	}
 
 	// Verify commit subject
-	out, err := exec.Command("git", "-C", repoDir, "log", "--format=%s", "-n", "1").Output()
+	out, err := gittest.Command(t, repoDir, "log", "--format=%s", "-n", "1").Output()
 	if err != nil {
 		t.Fatalf("git log failed: %v", err)
 	}
@@ -455,7 +445,7 @@ func TestCommitPhaseStart(t *testing.T) {
 	}
 
 	// Verify both marker files are tracked (not untracked)
-	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	statusOut, err := gittest.Command(t, repoDir, "status", "--porcelain").Output()
 	if err != nil {
 		t.Fatalf("git status failed: %v", err)
 	}
@@ -482,8 +472,8 @@ func TestCommitPhaseStart_NothingToCommit(t *testing.T) {
 	// Create initial commit with the marker files already committed.
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", ".").Run()
-	exec.Command("git", "-C", repoDir, "commit", "-m", "Add wayfinder files").Run()
+	gittest.Command(t, repoDir, "add", ".").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "Add wayfinder files").Run()
 
 	// CommitPhaseStart when nothing has changed should succeed silently.
 	if err := g.CommitPhaseStart("PROBLEM"); err != nil {
@@ -500,13 +490,13 @@ func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
 
 	// Bootstrap the repo with an initial commit.
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
-	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+	gittest.Command(t, repoDir, "add", "README.md").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run()
 
 	// Stage a user file that should NOT be swept up by CommitPhaseStart.
 	userFile := filepath.Join(repoDir, "my-deliverable.md")
 	os.WriteFile(userFile, []byte("# Work in progress\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", "my-deliverable.md").Run()
+	gittest.Command(t, repoDir, "add", "my-deliverable.md").Run()
 
 	// Write and let CommitPhaseStart commit only the marker files.
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
@@ -517,7 +507,7 @@ func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
 	}
 
 	// The user's staged file should still be in the index (not committed).
-	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	statusOut, err := gittest.Command(t, repoDir, "status", "--porcelain").Output()
 	if err != nil {
 		t.Fatalf("git status failed: %v", err)
 	}
@@ -526,7 +516,7 @@ func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
 	}
 
 	// Verify only the marker files appear in the last commit.
-	showOut, err := exec.Command("git", "-C", repoDir, "show", "--stat", "--format=", "HEAD").Output()
+	showOut, err := gittest.Command(t, repoDir, "show", "--stat", "--format=", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("git show failed: %v", err)
 	}
@@ -545,8 +535,8 @@ func TestCommitPhaseStart_LeavesWorktreeCleanForNextTransition(t *testing.T) {
 
 	// Bootstrap: initial commit so git has a HEAD.
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
-	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
-	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+	gittest.Command(t, repoDir, "add", "README.md").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run()
 
 	// Simulate what start-phase does: write marker files then auto-commit.
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("status: in_progress\n"), 0644)
@@ -591,11 +581,9 @@ func TestCommitPhaseCompletion_NothingToCommit(t *testing.T) {
 	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
 		t.Fatalf("failed to write README: %v", err)
 	}
-	addCmd := exec.Command("git", "add", "README.md")
-	addCmd.Dir = repoDir
+	addCmd := gittest.Command(t, repoDir, "add", "README.md")
 	addCmd.Run()
-	commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
-	commitCmd.Dir = repoDir
+	commitCmd := gittest.Command(t, repoDir, "commit", "-m", "Initial commit")
 	commitCmd.Run()
 
 	// Create and commit wayfinder files
@@ -603,11 +591,9 @@ func TestCommitPhaseCompletion_NothingToCommit(t *testing.T) {
 	if err := os.WriteFile(statusPath, []byte("# Status\n"), 0644); err != nil {
 		t.Fatalf("failed to write STATUS: %v", err)
 	}
-	addCmd2 := exec.Command("git", "add", "WAYFINDER-STATUS.md")
-	addCmd2.Dir = repoDir
+	addCmd2 := gittest.Command(t, repoDir, "add", "WAYFINDER-STATUS.md")
 	addCmd2.Run()
-	commitCmd2 := exec.Command("git", "commit", "-m", "Add wayfinder files")
-	commitCmd2.Dir = repoDir
+	commitCmd2 := gittest.Command(t, repoDir, "commit", "-m", "Add wayfinder files")
 	commitCmd2.Run()
 
 	// Try to commit again without changes (should not error)
@@ -675,11 +661,9 @@ func TestGetCommitHash(t *testing.T) {
 	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
 		t.Fatalf("failed to write README: %v", err)
 	}
-	addCmd := exec.Command("git", "add", "README.md")
-	addCmd.Dir = repoDir
+	addCmd := gittest.Command(t, repoDir, "add", "README.md")
 	addCmd.Run()
-	commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
-	commitCmd.Dir = repoDir
+	commitCmd := gittest.Command(t, repoDir, "commit", "-m", "Initial commit")
 	if err := commitCmd.Run(); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
@@ -827,8 +811,8 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				// Create initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 				return repoDir
 			},
 			wantFiles: []string{},
@@ -841,8 +825,8 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				// Create initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Create uncommitted deliverable files
 				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter\n"), 0644)
@@ -861,8 +845,8 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				// Initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Create .wayfinder directory with files (should be ignored)
 				wayfinderDir := filepath.Join(repoDir, ".wayfinder")
@@ -884,8 +868,8 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				// Initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Create .wayfinder directory with files (should all be ignored)
 				wayfinderDir := filepath.Join(repoDir, ".wayfinder")
@@ -903,8 +887,8 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				repoDir := setupGitRepo(t)
 				// Create and commit initial files
 				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter revision one\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Modify committed file
 				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter v2\n"), 0644)
@@ -980,8 +964,8 @@ func TestGetModifiedSourceFiles(t *testing.T) {
 				// Create initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 				return repoDir, repoDir
 			},
 			wantFiles: []string{},
@@ -994,8 +978,8 @@ func TestGetModifiedSourceFiles(t *testing.T) {
 				// Create initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Create project dir subdirectory
 				projectDir := filepath.Join(repoDir, "wf", "my-project")
@@ -1017,8 +1001,8 @@ func TestGetModifiedSourceFiles(t *testing.T) {
 				// Initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Create project dir
 				projectDir := filepath.Join(repoDir, "wf", "my-project")
@@ -1040,8 +1024,8 @@ func TestGetModifiedSourceFiles(t *testing.T) {
 				// Initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Modify markdown file (not source code)
 				mdFile := filepath.Join(repoDir, "PLAN.md")
@@ -1059,8 +1043,8 @@ func TestGetModifiedSourceFiles(t *testing.T) {
 				// Initial commit
 				readmePath := filepath.Join(repoDir, "README.md")
 				os.WriteFile(readmePath, []byte("# Test\n"), 0644)
-				exec.Command("git", "-C", repoDir, "add", ".").Run()
-				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
+				gittest.Command(t, repoDir, "add", ".").Run()
+				gittest.Command(t, repoDir, "commit", "-m", "Initial").Run()
 
 				// Modify multiple source files
 				os.WriteFile(filepath.Join(repoDir, "main.go"), []byte("package main\n"), 0644)

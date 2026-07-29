@@ -2,13 +2,13 @@ package bubblewrap
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // This file extends provider_test.go with coverage of the remaining
@@ -21,9 +21,8 @@ import (
 // enough -- the repo must be genuine.
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
-	cmd := exec.Command("git", "init", "-q", dir)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "git init failed: %s", string(out))
+	out, err := gittest.Output(t, dir, "init", "-q", dir)
+	require.NoError(t, err, "git init failed: %s", out)
 }
 
 func writeFile(t *testing.T, path, content string) {

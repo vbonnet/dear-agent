@@ -15,6 +15,7 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 const sandboxProviderFeaturePath = "agm/test/bdd/features/sandbox_provider_guardrails.feature"
@@ -236,7 +237,7 @@ func captureInvokingRepositoryWorktrees(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	raw, err := runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	raw, err := runSandboxProviderGit(ctx, 10*time.Second, "worktree", "list", "--porcelain")
 	if err != nil {
 		return err
 	}
@@ -256,7 +257,7 @@ func runWayfinderSandboxIsolationRegressions(ctx context.Context) error {
 		"-run", `^Test(CreateSandbox|ListSandboxes|CleanupSandbox|BasicSandboxOperationsDoNotMutateHostRepository|SandboxGitWorktreeLifecycleIsIsolated)$`,
 		"-count=1", "-timeout=90s",
 	)
-	raw, err := runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	raw, err := runSandboxProviderGit(ctx, 10*time.Second, "worktree", "list", "--porcelain")
 	if err != nil {
 		state.inventoryErr = err
 		return err
@@ -383,6 +384,17 @@ func runSandboxProviderCommand(parent context.Context, timeout time.Duration, na
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = packageSpecBDDRepoRoot()
+	return runSandboxProviderCmd(ctx, timeout, name, args, cmd)
+}
+
+func runSandboxProviderGit(parent context.Context, timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	cmd := gittest.CommandContext(ctx, packageSpecBDDRepoRoot(), args...)
+	return runSandboxProviderCmd(ctx, timeout, "git", args, cmd)
+}
+
+func runSandboxProviderCmd(ctx context.Context, timeout time.Duration, name string, args []string, cmd *exec.Cmd) (string, error) {
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

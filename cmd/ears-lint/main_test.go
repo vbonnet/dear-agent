@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func writeSpec(t *testing.T, dir, name, body string) string {
@@ -101,8 +101,7 @@ func TestRun_DirectoryRecursion(t *testing.T) {
 func TestExpandPathsHonorsRepositoryIgnoreAndGeneratedPolicy(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cmd := exec.Command("git", "init", "-q")
-	cmd.Dir = root
+	cmd := gittest.Command(t, root, "init", "-q")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}

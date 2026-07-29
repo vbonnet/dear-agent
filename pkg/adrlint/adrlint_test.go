@@ -3,11 +3,12 @@ package adrlint
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestCheckRepositoryClean(t *testing.T) {
@@ -508,11 +509,7 @@ func writeADRFile(t *testing.T, root, relative, content string) {
 
 func gitADR(t *testing.T, repo string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repo
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
+	gittest.Run(t, repo, args...)
 }
 
 func hasReason(violations []Violation, fragment string) bool {

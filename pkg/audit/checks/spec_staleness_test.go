@@ -3,7 +3,6 @@ package checks
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,29 +10,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/pkg/audit"
 )
 
 // newGitRepo initialises a bare-minimum git repo in t.TempDir() and returns
-// its root. It sets a throwaway user so every host can commit without a
-// pre-existing config.
+// its root. The gittest sandbox supplies a throwaway user so every host can
+// commit without a pre-existing config.
 func newGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test",
-		)
-		out, err := cmd.CombinedOutput()
+		out, err := gittest.Output(t, dir, args...)
 		require.NoError(t, err, "git %s: %s", strings.Join(args, " "), out)
 	}
 	run("init", "-b", "main")
-	run("config", "user.email", "test@test")
-	run("config", "user.name", "test")
 	return dir
 }
 
@@ -46,13 +38,7 @@ func writeAndCommit(t *testing.T, repo, relPath, content, msg string) {
 
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repo
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test",
-		)
-		out, err := cmd.CombinedOutput()
+		out, err := gittest.Output(t, repo, args...)
 		require.NoError(t, err, "git %s: %s", strings.Join(args, " "), out)
 	}
 	run("add", relPath)
