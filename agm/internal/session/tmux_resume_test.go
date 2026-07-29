@@ -19,6 +19,38 @@ func TestRealTmuxResumeReadinessReturnsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestOpenCodeResumeReadinessRequiresComposer(t *testing.T) {
+	called := false
+	result, err := waitForOpenCodeResumeReady(
+		t.Context(),
+		"opencode-resume",
+		time.Minute,
+		func(_ context.Context, sessionName, harness string, timeout time.Duration) error {
+			called = true
+			if sessionName != "opencode-resume" || harness != "opencode-cli" || timeout != time.Minute {
+				t.Fatalf("readiness wait = (%q, %q, %v)", sessionName, harness, timeout)
+			}
+			return nil
+		},
+	)
+	if err != nil || len(result.Warnings) != 0 || !called {
+		t.Fatalf("waitForOpenCodeResumeReady() = (%#v, %v), called=%v", result, err, called)
+	}
+}
+
+func TestOpenCodeResumeReadinessFailsClosed(t *testing.T) {
+	wantErr := errors.New("composer unavailable")
+	_, err := waitForOpenCodeResumeReady(
+		t.Context(),
+		"opencode-resume",
+		time.Minute,
+		func(context.Context, string, string, time.Duration) error { return wantErr },
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("waitForOpenCodeResumeReady() error = %v, want %v", err, wantErr)
+	}
+}
+
 func TestCodexResumeReadinessRequiresProcessThenComposer(t *testing.T) {
 	var calls []string
 	result, err := waitForCodexResumeReady(

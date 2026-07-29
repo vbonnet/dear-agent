@@ -165,9 +165,23 @@ func (t *RealTmux) WaitForResumeReady(ctx context.Context, sessionName, harness,
 			return ResumeReadiness{}, fmt.Errorf("pi exact resume did not reach managed readiness: %w", err)
 		}
 		return ResumeReadiness{}, nil
+	case "opencode-cli":
+		return waitForOpenCodeResumeReady(ctx, sessionName, timeout, tmux.WaitForExpectedHarnessReady)
 	default:
 		return ResumeReadiness{}, nil
 	}
+}
+
+func waitForOpenCodeResumeReady(
+	ctx context.Context,
+	sessionName string,
+	timeout time.Duration,
+	waitForHarness func(context.Context, string, string, time.Duration) error,
+) (ResumeReadiness, error) {
+	if err := waitForHarness(ctx, sessionName, "opencode-cli", timeout); err != nil {
+		return ResumeReadiness{}, fmt.Errorf("opencode composer did not become ready: %w", err)
+	}
+	return ResumeReadiness{}, nil
 }
 
 func waitForCodexResumeReady(

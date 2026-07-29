@@ -172,7 +172,7 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 		addResumeWarning(result, req, err.Error())
 	}
 
-	health := classifyResumeHealth(tmuxAdapter, m, req.ManifestPath)
+	health := classifyResumeHealth(ctx, tmuxAdapter, m, req.ManifestPath)
 	result.Health = health
 	result.TmuxSessionName = health.TmuxSessionName
 	emitResumeEvent(req, ResumeEventHealthClassified, "")
@@ -306,7 +306,7 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 	return result, nil
 }
 
-func classifyResumeHealth(tmuxAdapter session.TmuxInterface, m *manifest.Manifest, manifestPath string) ResumeSessionHealth {
+func classifyResumeHealth(ctx context.Context, tmuxAdapter session.TmuxInterface, m *manifest.Manifest, manifestPath string) ResumeSessionHealth {
 	sessionName := m.Tmux.SessionName
 	if sessionName == "" {
 		sessionName = tmux.SanitizeSessionName(m.Name)
@@ -331,7 +331,13 @@ func classifyResumeHealth(tmuxAdapter session.TmuxInterface, m *manifest.Manifes
 	} else {
 		health.WorktreeExists = true
 	}
-	exists, err := tmuxAdapter.HasSession(sessionName)
+	checker, ok := tmuxAdapter.(session.StrictSessionExistenceChecker)
+	if !ok {
+		health.Issues = append(health.Issues, "Tmux adapter does not support strict session existence checks")
+		health.CanResume = false
+		return health
+	}
+	exists, err := checker.HasSessionStrict(ctx, sessionName)
 	if err != nil {
 		health.Issues = append(health.Issues, fmt.Sprintf("Failed to check tmux session: %v", err))
 		health.CanResume = false

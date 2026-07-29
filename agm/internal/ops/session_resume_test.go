@@ -51,6 +51,10 @@ func (f *resumeTestTmux) HasSession(string) (bool, error) {
 	return f.exists, f.hasSessionErr
 }
 
+func (f *resumeTestTmux) HasSessionStrict(context.Context, string) (bool, error) {
+	return f.exists, f.hasSessionErr
+}
+
 func (f *resumeTestTmux) ListSessions() ([]string, error) {
 	return nil, nil
 }
