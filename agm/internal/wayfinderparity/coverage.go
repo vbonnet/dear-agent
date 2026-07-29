@@ -24,6 +24,14 @@ type HarnessSurface struct {
 	StatusSurface    string
 }
 
+var expectedDiscoverySurfaces = map[string]string{
+	"claude-code":  "native Claude plugin root skill",
+	"codex-cli":    ".codex/skills/wayfinder/SKILL.md native skill discovery",
+	"agy":          "neutral marketplace plus AGENTS.md fallback",
+	"opencode-cli": ".opencode/skills/wayfinder/SKILL.md native skill discovery",
+	"pi-cli":       ".pi/settings.json native skill discovery plus AGENTS.md",
+}
+
 // SurfaceForHarness returns the Wayfinder surface for a harness.
 func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 	switch agent.NormalizeHarnessName(harness) {
@@ -37,21 +45,21 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 	case "codex-cli":
 		return HarnessSurface{
 			Harness:          "codex-cli",
-			DiscoverySurface: "neutral marketplace plus AGENTS.md/SKILL fallback",
+			DiscoverySurface: expectedDiscoverySurfaces["codex-cli"],
 			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
 	case "agy":
 		return HarnessSurface{
 			Harness:          "agy",
-			DiscoverySurface: "neutral marketplace plus AGENTS.md/SKILL fallback",
+			DiscoverySurface: expectedDiscoverySurfaces["agy"],
 			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
 	case "opencode-cli":
 		return HarnessSurface{
 			Harness:          "opencode-cli",
-			DiscoverySurface: "neutral marketplace plus AGENTS.md/SKILL fallback",
+			DiscoverySurface: expectedDiscoverySurfaces["opencode-cli"],
 			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
@@ -91,6 +99,9 @@ func ValidateActiveHarnessSurfaces() error {
 		if surface.DiscoverySurface == "" || surface.ExecutionSurface == "" || surface.StatusSurface == "" {
 			return fmt.Errorf("active harness %q has incomplete Wayfinder surface: %+v", harness, surface)
 		}
+		if expected := expectedDiscoverySurfaces[harness]; surface.DiscoverySurface != expected {
+			return fmt.Errorf("active harness %q discovery surface = %q, want %q", harness, surface.DiscoverySurface, expected)
+		}
 	}
 	return nil
 }
@@ -103,6 +114,8 @@ func ValidateAssets(root string) error {
 		"wayfinder/.claude-plugin/plugin.json",
 		"wayfinder/ARCHITECTURE.md",
 		"wayfinder/cmd/wayfinder-session/SPEC.md",
+		".codex/skills/wayfinder/SKILL.md",
+		".opencode/skills/wayfinder/SKILL.md",
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			return fmt.Errorf("wayfinder asset %s: %w", rel, err)

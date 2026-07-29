@@ -39,6 +39,9 @@ func TestActiveHarnessesHaveWayfinderSurfaces(t *testing.T) {
 		if surface.ExecutionSurface == "" || surface.StatusSurface == "" {
 			t.Errorf("surface for %q is incomplete: %+v", harness, surface)
 		}
+		if got, want := surface.DiscoverySurface, expectedDiscoverySurfaces[harness]; got != want {
+			t.Errorf("surface discovery for %q = %q, want %q", harness, got, want)
+		}
 	}
 }
 

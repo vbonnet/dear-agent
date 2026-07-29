@@ -149,9 +149,10 @@ interface.** Check its `AGENTS.md`/equivalent first — e.g. dear-agent itself
 requires the explicit form
 `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>`
 for every invocation; use that exact form here. For a repo with no documented
-policy, respect the operator's configured database (`BEADS_DIR`, a
-`-C <path>` override) instead of hardcoding a path. That fallback is for the
-*absence* of repo policy, not license to skip required flags.
+policy, respect the operator's configured database through a supported
+`--db <path>` or `-C <path>` database-selection override on the canonical
+invocation instead of hardcoding a path. That fallback is for the *absence*
+of repo policy, not license to skip required flags.
 
 For a small decomposition, create the handful of beads directly. For a large
 decomposition, still create the beads directly, then encode its phases,
