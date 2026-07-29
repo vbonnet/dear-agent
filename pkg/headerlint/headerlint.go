@@ -182,6 +182,7 @@ func checkData(path string, data []byte) []Violation {
 	var htmlBlocks htmlBlockState
 	var inlineCode inlineCodeSpanState
 	paragraphOpen := false
+	var paragraphContainer fenceContainerContext
 	for i, line := range lines {
 		lineNo := i + 1
 		if fences.consume(line, paragraphOpen) {
@@ -190,14 +191,17 @@ func checkData(path string, data []byte) []Violation {
 			// or retain span state across it.
 			inlineCode = inlineCodeSpanState{}
 			paragraphOpen = false
+			paragraphContainer = fenceContainerContext{}
 			continue
 		}
 		if htmlBlocks.consume(line) {
 			inlineCode = inlineCodeSpanState{}
 			paragraphOpen = false
+			paragraphContainer = fenceContainerContext{}
 			continue
 		}
-		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode)
+		openerContainer := inlineOpenerContainer(line, paragraphOpen, paragraphContainer)
+		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode, openerContainer)
 		if matchesContainerATXHeading(scannable, headingH2Plus, paragraphOpen) ||
 			matchesListContinuationATXHeading(scannable, headingH2Plus, fences.listContinuation) {
 			break
@@ -209,8 +213,31 @@ func checkData(path string, data []byte) []Violation {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
 		paragraphOpen = lineLeavesParagraphOpen(scannable)
+		if paragraphOpen {
+			paragraphContainer = openerContainer
+		} else {
+			paragraphContainer = fenceContainerContext{}
+		}
 	}
 	return violations
+}
+
+func inlineOpenerContainer(
+	line string,
+	paragraphOpen bool,
+	paragraphContainer fenceContainerContext,
+) fenceContainerContext {
+	lineContainer := parseFenceContainerContext(line)
+	if paragraphOpen &&
+		lineContainer.quoteDepth == 0 && !lineContainer.hasList &&
+		(paragraphContainer.quoteDepth != 0 || paragraphContainer.hasList) &&
+		!inlineCodeBlockBoundary(line, paragraphContainer) {
+		// A container paragraph may continue lazily without repeating its
+		// quote/list prefix. An inline-code opener on that lazy line still
+		// belongs to the paragraph's original container.
+		return paragraphContainer
+	}
+	return lineContainer
 }
 
 type fenceState struct {
@@ -447,7 +474,12 @@ type inlineCodeSpanState struct {
 	container       fenceContainerContext
 }
 
-func stripInlineCodeSpans(line string, followingLines []string, state *inlineCodeSpanState) string {
+func stripInlineCodeSpans(
+	line string,
+	followingLines []string,
+	state *inlineCodeSpanState,
+	openerContainer fenceContainerContext,
+) string {
 	masked := []byte(line)
 	cursor, fullyMasked := maskCarriedInlineCodeSpan(line, masked, state)
 	if fullyMasked {
@@ -465,8 +497,7 @@ func stripInlineCodeSpans(line string, followingLines []string, state *inlineCod
 		runLength := runEnd - opener
 		closer := matchingBacktickRun(line, runEnd, runLength)
 		if closer < 0 {
-			container := parseFenceContainerContext(line)
-			if !hasMatchingBacktickRun(followingLines, runLength, container) {
+			if !hasMatchingBacktickRun(followingLines, runLength, openerContainer) {
 				// Without a closer before the inline block ends, CommonMark
 				// treats the opener as literal text.
 				opener = runEnd
@@ -476,7 +507,7 @@ func stripInlineCodeSpans(line string, followingLines []string, state *inlineCod
 				masked[index] = ' '
 			}
 			state.delimiterLength = runLength
-			state.container = container
+			state.container = openerContainer
 			break
 		}
 		spanEnd := closer + runLength
@@ -652,9 +683,15 @@ func isInterruptingHTMLBlockStart(line string, container fenceContainerContext) 
 type htmlBlockState struct {
 	endMarker  string
 	untilBlank bool
+	container  fenceContainerContext
 }
 
 func (s *htmlBlockState) consume(line string) bool {
+	if (s.endMarker != "" || s.untilBlank) && !s.container.contains(line) {
+		// Raw HTML nested in a quote or list cannot outlive that Markdown
+		// container. Reprocess the first line outside it as ordinary Markdown.
+		*s = htmlBlockState{}
+	}
 	if s.endMarker != "" {
 		if strings.Contains(strings.ToLower(line), s.endMarker) {
 			*s = htmlBlockState{}
@@ -681,11 +718,13 @@ func (s *htmlBlockState) consume(line string) bool {
 	if endMarker != "" {
 		if !strings.Contains(lower, endMarker) {
 			s.endMarker = endMarker
+			s.container = parseFenceContainerContext(line)
 		}
 		return true
 	}
 	if htmlBlockTag.MatchString(content) {
 		s.untilBlank = true
+		s.container = parseFenceContainerContext(line)
 		return true
 	}
 	return false

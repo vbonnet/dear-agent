@@ -751,6 +751,26 @@ func TestCheckFile_HeadingsInsideContainerRawHTMLDoNotEndHeaderZone(t *testing.T
 	}
 }
 
+func TestCheckFile_UnclosedRawHTMLEndsWithItsContainer(t *testing.T) {
+	for name, block := range map[string]string{
+		"blockquote": "> <!--\n\n",
+		"list":       "- <script>\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := "# Doc\n\n" + block + "**Status:** draft · **Owner:** docs\n"
+			dir := t.TempDir()
+			path := writeTemp(t, dir, name+"-unclosed-html.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 || violations[0].Line != 5 {
+				t.Fatalf("want top-level header-field violation after container ends, got %v", violations)
+			}
+		})
+	}
+}
+
 func TestCheckFile_NonInterruptingListShapedFencePreservesInlineCode(t *testing.T) {
 	const content = "# Doc\n\n" +
 		"Intro ` opener\n" +
@@ -781,6 +801,25 @@ func TestCheckFile_PreservesLazyContainerInlineCodeContinuation(t *testing.T) {
 			}
 			if len(violations) != 0 {
 				t.Fatalf("want lazy continuation code span ignored, got %v", violations)
+			}
+		})
+	}
+}
+
+func TestCheckFile_RetainsContainerForInlineCodeOpenedOnLazyLine(t *testing.T) {
+	for name, content := range map[string]string{
+		"blockquote": "# Doc\n\n> intro\nlazy opener `start\n> **Status:** draft · **Owner:** docs\n> end`\n",
+		"list":       "# Doc\n\n- intro\nlazy opener `start\n  **Status:** draft · **Owner:** docs\n  end`\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, name+"-lazy-opener.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 0 {
+				t.Fatalf("want code span opened on lazy line ignored, got %v", violations)
 			}
 		})
 	}
