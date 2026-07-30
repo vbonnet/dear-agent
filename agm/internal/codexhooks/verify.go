@@ -34,6 +34,8 @@ var (
 	interpreterOperand    = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:/bin/|/usr/bin/)?(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node))[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
 	envInterpreterOperand = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*/usr/bin/env[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node)[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
 	sourceOperand         = regexp.MustCompile(`(?m)(?:^|[;\n({]|&&|\|\|)[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:source|\.)[\t ]+([^ \t\r\n;|&]+)`)
+	pathAssignment        = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:export|readonly|typeset|declare|local)[\t ]+)?PATH(?:\+)?[\t ]*=`)
+	pathUnset             = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:unset|export[\t ]+-n)[\t ]+(?:--[\t ]+)?PATH(?:[\t ;\n]|$)`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -375,6 +377,9 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 		references[clean] = struct{}{}
 	}
 	unmatched := hookRootReference.ReplaceAllString(command, "")
+	if mutatesExecutableSearchPath(unmatched) {
+		return fmt.Errorf("command %q mutates PATH; trusted hooks must retain the hardened executable search path", command)
+	}
 	if containsMutableRuntimePath(unmatched) {
 		return fmt.Errorf(
 			"unsupported mutable runtime path in command %q; trusted hooks must execute committed assets through AGM_CODEX_HOOK_ROOT",
@@ -421,6 +426,10 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 	}
 
 	unmatched := hookRootReference.ReplaceAllString(script, "")
+	scannable := withoutFullLineComments(unmatched)
+	if mutatesExecutableSearchPath(scannable) {
+		return nil, fmt.Errorf("trusted hook script mutates PATH; trusted hooks must retain the hardened executable search path")
+	}
 	if anyProjectDirRef.MatchString(unmatched) ||
 		runtimeDirReference.MatchString(unmatched) {
 		return nil, fmt.Errorf(
@@ -437,7 +446,7 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 			path,
 		)
 	}
-	if err := rejectMutableScriptOperands(withoutFullLineComments(unmatched)); err != nil {
+	if err := rejectMutableScriptOperands(scannable); err != nil {
 		return nil, err
 	}
 
@@ -447,6 +456,10 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func mutatesExecutableSearchPath(script string) bool {
+	return pathAssignment.MatchString(script) || pathUnset.MatchString(script)
 }
 
 func withoutFullLineComments(script string) string {

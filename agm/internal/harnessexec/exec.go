@@ -80,16 +80,12 @@ func reserveExecutorLaunchOverrides(
 	check checkLaunchAdmission,
 	reserve reserveOverrideClaim,
 ) ([]*override.Reservation, error) {
-	if len(proofs) == 0 {
-		return nil, nil
-	}
 	hasAdmissionBrake := slices.ContainsFunc(proofs, func(proof override.AuthorizationProof) bool {
 		return proof.Kind == override.KindAdmissionBrake
 	})
-	if hasAdmissionBrake {
-		if err := validateExecutorAdmissionResult(check()); err != nil {
-			return nil, err
-		}
+	initialAdmission := check()
+	if _, err := validateExecutorAdmissionClaim(initialAdmission, hasAdmissionBrake); err != nil {
+		return nil, err
 	}
 
 	type authenticatedReservation struct {
@@ -128,13 +124,10 @@ func reserveExecutorLaunchOverrides(
 		})
 	}
 
-	crossesAdmissionBrake := false
-	if hasAdmissionBrake {
-		final := check()
-		if err := validateExecutorAdmissionResult(final); err != nil {
-			return nil, err
-		}
-		crossesAdmissionBrake = circuitbreaker.RequiresAdmissionBrakeOverride(final)
+	finalAdmission := check()
+	crossesAdmissionBrake, err := validateExecutorAdmissionClaim(finalAdmission, hasAdmissionBrake)
+	if err != nil {
+		return nil, err
 	}
 	reservations := make([]*override.Reservation, 0, len(authenticated))
 	for _, item := range authenticated {
@@ -144,6 +137,20 @@ func reserveExecutorLaunchOverrides(
 		reservations = append(reservations, item.reservation)
 	}
 	return reservations, nil
+}
+
+func validateExecutorAdmissionClaim(
+	result circuitbreaker.CheckResult,
+	hasAdmissionBrake bool,
+) (bool, error) {
+	if err := validateExecutorAdmissionResult(result); err != nil {
+		return false, err
+	}
+	crossesAdmissionBrake := circuitbreaker.RequiresAdmissionBrakeOverride(result)
+	if crossesAdmissionBrake && !hasAdmissionBrake {
+		return false, errors.New("private Codex launch requires an admission-brake authorization claim")
+	}
+	return crossesAdmissionBrake, nil
 }
 
 func validateExecutorAdmissionResult(result circuitbreaker.CheckResult) error {
@@ -156,7 +163,7 @@ func validateExecutorAdmissionResult(result circuitbreaker.CheckResult) error {
 	)
 }
 
-func currentLaunchAdmission() circuitbreaker.CheckResult {
+var currentLaunchAdmission = func() circuitbreaker.CheckResult {
 	return circuitbreaker.Check(
 		circuitbreaker.DefaultConfig(),
 		circuitbreaker.DefaultLoadReader(),

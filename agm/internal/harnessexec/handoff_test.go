@@ -156,11 +156,70 @@ func TestReserveExecutorLaunchOverridesRejectsOtherLiveGate(t *testing.T) {
 	}
 }
 
+func TestReserveExecutorLaunchOverridesRejectsOmittedBrakeClaim(t *testing.T) {
+	reserveCalls := 0
+	_, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{testCodexHookProof("worker-one", "reviewed hooks", "dispatcher-test")},
+		func() circuitbreaker.CheckResult {
+			return circuitbreaker.CheckResult{
+				Gates: []circuitbreaker.GateResult{{
+					Gate: "admission_brake", RequiresOverride: true,
+				}},
+			}
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires an admission-brake authorization claim") {
+		t.Fatalf("omitted-brake error = %v", err)
+	}
+	if reserveCalls != 0 {
+		t.Fatalf("omitted brake claim made %d override reservations", reserveCalls)
+	}
+}
+
+func TestReserveExecutorLaunchOverridesRejectsBrakeEngagedAfterReservation(t *testing.T) {
+	results := []circuitbreaker.CheckResult{
+		{Allowed: true},
+		{Gates: []circuitbreaker.GateResult{{
+			Gate: "admission_brake", RequiresOverride: true,
+		}}},
+	}
+	reserveCalls := 0
+	_, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{testCodexHookProof("worker-one", "reviewed hooks", "dispatcher-test")},
+		func() circuitbreaker.CheckResult {
+			result := results[0]
+			results = results[1:]
+			return result
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires an admission-brake authorization claim") {
+		t.Fatalf("late-brake error = %v", err)
+	}
+	if reserveCalls != 1 {
+		t.Fatalf("late brake made %d override reservations, want hook claim reauthorization before final check", reserveCalls)
+	}
+}
+
 func TestMain(m *testing.M) {
 	original := scheduleHandoffExpiry
+	originalAdmission := currentLaunchAdmission
 	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) { return nil, nil }
+	currentLaunchAdmission = func() circuitbreaker.CheckResult {
+		return circuitbreaker.CheckResult{Allowed: true}
+	}
 	code := m.Run()
 	scheduleHandoffExpiry = original
+	currentLaunchAdmission = originalAdmission
 	os.Exit(code)
 }
 

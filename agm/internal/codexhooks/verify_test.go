@@ -256,6 +256,37 @@ func TestReferencedScriptAssetsAllowsInterpreterInlineCode(t *testing.T) {
 	}
 }
 
+func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\nexport PATH=.; helper\n",
+		"#!/bin/sh\nPATH=. helper\n",
+		"#!/bin/sh\nif PATH=.; then helper; fi\n",
+		"#!/bin/sh\nunset PATH; helper\n",
+		"#!/bin/sh\nexport -n PATH; helper\n",
+	} {
+		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "mutates PATH") {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want PATH mutation rejection", script, err)
+		}
+	}
+	references := make(map[string]struct{})
+	if err := addTrustedCommandAssets(references, "PATH=.; helper"); err == nil ||
+		!strings.Contains(err.Error(), "mutates PATH") {
+		t.Fatalf("addTrustedCommandAssets(PATH mutation) error = %v", err)
+	}
+}
+
+func TestTrustedHookAssetsAllowNonCommandPathText(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\n# Example only: export PATH=.\n/bin/true\n",
+		"#!/bin/sh\nprintf '%s\\n' 'do not set PATH=.'\n",
+	} {
+		if _, err := referencedScriptAssets([]byte(script)); err != nil {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want non-command PATH text allowed", script, err)
+		}
+	}
+}
+
 func TestRepositoryEnabledHookScriptsHaveClosedRuntimeDependencies(t *testing.T) {
 	repositoryRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	manifest, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(hooksManifestPath)))

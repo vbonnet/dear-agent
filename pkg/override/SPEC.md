@@ -68,7 +68,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-26** When final launch admission succeeds, the system shall record the circuit-breaker spawn timestamp only after every launch-bound override reservation has been committed or sealed successfully and immediately before process or tmux submission.
 
-**OVR-27** When the private Codex executor receives a deferred admission-brake claim, the system shall treat the claim and its authorization ID as non-authoritative, repeat every live circuit-breaker gate before and after reserving current human authorization, commit a fresh admission-brake reservation only when the brake remains the sole refusal, and reject the launch when any other gate refuses.
+**OVR-27** When the private Codex executor receives any hook-trust handoff, the system shall treat every claim and authorization ID as non-authoritative, repeat every live circuit-breaker gate before and after reserving current human authorization whether or not an admission-brake claim is present, require and commit a fresh admission-brake reservation only when the brake remains the sole refusal, and reject the launch when the required brake claim is omitted or any other gate refuses.
 
 ## Override kinds
 
