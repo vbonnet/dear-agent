@@ -69,6 +69,24 @@ func TestParseLauncherIdentityRequiresCurrentPlatformDigest(t *testing.T) {
 	}
 }
 
+func TestLauncherIdentityMatchesOnlyApprovedAGMOrCompanion(t *testing.T) {
+	agm := codeIdentityAlgorithm() + ":" + strings.Repeat("a", codeIdentityHexLength())
+	companion := codeIdentityAlgorithm() + ":" + strings.Repeat("b", codeIdentityHexLength())
+	unapproved := codeIdentityAlgorithm() + ":" + strings.Repeat("c", codeIdentityHexLength())
+	if !launcherIdentityMatches(agm, []string{agm}) {
+		t.Fatal("approved AGM identity did not match")
+	}
+	if !launcherIdentityMatches(companion, []string{agm, companion}) {
+		t.Fatal("approved companion identity did not match issuance policy")
+	}
+	if launcherIdentityMatches(companion, []string{agm}) {
+		t.Fatal("companion identity matched AGM-only policy")
+	}
+	if launcherIdentityMatches(unapproved, []string{agm, companion}) {
+		t.Fatal("unapproved identity matched launcher policy")
+	}
+}
+
 func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	makefile, err := os.ReadFile("../../Makefile")
 	if err != nil {
@@ -76,8 +94,11 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	}
 	text := string(makefile)
 	for _, required := range []string{
-		"install-override-ledger-helper: build-override-ledger-helper install-agm",
+		"install-override-ledger-helper: build-override-ledger-helper install-agm install-agm-mcp-server",
 		"dear-agent-override-ledger-agm.identity",
+		"dear-agent-override-ledger-agm-mcp-server.identity",
+		"companion_caller_identity",
+		"staged_companion_identity",
 		"darwin-cdhash:",
 		"linux-sha256:",
 		"staged_identity",

@@ -3,6 +3,7 @@ package harnessexec
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +37,9 @@ var (
 		}
 		return subject
 	}()
+	testCapabilityMu    sync.Mutex
+	testCapabilityNext  uint64
+	testCapabilityStore = map[string]override.LaunchCapability{}
 )
 
 func testCodexHookProof(session, reason, actor string) override.AuthorizationProof {
@@ -241,13 +246,64 @@ func TestReserveExecutorLaunchOverridesRejectsBrakeEngagedAfterReservation(t *te
 func TestMain(m *testing.M) {
 	original := scheduleHandoffExpiry
 	originalAdmission := currentLaunchAdmission
+	originalIssueCapability := issueLaunchCapability
+	originalLoadCapability := loadLaunchCapability
+	originalConsumeCapability := consumeLaunchCapability
 	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) { return nil, nil }
 	currentLaunchAdmission = func() circuitbreaker.CheckResult {
 		return circuitbreaker.CheckResult{Allowed: true}
 	}
+	issueLaunchCapability = func(
+		claim override.LaunchCapabilityClaim,
+	) (override.LaunchCapability, error) {
+		testCapabilityMu.Lock()
+		defer testCapabilityMu.Unlock()
+		testCapabilityNext++
+		capability := override.LaunchCapability{
+			Version:               override.LaunchCapabilityVersion,
+			ID:                    fmt.Sprintf("%032x", testCapabilityNext),
+			LaunchCapabilityClaim: claim,
+			IssuedUTC:             time.Now().UTC(),
+		}
+		testCapabilityStore[capability.ID] = capability
+		return capability, nil
+	}
+	loadLaunchCapability = func(id string) (override.LaunchCapability, error) {
+		testCapabilityMu.Lock()
+		defer testCapabilityMu.Unlock()
+		capability, ok := testCapabilityStore[id]
+		if !ok {
+			return override.LaunchCapability{}, os.ErrNotExist
+		}
+		return capability, nil
+	}
+	consumeLaunchCapability = func(capability override.LaunchCapability) error {
+		testCapabilityMu.Lock()
+		defer testCapabilityMu.Unlock()
+		stored, ok := testCapabilityStore[capability.ID]
+		if !ok {
+			return os.ErrNotExist
+		}
+		storedJSON, err := override.EncodeLaunchCapability(stored)
+		if err != nil {
+			return err
+		}
+		consumeJSON, err := override.EncodeLaunchCapability(capability)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(storedJSON, consumeJSON) {
+			return errors.New("launch capability consume mismatch")
+		}
+		delete(testCapabilityStore, capability.ID)
+		return nil
+	}
 	code := m.Run()
 	scheduleHandoffExpiry = original
 	currentLaunchAdmission = originalAdmission
+	issueLaunchCapability = originalIssueCapability
+	loadLaunchCapability = originalLoadCapability
+	consumeLaunchCapability = originalConsumeCapability
 	os.Exit(code)
 }
 
@@ -351,6 +407,187 @@ func TestPreparedHarnessCommandCommitsBeforeExec(t *testing.T) {
 	}
 	if got, want := strings.Join(events, ","), "commit,record-spawn,exec"; got != want {
 		t.Fatalf("executor events = %q, want %q", got, want)
+	}
+}
+
+func TestGenericHandoffRejectsSelfGeneratedOverrideProof(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		commitLaunchOverrideProofs = originalCommitProofs
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	prepared, err := PrepareHarnessCommand(
+		"forged-generic",
+		"printf harmless",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("prepare generic handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+
+	data, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read generic handoff: %v", err)
+	}
+	var handoff launchHandoff
+	if err := json.Unmarshal(data, &handoff); err != nil {
+		t.Fatalf("decode generic handoff: %v", err)
+	}
+	handoff.OverrideProofs = []override.AuthorizationProof{{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "forged-actor",
+		Session:         "forged-generic",
+		AuthorizationID: "ffffffffffffffffffffffffffffffff",
+	}}
+	handoff.LaunchCapabilityID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	encoded, err := encodeBoundHandoff(handoff)
+	if err != nil {
+		t.Fatalf("encode forged generic handoff: %v", err)
+	}
+	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
+		t.Fatalf("write forged generic handoff: %v", err)
+	}
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		t.Fatal("self-generated proof reached override reauthorization")
+		return nil
+	}
+	replaceProcess = func(string, []string, []string) error {
+		t.Fatal("self-generated proof reached harness execution")
+		return nil
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "forged-generic",
+	})
+	if err == nil || !strings.Contains(err.Error(), "root-attested private launch capability") {
+		t.Fatalf("forged generic handoff error = %v", err)
+	}
+}
+
+func TestGenericHandoffCapabilityRejectsPostIssueMutation(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		commitLaunchOverrideProofs = originalCommitProofs
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	prepared, err := PrepareHarnessCommand(
+		"mutated-generic",
+		"agy --model reviewed",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("prepare generic handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	proof := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "mutated-generic",
+		AuthorizationID: "dddddddddddddddddddddddddddddddd",
+	}
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		HarnessProtocol,
+		false,
+		true,
+		[]override.AuthorizationProof{proof},
+	); err != nil {
+		t.Fatalf("bind root-attested generic handoff: %v", err)
+	}
+	data, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read bound generic handoff: %v", err)
+	}
+	var handoff launchHandoff
+	if err := json.Unmarshal(data, &handoff); err != nil {
+		t.Fatalf("decode bound generic handoff: %v", err)
+	}
+	handoff.HarnessCommand = "agy --model substituted"
+	encoded, err := encodeBoundHandoff(handoff)
+	if err != nil {
+		t.Fatalf("encode mutated generic handoff: %v", err)
+	}
+	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
+		t.Fatalf("write mutated generic handoff: %v", err)
+	}
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		t.Fatal("mutated handoff reached override reauthorization")
+		return nil
+	}
+	replaceProcess = func(string, []string, []string) error {
+		t.Fatal("mutated handoff reached harness execution")
+		return nil
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "mutated-generic",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match the private handoff") {
+		t.Fatalf("mutated generic handoff error = %v", err)
+	}
+}
+
+func TestGenericHandoffCapabilityIsOneShot(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	prepared, err := PrepareHarnessCommand(
+		"replayed-generic",
+		"printf harmless",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("prepare generic handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	proof := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "replayed-generic",
+		AuthorizationID: "abababababababababababababababab",
+	}
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		HarnessProtocol,
+		false,
+		false,
+		[]override.AuthorizationProof{proof},
+	); err != nil {
+		t.Fatalf("bind root-attested generic handoff: %v", err)
+	}
+	encoded, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read bound generic handoff: %v", err)
+	}
+	if _, err := consumeHandoff(prepared.path, HarnessProtocol, ""); err != nil {
+		t.Fatalf("consume first generic handoff: %v", err)
+	}
+	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
+		t.Fatalf("restore copied generic handoff: %v", err)
+	}
+	if _, err := consumeHandoff(prepared.path, HarnessProtocol, ""); err == nil ||
+		!strings.Contains(err.Error(), "root-attested private launch capability") {
+		t.Fatalf("replayed generic handoff error = %v", err)
 	}
 }
 

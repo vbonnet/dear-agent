@@ -16,6 +16,7 @@ const (
 	maxLauncherAncestryDepth = 4
 	installedSudoPath        = "/usr/bin/sudo"
 	launcherIdentityPath     = "/usr/local/libexec/dear-agent-override-ledger-agm.identity"
+	companionIdentityPath    = "/usr/local/libexec/dear-agent-override-ledger-agm-mcp-server.identity"
 	maxLauncherIdentityBytes = 256
 )
 
@@ -23,12 +24,10 @@ type processParentLookup func(int) (int, error)
 type processPathLookup func(int) (string, error)
 
 // authenticateLauncher authenticates the unprivileged AGM process that invoked
-// sudo. A PID supplied by an unrelated shell cannot pass: it must be the first
-// non-sudo ancestor of this fixed helper, and its kernel-backed executable
-// identity must match the policy installed with the reviewed helper bytes.
-// This excludes agent shells that merely descend from a long-running AGM
-// supervisor.
-func authenticateLauncher(launcherPID int) error {
+// sudo. Capability issuance may also originate in the separately attested,
+// co-installed MCP companion because that process prepares launches directly.
+// Ledger appends and capability consumption remain AGM-only.
+func authenticateLauncher(launcherPID int, allowCompanion bool) error {
 	if launcherPID <= 1 {
 		return errors.New("launcher PID is invalid")
 	}
@@ -46,21 +45,36 @@ func authenticateLauncher(launcherPID int) error {
 	); err != nil {
 		return err
 	}
-	expected, err := loadLauncherIdentity()
+	expectedAGM, err := loadLauncherIdentity(launcherIdentityPath)
 	if err != nil {
 		return err
 	}
+	expected := []string{expectedAGM}
+	if allowCompanion {
+		companion, companionErr := loadLauncherIdentity(companionIdentityPath)
+		if companionErr != nil {
+			return companionErr
+		}
+		expected = append(expected, companion)
+	}
 	actual, err := processCodeIdentity(launcherPID)
 	if err != nil {
-		return fmt.Errorf("inspect running AGM code identity: %w", err)
+		return fmt.Errorf("inspect running launcher code identity: %w", err)
 	}
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) != 1 {
-		return fmt.Errorf(
-			"running AGM identity %q does not match operator-approved identity %q",
-			actual, expected,
+	if !launcherIdentityMatches(actual, expected) {
+		return errors.New(
+			"running launcher identity does not match any operator-approved identity",
 		)
 	}
 	return nil
+}
+
+func launcherIdentityMatches(actual string, expected []string) bool {
+	matched := 0
+	for _, identity := range expected {
+		matched |= subtle.ConstantTimeCompare([]byte(identity), []byte(actual))
+	}
+	return matched == 1
 }
 
 func validateLauncherChain(
@@ -101,14 +115,14 @@ func validateLauncherChain(
 	)
 }
 
-func loadLauncherIdentity() (string, error) {
-	if err := validateRootOwnedPath(filepath.Dir(launcherIdentityPath), true); err != nil {
-		return "", fmt.Errorf("validate AGM caller policy directory: %w", err)
+func loadLauncherIdentity(path string) (string, error) {
+	if err := validateRootOwnedPath(filepath.Dir(path), true); err != nil {
+		return "", fmt.Errorf("validate launcher policy directory: %w", err)
 	}
-	if err := validateRootOwnedPath(launcherIdentityPath, false); err != nil {
-		return "", fmt.Errorf("validate root-owned AGM caller identity: %w", err)
+	if err := validateRootOwnedPath(path, false); err != nil {
+		return "", fmt.Errorf("validate root-owned launcher identity: %w", err)
 	}
-	data, err := os.ReadFile(launcherIdentityPath)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -117,24 +131,24 @@ func loadLauncherIdentity() (string, error) {
 
 func parseLauncherIdentity(data []byte) (string, error) {
 	if len(data) == 0 || len(data) > maxLauncherIdentityBytes {
-		return "", errors.New("root-owned AGM caller identity has an invalid size")
+		return "", errors.New("root-owned launcher identity has an invalid size")
 	}
 	raw := string(data)
 	identity := strings.TrimSuffix(raw, "\n")
 	if identity == "" ||
 		(raw != identity && raw != identity+"\n") ||
 		strings.ContainsAny(identity, " \t\r\n") {
-		return "", errors.New("root-owned AGM caller identity is not canonical")
+		return "", errors.New("root-owned launcher identity is not canonical")
 	}
 	prefix, digest, ok := strings.Cut(identity, ":")
 	if !ok || prefix != codeIdentityAlgorithm() {
-		return "", fmt.Errorf("root-owned AGM caller identity uses unsupported algorithm %q", prefix)
+		return "", fmt.Errorf("root-owned launcher identity uses unsupported algorithm %q", prefix)
 	}
 	if len(digest) != codeIdentityHexLength() {
-		return "", fmt.Errorf("root-owned AGM caller identity has invalid %s digest length", prefix)
+		return "", fmt.Errorf("root-owned launcher identity has invalid %s digest length", prefix)
 	}
 	if _, err := hex.DecodeString(digest); err != nil {
-		return "", fmt.Errorf("root-owned AGM caller identity has invalid %s digest: %w", prefix, err)
+		return "", fmt.Errorf("root-owned launcher identity has invalid %s digest: %w", prefix, err)
 	}
 	return identity, nil
 }

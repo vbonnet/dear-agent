@@ -59,6 +59,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-18** When a foreground Claude launcher carries launch-admission effects, the system shall expose a direct invocation of the same prepared one-shot Claude executor, bind only Claude-compatible override claims and the successful-spawn obligation before starting that executor, re-resolve the configured Claude executable inside it, and consume no bound effect when executor delivery or executable resolution is confirmed to have failed.
 
+**HEXEC-19** When a private Codex, Claude, or generic harness handoff carries any override proof, the authenticated parent AGM process, or the separately attested co-installed AGM MCP companion that prepares MCP launches directly, shall obtain a root-owned capability for the exact protocol, path, handoff digest, proofs, and accompanying successful-spawn obligation before submission; the AGM executor shall require the matching capability and atomically consume it under the AGM-only caller policy before accepting those claims, rejecting self-generated, mutated, and replayed same-user handoffs.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

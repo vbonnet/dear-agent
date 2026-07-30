@@ -2,6 +2,7 @@ package harnessexec
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +33,12 @@ const (
 )
 
 var (
-	executablePath        = os.Executable
-	scheduleHandoffExpiry = startHandoffExpiry
-	reapExpiryProcess     = func(cmd *exec.Cmd) {
+	executablePath          = os.Executable
+	scheduleHandoffExpiry   = startHandoffExpiry
+	issueLaunchCapability   = override.IssueLaunchCapability
+	loadLaunchCapability    = override.LoadLaunchCapability
+	consumeLaunchCapability = override.ConsumeLaunchCapability
+	reapExpiryProcess       = func(cmd *exec.Cmd) {
 		go func() { _ = cmd.Wait() }()
 	}
 )
@@ -119,6 +123,7 @@ type launchHandoff struct {
 	Environment               []string                      `json:"environment"`
 	OverrideProofs            []override.AuthorizationProof `json:"override_proofs,omitempty"`
 	RecordSpawn               bool                          `json:"record_spawn,omitempty"`
+	LaunchCapabilityID        string                        `json:"launch_capability_id,omitempty"`
 	CodexHookRoot             string                        `json:"codex_hook_root,omitempty"`
 	CodexLaunch               *codexLaunchBinding           `json:"codex_launch,omitempty"`
 	ClaudeLaunch              *claudeLaunchBinding          `json:"claude_launch,omitempty"`
@@ -454,6 +459,9 @@ func bindHandoffOverrideProofs(
 	recordSpawn bool,
 	proofs []override.AuthorizationProof,
 ) error {
+	if len(proofs) == 0 && !recordSpawn {
+		return nil
+	}
 	file, openedInfo, err := openHandoffForOverrideBinding(path, trusted)
 	if err != nil {
 		return err
@@ -465,7 +473,24 @@ func bindHandoffOverrideProofs(
 	}
 	handoff.OverrideProofs = proofs
 	handoff.RecordSpawn = recordSpawn
-	if err := validateHandoff(handoff, protocol, time.Now(), openedInfo.ModTime()); err != nil {
+	now := time.Now()
+	if err := validateHandoffState(
+		handoff, protocol, now, openedInfo.ModTime(), false,
+	); err != nil {
+		return err
+	}
+	if len(proofs) != 0 {
+		claim, claimErr := launchCapabilityClaim(handoff, path, now)
+		if claimErr != nil {
+			return claimErr
+		}
+		capability, issueErr := issueLaunchCapability(claim)
+		if issueErr != nil {
+			return fmt.Errorf("issue root-attested private launch capability: %w", issueErr)
+		}
+		handoff.LaunchCapabilityID = capability.ID
+	}
+	if err := validateHandoff(handoff, protocol, now, openedInfo.ModTime()); err != nil {
 		return err
 	}
 	encoded, err := encodeBoundHandoff(handoff)
@@ -1062,6 +1087,9 @@ func consumeHandoff(
 		(handoff.CodexLaunch == nil || !handoff.CodexLaunch.matches(*expectedBinding)) {
 		return launchHandoff{}, errors.New("private launch handoff does not authorize the requested Codex launch")
 	}
+	if err := authenticateLaunchCapability(handoff, path, time.Now()); err != nil {
+		return launchHandoff{}, err
+	}
 	return handoff, nil
 }
 
@@ -1166,6 +1194,41 @@ func decodeHandoff(file *os.File) (launchHandoff, error) {
 }
 
 func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt time.Time) error {
+	return validateHandoffState(handoff, protocol, now, modifiedAt, true)
+}
+
+func validateHandoffState(
+	handoff launchHandoff,
+	protocol string,
+	now, modifiedAt time.Time,
+	requireCapability bool,
+) error {
+	if err := validateHandoffIdentity(handoff, protocol, now, modifiedAt); err != nil {
+		return err
+	}
+	if err := validateHandoffOverrideProofs(handoff); err != nil {
+		return err
+	}
+	if err := validateCodexHandoffCapability(handoff, protocol); err != nil {
+		return err
+	}
+	if err := validateClaudeHandoffBinding(handoff, protocol); err != nil {
+		return err
+	}
+	if err := validateGenericHandoffBinding(handoff, protocol); err != nil {
+		return err
+	}
+	if err := validateHandoffEnvironment(protocol, handoff.Environment); err != nil {
+		return err
+	}
+	return validateLaunchCapabilityReference(handoff, requireCapability)
+}
+
+func validateHandoffIdentity(
+	handoff launchHandoff,
+	protocol string,
+	now, modifiedAt time.Time,
+) error {
 	createdAt, err := time.Parse(time.RFC3339Nano, handoff.CreatedAt)
 	validAt := createdAt
 	if handoff.DeferredUntilProducerExit {
@@ -1178,42 +1241,59 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	if handoff.Version != handoffVersion || handoff.Protocol != protocol {
 		return errors.New("private launch handoff does not match the requested protocol")
 	}
-	if err := validateHandoffOverrideProofs(handoff); err != nil {
-		return err
+	return nil
+}
+
+func validateCodexHandoffCapability(
+	handoff launchHandoff,
+	protocol string,
+) error {
+	if handoff.CodexHookRoot == "" {
+		if handoff.CodexLaunch != nil {
+			return errors.New("private launch handoff contains a Codex launch binding without a hook capability")
+		}
+		return nil
 	}
-	if handoff.CodexHookRoot != "" {
-		if protocol != CodexProtocol ||
-			!filepath.IsAbs(handoff.CodexHookRoot) ||
-			filepath.Clean(handoff.CodexHookRoot) != handoff.CodexHookRoot ||
-			handoff.CodexLaunch == nil ||
-			handoff.CodexLaunch.HookRoot != handoff.CodexHookRoot {
-			return errors.New("private launch handoff contains an invalid Codex hook capability")
-		}
-		if normalized, reasonErr := override.ValidateReason(handoff.CodexLaunch.HookTrustReason); reasonErr != nil || normalized != handoff.CodexLaunch.HookTrustReason {
-			return errors.New("private launch handoff contains an invalid Codex hook-trust reason")
-		}
-		if handoff.CodexLaunch.HookTrustActor == "" {
-			return errors.New("private launch handoff contains an invalid Codex hook-trust actor")
-		}
-		subject, subjectErr := override.CodexHookTrustSubject(
-			handoff.CodexLaunch.HookTrustSourceRepo,
-			handoff.CodexLaunch.HookTrustSourceCommit,
-			handoff.CodexLaunch.HookTrustDigest,
-		)
-		proof := handoff.CodexLaunch.HookTrustProof
-		if subjectErr != nil ||
-			proof.Kind != override.KindCodexHookTrust ||
-			proof.Reason != handoff.CodexLaunch.HookTrustReason ||
-			proof.Actor != handoff.CodexLaunch.HookTrustActor ||
-			proof.Session != handoff.CodexLaunch.SessionName ||
-			proof.Subject == "" ||
-			proof.Subject != subject ||
-			proof.AuthorizationID == "" {
-			return errors.New("private launch handoff contains an invalid Codex hook-trust authorization proof")
-		}
-	} else if handoff.CodexLaunch != nil {
-		return errors.New("private launch handoff contains a Codex launch binding without a hook capability")
+	if protocol != CodexProtocol ||
+		!filepath.IsAbs(handoff.CodexHookRoot) ||
+		filepath.Clean(handoff.CodexHookRoot) != handoff.CodexHookRoot ||
+		handoff.CodexLaunch == nil ||
+		handoff.CodexLaunch.HookRoot != handoff.CodexHookRoot {
+		return errors.New("private launch handoff contains an invalid Codex hook capability")
 	}
+	return validateCodexHookAuthorization(*handoff.CodexLaunch)
+}
+
+func validateCodexHookAuthorization(binding codexLaunchBinding) error {
+	if normalized, reasonErr := override.ValidateReason(binding.HookTrustReason); reasonErr != nil || normalized != binding.HookTrustReason {
+		return errors.New("private launch handoff contains an invalid Codex hook-trust reason")
+	}
+	if binding.HookTrustActor == "" {
+		return errors.New("private launch handoff contains an invalid Codex hook-trust actor")
+	}
+	subject, subjectErr := override.CodexHookTrustSubject(
+		binding.HookTrustSourceRepo,
+		binding.HookTrustSourceCommit,
+		binding.HookTrustDigest,
+	)
+	proof := binding.HookTrustProof
+	if subjectErr != nil ||
+		proof.Kind != override.KindCodexHookTrust ||
+		proof.Reason != binding.HookTrustReason ||
+		proof.Actor != binding.HookTrustActor ||
+		proof.Session != binding.SessionName ||
+		proof.Subject == "" ||
+		proof.Subject != subject ||
+		proof.AuthorizationID == "" {
+		return errors.New("private launch handoff contains an invalid Codex hook-trust authorization proof")
+	}
+	return nil
+}
+
+func validateClaudeHandoffBinding(
+	handoff launchHandoff,
+	protocol string,
+) error {
 	if protocol == ClaudeProtocol {
 		if handoff.ClaudeLaunch == nil {
 			return errors.New("private Claude handoff omits its exact launch binding")
@@ -1224,6 +1304,13 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	} else if handoff.ClaudeLaunch != nil {
 		return errors.New("private launch handoff contains an unrelated Claude launch binding")
 	}
+	return nil
+}
+
+func validateGenericHandoffBinding(
+	handoff launchHandoff,
+	protocol string,
+) error {
 	if protocol == HarnessProtocol {
 		if handoff.HarnessSessionName == "" || handoff.HarnessCommand == "" {
 			return errors.New("private harness handoff omits its session or command")
@@ -1242,8 +1329,92 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	} else if handoff.HarnessSessionName != "" || handoff.HarnessCommand != "" {
 		return errors.New("private launch handoff contains unrelated harness command state")
 	}
-	if err := validateHandoffEnvironment(protocol, handoff.Environment); err != nil {
+	return nil
+}
+
+func validateLaunchCapabilityReference(
+	handoff launchHandoff,
+	requireCapability bool,
+) error {
+	hasClaims := len(handoff.OverrideProofs) != 0
+	if !hasClaims {
+		if handoff.LaunchCapabilityID != "" {
+			return errors.New("claim-free private handoff contains a launch capability")
+		}
+		return nil
+	}
+	if handoff.LaunchCapabilityID == "" {
+		if requireCapability {
+			return errors.New("private launch handoff effects lack a root-attested capability")
+		}
+		return nil
+	}
+	if _, err := override.LaunchCapabilityPath(handoff.LaunchCapabilityID); err != nil {
+		return fmt.Errorf("private launch handoff capability: %w", err)
+	}
+	return nil
+}
+
+func launchCapabilityClaim(
+	handoff launchHandoff,
+	path string,
+	now time.Time,
+) (override.LaunchCapabilityClaim, error) {
+	if handoff.LaunchCapabilityID != "" {
+		return override.LaunchCapabilityClaim{}, errors.New("private launch handoff capability is already bound")
+	}
+	digest, err := launchCapabilityDigest(handoff)
+	if err != nil {
+		return override.LaunchCapabilityClaim{}, err
+	}
+	return override.LaunchCapabilityClaim{
+		Protocol:       handoff.Protocol,
+		HandoffPath:    path,
+		HandoffDigest:  digest,
+		OverrideProofs: append([]override.AuthorizationProof(nil), handoff.OverrideProofs...),
+		RecordSpawn:    handoff.RecordSpawn,
+		ExpiresUTC:     now.UTC().Add(handoffMaxAge),
+	}, nil
+}
+
+func launchCapabilityDigest(handoff launchHandoff) (string, error) {
+	handoff.LaunchCapabilityID = ""
+	encoded, err := json.Marshal(handoff)
+	if err != nil {
+		return "", fmt.Errorf("encode private launch capability digest: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(encoded)), nil
+}
+
+func authenticateLaunchCapability(
+	handoff launchHandoff,
+	path string,
+	now time.Time,
+) error {
+	if len(handoff.OverrideProofs) == 0 {
+		return nil
+	}
+	digest, err := launchCapabilityDigest(handoff)
+	if err != nil {
 		return err
+	}
+	capability, err := loadLaunchCapability(handoff.LaunchCapabilityID)
+	if err != nil {
+		return fmt.Errorf("load root-attested private launch capability: %w", err)
+	}
+	claim := override.LaunchCapabilityClaim{
+		Protocol:       handoff.Protocol,
+		HandoffPath:    path,
+		HandoffDigest:  digest,
+		OverrideProofs: append([]override.AuthorizationProof(nil), handoff.OverrideProofs...),
+		RecordSpawn:    handoff.RecordSpawn,
+		ExpiresUTC:     capability.ExpiresUTC,
+	}
+	if err := capability.Authorizes(claim, now); err != nil {
+		return fmt.Errorf("authenticate root-attested private launch capability: %w", err)
+	}
+	if err := consumeLaunchCapability(capability); err != nil {
+		return fmt.Errorf("consume root-attested private launch capability: %w", err)
 	}
 	return nil
 }

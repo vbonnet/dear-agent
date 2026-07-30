@@ -64,13 +64,17 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, re-reserve every claim with a fresh authorization ID, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
 
-**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and root-owned caller policy to the exact installed AGM code identity, carry the live launcher PID in the canonical append request, require that PID to be the helper's first non-sudo ancestor, and authenticate its running identity before appending.
+**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and separate root-owned caller policies to the exact installed AGM and co-installed MCP companion code identities, carry the live launcher PID in every canonical privileged request, require that PID to be the helper's first non-sudo ancestor, permit the companion identity only for capability issuance, and require the AGM identity for capability consumption and ledger append.
 
 **OVR-26** When final launch admission succeeds, the system shall record the circuit-breaker spawn timestamp only after every launch-bound override reservation has been committed or sealed successfully and immediately before process or tmux submission.
 
 **OVR-27** When the private Codex executor receives any hook-trust handoff, the system shall treat every claim and authorization ID as non-authoritative, repeat every live circuit-breaker gate before and after reserving current human authorization whether or not an admission-brake claim is present, require and commit a fresh admission-brake reservation only when the brake remains the sole refusal, and reject the launch when the required brake claim is omitted or any other gate refuses.
 
 **OVR-28** When the privileged ledger helper holds the append lock, the system shall refuse every new override transaction if the existing ledger ends without a newline or contains any malformed record, preserving the existing bytes so an incomplete write cannot absorb or hide a later successful authorization.
+
+**OVR-29** When any private handoff carries an override proof, the authenticated parent AGM process, or the separately attested co-installed AGM MCP companion that prepares MCP launches directly, shall bind the exact handoff bytes, proofs, and accompanying successful-spawn obligation to a short-lived root-owned launch capability; the AGM-only executor shall require an exact match and atomically consume that capability before accepting any carried claim, so a same-user process cannot mint a capability and a copied handoff cannot replay one.
+
+**OVR-30** When privileged launch-capability state contains abandoned entries, the helper shall prune expired canonical sidecars under a root-only directory lock and enforce a fixed maximum number of outstanding capabilities, failing closed on unexpected entries so repeated aborted launches cannot cause unbounded privileged-state growth.
 
 ## Override kinds
 
@@ -136,10 +140,11 @@ repository cannot reuse the approval.
 
 On Unix, the operator first runs
 `make install-override-ledger-helper`. That separately authenticated setup
-installs the matching AGM build, prints and requires typed confirmation of the
-helper artifact's complete SHA-256 and installed AGM code identity, copies the
-approved helper bytes and caller policy into unique root-owned staging files,
-and atomically activates each only on an exact match. It then installs the
+installs the matching AGM and AGM MCP companion builds, prints and requires
+typed confirmation of the helper artifact's complete SHA-256 and both installed
+code identities, copies the approved helper bytes and caller policies into
+unique root-owned staging files, and atomically activates each only on an exact
+match. It then installs the
 one-purpose root-owned
 `/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact
 per-user, helper-digest-qualified NOPASSWD sudoers rule for that path. Runtime
@@ -147,29 +152,40 @@ authorization invokes it with `sudo -n`: no fresh prompt or cached sudo
 credential is needed, and AGM, `tee`, `chmod`, arbitrary arguments, and
 arbitrary paths are never privileged.
 The helper accepts exactly one canonical bounded launcher request on stdin.
-Its embedded transaction is either one historical-compatible use record or one
-envelope containing at most one use per override kind. The helper appends only to
-`/var/log/dear-agent-overrides.jsonl`, revalidates every matching active
-root-owned grant, exact subject, unique random authorization ID, and near-current
-timestamp, synchronizes before returning, and stops at a 16 MiB ledger cap
-pending operator-owned rotation. The one-shot private Codex handoff carries
-prepared authorization claims and immutable source fields, but those claim IDs
-are audit correlation rather than secret capabilities. After re-running the
-persisted Git attestation and all other fallible launch checks, its executor
+That request either issues or consumes an exact short-lived launch capability,
+or carries an embedded ledger transaction containing one
+historical-compatible use record or one envelope with at most one use per
+override kind. Capabilities live in a fixed root-owned runtime directory and
+bind the complete private handoff digest and launch effects. Consumption
+compares the canonical bytes and unlinks the sidecar under an exclusive lock,
+making copied handoffs fail closed after the first accepted executor. Issuance
+uses a root-only directory lock, prunes expired canonical sidecars, rejects
+unexpected entries, and caps outstanding capabilities so abandoned handoffs
+cannot grow the privileged runtime directory without bound.
+The helper appends only to `/var/log/dear-agent-overrides.jsonl`, revalidates
+every matching active root-owned grant, exact subject, unique random
+authorization ID, and near-current timestamp, synchronizes before returning,
+and stops at a 16 MiB ledger cap pending operator-owned rotation. The one-shot
+private Codex handoff carries prepared authorization claims and immutable
+source fields, but those claim IDs are audit correlation rather than secret
+capabilities. The separately root-attested launch capability authenticates the
+parent-issued claim. After consuming it, re-running the persisted Git
+attestation, and completing all other fallible launch checks, the executor
 repeats the live admission gates, re-reserves each current grant with a fresh
 random ID, and appends the complete transaction immediately before replacing
 AGM with Codex.
 
-The installer also installs the matching AGM build, displays its
-kernel-verifiable code identity for separate typed confirmation, and records
-that identity in a root-owned policy next to the helper. The canonical
-privileged request binds the transaction to the live AGM PID that reached the
+The installer records the AGM and AGM MCP companion kernel-verifiable code
+identities in separate root-owned policies next to the helper. Canonical
+privileged requests bind each operation to the live caller PID that reached the
 launch boundary. The helper permits only root-owned `/usr/bin/sudo` processes
-between itself and that exact PID and requires the running macOS code-directory
-hash or Linux executable SHA-256 to match the policy. Direct shell calls,
-descendant agent shells under a persistent supervisor, unrelated PIDs, and
-changed AGM bytes therefore fail closed. Updating AGM requires reinstalling the
-helper policy before another privileged append can succeed.
+between itself and that exact PID. Ledger appends and capability consumption
+require the installed AGM identity; capability issuance also accepts the
+separately installed companion identity because it prepares MCP launches
+directly. Direct shell calls, descendant agent shells under a persistent
+supervisor, unrelated PIDs, and changed launcher bytes therefore fail closed.
+Updating either launcher requires reinstalling the helper policies before that
+launcher can perform another privileged operation.
 
 The ledger file and its parent are root-owned, so the scheduled audit process
 can read the audit while the agent user cannot truncate, replace, or remove

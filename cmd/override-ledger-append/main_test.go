@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,5 +230,222 @@ func TestAppendInputRejectsNonRootAtProductionBoundary(t *testing.T) {
 	}
 	if errors.Is(err, override.ErrLedgerRecord) {
 		t.Fatalf("root boundary was checked after parsing attacker input: %v", err)
+	}
+}
+
+func TestProcessInputIssuesRootAttestedLaunchCapability(t *testing.T) {
+	now := time.Now().UTC()
+	capability := override.LaunchCapability{
+		Version: override.LaunchCapabilityVersion,
+		ID:      strings.Repeat("a", 32),
+		LaunchCapabilityClaim: override.LaunchCapabilityClaim{
+			Protocol:      "__exec-harness",
+			HandoffPath:   "/tmp/agm/private-launch/launch-123.json",
+			HandoffDigest: strings.Repeat("b", 64),
+			OverrideProofs: []override.AuthorizationProof{{
+				Kind:            override.KindAdmissionBrake,
+				Reason:          "operator reviewed host recovery before this launch",
+				Actor:           "dispatcher-test",
+				Session:         "worker-1",
+				AuthorizationID: strings.Repeat("c", 32),
+			}},
+			RecordSpawn: true,
+			ExpiresUTC:  now.Add(5 * time.Minute),
+		},
+		IssuedUTC: now,
+	}
+	request, err := override.EncodePrivilegedLaunchCapabilityRequest(capability, 4242)
+	if err != nil {
+		t.Fatalf("encode capability request: %v", err)
+	}
+	root := t.TempDir()
+	capabilityDir := filepath.Join(root, "capabilities")
+	if err := processInput(
+		bytes.NewReader(request),
+		filepath.Join(root, "ledger.jsonl"),
+		capabilityDir,
+		false,
+	); err != nil {
+		t.Fatalf("process capability request: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(capabilityDir, capability.ID+".json"))
+	if err != nil {
+		t.Fatalf("read issued capability: %v", err)
+	}
+	decoded, err := override.DecodeLaunchCapability(data)
+	if err != nil {
+		t.Fatalf("decode issued capability: %v", err)
+	}
+	if decoded.ID != capability.ID ||
+		decoded.HandoffDigest != capability.HandoffDigest {
+		t.Fatalf("issued capability = %+v", decoded)
+	}
+	if err := processInput(
+		bytes.NewReader(request),
+		filepath.Join(root, "ledger.jsonl"),
+		capabilityDir,
+		false,
+	); err == nil {
+		t.Fatal("duplicate launch capability issuance was accepted")
+	}
+
+	consume, err := override.EncodePrivilegedConsumeLaunchCapabilityRequest(
+		capability,
+		4242,
+	)
+	if err != nil {
+		t.Fatalf("encode capability consume request: %v", err)
+	}
+	if err := processInput(
+		bytes.NewReader(consume),
+		filepath.Join(root, "ledger.jsonl"),
+		capabilityDir,
+		false,
+	); err != nil {
+		t.Fatalf("consume capability request: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(capabilityDir, capability.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("consumed capability still exists: %v", err)
+	}
+	if err := processInput(
+		bytes.NewReader(consume),
+		filepath.Join(root, "ledger.jsonl"),
+		capabilityDir,
+		false,
+	); err == nil {
+		t.Fatal("replayed launch capability consume was accepted")
+	}
+}
+
+func TestProcessInputPreservesLedgerAppendProtocol(t *testing.T) {
+	now := time.Now().UTC()
+	use := override.Use{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "worker-1",
+		AuthorizationID: strings.Repeat("d", 32),
+		AtUTC:           now,
+	}
+	request, err := override.EncodePrivilegedAppendRequest([]override.Use{use}, 4242)
+	if err != nil {
+		t.Fatalf("encode append request: %v", err)
+	}
+	root := t.TempDir()
+	ledger := filepath.Join(root, "ledger.jsonl")
+	if err := processInput(
+		bytes.NewReader(request),
+		ledger,
+		filepath.Join(root, "capabilities"),
+		false,
+	); err != nil {
+		t.Fatalf("process append request: %v", err)
+	}
+	recorded, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("read appended ledger: %v", err)
+	}
+	if !bytes.Contains(recorded, []byte(use.AuthorizationID)) {
+		t.Fatalf("ledger omitted authorization ID: %s", recorded)
+	}
+}
+
+func TestIssueCapabilityPrunesExpiredSidecars(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "capabilities")
+	oldNow := time.Now().UTC().Add(-20 * time.Minute)
+	expired := override.LaunchCapability{
+		Version: override.LaunchCapabilityVersion,
+		ID:      strings.Repeat("1", 32),
+		LaunchCapabilityClaim: override.LaunchCapabilityClaim{
+			Protocol:      "__exec-harness",
+			HandoffPath:   "/tmp/agm/private-launch/launch-expired.json",
+			HandoffDigest: strings.Repeat("2", 64),
+			OverrideProofs: []override.AuthorizationProof{{
+				Kind:            override.KindAdmissionBrake,
+				Reason:          "operator reviewed host recovery before this launch",
+				Actor:           "dispatcher-test",
+				Session:         "expired-worker",
+				AuthorizationID: strings.Repeat("3", 32),
+			}},
+			ExpiresUTC: oldNow.Add(5 * time.Minute),
+		},
+		IssuedUTC: oldNow,
+	}
+	if err := issueCapability(dir, expired, oldNow, false); err != nil {
+		t.Fatalf("issue expired fixture at its valid time: %v", err)
+	}
+	now := time.Now().UTC()
+	current := expired
+	current.ID = strings.Repeat("4", 32)
+	current.HandoffPath = "/tmp/agm/private-launch/launch-current.json"
+	current.HandoffDigest = strings.Repeat("5", 64)
+	current.OverrideProofs[0].AuthorizationID = strings.Repeat("6", 32)
+	current.ExpiresUTC = now.Add(5 * time.Minute)
+	current.IssuedUTC = now
+	if err := issueCapability(dir, current, now, false); err != nil {
+		t.Fatalf("issue current capability: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, expired.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired launch capability was not pruned: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, current.ID+".json")); err != nil {
+		t.Fatalf("current launch capability missing after pruning: %v", err)
+	}
+}
+
+func TestIssueCapabilityCapsOutstandingSidecars(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "capabilities")
+	if err := prepareCapabilityDirectory(dir, false); err != nil {
+		t.Fatalf("prepare capability directory: %v", err)
+	}
+	now := time.Now().UTC()
+	template := override.LaunchCapability{
+		Version: override.LaunchCapabilityVersion,
+		LaunchCapabilityClaim: override.LaunchCapabilityClaim{
+			Protocol:      "__exec-harness",
+			HandoffPath:   "/tmp/agm/private-launch/launch-limit.json",
+			HandoffDigest: strings.Repeat("a", 64),
+			OverrideProofs: []override.AuthorizationProof{{
+				Kind:            override.KindAdmissionBrake,
+				Reason:          "operator reviewed host recovery before this launch",
+				Actor:           "dispatcher-test",
+				Session:         "limited-worker",
+				AuthorizationID: strings.Repeat("b", 32),
+			}},
+			ExpiresUTC: now.Add(5 * time.Minute),
+		},
+		IssuedUTC: now,
+	}
+	for i := range maxOutstandingLaunchCapabilities {
+		capability := template
+		capability.ID = fmt.Sprintf("%032x", i+1)
+		capability.HandoffDigest = fmt.Sprintf("%064x", i+1)
+		capability.OverrideProofs = append(
+			[]override.AuthorizationProof(nil),
+			template.OverrideProofs...,
+		)
+		capability.OverrideProofs[0].AuthorizationID = fmt.Sprintf("%032x", i+1)
+		data, err := override.EncodeLaunchCapability(capability)
+		if err != nil {
+			t.Fatalf("encode capability %d: %v", i, err)
+		}
+		if err := writeCapabilityFile(
+			filepath.Join(dir, capability.ID+".json"),
+			data,
+		); err != nil {
+			t.Fatalf("write capability %d: %v", i, err)
+		}
+	}
+	candidate := template
+	candidate.ID = strings.Repeat("f", 32)
+	candidate.HandoffDigest = strings.Repeat("e", 64)
+	candidate.OverrideProofs = append(
+		[]override.AuthorizationProof(nil),
+		template.OverrideProofs...,
+	)
+	candidate.OverrideProofs[0].AuthorizationID = strings.Repeat("d", 32)
+	if err := issueCapability(dir, candidate, now, false); err == nil ||
+		!strings.Contains(err.Error(), "launch capability limit reached") {
+		t.Fatalf("issue beyond capability limit error = %v", err)
 	}
 }

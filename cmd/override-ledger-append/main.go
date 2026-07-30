@@ -3,15 +3,17 @@
 // Command override-ledger-append is the fixed privileged boundary for
 // dangerous-override audit records on Unix systems.
 //
-// It accepts no arguments and appends one bounded, canonical Use JSONL
-// transaction from a launcher-bound request on stdin to the fixed production
-// ledger. A transaction has at most one record per override kind. A sudoers
-// rule may grant NOPASSWD access to this command without granting access to tee,
-// chmod, AGM, or an operator-selected path.
+// It accepts no arguments and processes one bounded, canonical launcher-bound
+// request on stdin. A request either issues or consumes an exact one-shot
+// launch capability, or appends one Use JSONL transaction to the fixed
+// production ledger. A transaction has at most one record per override kind.
+// A sudoers rule may grant NOPASSWD access to this command without granting
+// access to tee, chmod, AGM, or an operator-selected path.
 package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -24,10 +26,12 @@ import (
 )
 
 const (
-	maxOperatorLedgerBytes  int64 = 16 << 20
-	maxRecordClockSkew            = time.Minute
-	privilegedRateWindow          = time.Hour
-	maxUsesPerKindPerWindow       = 5
+	maxOperatorLedgerBytes            int64 = 16 << 20
+	maxRecordClockSkew                      = time.Minute
+	privilegedRateWindow                    = time.Hour
+	maxUsesPerKindPerWindow                 = 5
+	maxOutstandingLaunchCapabilities        = 256
+	launchCapabilityDirectoryLockName       = ".lock"
 )
 
 func main() {
@@ -35,10 +39,69 @@ func main() {
 		fmt.Fprintln(os.Stderr, "override-ledger-append: arguments are not accepted")
 		os.Exit(2)
 	}
-	if err := appendInput(os.Stdin, override.LedgerPath(), true); err != nil {
+	if err := processInput(
+		os.Stdin,
+		override.LedgerPath(),
+		override.LaunchCapabilityDir(),
+		true,
+	); err != nil {
 		fmt.Fprintf(os.Stderr, "override-ledger-append: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func processInput(
+	input io.Reader,
+	ledgerPath, capabilityDir string,
+	requireRoot bool,
+) error {
+	maxBytes := max(
+		override.MaxPrivilegedAppendBytes,
+		override.MaxPrivilegedLaunchCapabilityBytes,
+	)
+	limited := &io.LimitedReader{R: input, N: int64(maxBytes + 1)}
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return fmt.Errorf("read privileged request: %w", err)
+	}
+	if len(data) > maxBytes {
+		return fmt.Errorf("%w: input exceeds %d bytes",
+			override.ErrLedgerRecordTooLarge, maxBytes)
+	}
+	operation, err := override.PrivilegedRequestOperation(data)
+	if err != nil {
+		return err
+	}
+	if operation != override.PrivilegedLaunchCapabilityOperation &&
+		operation != override.PrivilegedConsumeLaunchCapabilityOperation {
+		return appendInput(bytes.NewReader(data), ledgerPath, requireRoot)
+	}
+	if requireRoot && os.Geteuid() != 0 {
+		return errors.New("must run as root through the installed sudoers rule")
+	}
+	var capability override.LaunchCapability
+	var launcherPID int
+	switch operation {
+	case override.PrivilegedLaunchCapabilityOperation:
+		capability, launcherPID, err =
+			override.DecodePrivilegedLaunchCapabilityRequest(data)
+	case override.PrivilegedConsumeLaunchCapabilityOperation:
+		capability, launcherPID, err =
+			override.DecodePrivilegedConsumeLaunchCapabilityRequest(data)
+	}
+	if err != nil {
+		return err
+	}
+	if requireRoot {
+		allowCompanion := operation == override.PrivilegedLaunchCapabilityOperation
+		if err := authenticateLauncher(launcherPID, allowCompanion); err != nil {
+			return fmt.Errorf("authenticate launch-capability caller: %w", err)
+		}
+	}
+	if operation == override.PrivilegedLaunchCapabilityOperation {
+		return issueCapability(capabilityDir, capability, time.Now(), requireRoot)
+	}
+	return consumeCapability(capabilityDir, capability, time.Now(), requireRoot)
 }
 
 func appendInput(input io.Reader, path string, requireRoot bool) error {
@@ -60,7 +123,7 @@ func appendInput(input io.Reader, path string, requireRoot bool) error {
 		return err
 	}
 	if requireRoot {
-		if err := authenticateLauncher(launcherPID); err != nil {
+		if err := authenticateLauncher(launcherPID, false); err != nil {
 			return fmt.Errorf("authenticate launch-bound append caller: %w", err)
 		}
 	}
@@ -70,6 +133,302 @@ func appendInput(input io.Reader, path string, requireRoot bool) error {
 	}
 
 	return appendRecords(path, canonical, uses, now, requireRoot)
+}
+
+func issueCapability(
+	dir string,
+	capability override.LaunchCapability,
+	now time.Time,
+	requireRoot bool,
+) error {
+	if err := capability.Validate(now); err != nil {
+		return err
+	}
+	if err := prepareCapabilityDirectory(dir, requireRoot); err != nil {
+		return err
+	}
+	lock, err := lockCapabilityDirectory(dir, requireRoot)
+	if err != nil {
+		return err
+	}
+	defer closeLockedFile(lock)
+	count, err := pruneExpiredCapabilities(dir, now, requireRoot)
+	if err != nil {
+		return err
+	}
+	if count >= maxOutstandingLaunchCapabilities {
+		return fmt.Errorf(
+			"launch capability limit reached (%d outstanding); wait for expiry or inspect aborted launches",
+			maxOutstandingLaunchCapabilities,
+		)
+	}
+	data, err := override.EncodeLaunchCapability(capability)
+	if err != nil {
+		return err
+	}
+	return writeCapabilityFile(
+		filepath.Join(dir, capability.ID+".json"),
+		data,
+	)
+}
+
+func prepareCapabilityDirectory(dir string, requireRoot bool) error {
+	if requireRoot {
+		err := os.Mkdir(dir, 0o755)
+		if err != nil && !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("create launch capability directory: %w", err)
+		}
+		if err := validateRootOwnedPath(dir, true); err != nil {
+			return fmt.Errorf("validate launch capability directory: %w", err)
+		}
+		if err := syscall.Chmod(dir, 0o755); err != nil {
+			return fmt.Errorf("set launch capability directory mode: %w", err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create test launch capability directory: %w", err)
+	}
+	return nil
+}
+
+func writeCapabilityFile(path string, data []byte) error {
+	fd, err := syscall.Open(
+		path,
+		syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,
+		0o644,
+	)
+	if err != nil {
+		return fmt.Errorf("create root-attested launch capability: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		_ = syscall.Close(fd)
+		return errors.New("wrap launch capability descriptor")
+	}
+	removeOnFailure := true
+	defer func() {
+		_ = file.Close()
+		if removeOnFailure {
+			_ = os.Remove(path)
+		}
+	}()
+	if err := file.Chmod(0o644); err != nil {
+		return fmt.Errorf("set launch capability mode: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("write launch capability: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync launch capability: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close launch capability: %w", err)
+	}
+	removeOnFailure = false
+	return nil
+}
+
+func consumeCapability(
+	dir string,
+	capability override.LaunchCapability,
+	now time.Time,
+	requireRoot bool,
+) error {
+	if err := capability.Validate(now); err != nil {
+		return err
+	}
+	if requireRoot {
+		if err := validateRootOwnedPath(dir, true); err != nil {
+			return fmt.Errorf("validate launch capability directory: %w", err)
+		}
+	}
+	lock, err := lockCapabilityDirectory(dir, requireRoot)
+	if err != nil {
+		return err
+	}
+	defer closeLockedFile(lock)
+	path := filepath.Join(dir, capability.ID+".json")
+	file, err := openLockedCapability(path)
+	if err != nil {
+		return err
+	}
+	defer closeLockedFile(file)
+	if err := validateCapabilityFile(path, file, requireRoot); err != nil {
+		return err
+	}
+	if err := matchCapabilityContents(file, capability); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("consume root-attested launch capability: %w", err)
+	}
+	return nil
+}
+
+func lockCapabilityDirectory(dir string, requireRoot bool) (*os.File, error) {
+	path := filepath.Join(dir, launchCapabilityDirectoryLockName)
+	fd, err := syscall.Open(
+		path,
+		syscall.O_RDWR|syscall.O_CREAT|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,
+		0o600,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open launch capability directory lock: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		_ = syscall.Close(fd)
+		return nil, errors.New("wrap launch capability directory lock")
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("set launch capability directory lock mode: %w", err)
+	}
+	if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("lock launch capability directory: %w", err)
+	}
+	if err := validateCapabilityFile(path, file, requireRoot); err != nil {
+		closeLockedFile(file)
+		return nil, fmt.Errorf("validate launch capability directory lock: %w", err)
+	}
+	return file, nil
+}
+
+func closeLockedFile(file *os.File) {
+	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	_ = file.Close()
+}
+
+func pruneExpiredCapabilities(
+	dir string,
+	now time.Time,
+	requireRoot bool,
+) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("list launch capabilities: %w", err)
+	}
+	active := 0
+	for _, entry := range entries {
+		if entry.Name() == launchCapabilityDirectoryLockName {
+			continue
+		}
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".json" {
+			return 0, fmt.Errorf("unexpected entry in launch capability directory: %s", name)
+		}
+		id := name[:len(name)-len(".json")]
+		if _, err := override.LaunchCapabilityPath(id); err != nil {
+			return 0, fmt.Errorf("invalid launch capability sidecar %s: %w", name, err)
+		}
+		path := filepath.Join(dir, name)
+		capability, err := readCapabilityFile(path, requireRoot)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, fmt.Errorf("inspect launch capability %s: %w", name, err)
+		}
+		if !now.Before(capability.ExpiresUTC) {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return 0, fmt.Errorf("prune expired launch capability %s: %w", name, err)
+			}
+			continue
+		}
+		active++
+	}
+	return active, nil
+}
+
+func readCapabilityFile(
+	path string,
+	requireRoot bool,
+) (override.LaunchCapability, error) {
+	file, err := openLockedCapability(path)
+	if err != nil {
+		return override.LaunchCapability{}, err
+	}
+	defer closeLockedFile(file)
+	if err := validateCapabilityFile(path, file, requireRoot); err != nil {
+		return override.LaunchCapability{}, err
+	}
+	data, err := readCapabilityContents(file)
+	if err != nil {
+		return override.LaunchCapability{}, err
+	}
+	return override.DecodeLaunchCapability(data)
+}
+
+func openLockedCapability(path string) (*os.File, error) {
+	fd, err := syscall.Open(
+		path,
+		syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,
+		0,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open root-attested launch capability: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		_ = syscall.Close(fd)
+		return nil, errors.New("wrap launch capability descriptor")
+	}
+	if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("lock root-attested launch capability: %w", err)
+	}
+	return file, nil
+}
+
+func validateCapabilityFile(path string, file *os.File, requireRoot bool) error {
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("revalidate root-attested launch capability path: %w", err)
+	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect root-attested launch capability: %w", err)
+	}
+	if !fileInfo.Mode().IsRegular() || !os.SameFile(pathInfo, fileInfo) {
+		return errors.New("root-attested launch capability changed while being consumed")
+	}
+	if requireRoot {
+		if err := validateRootOwnedInfo(path, fileInfo, false); err != nil {
+			return fmt.Errorf("validate launch capability sidecar: %w", err)
+		}
+	}
+	return nil
+}
+
+func matchCapabilityContents(
+	file *os.File,
+	capability override.LaunchCapability,
+) error {
+	data, err := readCapabilityContents(file)
+	if err != nil {
+		return err
+	}
+	want, err := override.EncodeLaunchCapability(capability)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, want) {
+		return errors.New("root-attested launch capability does not match the consume request")
+	}
+	return nil
+}
+
+func readCapabilityContents(file *os.File) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(file, override.MaxLaunchCapabilityBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read root-attested launch capability: %w", err)
+	}
+	if len(data) > override.MaxLaunchCapabilityBytes {
+		return nil, errors.New("root-attested launch capability exceeds its size limit")
+	}
+	return data, nil
 }
 
 func decodeTransaction(data []byte) ([]override.Use, []byte, int, error) {

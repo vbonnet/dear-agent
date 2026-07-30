@@ -987,17 +987,20 @@ build-override-ledger-helper:
 	@mkdir -p bin
 	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
 
-install-override-ledger-helper: build-override-ledger-helper install-agm
+install-override-ledger-helper: build-override-ledger-helper install-agm install-agm-mcp-server
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
 		root_group="$$(id -gn 0)"; \
 		artifact="bin/dear-agent-override-ledger-append"; \
 		agm_executable="$(HOME)/go/bin/agm"; \
+		companion_executable="$(HOME)/go/bin/agm-mcp-server"; \
 		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
 		helper_staging=""; \
 		identity="/usr/local/libexec/dear-agent-override-ledger-agm.identity"; \
 		identity_staging=""; \
+		companion_policy="/usr/local/libexec/dear-agent-override-ledger-agm-mcp-server.identity"; \
+		companion_identity_staging=""; \
 		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
 		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
 		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
@@ -1007,11 +1010,17 @@ install-override-ledger-helper: build-override-ledger-helper install-agm
 				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
 				test -n "$$caller_digest" || { echo "installed AGM has no kernel-verifiable code identity" >&2; exit 1; }; \
 				caller_identity="darwin-cdhash:$$caller_digest"; \
+				companion_digest="$$(/usr/bin/codesign -dvvv "$$companion_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
+				test -n "$$companion_digest" || { echo "installed AGM MCP companion has no kernel-verifiable code identity" >&2; exit 1; }; \
+				companion_caller_identity="darwin-cdhash:$$companion_digest"; \
 				;; \
 			Linux) \
 				caller_digest="$$(/usr/bin/sha256sum "$$agm_executable")"; \
 				caller_digest="$${caller_digest%% *}"; \
 				caller_identity="linux-sha256:$$caller_digest"; \
+				companion_digest="$$(/usr/bin/sha256sum "$$companion_executable")"; \
+				companion_digest="$${companion_digest%% *}"; \
+				companion_caller_identity="linux-sha256:$$companion_digest"; \
 				;; \
 			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
 		esac; \
@@ -1024,12 +1033,19 @@ install-override-ledger-helper: build-override-ledger-helper install-agm
 		printf 'Type that complete identity to bind privileged appends to these exact AGM bytes: '; \
 		IFS= read -r confirmed_identity; \
 		test "$$confirmed_identity" = "$$caller_identity" || { echo "AGM caller identity confirmation did not match" >&2; exit 2; }; \
+		printf 'Reviewed installed AGM MCP companion identity: %s\n' "$$companion_caller_identity"; \
+		printf 'Type that complete identity to permit launch-capability issuance from these exact companion bytes: '; \
+		IFS= read -r confirmed_companion_identity; \
+		test "$$confirmed_companion_identity" = "$$companion_caller_identity" || { echo "AGM MCP companion identity confirmation did not match" >&2; exit 2; }; \
 		cleanup_helper_staging() { \
 			if test -n "$$helper_staging"; then \
 				/usr/bin/sudo -n /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
 			fi; \
 			if test -n "$$identity_staging"; then \
 				/usr/bin/sudo -n /bin/rm -f "$$identity_staging" >/dev/null 2>&1 || true; \
+			fi; \
+			if test -n "$$companion_identity_staging"; then \
+				/usr/bin/sudo -n /bin/rm -f "$$companion_identity_staging" >/dev/null 2>&1 || true; \
 			fi; \
 			if test -n "$$staging"; then \
 				/usr/bin/sudo -n /bin/rm -f "$$staging" >/dev/null 2>&1 || true; \
@@ -1049,6 +1065,11 @@ install-override-ledger-helper: build-override-ledger-helper install-agm
 		/usr/bin/sudo /bin/chmod 0444 "$$identity_staging"; \
 		staged_identity="$$(/usr/bin/sudo /bin/cat "$$identity_staging")"; \
 		test "$$staged_identity" = "$$caller_identity" || { echo "root-owned staged AGM caller identity differs from the approved identity" >&2; exit 1; }; \
+		companion_identity_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm-mcp-server.identity.XXXXXX)"; \
+		printf '%s\n' "$$companion_caller_identity" | /usr/bin/sudo /usr/bin/tee "$$companion_identity_staging" >/dev/null; \
+		/usr/bin/sudo /bin/chmod 0444 "$$companion_identity_staging"; \
+		staged_companion_identity="$$(/usr/bin/sudo /bin/cat "$$companion_identity_staging")"; \
+		test "$$staged_companion_identity" = "$$companion_caller_identity" || { echo "root-owned staged AGM MCP companion identity differs from the approved identity" >&2; exit 1; }; \
 		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.XXXXXX)"; \
 		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
 		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"; \
@@ -1063,11 +1084,13 @@ install-override-ledger-helper: build-override-ledger-helper install-agm
 		staging=""; \
 		/usr/bin/sudo /bin/mv -f "$$identity_staging" "$$identity"; \
 		identity_staging=""; \
+		/usr/bin/sudo /bin/mv -f "$$companion_identity_staging" "$$companion_policy"; \
+		companion_identity_staging=""; \
 		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
 		helper_staging=""; \
 		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		echo "Installed digest-bound root-owned ledger helper, AGM caller identity, and exact sudoers rule for $$operator_user"
+		echo "Installed digest-bound root-owned ledger helper, AGM and MCP companion caller identities, and exact sudoers rule for $$operator_user"
 
 # Install the macOS audit under launchd's system domain without activating it.
 # Both scheduler and executable are root-owned, so an unattended same-user
