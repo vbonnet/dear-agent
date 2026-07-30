@@ -39,6 +39,10 @@ func TestValidateReasonRefusesUnauditableReasons(t *testing.T) {
 
 func TestKindsIncludesEverySharedDangerousOverride(t *testing.T) {
 	kinds := Kinds()
+	if got := len(kinds); got != MaxLedgerUsesPerTransaction {
+		t.Fatalf("len(Kinds()) = %d, transaction bound = %d; keep them synchronized",
+			got, MaxLedgerUsesPerTransaction)
+	}
 	for _, want := range []Kind{
 		KindCodexHookTrust,
 		KindAdmissionBrake,

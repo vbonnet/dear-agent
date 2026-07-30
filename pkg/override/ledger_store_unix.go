@@ -13,8 +13,9 @@ import (
 const operatorLedgerAppendHelper = "/usr/local/libexec/dear-agent-override-ledger-append"
 
 // appendOperatorLedger crosses only the fixed, root-owned helper boundary.
-// The helper accepts no arguments, validates and bounds one canonical record,
-// and owns the fixed destination. The invoking AGM binary is never elevated.
+// The helper accepts no arguments, validates and bounds one canonical
+// transaction, and owns the fixed destination. The invoking AGM binary is
+// never elevated.
 func appendOperatorLedger(data []byte, path string) error {
 	if path != operatorLedgerPath {
 		return fmt.Errorf("%w: privileged append destination is %q, want fixed %q",

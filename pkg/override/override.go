@@ -89,9 +89,14 @@ const (
 	// its trailing newline. The privileged helper enforces the same limit.
 	MaxLedgerRecordBytes = 2048
 
-	// MaxLedgerBatchBytes bounds one atomic launch-bound transaction. At most
-	// one reservation per known override kind may be committed together.
-	MaxLedgerBatchBytes = MaxLedgerRecordBytes * 3
+	// MaxLedgerUsesPerTransaction is the number of override kinds that can be
+	// crossed at one launch boundary. The Kinds contract test keeps this bound
+	// synchronized when a new kind is added.
+	MaxLedgerUsesPerTransaction = 3
+
+	// MaxLedgerBatchBytes bounds one atomic launch-bound transaction, including
+	// the multi-use JSON envelope in addition to each individually bounded use.
+	MaxLedgerBatchBytes = MaxLedgerRecordBytes*MaxLedgerUsesPerTransaction + 64
 )
 
 // Sentinel errors so callers can distinguish "you may not" from "you did it
@@ -374,9 +379,9 @@ func EncodeLedgerUses(uses []Use) ([]byte, error) {
 	if len(uses) == 0 {
 		return nil, fmt.Errorf("%w: override transaction is empty", ErrLedgerRecord)
 	}
-	if len(uses) > len(Kinds()) {
+	if len(uses) > MaxLedgerUsesPerTransaction {
 		return nil, fmt.Errorf("%w: override transaction has %d records, maximum is %d",
-			ErrLedgerRecord, len(uses), len(Kinds()))
+			ErrLedgerRecord, len(uses), MaxLedgerUsesPerTransaction)
 	}
 	seen := make(map[Kind]struct{}, len(uses))
 	for _, use := range uses {
