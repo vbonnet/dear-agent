@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 func TestOnlyAdmissionBrakeRefused(t *testing.T) {
@@ -94,6 +95,8 @@ func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) 
 		Gate: "admission_brake", RequiresOverride: true,
 	}}}
 	var events []string
+	brakeReservation := &override.Reservation{}
+	oauthReservation := &override.Reservation{}
 	result, err := finalizeAdmissionBrakeOverride(
 		initial,
 		"operator verified host recovery",
@@ -102,16 +105,23 @@ func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) 
 			events = append(events, "final-check")
 			return initial
 		},
-		func(reason, session string) (func() error, error) {
+		func(reason, session string) (*override.Reservation, error) {
 			events = append(events, "reserve")
 			if reason == "" || session != "worker-ce-6xfu" {
 				t.Fatalf("reservation attribution = (%q, %q)", reason, session)
 			}
-			return func() error {
-				events = append(events, "commit")
-				return nil
-			}, nil
+			return brakeReservation, nil
 		},
+		func(reservations ...*override.Reservation) error {
+			events = append(events, "commit")
+			if len(reservations) != 2 ||
+				reservations[0] != brakeReservation ||
+				reservations[1] != oauthReservation {
+				t.Fatalf("combined reservations = %v, want brake then OAuth", reservations)
+			}
+			return nil
+		},
+		oauthReservation,
 	)
 	if err != nil {
 		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)
@@ -139,12 +149,14 @@ func TestFinalizeAdmissionBrakeOverrideAbandonsReservationOnConcurrentRefusal(t 
 				{Gate: "admission_brake", RequiresOverride: true},
 			}}
 		},
-		func(string, string) (func() error, error) {
-			return func() error {
-				committed = true
-				return nil
-			}, nil
+		func(string, string) (*override.Reservation, error) {
+			return &override.Reservation{}, nil
 		},
+		func(...*override.Reservation) error {
+			committed = true
+			return nil
+		},
+		&override.Reservation{},
 	)
 	if err != nil {
 		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)
@@ -171,8 +183,12 @@ func TestFinalizeAdmissionBrakeOverridePropagatesReservationFailure(t *testing.T
 			finalChecked = true
 			return initial
 		},
-		func(string, string) (func() error, error) {
+		func(string, string) (*override.Reservation, error) {
 			return nil, wantErr
+		},
+		func(...*override.Reservation) error {
+			t.Fatal("commit ran without a valid brake reservation")
+			return nil
 		},
 	)
 	if !errors.Is(err, wantErr) {

@@ -7,10 +7,10 @@ import (
 )
 
 // ReserveAdmissionBrakeOverride validates human authorization without
-// recording a use. The returned one-shot callback commits the ledger entry;
-// callers invoke it only after their final live admission check proves that
-// the brake remains the sole refusal.
-func ReserveAdmissionBrakeOverride(reason, sessionName string) (func() error, error) {
+// recording a use. The caller commits the reservation only after its final
+// live admission check proves that the brake remains the sole refusal, and may
+// combine it atomically with other launch-bound override reservations.
+func ReserveAdmissionBrakeOverride(reason, sessionName string) (*override.Reservation, error) {
 	reservation, err := override.Reserve(override.Request{
 		Kind:    override.KindAdmissionBrake,
 		Reason:  reason,
@@ -20,12 +20,7 @@ func ReserveAdmissionBrakeOverride(reason, sessionName string) (func() error, er
 	if err != nil {
 		return nil, fmt.Errorf("admission-brake override refused: %w", err)
 	}
-	return func() error {
-		if _, err := reservation.Commit(); err != nil {
-			return fmt.Errorf("admission-brake override refused: %w", err)
-		}
-		return nil
-	}, nil
+	return reservation, nil
 }
 
 // ValidateAdmissionBrakeOverrideReason rejects malformed or boilerplate

@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -87,6 +88,10 @@ const (
 	// MaxLedgerRecordBytes is the complete canonical JSONL record, including
 	// its trailing newline. The privileged helper enforces the same limit.
 	MaxLedgerRecordBytes = 2048
+
+	// MaxLedgerBatchBytes bounds one atomic launch-bound transaction. At most
+	// one reservation per known override kind may be committed together.
+	MaxLedgerBatchBytes = MaxLedgerRecordBytes * 3
 )
 
 // Sentinel errors so callers can distinguish "you may not" from "you did it
@@ -179,6 +184,10 @@ type Use struct {
 	AtUTC   time.Time `json:"at_utc"`
 }
 
+type ledgerTransaction struct {
+	Uses []Use `json:"uses"`
+}
+
 // Request is one attempt to use a dangerous override.
 type Request struct {
 	Kind    Kind
@@ -210,6 +219,7 @@ var (
 	enforceOperatorOwnership = true
 	ledgerFilePath           = operatorLedgerPath
 	enforceOperatorLedger    = true
+	reservationCommitMu      sync.Mutex
 )
 
 // GrantDir is the operator-owned approval store. It is deliberately outside
@@ -357,12 +367,108 @@ func EncodeLedgerUse(use Use) ([]byte, error) {
 	return line, nil
 }
 
+// EncodeLedgerUses validates and canonically encodes one atomic transaction.
+// A launch may cross several distinct override kinds, but it may not consume
+// the same kind twice at one boundary.
+func EncodeLedgerUses(uses []Use) ([]byte, error) {
+	if len(uses) == 0 {
+		return nil, fmt.Errorf("%w: override transaction is empty", ErrLedgerRecord)
+	}
+	if len(uses) > len(Kinds()) {
+		return nil, fmt.Errorf("%w: override transaction has %d records, maximum is %d",
+			ErrLedgerRecord, len(uses), len(Kinds()))
+	}
+	seen := make(map[Kind]struct{}, len(uses))
+	for _, use := range uses {
+		if _, ok := seen[use.Kind]; ok {
+			return nil, fmt.Errorf("%w: override transaction repeats kind %q", ErrLedgerRecord, use.Kind)
+		}
+		seen[use.Kind] = struct{}{}
+		if _, err := EncodeLedgerUse(use); err != nil {
+			return nil, err
+		}
+	}
+	if len(uses) == 1 {
+		return EncodeLedgerUse(uses[0])
+	}
+	encoded, err := json.Marshal(ledgerTransaction{Uses: uses})
+	if err != nil {
+		return nil, fmt.Errorf("encode override transaction: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if len(encoded) > MaxLedgerBatchBytes {
+		return nil, fmt.Errorf("%w: transaction has %d bytes, maximum is %d",
+			ErrLedgerRecordTooLarge, len(encoded), MaxLedgerBatchBytes)
+	}
+	return encoded, nil
+}
+
+// DecodeLedgerUses parses one canonical ledger line, expanding either a
+// historical single-use record or an atomic multi-use transaction.
+func DecodeLedgerUses(data []byte) ([]Use, error) {
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(data, &shape); err != nil {
+		return nil, err
+	}
+	var uses []Use
+	if _, transaction := shape["uses"]; transaction {
+		var envelope ledgerTransaction
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&envelope); err != nil {
+			return nil, err
+		}
+		if err := requireLedgerEOF(decoder); err != nil {
+			return nil, err
+		}
+		uses = envelope.Uses
+	} else {
+		var use Use
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&use); err != nil {
+			return nil, err
+		}
+		if err := requireLedgerEOF(decoder); err != nil {
+			return nil, err
+		}
+		uses = []Use{use}
+	}
+	canonical, err := EncodeLedgerUses(uses)
+	if err != nil {
+		return nil, err
+	}
+	if string(data) != string(canonical) {
+		return nil, fmt.Errorf("%w: ledger input is not canonical", ErrLedgerRecord)
+	}
+	return uses, nil
+}
+
+func requireLedgerEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("%w: multiple ledger values", ErrLedgerRecord)
+		}
+		return err
+	}
+	return nil
+}
+
 // Record appends a use to the ledger. A use that cannot be recorded is an
 // error the caller must surface: the ledger is what the audit gate reads, and
 // an unrecorded override is an invisible one.
 func Record(use Use) error {
+	return RecordAll([]Use{use})
+}
+
+// RecordAll appends every use as one ledger transaction. The privileged helper
+// validates every grant and per-kind rate limit while holding one ledger lock,
+// then writes all records with one append. A combined launch therefore records
+// all of its override uses or none of them.
+func RecordAll(uses []Use) error {
 	path := LedgerPath()
-	line, err := EncodeLedgerUse(use)
+	data, err := EncodeLedgerUses(uses)
 	if err != nil {
 		return err
 	}
@@ -370,7 +476,7 @@ func Record(use Use) error {
 		if err := inspectExistingLedger(path); err != nil {
 			return err
 		}
-		if err := appendOperatorLedger(line, path); err != nil {
+		if err := appendOperatorLedger(data, path); err != nil {
 			return err
 		}
 		if err := validateLedgerPath(path); err != nil {
@@ -381,7 +487,7 @@ func Record(use Use) error {
 		}
 		return nil
 	}
-	return recordLocalUse(path, line)
+	return recordLocalUses(path, data)
 }
 
 func inspectExistingLedger(path string) error {
@@ -412,7 +518,7 @@ func syncLedger(path string) error {
 	return nil
 }
 
-func recordLocalUse(path string, line []byte) error {
+func recordLocalUses(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create override ledger dir: %w", err)
 	}
@@ -423,7 +529,7 @@ func recordLocalUse(path string, line []byte) error {
 	if err != nil {
 		return fmt.Errorf("open override ledger: %w", err)
 	}
-	if _, err := file.Write(line); err != nil {
+	if _, err := file.Write(data); err != nil {
 		closeErr := file.Close()
 		return errors.Join(fmt.Errorf("append override ledger: %w", err), closeErr)
 	}
@@ -458,14 +564,16 @@ func LoadUses(since time.Time) ([]Use, error) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var use Use
-		if err := json.Unmarshal([]byte(line), &use); err != nil {
+		recorded, err := DecodeLedgerUses([]byte(line + "\n"))
+		if err != nil {
 			continue
 		}
-		if use.AtUTC.Before(since) {
-			continue
+		for _, use := range recorded {
+			if use.AtUTC.Before(since) {
+				continue
+			}
+			uses = append(uses, use)
 		}
-		uses = append(uses, use)
 	}
 	return uses, nil
 }
@@ -515,36 +623,68 @@ func Reserve(req Request) (*Reservation, error) {
 	return &Reservation{use: use, fixedNow: !req.Now.IsZero()}, nil
 }
 
-// Commit records a reserved authorization exactly once. It revalidates the
-// human grant at commit time, and the privileged append boundary independently
-// repeats that validation and enforces its rate limit in production.
-func (r *Reservation) Commit() (Use, error) {
-	if r == nil {
-		return Use{}, errors.New("nil override authorization reservation")
+// CommitAll records distinct reservations as one launch-bound transaction. It
+// revalidates every grant before any ledger append; the privileged helper then
+// repeats all grant and rate-limit checks under one ledger lock and performs a
+// single write. Every supplied reservation becomes attempted together.
+func CommitAll(reservations ...*Reservation) ([]Use, error) {
+	if len(reservations) == 0 {
+		return nil, nil
 	}
-	r.mu.Lock()
-	if r.attempted {
-		r.mu.Unlock()
-		return Use{}, ErrReservationCommitted
-	}
-	r.attempted = true
-	r.mu.Unlock()
+	reservationCommitMu.Lock()
+	defer reservationCommitMu.Unlock()
 
-	use := r.use
-	if !r.fixedNow {
-		use.AtUTC = time.Now().UTC()
+	seen := make(map[*Reservation]struct{}, len(reservations))
+	for _, reservation := range reservations {
+		if reservation == nil {
+			return nil, errors.New("nil override authorization reservation")
+		}
+		if _, ok := seen[reservation]; ok {
+			return nil, fmt.Errorf("%w: duplicate reservation", ErrReservationCommitted)
+		}
+		seen[reservation] = struct{}{}
+		reservation.mu.Lock()
+		attempted := reservation.attempted
+		reservation.mu.Unlock()
+		if attempted {
+			return nil, ErrReservationCommitted
+		}
 	}
-	grant, err := LoadGrant(use.Kind)
+	for _, reservation := range reservations {
+		reservation.mu.Lock()
+		reservation.attempted = true
+		reservation.mu.Unlock()
+	}
+
+	commitNow := time.Now().UTC()
+	uses := make([]Use, 0, len(reservations))
+	for _, reservation := range reservations {
+		use := reservation.use
+		if !reservation.fixedNow {
+			use.AtUTC = commitNow
+		}
+		grant, err := LoadGrant(use.Kind)
+		if err != nil {
+			return nil, err
+		}
+		if err := grant.Active(use.Kind, use.AtUTC); err != nil {
+			return nil, err
+		}
+		uses = append(uses, use)
+	}
+	if err := RecordAll(uses); err != nil {
+		return nil, err
+	}
+	return uses, nil
+}
+
+// Commit records a reserved authorization exactly once.
+func (r *Reservation) Commit() (Use, error) {
+	uses, err := CommitAll(r)
 	if err != nil {
 		return Use{}, err
 	}
-	if err := grant.Active(use.Kind, use.AtUTC); err != nil {
-		return Use{}, err
-	}
-	if err := Record(use); err != nil {
-		return Use{}, err
-	}
-	return use, nil
+	return uses[0], nil
 }
 
 // Authorize runs every gate and records the use immediately. It is reserved

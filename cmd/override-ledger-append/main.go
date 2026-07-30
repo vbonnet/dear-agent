@@ -3,16 +3,15 @@
 // Command override-ledger-append is the fixed privileged boundary for
 // dangerous-override audit records on Unix systems.
 //
-// It accepts no arguments and appends exactly one bounded, canonical Use JSONL
-// record from stdin to the fixed production ledger. A sudoers rule may grant
-// NOPASSWD access to this command without granting access to tee, chmod, AGM,
-// or an operator-selected path.
+// It accepts no arguments and appends one bounded, canonical Use JSONL
+// transaction from stdin to the fixed production ledger. A transaction has at
+// most one record per override kind. A sudoers rule may grant NOPASSWD access
+// to this command without granting access to tee, chmod, AGM, or an
+// operator-selected path.
 package main
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,63 +46,49 @@ func appendInput(input io.Reader, path string, requireRoot bool) error {
 		return errors.New("must run as root through the installed sudoers rule")
 	}
 
-	limited := &io.LimitedReader{R: input, N: override.MaxLedgerRecordBytes + 1}
+	limited := &io.LimitedReader{R: input, N: override.MaxLedgerBatchBytes + 1}
 	data, err := io.ReadAll(limited)
 	if err != nil {
-		return fmt.Errorf("read record: %w", err)
+		return fmt.Errorf("read transaction: %w", err)
 	}
-	if len(data) > override.MaxLedgerRecordBytes {
-		return fmt.Errorf("%w: input exceeds %d bytes", override.ErrLedgerRecordTooLarge, override.MaxLedgerRecordBytes)
+	if len(data) > override.MaxLedgerBatchBytes {
+		return fmt.Errorf("%w: input exceeds %d bytes", override.ErrLedgerRecordTooLarge, override.MaxLedgerBatchBytes)
 	}
 
-	var use override.Use
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&use); err != nil {
-		return fmt.Errorf("decode record: %w", err)
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return err
-	}
-	canonical, err := override.EncodeLedgerUse(use)
+	uses, canonical, err := decodeTransaction(data)
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(data, canonical) {
-		return fmt.Errorf("%w: input must be one canonical JSONL record", override.ErrLedgerRecord)
-	}
-	now := use.AtUTC
+	now := uses[0].AtUTC
 	if requireRoot {
 		now = time.Now()
-		if use.AtUTC.Before(now.Add(-maxRecordClockSkew)) || use.AtUTC.After(now.Add(maxRecordClockSkew)) {
-			return fmt.Errorf("%w: timestamp is outside the %s append window",
-				override.ErrLedgerRecord, maxRecordClockSkew)
-		}
-		grant, err := override.LoadGrant(use.Kind)
-		if err != nil {
-			return fmt.Errorf("load approval at privileged boundary: %w", err)
-		}
-		if err := grant.Active(use.Kind, now); err != nil {
-			return fmt.Errorf("validate approval at privileged boundary: %w", err)
+		for _, use := range uses {
+			if use.AtUTC.Before(now.Add(-maxRecordClockSkew)) || use.AtUTC.After(now.Add(maxRecordClockSkew)) {
+				return fmt.Errorf("%w: timestamp is outside the %s append window",
+					override.ErrLedgerRecord, maxRecordClockSkew)
+			}
+			grant, err := override.LoadGrant(use.Kind)
+			if err != nil {
+				return fmt.Errorf("load approval at privileged boundary: %w", err)
+			}
+			if err := grant.Active(use.Kind, now); err != nil {
+				return fmt.Errorf("validate approval at privileged boundary: %w", err)
+			}
 		}
 	}
 
-	return appendRecord(path, canonical, use, now, requireRoot)
+	return appendRecords(path, canonical, uses, now, requireRoot)
 }
 
-func requireJSONEOF(decoder *json.Decoder) error {
-	var extra any
-	err := decoder.Decode(&extra)
-	if errors.Is(err, io.EOF) {
-		return nil
+func decodeTransaction(data []byte) ([]override.Use, []byte, error) {
+	uses, err := override.DecodeLedgerUses(data)
+	if err != nil {
+		return nil, nil, err
 	}
-	if err == nil {
-		return fmt.Errorf("%w: multiple JSON values are not accepted", override.ErrLedgerRecord)
-	}
-	return fmt.Errorf("decode trailing input: %w", err)
+	return uses, data, nil
 }
 
-func appendRecord(path string, line []byte, use override.Use, now time.Time, requireRoot bool) error {
+func appendRecords(path string, data []byte, uses []override.Use, now time.Time, requireRoot bool) error {
 	if requireRoot {
 		if err := validateRootOwnedPath(filepath.Dir(path), true); err != nil {
 			return fmt.Errorf("validate ledger directory: %w", err)
@@ -138,7 +123,7 @@ func appendRecord(path string, line []byte, use override.Use, now time.Time, req
 	}
 	locked = true
 
-	if err := appendLockedRecord(file, path, line, use, now, requireRoot); err != nil {
+	if err := appendLockedRecords(file, path, data, uses, now, requireRoot); err != nil {
 		return err
 	}
 	if err := file.Close(); err != nil {
@@ -149,11 +134,11 @@ func appendRecord(path string, line []byte, use override.Use, now time.Time, req
 	return nil
 }
 
-func appendLockedRecord(
+func appendLockedRecords(
 	file *os.File,
 	path string,
-	line []byte,
-	use override.Use,
+	data []byte,
+	uses []override.Use,
 	now time.Time,
 	requireRoot bool,
 ) error {
@@ -169,16 +154,16 @@ func appendLockedRecord(
 			return err
 		}
 	}
-	if info.Size() > maxOperatorLedgerBytes-int64(len(line)) {
+	if info.Size() > maxOperatorLedgerBytes-int64(len(data)) {
 		return fmt.Errorf("fixed ledger size cap of %d bytes would be exceeded", maxOperatorLedgerBytes)
 	}
-	if err := enforcePrivilegedRateLimit(file, use.Kind, now); err != nil {
+	if err := enforcePrivilegedRateLimits(file, uses, now); err != nil {
 		return err
 	}
 	if err := file.Chmod(0o644); err != nil {
 		return fmt.Errorf("secure fixed ledger mode: %w", err)
 	}
-	if _, err := file.Write(line); err != nil {
+	if _, err := file.Write(data); err != nil {
 		return fmt.Errorf("append fixed ledger: %w", err)
 	}
 	if err := file.Sync(); err != nil {
@@ -187,36 +172,46 @@ func appendLockedRecord(
 	return nil
 }
 
-func enforcePrivilegedRateLimit(file *os.File, kind override.Kind, now time.Time) error {
+func enforcePrivilegedRateLimits(file *os.File, uses []override.Use, now time.Time) error {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek fixed ledger for rate limit: %w", err)
 	}
+	additions := make(map[override.Kind]int, len(uses))
+	for _, use := range uses {
+		additions[use.Kind]++
+	}
 	cutoff := now.Add(-privilegedRateWindow)
-	count := 0
-	var oldest time.Time
+	counts := make(map[override.Kind]int, len(additions))
+	oldest := make(map[override.Kind]time.Time, len(additions))
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024), override.MaxLedgerRecordBytes)
+	scanner.Buffer(make([]byte, 1024), override.MaxLedgerBatchBytes)
 	for scanner.Scan() {
-		var recorded override.Use
-		if json.Unmarshal(scanner.Bytes(), &recorded) != nil ||
-			recorded.Kind != kind ||
-			recorded.AtUTC.Before(cutoff) ||
-			recorded.AtUTC.After(now.Add(maxRecordClockSkew)) {
+		recordedUses, err := override.DecodeLedgerUses(append(append([]byte(nil), scanner.Bytes()...), '\n'))
+		if err != nil {
 			continue
 		}
-		count++
-		if oldest.IsZero() || recorded.AtUTC.Before(oldest) {
-			oldest = recorded.AtUTC
+		for _, recorded := range recordedUses {
+			if additions[recorded.Kind] == 0 ||
+				recorded.AtUTC.Before(cutoff) ||
+				recorded.AtUTC.After(now.Add(maxRecordClockSkew)) {
+				continue
+			}
+			counts[recorded.Kind]++
+			if oldest[recorded.Kind].IsZero() || recorded.AtUTC.Before(oldest[recorded.Kind]) {
+				oldest[recorded.Kind] = recorded.AtUTC
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scan fixed ledger for rate limit: %w", err)
 	}
-	if count >= maxUsesPerKindPerWindow {
-		return fmt.Errorf(
-			"%s override rate limit reached (%d uses per %s); retry after %s and audit or revoke an unexpectedly busy grant",
-			kind, maxUsesPerKindPerWindow, privilegedRateWindow, oldest.Add(privilegedRateWindow).UTC().Format(time.RFC3339),
-		)
+	for kind, addition := range additions {
+		if counts[kind]+addition > maxUsesPerKindPerWindow {
+			return fmt.Errorf(
+				"%s override rate limit reached (%d uses per %s); retry after %s and audit or revoke an unexpectedly busy grant",
+				kind, maxUsesPerKindPerWindow, privilegedRateWindow, oldest[kind].Add(privilegedRateWindow).UTC().Format(time.RFC3339),
+			)
+		}
 	}
 	return nil
 }

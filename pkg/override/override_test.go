@@ -206,6 +206,79 @@ func TestReservationRecordsOnlyAfterCommit(t *testing.T) {
 	}
 }
 
+func TestCommitAllRecordsCombinedReservationsAtomically(t *testing.T) {
+	configureTestStore(t)
+	for _, kind := range []Kind{KindAdmissionBrake, KindSupervisorOAuthCheck} {
+		if err := SaveGrant(Grant{
+			Kind:       kind,
+			ApprovedBy: "valentin",
+			ExpiresUTC: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("save %s grant: %v", kind, err)
+		}
+	}
+	reserveBoth := func() (*Reservation, *Reservation) {
+		t.Helper()
+		brake, err := Reserve(Request{
+			Kind:    KindAdmissionBrake,
+			Reason:  "host recovered and the operator is verifying one guarded spawn",
+			Session: "vroom-orchestrator",
+		})
+		if err != nil {
+			t.Fatalf("reserve brake: %v", err)
+		}
+		oauth, err := Reserve(Request{
+			Kind:    KindSupervisorOAuthCheck,
+			Reason:  "validating a development supervisor without stored OAuth",
+			Session: "vroom-orchestrator",
+		})
+		if err != nil {
+			t.Fatalf("reserve OAuth: %v", err)
+		}
+		return brake, oauth
+	}
+
+	brake, oauth := reserveBoth()
+	if err := SaveGrant(Grant{
+		Kind:       KindSupervisorOAuthCheck,
+		ApprovedBy: "valentin",
+		ExpiresUTC: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("expire OAuth grant: %v", err)
+	}
+	if _, err := CommitAll(brake, oauth); !errors.Is(err, ErrGrantExpired) {
+		t.Fatalf("combined commit error = %v, want ErrGrantExpired", err)
+	}
+	if uses, err := LoadUses(time.Time{}); err != nil || len(uses) != 0 {
+		t.Fatalf("failed combined commit partially recorded: uses=%+v err=%v", uses, err)
+	}
+
+	if err := SaveGrant(Grant{
+		Kind:       KindSupervisorOAuthCheck,
+		ApprovedBy: "valentin",
+		ExpiresUTC: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("restore OAuth grant: %v", err)
+	}
+	brake, oauth = reserveBoth()
+	uses, err := CommitAll(brake, oauth)
+	if err != nil {
+		t.Fatalf("commit combined reservations: %v", err)
+	}
+	if len(uses) != 2 {
+		t.Fatalf("combined uses = %+v, want two", uses)
+	}
+	recorded, err := LoadUses(time.Time{})
+	if err != nil {
+		t.Fatalf("load combined uses: %v", err)
+	}
+	if len(recorded) != 2 ||
+		recorded[0].Kind != KindAdmissionBrake ||
+		recorded[1].Kind != KindSupervisorOAuthCheck {
+		t.Fatalf("combined ledger = %+v, want brake and OAuth records", recorded)
+	}
+}
+
 func TestAbandonedReservationDoesNotConsumeLedgerQuota(t *testing.T) {
 	configureTestStore(t)
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)

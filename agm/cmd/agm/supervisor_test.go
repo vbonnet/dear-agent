@@ -22,18 +22,6 @@ type fakeSupervisorEnv struct {
 	paths map[string]string
 }
 
-type fakeSupervisorOverrideReservation struct {
-	events    *[]string
-	commitErr error
-}
-
-func (f *fakeSupervisorOverrideReservation) Commit() (override.Use, error) {
-	if f.events != nil {
-		*f.events = append(*f.events, "commit")
-	}
-	return override.Use{Kind: override.KindSupervisorOAuthCheck}, f.commitErr
-}
-
 func (f fakeSupervisorEnv) Getenv(key string) string { return f.envs[key] }
 func (f fakeSupervisorEnv) LookPath(bin string) (string, error) {
 	if p, ok := f.paths[bin]; ok {
@@ -101,9 +89,9 @@ func TestReserveSupervisorOAuthOverrideUsesSharedDangerousOverrideKind(t *testin
 	t.Cleanup(func() { reserveSupervisorDangerousOverride = original })
 	t.Setenv("AGM_ACTOR", "supervisor-test")
 
-	wantReservation := &fakeSupervisorOverrideReservation{}
+	wantReservation := &override.Reservation{}
 	var got override.Request
-	reserveSupervisorDangerousOverride = func(req override.Request) (supervisorOverrideReservation, error) {
+	reserveSupervisorDangerousOverride = func(req override.Request) (*override.Reservation, error) {
 		got = req
 		return wantReservation, nil
 	}
@@ -128,10 +116,19 @@ func TestReserveSupervisorOAuthOverrideUsesSharedDangerousOverrideKind(t *testin
 
 func TestAuthorizeSupervisorLaunchBoundaryChecksAdmissionBeforeLedgerCommit(t *testing.T) {
 	var events []string
-	reservation := &fakeSupervisorOverrideReservation{events: &events}
-	err := authorizeSupervisorLaunchBoundary(func() error {
-		events = append(events, "admission")
+	reservation := &override.Reservation{}
+	originalCommit := commitOverrideReservations
+	t.Cleanup(func() { commitOverrideReservations = originalCommit })
+	commitOverrideReservations = func(got ...*override.Reservation) error {
+		if len(got) != 1 || got[0] != reservation {
+			t.Fatalf("committed reservations = %v, want OAuth reservation", got)
+		}
+		events = append(events, "commit")
 		return nil
+	}
+	err := authorizeSupervisorLaunchBoundary(func(reservations ...*override.Reservation) error {
+		events = append(events, "admission")
+		return commitOverrideReservations(reservations...)
 	}, reservation)
 	if err != nil {
 		t.Fatalf("authorizeSupervisorLaunchBoundary() error: %v", err)
@@ -144,8 +141,14 @@ func TestAuthorizeSupervisorLaunchBoundaryChecksAdmissionBeforeLedgerCommit(t *t
 func TestAuthorizeSupervisorLaunchBoundaryDoesNotCommitRefusedLaunch(t *testing.T) {
 	refusal := errors.New("concurrent admission brake engaged")
 	var events []string
-	reservation := &fakeSupervisorOverrideReservation{events: &events}
-	err := authorizeSupervisorLaunchBoundary(func() error {
+	reservation := &override.Reservation{}
+	originalCommit := commitOverrideReservations
+	t.Cleanup(func() { commitOverrideReservations = originalCommit })
+	commitOverrideReservations = func(...*override.Reservation) error {
+		events = append(events, "commit")
+		return nil
+	}
+	err := authorizeSupervisorLaunchBoundary(func(...*override.Reservation) error {
 		events = append(events, "admission")
 		return refusal
 	}, reservation)

@@ -42,7 +42,7 @@ func TestAppendInputAcceptsOnlyOneCanonicalBoundedRecord(t *testing.T) {
 	}
 
 	for name, input := range map[string][]byte{
-		"oversized":   []byte(strings.Repeat("x", override.MaxLedgerRecordBytes+1)),
+		"oversized":   []byte(strings.Repeat("x", override.MaxLedgerBatchBytes+1)),
 		"two records": append(append([]byte(nil), line...), line...),
 		"not JSONL":   bytes.TrimSuffix(line, []byte("\n")),
 		"unknown key": []byte(`{"kind":"codex-hook-trust","reason":"sandbox path rotates per spawn so hooks cannot be pre-trusted","actor":"test","at_utc":"2026-07-29T12:00:00Z","extra":true}` + "\n"),
@@ -52,6 +52,41 @@ func TestAppendInputAcceptsOnlyOneCanonicalBoundedRecord(t *testing.T) {
 				t.Fatal("invalid input was accepted")
 			}
 		})
+	}
+}
+
+func TestAppendInputWritesDistinctKindsAsOneTransaction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.jsonl")
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	uses := []override.Use{
+		{
+			Kind:    override.KindAdmissionBrake,
+			Reason:  "host recovered and the operator is verifying one guarded spawn",
+			Actor:   "vroom-dispatch",
+			Session: "vroom-orchestrator",
+			AtUTC:   now,
+		},
+		{
+			Kind:    override.KindSupervisorOAuthCheck,
+			Reason:  "validating a development supervisor without stored OAuth",
+			Actor:   "vroom-dispatch",
+			Session: "vroom-orchestrator",
+			AtUTC:   now,
+		},
+	}
+	transaction, err := override.EncodeLedgerUses(uses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appendInput(bytes.NewReader(transaction), path, false); err != nil {
+		t.Fatalf("append combined transaction: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, transaction) {
+		t.Fatalf("ledger = %q, want atomic transaction %q", got, transaction)
 	}
 }
 

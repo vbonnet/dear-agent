@@ -58,6 +58,8 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-21** When AGM resolves the operator grant store on macOS, the system shall use the canonical `/private/etc` directory so the validator can reject untrusted symlinks without rejecting the operating system's `/etc` symlink.
 
+**OVR-22** When one launch crosses more than one dangerous override, the system shall revalidate every reservation and every per-kind rate limit before recording any use, then append the complete set under one ledger lock and one write so a failed combined authorization records none of its uses.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |

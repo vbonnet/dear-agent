@@ -336,15 +336,11 @@ func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.Look
 // API-key-present guard. Unwrapped as exit code 2.
 var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; unset it or use an OAuth-only env")
 
-type supervisorOverrideReservation interface {
-	Commit() (override.Use, error)
-}
-
-var reserveSupervisorDangerousOverride = func(req override.Request) (supervisorOverrideReservation, error) {
+var reserveSupervisorDangerousOverride = func(req override.Request) (*override.Reservation, error) {
 	return override.Reserve(req)
 }
 
-func reserveSupervisorOAuthOverride(reason, session string) (supervisorOverrideReservation, error) {
+func reserveSupervisorOAuthOverride(reason, session string) (*override.Reservation, error) {
 	reservation, err := reserveSupervisorDangerousOverride(override.Request{
 		Kind:    override.KindSupervisorOAuthCheck,
 		Reason:  reason,
@@ -357,22 +353,25 @@ func reserveSupervisorOAuthOverride(reason, session string) (supervisorOverrideR
 	return reservation, nil
 }
 
-// authorizeSupervisorLaunchBoundary repeats the final live admission callback
-// before consuming the one-shot OAuth override. A refused launch must not spend
-// privileged ledger quota; a permitted launch records immediately before Run.
+// authorizeSupervisorLaunchBoundary hands the OAuth reservation to final live
+// admission so it can be committed atomically with any brake reservation. A
+// refused launch must not spend privileged ledger quota.
 func authorizeSupervisorLaunchBoundary(
-	beforeSpawn func() error,
-	reservation supervisorOverrideReservation,
+	beforeSpawn func(...*override.Reservation) error,
+	reservation *override.Reservation,
 ) error {
+	var reservations []*override.Reservation
+	if reservation != nil {
+		reservations = append(reservations, reservation)
+	}
 	if beforeSpawn != nil {
-		if err := beforeSpawn(); err != nil {
+		if err := beforeSpawn(reservations...); err != nil {
 			return fmt.Errorf("supervisor: launch admission: %w", err)
 		}
+		return nil
 	}
-	if reservation != nil {
-		if _, err := reservation.Commit(); err != nil {
-			return fmt.Errorf("supervisor: commit --skip-oauth-check override: %w", err)
-		}
+	if err := commitOverrideReservations(reservations...); err != nil {
+		return fmt.Errorf("supervisor: commit launch override transaction: %w", err)
 	}
 	return nil
 }
@@ -412,7 +411,7 @@ func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath strin
 }
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
-	var beforeSpawn func() error
+	var beforeSpawn func(...*override.Reservation) error
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
 		beforeSpawn, admissionErr = enforceCircuitBreakers(supervisorID)
@@ -424,7 +423,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		os.Exit(2)
 	}
 
-	var oauthOverride supervisorOverrideReservation
+	var oauthOverride *override.Reservation
 	if supervisorSkipOAuthCheck {
 		oauthOverride, err = reserveSupervisorOAuthOverride(supervisorSkipOAuthReason, supervisorID)
 		if err != nil {

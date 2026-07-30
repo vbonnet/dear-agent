@@ -26,11 +26,11 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
 		}
-		var err error
-		beforeSpawn, err = enforceCircuitBreakers(sessionName)
+		admission, err := enforceCircuitBreakers(sessionName)
 		if err != nil {
 			return err
 		}
+		beforeSpawn = func() error { return admission() }
 	}
 
 	fmt.Printf("Starting new Claude session in current tmux: %s\n", sessionName)
