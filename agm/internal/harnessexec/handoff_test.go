@@ -156,6 +156,34 @@ func TestReserveExecutorLaunchOverridesRejectsOtherLiveGate(t *testing.T) {
 	}
 }
 
+func TestReserveExecutorLaunchOverridesLeavesOrdinaryLaunchAdmissionToParent(t *testing.T) {
+	checkCalls := 0
+	reserveCalls := 0
+	reservations, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		nil,
+		func() circuitbreaker.CheckResult {
+			checkCalls++
+			return circuitbreaker.CheckResult{
+				Gates: []circuitbreaker.GateResult{{Gate: "spawn_stagger"}},
+			}
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("ordinary launch override reservation error = %v", err)
+	}
+	if len(reservations) != 0 {
+		t.Fatalf("ordinary launch retained %d override reservations", len(reservations))
+	}
+	if checkCalls != 0 || reserveCalls != 0 {
+		t.Fatalf("ordinary launch made %d admission checks and %d reservations", checkCalls, reserveCalls)
+	}
+}
+
 func TestReserveExecutorLaunchOverridesRejectsOmittedBrakeClaim(t *testing.T) {
 	reserveCalls := 0
 	_, err := reserveExecutorLaunchOverrides(

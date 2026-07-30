@@ -80,6 +80,13 @@ func reserveExecutorLaunchOverrides(
 	check checkLaunchAdmission,
 	reserve reserveOverrideClaim,
 ) ([]*override.Reservation, error) {
+	// Ordinary Codex launches carry no override claims and remain governed by
+	// the parent launch path. A trusted hook handoff always carries its required
+	// hook-trust claim, so it cannot use this boundary to suppress the executor's
+	// live admission checks.
+	if len(proofs) == 0 {
+		return nil, nil
+	}
 	hasAdmissionBrake := slices.ContainsFunc(proofs, func(proof override.AuthorizationProof) bool {
 		return proof.Kind == override.KindAdmissionBrake
 	})
