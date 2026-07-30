@@ -243,15 +243,15 @@ func TestReferencedScriptAssetsAllowsCommittedInterpreterOperand(t *testing.T) {
 	}
 }
 
-func TestReferencedScriptAssetsAllowsInterpreterInlineCode(t *testing.T) {
+func TestReferencedScriptAssetsRejectsInterpreterInlineCode(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n/bin/sh -c 'printf ok'\n",
 		"#!/bin/sh\n/usr/bin/env bash -c 'printf ok'\n",
 		"#!/bin/sh\npython3 -c 'print(1)'\n",
-		"#!/bin/sh\nprintf '%s\\n' 'use sh and bash carefully'\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err != nil {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want inline code allowed", script, err)
+		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "inline interpreter code") {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want inline-code rejection", script, err)
 		}
 	}
 }
@@ -263,6 +263,10 @@ func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
 		"#!/bin/sh\nif PATH=.; then helper; fi\n",
 		"#!/bin/sh\nunset PATH; helper\n",
 		"#!/bin/sh\nexport -n PATH; helper\n",
+		"#!/bin/sh\n/usr/bin/env PATH=. helper\n",
+		"#!/bin/sh\ncommand env -i PATH=. helper\n",
+		"#!/bin/sh\n/usr/bin/env -u PATH helper\n",
+		"#!/bin/sh\nexec env --unset=PATH helper\n",
 	} {
 		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "mutates PATH") {
@@ -280,6 +284,7 @@ func TestTrustedHookAssetsAllowNonCommandPathText(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n# Example only: export PATH=.\n/bin/true\n",
 		"#!/bin/sh\nprintf '%s\\n' 'do not set PATH=.'\n",
+		"#!/bin/sh\nprintf '%s\\n' 'use sh and bash carefully'\n",
 	} {
 		if _, err := referencedScriptAssets([]byte(script)); err != nil {
 			t.Fatalf("referencedScriptAssets(%q) error = %v, want non-command PATH text allowed", script, err)

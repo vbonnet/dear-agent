@@ -34,8 +34,9 @@ var (
 	interpreterOperand    = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:/bin/|/usr/bin/)?(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node))[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
 	envInterpreterOperand = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*/usr/bin/env[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node)[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
 	sourceOperand         = regexp.MustCompile(`(?m)(?:^|[;\n({]|&&|\|\|)[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:source|\.)[\t ]+([^ \t\r\n;|&]+)`)
-	pathAssignment        = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:export|readonly|typeset|declare|local)[\t ]+)?PATH(?:\+)?[\t ]*=`)
+	pathAssignment        = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:(?:/usr/bin/)?env[\t ]+(?:--?[A-Za-z0-9_-]+(?:=[^ \t;|&]+)?[\t ]+)*)?(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:export|readonly|typeset|declare|local)[\t ]+)?PATH(?:\+)?[\t ]*=`)
 	pathUnset             = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:unset|export[\t ]+-n)[\t ]+(?:--[\t ]+)?PATH(?:[\t ;\n]|$)`)
+	envPathUnset          = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:/usr/bin/)?env[\t ]+(?:-[^- \t]*u|--unset)(?:=|[\t ]+)PATH(?:[\t ;\n]|$)`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -459,7 +460,9 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 }
 
 func mutatesExecutableSearchPath(script string) bool {
-	return pathAssignment.MatchString(script) || pathUnset.MatchString(script)
+	return pathAssignment.MatchString(script) ||
+		pathUnset.MatchString(script) ||
+		envPathUnset.MatchString(script)
 }
 
 func withoutFullLineComments(script string) string {
@@ -479,7 +482,9 @@ func rejectMutableScriptOperands(script string) error {
 	} {
 		for _, match := range matcher.FindAllStringSubmatch(script, -1) {
 			if interpreterRunsInlineCode(strings.Fields(match[1])) {
-				continue
+				return fmt.Errorf(
+					"unsupported inline interpreter code; trusted hook scripts must invoke committed scripts through AGM_CODEX_HOOK_ROOT",
+				)
 			}
 			operand := strings.Trim(match[2], `"'`)
 			if operand == "" || (filepath.IsAbs(operand) && isSystemRuntimePath(operand)) {
