@@ -52,8 +52,11 @@ func TestAttestedHookPathContainsOnlyOperatorOwnedLocations(t *testing.T) {
 	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
 		t.Fatalf("validateTrustedExecutableSearchPath(attestedHookPath): %v", err)
 	}
-	if err := validateTrustedHookExecutable(systemJQPath); err != nil {
-		t.Fatalf("validateTrustedHookExecutable(systemJQPath): %v", err)
+	if trustedHookJSONPath != "/usr/local/libexec/dear-agent-codex-hook-json" {
+		t.Fatalf("trusted hook JSON path = %q", trustedHookJSONPath)
+	}
+	if err := validateTrustedHookExecutable("/bin/sh"); err != nil {
+		t.Fatalf("validateTrustedHookExecutable(/bin/sh): %v", err)
 	}
 }
 
@@ -95,6 +98,7 @@ func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) 
 }
 
 func TestLaunchConfigOverridesDisablesMutableWorkspaceExecutingHooks(t *testing.T) {
+	useTrustedHookJSONFixture(t)
 	hookRoot := t.TempDir()
 	writeFile(t, filepath.Join(hookRoot, ".codex", "hooks.json"), `{
 		"hooks":{
@@ -141,6 +145,7 @@ func TestLaunchConfigOverridesDisablesMutableWorkspaceExecutingHooks(t *testing.
 }
 
 func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testing.T) {
+	useTrustedHookJSONFixture(t)
 	hookRoot := t.TempDir()
 	manifestPath := filepath.Join(hookRoot, ".codex", "hooks.json")
 	writeFile(t, manifestPath, `{
@@ -248,6 +253,7 @@ func TestLaunchConfigOverridesRejectsMutableOrAmbiguousManifest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			useTrustedHookJSONFixture(t)
 			hookRoot := t.TempDir()
 			writeFile(t, filepath.Join(hookRoot, ".codex", "hooks.json"), tt.manifest, tt.mode)
 			_, err := LaunchConfigOverrides(hookRoot, gittest.NewRepo(t))
@@ -256,4 +262,13 @@ func TestLaunchConfigOverridesRejectsMutableOrAmbiguousManifest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func useTrustedHookJSONFixture(t *testing.T) {
+	t.Helper()
+	previous := trustedHookJSONPath
+	trustedHookJSONPath = "/bin/sh"
+	t.Cleanup(func() {
+		trustedHookJSONPath = previous
+	})
 }

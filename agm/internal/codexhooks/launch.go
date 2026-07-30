@@ -27,8 +27,9 @@ var sessionFlagsHookSource = func() string {
 const (
 	attestedHookPath          = "/usr/local/libexec:/usr/bin:/bin:/usr/sbin:/sbin"
 	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
-	systemJQPath              = "/usr/bin/jq"
 )
+
+var trustedHookJSONPath = "/usr/local/libexec/dear-agent-codex-hook-json"
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
 	"PostCompact":      {},
@@ -63,8 +64,11 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
 		return nil, err
 	}
-	if err := validateTrustedHookExecutable(systemJQPath); err != nil {
-		return nil, err
+	if err := validateTrustedHookExecutable(trustedHookJSONPath); err != nil {
+		return nil, fmt.Errorf(
+			"validate trusted Codex hook JSON helper (install with make install-codex-hook-json): %w",
+			err,
+		)
 	}
 	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
 		return nil, err

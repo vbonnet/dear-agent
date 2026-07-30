@@ -42,7 +42,7 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-13** When a reviewed hook event intentionally executes workspace code or depends on non-system workspace tooling, the system shall preserve and disable the mutable project handler identity but replace the bypassed session handler with an OS-owned no-op; ordinary non-bypassed Codex sessions retain the reviewed project behavior.
 
-**CHOOK-14** When an attested input-inspection hook parses Codex JSON, the system shall require the fixed `/usr/bin/jq` identity to resolve to a root-owned, non-writable executable regular file behind root-owned, non-writable ancestors before launch.
+**CHOOK-14** When an attested input-inspection hook parses Codex JSON, the system shall require the fixed `/usr/local/libexec/dear-agent-codex-hook-json` identity to resolve to a root-owned, non-writable executable regular file behind root-owned, non-writable ancestors before launch.
 
 ## BDD Traceability
 

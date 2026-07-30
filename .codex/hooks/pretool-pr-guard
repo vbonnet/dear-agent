@@ -7,10 +7,16 @@
 
 set -uo pipefail
 
+json_tool="/usr/local/libexec/dear-agent-codex-hook-json"
+if [ -z "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  json_tool="$(command -v jq 2>/dev/null || true)"
+fi
+[ -x "$json_tool" ] || exit 0
+
 input="$(cat)"
-tool="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | "$json_tool" -r '.tool_name // empty' 2>/dev/null || true)"
 [ "$tool" = "Bash" ] || exit 0
-cmd="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+cmd="$(printf '%s' "$input" | "$json_tool" -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 cmd="${cmd//\\$'\n'/ }"
 

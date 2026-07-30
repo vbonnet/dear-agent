@@ -64,6 +64,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-codex-hook-json    Build the fixed JSON helper for attested Codex hooks
+#   install-codex-hook-json  Operator-install the digest-bound JSON helper
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
 #   install-bead-close-guard Install bead-close-guard to ~/go/bin and the operator-owned Codex hook path
 #   build-drift-check       Build the legacy deployment-drift detector (cmd/drift-check)
@@ -123,7 +125,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchdaemon uninstall-override-audit-launchdaemon install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchdaemon uninstall-override-audit-launchdaemon install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
@@ -552,6 +554,52 @@ build-bead-pr-guard:
 
 install-bead-pr-guard: build-bead-pr-guard
 	$(call install-go-bin,bin/bead-pr-guard)
+
+# Supplies only the fixed JSON filters used by attested Codex hook scripts as a
+# static Go binary. The privileged install is digest-confirmed and root-staged
+# so the unattended agent cannot replace either the executable or its runtime.
+build-codex-hook-json:
+	@echo "Building codex-hook-json..."
+	@mkdir -p bin
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/codex-hook-json ./cmd/codex-hook-json/
+	@echo "Built: bin/codex-hook-json"
+
+install-codex-hook-json: build-codex-hook-json
+	@set -eu; \
+		test -t 0 || { echo "refusing non-interactive privileged Codex hook JSON helper installation" >&2; exit 2; }; \
+		root_group="$$(id -gn 0)"; \
+		artifact="bin/codex-hook-json"; \
+		helper="/usr/local/libexec/dear-agent-codex-hook-json"; \
+		helper_staging=""; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		printf 'Reviewed Codex hook JSON helper SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "Codex hook JSON helper digest confirmation did not match" >&2; exit 2; }; \
+		cleanup_helper_staging() { \
+			if test -n "$$helper_staging"; then \
+				/usr/bin/sudo /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
+			fi; \
+		}; \
+		trap cleanup_helper_staging EXIT HUP INT TERM; \
+		/usr/bin/sudo -k; \
+		if /usr/bin/sudo -n -v 2>/dev/null; then \
+			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
+			exit 2; \
+		fi; \
+		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
+		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-codex-hook-json.XXXXXX)"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
+		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"; \
+		staged_hash="$${staged_hash%% *}"; \
+		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged Codex hook JSON helper differs from the approved bytes" >&2; exit 1; }; \
+		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
+		helper_staging=""; \
+		trap - EXIT HUP INT TERM; \
+		/usr/bin/sudo -k; \
+		echo "Installed digest-bound operator-owned Codex hook JSON helper: $$helper"
 
 # Enforces Definition of Done before bead closure: blocks `bd close` when
 # referenced PRs are not yet merged. Used by the pretool-bead-close-guard hook.
