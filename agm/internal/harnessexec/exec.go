@@ -461,7 +461,9 @@ func runCodex(args []string) error {
 			return fmt.Errorf("revalidate approved Codex hook source: %w", err)
 		}
 		environ = overlayEnvironment(environ, []string{"AGM_CODEX_HOOK_ROOT=" + request.HookRoot})
-		overrides, overrideErr := codexHookOverrides(request.HookRoot, request.WorkDir)
+		overrides, overrideErr := codexHookOverrides(
+			request.HookRoot, request.HookTrustDigest, request.WorkDir,
+		)
 		if overrideErr != nil {
 			return fmt.Errorf("prepare immutable Codex hook configuration: %w", overrideErr)
 		}

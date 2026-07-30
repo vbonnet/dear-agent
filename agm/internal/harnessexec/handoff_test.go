@@ -470,8 +470,11 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		executableResolved = true
 		return "/fixed/codex", nil
 	}
-	codexHookOverrides = func(root, workDir string) ([]string, error) {
+	codexHookOverrides = func(root, digest, workDir string) ([]string, error) {
 		hookConfigurationPrepared = true
+		if digest != testCodexHookDigest {
+			t.Fatalf("hook digest = %q, want %q", digest, testCodexHookDigest)
+		}
 		return []string{
 			`projects={"` + workDir + `"={trust_level="untrusted"}}`,
 			`hooks={"PreToolUse":[]}`,
@@ -716,7 +719,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		t.Fatalf("prepare config-failure Codex bypass: %v", err)
 	}
 	bindProof(configFailure, testCodexHookProof("config-failure", hookTrustReason, hookTrustActor))
-	codexHookOverrides = func(string, string) ([]string, error) {
+	codexHookOverrides = func(string, string, string) ([]string, error) {
 		return nil, errors.New("configuration failed")
 	}
 	err = Run(CodexProtocol, []string{
@@ -751,7 +754,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		t.Fatalf("prepare resolve-failure Codex bypass: %v", err)
 	}
 	bindProof(resolveFailure, testCodexHookProof("resolve-failure", hookTrustReason, hookTrustActor))
-	codexHookOverrides = func(string, string) ([]string, error) { return nil, nil }
+	codexHookOverrides = func(string, string, string) ([]string, error) { return nil, nil }
 	lookPathInEnvironment = func(string, []string) (string, error) {
 		return "", errors.New("codex missing")
 	}

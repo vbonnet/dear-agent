@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -44,40 +43,22 @@ var neutralizedAttestedHookEvents = map[string]struct{}{
 	"UserPromptSubmit": {},
 }
 
-// LaunchConfigOverrides returns a Codex CLI config override that loads the
-// attested hooks from the immutable materialization, pins their exact trust
-// hashes, and disables the corresponding mutable project-layer entries.
+// LaunchConfigOverrides returns a Codex CLI config override that loads one
+// digest-verified in-memory snapshot of the attested materialization, embeds
+// enabled script bytes into the session command, pins their exact trust hashes,
+// and disables the corresponding mutable project-layer entries.
 //
 // The manifest and state are encoded into argv before exec. AGM deliberately
 // does not ask Codex to bypass hook trust globally: an entry appended to a
 // writable project hooks.json after attestation therefore has neither a pinned
 // session hash nor a trusted project key and cannot run. Project trust itself
 // remains unchanged so the interactive TUI can start.
-func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
-	if !filepath.IsAbs(hookRoot) || filepath.Clean(hookRoot) != hookRoot {
-		return nil, fmt.Errorf("materialized hook root must be a clean absolute path")
-	}
+func LaunchConfigOverrides(hookRoot, expectedDigest, workDir string) ([]string, error) {
 	if !filepath.IsAbs(workDir) || filepath.Clean(workDir) != workDir {
 		return nil, fmt.Errorf("codex working directory must be a clean absolute path")
 	}
-
-	hooks, err := readMaterializedHookManifest(hookRoot)
+	hooks, err := embeddedMaterializedHooks(hookRoot, expectedDigest)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateAttestedExecutablePath(attestedHookPath); err != nil {
-		return nil, err
-	}
-	if err := validateTrustedHookJSONExecutable(trustedHookJSONPath); err != nil {
-		return nil, fmt.Errorf(
-			"validate trusted Codex hook JSON helper (install with make install-codex-hook-json): %w",
-			err,
-		)
-	}
-	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
-		return nil, err
-	}
-	if err := hardenHookCommands(hooks); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -101,25 +82,50 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 	return []string{"hooks=" + encodedHooks}, nil
 }
 
-func readMaterializedHookManifest(hookRoot string) (map[string]any, error) {
-	manifestPath := filepath.Join(hookRoot, filepath.FromSlash(hooksManifestPath))
-	info, err := os.Lstat(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("inspect materialized Codex hook manifest: %w", err)
+func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any, error) {
+	if !filepath.IsAbs(hookRoot) || filepath.Clean(hookRoot) != hookRoot {
+		return nil, fmt.Errorf("materialized hook root must be a clean absolute path")
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o222 != 0 {
+	if len(expectedDigest) != sha256.Size*2 || filepath.Base(hookRoot) != expectedDigest {
+		return nil, fmt.Errorf("materialized hook root must match the approved SHA-256 digest")
+	}
+	assets, err := loadMaterializedSnapshot(hookRoot, expectedDigest)
+	if err != nil {
+		return nil, err
+	}
+	hooks, err := readMaterializedHookManifest(assets)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAttestedExecutablePath(attestedHookPath); err != nil {
+		return nil, err
+	}
+	if err := validateTrustedHookJSONExecutable(trustedHookJSONPath); err != nil {
+		return nil, fmt.Errorf(
+			"validate trusted Codex hook JSON helper (install with make install-codex-hook-json): %w",
+			err,
+		)
+	}
+	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
+		return nil, err
+	}
+	if err := hardenHookCommands(hooks, assets); err != nil {
+		return nil, err
+	}
+	return hooks, nil
+}
+
+func readMaterializedHookManifest(assets map[string]asset) (map[string]any, error) {
+	manifestAsset, ok := assets[hooksManifestPath]
+	if !ok || manifestAsset.executable {
 		return nil, fmt.Errorf("materialized Codex hook manifest must be a read-only regular file")
-	}
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("read materialized Codex hook manifest: %w", err)
 	}
 
 	var manifest struct {
 		Description string         `json:"description,omitempty"`
 		Hooks       map[string]any `json:"hooks"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder := json.NewDecoder(bytes.NewReader(manifestAsset.content))
 	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&manifest); err != nil {
@@ -178,7 +184,7 @@ func neutralizeWorkspaceExecutingHooks(hooks map[string]any) error {
 	return nil
 }
 
-func hardenHookCommands(hooks map[string]any) error {
+func hardenHookCommands(hooks map[string]any, assets map[string]asset) error {
 	for eventName := range hookEventKeyLabels {
 		rawGroups, exists := hooks[eventName]
 		if !exists {
@@ -220,11 +226,40 @@ func hardenHookCommands(hooks map[string]any) error {
 						eventName, groupIndex, handlerIndex,
 					)
 				}
+				command, err := inlineMaterializedCommand(command, assets)
+				if err != nil {
+					return fmt.Errorf(
+						"materialized Codex hook event %s group %d handler %d: %w",
+						eventName, groupIndex, handlerIndex, err,
+					)
+				}
 				handler[field] = attestedHookCommandPrefix + shellSingleQuote(command)
 			}
 		}
 	}
 	return nil
+}
+
+func inlineMaterializedCommand(command string, assets map[string]asset) (string, error) {
+	matches := hookRootReference.FindAllStringSubmatch(command, -1)
+	if len(matches) == 0 {
+		return command, nil
+	}
+	if len(matches) != 1 || strings.TrimSpace(command) != matches[0][0] {
+		return "", fmt.Errorf("trusted materialized hook command must be one exact committed executable")
+	}
+	path, err := cleanProjectPath(matches[0][1])
+	if err != nil {
+		return "", err
+	}
+	item, ok := assets[path]
+	if !ok || !item.executable {
+		return "", fmt.Errorf("trusted materialized hook executable %q is missing or not executable", path)
+	}
+	// The verified bytes, rather than their same-user-owned filesystem path,
+	// become the session command. This removes the post-verification mutation
+	// window for the entire Codex process lifetime.
+	return string(item.content), nil
 }
 
 func shellSingleQuote(value string) string {

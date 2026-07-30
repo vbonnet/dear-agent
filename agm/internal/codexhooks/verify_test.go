@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -161,12 +160,6 @@ func TestVerifyRejectsMutatedSandboxHookAssets(t *testing.T) {
 			},
 		},
 		{
-			name: "transitively referenced script",
-			mutate: func(t *testing.T, sandbox string) {
-				writeFile(t, filepath.Join(sandbox, "tools", "transitive-guard"), "#!/bin/sh\nexit 99\n", 0o755)
-			},
-		},
-		{
 			name: "referenced script symlink",
 			mutate: func(t *testing.T, sandbox string) {
 				path := filepath.Join(sandbox, ".codex", "hooks", "guard")
@@ -215,7 +208,7 @@ func TestAttestRejectsMutableTransitiveHookRuntimeDependencies(t *testing.T) {
 	}
 }
 
-func TestReferencedScriptAssetsRejectsBareInterpreterAndSourceOperands(t *testing.T) {
+func TestValidateScriptAssetRejectsBareInterpreterAndSourceOperands(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n/bin/sh helper\n",
 		"#!/bin/sh\n/bin/sh ./helper\n",
@@ -225,33 +218,30 @@ func TestReferencedScriptAssetsRejectsBareInterpreterAndSourceOperands(t *testin
 		"#!/bin/bash\nsource helper\n",
 		"#!/bin/sh\n. helper\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "mutable interpreter or sourced-file operand") {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want mutable operand rejection", script, err)
+			t.Fatalf("validateScriptAsset(%q) error = %v, want mutable operand rejection", script, err)
 		}
 	}
 }
 
-func TestReferencedScriptAssetsAllowsCommittedInterpreterOperand(t *testing.T) {
+func TestValidateScriptAssetRejectsMaterializedChildExecution(t *testing.T) {
 	const script = "#!/bin/sh\n/bin/sh \"${AGM_CODEX_HOOK_ROOT:-.}/tools/helper\"\n"
-	references, err := referencedScriptAssets([]byte(script))
-	if err != nil {
-		t.Fatalf("referencedScriptAssets() error: %v", err)
-	}
-	if !slices.Equal(references, []string{"tools/helper"}) {
-		t.Fatalf("references = %v, want committed interpreter operand", references)
+	if err := validateScriptAsset([]byte(script)); err == nil ||
+		!strings.Contains(err.Error(), "materialized child asset") {
+		t.Fatalf("validateScriptAsset() error = %v, want child-execution rejection", err)
 	}
 }
 
-func TestReferencedScriptAssetsRejectsInterpreterInlineCode(t *testing.T) {
+func TestValidateScriptAssetRejectsInterpreterInlineCode(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n/bin/sh -c 'printf ok'\n",
 		"#!/bin/sh\n/usr/bin/env bash -c 'printf ok'\n",
 		"#!/bin/sh\npython3 -c 'print(1)'\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "inline interpreter code") {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want inline-code rejection", script, err)
+			t.Fatalf("validateScriptAsset(%q) error = %v, want inline-code rejection", script, err)
 		}
 	}
 }
@@ -268,9 +258,9 @@ func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/env -u PATH helper\n",
 		"#!/bin/sh\nexec env --unset=PATH helper\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "mutates PATH") {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want PATH mutation rejection", script, err)
+			t.Fatalf("validateScriptAsset(%q) error = %v, want PATH mutation rejection", script, err)
 		}
 	}
 	references := make(map[string]struct{})
@@ -286,8 +276,8 @@ func TestTrustedHookAssetsAllowNonCommandPathText(t *testing.T) {
 		"#!/bin/sh\nprintf '%s\\n' 'do not set PATH=.'\n",
 		"#!/bin/sh\nprintf '%s\\n' 'use sh and bash carefully'\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err != nil {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want non-command PATH text allowed", script, err)
+		if err := validateScriptAsset([]byte(script)); err != nil {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want non-command PATH text allowed", script, err)
 		}
 	}
 }
@@ -301,9 +291,9 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\nroot=.; /usr/bin/env \"$root/helper\"\n",
 		"#!/bin/sh\ncmd=helper; eval \"$cmd\"\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want dynamic-command rejection", script, err)
+			t.Fatalf("validateScriptAsset(%q) error = %v, want dynamic-command rejection", script, err)
 		}
 	}
 }
@@ -314,8 +304,8 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/sh\ncommand -v jq\n",
 		"#!/bin/sh\n/usr/bin/env -i /bin/true\n",
 	} {
-		if _, err := referencedScriptAssets([]byte(script)); err != nil {
-			t.Fatalf("referencedScriptAssets(%q) error = %v, want static command allowed", script, err)
+		if err := validateScriptAsset([]byte(script)); err != nil {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)
 		}
 	}
 }
@@ -342,11 +332,9 @@ func TestRepositoryEnabledHookScriptsHaveClosedRuntimeDependencies(t *testing.T)
 		if readErr != nil {
 			t.Fatalf("read repository hook asset %q: %v", reference, readErr)
 		}
-		transitive, parseErr := referencedScriptAssets(content)
-		if parseErr != nil {
-			t.Fatalf("validate repository hook asset %q: %v", reference, parseErr)
+		if err := validateScriptAsset(content); err != nil {
+			t.Fatalf("validate repository hook asset %q: %v", reference, err)
 		}
-		references = append(references, transitive...)
 	}
 }
 
@@ -484,9 +472,7 @@ func attestForTest(t *testing.T, source, sandbox string, writableRoots []string)
 
 func hookFixture(t *testing.T) (string, string) {
 	t.Helper()
-	return hookFixtureWithGuard(t,
-		"#!/bin/sh\n${AGM_CODEX_HOOK_ROOT:-.}/tools/transitive-guard\n",
-	)
+	return hookFixtureWithGuard(t, "#!/bin/sh\n/bin/true\n")
 }
 
 func hookFixtureWithGuard(t *testing.T, guard string) (string, string) {
@@ -498,8 +484,7 @@ func hookFixtureWithGuard(t *testing.T, guard string) (string, string) {
 	)
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), guard, 0o755)
 	writeFile(t, filepath.Join(source, "tools", "relative-guard"), "#!/bin/sh\nexit 0\n", 0o755)
-	writeFile(t, filepath.Join(source, "tools", "transitive-guard"), "#!/bin/sh\nexit 0\n", 0o755)
-	gittest.Run(t, source, "add", ".codex", "tools/relative-guard", "tools/transitive-guard")
+	gittest.Run(t, source, "add", ".codex", "tools/relative-guard")
 	gittest.Run(t, source, "commit", "-m", "add reviewed hooks")
 
 	sandbox := filepath.Join(t.TempDir(), "sandbox")

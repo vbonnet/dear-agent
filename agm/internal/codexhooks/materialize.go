@@ -3,6 +3,7 @@ package codexhooks
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	slashpath "path"
@@ -187,6 +188,90 @@ func verifyMaterializedAssets(root, digest string, expected []asset) error {
 		return fmt.Errorf("materialized hook digest differs: got %s, want %s", got, digest)
 	}
 	return nil
+}
+
+// loadMaterializedSnapshot reads every materialized asset into memory and
+// verifies the complete content-addressed tree before any of those bytes are
+// used to build the Codex session configuration. Once returned, later
+// same-user filesystem mutations cannot change the snapshot embedded into the
+// child process argv.
+func loadMaterializedSnapshot(root, expectedDigest string) (map[string]asset, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, fmt.Errorf("inspect materialized hook root: %w", err)
+	}
+	if !info.IsDir() || info.Mode().Perm()&0o222 != 0 {
+		return nil, fmt.Errorf("materialized hook root %q is not a read-only directory", root)
+	}
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open materialized hook root: %w", err)
+	}
+	defer func() { _ = rootFS.Close() }()
+
+	var loaded []asset
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if info.Mode().Perm()&0o222 != 0 {
+				return fmt.Errorf("materialized hook directory %q is writable", filepath.ToSlash(relative))
+			}
+			return nil
+		}
+		item, err := loadSnapshotAsset(rootFS, relative, info)
+		if err == nil {
+			loaded = append(loaded, item)
+		}
+		return err
+	}); err != nil {
+		return nil, fmt.Errorf("load materialized hook snapshot: %w", err)
+	}
+	if got := digestAssets(loaded); got != expectedDigest {
+		return nil, fmt.Errorf("materialized hook snapshot digest differs: got %s, want %s", got, expectedDigest)
+	}
+	byPath := make(map[string]asset, len(loaded))
+	for _, item := range loaded {
+		byPath[item.path] = item
+	}
+	return byPath, nil
+}
+
+func loadSnapshotAsset(rootFS *os.Root, relative string, info os.FileInfo) (asset, error) {
+	displayPath := filepath.ToSlash(relative)
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o222 != 0 {
+		return asset{}, fmt.Errorf("materialized hook asset %q is not a read-only regular file", displayPath)
+	}
+	file, err := rootFS.Open(relative)
+	if err != nil {
+		return asset{}, fmt.Errorf("open materialized hook asset %q: %w", displayPath, err)
+	}
+	content, readErr := io.ReadAll(file)
+	if closeErr := file.Close(); readErr != nil || closeErr != nil {
+		return asset{}, fmt.Errorf(
+			"read materialized hook asset %q: %w", displayPath, errors.Join(readErr, closeErr),
+		)
+	}
+	executable := info.Mode().Perm()&0o111 != 0
+	gitMode := "100644"
+	if executable {
+		gitMode = "100755"
+	}
+	return asset{
+		path: displayPath, gitMode: gitMode, content: content, executable: executable,
+	}, nil
 }
 
 func inventoryMaterializedAssets(root string, expected []asset) (map[string]bool, error) {

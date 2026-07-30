@@ -46,6 +46,8 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-15** When an operator approves a Codex hook-trust source, the system shall resolve and display the canonical repository, full current commit, and committed hook-byte digest without trusting mutable working-tree bytes, and every private executor shall revalidate that exact persisted identity, materialization, and sandbox asset set before launch.
 
+**CHOOK-16** When AGM builds the hook configuration for an approved Codex launch, the system shall load every materialized asset into one in-memory snapshot, require the complete snapshot to match the approved digest, embed each enabled hook script's verified bytes into the session configuration, and never execute that script through its same-user-owned materialized path.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

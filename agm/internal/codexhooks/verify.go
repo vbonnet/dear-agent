@@ -209,11 +209,9 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 		}
 		seen[reference] = struct{}{}
 		assets = append(assets, item)
-		transitive, err := referencedScriptAssets(item.content)
-		if err != nil {
+		if err := validateScriptAsset(item.content); err != nil {
 			return nil, fmt.Errorf("parse committed hook asset %q: %w", reference, err)
 		}
-		references = append(references, transitive...)
 	}
 	sort.Slice(assets, func(i, j int) bool { return assets[i].path < assets[j].path })
 	return assets, nil
@@ -416,29 +414,27 @@ func containsMutableAbsolutePath(command string) bool {
 	return false
 }
 
-// referencedScriptAssets closes the transitive trust gap for enabled hook
-// scripts. Every explicitly materialized-root dependency is recursively pinned,
-// while paths that would resolve through mutable workspace or runtime state are
-// refused instead of being guessed by a shell parser.
-func referencedScriptAssets(content []byte) ([]string, error) {
+// validateScriptAsset closes the transitive trust gap for enabled hook scripts.
+// A manifest-level executable can be embedded into the immutable session
+// configuration, but that script cannot safely delegate to a same-user-owned
+// materialized child after launch.
+func validateScriptAsset(content []byte) error {
 	script := string(content)
-	references := make(map[string]struct{})
 	for _, match := range hookRootReference.FindAllStringSubmatch(script, -1) {
-		clean, err := cleanProjectPath(match[1])
-		if err != nil {
-			return nil, err
-		}
-		references[clean] = struct{}{}
+		return fmt.Errorf(
+			"trusted hook script references materialized child asset %q; only manifest-level executables can be embedded into the immutable session configuration",
+			match[1],
+		)
 	}
 
 	unmatched := hookRootReference.ReplaceAllString(script, "")
 	scannable := withoutFullLineComments(unmatched)
 	if mutatesExecutableSearchPath(scannable) {
-		return nil, fmt.Errorf("trusted hook script mutates PATH; trusted hooks must retain the hardened executable search path")
+		return fmt.Errorf("trusted hook script mutates PATH; trusted hooks must retain the hardened executable search path")
 	}
 	if anyProjectDirRef.MatchString(unmatched) ||
 		runtimeDirReference.MatchString(unmatched) {
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"unsupported mutable runtime path; trusted hook scripts must execute committed assets through AGM_CODEX_HOOK_ROOT",
 		)
 	}
@@ -447,24 +443,19 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 		if filepath.IsAbs(path) && isSystemRuntimePath(path) {
 			continue
 		}
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"unsupported mutable command path %q; trusted hook scripts must execute committed assets through AGM_CODEX_HOOK_ROOT",
 			path,
 		)
 	}
 	if err := rejectDynamicCommandResolution(scannable); err != nil {
-		return nil, err
+		return err
 	}
 	if err := rejectMutableScriptOperands(scannable); err != nil {
-		return nil, err
+		return err
 	}
 
-	out := make([]string, 0, len(references))
-	for path := range references {
-		out = append(out, path)
-	}
-	sort.Strings(out)
-	return out, nil
+	return nil
 }
 
 func rejectDynamicCommandResolution(script string) error {
