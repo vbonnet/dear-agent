@@ -3,6 +3,7 @@
 package override
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,7 +39,7 @@ func appendOperatorLedger(uses []Use, path string) error {
 		return err
 	}
 	cmd := exec.Command("/usr/bin/sudo", "-n", operatorLedgerAppendHelper)
-	cmd.Stdin = strings.NewReader(string(data))
+	cmd.Stdin = bytes.NewReader(data)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf(

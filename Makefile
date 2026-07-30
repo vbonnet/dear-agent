@@ -1004,7 +1004,7 @@ install-override-ledger-helper: build-override-ledger-helper install-agm
 		expected_hash="$${expected_hash%% *}"; \
 		case "$$(uname -s)" in \
 			Darwin) \
-				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p')"; \
+				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
 				test -n "$$caller_digest" || { echo "installed AGM has no kernel-verifiable code identity" >&2; exit 1; }; \
 				caller_identity="darwin-cdhash:$$caller_digest"; \
 				;; \

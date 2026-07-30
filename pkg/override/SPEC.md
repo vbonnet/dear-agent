@@ -142,9 +142,9 @@ per-user, helper-digest-qualified NOPASSWD sudoers rule for that path. Runtime
 authorization invokes it with `sudo -n`: no fresh prompt or cached sudo
 credential is needed, and AGM, `tee`, `chmod`, arbitrary arguments, and
 arbitrary paths are never privileged.
-The helper accepts exactly one canonical bounded JSONL transaction on stdin.
-A transaction is either one historical-compatible use record or one envelope
-containing at most one use per override kind. The helper appends only to
+The helper accepts exactly one canonical bounded launcher request on stdin.
+Its embedded transaction is either one historical-compatible use record or one
+envelope containing at most one use per override kind. The helper appends only to
 `/var/log/dear-agent-overrides.jsonl`, revalidates every matching active
 root-owned grant, exact subject, unique random authorization ID, and near-current
 timestamp, synchronizes before returning, and stops at a 16 MiB ledger cap
