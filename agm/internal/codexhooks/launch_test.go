@@ -1,6 +1,7 @@
 package codexhooks
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
-func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHooks(t *testing.T) {
+func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testing.T) {
 	hookRoot := t.TempDir()
 	manifestPath := filepath.Join(hookRoot, ".codex", "hooks.json")
 	writeFile(t, manifestPath, `{
@@ -27,33 +28,61 @@ func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHooks(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LaunchConfigOverrides() error: %v", err)
 	}
-	if len(overrides) != 2 {
-		t.Fatalf("LaunchConfigOverrides() = %q, want two overrides", overrides)
+	if len(overrides) != 1 {
+		t.Fatalf("LaunchConfigOverrides() = %q, want one override", overrides)
 	}
 
 	var parsed map[string]any
 	if err := toml.Unmarshal([]byte(strings.Join(overrides, "\n")), &parsed); err != nil {
 		t.Fatalf("generated overrides are not valid TOML: %v\n%s", err, strings.Join(overrides, "\n"))
 	}
-	projects, ok := parsed["projects"].(map[string]any)
-	if !ok {
-		t.Fatalf("projects override = %#v", parsed["projects"])
-	}
-	project, ok := projects[workDir].(map[string]any)
-	if !ok || project["trust_level"] != "untrusted" {
-		t.Fatalf("project trust override = %#v", projects[workDir])
-	}
 	canonicalProjectRoot, err := filepath.EvalSymlinks(projectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootProject, ok := projects[canonicalProjectRoot].(map[string]any)
-	if !ok || rootProject["trust_level"] != "untrusted" {
-		t.Fatalf("root project trust override = %#v", projects[canonicalProjectRoot])
-	}
 	hooks, ok := parsed["hooks"].(map[string]any)
 	if !ok || hooks["PreToolUse"] == nil {
 		t.Fatalf("hooks override = %#v", parsed["hooks"])
+	}
+	state, ok := hooks["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("hooks state override = %#v", hooks["state"])
+	}
+	key := filepath.Join(canonicalProjectRoot, ".codex", "hooks.json") + ":pre_tool_use:0:0"
+	disabled, ok := state[key].(map[string]any)
+	if !ok || disabled["enabled"] != false {
+		t.Fatalf("project hook state = %#v", state[key])
+	}
+	if _, exists := parsed["projects"]; exists {
+		t.Fatalf("launch overrides project trust: %#v", parsed["projects"])
+	}
+}
+
+func TestProjectHookSourceRootsIncludesLinkedRootCheckout(t *testing.T) {
+	rootCheckout := gittest.NewRepo(t)
+	linkedCheckout := filepath.Join(t.TempDir(), "linked")
+	gittest.Run(t, rootCheckout, "worktree", "add", "-b", "linked", linkedCheckout)
+
+	projectRoot, err := gitRoot(context.Background(), linkedCheckout)
+	if err != nil {
+		t.Fatalf("gitRoot() error: %v", err)
+	}
+	roots, err := projectHookSourceRoots(context.Background(), linkedCheckout, projectRoot)
+	if err != nil {
+		t.Fatalf("projectHookSourceRoots() error: %v", err)
+	}
+	got := make(map[string]bool, len(roots))
+	for _, root := range roots {
+		got[root] = true
+	}
+	canonicalRootCheckout, err := filepath.EvalSymlinks(rootCheckout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{projectRoot, canonicalRootCheckout} {
+		if !got[want] {
+			t.Fatalf("project hook roots = %q, missing %q", roots, want)
+		}
 	}
 }
 
@@ -67,7 +96,7 @@ func TestLaunchConfigOverridesRejectsMutableOrAmbiguousManifest(t *testing.T) {
 		{name: "writable", manifest: `{"hooks":{}}`, mode: 0o644, want: "read-only regular file"},
 		{name: "missing hooks", manifest: `{"description":"none"}`, mode: 0o444, want: "no hooks object"},
 		{name: "trailing value", manifest: `{"hooks":{}} {}`, mode: 0o444, want: "trailing JSON value"},
-		{name: "null hook value", manifest: `{"hooks":{"Stop":null}}`, mode: 0o444, want: "null is not a TOML value"},
+		{name: "null hook value", manifest: `{"hooks":{"Stop":null}}`, mode: 0o444, want: "event Stop must be an array"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

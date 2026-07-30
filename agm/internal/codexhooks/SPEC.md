@@ -28,7 +28,7 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-06** When AGM prepares a sandboxed Codex session, the reviewed source repository shall remain outside every agent-writable root and shall not be forwarded to Codex as an `--add-dir`.
 
-**CHOOK-07** When AGM authorizes the hook-trust bypass, the system shall materialize the exact attested manifest and referenced hooks in a content-addressed, read-only directory outside every agent-writable root, reject missing or unexpected assets, and make that immutable root the project-hook execution root for the full Codex process lifetime.
+**CHOOK-07** When AGM authorizes the hook-trust bypass, the system shall materialize the exact attested manifest and referenced hooks in a content-addressed, read-only directory outside every agent-writable root, reject missing or unexpected assets, load those hooks through immutable session configuration, disable their mutable project-layer copies through Codex hook state, and preserve the project's trusted status for the full Codex process lifetime.
 
 **CHOOK-08** When AGM launches or cold-resumes a bypassed Codex session, the private executor shall require a clean absolute attested hook root, inject it as `AGM_CODEX_HOOK_ROOT`, and reject a hook root when the bypass is absent.
 
