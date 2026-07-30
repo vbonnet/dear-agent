@@ -65,6 +65,11 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite session store: %w", err)
 	}
+	// The SQLite adapter is a test-environment stand-in for Dolt. Keep its
+	// writes on one connection so concurrent callers queue in database/sql
+	// instead of racing separate SQLite writers into SQLITE_BUSY. The durable
+	// name reservation still arbitrates interleaved create lifecycles.
+	conn.SetMaxOpenConns(1)
 	if err := conn.Ping(); err != nil { //nolint:noctx // connection validation
 		_ = conn.Close()
 		return nil, fmt.Errorf("ping SQLite session store: %w", err)
