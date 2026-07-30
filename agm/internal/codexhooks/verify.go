@@ -24,12 +24,13 @@ const (
 )
 
 var (
-	projectDirReference  = regexp.MustCompile(`(?:\$\{(?:CLAUDE|CODEX)_PROJECT_DIR\}|\$(?:CLAUDE|CODEX)_PROJECT_DIR)/([A-Za-z0-9._/-]+)`)
+	anyProjectDirRef     = regexp.MustCompile(`\$\{?(?:CLAUDE|CODEX)_PROJECT_DIR\b`)
 	hookRootReference    = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
 	relativePathToken    = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
 	runtimeDirReference  = regexp.MustCompile(`(?:\$\{(?:PWD|HOME|TMPDIR|TMP|TEMP)\}|\$(?:PWD|HOME|TMPDIR|TMP|TEMP))/[A-Za-z0-9._/-]+`)
 	explicitRelativePath = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
 	absolutePathToken    = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
+	scriptCommandPath    = regexp.MustCompile(`(?m)(?:^|[;\n]|&&|\|\|)[\t ]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*((?:\.\.?/|~/)[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+|/[A-Za-z0-9._/-]+)`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -184,7 +185,13 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 		return nil, fmt.Errorf("parse committed Codex hook manifest: %w", err)
 	}
 	assets := []asset{manifest}
-	for _, reference := range references {
+	seen := map[string]struct{}{hooksManifestPath: {}}
+	for len(references) > 0 {
+		reference := references[0]
+		references = references[1:]
+		if _, exists := seen[reference]; exists {
+			continue
+		}
 		item, err := committedAsset(ctx, attestation.SourceRepo, attestation.SourceCommit, reference)
 		if err != nil {
 			return nil, fmt.Errorf("read committed hook asset %q: %w", reference, err)
@@ -192,7 +199,13 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 		if err := validateHookInterpreter(item); err != nil {
 			return nil, err
 		}
+		seen[reference] = struct{}{}
 		assets = append(assets, item)
+		transitive, err := referencedScriptAssets(item.content)
+		if err != nil {
+			return nil, fmt.Errorf("parse committed hook asset %q: %w", reference, err)
+		}
+		references = append(references, transitive...)
 	}
 	sort.Slice(assets, func(i, j int) bool { return assets[i].path < assets[j].path })
 	return assets, nil
@@ -369,8 +382,7 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 }
 
 func containsMutableRuntimePath(command string) bool {
-	return projectDirReference.MatchString(command) ||
-		strings.Contains(command, "PROJECT_DIR") ||
+	return anyProjectDirRef.MatchString(command) ||
 		runtimeDirReference.MatchString(command) ||
 		explicitRelativePath.MatchString(command) ||
 		relativePathToken.MatchString(command) ||
@@ -379,17 +391,62 @@ func containsMutableRuntimePath(command string) bool {
 
 func containsMutableAbsolutePath(command string) bool {
 	for _, match := range absolutePathToken.FindAllStringSubmatch(command, -1) {
-		path := filepath.Clean(match[1])
-		if path == "/bin" || strings.HasPrefix(path, "/bin/") ||
-			path == "/sbin" || strings.HasPrefix(path, "/sbin/") ||
-			path == "/usr/bin" || strings.HasPrefix(path, "/usr/bin/") ||
-			path == "/usr/sbin" || strings.HasPrefix(path, "/usr/sbin/") ||
-			path == "/usr/local/libexec" || strings.HasPrefix(path, "/usr/local/libexec/") {
+		if isSystemRuntimePath(match[1]) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+// referencedScriptAssets closes the transitive trust gap for enabled hook
+// scripts. Every explicitly materialized-root dependency is recursively pinned,
+// while paths that would resolve through mutable workspace or runtime state are
+// refused instead of being guessed by a shell parser.
+func referencedScriptAssets(content []byte) ([]string, error) {
+	script := string(content)
+	references := make(map[string]struct{})
+	for _, match := range hookRootReference.FindAllStringSubmatch(script, -1) {
+		clean, err := cleanProjectPath(match[1])
+		if err != nil {
+			return nil, err
+		}
+		references[clean] = struct{}{}
+	}
+
+	unmatched := hookRootReference.ReplaceAllString(script, "")
+	if anyProjectDirRef.MatchString(unmatched) ||
+		runtimeDirReference.MatchString(unmatched) {
+		return nil, fmt.Errorf(
+			"unsupported mutable runtime path; trusted hook scripts must execute committed assets through AGM_CODEX_HOOK_ROOT",
+		)
+	}
+	for _, match := range scriptCommandPath.FindAllStringSubmatch(unmatched, -1) {
+		path := match[1]
+		if filepath.IsAbs(path) && isSystemRuntimePath(path) {
+			continue
+		}
+		return nil, fmt.Errorf(
+			"unsupported mutable command path %q; trusted hook scripts must execute committed assets through AGM_CODEX_HOOK_ROOT",
+			path,
+		)
+	}
+
+	out := make([]string, 0, len(references))
+	for path := range references {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func isSystemRuntimePath(path string) bool {
+	path = filepath.Clean(path)
+	return path == "/bin" || strings.HasPrefix(path, "/bin/") ||
+		path == "/sbin" || strings.HasPrefix(path, "/sbin/") ||
+		path == "/usr/bin" || strings.HasPrefix(path, "/usr/bin/") ||
+		path == "/usr/sbin" || strings.HasPrefix(path, "/usr/sbin/") ||
+		path == "/usr/local/libexec" || strings.HasPrefix(path, "/usr/local/libexec/")
 }
 
 func collectCommands(value any) ([]string, error) {

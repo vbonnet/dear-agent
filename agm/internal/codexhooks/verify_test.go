@@ -160,6 +160,12 @@ func TestVerifyRejectsMutatedSandboxHookAssets(t *testing.T) {
 			},
 		},
 		{
+			name: "transitively referenced script",
+			mutate: func(t *testing.T, sandbox string) {
+				writeFile(t, filepath.Join(sandbox, "tools", "transitive-guard"), "#!/bin/sh\nexit 99\n", 0o755)
+			},
+		},
+		{
 			name: "referenced script symlink",
 			mutate: func(t *testing.T, sandbox string) {
 				path := filepath.Join(sandbox, ".codex", "hooks", "guard")
@@ -184,6 +190,57 @@ func TestVerifyRejectsMutatedSandboxHookAssets(t *testing.T) {
 				t.Fatal("Verify() error = nil, want fail-closed mismatch")
 			}
 		})
+	}
+}
+
+func TestAttestRejectsMutableTransitiveHookRuntimeDependencies(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "working directory executable", script: "#!/bin/sh\n$PWD/helper\n"},
+		{name: "dot relative executable", script: "#!/bin/sh\n./helper\n"},
+		{name: "nested relative executable", script: "#!/bin/sh\ntools/helper\n"},
+		{name: "temporary executable", script: "#!/bin/sh\n/tmp/helper\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, sandbox := hookFixtureWithGuard(t, tt.script)
+			if _, err := attestForTest(t, source, sandbox, []string{sandbox}); err == nil ||
+				!strings.Contains(err.Error(), "unsupported mutable") {
+				t.Fatalf("Attest() error = %v, want mutable transitive runtime-path rejection", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryEnabledHookScriptsHaveClosedRuntimeDependencies(t *testing.T) {
+	repositoryRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	manifest, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(hooksManifestPath)))
+	if err != nil {
+		t.Fatalf("read repository hook manifest: %v", err)
+	}
+	references, err := referencedHookAssets(manifest)
+	if err != nil {
+		t.Fatalf("parse repository hook manifest: %v", err)
+	}
+	seen := make(map[string]struct{})
+	for len(references) > 0 {
+		reference := references[0]
+		references = references[1:]
+		if _, exists := seen[reference]; exists {
+			continue
+		}
+		seen[reference] = struct{}{}
+		content, readErr := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(reference)))
+		if readErr != nil {
+			t.Fatalf("read repository hook asset %q: %v", reference, readErr)
+		}
+		transitive, parseErr := referencedScriptAssets(content)
+		if parseErr != nil {
+			t.Fatalf("validate repository hook asset %q: %v", reference, parseErr)
+		}
+		references = append(references, transitive...)
 	}
 }
 
@@ -321,14 +378,22 @@ func attestForTest(t *testing.T, source, sandbox string, writableRoots []string)
 
 func hookFixture(t *testing.T) (string, string) {
 	t.Helper()
+	return hookFixtureWithGuard(t,
+		"#!/bin/sh\n${AGM_CODEX_HOOK_ROOT:-.}/tools/transitive-guard\n",
+	)
+}
+
+func hookFixtureWithGuard(t *testing.T, guard string) (string, string) {
+	t.Helper()
 	source := gittest.NewRepo(t)
 	writeFile(t, filepath.Join(source, ".codex", "hooks.json"),
 		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/guard"},{"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/tools/relative-guard"}]}]}}`,
 		0o644,
 	)
-	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), guard, 0o755)
 	writeFile(t, filepath.Join(source, "tools", "relative-guard"), "#!/bin/sh\nexit 0\n", 0o755)
-	gittest.Run(t, source, "add", ".codex", "tools/relative-guard")
+	writeFile(t, filepath.Join(source, "tools", "transitive-guard"), "#!/bin/sh\nexit 0\n", 0o755)
+	gittest.Run(t, source, "add", ".codex", "tools/relative-guard", "tools/transitive-guard")
 	gittest.Run(t, source, "commit", "-m", "add reviewed hooks")
 
 	sandbox := filepath.Join(t.TempDir(), "sandbox")
