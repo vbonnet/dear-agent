@@ -494,6 +494,15 @@ func Authorize(req Request) (Use, error) {
 }
 
 func defaultActor() string {
+	return Actor()
+}
+
+// Actor returns the operator identity recorded for an override use. AGM_ACTOR
+// lets dispatchers distinguish automation from the account that runs it.
+func Actor() string {
+	if actor := os.Getenv("AGM_ACTOR"); actor != "" {
+		return actor
+	}
 	if user := os.Getenv("USER"); user != "" {
 		return user
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
@@ -207,7 +208,7 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		return err
 	}
 	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
-	bypassCodexHookTrust, err := prepareCodexHookTrustBypass(ctx, sandboxInfo, sessionName)
+	bypassCodexHookTrust, err := prepareCodexHookTrustBypass(ctx, sandboxInfo)
 	if err != nil {
 		return err
 	}
@@ -260,12 +261,10 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 	return err
 }
 
-// prepareCodexHookTrustBypass runs both controls guarding the hook-trust
-// override. Attestation answers whether the hooks are the reviewed ones;
-// authorization answers whether a human currently agrees to run them
-// unreviewed. Attestation runs first so a refused override never records a use
-// for hooks that were not even the right ones.
-func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig, sessionName string) (bool, error) {
+// prepareCodexHookTrustBypass validates and attests a requested hook-trust
+// override. The private executor performs authorization and records the use at
+// the final executable launch boundary, after all other preparation succeeds.
+func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig) (bool, error) {
 	reason := codexHookTrustBypassReason
 	if reason == "" {
 		reason = cfg.Sandbox.BypassCodexHookTrustReason
@@ -273,6 +272,11 @@ func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.Sand
 	if harnessName != "codex-cli" || reason == "" {
 		return false, nil
 	}
+	normalizedReason, err := override.ValidateReason(reason)
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	reason = normalizedReason
 	if sandboxInfo == nil || !sandboxInfo.Enabled {
 		// Outside a sandbox the hooks sit at their reviewed golden path, so the
 		// override buys nothing and would only widen what runs unreviewed.
@@ -292,16 +296,12 @@ func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.Sand
 	if err != nil {
 		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
 	}
-	if err := ops.AuthorizeCodexHookTrust(reason, sessionName); err != nil {
-		ui.PrintError(err, "Codex hook-trust override refused", ops.CodexHookTrustRemediation)
-		return false, err
-	}
 	sandboxInfo.CodexHookSourceRepo = attestation.SourceRepo
 	sandboxInfo.CodexHookSourceCommit = attestation.SourceCommit
 	sandboxInfo.CodexHookDigest = attestation.Digest
 	sandboxInfo.CodexHookRoot = attestation.HookRoot
 	sandboxInfo.BypassCodexHookTrustReason = reason
-	ui.PrintSuccess("Codex hook-trust override attested, authorized, and recorded")
+	ui.PrintSuccess("Codex hook-trust override attested; authorization will be recorded at launch")
 	return true, nil
 }
 

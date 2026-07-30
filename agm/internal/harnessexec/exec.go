@@ -20,6 +20,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 const (
@@ -37,11 +38,22 @@ const (
 )
 
 var (
-	lookPathInEnvironment = resolveExecutableInEnvironment
-	replaceProcess        = syscall.Exec
-	changeDirectory       = os.Chdir
-	resolveClaudeOAuth    = auth.ResolveOAuthToken
-	codexHookOverrides    = codexhooks.LaunchConfigOverrides
+	lookPathInEnvironment   = resolveExecutableInEnvironment
+	replaceProcess          = syscall.Exec
+	changeDirectory         = os.Chdir
+	resolveClaudeOAuth      = auth.ResolveOAuthToken
+	codexHookOverrides      = codexhooks.LaunchConfigOverrides
+	authorizeCodexHookTrust = func(reason, actor, sessionName string) error {
+		if _, err := override.Authorize(override.Request{
+			Kind:    override.KindCodexHookTrust,
+			Reason:  reason,
+			Actor:   actor,
+			Session: sessionName,
+		}); err != nil {
+			return fmt.Errorf("codex hook-trust override refused: %w", err)
+		}
+		return nil
+	}
 )
 
 var codexAllowedEnvironment = []string{
@@ -91,6 +103,8 @@ type CodexLaunch struct {
 	Remote                 bool
 	BypassHookTrust        bool
 	HookRoot               string
+	HookTrustReason        string
+	HookTrustActor         string
 	Persistent             bool
 	DeferUntilProducerExit bool
 }
@@ -287,6 +301,10 @@ func runCodex(args []string) error {
 		if handoffErr != nil {
 			return handoffErr
 		}
+		if request.BypassHooks {
+			request.HookTrustReason = handoff.CodexLaunch.HookTrustReason
+			request.HookTrustActor = handoff.CodexLaunch.HookTrustActor
+		}
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
 	}
@@ -307,6 +325,14 @@ func runCodex(args []string) error {
 		return fmt.Errorf("resolve codex executable: %w", err)
 	}
 	argv := append([]string{"codex"}, request.argv()...)
+	// Consume the bounded grant and record its audit use only after every
+	// fallible preparation step has succeeded. This is the last userspace
+	// boundary before the real Codex executable replaces AGM.
+	if request.BypassHooks {
+		if err := authorizeCodexHookTrust(request.HookTrustReason, request.HookTrustActor, request.SessionName); err != nil {
+			return err
+		}
+	}
 	if err := replaceProcess(path, argv, environ); err != nil {
 		return fmt.Errorf("execute codex: %w", err)
 	}
@@ -370,6 +396,8 @@ type codexRequest struct {
 	Remote          bool
 	BypassHooks     bool
 	HookRoot        string
+	HookTrustReason string
+	HookTrustActor  string
 	ConfigOverrides []string
 }
 

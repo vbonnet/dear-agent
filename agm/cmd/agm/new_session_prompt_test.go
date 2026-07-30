@@ -156,7 +156,7 @@ func TestPrepareCodexHookTrustBypassRequiresExplicitReviewedRepo(t *testing.T) {
 	enabled, err := prepareCodexHookTrustBypass(t.Context(), &manifest.SandboxConfig{
 		Enabled:             true,
 		CodexHookSourceRepo: "/dynamic/unreviewed",
-	}, "session")
+	})
 	if err == nil || !strings.Contains(err.Error(), "requires an explicit sandbox.repos source") {
 		t.Fatalf("prepareCodexHookTrustBypass() = %v, %v; want explicit-source rejection", enabled, err)
 	}

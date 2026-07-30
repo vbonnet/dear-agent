@@ -214,9 +214,9 @@ type SandboxConfig struct {
 	CodexHookSourceCommit string    `yaml:"codex_hook_source_commit,omitempty" json:"codex_hook_source_commit,omitempty"`
 	CodexHookDigest       string    `yaml:"codex_hook_digest,omitempty" json:"codex_hook_digest,omitempty"`
 	CodexHookRoot         string    `yaml:"codex_hook_root,omitempty" json:"codex_hook_root,omitempty"`
-	// BypassCodexHookTrustReason is the justification the override was granted
-	// against. It is persisted so resume can re-authorize rather than inherit
-	// the decision: a granted override is bounded in time, not forever.
+	// BypassCodexHookTrustReason is the justification bound into each private
+	// launch handoff. It is persisted so resume can authorize again at its
+	// executable boundary rather than inherit the original decision.
 	BypassCodexHookTrustReason string `yaml:"bypass_codex_hook_trust_reason,omitempty" json:"bypass_codex_hook_trust_reason,omitempty"`
 }
 

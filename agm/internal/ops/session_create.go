@@ -610,8 +610,12 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		req.Metadata.Sandbox != nil &&
 		req.Metadata.Sandbox.Enabled
 	codexHookRoot := ""
+	codexHookTrustReason := ""
+	codexHookTrustActor := ""
 	if bypassCodexHookTrust {
 		codexHookRoot = req.Metadata.Sandbox.CodexHookRoot
+		codexHookTrustReason = req.Metadata.Sandbox.BypassCodexHookTrustReason
+		codexHookTrustActor = OverrideActor()
 	}
 	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
@@ -629,6 +633,8 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 
 		BypassCodexHookTrust: bypassCodexHookTrust,
 		CodexHookRoot:        codexHookRoot,
+		CodexHookTrustReason: codexHookTrustReason,
+		CodexHookTrustActor:  codexHookTrustActor,
 		Codex:                codexMeta,
 		Pi:                   req.Metadata.Pi,
 		PiExtension:          req.Metadata.PiExtension,

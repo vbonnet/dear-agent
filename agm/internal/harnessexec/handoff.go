@@ -21,6 +21,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 const (
@@ -92,15 +93,17 @@ type launchHandoff struct {
 }
 
 type codexLaunchBinding struct {
-	SessionName string   `json:"session_name"`
-	Model       string   `json:"model"`
-	WorkDir     string   `json:"workdir"`
-	Sandbox     string   `json:"sandbox"`
-	Approval    string   `json:"approval,omitempty"`
-	AddDirs     []string `json:"add_dirs,omitempty"`
-	ResumeID    string   `json:"resume_id,omitempty"`
-	Remote      bool     `json:"remote,omitempty"`
-	HookRoot    string   `json:"hook_root"`
+	SessionName     string   `json:"session_name"`
+	Model           string   `json:"model"`
+	WorkDir         string   `json:"workdir"`
+	Sandbox         string   `json:"sandbox"`
+	Approval        string   `json:"approval,omitempty"`
+	AddDirs         []string `json:"add_dirs,omitempty"`
+	ResumeID        string   `json:"resume_id,omitempty"`
+	Remote          bool     `json:"remote,omitempty"`
+	HookRoot        string   `json:"hook_root"`
+	HookTrustReason string   `json:"hook_trust_reason"`
+	HookTrustActor  string   `json:"hook_trust_actor"`
 }
 
 // PrepareCodexCommand snapshots only Codex's documented allowlist from the
@@ -213,12 +216,21 @@ func validateCodexPastedValues(launch CodexLaunch) error {
 	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
 		return fmt.Errorf("validate Codex pane command: %w", err)
 	}
-	if launch.BypassHookTrust {
+	switch {
+	case launch.BypassHookTrust:
 		if !filepath.IsAbs(launch.HookRoot) || filepath.Clean(launch.HookRoot) != launch.HookRoot {
 			return errors.New("validate Codex pane command: hook root must be a clean absolute path")
 		}
-	} else if launch.HookRoot != "" {
+		if _, err := override.ValidateReason(launch.HookTrustReason); err != nil {
+			return fmt.Errorf("validate Codex pane command: invalid hook-trust reason: %w", err)
+		}
+		if launch.HookTrustActor == "" {
+			return errors.New("validate Codex pane command: hook-trust actor is required")
+		}
+	case launch.HookRoot != "":
 		return errors.New("validate Codex pane command: hook root requires hook-trust bypass")
+	case launch.HookTrustReason != "" || launch.HookTrustActor != "":
+		return errors.New("validate Codex pane command: hook-trust metadata requires hook-trust bypass")
 	}
 	return nil
 }
@@ -266,19 +278,24 @@ func validateTrustedHandoffIsolation(launch CodexLaunch) error {
 
 func bindCodexLaunch(launch CodexLaunch) codexLaunchBinding {
 	return codexLaunchBinding{
-		SessionName: launch.SessionName,
-		Model:       launch.Model,
-		WorkDir:     launch.WorkDir,
-		Sandbox:     launch.Sandbox,
-		Approval:    launch.Approval,
-		AddDirs:     append([]string(nil), launch.AddDirs...),
-		ResumeID:    launch.ResumeID,
-		Remote:      launch.Remote,
-		HookRoot:    launch.HookRoot,
+		SessionName:     launch.SessionName,
+		Model:           launch.Model,
+		WorkDir:         launch.WorkDir,
+		Sandbox:         launch.Sandbox,
+		Approval:        launch.Approval,
+		AddDirs:         append([]string(nil), launch.AddDirs...),
+		ResumeID:        launch.ResumeID,
+		Remote:          launch.Remote,
+		HookRoot:        launch.HookRoot,
+		HookTrustReason: launch.HookTrustReason,
+		HookTrustActor:  launch.HookTrustActor,
 	}
 }
 
 func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
+	// The hook-trust reason and actor never appear in the pasted command. The
+	// executor accepts them only from this validated owner-only binding after
+	// every command-visible field matches.
 	return binding.SessionName == other.SessionName &&
 		binding.Model == other.Model &&
 		binding.WorkDir == other.WorkDir &&
@@ -822,6 +839,12 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 			handoff.CodexLaunch == nil ||
 			handoff.CodexLaunch.HookRoot != handoff.CodexHookRoot {
 			return errors.New("private launch handoff contains an invalid Codex hook capability")
+		}
+		if normalized, reasonErr := override.ValidateReason(handoff.CodexLaunch.HookTrustReason); reasonErr != nil || normalized != handoff.CodexLaunch.HookTrustReason {
+			return errors.New("private launch handoff contains an invalid Codex hook-trust reason")
+		}
+		if handoff.CodexLaunch.HookTrustActor == "" {
+			return errors.New("private launch handoff contains an invalid Codex hook-trust actor")
 		}
 	} else if handoff.CodexLaunch != nil {
 		return errors.New("private launch handoff contains a Codex launch binding without a hook capability")

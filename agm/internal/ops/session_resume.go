@@ -23,6 +23,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	uuidpkg "github.com/vbonnet/dear-agent/agm/internal/uuid"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 const resumeReadinessTimeout = 60 * time.Second
@@ -787,13 +788,16 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		warnings := []string{}
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
-			// Both controls re-run on resume, and both fail closed. Attestation
-			// proves the hooks are still the reviewed ones; authorization proves
-			// someone currently agrees to run them unreviewed. A persisted launch
-			// policy must not outlive either, or "approve once, resume forever"
-			// reopens the loophole. Failing closed costs a hook-review prompt,
-			// which is the outcome the control is supposed to produce.
+			// Attestation re-runs here and fails closed. The normalized reason
+			// and caller identity are sealed into the private handoff; live
+			// authorization is consumed by its executor immediately before exec.
+			// A persisted launch policy therefore cannot become "approve once,
+			// resume forever", while preparation failures spend no grant use.
 			if m.Sandbox.BypassCodexHookTrust {
+				reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
+				if reasonErr != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook-trust reason before resume: %w", reasonErr)
+				}
 				if err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
 					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
 					SourceCommit: m.Sandbox.CodexHookSourceCommit,
@@ -802,11 +806,10 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 				}, health.WorktreePath); err != nil {
 					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
 				}
-				if err := AuthorizeCodexHookTrust(m.Sandbox.BypassCodexHookTrustReason, m.Name); err != nil {
-					return HarnessLaunchCommand{}, "", warnings, err
-				}
 				spec.BypassCodexHookTrust = true
 				spec.CodexHookRoot = m.Sandbox.CodexHookRoot
+				spec.CodexHookTrustReason = reason
+				spec.CodexHookTrustActor = OverrideActor()
 			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {

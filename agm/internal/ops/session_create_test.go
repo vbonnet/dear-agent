@@ -1873,6 +1873,7 @@ func TestVerifyCreateCodexHookTrustRechecksSandboxAssets(t *testing.T) {
 }
 
 func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing.T) {
+	t.Setenv("AGM_ACTOR", "vroom-dispatch")
 	params := &createSessionParams{name: "codex", harness: "codex-cli", model: "gpt-5.5"}
 	for _, tt := range []struct {
 		name    string
@@ -1881,7 +1882,14 @@ func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing
 	}{
 		{name: "no sandbox"},
 		{name: "disabled sandbox", sandbox: &manifest.SandboxConfig{}},
-		{name: "enabled sandbox", sandbox: &manifest.SandboxConfig{Enabled: true}, want: true},
+		{
+			name: "enabled sandbox",
+			sandbox: &manifest.SandboxConfig{
+				Enabled:                    true,
+				BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+			},
+			want: true,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			req := &CreateSessionRequest{
@@ -1892,6 +1900,12 @@ func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing
 			got := buildHarnessLaunchSpec(req, params, "session-id", nil)
 			if got.BypassCodexHookTrust != tt.want {
 				t.Fatalf("BypassCodexHookTrust = %v, want %v", got.BypassCodexHookTrust, tt.want)
+			}
+			if tt.want && got.CodexHookTrustReason != tt.sandbox.BypassCodexHookTrustReason {
+				t.Fatalf("CodexHookTrustReason = %q, want %q", got.CodexHookTrustReason, tt.sandbox.BypassCodexHookTrustReason)
+			}
+			if tt.want && got.CodexHookTrustActor != "vroom-dispatch" {
+				t.Fatalf("CodexHookTrustActor = %q, want caller identity", got.CodexHookTrustActor)
 			}
 		})
 	}

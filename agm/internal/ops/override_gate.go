@@ -2,32 +2,11 @@ package ops
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 var authorizeOverride = override.Authorize
-
-// AuthorizeCodexHookTrust runs the shared dangerous-override gates for trusting
-// the exact attested Codex hooks without interactive per-path review and
-// records the use.
-//
-// Every path that can request this launch policy must call this, including
-// resume. Resume replays a policy persisted in the manifest, so skipping it
-// there would turn "approve once, resume forever" into the loophole the gates
-// exist to close.
-func AuthorizeCodexHookTrust(reason, sessionName string) error {
-	if _, err := authorizeOverride(override.Request{
-		Kind:    override.KindCodexHookTrust,
-		Reason:  reason,
-		Actor:   OverrideActor(),
-		Session: sessionName,
-	}); err != nil {
-		return fmt.Errorf("codex hook-trust override refused: %w", err)
-	}
-	return nil
-}
 
 // AuthorizeAdmissionBrakeOverride runs the shared dangerous-override gates for
 // crossing an engaged admission brake and records the use.
@@ -69,17 +48,5 @@ const AdmissionBrakeRemediation = "  • Approve interactively: agm override app
 // dispatcher identify itself so the ledger distinguishes automated use from a
 // human at a terminal — the distinction the audit gate cares about most.
 func OverrideActor() string {
-	if actor := os.Getenv("AGM_ACTOR"); actor != "" {
-		return actor
-	}
-	if user := os.Getenv("USER"); user != "" {
-		return user
-	}
-	return "unknown"
+	return override.Actor()
 }
-
-// CodexHookTrustRemediation is the operator-facing next step shared by every
-// surface that refuses the override.
-const CodexHookTrustRemediation = "  • Approve interactively: agm override approve codex-hook-trust --ttl 2h\n" +
-	"  • State why in the request: sandbox.bypass_codex_hook_trust_reason, or --dangerously-bypass-hook-trust=\"<reason>\"\n" +
-	"  • Review recent use: agm override audit"

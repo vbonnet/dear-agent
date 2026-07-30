@@ -33,6 +33,8 @@ type HarnessLaunchSpec struct {
 	// consumes it; other harnesses ignore it.
 	BypassCodexHookTrust bool
 	CodexHookRoot        string
+	CodexHookTrustReason string
+	CodexHookTrustActor  string
 	ForwardTelemetry     bool
 	Codex                *manifest.Codex
 	Pi                   *manifest.Pi
@@ -286,6 +288,8 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		Remote:                 resumeID != "",
 		BypassHookTrust:        spec.BypassCodexHookTrust,
 		HookRoot:               spec.CodexHookRoot,
+		HookTrustReason:        spec.CodexHookTrustReason,
+		HookTrustActor:         spec.CodexHookTrustActor,
 		Persistent:             spec.Persistent,
 		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}
