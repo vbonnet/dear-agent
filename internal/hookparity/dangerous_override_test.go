@@ -46,11 +46,22 @@ func TestDangerousOverrideHookDeniesRawCodexWithoutParentReason(t *testing.T) {
 		"single quoted join":   `codex --dangerously-bypass-hook-'trust'`,
 		"backslash join":       `codex --dangerously-bypass-hook-\trust`,
 		"expanded raw command": `codex "$AGM_UNTRUSTED_ARGS"`,
+		"brace expanded join":  `codex --dangerously-bypass-hook-{t..t}rust`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			output := runDangerousOverrideHook(t, t.TempDir(), command)
 			assertDangerousOverrideDenied(t, output, "agm session new")
 		})
+	}
+}
+
+func TestDangerousOverrideHookAllowsSimpleRawCodexWithoutBypass(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("hook requires jq")
+	}
+	output := runDangerousOverrideHook(t, t.TempDir(), "codex --version")
+	if strings.TrimSpace(output) != "" {
+		t.Fatalf("simple raw Codex command output = %q, want allowed", output)
 	}
 }
 
