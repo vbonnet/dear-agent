@@ -27,22 +27,19 @@ const (
 )
 
 var (
-	anyProjectDirRef      = regexp.MustCompile(`\$\{?(?:CLAUDE|CODEX)_PROJECT_DIR\b`)
-	hookRootReference     = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
-	relativePathToken     = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
-	runtimeDirReference   = regexp.MustCompile(`(?:\$\{(?:PWD|HOME|TMPDIR|TMP|TEMP)\}|\$(?:PWD|HOME|TMPDIR|TMP|TEMP))/[A-Za-z0-9._/-]+`)
-	explicitRelativePath  = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
-	absolutePathToken     = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
-	scriptCommandPath     = regexp.MustCompile(`(?m)(?:^|[;\n]|&&|\|\|)[\t ]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*((?:\.\.?/|~/)[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+|/[A-Za-z0-9._/-]+)`)
-	interpreterOperand    = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:/bin/|/usr/bin/)?(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node))[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
-	envInterpreterOperand = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*/usr/bin/env[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node)[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
-	sourceOperand         = regexp.MustCompile(`(?m)(?:^|[;\n({]|&&|\|\|)[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:source|\.)[\t ]+([^ \t\r\n;|&]+)`)
-	pathAssignment        = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:(?:/usr/bin/)?env[\t ]+(?:--?[A-Za-z0-9_-]+(?:=[^ \t;|&]+)?[\t ]+)*)?(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:export|readonly|typeset|declare|local)[\t ]+)?PATH(?:\+)?[\t ]*=`)
-	pathUnset             = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:unset|export[\t ]+-n)[\t ]+(?:--[\t ]+)?PATH(?:[\t ;\n]|$)`)
-	envPathUnset          = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:/usr/bin/)?env[\t ]+(?:-[^- \t]*u|--unset)(?:=|[\t ]+)PATH(?:[\t ;\n]|$)`)
-	awkSystemCall         = regexp.MustCompile(`\bsystem[[:space:]]*\(`)
-	awkGetline            = regexp.MustCompile(`\bgetline\b`)
-	awkOutputPipe         = regexp.MustCompile(`\b(?:print|printf)\b[^;\n]*\|`)
+	anyProjectDirRef     = regexp.MustCompile(`\$\{?(?:CLAUDE|CODEX)_PROJECT_DIR\b`)
+	hookRootReference    = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
+	relativePathToken    = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
+	runtimeDirReference  = regexp.MustCompile(`(?:\$\{(?:PWD|HOME|TMPDIR|TMP|TEMP)\}|\$(?:PWD|HOME|TMPDIR|TMP|TEMP))/[A-Za-z0-9._/-]+`)
+	explicitRelativePath = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
+	absolutePathToken    = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
+	scriptCommandPath    = regexp.MustCompile(`(?m)(?:^|[;\n]|&&|\|\|)[\t ]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*((?:\.\.?/|~/)[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+|/[A-Za-z0-9._/-]+)`)
+	pathAssignment       = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:(?:/usr/bin/)?env[\t ]+(?:--?[A-Za-z0-9_-]+(?:=[^ \t;|&]+)?[\t ]+)*)?(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:export|readonly|typeset|declare|local)[\t ]+)?PATH(?:\+)?[\t ]*=`)
+	pathUnset            = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:unset|export[\t ]+-n)[\t ]+(?:--[\t ]+)?PATH(?:[\t ;\n]|$)`)
+	envPathUnset         = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:/usr/bin/)?env[\t ]+(?:-[^- \t]*u|--unset)(?:=|[\t ]+)PATH(?:[\t ;\n]|$)`)
+	awkSystemCall        = regexp.MustCompile(`\bsystem[[:space:]]*\(`)
+	awkGetline           = regexp.MustCompile(`\bgetline\b`)
+	awkOutputPipe        = regexp.MustCompile(`\b(?:print|printf)\b[^;\n]*\|`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -403,9 +400,6 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 	if err := rejectInterpreterPipelines(unmatched); err != nil {
 		return fmt.Errorf("command %q: %w", command, err)
 	}
-	if err := rejectMutableScriptOperands(unmatched); err != nil {
-		return fmt.Errorf("command %q: %w", command, err)
-	}
 	return nil
 }
 
@@ -473,10 +467,6 @@ func validateScriptAsset(content []byte) error {
 	if err := rejectInterpreterPipelines(scannable); err != nil {
 		return err
 	}
-	if err := rejectMutableScriptOperands(scannable); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -752,9 +742,10 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 	if commandResolutionStateBuiltin(command) {
 		return call.Args[0], "command-resolution state builtin"
 	}
+	if target, reason, handled := dynamicRuntimeOperand(command, call.Args[0], call.Args[1:]); handled {
+		return target, reason
+	}
 	switch command {
-	case "eval", "trap":
-		return call.Args[0], "string-evaluating shell builtin"
 	case "command", "builtin", "exec", "nohup":
 		return dynamicWrapperCommand(call.Args[1:], false)
 	case "env", "/usr/bin/env":
@@ -785,11 +776,10 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		if commandResolutionStateBuiltin(value) {
 			return word, "command-resolution state builtin"
 		}
+		if target, reason, handled := dynamicRuntimeOperand(value, word, args[index+1:]); handled {
+			return target, reason
+		}
 		switch value {
-		case "eval", "trap":
-			return word, "string-evaluating shell builtin"
-		case "source", ".":
-			return wrappedSourceOperand(args[index+1:])
 		case "command", "builtin", "exec", "nohup":
 			return dynamicWrapperCommand(args[index+1:], false)
 		case "env", "/usr/bin/env":
@@ -799,6 +789,22 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		}
 	}
 	return nil, ""
+}
+
+func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syntax.Word) (*syntax.Word, string, bool) {
+	if isRuntimeInterpreter(command) {
+		target, reason := interpreterScriptOperand(args)
+		return target, reason, true
+	}
+	switch command {
+	case "eval", "trap":
+		return commandWord, "string-evaluating shell builtin", true
+	case "source", ".":
+		target, reason := sourcedFileOperand(args)
+		return target, reason, true
+	default:
+		return nil, "", false
+	}
 }
 
 func awkUsesCommandExecution(command string, args []*syntax.Word) bool {
@@ -1008,7 +1014,9 @@ func gitUsesCommandExecution(command string, args []*syntax.Word) bool {
 			return true
 		}
 		// Unknown names can resolve through aliases or PATH as git-<name>.
-		return !slices.Contains([]string{"rev-parse", "status"}, value)
+		// status is intentionally excluded because repository-local
+		// core.fsmonitor configuration can execute mutable commands.
+		return value != "rev-parse"
 	}
 	return true
 }
@@ -1308,7 +1316,7 @@ func namerefDeclarationOption(args []*syntax.Word) *syntax.Word {
 	return nil
 }
 
-func wrappedSourceOperand(args []*syntax.Word) (*syntax.Word, string) {
+func sourcedFileOperand(args []*syntax.Word) (*syntax.Word, string) {
 	for _, word := range args {
 		value, static := staticShellWord(word)
 		if !static {
@@ -1323,6 +1331,41 @@ func wrappedSourceOperand(args []*syntax.Word) (*syntax.Word, string) {
 		return word, "mutable interpreter or sourced-file operand"
 	}
 	return nil, ""
+}
+
+func interpreterScriptOperand(args []*syntax.Word) (*syntax.Word, string) {
+	operandsOnly := false
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			return word, "mutable interpreter or sourced-file operand"
+		}
+		if !operandsOnly && value == "--" {
+			operandsOnly = true
+			continue
+		}
+		if !operandsOnly && strings.HasPrefix(value, "-") {
+			if interpreterInlineCodeOption(value) {
+				return word, "inline interpreter code"
+			}
+			continue
+		}
+		if filepath.IsAbs(value) && isSystemRuntimePath(value) {
+			return nil, ""
+		}
+		return word, "mutable interpreter or sourced-file operand"
+	}
+	return nil, ""
+}
+
+func interpreterInlineCodeOption(value string) bool {
+	switch value {
+	case "-c", "-e", "--eval", "--print", "-p":
+		return true
+	default:
+		return strings.HasPrefix(value, "--eval=") ||
+			strings.HasPrefix(value, "--print=")
+	}
 }
 
 func envSplitStringOption(value string) bool {
@@ -1594,50 +1637,6 @@ func withoutFullLineComments(script string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-func rejectMutableScriptOperands(script string) error {
-	for _, matcher := range []*regexp.Regexp{
-		envInterpreterOperand,
-		interpreterOperand,
-	} {
-		for _, match := range matcher.FindAllStringSubmatch(script, -1) {
-			if interpreterRunsInlineCode(strings.Fields(match[1])) {
-				return fmt.Errorf(
-					"unsupported inline interpreter code; trusted hook scripts must invoke committed scripts through AGM_CODEX_HOOK_ROOT",
-				)
-			}
-			operand := strings.Trim(match[2], `"'`)
-			if operand == "" || (filepath.IsAbs(operand) && isSystemRuntimePath(operand)) {
-				continue
-			}
-			return fmt.Errorf(
-				"unsupported mutable interpreter or sourced-file operand %q; trusted hook scripts must reference committed operands through AGM_CODEX_HOOK_ROOT",
-				operand,
-			)
-		}
-	}
-	for _, match := range sourceOperand.FindAllStringSubmatch(script, -1) {
-		operand := strings.Trim(match[1], `"'`)
-		if operand == "" || (filepath.IsAbs(operand) && isSystemRuntimePath(operand)) {
-			continue
-		}
-		return fmt.Errorf(
-			"unsupported mutable interpreter or sourced-file operand %q; trusted hook scripts must reference committed operands through AGM_CODEX_HOOK_ROOT",
-			operand,
-		)
-	}
-	return nil
-}
-
-func interpreterRunsInlineCode(options []string) bool {
-	for _, option := range options {
-		switch option {
-		case "-c", "-e", "--eval", "--print", "-p":
-			return true
-		}
-	}
-	return false
 }
 
 func isSystemRuntimePath(path string) bool {

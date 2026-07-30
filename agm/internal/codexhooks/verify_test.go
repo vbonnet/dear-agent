@@ -215,6 +215,8 @@ func TestValidateScriptAssetRejectsBareInterpreterAndSourceOperands(t *testing.T
 		"#!/bin/sh\n/usr/bin/env bash helper\n",
 		"#!/bin/sh\nexec /bin/sh helper\n",
 		"#!/bin/sh\nif /bin/sh helper; then exit 0; fi\n",
+		"#!/bin/bash\ntime /bin/bash helper\n",
+		"#!/bin/bash\ntime -p /usr/bin/env bash helper\n",
 		"#!/bin/bash\nsource helper\n",
 		"#!/bin/sh\n. helper\n",
 		"#!/bin/bash\nbuiltin source helper\n",
@@ -422,6 +424,7 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\ncommand /usr/bin/git --config-env=alias.pwn=ALIAS_VALUE pwn\n",
 		"#!/bin/sh\n/usr/bin/git \"$GIT_OPTIONS\" status --porcelain\n",
 		"#!/bin/sh\n/usr/bin/git workspace-helper\n",
+		"#!/bin/sh\n/usr/bin/git status --porcelain\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
@@ -458,7 +461,7 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/sh\n/usr/bin/tar --checkpoint=1 -cf /dev/null /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/tar -cf /dev/null -- \"$FILE\"\n",
 		"#!/bin/sh\n/usr/bin/git -C \"$ROOT\" rev-parse --show-toplevel\n",
-		"#!/bin/sh\n/usr/bin/git -C \"$ROOT\" status --porcelain\n",
+		"#!/bin/bash\ntime /bin/bash /usr/bin/true\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)
