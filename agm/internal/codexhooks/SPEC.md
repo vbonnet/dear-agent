@@ -1,6 +1,6 @@
 # Codex Hook Attestation Specification
 
-<!-- Last audited at: 2026-07-29 -->
+<!-- Last audited at: 2026-07-30 -->
 
 ## Overview
 
@@ -20,7 +20,7 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-02** When the sandbox materialization is attested or revalidated, the system shall require its hook manifest and every referenced hook to be regular non-symlink files with executable modes and bytes matching the pinned commit.
 
-**CHOOK-03** When a trusted hook command or any executable asset it invokes, sources, passes as an interpreter operand, embeds as inline interpreter code, resolves as a command word or command-wrapper target through shell expansion, or invokes through a string-evaluating shell builtin such as `eval` or `trap` references a mutable project, working, home, temporary, relative, or non-system absolute runtime path instead of a committed asset through `AGM_CODEX_HOOK_ROOT`, mutates the hardened `PATH`, assigns a dynamic-loader, shell-startup, or interpreter environment variable that can load unverified runtime code, references a missing or uncommitted asset, or can be shadowed by a nested unattested hook manifest between the launch directory and repository root, the system shall reject the attestation; every materialized-root dependency shall be recursively pinned, and commands for events that are replaced with an OS-owned no-op before bypassed launch are excluded from runtime-asset attestation.
+**CHOOK-03** When a trusted hook command or any executable asset it invokes, sources, passes as an interpreter operand, embeds as inline interpreter code, consumes as runtime code through an interpreter or command-executing pipeline mediator, resolves as a command word or command-wrapper target through shell expansion, or invokes through a string-evaluating shell builtin such as `eval` or `trap` references a mutable project, working, home, temporary, relative, or non-system absolute runtime path instead of a committed asset through `AGM_CODEX_HOOK_ROOT`, mutates the hardened `PATH`, assigns a dynamic-loader, shell-startup, or interpreter environment variable that can load unverified runtime code, references a missing or uncommitted asset, or can be shadowed by a nested unattested hook manifest between the launch directory and repository root, the system shall reject the attestation; every materialized-root dependency shall be recursively pinned, and commands for events that are replaced with an OS-owned no-op before bypassed launch are excluded from runtime-asset attestation.
 
 **CHOOK-04** When persisted hook evidence is revalidated, the system shall require the same canonical source-repository identity, a full hexadecimal Git object ID, a hexadecimal SHA-256 digest, reachable committed assets, and an exact sandbox digest match.
 
@@ -36,7 +36,7 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-10** When an ordinary non-bypassed Codex session runs from a repository subdirectory, the system shall resolve every project hook relative to the repository project root instead of that subdirectory.
 
-**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject every existing search-path directory or ancestor that is not root-owned and non-writable by group or other, reject mutable runtime paths and executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, and keep required hook helpers reachable only through an operator-owned absolute installation path or the content-addressed hook root.
+**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject every existing search-path directory or ancestor that is not root-owned and non-writable by group or other, reject mutable runtime paths and executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, require every referenced `/usr/local/libexec` executable to use an exact allowlisted identity that is revalidated as a root-owned, non-writable executable regular file behind root-owned, non-writable ancestors immediately before launch, and keep required hook helpers reachable only through an operator-owned absolute installation path or the content-addressed hook root.
 
 **CHOOK-12** When a bypassed Codex session reaches a trusted Stop or SubagentStop hook, the system shall not execute project-root programs, build recipes, or other mutable workspace code automatically.
 

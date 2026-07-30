@@ -36,6 +36,7 @@ var (
 	trustedHookJSONPath               = "/usr/local/libexec/dear-agent-codex-hook-json"
 	validateAttestedExecutablePath    = validateTrustedExecutableSearchPath
 	validateTrustedHookJSONExecutable = validateTrustedHookExecutable
+	validateTrustedSystemExecutable   = validateTrustedHookExecutable
 )
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
@@ -117,6 +118,9 @@ func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any,
 			err,
 		)
 	}
+	if err := validateMaterializedSystemExecutables(assets); err != nil {
+		return nil, err
+	}
 	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
 		return nil, err
 	}
@@ -124,6 +128,43 @@ func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any,
 		return nil, err
 	}
 	return hooks, nil
+}
+
+func validateMaterializedSystemExecutables(assets map[string]asset) error {
+	paths := make(map[string]struct{})
+	for _, item := range assets {
+		if !item.executable {
+			continue
+		}
+		for _, match := range absolutePathToken.FindAllStringSubmatch(
+			withoutFullLineComments(string(item.content)),
+			-1,
+		) {
+			path := filepath.Clean(match[1])
+			if path == "/usr/local/libexec" ||
+				!strings.HasPrefix(path, "/usr/local/libexec/") {
+				continue
+			}
+			if !isSystemRuntimePath(path) {
+				return fmt.Errorf(
+					"trusted hook references unapproved system executable %q",
+					path,
+				)
+			}
+			paths[path] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(paths))
+	for path := range paths {
+		ordered = append(ordered, path)
+	}
+	sort.Strings(ordered)
+	for _, path := range ordered {
+		if err := validateTrustedSystemExecutable(path); err != nil {
+			return fmt.Errorf("validate exact trusted hook executable %q: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func readMaterializedHookManifest(assets map[string]asset) (map[string]any, error) {

