@@ -120,6 +120,15 @@ type createTestRuntime struct {
 	complete func(context.Context, CreateSessionCompletion) error
 }
 
+type createTestPreparingRuntime struct {
+	*createTestRuntime
+	prepare func(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error)
+}
+
+func (r *createTestPreparingRuntime) Prepare(ctx context.Context, input CreateSessionPreparation) (CreateSessionPreparation, error) {
+	return r.prepare(ctx, input)
+}
+
 type createTestAgyBootstrapRuntime struct {
 	*createTestRuntime
 	bootstrap func(context.Context, AgyCreateIdentityBootstrap) error
@@ -447,7 +456,7 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 	if result.SessionID != "agy-lazy-id" || promptDeliveries != 1 {
 		t.Fatalf("result/prompt deliveries = %+v/%d", result, promptDeliveries)
 	}
-	wantOrder := []string{"lock", "snapshot", "reserve", "launch", "prompt", "discover", "register", "unlock", "complete"}
+	wantOrder := []string{"lock", "reserve", "snapshot", "launch", "prompt", "discover", "register", "unlock", "complete"}
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("AGY lazy identity lifecycle = %v, want %v", order, wantOrder)
 	}
@@ -604,7 +613,7 @@ func TestCreateSessionPiRejectsInvalidCodingAgentDirectoryBeforeTmux(t *testing.
 	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(t.TempDir(), "missing"))
 	tmuxMock := session.NewMockTmux()
-	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Prompt: "fixture", Title: "pi-invalid-config", Harness: "pi", SessionID: "pi-invalid-config",
 	})
 	if err == nil || !strings.Contains(err.Error(), "coding agent directory") {
@@ -962,11 +971,18 @@ func TestCreateSession_AtomicNameConflictPreventsQueuedCurrentTmuxLaunch(t *test
 	store := &createMockStorage{
 		reserveErr: &dolt.SessionNameConflictError{Name: "concurrent-name"},
 	}
+	prepared := false
 	launched := false
-	runtime := &createTestRuntime{
-		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
-			launched = true
-			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{
+			launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+				launched = true
+				return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+			},
+		},
+		prepare: func(_ context.Context, input CreateSessionPreparation) (CreateSessionPreparation, error) {
+			prepared = true
+			return input, nil
 		},
 	}
 
@@ -981,14 +997,98 @@ func TestCreateSession_AtomicNameConflictPreventsQueuedCurrentTmuxLaunch(t *test
 	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionExists {
 		t.Fatalf("CreateSessionWithContext() error = %v, want %s", err, ErrCodeSessionExists)
 	}
-	if launched || len(tmuxMock.SentCommands) != 0 {
-		t.Fatalf("losing creator launched harness: runtime=%t commands=%v", launched, tmuxMock.SentCommands)
+	if prepared || launched || len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("losing creator mutated preparation or launched harness: prepared=%t runtime=%t commands=%v", prepared, launched, tmuxMock.SentCommands)
 	}
 	if len(store.created) != 0 {
 		t.Fatalf("losing creator reached registration: %d writes", len(store.created))
 	}
 	if !tmuxMock.Sessions["concurrent-name"] {
 		t.Fatal("name-conflict rollback removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_PreparesSurfaceAfterReservationBeforeLaunch(t *testing.T) {
+	initialDir := t.TempDir()
+	preparedDir := t.TempDir()
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	var launchedSpec HarnessLaunchSpec
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{
+			launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+				order = append(order, "launch")
+				launchedSpec = spec
+				return CreateSessionLaunchResult{Readiness: CreateSessionReadinessVerified}, nil
+			},
+			complete: func(context.Context, CreateSessionCompletion) error {
+				order = append(order, "complete")
+				return nil
+			},
+		},
+		prepare: func(_ context.Context, input CreateSessionPreparation) (CreateSessionPreparation, error) {
+			if len(store.reserved) != 1 {
+				t.Fatalf("preparation ran before durable reservation: %v", store.reserved)
+			}
+			order = append(order, "prepare")
+			input.Cwd = preparedDir
+			input.ExtraAddDirs = []string{"/prepared/source"}
+			input.PermissionPolicy = &manifest.PermissionPolicy{Profile: "worker"}
+			input.Sandbox = &manifest.SandboxConfig{Enabled: true, ID: "prepared-sandbox"}
+			return input, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: initialDir, Title: "prepared-session", Harness: "claude-code", Model: "sonnet",
+		SessionID: "prepared-id", Prompt: "test", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error = %v", err)
+	}
+	if got, want := order, []string{"reserve", "prepare", "launch", "register", "complete"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("creation order = %v, want %v", got, want)
+	}
+	if launchedSpec.WorkDir != preparedDir || !reflect.DeepEqual(launchedSpec.ExtraAddDirs, []string{"/prepared/source"}) {
+		t.Fatalf("launch spec did not receive prepared workspace: %+v", launchedSpec)
+	}
+	if len(store.created) != 1 ||
+		store.created[0].Context.Project != preparedDir ||
+		store.created[0].PermissionPolicy == nil ||
+		store.created[0].PermissionPolicy.Profile != "worker" ||
+		store.created[0].Sandbox == nil ||
+		store.created[0].Sandbox.ID != "prepared-sandbox" {
+		t.Fatalf("registered manifest did not receive preparation: %+v", store.created)
+	}
+}
+
+func TestCreateSession_PreparationFailureReleasesReservationBeforeTmux(t *testing.T) {
+	prepareErr := errors.New("permission preparation failed")
+	store := &createMockStorage{}
+	tmuxMock := session.NewMockTmux()
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{},
+		prepare: func(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error) {
+			return CreateSessionPreparation{}, prepareErr
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "prepare-failure", Harness: "claude-code", Model: "sonnet",
+		SessionID: "prepare-failure-id", Prompt: "test", RequireStorage: true,
+	})
+	if !errors.Is(err, prepareErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want preparation failure", err)
+	}
+	if got, want := store.released, []string{"prepare-failure-id"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("released reservations = %v, want %v", got, want)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux mutated after preparation failure: %v", tmuxMock.CreatedSessions)
 	}
 }
 
@@ -1261,7 +1361,7 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	store := &createMockStorage{}
 	store.onReserve = func() {
 		if !locked {
-			t.Fatal("AGY workspace lock was released before reservation")
+			t.Fatal("AGY workspace lock was not held during reservation")
 		}
 		order = append(order, "reserve")
 	}
@@ -1345,7 +1445,7 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	if result.Cwd != dir {
 		t.Fatalf("result cwd = %q, want canonical workspace %q", result.Cwd, dir)
 	}
-	want := []string{"lock", "snapshot", "reserve", "launch", "discover", "unlock", "complete"}
+	want := []string{"lock", "reserve", "snapshot", "launch", "discover", "unlock", "complete"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
 	}
@@ -1359,7 +1459,7 @@ func TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation(t *testing.T) 
 	tracker.snapshot = func(context.Context, string) (string, error) { return "", wantErr }
 
 	_, err := CreateSessionWithContext(t.Context(), &OpContext{
-		Tmux: tmuxMock, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+		Tmux: tmuxMock, Storage: &createMockStorage{}, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
 	}, &CreateSessionRequest{
 		Cwd: dir, Title: "agy-snapshot-failure", Harness: "agy", Model: "3.5-flash-low",
 		Prompt: "fixture",

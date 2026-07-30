@@ -161,7 +161,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-58** When a CLI creation surface, including `session create-child` and current-tmux creation, or the MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, completion ordering, and rollback to `CreateSessionWithContext`; child creation shall carry its parent relationship, selected context, and explicit initial prompt through the shared creation request, and shared validation shall reject every normalized AGY child without that identity-creating prompt before mutation.
 
-**OPS-59** When `CreateSessionWithContext` advances a named session, the system shall require reservation-capable storage and atomically reserve its non-archived name before bounded Codex setup, tmux creation, or runtime launch, without a separate list-based availability preflight; it shall then prove readiness, consume that reservation in the manifest-registration transaction, and run runtime completion.
+**OPS-59** When `CreateSessionWithContext` advances a named session, the system shall require reservation-capable storage and atomically reserve its non-archived name before surface-specific workspace or permission preparation, bounded provider setup, tmux creation, or runtime launch, without a separate list-based availability preflight; it shall then prove readiness, consume that reservation in the manifest-registration transaction, and run runtime completion.
 
 **OPS-60** When a creation request declares a caller surface, the system shall return that caller as result provenance and persist a matching `source:<caller>` manifest tag.
 

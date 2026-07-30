@@ -128,6 +128,25 @@ type CreateSessionRuntime interface {
 	Complete(context.Context, CreateSessionCompletion) error
 }
 
+// CreateSessionPreparation is the narrow, mutable subset a surface may prepare
+// after the shared lifecycle has reserved the session name but before any
+// workspace, permission, provider, tmux, or harness mutation.
+type CreateSessionPreparation struct {
+	SessionID        string
+	SessionName      string
+	Cwd              string
+	ExtraAddDirs     []string
+	PermissionPolicy *manifest.PermissionPolicy
+	Sandbox          *manifest.SandboxConfig
+}
+
+// CreateSessionPreparer is an optional runtime capability for surface-specific
+// workspace and permission preparation. The shared lifecycle controls its
+// position immediately after durable name admission.
+type CreateSessionPreparer interface {
+	Prepare(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error)
+}
+
 // SessionStorageOpener lazily constructs surface-specific storage before any
 // harness launch side effect. The returned cleanup runs after rollback.
 type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
@@ -333,13 +352,14 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, err
 		}
 	}
-	// Validate every request-derived terminal value before acquiring lifecycle
-	// locks or creating either a tmux session or a remote provider thread.
-	// Provider-derived metadata is validated again when the final command is
-	// prepared after remote setup.
+	// Validate every initial request-derived terminal value before acquiring
+	// lifecycle state. Surface preparation may change the working directory,
+	// so the resulting launch values are validated again after name admission.
 	if err := validateHarnessLaunchSpec(buildHarnessLaunchSpec(req, params, req.SessionID, nil)); err != nil {
 		return nil, ErrStorageError("prepare harness launch", err)
 	}
+
+	sessionID := createSessionID(req.SessionID)
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string
 	var releaseAgyWorkspaceLock func() error
@@ -365,20 +385,8 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		if agyIdentityTracker == nil {
 			agyIdentityTracker = agysession.NewCreateIdentityTracker()
 		}
-		previousAgyConversationID, err = agyIdentityTracker.Snapshot(callCtx, req.Cwd)
-		if err != nil {
-			return nil, ErrStorageError("agy.identity.snapshot", err)
-		}
 	}
 
-	sessionID := createSessionID(req.SessionID)
-	if params.harness == "pi-cli" {
-		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
-		if prepareErr != nil {
-			return nil, prepareErr
-		}
-		req = prepared
-	}
 	state := &createSessionState{}
 	defer func() { retErr = state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
@@ -389,6 +397,26 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	preparedRequest, preparedParams, prepareErr := prepareCreateSessionAfterReservation(callCtx, opCtx, req, params, sessionID)
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	req, params = preparedRequest, preparedParams
+	if params.harness == "pi-cli" {
+		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		req = prepared
+	}
+
+	if agyIdentityTracker != nil {
+		previousAgyConversationID, err = agyIdentityTracker.Snapshot(callCtx, req.Cwd)
+		if err != nil {
+			return nil, ErrStorageError("agy.identity.snapshot", err)
+		}
+	}
+
 	exists, err := prepareCreateTmux(opCtx, req, params.name)
 	if err != nil {
 		return nil, err
@@ -458,6 +486,58 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 	return createSessionResult(req, params, sessionID), nil
+}
+
+func prepareCreateSessionAfterReservation(
+	ctx context.Context,
+	opCtx *OpContext,
+	req *CreateSessionRequest,
+	params *createSessionParams,
+	sessionID string,
+) (*CreateSessionRequest, *createSessionParams, error) {
+	preparer, ok := opCtx.CreationRuntime.(CreateSessionPreparer)
+	if !ok {
+		return req, params, nil
+	}
+	prepared, err := preparer.Prepare(ctx, CreateSessionPreparation{
+		SessionID:        sessionID,
+		SessionName:      params.name,
+		Cwd:              req.Cwd,
+		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
+		PermissionPolicy: cloneCreatePermissionPolicy(req.Metadata.PermissionPolicy),
+		Sandbox:          cloneCreateSandboxConfig(req.Metadata.Sandbox),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	preparedRequest := *req
+	preparedRequest.Metadata = req.Metadata
+	preparedRequest.Cwd = prepared.Cwd
+	preparedRequest.ExtraAddDirs = append([]string{}, prepared.ExtraAddDirs...)
+	preparedRequest.Metadata.PermissionPolicy = cloneCreatePermissionPolicy(prepared.PermissionPolicy)
+	preparedRequest.Metadata.Sandbox = cloneCreateSandboxConfig(prepared.Sandbox)
+
+	preparedParams, err := validateCreateRequest(opCtx, &preparedRequest)
+	if err != nil {
+		return nil, nil, err
+	}
+	if preparedParams.harness == "agy" {
+		canonical, canonicalErr := canonicalizeAgyCreateRequest(&preparedRequest, preparedParams)
+		if canonicalErr != nil {
+			return nil, nil, canonicalErr
+		}
+		preparedRequest = *canonical
+	}
+	if preparedParams.name != params.name ||
+		preparedParams.harness != params.harness ||
+		preparedParams.model != params.model ||
+		preparedParams.persistent != params.persistent {
+		return nil, nil, ErrInvalidInput("preparation", "Surface preparation changed immutable session identity.")
+	}
+	if err := validateHarnessLaunchSpec(buildHarnessLaunchSpec(&preparedRequest, preparedParams, sessionID, nil)); err != nil {
+		return nil, nil, ErrStorageError("prepare harness launch", err)
+	}
+	return &preparedRequest, preparedParams, nil
 }
 
 func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {
@@ -924,6 +1004,15 @@ func cloneCreatePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.Pe
 	clone.Explicit = append([]string{}, policy.Explicit...)
 	clone.Allow = append([]string{}, policy.Allow...)
 	clone.Targets = append([]manifest.PermissionPolicyTarget{}, policy.Targets...)
+	return &clone
+}
+
+func cloneCreateSandboxConfig(sandbox *manifest.SandboxConfig) *manifest.SandboxConfig {
+	if sandbox == nil {
+		return nil
+	}
+	clone := *sandbox
+	clone.ExtraAddDirs = append([]string{}, sandbox.ExtraAddDirs...)
 	return &clone
 }
 

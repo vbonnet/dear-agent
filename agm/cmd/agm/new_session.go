@@ -36,6 +36,7 @@ var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
 var checkExpectedHarnessInputAndSend = tmux.CheckExpectedHarnessInputAndSend
 
 type cliCreateSessionRuntime struct {
+	prepare              func(context.Context, ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error)
 	launch               func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
 	bootstrapAgyIdentity func(context.Context, ops.AgyCreateIdentityBootstrap) error
 	complete             func(context.Context, ops.CreateSessionCompletion) error
@@ -45,6 +46,13 @@ type cliCreateFinalizationRuntime struct {
 	checkLiveness func(context.Context, string, string) (tmux.PaneLiveness, error)
 	updateTitle   func(string)
 	attach        func(string)
+}
+
+func (r *cliCreateSessionRuntime) Prepare(ctx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+	if r.prepare == nil {
+		return input, nil
+	}
+	return r.prepare(ctx, input)
 }
 
 func (r *cliCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
@@ -157,31 +165,6 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 	announceFrameworkGuardrails(workDir)
 	announceAcceptanceCriteria(workDir)
 
-	sessionID := uuid.New().String() // Generate session ID early for sandbox
-	var sandboxInfo *manifest.SandboxConfig
-	defer func() {
-		if retErr != nil && sandboxInfo != nil {
-			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
-		}
-	}()
-
-	sandboxInfo, workDir, err = maybeProvisionSandbox(ctx, sessionID, workDir)
-	if err != nil {
-		return err
-	}
-
-	trustedAddDirs, guardPath, err := trustedAddDirsForSession(sessionName, roleName)
-	if err != nil {
-		return err
-	}
-	extraAddDirs, trustPreConfigured := collectExtraAddDirs(sandboxInfo, trustedAddDirs)
-	if err := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); err != nil {
-		return err
-	}
-	if err := configureProjectPermissions(workDir); err != nil {
-		return err
-	}
-
 	exists, retry, err := resolveTmuxSession(sessionName)
 	if err != nil {
 		return err
@@ -190,12 +173,12 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 		return createTmuxSessionAndStartClaude(ctx, retry)
 	}
 
-	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
+	return runCreateSessionLifecycle(ctx, sessionName, uuid.New().String(), workDir, exists)
 }
 
 // runCreateSessionLifecycle adapts CLI presentation and readiness behavior to
 // the shared ops lifecycle. Business ordering and rollback stay in ops.
-func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) error {
+func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool) (retErr error) {
 	if harnessName == "codex-cli" {
 		if err := validateCodexCredentials(); err != nil {
 			return err
@@ -206,7 +189,29 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 	if err != nil {
 		return err
 	}
-	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
+	var sandboxInfo *manifest.SandboxConfig
+	defer func() {
+		if retErr != nil && sandboxInfo != nil {
+			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
+		}
+	}()
+	runtime := newCLICreateSessionRuntime(sessionName, exists, true)
+	runtime.prepare = func(prepareCtx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+		preparedSandbox, preparedWorkDir, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
+		sandboxInfo = preparedSandbox
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		extraAddDirs, _ := collectExtraAddDirs(preparedSandbox)
+		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		input.Cwd = preparedWorkDir
+		input.ExtraAddDirs = extraAddDirs
+		input.PermissionPolicy = resolvedSessionPermissionPolicy
+		input.Sandbox = preparedSandbox
+		return input, nil
+	}
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
 		CreationRuntime: runtime,
@@ -230,7 +235,6 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		PermissionMode:      modeFlagValue,
 		DisableAutoMode:     noAutoMode,
 		MaxBudgetUSD:        maxBudgetUsd,
-		ExtraAddDirs:        extraAddDirs,
 		ForwardTelemetry:    true,
 		ForwardClaudeOAuth:  true,
 		AllowEmptyPrompt:    true,
@@ -240,16 +244,14 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		ManifestDir:         manifestDir,
 		ManifestDirOptional: true,
 		Metadata: ops.CreateSessionMetadata{
-			Workspace:        cfg.Workspace,
-			ModelTier:        modelTierFlag,
-			Tags:             buildSessionTags(roleName, sessionTags),
-			PermissionPolicy: resolvedSessionPermissionPolicy,
-			Sandbox:          sandboxInfo,
-			IsTest:           testMode,
-			Disposable:       disposable,
-			DisposableTTL:    disposableTTL,
-			PermissionMode:   modeFlagValue,
-			OpenCodeServer:   os.Getenv("OPENCODE_SERVER_URL"),
+			Workspace:      cfg.Workspace,
+			ModelTier:      modelTierFlag,
+			Tags:           buildSessionTags(roleName, sessionTags),
+			IsTest:         testMode,
+			Disposable:     disposable,
+			DisposableTTL:  disposableTTL,
+			PermissionMode: modeFlagValue,
+			OpenCodeServer: os.Getenv("OPENCODE_SERVER_URL"),
 		},
 	})
 	return err
