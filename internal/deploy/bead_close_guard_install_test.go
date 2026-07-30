@@ -32,14 +32,22 @@ func TestCodexBeadCloseGuardUsesOperatorOwnedInstall(t *testing.T) {
 	install := makefile[start:end]
 	for _, required := range []string{
 		"test -t 0",
+		`expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"`,
+		"IFS= read -r confirmed_hash",
 		"/usr/bin/sudo -k",
 		"/usr/bin/sudo -n -v",
 		"/usr/bin/sudo -v",
+		"/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-bead-close-guard.XXXXXX",
+		`test "$$staged_hash" = "$$expected_hash"`,
+		`/usr/bin/sudo /bin/mv -f "$$guard_staging" "$$guard"`,
 		"/usr/local/libexec/dear-agent-bead-close-guard",
 		"$(call install-go-bin,bin/bead-close-guard)",
 	} {
 		if !strings.Contains(install, required) {
 			t.Errorf("bead-close guard installer does not retain %q", required)
 		}
+	}
+	if strings.Contains(install, "bin/bead-close-guard /usr/local/libexec/dear-agent-bead-close-guard") {
+		t.Fatal("bead-close guard installer copies mutable build output directly to the privileged path")
 	}
 }

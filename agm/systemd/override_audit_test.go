@@ -61,6 +61,18 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	for _, required := range []string{
 		"/usr/bin/sudo -k",
 		"/usr/bin/sudo -v",
+		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
+		`expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"`,
+		`expected_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_artifact")"`,
+		"IFS= read -r confirmed_audit_hash",
+		"IFS= read -r confirmed_service_hash",
+		"IFS= read -r confirmed_timer_hash",
+		"/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX",
+		"/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-service.XXXXXX",
+		"/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-timer.XXXXXX",
+		`test "$$staged_audit_hash" = "$$expected_audit_hash"`,
+		`test "$$staged_service_hash" = "$$expected_service_hash"`,
+		`test "$$staged_timer_hash" = "$$expected_timer_hash"`,
 		"/usr/local/libexec/dear-agent-override-audit",
 		"/etc/systemd/system/dear-agent-override-audit@.service",
 		"/etc/systemd/system/dear-agent-override-audit@.timer",
@@ -79,6 +91,15 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	for _, forbidden := range []string{"@systemctl --user", "echo \"  systemctl --user"} {
 		if strings.Contains(install, forbidden) {
 			t.Errorf("system audit installer retains same-user command %q", forbidden)
+		}
+	}
+	for _, forbidden := range []string{
+		`bin/agm /usr/local/libexec/dear-agent-override-audit`,
+		`agm/systemd/dear-agent-override-audit@.service /etc/systemd/system/dear-agent-override-audit@.service`,
+		`agm/systemd/dear-agent-override-audit@.timer /etc/systemd/system/dear-agent-override-audit@.timer`,
+	} {
+		if strings.Contains(install, forbidden) {
+			t.Errorf("system audit installer copies mutable bytes directly to a privileged path: %q", forbidden)
 		}
 	}
 }

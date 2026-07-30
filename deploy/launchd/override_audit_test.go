@@ -59,6 +59,16 @@ func TestOverrideAuditInstallerRequiresFreshOperatorBoundary(t *testing.T) {
 		"/usr/bin/sudo -v",
 		"operator_user=\"$$(id -un)\"",
 		"s|__OPERATOR_USER__|$$operator_user|g",
+		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
+		`expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"`,
+		"IFS= read -r confirmed_audit_hash",
+		"IFS= read -r confirmed_plist_hash",
+		"/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX",
+		"/usr/bin/sudo /usr/bin/mktemp /Library/LaunchDaemons/.com.dear-agent.override-audit.XXXXXX",
+		`test "$$staged_audit_hash" = "$$expected_audit_hash"`,
+		`test "$$staged_plist_hash" = "$$expected_plist_hash"`,
+		`/usr/bin/sudo /usr/bin/plutil -lint "$$plist_staging"`,
+		`/usr/bin/sudo /bin/mv -f "$$plist_staging" /Library/LaunchDaemons/com.dear-agent.override-audit.plist`,
 		"/usr/local/libexec/dear-agent-override-audit",
 		"/Library/LaunchDaemons/com.dear-agent.override-audit.plist",
 		"sudo launchctl bootstrap system",
@@ -66,6 +76,9 @@ func TestOverrideAuditInstallerRequiresFreshOperatorBoundary(t *testing.T) {
 		if !strings.Contains(install, required) {
 			t.Errorf("system audit installer does not retain %q", required)
 		}
+	}
+	if strings.Contains(install, `-m 0644 "$$staged" /Library/LaunchDaemons/com.dear-agent.override-audit.plist`) {
+		t.Fatal("LaunchDaemon installer copies a same-user staging file directly to the final privileged path")
 	}
 	for _, forbidden := range []string{"Library/LaunchAgents", "launchctl bootstrap gui/"} {
 		if strings.Contains(install, forbidden) {

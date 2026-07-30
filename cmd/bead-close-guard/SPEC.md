@@ -31,7 +31,7 @@ touched deploy targets are current before a Bead can be closed.
 
 **BCG-11** When closure is blocked by policy, the command shall exit with code 2; when infrastructure fails, it shall exit with code 1.
 
-**BCG-12** When the guard is installed for attested Codex hooks, the system shall require fresh interactive operator authentication, place a root-owned executable at the fixed hook path, and retain the user-path installation for ordinary harness and CLI use.
+**BCG-12** When the guard is installed for attested Codex hooks, the system shall require typed confirmation of the complete artifact SHA-256 and fresh interactive operator authentication, copy the approved bytes into unique root-owned staging, verify the staged digest, atomically activate the fixed hook path only on an exact match, and retain the user-path installation for ordinary harness and CLI use.
 
 ## BDD Traceability
 

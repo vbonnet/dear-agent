@@ -566,6 +566,21 @@ install-bead-close-guard: build-bead-close-guard
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged bead-close guard installation" >&2; exit 2; }; \
 		root_group="$$(id -gn 0)"; \
+		artifact="bin/bead-close-guard"; \
+		guard="/usr/local/libexec/dear-agent-bead-close-guard"; \
+		guard_staging=""; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		printf 'Reviewed bead-close guard SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "bead-close guard digest confirmation did not match" >&2; exit 2; }; \
+		cleanup_guard_staging() { \
+			if test -n "$$guard_staging"; then \
+				/usr/bin/sudo /bin/rm -f "$$guard_staging" >/dev/null 2>&1 || true; \
+			fi; \
+		}; \
+		trap cleanup_guard_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
 		if /usr/bin/sudo -n -v 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
@@ -573,9 +588,16 @@ install-bead-close-guard: build-bead-close-guard
 		fi; \
 		/usr/bin/sudo -v; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/bead-close-guard /usr/local/libexec/dear-agent-bead-close-guard; \
+		guard_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-bead-close-guard.XXXXXX)"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$guard_staging"; \
+		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$guard_staging")"; \
+		staged_hash="$${staged_hash%% *}"; \
+		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged bead-close guard differs from the approved bytes" >&2; exit 1; }; \
+		/usr/bin/sudo /bin/mv -f "$$guard_staging" "$$guard"; \
+		guard_staging=""; \
+		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		echo "Installed operator-owned Codex hook guard: /usr/local/libexec/dear-agent-bead-close-guard"
+		echo "Installed digest-bound operator-owned Codex hook guard: $$guard"
 	$(call install-go-bin,bin/bead-close-guard)
 
 # Detects deployment drift: deployed artifacts (Claude Code hooks, launchd
@@ -977,10 +999,30 @@ install-override-audit-launchdaemon: build-agm
 		operator_user="$$(id -un)"; \
 		case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
 		root_group="$$(id -gn 0)"; \
-		staged="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
-		trap '/bin/rm -f "$$staged"' EXIT HUP INT TERM; \
-		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" deploy/launchd/com.dear-agent.override-audit.plist >"$$staged"; \
-		/usr/bin/plutil -lint "$$staged" >/dev/null; \
+		audit_artifact="bin/agm"; \
+		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
+		audit_staging=""; \
+		plist_staging=""; \
+		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" deploy/launchd/com.dear-agent.override-audit.plist >"$$plist_candidate"; \
+		/usr/bin/plutil -lint "$$plist_candidate" >/dev/null; \
+		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
+		expected_audit_hash="$${expected_audit_hash%% *}"; \
+		expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"; \
+		expected_plist_hash="$${expected_plist_hash%% *}"; \
+		printf 'Reviewed audit executable SHA-256: %s\n' "$$expected_audit_hash"; \
+		printf 'Reviewed rendered LaunchDaemon SHA-256: %s\n' "$$expected_plist_hash"; \
+		printf 'Type the executable SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_audit_hash; \
+		printf 'Type the LaunchDaemon SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_plist_hash; \
+		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
+		cleanup_audit_staging() { \
+			/bin/rm -f "$$plist_candidate"; \
+			if test -n "$$audit_staging"; then /usr/bin/sudo /bin/rm -f "$$audit_staging" >/dev/null 2>&1 || true; fi; \
+			if test -n "$$plist_staging"; then /usr/bin/sudo /bin/rm -f "$$plist_staging" >/dev/null 2>&1 || true; fi; \
+		}; \
+		trap cleanup_audit_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
 		if /usr/bin/sudo -n -v 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
@@ -988,10 +1030,26 @@ install-override-audit-launchdaemon: build-agm
 		fi; \
 		/usr/bin/sudo -v; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/agm /usr/local/libexec/dear-agent-override-audit; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 "$$staged" /Library/LaunchDaemons/com.dear-agent.override-audit.plist; \
+		audit_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX)"; \
+		plist_staging="$$(/usr/bin/sudo /usr/bin/mktemp /Library/LaunchDaemons/.com.dear-agent.override-audit.XXXXXX)"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$audit_artifact" "$$audit_staging"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 "$$plist_candidate" "$$plist_staging"; \
+		staged_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_staging")"; \
+		staged_audit_hash="$${staged_audit_hash%% *}"; \
+		staged_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_staging")"; \
+		staged_plist_hash="$${staged_plist_hash%% *}"; \
+		test "$$staged_audit_hash" = "$$expected_audit_hash" || { echo "root-owned staged audit executable differs from the approved bytes" >&2; exit 1; }; \
+		test "$$staged_plist_hash" = "$$expected_plist_hash" || { echo "root-owned staged LaunchDaemon differs from the approved bytes" >&2; exit 1; }; \
+		/usr/bin/sudo /usr/bin/plutil -lint "$$plist_staging" >/dev/null; \
+		/usr/bin/sudo /bin/mv -f "$$audit_staging" /usr/local/libexec/dear-agent-override-audit; \
+		audit_staging=""; \
+		/usr/bin/sudo /bin/mv -f "$$plist_staging" /Library/LaunchDaemons/com.dear-agent.override-audit.plist; \
+		plist_staging=""; \
+		/bin/rm -f "$$plist_candidate"; \
+		plist_candidate=""; \
+		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		echo "Installed root-owned audit executable and system LaunchDaemon"; \
+		echo "Installed digest-bound root-owned audit executable and system LaunchDaemon"; \
 		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \
 		echo "  sudo launchctl bootstrap system /Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \
 		echo "  log stream --predicate 'senderImagePath == \"/usr/bin/logger\"'"
@@ -1022,7 +1080,38 @@ install-override-audit-systemd: build-agm
 		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
 		command -v systemctl >/dev/null || { echo "systemctl is required" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
+		case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
 		root_group="$$(id -gn 0)"; \
+		audit_artifact="bin/agm"; \
+		service_artifact="agm/systemd/dear-agent-override-audit@.service"; \
+		timer_artifact="agm/systemd/dear-agent-override-audit@.timer"; \
+		audit_staging=""; \
+		service_staging=""; \
+		timer_staging=""; \
+		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
+		expected_audit_hash="$${expected_audit_hash%% *}"; \
+		expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"; \
+		expected_service_hash="$${expected_service_hash%% *}"; \
+		expected_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_artifact")"; \
+		expected_timer_hash="$${expected_timer_hash%% *}"; \
+		printf 'Reviewed audit executable SHA-256: %s\n' "$$expected_audit_hash"; \
+		printf 'Reviewed systemd service SHA-256: %s\n' "$$expected_service_hash"; \
+		printf 'Reviewed systemd timer SHA-256: %s\n' "$$expected_timer_hash"; \
+		printf 'Type the executable SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_audit_hash; \
+		printf 'Type the service SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_service_hash; \
+		printf 'Type the timer SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_timer_hash; \
+		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_service_hash" = "$$expected_service_hash" || { echo "systemd service digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_timer_hash" = "$$expected_timer_hash" || { echo "systemd timer digest confirmation did not match" >&2; exit 2; }; \
+		cleanup_systemd_staging() { \
+			if test -n "$$audit_staging"; then /usr/bin/sudo /bin/rm -f "$$audit_staging" >/dev/null 2>&1 || true; fi; \
+			if test -n "$$service_staging"; then /usr/bin/sudo /bin/rm -f "$$service_staging" >/dev/null 2>&1 || true; fi; \
+			if test -n "$$timer_staging"; then /usr/bin/sudo /bin/rm -f "$$timer_staging" >/dev/null 2>&1 || true; fi; \
+		}; \
+		trap cleanup_systemd_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
 		if /usr/bin/sudo -n -v 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
@@ -1030,12 +1119,31 @@ install-override-audit-systemd: build-agm
 		fi; \
 		/usr/bin/sudo -v; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/agm /usr/local/libexec/dear-agent-override-audit; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 agm/systemd/dear-agent-override-audit@.service /etc/systemd/system/dear-agent-override-audit@.service; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 agm/systemd/dear-agent-override-audit@.timer /etc/systemd/system/dear-agent-override-audit@.timer; \
+		audit_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX)"; \
+		service_staging="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-service.XXXXXX)"; \
+		timer_staging="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-timer.XXXXXX)"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$audit_artifact" "$$audit_staging"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 "$$service_artifact" "$$service_staging"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 "$$timer_artifact" "$$timer_staging"; \
+		staged_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_staging")"; \
+		staged_audit_hash="$${staged_audit_hash%% *}"; \
+		staged_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_staging")"; \
+		staged_service_hash="$${staged_service_hash%% *}"; \
+		staged_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_staging")"; \
+		staged_timer_hash="$${staged_timer_hash%% *}"; \
+		test "$$staged_audit_hash" = "$$expected_audit_hash" || { echo "root-owned staged audit executable differs from the approved bytes" >&2; exit 1; }; \
+		test "$$staged_service_hash" = "$$expected_service_hash" || { echo "root-owned staged systemd service differs from the approved bytes" >&2; exit 1; }; \
+		test "$$staged_timer_hash" = "$$expected_timer_hash" || { echo "root-owned staged systemd timer differs from the approved bytes" >&2; exit 1; }; \
+		/usr/bin/sudo /bin/mv -f "$$audit_staging" /usr/local/libexec/dear-agent-override-audit; \
+		audit_staging=""; \
+		/usr/bin/sudo /bin/mv -f "$$service_staging" /etc/systemd/system/dear-agent-override-audit@.service; \
+		service_staging=""; \
+		/usr/bin/sudo /bin/mv -f "$$timer_staging" /etc/systemd/system/dear-agent-override-audit@.timer; \
+		timer_staging=""; \
+		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo /usr/bin/systemctl daemon-reload; \
 		/usr/bin/sudo -k; \
-		echo "Installed root-owned audit executable and system unit templates"; \
+		echo "Installed digest-bound root-owned audit executable and system unit templates"; \
 		echo "Review, activate, and monitor them yourself (ask-gated host actions):"; \
 		echo "  sudo systemctl enable --now dear-agent-override-audit@$$operator_user.timer"; \
 		echo "  journalctl -t dear-agent-override-audit"
