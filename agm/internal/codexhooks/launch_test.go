@@ -44,13 +44,17 @@ func TestHardenHookCommandsReplacesCallerPath(t *testing.T) {
 }
 
 func TestAttestedHookPathContainsOnlyOperatorOwnedLocations(t *testing.T) {
+	const want = "/usr/local/libexec:/usr/bin:/bin:/usr/sbin:/sbin"
+	if attestedHookPath != want {
+		t.Fatalf("attested hook PATH = %q, want %q", attestedHookPath, want)
+	}
 	if strings.Contains(attestedHookPath, "/opt/homebrew") ||
 		strings.Contains(attestedHookPath, "/usr/local/bin") ||
 		strings.Contains(attestedHookPath, "/usr/local/go/bin") {
 		t.Fatalf("attested hook PATH includes a commonly user-writable location: %q", attestedHookPath)
 	}
-	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
-		t.Fatalf("validateTrustedExecutableSearchPath(attestedHookPath): %v", err)
+	if err := validateTrustedExecutableSearchPath("/usr/bin:/bin:/usr/sbin:/sbin"); err != nil {
+		t.Fatalf("validate root-owned system PATH entries: %v", err)
 	}
 	if trustedHookJSONPath != "/usr/local/libexec/dear-agent-codex-hook-json" {
 		t.Fatalf("trusted hook JSON path = %q", trustedHookJSONPath)
@@ -266,9 +270,17 @@ func TestLaunchConfigOverridesRejectsMutableOrAmbiguousManifest(t *testing.T) {
 
 func useTrustedHookJSONFixture(t *testing.T) {
 	t.Helper()
-	previous := trustedHookJSONPath
+	previousJSONPath := trustedHookJSONPath
+	previousPathValidator := validateAttestedExecutablePath
 	trustedHookJSONPath = "/bin/sh"
+	validateAttestedExecutablePath = func(got string) error {
+		if got != attestedHookPath {
+			t.Fatalf("validate attested executable PATH %q, want %q", got, attestedHookPath)
+		}
+		return nil
+	}
 	t.Cleanup(func() {
-		trustedHookJSONPath = previous
+		trustedHookJSONPath = previousJSONPath
+		validateAttestedExecutablePath = previousPathValidator
 	})
 }

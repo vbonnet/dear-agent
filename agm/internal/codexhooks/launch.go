@@ -29,7 +29,10 @@ const (
 	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
 )
 
-var trustedHookJSONPath = "/usr/local/libexec/dear-agent-codex-hook-json"
+var (
+	trustedHookJSONPath            = "/usr/local/libexec/dear-agent-codex-hook-json"
+	validateAttestedExecutablePath = validateTrustedExecutableSearchPath
+)
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
 	"PostCompact":      {},
@@ -61,7 +64,7 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
+	if err := validateAttestedExecutablePath(attestedHookPath); err != nil {
 		return nil, err
 	}
 	if err := validateTrustedHookExecutable(trustedHookJSONPath); err != nil {
