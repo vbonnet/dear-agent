@@ -564,6 +564,10 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 			return RenameSessionIdentityResult{}, err
 		}
 	}
+	reservationName := ""
+	if reservationHeld {
+		reservationName = newName
+	}
 	result, retErr = a.renameSessionIdentityReserved(
 		ctx,
 		sessionID,
@@ -571,6 +575,7 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 		previousTmuxName,
 		observedRevision,
 		newName,
+		reservationName,
 	)
 	if retErr == nil {
 		result.StorageCommitted = true
@@ -578,7 +583,7 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	return result, retErr
 }
 
-func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (RenameSessionIdentityResult, error) {
+func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName, reservationName string) (RenameSessionIdentityResult, error) {
 	observedRevisionValue := nullableStringValue(sql.NullString{
 		String: observedRevision,
 		Valid:  observedRevision != "",
@@ -590,8 +595,13 @@ func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, 
 		WHERE id = ? AND workspace = ?
 		  AND name = ? AND tmux_session_name = ?
 		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+		  AND (? = '' OR EXISTS (
+			  SELECT 1 FROM agm_session_name_reservations
+			  WHERE workspace = ? AND name = ? AND session_id = ?
+		  ))
 	`, time.Now(), newName, newName, nextRevision, sessionID, a.workspace,
-		previousName, previousTmuxName, observedRevisionValue, observedRevisionValue)
+		previousName, previousTmuxName, observedRevisionValue, observedRevisionValue,
+		reservationName, a.workspace, reservationName, sessionID)
 	if err == nil {
 		rowsAffected, rowsErr := result.RowsAffected()
 		if rowsErr == nil && rowsAffected == 1 {
@@ -604,6 +614,14 @@ func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, 
 		}
 	} else {
 		err = fmt.Errorf("rename session identity: %w", err)
+	}
+	if reservationName != "" {
+		owned, ownershipErr := a.sessionNameReservationOwned(sessionID, reservationName)
+		if ownershipErr != nil {
+			err = errors.Join(err, ownershipErr)
+		} else if !owned {
+			err = &SessionNameConflictError{Name: reservationName}
+		}
 	}
 
 	// ExecContext can lose its reply before the server finishes autocommit. A

@@ -123,7 +123,7 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 		return err
 	}
 
-	reservationCreated, err := a.reserveParentLinkName(ctx, sessionID, inheritedName)
+	reservationCreated, reservationName, err := a.reserveParentLinkName(ctx, sessionID, inheritedName)
 	if reservationCreated {
 		defer func() {
 			if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
@@ -134,7 +134,10 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 	if err != nil {
 		return err
 	}
+	return a.linkSessionParentReserved(ctx, sessionID, observedRevision, parentSessionID, inheritedName, reservationName)
+}
 
+func (a *Adapter) linkSessionParentReserved(ctx context.Context, sessionID, observedRevision, parentSessionID string, inheritedName *string, reservationName string) error {
 	observed := nullableStringValue(sql.NullString{String: observedRevision, Valid: observedRevision != ""})
 	var inheritedNameValue any
 	if inheritedName != nil {
@@ -147,7 +150,12 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 			tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
 		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
-	`, time.Now(), parentSessionID, inheritedNameValue, inheritedNameValue, uuid.NewString(), sessionID, a.workspace, observed, observed)
+		  AND (? = '' OR EXISTS (
+			  SELECT 1 FROM agm_session_name_reservations
+			  WHERE workspace = ? AND name = ? AND session_id = ?
+		  ))
+	`, time.Now(), parentSessionID, inheritedNameValue, inheritedNameValue, uuid.NewString(), sessionID, a.workspace, observed, observed,
+		reservationName, a.workspace, reservationName, sessionID)
 	if err != nil {
 		return fmt.Errorf("link session parent: %w", err)
 	}
@@ -157,6 +165,15 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 	}
 	if rowsAffected > 0 {
 		return nil
+	}
+	if reservationName != "" {
+		owned, ownershipErr := a.sessionNameReservationOwned(sessionID, reservationName)
+		if ownershipErr != nil {
+			return ownershipErr
+		}
+		if !owned {
+			return &SessionNameConflictError{Name: reservationName}
+		}
 	}
 
 	var currentRevision sql.NullString
@@ -185,9 +202,9 @@ func (a *Adapter) ensureParentSessionExists(ctx context.Context, parentSessionID
 	return nil
 }
 
-func (a *Adapter) reserveParentLinkName(ctx context.Context, sessionID string, inheritedName *string) (bool, error) {
+func (a *Adapter) reserveParentLinkName(ctx context.Context, sessionID string, inheritedName *string) (bool, string, error) {
 	if inheritedName == nil {
-		return false, nil
+		return false, "", nil
 	}
 	var currentName, lifecycle string
 	if err := a.conn.QueryRowContext(
@@ -197,17 +214,18 @@ func (a *Adapter) reserveParentLinkName(ctx context.Context, sessionID string, i
 		a.workspace,
 	).Scan(&currentName, &lifecycle); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("session not found: %s", sessionID)
+			return false, "", fmt.Errorf("session not found: %s", sessionID)
 		}
-		return false, fmt.Errorf("inspect session before linking parent: %w", err)
+		return false, "", fmt.Errorf("inspect session before linking parent: %w", err)
 	}
 	if lifecycle == manifest.LifecycleArchived || currentName == *inheritedName {
 		// Archived rows do not occupy the active-name set. ReactivateSession
 		// uses an exact archived identity CAS, so a link that advances this
 		// revision fences every stale reactivation snapshot.
-		return false, nil
+		return false, "", nil
 	}
-	return a.reserveSessionName(sessionID, *inheritedName)
+	created, err := a.reserveSessionName(sessionID, *inheritedName)
+	return created, *inheritedName, err
 }
 
 // DetachChild sets parent_session_id to NULL for a given child session.

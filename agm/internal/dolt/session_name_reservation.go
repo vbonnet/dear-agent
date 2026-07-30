@@ -193,11 +193,11 @@ func (a *Adapter) ReactivateSession(session *manifest.Manifest) (result Reactiva
 	if err != nil {
 		return ReactivateSessionResult{}, err
 	}
-	result, retErr = a.reactivateSessionReserved(session)
+	result, retErr = a.reactivateSessionReserved(session, session.Name)
 	return result, retErr
 }
 
-func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest) (ReactivateSessionResult, error) {
+func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest, reservationName string) (ReactivateSessionResult, error) {
 	observedRevision := nullableStringValue(sql.NullString{
 		String: session.Tmux.SessionRevision,
 		Valid:  session.Tmux.SessionRevision != "",
@@ -209,7 +209,11 @@ func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest) (Reactiv
 		 SET status = 'active', updated_at = ?, tmux_session_revision = ?
 		 WHERE id = ? AND workspace = ? AND status = 'archived'
 		   AND name = ? AND tmux_session_name = ?
-		   AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)`,
+		   AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+		   AND (? = '' OR EXISTS (
+			   SELECT 1 FROM agm_session_name_reservations
+			   WHERE workspace = ? AND name = ? AND session_id = ?
+		   ))`,
 		updatedAt,
 		nextRevision,
 		session.SessionID,
@@ -218,6 +222,10 @@ func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest) (Reactiv
 		session.Tmux.SessionName,
 		observedRevision,
 		observedRevision,
+		reservationName,
+		a.workspace,
+		reservationName,
+		session.SessionID,
 	)
 	if err == nil {
 		rowsAffected, rowsErr := updateResult.RowsAffected()
@@ -247,6 +255,15 @@ func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest) (Reactiv
 		session.UpdatedAt = current.UpdatedAt
 		session.Tmux.SessionRevision = current.Tmux.SessionRevision
 		return ReactivateSessionResult{StorageCommitted: true}, nil
+	}
+	if reservationName != "" {
+		owned, ownershipErr := a.sessionNameReservationOwned(session.SessionID, reservationName)
+		if ownershipErr != nil {
+			return ReactivateSessionResult{}, errors.Join(err, ownershipErr)
+		}
+		if !owned {
+			return ReactivateSessionResult{}, &SessionNameConflictError{Name: reservationName}
+		}
 	}
 	return ReactivateSessionResult{}, err
 }

@@ -257,6 +257,176 @@ func TestResolveSessionNameReservationCommitErrorReconcilesOwnership(t *testing.
 	}
 }
 
+func TestSQLiteExpiredReservationCannotAuthorizeRename(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	session := &manifest.Manifest{
+		SessionID: "expired-rename-owner",
+		Name:      "old-name",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Tmux:      manifest.Tmux{SessionName: "old-name"},
+	}
+	if err := adapter.CreateSession(session); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	observed, err := adapter.GetSession(session.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if err := adapter.ReserveSessionName(session.SessionID, "target-name"); err != nil {
+		t.Fatalf("ReserveSessionName() error: %v", err)
+	}
+	replaceExpiredSessionNameReservation(t, adapter, session.SessionID, "replacement-owner", "target-name")
+
+	_, err = adapter.renameSessionIdentityReserved(
+		t.Context(),
+		observed.SessionID,
+		observed.Name,
+		observed.Tmux.SessionName,
+		observed.Tmux.SessionRevision,
+		"target-name",
+		"target-name",
+	)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) || conflict.Name != "target-name" {
+		t.Fatalf("renameSessionIdentityReserved() error = %v, want target-name conflict", err)
+	}
+	current, err := adapter.GetSession(session.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after rejected rename: %v", err)
+	}
+	if current.Name != "old-name" || current.Tmux.SessionName != "old-name" {
+		t.Fatalf("identity after rejected rename = (%q, %q), want old-name", current.Name, current.Tmux.SessionName)
+	}
+}
+
+func TestSQLiteExpiredReservationCannotAuthorizeReactivation(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	session := &manifest.Manifest{
+		SessionID: "expired-reactivation-owner",
+		Name:      "restored-name",
+		Lifecycle: manifest.LifecycleArchived,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Tmux:      manifest.Tmux{SessionName: "archived-tmux"},
+	}
+	if err := adapter.CreateSession(session); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	observed, err := adapter.GetSession(session.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if err := adapter.ReserveSessionName(session.SessionID, session.Name); err != nil {
+		t.Fatalf("ReserveSessionName() error: %v", err)
+	}
+	replaceExpiredSessionNameReservation(t, adapter, session.SessionID, "replacement-owner", session.Name)
+
+	result, err := adapter.reactivateSessionReserved(observed, session.Name)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) || conflict.Name != session.Name || result.StorageCommitted {
+		t.Fatalf("reactivateSessionReserved() = (%+v, %v), want uncommitted conflict", result, err)
+	}
+	current, err := adapter.GetSession(session.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after rejected reactivation: %v", err)
+	}
+	if current.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("lifecycle after rejected reactivation = %q, want archived", current.Lifecycle)
+	}
+}
+
+func TestSQLiteExpiredReservationCannotAuthorizeParentLink(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	parent := &manifest.Manifest{
+		SessionID: "expired-link-parent",
+		Name:      "planning",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	child := &manifest.Manifest{
+		SessionID: "expired-link-owner",
+		Name:      "old-child-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Tmux:      manifest.Tmux{SessionName: "child-tmux"},
+	}
+	for _, session := range []*manifest.Manifest{parent, child} {
+		if err := adapter.CreateSession(session); err != nil {
+			t.Fatalf("CreateSession(%s) error: %v", session.SessionID, err)
+		}
+	}
+	observed, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	inheritedName := "planning-exec"
+	created, reservationName, err := adapter.reserveParentLinkName(t.Context(), child.SessionID, &inheritedName)
+	if err != nil || !created || reservationName != inheritedName {
+		t.Fatalf("reserveParentLinkName() = (%t, %q, %v), want created %q", created, reservationName, err, inheritedName)
+	}
+	replaceExpiredSessionNameReservation(t, adapter, child.SessionID, "replacement-owner", inheritedName)
+
+	err = adapter.linkSessionParentReserved(
+		t.Context(),
+		child.SessionID,
+		observed.Tmux.SessionRevision,
+		parent.SessionID,
+		&inheritedName,
+		reservationName,
+	)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) || conflict.Name != inheritedName {
+		t.Fatalf("linkSessionParentReserved() error = %v, want conflict for %q", err, inheritedName)
+	}
+	current, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after rejected parent link: %v", err)
+	}
+	if current.ParentSessionID != nil || current.Name != child.Name {
+		t.Fatalf("child after rejected parent link = parent %#v name %q, want nil/%q", current.ParentSessionID, current.Name, child.Name)
+	}
+}
+
+func replaceExpiredSessionNameReservation(t *testing.T, adapter *Adapter, owner, replacement, name string) {
+	t.Helper()
+	result, err := adapter.Conn().Exec(
+		`UPDATE agm_session_name_reservations
+		 SET expires_at = ?
+		 WHERE workspace = ? AND name = ? AND session_id = ?`,
+		time.Now().Add(-time.Minute),
+		adapter.Workspace(),
+		name,
+		owner,
+	)
+	if err != nil {
+		t.Fatalf("expire reservation %q: %v", name, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		t.Fatalf("expired reservation rows = %d, %v; want 1", rows, err)
+	}
+	if err := adapter.ReserveSessionName(replacement, name); err != nil {
+		t.Fatalf("ReserveSessionName(%s replacement) error: %v", replacement, err)
+	}
+}
+
 func TestSQLiteSessionNameReservationsPreserveLegacyDuplicateRows(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {
