@@ -270,10 +270,34 @@ func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
 	}
 }
 
+func TestTrustedHookAssetsRejectExecutionInfluencingEnvironment(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\nLD_PRELOAD=./helper.so /bin/true\n",
+		"#!/bin/sh\nexport DYLD_INSERT_LIBRARIES=./helper.dylib\n",
+		"#!/bin/sh\ncommand env LD_LIBRARY_PATH=./lib /bin/true\n",
+		"#!/bin/sh\ncommand env -u HOME command env LD_PRELOAD=./helper.so /bin/true\n",
+		"#!/bin/sh\nbuiltin export LD_AUDIT=./audit.so\n",
+		"#!/bin/sh\nexec /usr/bin/env BASH_ENV=./startup /bin/bash\n",
+		"#!/bin/sh\nPYTHONPATH=./lib python3 helper.py\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "execution-influencing environment") {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want runtime-environment rejection", script, err)
+		}
+	}
+	references := make(map[string]struct{})
+	if err := addTrustedCommandAssets(references, "LD_PRELOAD=./helper.so /bin/true"); err == nil ||
+		!strings.Contains(err.Error(), "execution-influencing environment") {
+		t.Fatalf("addTrustedCommandAssets(loader assignment) error = %v", err)
+	}
+}
+
 func TestTrustedHookAssetsAllowNonCommandPathText(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n# Example only: export PATH=.\n/bin/true\n",
 		"#!/bin/sh\nprintf '%s\\n' 'do not set PATH=.'\n",
+		"#!/bin/sh\nprintf '%s\\n' 'LD_PRELOAD=./example.so'\n",
+		"#!/bin/sh\nstatus=ready /bin/true\n",
 		"#!/bin/sh\nprintf '%s\\n' 'use sh and bash carefully'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
@@ -311,6 +335,14 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)
 		}
+	}
+}
+
+func TestTrustedHookAssetsRejectEnvSplitString(t *testing.T) {
+	const script = "#!/bin/sh\n/usr/bin/env -S 'LD_PRELOAD=./helper.so /bin/true'\n"
+	if err := validateScriptAsset([]byte(script)); err == nil ||
+		!strings.Contains(err.Error(), "execution-influencing environment") {
+		t.Fatalf("validateScriptAsset() error = %v, want env split-string rejection", err)
 	}
 }
 

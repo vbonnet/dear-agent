@@ -381,6 +381,9 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 	if mutatesExecutableSearchPath(unmatched) {
 		return fmt.Errorf("command %q mutates PATH; trusted hooks must retain the hardened executable search path", command)
 	}
+	if err := rejectExecutionInfluencingEnvironment(unmatched); err != nil {
+		return fmt.Errorf("command %q: %w", command, err)
+	}
 	if containsMutableRuntimePath(unmatched) {
 		return fmt.Errorf(
 			"unsupported mutable runtime path in command %q; trusted hooks must execute committed assets through AGM_CODEX_HOOK_ROOT",
@@ -432,6 +435,9 @@ func validateScriptAsset(content []byte) error {
 	if mutatesExecutableSearchPath(scannable) {
 		return fmt.Errorf("trusted hook script mutates PATH; trusted hooks must retain the hardened executable search path")
 	}
+	if err := rejectExecutionInfluencingEnvironment(scannable); err != nil {
+		return err
+	}
 	if anyProjectDirRef.MatchString(unmatched) ||
 		runtimeDirReference.MatchString(unmatched) {
 		return fmt.Errorf(
@@ -456,6 +462,158 @@ func validateScriptAsset(content []byte) error {
 	}
 
 	return nil
+}
+
+func rejectExecutionInfluencingEnvironment(script string) error {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).
+		Parse(strings.NewReader(script), "trusted-hook")
+	if err != nil {
+		return fmt.Errorf("parse trusted hook shell: %w", err)
+	}
+	var rejected syntax.Node
+	var name string
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if rejected != nil {
+			return false
+		}
+		switch typed := node.(type) {
+		case *syntax.CallExpr:
+			for _, assignment := range typed.Assigns {
+				if name = executionInfluencingEnvironmentName(assignment); name != "" {
+					rejected = assignment
+					return false
+				}
+			}
+			if word, found := envWrapperEnvironmentAssignment(typed.Args); word != nil {
+				rejected, name = word, found
+				return false
+			}
+		case *syntax.DeclClause:
+			for _, assignment := range typed.Args {
+				if assignment.Name == nil && assignment.Value != nil {
+					rejected, name = assignment, "<dynamic environment name>"
+					return false
+				}
+				if name = executionInfluencingEnvironmentName(assignment); name != "" {
+					rejected = assignment
+					return false
+				}
+			}
+		}
+		return true
+	})
+	if rejected == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"unsupported execution-influencing environment assignment %q at line %d; trusted hooks must not load unverified runtime code",
+		name, rejected.Pos().Line(),
+	)
+}
+
+func executionInfluencingEnvironmentName(assignment *syntax.Assign) string {
+	if assignment == nil || assignment.Name == nil {
+		return ""
+	}
+	if isExecutionInfluencingEnvironment(assignment.Name.Value) {
+		return assignment.Name.Value
+	}
+	return ""
+}
+
+func envWrapperEnvironmentAssignment(args []*syntax.Word) (*syntax.Word, string) {
+	if len(args) == 0 {
+		return nil, ""
+	}
+	command, static := staticShellWord(args[0])
+	if !static {
+		return nil, ""
+	}
+	switch command {
+	case "command", "builtin", "exec", "nohup":
+		return envWrapperEnvironmentAssignment(args[1:])
+	case "env", "/usr/bin/env":
+		return envCommandEnvironmentAssignment(args[1:])
+	case "declare", "export", "local", "nameref", "readonly", "typeset":
+		return declarationCommandEnvironmentAssignment(args[1:])
+	default:
+		return nil, ""
+	}
+}
+
+func envCommandEnvironmentAssignment(args []*syntax.Word) (*syntax.Word, string) {
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return nil, ""
+		}
+		if value == "--" {
+			continue
+		}
+		if envOptionConsumesNext(value) {
+			index++
+			continue
+		}
+		if strings.HasPrefix(value, "-") {
+			continue
+		}
+		name, _, assignment := strings.Cut(value, "=")
+		if assignment {
+			if isExecutionInfluencingEnvironment(name) {
+				return word, name
+			}
+			continue
+		}
+		return envWrapperEnvironmentAssignment(args[index:])
+	}
+	return nil, ""
+}
+
+func envOptionConsumesNext(value string) bool {
+	switch value {
+	case "-a", "--argv0", "-C", "--chdir", "-u", "--unset":
+		return true
+	default:
+		return false
+	}
+}
+
+func declarationCommandEnvironmentAssignment(args []*syntax.Word) (*syntax.Word, string) {
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			return word, "<dynamic environment name>"
+		}
+		if value == "--" || strings.HasPrefix(value, "-") {
+			continue
+		}
+		name, _, _ := strings.Cut(value, "=")
+		if isExecutionInfluencingEnvironment(name) {
+			return word, name
+		}
+	}
+	return nil, ""
+}
+
+func isExecutionInfluencingEnvironment(name string) bool {
+	if strings.HasPrefix(name, "LD_") ||
+		strings.HasPrefix(name, "DYLD_") ||
+		strings.HasPrefix(name, "_RLD_") {
+		return true
+	}
+	switch name {
+	case "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS",
+		"GCONV_PATH", "LOCPATH", "LIBPATH", "SHLIB_PATH",
+		"LDR_PRELOAD", "LDR_LIBRARY_PATH",
+		"NODE_OPTIONS", "NODE_PATH",
+		"PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP",
+		"PERL5LIB", "PERL5OPT", "RUBYLIB", "RUBYOPT",
+		"CLASSPATH", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS":
+		return true
+	default:
+		return false
+	}
 }
 
 func rejectDynamicCommandResolution(script string) error {
@@ -509,6 +667,12 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		value, static := staticShellWord(word)
 		if !static {
 			return word, "expanded command-wrapper operand"
+		}
+		if env && (value == "-S" ||
+			value == "--split-string" ||
+			strings.HasPrefix(value, "-S") ||
+			strings.HasPrefix(value, "--split-string=")) {
+			return word, "env split-string command"
 		}
 		if value == "--" || strings.HasPrefix(value, "-") {
 			continue
