@@ -1560,7 +1560,7 @@ func interpreterScriptOperand(command string, args []*syntax.Word) (*syntax.Word
 			if interpreterLoadsExternalCode(command, value) {
 				return word, "interpreter preload option"
 			}
-			if interpreterInlineCodeOption(value) {
+			if interpreterInlineCodeOption(command, value) {
 				return word, "inline interpreter code"
 			}
 			continue
@@ -1633,13 +1633,27 @@ func nodeLoadsExternalCode(value string) bool {
 	return strings.HasPrefix(value, "-r") && !strings.HasPrefix(value, "--")
 }
 
-func interpreterInlineCodeOption(value string) bool {
+func interpreterInlineCodeOption(command, value string) bool {
 	switch value {
 	case "-c", "-e", "--eval", "--print", "-p":
 		return true
 	default:
-		return strings.HasPrefix(value, "--eval=") ||
-			strings.HasPrefix(value, "--print=")
+		if strings.HasPrefix(value, "--eval=") ||
+			strings.HasPrefix(value, "--print=") {
+			return true
+		}
+	}
+	if strings.HasPrefix(value, "--") {
+		return false
+	}
+	switch filepath.Base(command) {
+	case "perl", "ruby":
+		return strings.HasPrefix(value, "-e")
+	case "node":
+		return strings.HasPrefix(value, "-e") || strings.HasPrefix(value, "-p")
+	default:
+		return strings.HasPrefix(filepath.Base(command), "python") &&
+			strings.HasPrefix(value, "-c")
 	}
 }
 

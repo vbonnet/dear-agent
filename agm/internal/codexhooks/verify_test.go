@@ -245,6 +245,10 @@ func TestValidateScriptAssetRejectsInterpreterInlineCode(t *testing.T) {
 		"#!/bin/sh\n/bin/sh -c 'printf ok'\n",
 		"#!/bin/sh\n/usr/bin/env bash -c 'printf ok'\n",
 		"#!/bin/sh\npython3 -c 'print(1)'\n",
+		"#!/bin/sh\n/usr/bin/python3 -c'print(1)'\n",
+		"#!/bin/sh\n/usr/bin/perl -e'print 1'\n",
+		"#!/bin/sh\n/usr/bin/ruby -e'puts 1'\n",
+		"#!/bin/sh\n/usr/bin/node -p'1 + 1'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "inline interpreter code") {
