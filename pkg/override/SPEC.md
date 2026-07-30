@@ -48,7 +48,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-16** When the macOS system audit is installed, the system shall require the operator to confirm the executable and rendered LaunchDaemon SHA-256 values, copy both artifacts into unique root-owned staging, verify both staged digests, validate the exact staged plist, and atomically activate only those verified bytes.
 
-**OVR-17** When the Linux system audit is installed, the system shall require the operator to confirm the executable, service, and timer SHA-256 values, copy all three artifacts into unique root-owned staging, verify every staged digest, and atomically activate only those verified bytes before reloading the system manager.
+**OVR-17** When the Linux system audit is installed, the system shall require the operator to confirm the executable, service, and timer SHA-256 values, copy all three artifacts into unique root-owned staging, verify every staged digest, back up the complete live artifact set, and transactionally activate only those verified bytes before reloading the system manager; any partial activation shall restore every prior artifact and remove any newly introduced artifact.
 
 **OVR-18** When a system-scheduled override audit runs, the system shall load default-only AGM configuration from the fixed OS null device and use a root-owned non-writable home instead of consulting mutable user configuration.
 

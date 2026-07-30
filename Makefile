@@ -1276,6 +1276,17 @@ install-override-audit-systemd: build-agm
 		audit_staging=""; \
 		service_staging=""; \
 		timer_staging=""; \
+		audit_live="/usr/local/libexec/dear-agent-override-audit"; \
+		service_live="/etc/systemd/system/dear-agent-override-audit@.service"; \
+		timer_live="/etc/systemd/system/dear-agent-override-audit@.timer"; \
+		audit_backup=""; \
+		service_backup=""; \
+		timer_backup=""; \
+		audit_existed=0; \
+		service_existed=0; \
+		timer_existed=0; \
+		activation_started=0; \
+		activation_complete=0; \
 		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
 		expected_audit_hash="$${expected_audit_hash%% *}"; \
 		expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"; \
@@ -1295,9 +1306,15 @@ install-override-audit-systemd: build-agm
 		test "$$confirmed_service_hash" = "$$expected_service_hash" || { echo "systemd service digest confirmation did not match" >&2; exit 2; }; \
 		test "$$confirmed_timer_hash" = "$$expected_timer_hash" || { echo "systemd timer digest confirmation did not match" >&2; exit 2; }; \
 		cleanup_systemd_staging() { \
+			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
+				if test "$$audit_existed" = 1; then if test -n "$$audit_backup" && /usr/bin/sudo -n /bin/mv -f "$$audit_backup" "$$audit_live"; then audit_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$audit_live" >/dev/null 2>&1 || true; fi; \
+				if test "$$service_existed" = 1; then if test -n "$$service_backup" && /usr/bin/sudo -n /bin/mv -f "$$service_backup" "$$service_live"; then service_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$service_live" >/dev/null 2>&1 || true; fi; \
+				if test "$$timer_existed" = 1; then if test -n "$$timer_backup" && /usr/bin/sudo -n /bin/mv -f "$$timer_backup" "$$timer_live"; then timer_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$timer_live" >/dev/null 2>&1 || true; fi; \
+			fi; \
 			if test -n "$$audit_staging"; then /usr/bin/sudo /bin/rm -f "$$audit_staging" >/dev/null 2>&1 || true; fi; \
 			if test -n "$$service_staging"; then /usr/bin/sudo /bin/rm -f "$$service_staging" >/dev/null 2>&1 || true; fi; \
 			if test -n "$$timer_staging"; then /usr/bin/sudo /bin/rm -f "$$timer_staging" >/dev/null 2>&1 || true; fi; \
+			if test "$$activation_started" != 1 || test "$$activation_complete" = 1; then /usr/bin/sudo -n /bin/rm -f "$$audit_backup" "$$service_backup" "$$timer_backup" >/dev/null 2>&1 || true; fi; \
 		}; \
 		trap cleanup_systemd_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
@@ -1322,12 +1339,33 @@ install-override-audit-systemd: build-agm
 		test "$$staged_audit_hash" = "$$expected_audit_hash" || { echo "root-owned staged audit executable differs from the approved bytes" >&2; exit 1; }; \
 		test "$$staged_service_hash" = "$$expected_service_hash" || { echo "root-owned staged systemd service differs from the approved bytes" >&2; exit 1; }; \
 		test "$$staged_timer_hash" = "$$expected_timer_hash" || { echo "root-owned staged systemd timer differs from the approved bytes" >&2; exit 1; }; \
-		/usr/bin/sudo /bin/mv -f "$$audit_staging" /usr/local/libexec/dear-agent-override-audit; \
+		if /usr/bin/sudo /usr/bin/test -e "$$audit_live"; then \
+			audit_existed=1; \
+			audit_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$audit_live" "$$audit_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$service_live"; then \
+			service_existed=1; \
+			service_backup="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-service.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$service_live" "$$service_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$timer_live"; then \
+			timer_existed=1; \
+			timer_backup="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-timer.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$timer_live" "$$timer_backup"; \
+		fi; \
+		activation_started=1; \
+		/usr/bin/sudo /bin/mv -f "$$audit_staging" "$$audit_live"; \
 		audit_staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$service_staging" /etc/systemd/system/dear-agent-override-audit@.service; \
+		/usr/bin/sudo /bin/mv -f "$$service_staging" "$$service_live"; \
 		service_staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$timer_staging" /etc/systemd/system/dear-agent-override-audit@.timer; \
+		/usr/bin/sudo /bin/mv -f "$$timer_staging" "$$timer_live"; \
 		timer_staging=""; \
+		activation_complete=1; \
+		/usr/bin/sudo /bin/rm -f "$$audit_backup" "$$service_backup" "$$timer_backup"; \
+		audit_backup=""; \
+		service_backup=""; \
+		timer_backup=""; \
 		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo /usr/bin/systemctl daemon-reload; \
 		/usr/bin/sudo -k; \
