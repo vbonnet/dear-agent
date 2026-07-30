@@ -766,21 +766,21 @@ func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
 	return &sandbox
 }
 
-func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
+func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, created bool, err error) {
 	if req.ManifestDir == "" {
-		return "", true, false, nil
+		return "", false, nil
 	}
 	manifestPath = filepath.Join(req.ManifestDir, "manifest.yaml")
 	_, statErr := os.Stat(req.ManifestDir)
 	created = os.IsNotExist(statErr)
 	if mkdirErr := os.MkdirAll(req.ManifestDir, 0o700); mkdirErr != nil {
 		if !req.ManifestDirOptional {
-			return "", false, false, ErrStorageError("manifest.mkdir", mkdirErr)
+			return "", false, ErrStorageError("manifest.mkdir", mkdirErr)
 		}
-		fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without manifest registration\n", mkdirErr)
-		return "", false, false, nil
+		fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without a filesystem manifest\n", mkdirErr)
+		return "", false, nil
 	}
-	return manifestPath, true, created, nil
+	return manifestPath, created, nil
 }
 
 func prepareAndRegisterCreatedSession(
@@ -794,7 +794,7 @@ func prepareAndRegisterCreatedSession(
 	previousAgyConversationID string,
 	requireRegistration bool,
 ) (string, *manifest.Manifest, error) {
-	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
+	manifestPath, createdManifestDir, err := prepareCreateManifestDir(req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -806,15 +806,6 @@ func prepareAndRegisterCreatedSession(
 			return "", nil, ErrStorageError("agy.identity.discover", identityErr)
 		}
 		applyAgyCreateIdentity(m, metadata)
-	}
-	if !registrationAllowed {
-		if requireRegistration {
-			return "", nil, ErrStorageError(
-				"storage.CreateSession",
-				fmt.Errorf("durable session registration is required before launch"),
-			)
-		}
-		return manifestPath, m, nil
 	}
 	state.registered, err = registerCreatedSession(req, state.store, m)
 	if err != nil {

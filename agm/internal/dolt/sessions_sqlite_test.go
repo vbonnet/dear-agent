@@ -600,6 +600,20 @@ func TestSQLiteLinkSessionParentUsesExplicitIdentityCAS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after rejected link: %v", err)
 	}
+	if err := adapter.ReserveSessionName("competing-parent-link", inheritedName); err != nil {
+		t.Fatalf("ReserveSessionName() competing parent link: %v", err)
+	}
+	err = adapter.LinkSessionParent(t.Context(), child.SessionID, current.Tmux.SessionRevision, parent.SessionID, &inheritedName)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("LinkSessionParent() with competing target lease = %v, want SessionNameConflictError", err)
+	}
+	if got, err := adapter.GetParent(child.SessionID); err != nil || got != nil {
+		t.Fatalf("parent after competing target lease = (%#v, %v), want (nil, nil)", got, err)
+	}
+	if err := adapter.ReleaseSessionNameReservation("competing-parent-link"); err != nil {
+		t.Fatalf("ReleaseSessionNameReservation() competing parent link: %v", err)
+	}
 	if err := adapter.LinkSessionParent(t.Context(), child.SessionID, current.Tmux.SessionRevision, parent.SessionID, &inheritedName); err != nil {
 		t.Fatalf("LinkSessionParent() current identity: %v", err)
 	}
@@ -613,6 +627,17 @@ func TestSQLiteLinkSessionParentUsesExplicitIdentityCAS(t *testing.T) {
 	if got, err := adapter.GetParent(child.SessionID); err != nil || got == nil || got.SessionID != parent.SessionID {
 		t.Fatalf("GetParent() after link = (%#v, %v), want %s", got, err, parent.SessionID)
 	}
+	var reservations int
+	if err := adapter.Conn().QueryRowContext(
+		t.Context(),
+		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE session_id = ?`,
+		child.SessionID,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count inherited-name reservations: %v", err)
+	}
+	if reservations != 0 {
+		t.Fatalf("inherited-name reservations after parent link = %d, want 0", reservations)
+	}
 
 	stale.Name = "stale-name-writer"
 	stale.Context.Notes = "later stale metadata"
@@ -624,6 +649,73 @@ func TestSQLiteLinkSessionParentUsesExplicitIdentityCAS(t *testing.T) {
 	}
 	if storedParentID != parent.SessionID || storedName != inheritedName {
 		t.Fatalf("stale writer changed linked identity = (parent=%q name=%q)", storedParentID, storedName)
+	}
+}
+
+func TestSQLiteLinkSessionParentRejectsReservedInheritedName(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	parent := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "reserved-link-parent",
+		Name:          "planning-session",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "planning-session"},
+	}
+	child := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "reserved-link-child",
+		Name:          "Unknown",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "child-tmux"},
+	}
+	conflicting := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "reserved-link-conflict",
+		Name:          "planning-session-exec",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "planning-session-exec"},
+	}
+	for _, session := range []*manifest.Manifest{parent, child, conflicting} {
+		if err := adapter.CreateSession(session); err != nil {
+			t.Fatalf("CreateSession(%s) error: %v", session.SessionID, err)
+		}
+	}
+	observed, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() child: %v", err)
+	}
+	inheritedName := parent.Name + "-exec"
+	err = adapter.LinkSessionParent(
+		t.Context(),
+		child.SessionID,
+		observed.Tmux.SessionRevision,
+		parent.SessionID,
+		&inheritedName,
+	)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) || conflict.Name != inheritedName {
+		t.Fatalf("LinkSessionParent() error = %v, want conflict for %q", err, inheritedName)
+	}
+	unchanged, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after conflict: %v", err)
+	}
+	if unchanged.Name != child.Name || unchanged.ParentSessionID != nil {
+		t.Fatalf("child after inherited-name conflict = name %q parent %#v, want %q and nil", unchanged.Name, unchanged.ParentSessionID, child.Name)
 	}
 }
 

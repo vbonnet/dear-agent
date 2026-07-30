@@ -1840,7 +1840,7 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	manifestPath, registrationAllowed, created, err := prepareCreateManifestDir(&CreateSessionRequest{
+	manifestPath, created, err := prepareCreateManifestDir(&CreateSessionRequest{
 		ManifestDir:         filepath.Join(blocker, "session"),
 		ManifestDirOptional: true,
 	})
@@ -1850,8 +1850,106 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 	if manifestPath != "" {
 		t.Fatalf("manifest path = %q, want empty path after optional mkdir failure", manifestPath)
 	}
-	if registrationAllowed || created {
-		t.Fatalf("registrationAllowed = %v, created = %v; want both false", registrationAllowed, created)
+	if created {
+		t.Fatal("optional manifest directory reported as created after mkdir failure")
+	}
+}
+
+func TestCreateSessionOptionalManifestFailureStillRegistersDurably(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["optional-manifest"] = true
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			order = append(order, "launch")
+			if len(store.created) != 1 {
+				t.Fatalf("durable registrations at launch = %d, want 1", len(store.created))
+			}
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux:            tmuxMock,
+		Storage:         store,
+		CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd:                  t.TempDir(),
+		Title:                "optional-manifest",
+		SessionID:            "optional-manifest-id",
+		Model:                "sonnet",
+		Harness:              "claude-code",
+		Caller:               CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt:     true,
+		ReuseExistingTmux:    true,
+		RequireStorage:       true,
+		RegisterBeforeLaunch: true,
+		ManifestDir:          filepath.Join(blocker, "session"),
+		ManifestDirOptional:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if result.SessionID != "optional-manifest-id" {
+		t.Fatalf("result session ID = %q", result.SessionID)
+	}
+	if len(store.created) != 1 || store.created[0].SessionID != result.SessionID {
+		t.Fatalf("durable registrations = %#v, want session %q", store.created, result.SessionID)
+	}
+	if len(store.released) != 0 {
+		t.Fatalf("consumed reservation releases = %v, want none", store.released)
+	}
+	if !reflect.DeepEqual(order, []string{"reserve", "register", "launch"}) {
+		t.Fatalf("lifecycle order = %v", order)
+	}
+}
+
+func TestCreateSessionOptionalManifestFailureRegistersAfterReadiness(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			order = append(order, "launch")
+			return CreateSessionLaunchResult{}, nil
+		},
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux:            tmuxMock,
+		Storage:         store,
+		CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd:                 t.TempDir(),
+		Title:               "optional-manifest-ready",
+		SessionID:           "optional-manifest-ready-id",
+		Model:               "sonnet",
+		Harness:             "claude-code",
+		AllowEmptyPrompt:    true,
+		RequireStorage:      true,
+		ManifestDir:         filepath.Join(blocker, "session"),
+		ManifestDirOptional: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if len(store.created) != 1 || store.created[0].SessionID != result.SessionID {
+		t.Fatalf("durable registrations = %#v, want session %q", store.created, result.SessionID)
+	}
+	if len(store.released) != 0 {
+		t.Fatalf("consumed reservation releases = %v, want none", store.released)
+	}
+	if !reflect.DeepEqual(order, []string{"reserve", "launch", "ready", "register"}) {
+		t.Fatalf("lifecycle order = %v", order)
 	}
 }
 

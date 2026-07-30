@@ -105,7 +105,7 @@ func (a *Adapter) GetChildren(sessionID string) ([]*manifest.Manifest, error) {
 // inherited display name against the exact session identity revision observed
 // by the caller. Administrative hierarchy repair must never report a name
 // update that a concurrent full-session writer silently fenced out.
-func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevision, parentSessionID string, inheritedName *string) error {
+func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevision, parentSessionID string, inheritedName *string) (retErr error) {
 	if sessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
@@ -119,12 +119,20 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	var parentExists int
-	if err := a.conn.QueryRowContext(ctx, `SELECT 1 FROM agm_sessions WHERE id = ? AND workspace = ?`, parentSessionID, a.workspace).Scan(&parentExists); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("parent session not found: %s", parentSessionID)
-		}
-		return fmt.Errorf("check parent session: %w", err)
+	if err := a.ensureParentSessionExists(ctx, parentSessionID); err != nil {
+		return err
+	}
+
+	reservationCreated, err := a.reserveParentLinkName(ctx, sessionID, inheritedName)
+	if err != nil {
+		return err
+	}
+	if reservationCreated {
+		defer func() {
+			if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
+				retErr = errors.Join(retErr, err)
+			}
+		}()
 	}
 
 	observed := nullableStringValue(sql.NullString{String: observedRevision, Valid: observedRevision != ""})
@@ -159,6 +167,44 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 		return fmt.Errorf("inspect session parent conflict: %w", err)
 	}
 	return fmt.Errorf("session identity changed concurrently while linking parent %s", sessionID)
+}
+
+func (a *Adapter) ensureParentSessionExists(ctx context.Context, parentSessionID string) error {
+	var parentExists int
+	if err := a.conn.QueryRowContext(
+		ctx,
+		`SELECT 1 FROM agm_sessions WHERE id = ? AND workspace = ?`,
+		parentSessionID,
+		a.workspace,
+	).Scan(&parentExists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("parent session not found: %s", parentSessionID)
+		}
+		return fmt.Errorf("check parent session: %w", err)
+	}
+	return nil
+}
+
+func (a *Adapter) reserveParentLinkName(ctx context.Context, sessionID string, inheritedName *string) (bool, error) {
+	if inheritedName == nil {
+		return false, nil
+	}
+	var currentName, lifecycle string
+	if err := a.conn.QueryRowContext(
+		ctx,
+		`SELECT name, status FROM agm_sessions WHERE id = ? AND workspace = ?`,
+		sessionID,
+		a.workspace,
+	).Scan(&currentName, &lifecycle); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("session not found: %s", sessionID)
+		}
+		return false, fmt.Errorf("inspect session before linking parent: %w", err)
+	}
+	if lifecycle == manifest.LifecycleArchived || currentName == *inheritedName {
+		return false, nil
+	}
+	return a.reserveSessionName(sessionID, *inheritedName)
 }
 
 // DetachChild sets parent_session_id to NULL for a given child session.

@@ -175,7 +175,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-65** When create-session rollback cannot delete a registration, stop a newly-created tmux session, or remove its newly-created manifest directory, the system shall report the cleanup failure instead of silently discarding it.
 
-**OPS-66** When an optional manifest directory cannot be created, the system shall continue without registration and shall provide no manifest path to runtime completion.
+**OPS-66** When an optional manifest directory cannot be created, the system shall continue without a filesystem manifest, shall still complete required durable session registration independently, and shall provide no manifest path to runtime completion.
 
 **OPS-77** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
 
