@@ -26,6 +26,10 @@ var sessionFlagsHookSource = func() string {
 const (
 	attestedHookPath          = "/usr/local/libexec:/usr/bin:/bin:/usr/sbin:/sbin"
 	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
+	// Linux limits one execve argument to 128 KiB even when ARG_MAX is larger.
+	// Keep the generated hooks override below half that ceiling so the private
+	// executor can reject it before committing any launch reservation.
+	maxHookConfigArgumentBytes = 64 * 1024
 )
 
 var (
@@ -79,7 +83,14 @@ func LaunchConfigOverrides(hookRoot, expectedDigest, workDir string) ([]string, 
 	if err != nil {
 		return nil, fmt.Errorf("encode materialized Codex hooks for launch: %w", err)
 	}
-	return []string{"hooks=" + encodedHooks}, nil
+	override := "hooks=" + encodedHooks
+	if len(override)+1 > maxHookConfigArgumentBytes {
+		return nil, fmt.Errorf(
+			"materialized Codex hook configuration is %d bytes and exceeds the %d-byte safe single-argument limit",
+			len(override)+1, maxHookConfigArgumentBytes,
+		)
+	}
+	return []string{override}, nil
 }
 
 func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any, error) {
@@ -259,7 +270,21 @@ func inlineMaterializedCommand(command string, assets map[string]asset) (string,
 	// The verified bytes, rather than their same-user-owned filesystem path,
 	// become the session command. This removes the post-verification mutation
 	// window for the entire Codex process lifetime.
-	return string(item.content), nil
+	return embeddedScriptCommand(item.content)
+}
+
+func embeddedScriptCommand(content []byte) (string, error) {
+	firstLine, _, _ := bytes.Cut(content, []byte("\n"))
+	var interpreter string
+	switch string(bytes.TrimSuffix(firstLine, []byte("\r"))) {
+	case "#!/bin/bash":
+		interpreter = "/bin/bash"
+	case "#!/bin/sh":
+		interpreter = "/bin/sh"
+	default:
+		return "", fmt.Errorf("embedded hook script must use /bin/bash or /bin/sh")
+	}
+	return interpreter + " -c " + shellSingleQuote(string(content)), nil
 }
 
 func shellSingleQuote(value string) string {

@@ -272,6 +272,60 @@ func TestLaunchConfigOverridesEmbedsVerifiedHookBytes(t *testing.T) {
 	}
 }
 
+func TestLaunchConfigOverridesPreservesEmbeddedBashInterpreter(t *testing.T) {
+	useTrustedHookJSONFixture(t)
+	stage := t.TempDir()
+	writeFile(t, filepath.Join(stage, ".codex", "hooks.json"), `{
+		"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{
+			"type":"command",
+			"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/guard"
+		}]}]}
+	}`, 0o444)
+	writeFile(
+		t,
+		filepath.Join(stage, ".codex", "hooks", "guard"),
+		"#!/bin/bash\nset -uo pipefail\nvalues=(original preserved)\n[[ ${values[1]} == preserved ]]\nprintf bash\n",
+		0o555,
+	)
+	hookRoot, digest := sealMaterializedFixture(t, stage)
+
+	overrides, err := LaunchConfigOverrides(hookRoot, digest, gittest.NewRepo(t))
+	if err != nil {
+		t.Fatalf("LaunchConfigOverrides() error: %v", err)
+	}
+	command := commandFromOverrides(t, overrides, "PreToolUse")
+	output, err := exec.Command("/bin/sh", "-c", command).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run embedded Bash hook command: %v\n%s", err, output)
+	}
+	if got := string(output); got != "bash" {
+		t.Fatalf("embedded Bash hook output = %q, want bash", got)
+	}
+}
+
+func TestLaunchConfigOverridesRejectsOversizedEmbeddedHookArgument(t *testing.T) {
+	useTrustedHookJSONFixture(t)
+	stage := t.TempDir()
+	writeFile(t, filepath.Join(stage, ".codex", "hooks.json"), `{
+		"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{
+			"type":"command",
+			"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/guard"
+		}]}]}
+	}`, 0o444)
+	writeFile(
+		t,
+		filepath.Join(stage, ".codex", "hooks", "guard"),
+		"#!/bin/bash\n#"+strings.Repeat("x", maxHookConfigArgumentBytes)+"\n",
+		0o555,
+	)
+	hookRoot, digest := sealMaterializedFixture(t, stage)
+
+	_, err := LaunchConfigOverrides(hookRoot, digest, gittest.NewRepo(t))
+	if err == nil || !strings.Contains(err.Error(), "safe single-argument limit") {
+		t.Fatalf("LaunchConfigOverrides() error = %v, want oversized-argument rejection", err)
+	}
+}
+
 func TestProjectHookSourceRootsIncludesLinkedRootCheckout(t *testing.T) {
 	rootCheckout := gittest.NewRepo(t)
 	linkedCheckout := filepath.Join(t.TempDir(), "linked")
@@ -375,6 +429,19 @@ func sealMaterializedFixture(t *testing.T, stage string) (string, string) {
 		_ = os.RemoveAll(root)
 	})
 	return root, digest
+}
+
+func commandFromOverrides(t *testing.T, overrides []string, event string) string {
+	t.Helper()
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(strings.Join(overrides, "\n")), &parsed); err != nil {
+		t.Fatalf("generated overrides are not valid TOML: %v", err)
+	}
+	hooks := parsed["hooks"].(map[string]any)
+	groups := hooks[event].([]any)
+	group := groups[0].(map[string]any)
+	handlers := group["hooks"].([]any)
+	return handlers[0].(map[string]any)["command"].(string)
 }
 
 func useTrustedHookJSONFixture(t *testing.T) {
