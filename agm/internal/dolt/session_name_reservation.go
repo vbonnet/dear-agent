@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 const sessionNameReservationTTL = 2 * time.Hour
@@ -99,6 +101,44 @@ func (a *Adapter) ReleaseSessionNameReservation(sessionID string) error {
 	); err != nil {
 		return fmt.Errorf("release session-name reservation: %w", err)
 	}
+	return nil
+}
+
+// ReactivateSession restores an archived session only after atomically
+// reserving its workspace-scoped active name. The reservation stays live until
+// the durable lifecycle update finishes, so creation and concurrent restore
+// attempts cannot install the same active name.
+func (a *Adapter) ReactivateSession(session *manifest.Manifest) (retErr error) {
+	if session == nil {
+		return fmt.Errorf("session cannot be nil")
+	}
+	if session.SessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if session.Lifecycle != manifest.LifecycleArchived {
+		return fmt.Errorf("session is not archived: %s", session.SessionID)
+	}
+	if err := a.ReserveSessionName(session.SessionID, session.Name); err != nil {
+		return err
+	}
+
+	previousUpdatedAt := session.UpdatedAt
+	updateSucceeded := false
+	defer func() {
+		if !updateSucceeded {
+			session.Lifecycle = manifest.LifecycleArchived
+			session.UpdatedAt = previousUpdatedAt
+		}
+		if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
+			retErr = errors.Join(retErr, err)
+		}
+	}()
+
+	session.Lifecycle = ""
+	if err := a.UpdateSession(session); err != nil {
+		return err
+	}
+	updateSucceeded = true
 	return nil
 }
 

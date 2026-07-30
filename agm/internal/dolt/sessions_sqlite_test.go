@@ -214,6 +214,76 @@ func TestSQLiteSessionNameReservationsPreserveLegacyDuplicateRows(t *testing.T) 
 	}
 }
 
+func TestSQLiteReactivateSessionRejectsReusedActiveName(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	archived := &manifest.Manifest{
+		SessionID: "archived-original",
+		Name:      "reused-name",
+		Lifecycle: manifest.LifecycleArchived,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := adapter.CreateSession(archived); err != nil {
+		t.Fatalf("CreateSession(archived) error: %v", err)
+	}
+	replacement := &manifest.Manifest{
+		SessionID: "active-replacement",
+		Name:      "reused-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := adapter.CreateSession(replacement); err != nil {
+		t.Fatalf("CreateSession(replacement) error: %v", err)
+	}
+
+	err = adapter.ReactivateSession(archived)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) || conflict.Name != archived.Name {
+		t.Fatalf("ReactivateSession() error = %v, want conflict for %q", err, archived.Name)
+	}
+	if archived.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("rejected manifest lifecycle = %q, want archived", archived.Lifecycle)
+	}
+	stored, err := adapter.GetSession(archived.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(archived) error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("rejected stored lifecycle = %q, want archived", stored.Lifecycle)
+	}
+
+	replacement.Lifecycle = manifest.LifecycleArchived
+	if err := adapter.UpdateSession(replacement); err != nil {
+		t.Fatalf("archive replacement: %v", err)
+	}
+	if err := adapter.ReactivateSession(archived); err != nil {
+		t.Fatalf("ReactivateSession(after archive) error: %v", err)
+	}
+	stored, err = adapter.GetSession(archived.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(reactivated) error: %v", err)
+	}
+	if stored.Lifecycle == manifest.LifecycleArchived {
+		t.Fatal("session remained archived after successful reactivation")
+	}
+	var reservations int
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE session_id = ?`,
+		archived.SessionID,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count reactivation reservations: %v", err)
+	}
+	if reservations != 0 {
+		t.Fatalf("reactivation reservations = %d, want 0", reservations)
+	}
+}
+
 func TestSQLiteGetSessionByUUID_ClaudeUUID(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

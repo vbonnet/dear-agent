@@ -192,13 +192,11 @@ func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSes
 		}
 	}
 
-	// Update lifecycle to active
-	m.Lifecycle = ""
-
-	// Write manifest to Dolt (automatic UpdatedAt)
-	if err := adapter.UpdateSession(m); err != nil {
+	// Atomically claim the active name before restoring the durable lifecycle.
+	if err := adapter.ReactivateSession(m); err != nil {
 		ui.PrintError(err, "Failed to update session in Dolt",
-			"  • Check database connection\n"+
+			"  • Check for another non-archived session with this name\n"+
+				"  • Check database connection\n"+
 				"  • Verify Dolt server is running")
 		return err
 	}
