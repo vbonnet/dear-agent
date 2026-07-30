@@ -1412,7 +1412,9 @@ func dynamicBuiltinOperand(
 
 func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 	switch filepath.Base(command) {
-	case "setsid", "flock", "stdbuf":
+	case "chroot", "daemon", "doas", "flock", "ionice", "nsenter",
+		"numactl", "parallel", "rlwrap", "runuser", "script", "setpriv",
+		"setsid", "stdbuf", "su", "sudo", "taskset", "unshare", "watch":
 		return "command-capable process wrapper"
 	}
 	if awkUsesCommandExecution(command, args) {
