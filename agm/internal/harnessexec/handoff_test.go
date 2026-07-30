@@ -375,6 +375,17 @@ func TestPreparedHarnessCommandCommitsBeforeExec(t *testing.T) {
 		!strings.HasSuffix(prepared.Command, " && exit") {
 		t.Fatalf("prepared harness command = %q", prepared.Command)
 	}
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		t.Fatalf("direct harness invocation: %v", err)
+	}
+	if executable != "/opt/agm/bin/agm" || !slices.Equal(arguments, []string{
+		HarnessProtocol,
+		"--handoff", prepared.path,
+		"--session", "agy-worker",
+	}) {
+		t.Fatalf("direct harness invocation = %q %q", executable, arguments)
+	}
 	if err := prepared.BindOverrideReservations(true); err != nil {
 		t.Fatalf("bind harness launch effects: %v", err)
 	}
@@ -398,10 +409,7 @@ func TestPreparedHarnessCommandCommitsBeforeExec(t *testing.T) {
 		events = append(events, "exec")
 		return errors.New("fixture exec returned")
 	}
-	err = Run(HarnessProtocol, []string{
-		"--handoff", prepared.path,
-		"--session", "agy-worker",
-	})
+	err = Run(arguments[0], arguments[1:])
 	if err == nil || !strings.Contains(err.Error(), "fixture exec returned") {
 		t.Fatalf("Run() error = %v", err)
 	}

@@ -12,8 +12,10 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/pkg/override"
@@ -255,14 +257,51 @@ func waitForClaudeReady(ctx context.Context, sessionName string, claudeReady *tm
 // short-circuit the rest of session setup.
 func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
 	return startGeminiHarnessWithRuntime(ctx, spec, geminiWrapperRuntime{
-		lookPath:       exec.LookPath,
-		commandContext: exec.CommandContext,
+		lookPath: exec.LookPath,
+		prepare:  prepareGeminiWrapperLaunch,
+		run:      runGeminiWrapperLaunch,
 	})
 }
 
+type geminiWrapperLaunch struct {
+	executable string
+	arguments  []string
+	bind       func(bool, ...*override.Reservation) error
+	cancel     func() error
+}
+
 type geminiWrapperRuntime struct {
-	lookPath       func(string) (string, error)
-	commandContext func(context.Context, string, ...string) *exec.Cmd
+	lookPath func(string) (string, error)
+	prepare  func(string, string) (geminiWrapperLaunch, error)
+	run      func(context.Context, string, []string) error
+}
+
+func prepareGeminiWrapperLaunch(sessionName, wrapperPath string) (geminiWrapperLaunch, error) {
+	command := shellquote.Quote(wrapperPath) +
+		" --agent=gemini-cli " +
+		shellquote.Quote(sessionName)
+	prepared, err := harnessexec.PrepareHarnessCommand(sessionName, command, true, false)
+	if err != nil {
+		return geminiWrapperLaunch{}, err
+	}
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		return geminiWrapperLaunch{}, errors.Join(err, prepared.Cancel())
+	}
+	return geminiWrapperLaunch{
+		executable: executable,
+		arguments:  arguments,
+		bind:       prepared.BindOverrideReservations,
+		cancel:     prepared.Cancel,
+	}, nil
+}
+
+func runGeminiWrapperLaunch(ctx context.Context, executable string, arguments []string) error {
+	cmd := exec.CommandContext(ctx, executable, arguments...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func startGeminiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime geminiWrapperRuntime) (bool, error) {
@@ -272,45 +311,34 @@ func startGeminiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSp
 		return false, startGeminiDirect(ctx, spec)
 	}
 	debug.Log("Found agm-agent-wrapper at: %s", wrapperPath)
-	debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
-	cmd := runtime.commandContext(ctx, wrapperPath, "--agent=gemini-cli", spec.SessionName)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	debug.Log("Preparing foreground wrapper launch: %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
+	launch, err := runtime.prepare(spec.SessionName, wrapperPath)
+	if err != nil {
+		return false, fmt.Errorf("prepare Gemini wrapper launch: %w", err)
+	}
 	reservations, err := runBeforeHarnessSpawn(spec)
 	if err != nil {
-		return false, fmt.Errorf("gemini launch admission: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		ui.PrintError(err,
-			"Failed to start agm-agent-wrapper",
-			"  • Check wrapper installed: which agm-agent-wrapper\n"+
-				"  • Try direct mode by temporarily renaming wrapper\n"+
-				"  • Attach and check: tmux attach -t "+spec.SessionName)
-		return false, err
-	}
-	if _, err := override.CommitAll(reservations...); err != nil {
-		killErr := cmd.Process.Kill()
-		if errors.Is(killErr, os.ErrProcessDone) {
-			killErr = nil
-		}
-		waitErr := cmd.Wait()
 		return false, errors.Join(
-			fmt.Errorf("gemini launch override transaction: %w", err),
-			killErr,
-			waitErr,
+			fmt.Errorf("gemini launch admission: %w", err),
+			launch.cancel(),
 		)
 	}
-	if spec.AfterAuthorization != nil {
-		spec.AfterAuthorization()
+	if err := launch.bind(true, reservations...); err != nil {
+		return false, errors.Join(
+			fmt.Errorf("gemini launch override transaction: %w", err),
+			launch.cancel(),
+		)
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := runtime.run(ctx, launch.executable, launch.arguments); err != nil {
 		ui.PrintError(err,
 			"Failed to run agm-agent-wrapper",
 			"  • Check wrapper installed: which agm-agent-wrapper\n"+
 				"  • Try direct mode by temporarily renaming wrapper\n"+
 				"  • Attach and check: tmux attach -t "+spec.SessionName)
-		return false, err
+		return false, errors.Join(err, launch.cancel())
+	}
+	if err := launch.cancel(); err != nil {
+		return false, fmt.Errorf("release Gemini wrapper handoff: %w", err)
 	}
 	ui.PrintSuccess("Gemini session ended")
 	return true, nil

@@ -282,8 +282,9 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	}, nil
 }
 
-// PrepareHarnessCommand stages a non-Codex, non-Claude tmux command behind a
-// private executor so launch overrides are committed immediately before exec.
+// PrepareHarnessCommand stages a non-Codex, non-Claude command behind a private
+// executor so launch overrides are committed immediately before exec. Callers
+// may submit Command through tmux or use DirectInvocation for foreground work.
 func PrepareHarnessCommand(
 	sessionName, command string,
 	persistent, deferred bool,
@@ -309,9 +310,15 @@ func PrepareHarnessCommand(
 		return PreparedCommand{}, cleanupFailedHandoff(path, err)
 	}
 	return PreparedCommand{
-		Command: BuildHarnessCommand(executable, path, sessionName, persistent),
-		path:    path,
-		lease:   lease,
+		Command:    BuildHarnessCommand(executable, path, sessionName, persistent),
+		path:       path,
+		lease:      lease,
+		executable: executable,
+		arguments: []string{
+			HarnessProtocol,
+			"--handoff", path,
+			"--session", sessionName,
+		},
 		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
 			return bindHandoffOverrideReservations(
 				path, HarnessProtocol, false, recordSpawn, reservations...,

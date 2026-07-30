@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,8 +15,10 @@ import (
 )
 
 func TestGeminiWrapperStartFailureDoesNotCommitAdmissionEffects(t *testing.T) {
+	startFailure := errors.New("private executor did not start")
 	reservation := &override.Reservation{}
 	recorded := false
+	canceled := false
 	done, err := startGeminiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
 		SessionName: "gemini-start-failure",
 		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
@@ -27,36 +29,94 @@ func TestGeminiWrapperStartFailureDoesNotCommitAdmissionEffects(t *testing.T) {
 		},
 	}, geminiWrapperRuntime{
 		lookPath: func(string) (string, error) {
-			return "/definitely/missing/agm-agent-wrapper", nil
+			return "/opt/agm/bin/agm-agent-wrapper", nil
 		},
-		commandContext: exec.CommandContext,
+		prepare: func(sessionName, wrapperPath string) (geminiWrapperLaunch, error) {
+			if sessionName != "gemini-start-failure" ||
+				wrapperPath != "/opt/agm/bin/agm-agent-wrapper" {
+				t.Fatalf("prepare wrapper = (%q, %q)", sessionName, wrapperPath)
+			}
+			return geminiWrapperLaunch{
+				executable: "/opt/agm/bin/agm",
+				arguments:  []string{"__exec-harness", "--handoff", "/tmp/fixture"},
+				bind: func(recordSpawn bool, got ...*override.Reservation) error {
+					if !recordSpawn || !slices.Equal(got, []*override.Reservation{reservation}) {
+						t.Fatalf("bind effects = (%t, %v)", recordSpawn, got)
+					}
+					return nil
+				},
+				cancel: func() error {
+					canceled = true
+					return nil
+				},
+			}, nil
+		},
+		run: func(context.Context, string, []string) error {
+			return startFailure
+		},
 	})
-	if err == nil || done {
+	if !errors.Is(err, startFailure) || done {
 		t.Fatalf("startGeminiHarnessWithRuntime() = done:%t error:%v, want definite start failure", done, err)
 	}
 	if recorded {
 		t.Fatal("definite wrapper start failure recorded post-authorization effects")
+	}
+	if !canceled {
+		t.Fatal("definite wrapper start failure preserved an undelivered handoff")
 	}
 	if _, commitErr := reservation.Commit(); errors.Is(commitErr, override.ErrReservationCommitted) {
 		t.Fatal("definite wrapper start failure consumed the override reservation")
 	}
 }
 
-func TestGeminiWrapperCommitsEffectsAfterSuccessfulStart(t *testing.T) {
+func TestGeminiWrapperDelegatesEffectsToExecutorBeforeSuccessfulStart(t *testing.T) {
+	var events []string
 	recorded := false
 	done, err := startGeminiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
 		SessionName: "gemini-start-success",
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			events = append(events, "authorize")
+			return got, nil
+		},
 		AfterAuthorization: func() {
 			recorded = true
 		},
 	}, geminiWrapperRuntime{
 		lookPath: func(string) (string, error) {
-			return "/usr/bin/true", nil
+			return "/opt/agm/bin/agm-agent-wrapper", nil
 		},
-		commandContext: exec.CommandContext,
+		prepare: func(string, string) (geminiWrapperLaunch, error) {
+			events = append(events, "prepare")
+			return geminiWrapperLaunch{
+				executable: "/opt/agm/bin/agm",
+				arguments:  []string{"__exec-harness", "--handoff", "/tmp/fixture"},
+				bind: func(recordSpawn bool, _ ...*override.Reservation) error {
+					if !recordSpawn {
+						t.Fatal("foreground wrapper did not delegate spawn recording")
+					}
+					events = append(events, "bind")
+					return nil
+				},
+				cancel: func() error {
+					events = append(events, "cancel")
+					return nil
+				},
+			}, nil
+		},
+		run: func(_ context.Context, executable string, arguments []string) error {
+			if executable != "/opt/agm/bin/agm" ||
+				!slices.Equal(arguments, []string{"__exec-harness", "--handoff", "/tmp/fixture"}) {
+				t.Fatalf("executor invocation = %q %q", executable, arguments)
+			}
+			events = append(events, "run")
+			return nil
+		},
 	})
-	if err != nil || !done || !recorded {
+	if err != nil || !done || recorded {
 		t.Fatalf("startGeminiHarnessWithRuntime() = done:%t recorded:%t error:%v", done, recorded, err)
+	}
+	if got, want := strings.Join(events, ","), "prepare,authorize,bind,run,cancel"; got != want {
+		t.Fatalf("foreground launch events = %q, want %q", got, want)
 	}
 }
 
