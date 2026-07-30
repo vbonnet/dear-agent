@@ -1590,11 +1590,11 @@ func interpreterLoadsExternalCode(command, value string) bool {
 }
 
 func pythonLoadsExternalCode(value string) bool {
-	if value == "-m" {
-		return true
-	}
-	// CPython accepts the module name joined to -m, including -mhelper.
-	return strings.HasPrefix(value, "-m") && !strings.HasPrefix(value, "--")
+	// CPython accepts boolean short options before -m in the same token
+	// (for example, -Imhelper), and -m consumes the rest as the module name.
+	return strings.HasPrefix(value, "-") &&
+		!strings.HasPrefix(value, "--") &&
+		strings.ContainsRune(value[1:], 'm')
 }
 
 func perlLoadsExternalCode(value string) bool {
@@ -1646,14 +1646,17 @@ func interpreterInlineCodeOption(command, value string) bool {
 	if strings.HasPrefix(value, "--") {
 		return false
 	}
+	bundle := strings.TrimPrefix(value, "-")
 	switch filepath.Base(command) {
+	case "sh", "bash", "dash", "zsh", "ksh":
+		return strings.ContainsRune(bundle, 'c')
 	case "perl", "ruby":
-		return strings.HasPrefix(value, "-e")
+		return strings.ContainsRune(bundle, 'e')
 	case "node":
-		return strings.HasPrefix(value, "-e") || strings.HasPrefix(value, "-p")
+		return strings.ContainsAny(bundle, "ep")
 	default:
 		return strings.HasPrefix(filepath.Base(command), "python") &&
-			strings.HasPrefix(value, "-c")
+			strings.ContainsRune(bundle, 'c')
 	}
 }
 

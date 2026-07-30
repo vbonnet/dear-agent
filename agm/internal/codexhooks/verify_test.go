@@ -244,11 +244,16 @@ func TestValidateScriptAssetRejectsInterpreterInlineCode(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n/bin/sh -c 'printf ok'\n",
 		"#!/bin/sh\n/usr/bin/env bash -c 'printf ok'\n",
+		"#!/bin/sh\n/bin/bash -xc 'printf ok'\n",
 		"#!/bin/sh\npython3 -c 'print(1)'\n",
 		"#!/bin/sh\n/usr/bin/python3 -c'print(1)'\n",
+		"#!/bin/sh\n/usr/bin/python3 -Ic'print(1)'\n",
 		"#!/bin/sh\n/usr/bin/perl -e'print 1'\n",
+		"#!/bin/sh\n/usr/bin/perl -we'print 1'\n",
 		"#!/bin/sh\n/usr/bin/ruby -e'puts 1'\n",
+		"#!/bin/sh\n/usr/bin/ruby -we'puts 1'\n",
 		"#!/bin/sh\n/usr/bin/node -p'1 + 1'\n",
+		"#!/bin/sh\n/usr/bin/node -pe'1 + 1'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "inline interpreter code") {
@@ -456,6 +461,7 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/node --require=helper /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/node --import=./helper.mjs /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/python3 -mhelper\n",
+		"#!/bin/sh\n/usr/bin/python3 -Imhelper\n",
 		"#!/bin/sh\ncommand /usr/bin/python3 -m helper\n",
 		"#!/bin/sh\n/usr/bin/tar --checkpoint-action=exec='x=$(printf \".%shelper\" /); \"$x\"' -cf /dev/null /usr/bin/true\n",
 		"#!/bin/sh\ncommand /usr/bin/tar --to-command='./helper' -xf /dev/null\n",
