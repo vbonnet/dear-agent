@@ -584,11 +584,11 @@ install-codex-hook-json: build-codex-hook-json
 		}; \
 		trap cleanup_helper_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
 		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-codex-hook-json.XXXXXX)"; \
 		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
@@ -630,11 +630,11 @@ install-bead-close-guard: build-bead-close-guard
 		}; \
 		trap cleanup_guard_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
 		guard_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-bead-close-guard.XXXXXX)"; \
 		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$guard_staging"; \
@@ -1038,11 +1038,11 @@ install-override-ledger-helper: build-override-ledger-helper install-agm
 		}; \
 		trap cleanup_helper_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
 		identity_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm.identity.XXXXXX)"; \
 		printf '%s\n' "$$caller_identity" | /usr/bin/sudo /usr/bin/tee "$$identity_staging" >/dev/null; \
@@ -1105,11 +1105,11 @@ install-override-audit-launchdaemon: build-agm
 		}; \
 		trap cleanup_audit_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
 		audit_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX)"; \
 		plist_staging="$$(/usr/bin/sudo /usr/bin/mktemp /Library/LaunchDaemons/.com.dear-agent.override-audit.XXXXXX)"; \
@@ -1140,11 +1140,11 @@ uninstall-override-audit-launchdaemon:
 		test "$$(uname -s)" = "Darwin" || { echo "launchd audit removal is macOS-only" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /bin/launchctl bootout system/com.dear-agent.override-audit 2>/dev/null || true; \
 		/usr/bin/sudo /bin/rm -f /Library/LaunchDaemons/com.dear-agent.override-audit.plist /usr/local/libexec/dear-agent-override-audit; \
 		/usr/bin/sudo -k; \
@@ -1194,11 +1194,11 @@ install-override-audit-systemd: build-agm
 		}; \
 		trap cleanup_systemd_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
 		audit_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX)"; \
 		service_staging="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-service.XXXXXX)"; \
@@ -1235,11 +1235,11 @@ uninstall-override-audit-systemd:
 		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
 		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n -v 2>/dev/null; then \
+		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/true; \
 		/usr/bin/sudo /usr/bin/systemctl disable --now "dear-agent-override-audit@$$operator_user.timer" 2>/dev/null || true; \
 		/usr/bin/sudo /bin/rm -f /etc/systemd/system/dear-agent-override-audit@.service /etc/systemd/system/dear-agent-override-audit@.timer /usr/local/libexec/dear-agent-override-audit; \
 		/usr/bin/sudo /usr/bin/systemctl daemon-reload; \

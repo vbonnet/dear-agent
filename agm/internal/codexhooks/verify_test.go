@@ -248,6 +248,30 @@ func TestValidateScriptAssetRejectsInterpreterInlineCode(t *testing.T) {
 	}
 }
 
+func TestValidateScriptAssetRejectsMutableInputRedirection(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/bash\n< helper /bin/bash\n",
+		"#!/bin/bash\ncommand /bin/bash < ./helper\n",
+		"#!/bin/bash\npython3 <> helper.py\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "mutable input redirection") {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want mutable-input rejection", script, err)
+		}
+	}
+}
+
+func TestValidateScriptAssetAllowsSystemOwnedInputRedirection(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/bash\n/bin/cat < /dev/null\n",
+		"#!/bin/bash\n/bin/cat < /usr/bin/true\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err != nil {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want system-input allowance", script, err)
+		}
+	}
+}
+
 func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\nexport PATH=.; helper\n",

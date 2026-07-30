@@ -26,7 +26,7 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"`,
 		`IFS= read -r confirmed_hash`,
 		`test "$$confirmed_hash" = "$$expected_hash"`,
-		`/usr/bin/sudo -v`,
+		`/usr/bin/sudo /usr/bin/true`,
 		`helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.XXXXXX)"`,
 		`/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"`,
 		`staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"`,

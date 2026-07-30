@@ -87,4 +87,25 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 			t.Errorf("helper installer is missing %q", required)
 		}
 	}
+	start := strings.Index(text, "install-override-ledger-helper:")
+	if start < 0 {
+		t.Fatal("could not find helper installer target")
+	}
+	end := strings.Index(text[start:], "\ninstall-override-audit-launchdaemon:")
+	if end < 0 {
+		t.Fatal("could not find the target after helper installation")
+	}
+	installer := text[start : start+end]
+	for _, required := range []string{
+		"/usr/bin/sudo -n /usr/bin/true",
+		"/usr/bin/sudo /usr/bin/true",
+	} {
+		if !strings.Contains(installer, required) {
+			t.Errorf("helper installer is missing command-specific authentication %q", required)
+		}
+	}
+	if strings.Contains(installer, "/usr/bin/sudo -n -v") ||
+		strings.Contains(installer, "/usr/bin/sudo -v") {
+		t.Fatal("helper installer still uses sudo's generic validation pseudocommand")
+	}
 }

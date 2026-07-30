@@ -393,6 +393,9 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 	if err := rejectDynamicCommandResolution(unmatched); err != nil {
 		return fmt.Errorf("command %q: %w", command, err)
 	}
+	if err := rejectMutableInputRedirections(unmatched); err != nil {
+		return fmt.Errorf("command %q: %w", command, err)
+	}
 	if err := rejectMutableScriptOperands(unmatched); err != nil {
 		return fmt.Errorf("command %q: %w", command, err)
 	}
@@ -455,6 +458,9 @@ func validateScriptAsset(content []byte) error {
 		)
 	}
 	if err := rejectDynamicCommandResolution(scannable); err != nil {
+		return err
+	}
+	if err := rejectMutableInputRedirections(scannable); err != nil {
 		return err
 	}
 	if err := rejectMutableScriptOperands(scannable); err != nil {
@@ -813,6 +819,46 @@ func commandResolutionStateBuiltin(command string) bool {
 	default:
 		return false
 	}
+}
+
+func rejectMutableInputRedirections(script string) error {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).
+		Parse(strings.NewReader(script), "trusted-hook")
+	if err != nil {
+		return fmt.Errorf("parse trusted hook shell: %w", err)
+	}
+	var rejected *syntax.Word
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if rejected != nil {
+			return false
+		}
+		redirect, ok := node.(*syntax.Redirect)
+		if !ok ||
+			redirect.Word == nil ||
+			(redirect.Op != syntax.RdrIn && redirect.Op != syntax.RdrInOut) {
+			return true
+		}
+		operand, static := staticShellWord(redirect.Word)
+		if static && inputRedirectionPathIsSystemOwned(operand) {
+			return true
+		}
+		rejected = redirect.Word
+		return false
+	})
+	if rejected == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"unsupported mutable input redirection at line %d; trusted hooks must not execute input from mutable paths",
+		rejected.Pos().Line(),
+	)
+}
+
+func inputRedirectionPathIsSystemOwned(path string) bool {
+	if path == "/dev/null" {
+		return true
+	}
+	return filepath.IsAbs(path) && isSystemRuntimePath(path)
 }
 
 func staticShellWord(word *syntax.Word) (string, bool) {
