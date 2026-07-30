@@ -153,10 +153,29 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 		if err != nil {
 			return nil, fmt.Errorf("read committed hook asset %q: %w", reference, err)
 		}
+		if err := validateHookInterpreter(item); err != nil {
+			return nil, err
+		}
 		assets = append(assets, item)
 	}
 	sort.Slice(assets, func(i, j int) bool { return assets[i].path < assets[j].path })
 	return assets, nil
+}
+
+func validateHookInterpreter(item asset) error {
+	if !item.executable {
+		return nil
+	}
+	firstLine, _, _ := bytes.Cut(item.content, []byte("\n"))
+	switch string(bytes.TrimSuffix(firstLine, []byte("\r"))) {
+	case "#!/bin/bash", "#!/bin/sh":
+		return nil
+	default:
+		return fmt.Errorf(
+			"committed hook asset %q must use a trusted absolute interpreter (/bin/bash or /bin/sh)",
+			item.path,
+		)
+	}
 }
 
 func committedAsset(ctx context.Context, repo, commit, path string) (asset, error) {

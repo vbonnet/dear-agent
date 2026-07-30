@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # PreToolUse hook: block BEADS_DIR usage, redirect to the canonical Beads DB.
 #
 # BEADS_DIR is not a supported bd environment variable and has no effect on bd.

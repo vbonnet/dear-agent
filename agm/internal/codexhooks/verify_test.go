@@ -222,6 +222,21 @@ func TestAttestRejectsUncommittedOrUnsupportedProjectReferences(t *testing.T) {
 	}
 }
 
+func TestAttestRejectsPathResolvedHookInterpreter(t *testing.T) {
+	source, sandbox := hookFixture(t)
+	const script = "#!/usr/bin/env bash\nexit 0\n"
+	for _, root := range []string{source, sandbox} {
+		writeFile(t, filepath.Join(root, ".codex", "hooks", "guard"), script, 0o755)
+	}
+	gittest.Run(t, source, "add", ".codex/hooks/guard")
+	gittest.Run(t, source, "commit", "-m", "use path-resolved interpreter")
+
+	_, err := attestForTest(t, source, sandbox, []string{sandbox})
+	if err == nil || !strings.Contains(err.Error(), "trusted absolute interpreter") {
+		t.Fatalf("Attest() error = %v, want trusted-interpreter rejection", err)
+	}
+}
+
 func attestForTest(t *testing.T, source, sandbox string, writableRoots []string) (Attestation, error) {
 	t.Helper()
 	attestation, err := Attest(

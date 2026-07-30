@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Stop / SubagentStop hook: the WF-A guardrail feedback loop (bead ce-vrux).
 #
 # WHAT: when an agent is about to finish, run the deterministic guardrail

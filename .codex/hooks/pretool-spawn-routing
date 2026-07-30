@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # PreToolUse hook: dogfooding routing nudge (Beads ce-qgf, AGENTS.md §Dogfooding).
 #
 # WHAT: when a session running in dear-agent tries to spawn a NEW top-level

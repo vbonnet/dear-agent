@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # PreToolUse hook: wayfinder-only PR lifecycle enforcement.
 # CDX harness port of .claude/hooks/pretool-pr-guard.
 #

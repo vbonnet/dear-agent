@@ -2,7 +2,9 @@ package codexhooks
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +12,36 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+func TestHardenHookCommandsReplacesCallerPath(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "guard")
+	writeFile(t, script, "#!/bin/bash\nprintf '%s' \"$PATH\"\n", 0o755)
+	hooks := map[string]any{
+		"Stop": []any{map[string]any{
+			"hooks": []any{map[string]any{
+				"type":    "command",
+				"command": script,
+			}},
+		}},
+	}
+	if err := hardenHookCommands(hooks); err != nil {
+		t.Fatalf("hardenHookCommands() error: %v", err)
+	}
+	groups := hooks["Stop"].([]any)
+	group := groups[0].(map[string]any)
+	handlers := group["hooks"].([]any)
+	handler := handlers[0].(map[string]any)
+	command := handler["command"].(string)
+	cmd := exec.Command("/bin/sh", "-c", command)
+	cmd.Env = []string{"PATH=" + t.TempDir()}
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("run hardened hook command: %v", err)
+	}
+	if got := string(output); got != attestedHookPath {
+		t.Fatalf("hook PATH = %q, want %q", got, attestedHookPath)
+	}
+}
 
 func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testing.T) {
 	hookRoot := t.TempDir()
@@ -44,6 +76,15 @@ func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testin
 	if !ok || hooks["PreToolUse"] == nil {
 		t.Fatalf("hooks override = %#v", parsed["hooks"])
 	}
+	groups := hooks["PreToolUse"].([]any)
+	group := groups[0].(map[string]any)
+	handlers := group["hooks"].([]any)
+	handler := handlers[0].(map[string]any)
+	command := handler["command"].(string)
+	if !strings.HasPrefix(command, attestedHookCommandPrefix) ||
+		!strings.Contains(command, "guard --check") {
+		t.Fatalf("hardened hook command = %q", command)
+	}
 	state, ok := hooks["state"].(map[string]any)
 	if !ok {
 		t.Fatalf("hooks state override = %#v", hooks["state"])
@@ -55,7 +96,12 @@ func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testin
 	}
 	sessionKey := sessionFlagsHookSource + ":pre_tool_use:0:0"
 	trusted, ok := state[sessionKey].(map[string]any)
-	if !ok || trusted["trusted_hash"] != "sha256:7d37e27e08e8694a3f4954a741d7f2c87607b7a6aa63cdc7ccfe4c9feac25f32" {
+	handler["timeout"] = json.Number("10")
+	wantTrustedHash, err := commandHookTrustedHash("PreToolUse", "pre_tool_use", group, handler)
+	if err != nil {
+		t.Fatalf("commandHookTrustedHash() error: %v", err)
+	}
+	if !ok || trusted["trusted_hash"] != wantTrustedHash {
 		t.Fatalf("session hook state = %#v", state[sessionKey])
 	}
 	if _, exists := parsed["projects"]; exists {

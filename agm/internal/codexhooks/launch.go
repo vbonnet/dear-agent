@@ -24,6 +24,11 @@ var sessionFlagsHookSource = func() string {
 	return "/<session-flags>/config.toml"
 }()
 
+const (
+	attestedHookPath          = "/opt/homebrew/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
+)
+
 // LaunchConfigOverrides returns a Codex CLI config override that loads the
 // attested hooks from the immutable materialization, pins their exact trust
 // hashes, and disables the corresponding mutable project-layer entries.
@@ -43,6 +48,9 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 
 	hooks, err := readMaterializedHookManifest(hookRoot)
 	if err != nil {
+		return nil, err
+	}
+	if err := hardenHookCommands(hooks); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -97,6 +105,59 @@ func readMaterializedHookManifest(hookRoot string) (map[string]any, error) {
 		return nil, fmt.Errorf("materialized Codex hook manifest has no hooks object")
 	}
 	return manifest.Hooks, nil
+}
+
+func hardenHookCommands(hooks map[string]any) error {
+	for eventName := range hookEventKeyLabels {
+		rawGroups, exists := hooks[eventName]
+		if !exists {
+			continue
+		}
+		groups, ok := rawGroups.([]any)
+		if !ok {
+			return fmt.Errorf("materialized Codex hook event %s must be an array", eventName)
+		}
+		for groupIndex, rawGroup := range groups {
+			group, ok := rawGroup.(map[string]any)
+			if !ok {
+				return fmt.Errorf("materialized Codex hook event %s group %d must be an object", eventName, groupIndex)
+			}
+			rawHandlers, ok := group["hooks"]
+			if !ok {
+				continue
+			}
+			handlers, ok := rawHandlers.([]any)
+			if !ok {
+				return fmt.Errorf("materialized Codex hook event %s group %d handlers must be an array", eventName, groupIndex)
+			}
+			for handlerIndex, rawHandler := range handlers {
+				handler, ok := rawHandler.(map[string]any)
+				if !ok {
+					return fmt.Errorf(
+						"materialized Codex hook event %s group %d handler %d must be an object",
+						eventName, groupIndex, handlerIndex,
+					)
+				}
+				field := "command"
+				if runtime.GOOS == "windows" {
+					return fmt.Errorf("attested Codex command hooks require a POSIX runtime")
+				}
+				command, ok := handler[field].(string)
+				if !ok || strings.TrimSpace(command) == "" {
+					return fmt.Errorf(
+						"materialized Codex hook event %s group %d handler %d command must be a non-empty string",
+						eventName, groupIndex, handlerIndex,
+					)
+				}
+				handler[field] = attestedHookCommandPrefix + shellSingleQuote(command)
+			}
+		}
+	}
+	return nil
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 var hookEventKeyLabels = map[string]string{

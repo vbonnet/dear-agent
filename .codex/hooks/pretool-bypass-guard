@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # PreToolUse hook: intercepts bypass flags removed from our tools (ADR-031).
 # CDX harness port of .claude/hooks/pretool-bypass-guard.
 #
