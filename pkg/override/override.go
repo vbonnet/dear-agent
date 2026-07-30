@@ -1,12 +1,13 @@
 // Package override is the shared contract for dangerous overrides — the
 // escape hatches that let an operator switch off a safety control.
 //
-// Two exist today: the Codex hook-trust bypass, which runs repo hooks without
-// per-path review, and the admission-brake override, which admits spawns while
-// a watchdog hold is engaged. Both were introduced for the same reason: the
-// control they disable had no bounded way out, so the alternative was an
-// outage. Both carry the same failure mode: an unattended agent flips one to
-// get past a blocker, nobody notices, and the control is silently dead.
+// Two exist today: the Codex hook-trust override, which trusts an exact attested
+// hook materialization without per-path review, and the admission-brake
+// override, which admits spawns while a watchdog hold is engaged. Both were
+// introduced for the same reason: the control they relax had no bounded way
+// out, so the alternative was an outage. Both carry the same failure mode: an
+// unattended agent flips one to get past a blocker, nobody notices, and the
+// control is silently dead.
 //
 // Every override therefore travels the same four gates:
 //
@@ -43,9 +44,8 @@ import (
 type Kind string
 
 const (
-	// KindCodexHookTrust covers launching Codex with
-	// --dangerously-bypass-hook-trust, which runs every enabled hook without
-	// the per-path trust review.
+	// KindCodexHookTrust covers launching Codex with exact attested hook trust
+	// in place of the interactive per-path review.
 	KindCodexHookTrust Kind = "codex-hook-trust"
 
 	// KindAdmissionBrake covers admitting a spawn while an admission brake is

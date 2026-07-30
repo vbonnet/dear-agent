@@ -9,13 +9,14 @@ import (
 
 var authorizeOverride = override.Authorize
 
-// AuthorizeCodexHookTrust runs the shared dangerous-override gates for the
-// Codex hook-trust bypass and records the use.
+// AuthorizeCodexHookTrust runs the shared dangerous-override gates for trusting
+// the exact attested Codex hooks without interactive per-path review and
+// records the use.
 //
-// Every path that can launch Codex with --dangerously-bypass-hook-trust must
-// call this, including resume. Resume replays a launch policy persisted in the
-// manifest, so skipping it there would turn "approve once, resume forever" into
-// the loophole the gates exist to close.
+// Every path that can request this launch policy must call this, including
+// resume. Resume replays a policy persisted in the manifest, so skipping it
+// there would turn "approve once, resume forever" into the loophole the gates
+// exist to close.
 func AuthorizeCodexHookTrust(reason, sessionName string) error {
 	if _, err := authorizeOverride(override.Request{
 		Kind:    override.KindCodexHookTrust,
@@ -44,6 +45,18 @@ func AuthorizeAdmissionBrakeOverride(reason, sessionName string) error {
 		return fmt.Errorf("admission-brake override refused: %w", err)
 	}
 	return nil
+}
+
+// ValidateAdmissionBrakeOverrideReason rejects malformed or boilerplate
+// requests before admission probes run. This does not consume an approval or
+// write the ledger; AuthorizeAdmissionBrakeOverride must still be called at the
+// point where a live brake is actually crossed.
+func ValidateAdmissionBrakeOverrideReason(reason string) (string, error) {
+	normalized, err := override.ValidateReason(reason)
+	if err != nil {
+		return "", fmt.Errorf("admission-brake override refused: %w", err)
+	}
+	return normalized, nil
 }
 
 // AdmissionBrakeRemediation is the operator-facing next step for a refused

@@ -799,18 +799,31 @@ func enforceCircuitBreakers(sessionName string) error {
 		circuitbreaker.WithProcCounter(pc),
 		circuitbreaker.WithBrakeReader(br),
 	}
-	// Authorize before checking, never after: the gates must run even if the
-	// brake turns out not to be engaged, so that an unapproved override is
-	// refused rather than quietly succeeding whenever it happens to be moot.
+	normalizedBrakeOverrideReason := ""
 	if brakeOverrideReason != "" {
-		if err := ops.AuthorizeAdmissionBrakeOverride(brakeOverrideReason, sessionName); err != nil {
+		var err error
+		normalizedBrakeOverrideReason, err = ops.ValidateAdmissionBrakeOverrideReason(brakeOverrideReason)
+		if err != nil {
 			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
 			return err
 		}
-		checkOpts = append(checkOpts, circuitbreaker.WithAuthorizedBrakeOverride(brakeOverrideReason))
 	}
 
 	result := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
+	if normalizedBrakeOverrideReason != "" && onlyAdmissionBrakeRefused(result) {
+		// Consume and record the authorization only after every resource gate
+		// has passed and the live brake is the sole remaining refusal. A second
+		// check keeps the actual spawn fail-closed if host state changes while
+		// the privileged ledger append is in flight.
+		if err := ops.AuthorizeAdmissionBrakeOverride(normalizedBrakeOverrideReason, sessionName); err != nil {
+			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
+			return err
+		}
+		result = circuitbreaker.Check(
+			cfg, lr, wc, st, mr,
+			append(checkOpts, circuitbreaker.WithAuthorizedBrakeOverride(normalizedBrakeOverrideReason))...,
+		)
+	}
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
@@ -828,6 +841,21 @@ func enforceCircuitBreakers(sessionName string) error {
 	}
 
 	return nil
+}
+
+func onlyAdmissionBrakeRefused(result circuitbreaker.CheckResult) bool {
+	engagedBrake := false
+	for _, gate := range result.Gates {
+		if gate.Passed {
+			continue
+		}
+		if gate.Gate == "admission_brake" && gate.RequiresOverride {
+			engagedBrake = true
+			continue
+		}
+		return false
+	}
+	return engagedBrake
 }
 
 // taggedWorkerSessions returns the tmux session names of non-archived sessions

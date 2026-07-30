@@ -3,23 +3,36 @@ package codexhooks
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
+var sessionFlagsHookSource = func() string {
+	if runtime.GOOS == "windows" {
+		return `C:\<session-flags>\config.toml`
+	}
+	return "/<session-flags>/config.toml"
+}()
+
 // LaunchConfigOverrides returns a Codex CLI config override that loads the
-// attested hooks from the immutable materialization and disables their mutable
-// project-layer copies through hooks.state. The manifest and disablement state
-// are encoded into argv before exec, so a process with write access to the
-// sandbox cannot replace .codex/hooks.json between verification and Codex
-// startup. Project trust remains unchanged so the interactive TUI can start.
+// attested hooks from the immutable materialization, pins their exact trust
+// hashes, and disables the corresponding mutable project-layer entries.
+//
+// The manifest and state are encoded into argv before exec. AGM deliberately
+// does not ask Codex to bypass hook trust globally: an entry appended to a
+// writable project hooks.json after attestation therefore has neither a pinned
+// session hash nor a trusted project key and cannot run. Project trust itself
+// remains unchanged so the interactive TUI can start.
 func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 	if !filepath.IsAbs(hookRoot) || filepath.Clean(hookRoot) != hookRoot {
 		return nil, fmt.Errorf("materialized hook root must be a clean absolute path")
@@ -42,7 +55,7 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	hooks, err = hooksWithProjectCopiesDisabled(hooks, projectHookRoots)
+	hooks, err = hooksWithPinnedTrustState(hooks, projectHookRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +135,7 @@ func projectHookSourceRoots(ctx context.Context, workDir, projectRoot string) ([
 	return sorted, nil
 }
 
-func hooksWithProjectCopiesDisabled(hooks map[string]any, projectRoots []string) (map[string]any, error) {
+func hooksWithPinnedTrustState(hooks map[string]any, projectRoots []string) (map[string]any, error) {
 	withState := make(map[string]any, len(hooks)+1)
 	maps.Copy(withState, hooks)
 	state := make(map[string]any)
@@ -148,7 +161,19 @@ func hooksWithProjectCopiesDisabled(hooks map[string]any, projectRoots []string)
 			if !ok {
 				return nil, fmt.Errorf("materialized Codex hook event %s group %d handlers must be an array", eventName, groupIndex)
 			}
-			for handlerIndex := range handlers {
+			for handlerIndex, rawHandler := range handlers {
+				trustedHash, err := commandHookTrustedHash(eventName, eventKey, group, rawHandler)
+				if err != nil {
+					return nil, fmt.Errorf(
+						"materialized Codex hook event %s group %d handler %d: %w",
+						eventName, groupIndex, handlerIndex, err,
+					)
+				}
+				sessionKey := fmt.Sprintf(
+					"%s:%s:%d:%d",
+					sessionFlagsHookSource, eventKey, groupIndex, handlerIndex,
+				)
+				state[sessionKey] = map[string]any{"trusted_hash": trustedHash}
 				for _, root := range projectRoots {
 					source := filepath.Join(root, filepath.FromSlash(hooksManifestPath))
 					key := fmt.Sprintf("%s:%s:%d:%d", source, eventKey, groupIndex, handlerIndex)
@@ -159,6 +184,186 @@ func hooksWithProjectCopiesDisabled(hooks map[string]any, projectRoots []string)
 	}
 	withState["state"] = state
 	return withState, nil
+}
+
+func commandHookTrustedHash(
+	eventName, eventKey string,
+	group map[string]any,
+	rawHandler any,
+) (string, error) {
+	normalizedHandler, err := normalizedCommandHookHandler(eventName, rawHandler)
+	if err != nil {
+		return "", err
+	}
+	matcher, err := normalizedHookMatcher(eventName, group)
+	if err != nil {
+		return "", err
+	}
+	identity := map[string]any{
+		"event_name": eventKey,
+		"hooks":      []any{normalizedHandler},
+	}
+	if matcher != nil {
+		identity["matcher"] = *matcher
+	}
+	var canonical bytes.Buffer
+	encoder := json.NewEncoder(&canonical)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(identity); err != nil {
+		return "", fmt.Errorf("encode normalized hook identity: %w", err)
+	}
+	encoded := bytes.TrimSuffix(canonical.Bytes(), []byte("\n"))
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(encoded)), nil
+}
+
+func normalizedCommandHookHandler(eventName string, rawHandler any) (map[string]any, error) {
+	handler, ok := rawHandler.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("must be an object")
+	}
+	handlerType, ok := handler["type"].(string)
+	if !ok || handlerType != "command" {
+		return nil, fmt.Errorf("type must be command")
+	}
+	command, err := normalizedHookCommand(handler)
+	if err != nil {
+		return nil, err
+	}
+	timeout, err := normalizedHookTimeout(eventName, handler["timeout"])
+	if err != nil {
+		return nil, err
+	}
+	async, err := optionalBool(handler, "async")
+	if err != nil {
+		return nil, err
+	}
+	normalizedHandler := map[string]any{
+		"type":    "command",
+		"command": command,
+		"timeout": timeout,
+		"async":   async,
+	}
+	if err := copyOptionalString(normalizedHandler, handler, "statusMessage"); err != nil {
+		return nil, err
+	}
+	if err := addNormalizedAdditionalContextLimit(normalizedHandler, handler, eventName); err != nil {
+		return nil, err
+	}
+	return normalizedHandler, nil
+}
+
+func normalizedHookCommand(handler map[string]any) (string, error) {
+	field := "command"
+	if runtime.GOOS == "windows" {
+		switch {
+		case handler["commandWindows"] != nil:
+			field = "commandWindows"
+		case handler["command_windows"] != nil:
+			field = "command_windows"
+		}
+	}
+	command, ok := handler[field].(string)
+	if !ok || strings.TrimSpace(command) == "" {
+		return "", fmt.Errorf("%s must be a non-empty string", field)
+	}
+	return command, nil
+}
+
+func normalizedHookMatcher(eventName string, group map[string]any) (*string, error) {
+	if eventName == "UserPromptSubmit" || eventName == "Stop" || group["matcher"] == nil {
+		return nil, nil
+	}
+	matcher, ok := group["matcher"].(string)
+	if !ok {
+		return nil, fmt.Errorf("matcher must be a string")
+	}
+	return &matcher, nil
+}
+
+func copyOptionalString(destination, source map[string]any, field string) error {
+	raw, exists := source[field]
+	if !exists || raw == nil {
+		return nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return fmt.Errorf("%s must be a string", field)
+	}
+	destination[field] = value
+	return nil
+}
+
+func addNormalizedAdditionalContextLimit(
+	destination, source map[string]any,
+	eventName string,
+) error {
+	raw, exists := source["additionalContextLimit"]
+	if !exists || raw == nil || !hookEventSupportsAdditionalContext(eventName) {
+		return nil
+	}
+	limit, err := jsonUint(raw, "additionalContextLimit")
+	if err != nil {
+		return err
+	}
+	if limit != 2500 {
+		destination["additionalContextLimit"] = limit
+	}
+	return nil
+}
+
+func normalizedHookTimeout(eventName string, raw any) (uint64, error) {
+	defaultTimeout := uint64(600)
+	if eventName == "SessionEnd" {
+		defaultTimeout = 1
+	}
+	timeout := defaultTimeout
+	if raw != nil {
+		var err error
+		timeout, err = jsonUint(raw, "timeout")
+		if err != nil {
+			return 0, err
+		}
+	}
+	if timeout < 1 {
+		timeout = 1
+	}
+	if eventName == "SessionEnd" && timeout > 3 {
+		timeout = 3
+	}
+	return timeout, nil
+}
+
+func jsonUint(raw any, field string) (uint64, error) {
+	number, ok := raw.(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("%s must be an unsigned integer", field)
+	}
+	value, err := strconv.ParseUint(number.String(), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an unsigned integer", field)
+	}
+	return value, nil
+}
+
+func optionalBool(object map[string]any, field string) (bool, error) {
+	raw, exists := object[field]
+	if !exists {
+		return false, nil
+	}
+	value, ok := raw.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be a boolean", field)
+	}
+	return value, nil
+}
+
+func hookEventSupportsAdditionalContext(eventName string) bool {
+	switch eventName {
+	case "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "SubagentStart":
+		return true
+	default:
+		return false
+	}
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {

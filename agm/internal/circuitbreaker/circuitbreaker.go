@@ -269,9 +269,10 @@ type ProcCounter interface {
 
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake"
-	Passed  bool
-	Message string
+	Gate             string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake"
+	Passed           bool
+	RequiresOverride bool // true only when this exact refusal may be crossed by its scoped override
+	Message          string
 }
 
 // CheckResult aggregates all gate outcomes.
@@ -675,8 +676,9 @@ func checkAdmissionBrake(br BrakeReader, overrideReason string) GateResult {
 	}
 
 	return GateResult{
-		Gate:   "admission_brake",
-		Passed: false,
+		Gate:             "admission_brake",
+		Passed:           false,
+		RequiresOverride: true,
 		Message: fmt.Sprintf(
 			"admission brake engaged by %s: %s (set %s ago, expires %s). Spawns resume when the watchdog sees a healthy host; cross it once with an audited override (agm override approve admission-brake, then --brake-override=\"<reason>\"), or delete %s to clear it.",
 			brake.Source,

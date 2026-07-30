@@ -449,11 +449,6 @@ func (r codexRequest) argv() []string {
 	for _, override := range r.ConfigOverrides {
 		args = append(args, "-c", override)
 	}
-	if r.BypassHooks {
-		// Codex keys hook trust by absolute hooks.json path, which is new on
-		// every sandboxed spawn. Without this the TUI never reaches its composer.
-		args = append(args, "--dangerously-bypass-hook-trust")
-	}
 	if r.Approval != "" {
 		args = append(args, "-a", r.Approval)
 	}

@@ -53,6 +53,11 @@ func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testin
 	if !ok || disabled["enabled"] != false {
 		t.Fatalf("project hook state = %#v", state[key])
 	}
+	sessionKey := sessionFlagsHookSource + ":pre_tool_use:0:0"
+	trusted, ok := state[sessionKey].(map[string]any)
+	if !ok || trusted["trusted_hash"] != "sha256:7d37e27e08e8694a3f4954a741d7f2c87607b7a6aa63cdc7ccfe4c9feac25f32" {
+		t.Fatalf("session hook state = %#v", state[sessionKey])
+	}
 	if _, exists := parsed["projects"]; exists {
 		t.Fatalf("launch overrides project trust: %#v", parsed["projects"])
 	}

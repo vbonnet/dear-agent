@@ -28,8 +28,9 @@ type HarnessLaunchSpec struct {
 	DisableOAuth    bool
 	MaxBudgetUSD    float64
 	ExtraAddDirs    []string
-	// BypassCodexHookTrust launches Codex without per-path hook trust. Only
-	// codex-cli consumes it; other harnesses ignore it.
+	// BypassCodexHookTrust authorizes Codex to trust the exact attested hook
+	// materialization without an interactive per-path review. Only codex-cli
+	// consumes it; other harnesses ignore it.
 	BypassCodexHookTrust bool
 	CodexHookRoot        string
 	ForwardTelemetry     bool
