@@ -6,9 +6,9 @@ After=local-fs.target
 [Service]
 Type=oneshot
 User=%i
-ExecStart=/usr/local/libexec/dear-agent-override-audit override audit --window 168h --threshold 5 --notify
-WorkingDirectory=%h
-Environment="HOME=%h"
+ExecStart=/usr/local/libexec/dear-agent-override-audit --config /dev/null override audit --window 168h --threshold 5 --notify
+WorkingDirectory=/
+Environment="HOME=/"
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 StandardOutput=journal
 StandardError=journal

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,22 @@ func TestValidateReasonRefusesUnauditableReasons(t *testing.T) {
 	}
 	if want := "sandbox path rotates per spawn, hooks can never be pre-trusted"; normalized != want {
 		t.Fatalf("normalized = %q, want %q", normalized, want)
+	}
+}
+
+func TestKindsIncludesEverySharedDangerousOverride(t *testing.T) {
+	kinds := Kinds()
+	for _, want := range []Kind{
+		KindCodexHookTrust,
+		KindAdmissionBrake,
+		KindSupervisorOAuthCheck,
+	} {
+		if !slices.Contains(kinds, want) {
+			t.Errorf("Kinds() = %v, missing %q", kinds, want)
+		}
+		if !want.Valid() {
+			t.Errorf("shared override kind %q is not valid", want)
+		}
 	}
 }
 

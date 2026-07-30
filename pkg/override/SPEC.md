@@ -5,13 +5,13 @@
 ## Purpose
 
 `pkg/override` is the shared contract for every escape hatch that switches off
-a safety control. Two exist today — the Codex hook-trust bypass and the
-admission-brake override — and both reach the same failure mode if left
-ungoverned: an unattended agent flips one to get past a blocker, nobody
-notices, and the control is silently dead.
+a safety control. Three exist today — the Codex hook-trust bypass, the
+admission-brake override, and the supervisor OAuth-check bypass — and all reach
+the same failure mode if left ungoverned: an unattended agent flips one to get
+past a blocker, nobody notices, and the control is silently dead.
 
-Rather than two bespoke implementations, both travel one pattern: **stated
-reason, human approval, ledger, recurring audit**.
+Rather than three bespoke implementations, all three travel one pattern:
+**stated reason, human approval, ledger, recurring audit**.
 
 ## EARS Requirements
 
@@ -49,12 +49,17 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-17** When the Linux system audit is installed, the system shall require the operator to confirm the executable, service, and timer SHA-256 values, copy all three artifacts into unique root-owned staging, verify every staged digest, and atomically activate only those verified bytes before reloading the system manager.
 
+**OVR-18** When a system-scheduled override audit runs, the system shall load default-only AGM configuration from the fixed OS null device and use a root-owned non-writable home instead of consulting mutable user configuration.
+
+**OVR-19** When `agm supervisor run --skip-oauth-check` reaches the executable boundary, the system shall require the shared supervisor OAuth-check override kind, reserve current human authorization without recording a use, repeat final live admission, and commit the privileged ledger use immediately before launching Claude.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
 |---|---|---|
 | `codex-hook-trust` | Codex per-path hook trust review | `sandbox.bypass_codex_hook_trust_reason`, or `agm session new --dangerously-bypass-hook-trust="<reason>"` |
 | `admission-brake` | The watchdog admission brake | `agm session new --brake-override="<reason>"` |
+| `supervisor-oauth-check` | The supervisor Claude OAuth-token presence check | `agm supervisor run --skip-oauth-check --reason "<reason>"` |
 
 ## Enforcement surfaces
 
@@ -117,12 +122,16 @@ authentication to install both
 `deploy/launchd/com.dear-agent.override-audit.plist` and a reviewed AGM copy
 into root-owned system locations. The system LaunchDaemon cannot be disabled
 through the same-user GUI domain and runs the fixed audit command as the named
-unprivileged operator. Its `--notify` mode delivers threshold breaches to the
-unified system log even when Notification Center is unavailable. On Linux,
+unprivileged operator. It pins `--config /dev/null` and a root-owned empty home,
+so malformed or blocking mutable user configuration cannot blind the audit
+before it reads the operator-owned ledger. Its `--notify` mode delivers
+threshold breaches to the unified system log even when Notification Center is
+unavailable. On Linux,
 `make install-override-audit-systemd` uses the same operator boundary to
 install a root-owned audit executable and system-manager templates; the service
-runs as the named unprivileged operator, but an unattended same-user agent
-cannot disable its timer through `systemctl --user`.
+runs as the named unprivileged operator with `/` as its fixed home and working
+directory, so an unattended same-user agent cannot disable its timer through
+`systemctl --user` or redirect it through mutable user configuration.
 
 ## BDD Traceability
 

@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
-	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
+	"github.com/vbonnet/dear-agent/pkg/override"
 	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
@@ -336,6 +336,47 @@ func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.Look
 // API-key-present guard. Unwrapped as exit code 2.
 var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; unset it or use an OAuth-only env")
 
+type supervisorOverrideReservation interface {
+	Commit() (override.Use, error)
+}
+
+var reserveSupervisorDangerousOverride = func(req override.Request) (supervisorOverrideReservation, error) {
+	return override.Reserve(req)
+}
+
+func reserveSupervisorOAuthOverride(reason, session string) (supervisorOverrideReservation, error) {
+	reservation, err := reserveSupervisorDangerousOverride(override.Request{
+		Kind:    override.KindSupervisorOAuthCheck,
+		Reason:  reason,
+		Actor:   override.Actor(),
+		Session: session,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("authorize supervisor --skip-oauth-check: %w", err)
+	}
+	return reservation, nil
+}
+
+// authorizeSupervisorLaunchBoundary repeats the final live admission callback
+// before consuming the one-shot OAuth override. A refused launch must not spend
+// privileged ledger quota; a permitted launch records immediately before Run.
+func authorizeSupervisorLaunchBoundary(
+	beforeSpawn func() error,
+	reservation supervisorOverrideReservation,
+) error {
+	if beforeSpawn != nil {
+		if err := beforeSpawn(); err != nil {
+			return fmt.Errorf("supervisor: launch admission: %w", err)
+		}
+	}
+	if reservation != nil {
+		if _, err := reservation.Commit(); err != nil {
+			return fmt.Errorf("supervisor: commit --skip-oauth-check override: %w", err)
+		}
+	}
+	return nil
+}
+
 // supervisorPreflight runs every pre-launch guard in order and returns the
 // resolved claude binary path, or the first refusal. It returns errors rather
 // than exiting so the ordering and the refusals are testable; runSupervisorRun
@@ -371,21 +412,6 @@ func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath strin
 }
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
-	// Skipping the OAuth-token requirement requires a recorded justification:
-	// the gate exists so a supervisor never launches without auth and silently
-	// fails downstream.
-	if supervisorSkipOAuthCheck {
-		if gerr := override.Require(cmd.Context(), override.Guard{
-			Tool: "agm supervisor run",
-			Flag: "--skip-oauth-check",
-			Gate: "CLAUDE_CODE_OAUTH_TOKEN presence requirement",
-			Risk: override.RiskP1,
-		}, supervisorSkipOAuthReason); gerr != nil {
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), gerr)
-			os.Exit(2)
-		}
-	}
-
 	var beforeSpawn func() error
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
@@ -396,6 +422,15 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
 		os.Exit(2)
+	}
+
+	var oauthOverride supervisorOverrideReservation
+	if supervisorSkipOAuthCheck {
+		oauthOverride, err = reserveSupervisorOAuthOverride(supervisorSkipOAuthReason, supervisorID)
+		if err != nil {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
+			os.Exit(2)
+		}
 	}
 
 	// Announce the role so downstream logs attribute correctly.
@@ -425,10 +460,8 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"AGM_SUPERVISOR_TERTIARY_FOR="+supervisorTertiaryFor,
 	)
 
-	if beforeSpawn != nil {
-		if err := beforeSpawn(); err != nil {
-			return fmt.Errorf("supervisor: launch admission: %w", err)
-		}
+	if err := authorizeSupervisorLaunchBoundary(beforeSpawn, oauthOverride); err != nil {
+		return err
 	}
 	if err := claudeCmd.Run(); err != nil {
 		return fmt.Errorf("supervisor: claude exited: %w", err)

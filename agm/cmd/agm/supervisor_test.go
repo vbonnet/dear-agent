@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/pkg/override"
 	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
@@ -19,6 +20,18 @@ import (
 type fakeSupervisorEnv struct {
 	envs  map[string]string
 	paths map[string]string
+}
+
+type fakeSupervisorOverrideReservation struct {
+	events    *[]string
+	commitErr error
+}
+
+func (f *fakeSupervisorOverrideReservation) Commit() (override.Use, error) {
+	if f.events != nil {
+		*f.events = append(*f.events, "commit")
+	}
+	return override.Use{Kind: override.KindSupervisorOAuthCheck}, f.commitErr
 }
 
 func (f fakeSupervisorEnv) Getenv(key string) string { return f.envs[key] }
@@ -80,6 +93,67 @@ func TestCheckSupervisorEnvSkipFlag(t *testing.T) {
 	env := fakeSupervisorEnv{envs: map[string]string{}}
 	if err := checkSupervisorEnv(env, true, noCredsPath(t)); err != nil {
 		t.Errorf("--skip-oauth-check should bypass, got %v", err)
+	}
+}
+
+func TestReserveSupervisorOAuthOverrideUsesSharedDangerousOverrideKind(t *testing.T) {
+	original := reserveSupervisorDangerousOverride
+	t.Cleanup(func() { reserveSupervisorDangerousOverride = original })
+	t.Setenv("AGM_ACTOR", "supervisor-test")
+
+	wantReservation := &fakeSupervisorOverrideReservation{}
+	var got override.Request
+	reserveSupervisorDangerousOverride = func(req override.Request) (supervisorOverrideReservation, error) {
+		got = req
+		return wantReservation, nil
+	}
+
+	reservation, err := reserveSupervisorOAuthOverride(
+		"validating a development supervisor without stored OAuth",
+		"vroom-orchestrator",
+	)
+	if err != nil {
+		t.Fatalf("reserveSupervisorOAuthOverride() error: %v", err)
+	}
+	if reservation != wantReservation {
+		t.Fatal("reserveSupervisorOAuthOverride() lost the shared reservation")
+	}
+	if got.Kind != override.KindSupervisorOAuthCheck ||
+		got.Actor != "supervisor-test" ||
+		got.Session != "vroom-orchestrator" ||
+		got.Reason != "validating a development supervisor without stored OAuth" {
+		t.Fatalf("shared override request = %+v", got)
+	}
+}
+
+func TestAuthorizeSupervisorLaunchBoundaryChecksAdmissionBeforeLedgerCommit(t *testing.T) {
+	var events []string
+	reservation := &fakeSupervisorOverrideReservation{events: &events}
+	err := authorizeSupervisorLaunchBoundary(func() error {
+		events = append(events, "admission")
+		return nil
+	}, reservation)
+	if err != nil {
+		t.Fatalf("authorizeSupervisorLaunchBoundary() error: %v", err)
+	}
+	if got, want := strings.Join(events, ","), "admission,commit"; got != want {
+		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestAuthorizeSupervisorLaunchBoundaryDoesNotCommitRefusedLaunch(t *testing.T) {
+	refusal := errors.New("concurrent admission brake engaged")
+	var events []string
+	reservation := &fakeSupervisorOverrideReservation{events: &events}
+	err := authorizeSupervisorLaunchBoundary(func() error {
+		events = append(events, "admission")
+		return refusal
+	}, reservation)
+	if !errors.Is(err, refusal) {
+		t.Fatalf("authorizeSupervisorLaunchBoundary() error = %v, want %v", err, refusal)
+	}
+	if got, want := strings.Join(events, ","), "admission"; got != want {
+		t.Fatalf("refused launch boundary events = %q, want %q", got, want)
 	}
 }
 

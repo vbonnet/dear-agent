@@ -1,13 +1,13 @@
 // Package override is the shared contract for dangerous overrides — the
 // escape hatches that let an operator switch off a safety control.
 //
-// Two exist today: the Codex hook-trust override, which trusts an exact attested
-// hook materialization without per-path review, and the admission-brake
-// override, which admits spawns while a watchdog hold is engaged. Both were
-// introduced for the same reason: the control they relax had no bounded way
-// out, so the alternative was an outage. Both carry the same failure mode: an
-// unattended agent flips one to get past a blocker, nobody notices, and the
-// control is silently dead.
+// Three exist today: the Codex hook-trust override, which trusts an exact
+// attested hook materialization without per-path review; the admission-brake
+// override, which admits spawns while a watchdog hold is engaged; and the
+// supervisor OAuth-check override, which permits a supervisor launch without
+// proving a current OAuth token. They carry the same failure mode: an unattended
+// agent flips one to get past a blocker, nobody notices, and the control is
+// silently dead.
 //
 // Every override therefore travels the same four gates:
 //
@@ -52,10 +52,16 @@ const (
 	// KindAdmissionBrake covers admitting a spawn while an admission brake is
 	// engaged by a watchdog or an operator.
 	KindAdmissionBrake Kind = "admission-brake"
+
+	// KindSupervisorOAuthCheck covers launching an AGM supervisor without
+	// proving that a current Claude OAuth token is available.
+	KindSupervisorOAuthCheck Kind = "supervisor-oauth-check"
 )
 
 // Kinds returns every known override kind, in stable order.
-func Kinds() []Kind { return []Kind{KindCodexHookTrust, KindAdmissionBrake} }
+func Kinds() []Kind {
+	return []Kind{KindCodexHookTrust, KindAdmissionBrake, KindSupervisorOAuthCheck}
+}
 
 // Valid reports whether k is a known override kind.
 func (k Kind) Valid() bool { return slices.Contains(Kinds(), k) }

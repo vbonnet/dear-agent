@@ -135,6 +135,8 @@ Provide a production-ready CLI that:
 
 **CLI-52** When AGM launches a Codex worker, the AGM CLI shall fail closed before harness startup unless the host-authenticated system-managed worker write-boundary guard is an executable regular file, while non-worker and non-Codex sessions shall remain unaffected.
 
+**CLI-53** When `agm supervisor run --skip-oauth-check` is requested, the CLI shall reserve the shared supervisor OAuth-check override after preflight, repeat final live admission, commit the privileged use immediately before process launch, and refuse without launching when any authorization gate fails.
+
 ## Requirements
 
 ### Functional Requirements

@@ -19,7 +19,9 @@ func TestOverrideAuditSystemTimerIsOperatorOwnedAndJournalDelivered(t *testing.T
 
 	for _, required := range []string{
 		"User=%i",
-		"ExecStart=/usr/local/libexec/dear-agent-override-audit override audit --window 168h --threshold 5 --notify",
+		"ExecStart=/usr/local/libexec/dear-agent-override-audit --config /dev/null override audit --window 168h --threshold 5 --notify",
+		"WorkingDirectory=/",
+		`Environment="HOME=/"`,
 		"StandardOutput=journal",
 		"StandardError=journal",
 		"SyslogIdentifier=dear-agent-override-audit",
@@ -38,7 +40,7 @@ func TestOverrideAuditSystemTimerIsOperatorOwnedAndJournalDelivered(t *testing.T
 			t.Errorf("timer does not retain %q", required)
 		}
 	}
-	for _, forbidden := range []string{"%h/go/bin/agm", "WantedBy=default.target"} {
+	for _, forbidden := range []string{"%h", "WantedBy=default.target"} {
 		if strings.Contains(service+"\n"+timer, forbidden) {
 			t.Errorf("operator-owned units retain user-manager surface %q", forbidden)
 		}

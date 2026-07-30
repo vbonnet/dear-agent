@@ -47,6 +47,8 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/libexec/dear-agent-override-audit</string>
+    <string>--config</string>
+    <string>/dev/null</string>
     <string>override</string>
     <string>audit</string>
     <string>--window</string>
@@ -58,6 +60,8 @@
 
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key>
+    <string>/var/empty</string>
     <key>PATH</key>
     <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>

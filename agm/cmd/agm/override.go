@@ -43,7 +43,9 @@ agent cannot approve its own override.
 
 Kinds:
   codex-hook-trust   run Codex hooks without per-path trust review
-  admission-brake    admit a spawn while an admission brake is engaged`,
+  admission-brake    admit a spawn while an admission brake is engaged
+  supervisor-oauth-check
+                      launch a supervisor without a current OAuth token`,
 }
 
 var overrideApproveCmd = &cobra.Command{
