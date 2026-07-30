@@ -941,18 +941,7 @@ func logCircuitBreakerResult(result circuitbreaker.CheckResult) {
 }
 
 func onlyAdmissionBrakeRefused(result circuitbreaker.CheckResult) bool {
-	engagedBrake := false
-	for _, gate := range result.Gates {
-		if gate.Passed {
-			continue
-		}
-		if gate.Gate == "admission_brake" && gate.RequiresOverride {
-			engagedBrake = true
-			continue
-		}
-		return false
-	}
-	return engagedBrake
+	return circuitbreaker.RequiresAdmissionBrakeOverride(result)
 }
 
 // taggedWorkerSessions returns the tmux session names of non-archived sessions

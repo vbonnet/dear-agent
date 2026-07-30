@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -44,6 +45,114 @@ func testCodexHookProof(session, reason, actor string) override.AuthorizationPro
 		Session:         session,
 		Subject:         testCodexHookSubject,
 		AuthorizationID: "0123456789abcdef0123456789abcdef",
+	}
+}
+
+func TestReserveExecutorLaunchOverridesReauthenticatesClaimsAtLiveBrake(t *testing.T) {
+	brakeClaim := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator verified host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "worker-one",
+		AuthorizationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	onlyBrake := circuitbreaker.CheckResult{
+		Gates: []circuitbreaker.GateResult{{
+			Gate: "admission_brake", RequiresOverride: true,
+		}},
+	}
+	checks := 0
+	check := func() circuitbreaker.CheckResult {
+		checks++
+		return onlyBrake
+	}
+	fresh := &override.Reservation{}
+	var reserved override.Request
+	reservations, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{brakeClaim},
+		check,
+		func(request override.Request) (*override.Reservation, error) {
+			reserved = request
+			return fresh, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("reserve executor overrides: %v", err)
+	}
+	if checks != 2 {
+		t.Fatalf("live admission checks = %d, want 2", checks)
+	}
+	if len(reservations) != 1 || reservations[0] != fresh {
+		t.Fatalf("authenticated reservations = %v, want fresh reservation", reservations)
+	}
+	if reserved.Kind != brakeClaim.Kind ||
+		reserved.Reason != brakeClaim.Reason ||
+		reserved.Actor != brakeClaim.Actor ||
+		reserved.Session != brakeClaim.Session {
+		t.Fatalf("fresh reservation request = %+v, want exact launch claim", reserved)
+	}
+}
+
+func TestReserveExecutorLaunchOverridesDropsBrakeClaimWhenBrakeClears(t *testing.T) {
+	onlyBrake := circuitbreaker.CheckResult{
+		Gates: []circuitbreaker.GateResult{{
+			Gate: "admission_brake", RequiresOverride: true,
+		}},
+	}
+	results := []circuitbreaker.CheckResult{onlyBrake, {Allowed: true}}
+	reservations, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{{
+			Kind:            override.KindAdmissionBrake,
+			Reason:          "operator verified host recovery before this launch",
+			Actor:           "dispatcher-test",
+			Session:         "worker-one",
+			AuthorizationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		func() circuitbreaker.CheckResult {
+			result := results[0]
+			results = results[1:]
+			return result
+		},
+		func(override.Request) (*override.Reservation, error) {
+			return &override.Reservation{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("reserve executor overrides: %v", err)
+	}
+	if len(reservations) != 0 {
+		t.Fatalf("cleared brake retained %d authorization reservations", len(reservations))
+	}
+}
+
+func TestReserveExecutorLaunchOverridesRejectsOtherLiveGate(t *testing.T) {
+	reserveCalls := 0
+	_, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{{
+			Kind:            override.KindAdmissionBrake,
+			Reason:          "operator verified host recovery before this launch",
+			Actor:           "dispatcher-test",
+			Session:         "worker-one",
+			AuthorizationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		func() circuitbreaker.CheckResult {
+			return circuitbreaker.CheckResult{
+				Gates: []circuitbreaker.GateResult{{Gate: "disk"}},
+			}
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "live circuit breakers") {
+		t.Fatalf("other-gate error = %v", err)
+	}
+	if reserveCalls != 0 {
+		t.Fatalf("other-gate refusal made %d override reservations", reserveCalls)
 	}
 }
 
@@ -305,9 +414,12 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 	authorizedUses := 0
 	recordedSpawns := 0
-	commitLaunchOverrideProofs = func(proofs ...override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(sessionName string, proofs ...override.AuthorizationProof) error {
 		if !hookConfigurationPrepared || !executableResolved {
 			t.Fatal("hook-trust use recorded before launch preparation completed")
+		}
+		if sessionName != "bypass-codex" {
+			t.Fatalf("override session = %q, want bypass-codex", sessionName)
 		}
 		want := []override.AuthorizationProof{brakeProof, hookProof}
 		if !slices.Equal(proofs, want) {

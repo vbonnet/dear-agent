@@ -24,13 +24,16 @@ const (
 )
 
 var (
-	anyProjectDirRef     = regexp.MustCompile(`\$\{?(?:CLAUDE|CODEX)_PROJECT_DIR\b`)
-	hookRootReference    = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
-	relativePathToken    = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
-	runtimeDirReference  = regexp.MustCompile(`(?:\$\{(?:PWD|HOME|TMPDIR|TMP|TEMP)\}|\$(?:PWD|HOME|TMPDIR|TMP|TEMP))/[A-Za-z0-9._/-]+`)
-	explicitRelativePath = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
-	absolutePathToken    = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
-	scriptCommandPath    = regexp.MustCompile(`(?m)(?:^|[;\n]|&&|\|\|)[\t ]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*((?:\.\.?/|~/)[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+|/[A-Za-z0-9._/-]+)`)
+	anyProjectDirRef      = regexp.MustCompile(`\$\{?(?:CLAUDE|CODEX)_PROJECT_DIR\b`)
+	hookRootReference     = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
+	relativePathToken     = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
+	runtimeDirReference   = regexp.MustCompile(`(?:\$\{(?:PWD|HOME|TMPDIR|TMP|TEMP)\}|\$(?:PWD|HOME|TMPDIR|TMP|TEMP))/[A-Za-z0-9._/-]+`)
+	explicitRelativePath  = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
+	absolutePathToken     = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
+	scriptCommandPath     = regexp.MustCompile(`(?m)(?:^|[;\n]|&&|\|\|)[\t ]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*((?:\.\.?/|~/)[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+|/[A-Za-z0-9._/-]+)`)
+	interpreterOperand    = regexp.MustCompile(`(?:^|[\s"'();|&])(?:(?:/bin/|/usr/bin/)?(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node))[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*([^ \t\r\n;|&]+)`)
+	envInterpreterOperand = regexp.MustCompile(`(?:^|[\s"'();|&])/usr/bin/env[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node)[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*([^ \t\r\n;|&]+)`)
+	sourceOperand         = regexp.MustCompile(`(?m)(?:^|[;\n({]|&&|\|\|)[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:source|\.)[\t ]+([^ \t\r\n;|&]+)`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -378,6 +381,9 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 			command,
 		)
 	}
+	if err := rejectMutableScriptOperands(unmatched); err != nil {
+		return fmt.Errorf("command %q: %w", command, err)
+	}
 	return nil
 }
 
@@ -431,6 +437,9 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 			path,
 		)
 	}
+	if err := rejectMutableScriptOperands(withoutFullLineComments(unmatched)); err != nil {
+		return nil, err
+	}
 
 	out := make([]string, 0, len(references))
 	for path := range references {
@@ -438,6 +447,36 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func withoutFullLineComments(script string) string {
+	lines := strings.Split(script, "\n")
+	for index, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			lines[index] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func rejectMutableScriptOperands(script string) error {
+	for _, matcher := range []*regexp.Regexp{
+		envInterpreterOperand,
+		interpreterOperand,
+		sourceOperand,
+	} {
+		for _, match := range matcher.FindAllStringSubmatch(script, -1) {
+			operand := strings.Trim(match[1], `"'`)
+			if operand == "" || (filepath.IsAbs(operand) && isSystemRuntimePath(operand)) {
+				continue
+			}
+			return fmt.Errorf(
+				"unsupported mutable interpreter or sourced-file operand %q; trusted hook scripts must reference committed operands through AGM_CODEX_HOOK_ROOT",
+				operand,
+			)
+		}
+	}
+	return nil
 }
 
 func isSystemRuntimePath(path string) bool {

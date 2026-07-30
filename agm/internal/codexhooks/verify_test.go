@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,6 +212,34 @@ func TestAttestRejectsMutableTransitiveHookRuntimeDependencies(t *testing.T) {
 				t.Fatalf("Attest() error = %v, want mutable transitive runtime-path rejection", err)
 			}
 		})
+	}
+}
+
+func TestReferencedScriptAssetsRejectsBareInterpreterAndSourceOperands(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\n/bin/sh helper\n",
+		"#!/bin/sh\n/bin/sh ./helper\n",
+		"#!/bin/sh\n/usr/bin/env bash helper\n",
+		"#!/bin/sh\nexec /bin/sh helper\n",
+		"#!/bin/sh\nif /bin/sh helper; then exit 0; fi\n",
+		"#!/bin/bash\nsource helper\n",
+		"#!/bin/sh\n. helper\n",
+	} {
+		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "mutable interpreter or sourced-file operand") {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want mutable operand rejection", script, err)
+		}
+	}
+}
+
+func TestReferencedScriptAssetsAllowsCommittedInterpreterOperand(t *testing.T) {
+	const script = "#!/bin/sh\n/bin/sh \"${AGM_CODEX_HOOK_ROOT:-.}/tools/helper\"\n"
+	references, err := referencedScriptAssets([]byte(script))
+	if err != nil {
+		t.Fatalf("referencedScriptAssets() error: %v", err)
+	}
+	if !slices.Equal(references, []string{"tools/helper"}) {
+		t.Fatalf("references = %v, want committed interpreter operand", references)
 	}
 }
 

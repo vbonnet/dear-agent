@@ -373,9 +373,9 @@ type Request struct {
 }
 
 // AuthorizationProof is the exact non-secret reservation claim sealed into a
-// private launch handoff. It does not authorize anything by itself:
-// CommitProofs revalidates every matching root-owned grant at the executable
-// boundary before recording the complete transaction.
+// private launch handoff. It does not authorize anything by itself: the
+// executor must repeat the live safety gate and call Reserve again before
+// committing a fresh reservation.
 type AuthorizationProof struct {
 	Kind            Kind   `json:"kind"`
 	Reason          string `json:"reason"`
@@ -398,8 +398,9 @@ type Reservation struct {
 }
 
 // Proof returns the immutable fields for this reservation without consuming
-// it. A private executor may pass the proof to CommitProofs only after every
-// other fallible launch validation has succeeded.
+// it. A private executor treats these fields as an untrusted launch claim,
+// repeats its live gate, and makes a fresh reservation only after every other
+// fallible launch validation has succeeded.
 func (r *Reservation) Proof() AuthorizationProof {
 	if r == nil {
 		return AuthorizationProof{}
@@ -815,11 +816,9 @@ func LoadUses(since time.Time) ([]Use, error) {
 // check can therefore reserve human authorization, repeat that check, and
 // commit only after the final result permits the operation.
 //
-// Reserve and Authorize are the public launch-surface entry points;
-// CommitProofs is reserved for the private executor that consumes claims
-// produced by Reserve. Callers must not consult ValidateReason or LoadGrant
-// directly and decide for themselves — that is how one path ends up skipping
-// the ledger.
+// Reserve and Authorize are the public launch-surface entry points. Callers
+// must not consult ValidateReason or LoadGrant directly and decide for
+// themselves — that is how one path ends up skipping the ledger.
 func Reserve(req Request) (*Reservation, error) {
 	if !req.Kind.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownKind, req.Kind)
@@ -924,64 +923,6 @@ func newAuthorizationID() (string, error) {
 		return "", fmt.Errorf("generate override authorization ID: %w", err)
 	}
 	return fmt.Sprintf("%x", random), nil
-}
-
-// CommitProofs revalidates and records prepared authorization claims as one
-// transaction. The private executor calls it only after attestation, hook
-// configuration, helper validation, and executable lookup have succeeded.
-func CommitProofs(proofs ...AuthorizationProof) ([]Use, error) {
-	if len(proofs) == 0 {
-		return nil, nil
-	}
-	reservationCommitMu.Lock()
-	defer reservationCommitMu.Unlock()
-
-	now := time.Now().UTC()
-	uses := make([]Use, 0, len(proofs))
-	authorizationIDs := make(map[string]struct{}, len(proofs))
-	for _, proof := range proofs {
-		if !proof.Kind.Valid() {
-			return nil, fmt.Errorf("%w: %q", ErrUnknownKind, proof.Kind)
-		}
-		if proof.AuthorizationID == "" || !authorizationIDRE.MatchString(proof.AuthorizationID) {
-			return nil, fmt.Errorf("%w: authorization proof ID is missing or invalid", ErrLedgerRecord)
-		}
-		if _, duplicate := authorizationIDs[proof.AuthorizationID]; duplicate {
-			return nil, fmt.Errorf("%w: authorization proof ID is repeated", ErrLedgerRecord)
-		}
-		authorizationIDs[proof.AuthorizationID] = struct{}{}
-		reason, err := ValidateReason(proof.Reason)
-		if err != nil {
-			return nil, err
-		}
-		if reason != proof.Reason {
-			return nil, fmt.Errorf("%w: authorization proof reason is not normalized", ErrLedgerRecord)
-		}
-		grant, err := LoadGrant(proof.Kind)
-		if err != nil {
-			return nil, err
-		}
-		if err := grant.Authorizes(proof.Kind, proof.Subject, now); err != nil {
-			return nil, err
-		}
-		use := Use{
-			Kind:            proof.Kind,
-			Reason:          proof.Reason,
-			Actor:           proof.Actor,
-			Session:         proof.Session,
-			Subject:         proof.Subject,
-			AuthorizationID: proof.AuthorizationID,
-			AtUTC:           now,
-		}
-		if _, err := EncodeLedgerUse(use); err != nil {
-			return nil, err
-		}
-		uses = append(uses, use)
-	}
-	if err := RecordAll(uses); err != nil {
-		return nil, err
-	}
-	return uses, nil
 }
 
 // Commit records a reserved authorization exactly once.

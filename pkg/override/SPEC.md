@@ -62,11 +62,13 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-23** When a human approves `codex-hook-trust`, the system shall bind the root-owned grant to the canonical repository, full source commit, and committed hook-byte digest displayed during approval, and shall refuse a generic or mismatched hook-trust grant.
 
-**OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
+**OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, re-reserve every claim with a fresh authorization ID, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
 
 **OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and root-owned caller policy to the exact installed AGM code identity, carry the live launcher PID in the canonical append request, require that PID to be the helper's first non-sudo ancestor, and authenticate its running identity before appending.
 
 **OVR-26** When final launch admission succeeds, the system shall record the circuit-breaker spawn timestamp only after every launch-bound override reservation has been committed or sealed successfully and immediately before process or tmux submission.
+
+**OVR-27** When the private Codex executor receives a deferred admission-brake claim, the system shall treat the claim and its authorization ID as non-authoritative, repeat every live circuit-breaker gate before and after reserving current human authorization, commit a fresh admission-brake reservation only when the brake remains the sole refusal, and reject the launch when any other gate refuses.
 
 ## Override kinds
 
@@ -149,11 +151,12 @@ envelope containing at most one use per override kind. The helper appends only t
 root-owned grant, exact subject, unique random authorization ID, and near-current
 timestamp, synchronizes before returning, and stops at a 16 MiB ledger cap
 pending operator-owned rotation. The one-shot private Codex handoff carries
-prepared authorization claims with the same random IDs and immutable source
-fields. After re-running the persisted Git attestation and all other fallible
-launch checks, its executor revalidates the current grants and appends the
-complete transaction immediately before replacing AGM with Codex. The IDs are
-audit correlation, not secret capabilities.
+prepared authorization claims and immutable source fields, but those claim IDs
+are audit correlation rather than secret capabilities. After re-running the
+persisted Git attestation and all other fallible launch checks, its executor
+repeats the live admission gates, re-reserves each current grant with a fresh
+random ID, and appends the complete transaction immediately before replacing
+AGM with Codex.
 
 The installer also installs the matching AGM build, displays its
 kernel-verifiable code identity for separate typed confirmation, and records

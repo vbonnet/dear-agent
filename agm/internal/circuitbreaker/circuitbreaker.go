@@ -283,6 +283,25 @@ type CheckResult struct {
 	Level   DEARLevel
 }
 
+// RequiresAdmissionBrakeOverride reports whether the admission brake is the
+// only refusing gate. Launch surfaces use this shared classification both
+// before staging a process and in the private executor that authenticates a
+// deferred override claim.
+func RequiresAdmissionBrakeOverride(result CheckResult) bool {
+	engagedBrake := false
+	for _, gate := range result.Gates {
+		if gate.Passed {
+			continue
+		}
+		if gate.Gate == "admission_brake" && gate.RequiresOverride {
+			engagedBrake = true
+			continue
+		}
+		return false
+	}
+	return engagedBrake
+}
+
 // checkOptions carries the optional disk, process, and brake readers injected
 // via CheckOption. Keeping them optional preserves Check's original signature so
 // existing callers and tests compile unchanged; production wires all three

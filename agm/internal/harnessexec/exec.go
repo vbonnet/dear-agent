@@ -48,14 +48,126 @@ var (
 	verifyCodexHookTrustAttestation = func(attestation codexhooks.Attestation, workDir string) error {
 		return codexhooks.Verify(context.Background(), attestation, workDir)
 	}
-	commitLaunchOverrideProofs = func(proofs ...override.AuthorizationProof) error {
-		_, err := override.CommitProofs(proofs...)
-		return err
-	}
-	recordLaunchSpawn = func() error {
+	commitLaunchOverrideProofs = commitAuthenticatedLaunchOverrideProofs
+	recordLaunchSpawn          = func() error {
 		return circuitbreaker.NewFileSpawnTimer().RecordSpawn(time.Now())
 	}
 )
+
+type reserveOverrideClaim func(override.Request) (*override.Reservation, error)
+type checkLaunchAdmission func() circuitbreaker.CheckResult
+
+func commitAuthenticatedLaunchOverrideProofs(
+	sessionName string,
+	proofs ...override.AuthorizationProof,
+) error {
+	reservations, err := reserveExecutorLaunchOverrides(
+		sessionName,
+		proofs,
+		currentLaunchAdmission,
+		override.Reserve,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = override.CommitAll(reservations...)
+	return err
+}
+
+func reserveExecutorLaunchOverrides(
+	sessionName string,
+	proofs []override.AuthorizationProof,
+	check checkLaunchAdmission,
+	reserve reserveOverrideClaim,
+) ([]*override.Reservation, error) {
+	if len(proofs) == 0 {
+		return nil, nil
+	}
+	hasAdmissionBrake := slices.ContainsFunc(proofs, func(proof override.AuthorizationProof) bool {
+		return proof.Kind == override.KindAdmissionBrake
+	})
+	if hasAdmissionBrake {
+		if err := validateExecutorAdmissionResult(check()); err != nil {
+			return nil, err
+		}
+	}
+
+	type authenticatedReservation struct {
+		kind        override.Kind
+		reservation *override.Reservation
+	}
+	authenticated := make([]authenticatedReservation, 0, len(proofs))
+	seen := make(map[override.Kind]struct{}, len(proofs))
+	for _, proof := range proofs {
+		if _, duplicate := seen[proof.Kind]; duplicate {
+			return nil, fmt.Errorf("private Codex launch repeats override kind %q", proof.Kind)
+		}
+		seen[proof.Kind] = struct{}{}
+		switch proof.Kind {
+		case override.KindAdmissionBrake, override.KindCodexHookTrust:
+		case override.KindSupervisorOAuthCheck:
+			return nil, fmt.Errorf("private Codex launch contains unsupported override kind %q", proof.Kind)
+		default:
+			return nil, fmt.Errorf("private Codex launch contains unsupported override kind %q", proof.Kind)
+		}
+		if proof.Session != sessionName {
+			return nil, errors.New("private Codex launch override claim is for another session")
+		}
+		reservation, err := reserve(override.Request{
+			Kind:    proof.Kind,
+			Reason:  proof.Reason,
+			Actor:   proof.Actor,
+			Session: proof.Session,
+			Subject: proof.Subject,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("re-authorize private Codex launch override %q: %w", proof.Kind, err)
+		}
+		authenticated = append(authenticated, authenticatedReservation{
+			kind: proof.Kind, reservation: reservation,
+		})
+	}
+
+	crossesAdmissionBrake := false
+	if hasAdmissionBrake {
+		final := check()
+		if err := validateExecutorAdmissionResult(final); err != nil {
+			return nil, err
+		}
+		crossesAdmissionBrake = circuitbreaker.RequiresAdmissionBrakeOverride(final)
+	}
+	reservations := make([]*override.Reservation, 0, len(authenticated))
+	for _, item := range authenticated {
+		if item.kind == override.KindAdmissionBrake && !crossesAdmissionBrake {
+			continue
+		}
+		reservations = append(reservations, item.reservation)
+	}
+	return reservations, nil
+}
+
+func validateExecutorAdmissionResult(result circuitbreaker.CheckResult) error {
+	if result.Allowed || circuitbreaker.RequiresAdmissionBrakeOverride(result) {
+		return nil
+	}
+	return fmt.Errorf(
+		"private Codex launch denied by live circuit breakers: %s",
+		circuitbreaker.FormatDenied(result),
+	)
+}
+
+func currentLaunchAdmission() circuitbreaker.CheckResult {
+	return circuitbreaker.Check(
+		circuitbreaker.DefaultConfig(),
+		circuitbreaker.DefaultLoadReader(),
+		circuitbreaker.TmuxWorkerCounter{},
+		circuitbreaker.NewFileSpawnTimer(),
+		circuitbreaker.DefaultMemReader(),
+		circuitbreaker.WithDiskReader(circuitbreaker.DefaultDiskReader()),
+		circuitbreaker.WithProcCounter(circuitbreaker.DefaultProcCounter()),
+		circuitbreaker.WithBrakeReader(circuitbreaker.DefaultBrakeReader()),
+	)
+}
 
 var codexAllowedEnvironment = []string{
 	"HOME", "PATH", "PWD", "SHELL", "USER", "LOGNAME",
@@ -349,7 +461,7 @@ func runCodex(args []string) error {
 	// Commit every prepared launch override as one transaction only after all
 	// fallible attestation, helper, configuration, and executable checks have
 	// succeeded. This is the final userspace boundary before exec.
-	if err := commitLaunchOverrideProofs(request.OverrideProofs...); err != nil {
+	if err := commitLaunchOverrideProofs(request.SessionName, request.OverrideProofs...); err != nil {
 		return fmt.Errorf("commit Codex launch override transaction: %w", err)
 	}
 	if request.RecordSpawn {
