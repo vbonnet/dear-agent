@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -684,6 +685,11 @@ func rejectDynamicCommandResolution(script string) error {
 			reason = "stateful variable-writing shell builtin"
 			return false
 		}
+		if arithmeticNodeWritesVariable(node) {
+			rejected = node
+			reason = "stateful variable-writing arithmetic expression"
+			return false
+		}
 		call, ok := node.(*syntax.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
@@ -703,6 +709,32 @@ func rejectDynamicCommandResolution(script string) error {
 		rejected.Pos().Line(),
 		reason,
 	)
+}
+
+func arithmeticNodeWritesVariable(node syntax.Node) bool {
+	switch arithmetic := node.(type) {
+	case *syntax.BinaryArithm:
+		return slices.Contains([]syntax.BinAritOperator{
+			syntax.Assgn,
+			syntax.AddAssgn,
+			syntax.SubAssgn,
+			syntax.MulAssgn,
+			syntax.QuoAssgn,
+			syntax.RemAssgn,
+			syntax.AndAssgn,
+			syntax.OrAssgn,
+			syntax.XorAssgn,
+			syntax.ShlAssgn,
+			syntax.ShrAssgn,
+			syntax.AndBoolAssgn,
+			syntax.OrBoolAssgn,
+			syntax.XorBoolAssgn,
+			syntax.PowAssgn,
+		}, arithmetic.Op)
+	case *syntax.UnaryArithm:
+		return arithmetic.Op == syntax.Inc || arithmetic.Op == syntax.Dec
+	}
+	return false
 }
 
 func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {

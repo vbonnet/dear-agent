@@ -411,9 +411,23 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 	}
 }
 
+func TestTrustedHookAssetsRejectAssignmentCapableArithmetic(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/bash\n: $((PATH=1)); helper\n",
+		"#!/bin/bash\n: $((PATH+=1)); helper\n",
+		"#!/bin/bash\n: $((PATH++)); helper\n",
+		"#!/bin/bash\n: $((enabled ? PATH=1 : 0)); helper\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil {
+			t.Fatalf("validateScriptAsset(%q) succeeded, want arithmetic-assignment rejection", script)
+		}
+	}
+}
+
 func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n/bin/printf '%s\\n' \"$HOME\"\n",
+		"#!/bin/bash\n/bin/printf '%s\\n' \"$((1 + 2))\"\n",
 		"#!/bin/sh\ncommand -v jq\n",
 		"#!/bin/sh\n/usr/bin/env -i /bin/true\n",
 		"#!/bin/bash\nbuiltin source /usr/bin/true\n",
