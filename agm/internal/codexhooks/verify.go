@@ -865,6 +865,24 @@ func sedUsesCommandExecution(command string, args []*syntax.Word) bool {
 	return slices.ContainsFunc(programs, sedProgramExecutesCommand)
 }
 
+func findUsesCommandExecution(command string, args []*syntax.Word) bool {
+	if filepath.Base(command) != "find" {
+		return false
+	}
+	return slices.ContainsFunc(args, func(argument *syntax.Word) bool {
+		value, static := staticShellWord(argument)
+		if !static {
+			return true
+		}
+		switch value {
+		case "-exec", "-execdir", "-ok", "-okdir":
+			return true
+		default:
+			return false
+		}
+	})
+}
+
 func staticSedPrograms(args []*syntax.Word) ([]string, bool) {
 	var programs []string
 	operandsOnly := false
@@ -1114,6 +1132,9 @@ func dynamicBuiltinOperand(
 	}
 	if sedUsesCommandExecution(command, args) {
 		return commandWord, "command-capable sed runtime"
+	}
+	if findUsesCommandExecution(command, args) {
+		return commandWord, "command-capable find runtime"
 	}
 	switch command {
 	case "mapfile", "readarray":

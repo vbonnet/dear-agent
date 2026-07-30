@@ -407,6 +407,9 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\ncommand /usr/bin/sed -n 's/a/b/e'\n",
 		"#!/bin/sh\n/usr/bin/sed -e '1,${e ./helper\n}'\n",
 		"#!/bin/sh\n/usr/bin/sed \"$SED_PROGRAM\"\n",
+		"#!/bin/sh\n/usr/bin/find /usr/bin/true -exec /bin/bash -c 'x=$(printf \".%shelper\" /); \"$x\"' ';'\n",
+		"#!/bin/sh\ncommand /usr/bin/find /usr/bin -execdir /bin/true '{}' +\n",
+		"#!/bin/sh\n/usr/bin/find /usr/bin \"$FIND_ACTION\" /bin/true '{}' ';'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
@@ -437,6 +440,7 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/bash\nbuiltin source /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/sed --sandbox -n 's/a/b/p'\n",
 		"#!/bin/sh\n/usr/bin/sed -n 's|e|x|g'\n",
+		"#!/bin/sh\n/usr/bin/find /usr/bin -name true -print\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)
