@@ -17,7 +17,7 @@ nor an operator-selected destination.
 
 **OLA-03** When the fixed ledger or its parent is inspected, the command shall reject symlinks, non-regular files, non-root ownership, and group-writable or other-writable modes.
 
-**OLA-04** When concurrent records are appended, the command shall serialize the size check and append under an exclusive lock and shall refuse growth beyond the fixed ledger cap.
+**OLA-04** When concurrent or repeated records are appended, the command shall serialize the rate-limit, size-check, and append under an exclusive lock, shall enforce a bounded per-kind window with automatic recovery, and shall refuse growth beyond the fixed ledger cap.
 
 **OLA-05** When a valid record is accepted, the command shall append only to `/var/log/dear-agent-overrides.jsonl`, set the ledger to a non-writable-by-users mode, and durably synchronize it before returning success.
 

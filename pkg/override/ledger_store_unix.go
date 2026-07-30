@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build !windows
 
 package override
 
@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -18,6 +19,12 @@ func appendOperatorLedger(data []byte, path string) error {
 	if path != operatorLedgerPath {
 		return fmt.Errorf("%w: privileged append destination is %q, want fixed %q",
 			ErrLedgerUntrusted, path, operatorLedgerPath)
+	}
+	if err := validateRootOwnedPath(filepath.Dir(operatorLedgerAppendHelper), true); err != nil {
+		return fmt.Errorf(
+			"%w: ledger helper parent is not installed securely at %s: %w",
+			ErrLedgerUntrusted, filepath.Dir(operatorLedgerAppendHelper), err,
+		)
 	}
 	if err := validateRootOwnedPath(operatorLedgerAppendHelper, false); err != nil {
 		return fmt.Errorf(

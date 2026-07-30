@@ -88,7 +88,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-disk-watchdog-launchagent   Stage the disk-watchdog launch agent (5-min tick)
 #   uninstall-disk-watchdog-launchagent Remove the disk-watchdog launch agent
 #   build-override-ledger-helper        Build the fixed privileged Unix ledger append helper
-#   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Linux)
+#   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Unix)
 #   install-override-audit-launchagent  Stage the daily dangerous-override audit
 #   uninstall-override-audit-launchagent Remove the dangerous-override audit
 #   install-gobin-guard             Install the ~/go/bin SENSE+ESCALATE guard outside GOBIN (ce-24f1)
@@ -899,7 +899,6 @@ uninstall-disk-watchdog-launchagent:
 # only for the helper's exact path, never for AGM, tee, chmod, or a variable
 # destination.
 build-override-ledger-helper:
-	@test "$$(uname -s)" != Darwin || { echo "macOS uses authopen; no ledger helper is required" >&2; exit 2; }
 	@mkdir -p bin
 	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
 
@@ -907,6 +906,7 @@ install-override-ledger-helper: build-override-ledger-helper
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
+		root_group="$$(id -gn 0)"; \
 		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
 		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
 		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
@@ -917,8 +917,8 @@ install-override-ledger-helper: build-override-ledger-helper
 			exit 2; \
 		fi; \
 		/usr/bin/sudo -v; \
-		/usr/bin/sudo /usr/bin/install -d -o root -g root -m 0755 /usr/local/libexec; \
-		/usr/bin/sudo /usr/bin/install -o root -g root -m 0755 bin/dear-agent-override-ledger-append "$$helper"; \
+		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/dear-agent-override-ledger-append "$$helper"; \
 		printf '%s\n' "$$rule" | /usr/bin/sudo /usr/bin/tee "$$staging" >/dev/null; \
 		/usr/bin/sudo /bin/chmod 0440 "$$staging"; \
 		if ! /usr/bin/sudo /usr/sbin/visudo -cf "$$staging"; then \

@@ -78,6 +78,40 @@ func TestAppendInputCapsTheFixedLedger(t *testing.T) {
 	}
 }
 
+func TestAppendInputRateLimitsEachKindWithAutomaticRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.jsonl")
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	use := override.Use{
+		Kind:   override.KindAdmissionBrake,
+		Reason: "disk watchdog clobbered the SRE hold, verifying the fix once",
+		Actor:  "vroom-dispatch",
+		AtUTC:  now,
+	}
+	line, err := override.EncodeLedgerUse(use)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range maxUsesPerKindPerWindow {
+		if err := appendInput(bytes.NewReader(line), path, false); err != nil {
+			t.Fatalf("append below rate limit: %v", err)
+		}
+	}
+	if err := appendInput(bytes.NewReader(line), path, false); err == nil ||
+		!strings.Contains(err.Error(), "retry after") {
+		t.Fatalf("rate limit error = %v, want bounded retry guidance", err)
+	}
+
+	recovered := use
+	recovered.AtUTC = now.Add(privilegedRateWindow + time.Second)
+	recoveredLine, err := override.EncodeLedgerUse(recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appendInput(bytes.NewReader(recoveredLine), path, false); err != nil {
+		t.Fatalf("rate window did not recover automatically: %v", err)
+	}
+}
+
 func TestAppendInputRejectsNonRootAtProductionBoundary(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("test process is root")

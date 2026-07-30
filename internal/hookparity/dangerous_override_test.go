@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestDangerousOverrideHookRoutesRawCodexThroughAuthorization(t *testing.T) {
+func TestDangerousOverrideHookDeniesRawCodexEvenWithApprovalContext(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("hook requires jq")
 	}
@@ -30,22 +30,9 @@ func TestDangerousOverrideHookRoutesRawCodexThroughAuthorization(t *testing.T) {
 		"AGM_CODEX_HOOK_TRUST_REASON=sandbox path rotates and cannot be pre-trusted",
 		"AGM_HOOK_CAPTURE="+capture,
 	)
-	if strings.TrimSpace(output) != "" {
-		t.Fatalf("authorized hook output = %q, want allow with no decision", output)
-	}
-	raw, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatalf("canonical authorizer was not invoked: %v", err)
-	}
-	got := string(raw)
-	for _, want := range []string{
-		"override authorize codex-hook-trust",
-		"--reason sandbox path rotates and cannot be pre-trusted",
-		"--actor codex-pretool-hook",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("authorize args = %q, missing %q", got, want)
-		}
+	assertDangerousOverrideDenied(t, output, "immutable hook attestation")
+	if _, err := os.Stat(capture); !os.IsNotExist(err) {
+		t.Fatalf("raw path invoked AGM authorization without attestation: %v", err)
 	}
 }
 
@@ -56,21 +43,7 @@ func TestDangerousOverrideHookDeniesRawCodexWithoutParentReason(t *testing.T) {
 	output := runDangerousOverrideHook(t, t.TempDir(),
 		"codex --dangerously-bypass-hook-trust; true",
 	)
-	var response struct {
-		HookSpecificOutput struct {
-			PermissionDecision string `json:"permissionDecision"`
-			Reason             string `json:"permissionDecisionReason"`
-		} `json:"hookSpecificOutput"`
-	}
-	if err := json.Unmarshal([]byte(output), &response); err != nil {
-		t.Fatalf("decode denial %q: %v", output, err)
-	}
-	if response.HookSpecificOutput.PermissionDecision != "deny" {
-		t.Fatalf("decision = %q, want deny", response.HookSpecificOutput.PermissionDecision)
-	}
-	if !strings.Contains(response.HookSpecificOutput.Reason, "AGM_CODEX_HOOK_TRUST_REASON") {
-		t.Fatalf("denial does not explain parent reason: %q", response.HookSpecificOutput.Reason)
-	}
+	assertDangerousOverrideDenied(t, output, "agm session new")
 }
 
 func TestDangerousOverrideHookDefersSingleInstalledAGMCommand(t *testing.T) {
@@ -126,13 +99,30 @@ func TestDangerousOverrideHookNeverDefersCompoundOrSubstitutedCommands(t *testin
 				"AGM_CODEX_HOOK_TRUST_REASON=sandbox path rotates and cannot be pre-trusted",
 				"AGM_HOOK_CAPTURE="+capture,
 			)
-			if strings.TrimSpace(output) != "" {
-				t.Fatalf("authorized raw path output = %q, want allow with no decision", output)
-			}
-			if _, err := os.Stat(capture); err != nil {
-				t.Fatalf("compound command bypassed canonical authorization: %v", err)
+			assertDangerousOverrideDenied(t, output, "immutable hook attestation")
+			if _, err := os.Stat(capture); !os.IsNotExist(err) {
+				t.Fatalf("compound command invoked an unattested authorization path: %v", err)
 			}
 		})
+	}
+}
+
+func assertDangerousOverrideDenied(t *testing.T, output, wantReason string) {
+	t.Helper()
+	var response struct {
+		HookSpecificOutput struct {
+			PermissionDecision string `json:"permissionDecision"`
+			Reason             string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatalf("decode denial %q: %v", output, err)
+	}
+	if response.HookSpecificOutput.PermissionDecision != "deny" {
+		t.Fatalf("decision = %q, want deny", response.HookSpecificOutput.PermissionDecision)
+	}
+	if !strings.Contains(response.HookSpecificOutput.Reason, wantReason) {
+		t.Fatalf("denial reason = %q, want substring %q", response.HookSpecificOutput.Reason, wantReason)
 	}
 }
 

@@ -35,7 +35,7 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-10** When override use is aggregated, the system shall evaluate the alert threshold separately for each override kind.
 
-**OVR-11** When a raw Codex hook-trust bypass is requested outside AGM, the system shall route it through the canonical authorization entry point and shall record the authorized use.
+**OVR-11** When a raw Codex hook-trust bypass is requested outside AGM's attested launch path, the system shall deny it and direct the caller to the canonical attested `agm session new` flow.
 
 **OVR-12** When AGM's private Codex executor receives a hook-trust bypass, the system shall require a one-shot prepared handoff that binds the exact attested hook root and complete launch request and lives outside the workspace and every agent-writable root.
 
@@ -59,11 +59,10 @@ to run is exactly how a guardrail becomes decorative (see
 
 `.codex/hooks/pretool-dangerous-override-guard` is defence in depth for the
 case where an agent shells out to a raw `codex --dangerously-bypass-hook-trust`
-instead of going through AGM. Raw Codex's flag is boolean, so its reason comes
-from `AGM_CODEX_HOOK_TRUST_REASON` in the parent Codex environment; a tool
-command cannot set that environment retroactively. The hook invokes `agm
-override authorize`, which validates the root-owned grant and appends the same
-ledger as in-process callers. It refuses via Codex's `permissionDecision:
+instead of going through AGM. It denies that raw path because authorization
+alone cannot attest or install an immutable hook root. Its sole exemption is a
+positively allowlisted complete `agm session new` command, whose binary path
+performs both controls. The hook refuses via Codex's `permissionDecision:
 "deny"` wire form; a non-zero hook exit is **not** a refusal in Codex.
 
 For the Codex hook-trust kind, authorization composes with attestation
@@ -88,7 +87,7 @@ requires a fresh password challenge, and invalidates the new timestamp after
 installation. That OS authentication and the command's interactive typed
 confirmation form the human boundary.
 
-On non-macOS Unix, the operator first runs
+On Unix, the operator first runs
 `make install-override-ledger-helper`. That separately authenticated setup
 installs the one-purpose root-owned
 `/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # PreToolUse hook: dangerous overrides require a stated reason and a human approval.
 #
-# WHAT: routes a raw Codex --dangerously-bypass-hook-trust tool call through
-# AGM's shared authorization gate. Normal AGM commands authorize inside the
-# binary; this hook covers the only native flag that could otherwise go around
-# that binary.
+# WHAT: denies a raw Codex --dangerously-bypass-hook-trust tool call. Only
+# AGM's attested `session new` path may carry this flag; authorization without
+# immutable hook attestation is not sufficient.
 #
 # WHY a block, not a nudge: these flags switch off a safety control. An agent
 # that can set one unattended can silently disable the control and nobody finds
@@ -64,20 +63,4 @@ if [ "$resolved_agm" = "$trusted_agm" ] && [[ "$cmd" =~ $safe_command_pattern ]]
   esac
 fi
 
-# A raw Codex flag is boolean, so the justification cannot ride on the flag.
-# The operator must place it in the parent Codex environment. A tool command
-# cannot retroactively alter this hook's environment, which keeps the reason
-# outside the unattended command being authorized.
-reason="${AGM_CODEX_HOOK_TRUST_REASON:-}"
-if [ -z "$reason" ]; then
-  deny "raw codex --dangerously-bypass-hook-trust requires AGM_CODEX_HOOK_TRUST_REASON in the parent Codex environment. Stop and ask the operator to restart Codex with that auditable reason after running: $trusted_agm override approve codex-hook-trust --ttl 1h"
-fi
-if [ ! -x "$trusted_agm" ]; then
-  deny "cannot authorize raw codex hook-trust bypass: trusted AGM binary is missing at $trusted_agm"
-fi
-
-auth_error="$("$trusted_agm" override authorize codex-hook-trust \
-  --reason "$reason" --actor codex-pretool-hook 2>&1 >/dev/null)" || \
-  deny "raw codex hook-trust override refused by the shared authorization gate: $auth_error"
-
-exit 0
+deny "raw codex --dangerously-bypass-hook-trust is forbidden because it cannot prove immutable hook attestation. Use: $trusted_agm session new <name> --dangerously-bypass-hook-trust=<auditable-reason>"
