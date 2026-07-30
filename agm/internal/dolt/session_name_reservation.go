@@ -147,7 +147,7 @@ func (a *Adapter) sessionNameReservationOwned(sessionID, name string) (bool, err
 func resolveSessionNameReservationCommitError(reservationCreated bool, commitErr error, owned bool, inspectErr error) (bool, error) {
 	err := fmt.Errorf("commit session-name reservation: %w", commitErr)
 	if inspectErr != nil {
-		return true, &SessionNameReservationCommitUncertainError{
+		return reservationCreated, &SessionNameReservationCommitUncertainError{
 			Err: errors.Join(err, inspectErr),
 		}
 	}

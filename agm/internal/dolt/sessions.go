@@ -143,23 +143,28 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) (retErr error) {
 	}
 
 	reservationHeld := session.Name != "" && session.Lifecycle != manifest.LifecycleArchived
+	releaseReservation := false
 	if reservationHeld {
-		if err := a.ReserveSessionName(session.SessionID, session.Name); err != nil {
+		reservationCreated, err := a.reserveSessionName(session.SessionID, session.Name)
+		releaseReservation = reservationCreated
+		if releaseReservation {
+			defer func() {
+				if !releaseReservation {
+					return
+				}
+				if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
+					retErr = errors.Join(retErr, err)
+				}
+			}()
+		}
+		if err != nil {
 			return err
 		}
-		defer func() {
-			if !reservationHeld {
-				return
-			}
-			if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
-				retErr = errors.Join(retErr, err)
-			}
-		}()
 	}
 	if err := a.insertSessionRegistration(session, reservationHeld); err != nil {
 		return err
 	}
-	reservationHeld = false
+	releaseReservation = false
 	return nil
 }
 
@@ -551,10 +556,15 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 		return RenameSessionIdentityResult{}, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 	reservationHeld := newName != previousName
+	releaseReservation := false
 	if reservationHeld {
 		reservationCreated, err := a.reserveSessionName(sessionID, newName)
-		if reservationCreated {
+		releaseReservation = reservationCreated
+		if releaseReservation {
 			defer func() {
+				if !releaseReservation {
+					return
+				}
 				if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
 					retErr = errors.Join(retErr, err)
 				}
@@ -577,6 +587,10 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 		newName,
 		reservationName,
 	)
+	var uncertain *SessionIdentityMutationCommitUncertainError
+	if errors.As(retErr, &uncertain) {
+		releaseReservation = false
+	}
 	if retErr == nil {
 		result.StorageCommitted = true
 	}
@@ -631,14 +645,23 @@ func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, 
 	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	fenceRevision := uuid.NewString()
-	if fenceErr := a.fenceSessionIdentityRename(inspectCtx, sessionID, previousName, previousTmuxName, observedRevisionValue, fenceRevision); fenceErr != nil {
+	fenceErr := a.fenceSessionIdentityRename(inspectCtx, sessionID, previousName, previousTmuxName, observedRevisionValue, fenceRevision)
+	if fenceErr != nil {
 		err = errors.Join(err, fenceErr)
 	}
 	currentName, currentTmuxName, currentRevision, inspectErr := a.inspectSessionIdentity(inspectCtx, sessionID)
 	if inspectErr != nil {
-		return RenameSessionIdentityResult{}, errors.Join(err, inspectErr)
+		err = errors.Join(err, inspectErr)
+		return RenameSessionIdentityResult{}, sessionIdentityRenameInspectionError(err, fenceErr)
 	}
 	return classifySessionIdentityRenameAfterError(previousName, previousTmuxName, observedRevision, newName, nextRevision, fenceRevision, currentName, currentTmuxName, currentRevision, err)
+}
+
+func sessionIdentityRenameInspectionError(primaryErr, fenceErr error) error {
+	if fenceErr != nil {
+		return &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
+	}
+	return primaryErr
 }
 
 func (a *Adapter) fenceSessionIdentityRename(ctx context.Context, sessionID, previousName, previousTmuxName string, observedRevisionValue any, fenceRevision string) error {
@@ -679,6 +702,11 @@ func classifySessionIdentityRenameAfterError(previousName, previousTmuxName, obs
 	// original autocommit may still be in flight.
 	fenced := currentRevision == fenceRevision || currentRevision != observedRevision
 	rollbackSafe := previousIdentity && fenced
+	if previousIdentity && !fenced {
+		return RenameSessionIdentityResult{}, &SessionIdentityMutationCommitUncertainError{
+			Err: primaryErr,
+		}
+	}
 	return RenameSessionIdentityResult{TmuxRollbackSafe: rollbackSafe}, primaryErr
 }
 

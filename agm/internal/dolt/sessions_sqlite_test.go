@@ -191,6 +191,68 @@ func TestSQLiteSessionNameReservationPrecedesAndIsConsumedByRegistration(t *test
 	}
 }
 
+func TestSQLiteCreateSessionCleansOnlyItsOwnReservationAfterRegistrationFailure(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "duplicate-id",
+		Name:      "existing-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSession(existing) error: %v", err)
+	}
+
+	failedRegistration := &manifest.Manifest{
+		SessionID: "duplicate-id",
+		Name:      "internally-reserved-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := adapter.CreateSession(failedRegistration); err == nil {
+		t.Fatal("CreateSession(duplicate ID) succeeded")
+	}
+	var reservations int
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations
+		 WHERE workspace = ? AND name = ? AND session_id = ?`,
+		adapter.workspace,
+		failedRegistration.Name,
+		failedRegistration.SessionID,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count internally created reservation: %v", err)
+	}
+	if reservations != 0 {
+		t.Fatalf("internally created reservations after registration failure = %d, want 0", reservations)
+	}
+
+	const callerReservedName = "caller-reserved-name"
+	if err := adapter.ReserveSessionName(failedRegistration.SessionID, callerReservedName); err != nil {
+		t.Fatalf("ReserveSessionName(caller) error: %v", err)
+	}
+	failedRegistration.Name = callerReservedName
+	if err := adapter.CreateSession(failedRegistration); err == nil {
+		t.Fatal("CreateSession(duplicate ID with caller reservation) succeeded")
+	}
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations
+		 WHERE workspace = ? AND name = ? AND session_id = ?`,
+		adapter.workspace,
+		callerReservedName,
+		failedRegistration.SessionID,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count caller-owned reservation: %v", err)
+	}
+	if reservations != 1 {
+		t.Fatalf("caller-owned reservations after registration failure = %d, want 1", reservations)
+	}
+}
+
 func TestResolveSessionNameReservationCommitErrorReconcilesOwnership(t *testing.T) {
 	commitErr := errors.New("reservation commit acknowledgement lost")
 	inspectErr := errors.New("reservation re-read unavailable")
@@ -227,6 +289,13 @@ func TestResolveSessionNameReservationCommitErrorReconcilesOwnership(t *testing.
 			wantErr:            true,
 			wantUncertain:      true,
 		},
+		{
+			name:               "failed inspection preserves caller-owned reservation",
+			reservationCreated: false,
+			inspectErr:         inspectErr,
+			wantErr:            true,
+			wantUncertain:      true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -254,6 +323,23 @@ func TestResolveSessionNameReservationCommitErrorReconcilesOwnership(t *testing.
 				t.Fatalf("error = %v, want inspect error", err)
 			}
 		})
+	}
+}
+
+func TestSessionIdentityRenameInspectionErrorRetainsReservationOnlyWhenFenceFails(t *testing.T) {
+	primaryErr := errors.New("rename inspection failed")
+	fenceErr := errors.New("rename fence failed")
+
+	err := sessionIdentityRenameInspectionError(primaryErr, fenceErr)
+	var uncertain *SessionIdentityMutationCommitUncertainError
+	if !errors.As(err, &uncertain) || !errors.Is(err, primaryErr) {
+		t.Fatalf("inspection error with failed fence = %v, want typed mutation uncertainty", err)
+	}
+
+	err = sessionIdentityRenameInspectionError(primaryErr, nil)
+	uncertain = nil
+	if errors.As(err, &uncertain) || !errors.Is(err, primaryErr) {
+		t.Fatalf("inspection error after successful fence = %v, want ordinary inspection error", err)
 	}
 }
 
@@ -1217,18 +1303,19 @@ func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 func TestClassifySessionIdentityRenameAfterError(t *testing.T) {
 	primary := errors.New("autocommit reply lost")
 	tests := []struct {
-		name         string
-		currentName  string
-		currentTmux  string
-		currentRev   string
-		wantSuccess  bool
-		wantRollback bool
+		name          string
+		currentName   string
+		currentTmux   string
+		currentRev    string
+		wantSuccess   bool
+		wantRollback  bool
+		wantUncertain bool
 	}{
 		{name: "exact generated revision committed", currentName: "new-name", currentTmux: "new-name", currentRev: "next-revision", wantSuccess: true},
 		{name: "later writer superseded committed revision", currentName: "new-name", currentTmux: "new-name", currentRev: "later-revision", wantSuccess: true},
 		{name: "exact fence revision proves rollback safe", currentName: "old-name", currentTmux: "old-tmux", currentRev: "fence-revision", wantRollback: true},
 		{name: "later revision also fences pending write", currentName: "old-name", currentTmux: "old-tmux", currentRev: "later-unrelated-revision", wantRollback: true},
-		{name: "unchanged observed revision remains ambiguous", currentName: "old-name", currentTmux: "old-tmux", currentRev: "observed-revision"},
+		{name: "unchanged observed revision remains ambiguous", currentName: "old-name", currentTmux: "old-tmux", currentRev: "observed-revision", wantUncertain: true},
 		{name: "different identity makes rollback unsafe", currentName: "other-name", currentTmux: "other-tmux", currentRev: "other-revision"},
 	}
 	for _, tt := range tests {
@@ -1236,6 +1323,10 @@ func TestClassifySessionIdentityRenameAfterError(t *testing.T) {
 			result, err := classifySessionIdentityRenameAfterError("old-name", "old-tmux", "observed-revision", "new-name", "next-revision", "fence-revision", tt.currentName, tt.currentTmux, tt.currentRev, primary)
 			if (err == nil) != tt.wantSuccess || result.TmuxRollbackSafe != tt.wantRollback {
 				t.Fatalf("classification = (result=%+v err=%v), want success=%v rollback=%v", result, err, tt.wantSuccess, tt.wantRollback)
+			}
+			var uncertain *SessionIdentityMutationCommitUncertainError
+			if errors.As(err, &uncertain) != tt.wantUncertain {
+				t.Fatalf("classification error = %v, uncertain=%v, want %v", err, uncertain != nil, tt.wantUncertain)
 			}
 		})
 	}

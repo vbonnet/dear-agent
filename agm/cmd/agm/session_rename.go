@@ -105,6 +105,7 @@ Examples:
 				return fmt.Errorf("session name already exists: %s", newName)
 			}
 
+			releaseRenameReservation := false
 			if newName != oldName {
 				if err := adapter.ReserveSessionName(stableSessionID, newName); err != nil {
 					var uncertain *dolt.SessionNameReservationCommitUncertainError
@@ -116,7 +117,11 @@ Examples:
 						"  • Another create or rename may already own this name")
 					return err
 				}
+				releaseRenameReservation = true
 				defer func() {
+					if !releaseRenameReservation {
+						return
+					}
 					if err := adapter.ReleaseSessionNameReservation(stableSessionID); err != nil {
 						retErr = errors.Join(retErr, fmt.Errorf("release rename target-name reservation: %w", err))
 					}
@@ -152,6 +157,10 @@ Examples:
 				return restoreTmuxSessionNameAfterRename(ctx, tmuxRename.Identity, currentName, previousName)
 			}
 			if err := persistRenamedSessionIdentity(cmd.Context(), adapter, m, newName, tmuxRename.Moved, restoreTmux); err != nil {
+				var uncertain *dolt.SessionIdentityMutationCommitUncertainError
+				if errors.As(err, &uncertain) {
+					releaseRenameReservation = false
+				}
 				ui.PrintError(err, "Failed to update Dolt record", "")
 				return err
 			}
