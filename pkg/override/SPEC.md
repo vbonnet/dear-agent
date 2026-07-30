@@ -20,7 +20,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-02** When a dangerous override is requested, the system shall refuse it unless an unexpired human approval exists for that override kind in root-owned storage that the agent user cannot modify.
 
-**OVR-03** When a human approval is minted, the system shall require an interactive terminal, a typed confirmation naming the override kind, and fresh OS authentication that cannot be satisfied by a cached or passwordless Unix sudo rule.
+**OVR-03** When a human approval is minted, the system shall require an interactive terminal, a typed confirmation naming the override kind, and fresh OS authentication through a harmless command-specific Unix sudo path that cannot be satisfied by a cached rule, a passwordless rule, or the installed NOPASSWD ledger-helper rule.
 
 **OVR-04** When a human approval exists for one override kind, the system shall not treat it as approval for any other override kind.
 

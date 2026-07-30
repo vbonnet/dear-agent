@@ -31,7 +31,11 @@ func requireFreshSudoAuthentication() error {
 }
 
 func sudoValidationIsPasswordless() (bool, error) {
-	err := exec.Command("/usr/bin/sudo", "-n", "-v").Run()
+	// Probe a harmless command that is deliberately outside the installed
+	// NOPASSWD ledger-helper rule. sudo's generic -v pseudocommand may succeed
+	// when any matching NOPASSWD rule exists, which would make the prerequisite
+	// helper installation disable every later approval.
+	err := exec.Command("/usr/bin/sudo", freshUnixAuthenticationArgs(true)...).Run()
 	if err == nil {
 		return true, nil
 	}
@@ -43,7 +47,9 @@ func sudoValidationIsPasswordless() (bool, error) {
 }
 
 func promptForSudoAuthentication() error {
-	cmd := exec.Command("/usr/bin/sudo", "-v")
+	// Authenticate this command specifically so the ledger helper's narrow
+	// NOPASSWD rule cannot satisfy the fresh human challenge.
+	cmd := exec.Command("/usr/bin/sudo", freshUnixAuthenticationArgs(false)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

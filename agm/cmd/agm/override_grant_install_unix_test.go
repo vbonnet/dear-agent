@@ -2,9 +2,31 @@ package main
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestFreshUnixAuthenticationArgsExcludeValidationPseudocommand(t *testing.T) {
+	for _, tt := range []struct {
+		name           string
+		nonInteractive bool
+		want           []string
+	}{
+		{name: "probe", nonInteractive: true, want: []string{"-n", "/usr/bin/true"}},
+		{name: "prompt", want: []string{"/usr/bin/true"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := freshUnixAuthenticationArgs(tt.nonInteractive)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("freshUnixAuthenticationArgs() = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(strings.Join(got, " "), "-v") {
+				t.Fatalf("fresh authentication args use sudo validation pseudocommand: %q", got)
+			}
+		})
+	}
+}
 
 func TestRequireFreshAuthenticationRejectsPasswordlessSudo(t *testing.T) {
 	invalidations := 0

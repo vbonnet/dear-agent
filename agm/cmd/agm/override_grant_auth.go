@@ -5,6 +5,16 @@ import (
 	"fmt"
 )
 
+const unixFreshAuthenticationCommand = "/usr/bin/true"
+
+func freshUnixAuthenticationArgs(nonInteractive bool) []string {
+	args := make([]string, 0, 2)
+	if nonInteractive {
+		args = append(args, "-n")
+	}
+	return append(args, unixFreshAuthenticationCommand)
+}
+
 func requireFreshAuthentication(
 	invalidate func() error,
 	passwordless func() (bool, error),
