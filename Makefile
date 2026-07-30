@@ -940,8 +940,13 @@ install-override-audit-launchdaemon: build-agm
 	@set -eu; \
 		test "$$(uname -s)" = "Darwin" || { echo "launchd audit installation is macOS-only" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
+		operator_user="$$(id -un)"; \
+		case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
 		root_group="$$(id -gn 0)"; \
-		/usr/bin/plutil -lint deploy/launchd/com.dear-agent.override-audit.plist >/dev/null; \
+		staged="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
+		trap '/bin/rm -f "$$staged"' EXIT HUP INT TERM; \
+		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" deploy/launchd/com.dear-agent.override-audit.plist >"$$staged"; \
+		/usr/bin/plutil -lint "$$staged" >/dev/null; \
 		/usr/bin/sudo -k; \
 		if /usr/bin/sudo -n -v 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
@@ -950,7 +955,7 @@ install-override-audit-launchdaemon: build-agm
 		/usr/bin/sudo -v; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
 		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/agm /usr/local/libexec/dear-agent-override-audit; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 deploy/launchd/com.dear-agent.override-audit.plist /Library/LaunchDaemons/com.dear-agent.override-audit.plist; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 "$$staged" /Library/LaunchDaemons/com.dear-agent.override-audit.plist; \
 		/usr/bin/sudo -k; \
 		echo "Installed root-owned audit executable and system LaunchDaemon"; \
 		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \

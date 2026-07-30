@@ -21,6 +21,8 @@ func TestOverrideAuditUsesRootOwnedSystemDomain(t *testing.T) {
 		"/var/log/dear-agent-override-audit.err.log",
 		"/var/empty",
 		"launchctl bootstrap system",
+		"<key>UserName</key>",
+		"<string>__OPERATOR_USER__</string>",
 	} {
 		if !strings.Contains(plist, required) {
 			t.Errorf("system audit plist does not retain %q", required)
@@ -55,6 +57,8 @@ func TestOverrideAuditInstallerRequiresFreshOperatorBoundary(t *testing.T) {
 		"test -t 0",
 		"/usr/bin/sudo -k",
 		"/usr/bin/sudo -v",
+		"operator_user=\"$$(id -un)\"",
+		"s|__OPERATOR_USER__|$$operator_user|g",
 		"/usr/local/libexec/dear-agent-override-audit",
 		"/Library/LaunchDaemons/com.dear-agent.override-audit.plist",
 		"sudo launchctl bootstrap system",

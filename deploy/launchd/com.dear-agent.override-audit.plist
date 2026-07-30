@@ -23,7 +23,8 @@
   authentication to install both this plist and a reviewed AGM copy into
   root-owned system locations. An unattended same-user agent therefore cannot
   replace the executable, edit the schedule, or disable it through the GUI
-  launchd domain.
+  launchd domain. The system manager runs the fixed command as the named
+  unprivileged operator.
 
   Activate (ask-gated host action):
     sudo launchctl bootstrap system \
@@ -39,6 +40,9 @@
 <dict>
   <key>Label</key>
   <string>com.dear-agent.override-audit</string>
+
+  <key>UserName</key>
+  <string>__OPERATOR_USER__</string>
 
   <key>ProgramArguments</key>
   <array>
