@@ -736,65 +736,94 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 	if !static {
 		return call.Args[0], "expanded command word"
 	}
-	if rejected, reason := dynamicBuiltinOperand(command, call.Args[0], call.Args[1:]); rejected != nil {
+	return dynamicNormalizedCommand(command, call.Args[0], call.Args[1:])
+}
+
+func dynamicNormalizedCommand(
+	command string,
+	commandWord *syntax.Word,
+	args []*syntax.Word,
+) (*syntax.Word, string) {
+	if rejected, reason := dynamicBuiltinOperand(command, commandWord, args); rejected != nil {
 		return rejected, reason
 	}
 	if commandResolutionStateBuiltin(command) {
-		return call.Args[0], "command-resolution state builtin"
+		return commandWord, "command-resolution state builtin"
 	}
-	if target, reason, handled := dynamicRuntimeOperand(command, call.Args[0], call.Args[1:]); handled {
+	if target, reason, handled := dynamicRuntimeOperand(command, commandWord, args); handled {
 		return target, reason
 	}
-	if target, reason, handled := nestedCommandWrapperOperand(command, call.Args[1:]); handled {
+	if target, reason, handled := nestedCommandWrapperOperand(command, args); handled {
 		return target, reason
 	}
 	switch command {
 	case "command", "builtin", "exec", "nohup":
-		return dynamicWrapperCommand(call.Args[1:], false)
+		return dynamicWrapperCommand(command, args)
 	case "env", "/usr/bin/env":
-		return dynamicWrapperCommand(call.Args[1:], true)
+		return dynamicWrapperCommand(command, args)
 	default:
 		return nil, ""
 	}
 }
 
-func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string) {
-	for index, word := range args {
+func dynamicWrapperCommand(wrapper string, args []*syntax.Word) (*syntax.Word, string) {
+	env := filepath.Base(wrapper) == "env"
+	options := true
+	for index := 0; index < len(args); index++ {
+		word := args[index]
 		value, static := staticShellWord(word)
 		if !static {
 			return word, "expanded command-wrapper operand"
 		}
-		if env && envSplitStringOption(value) {
+		if options && env && envSplitStringOption(value) {
 			return word, "env split-string command"
 		}
-		if value == "--" || strings.HasPrefix(value, "-") {
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && dynamicWrapperOptionConsumesNext(wrapper, value) {
+			nextIndex, rejected, reason := dynamicWrapperOptionOperand(args, index)
+			if rejected != nil {
+				return rejected, reason
+			}
+			index = nextIndex
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
 			continue
 		}
 		if env && strings.Contains(value, "=") {
 			continue
 		}
-		if rejected, reason := dynamicBuiltinOperand(value, word, args[index+1:]); rejected != nil {
-			return rejected, reason
-		}
-		if commandResolutionStateBuiltin(value) {
-			return word, "command-resolution state builtin"
-		}
-		if target, reason, handled := dynamicRuntimeOperand(value, word, args[index+1:]); handled {
-			return target, reason
-		}
-		if target, reason, handled := nestedCommandWrapperOperand(value, args[index+1:]); handled {
-			return target, reason
-		}
-		switch value {
-		case "command", "builtin", "exec", "nohup":
-			return dynamicWrapperCommand(args[index+1:], false)
-		case "env", "/usr/bin/env":
-			return dynamicWrapperCommand(args[index+1:], true)
-		default:
-			return nil, ""
-		}
+		return dynamicNormalizedCommand(value, word, args[index+1:])
 	}
 	return nil, ""
+}
+
+func dynamicWrapperOptionOperand(
+	args []*syntax.Word,
+	optionIndex int,
+) (int, *syntax.Word, string) {
+	if optionIndex+1 >= len(args) {
+		return optionIndex, args[optionIndex], "command-wrapper option missing operand"
+	}
+	operandIndex := optionIndex + 1
+	if _, static := staticShellWord(args[operandIndex]); !static {
+		return operandIndex, args[operandIndex], "expanded command-wrapper option operand"
+	}
+	return operandIndex, nil, ""
+}
+
+func dynamicWrapperOptionConsumesNext(wrapper, value string) bool {
+	switch filepath.Base(wrapper) {
+	case "exec":
+		return value == "-a" || value == "--argv0"
+	case "env":
+		return envOptionConsumesNext(value) || value == "-P"
+	default:
+		return false
+	}
 }
 
 func nestedCommandWrapperOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
@@ -857,7 +886,7 @@ func timeoutCommandOperand(command string, args []*syntax.Word) (*syntax.Word, s
 		if index+1 >= len(args) {
 			return nil, "", true
 		}
-		target, reason := dynamicWrapperCommand(args[index+1:], false)
+		target, reason := dynamicWrapperCommand("command", args[index+1:])
 		return target, reason, true
 	}
 	return nil, "", true
@@ -900,7 +929,7 @@ func niceCommandOperand(command string, args []*syntax.Word) (*syntax.Word, stri
 		if options && strings.HasPrefix(value, "-") {
 			continue
 		}
-		target, reason := dynamicWrapperCommand(args[index:], false)
+		target, reason := dynamicWrapperCommand("command", args[index:])
 		return target, reason, true
 	}
 	return nil, "", true
@@ -1724,8 +1753,8 @@ func xargsRunsCustomCommand(args []*syntax.Word) bool {
 func xargsOptionConsumesNext(value string) bool {
 	switch value {
 	case "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
-		"--arg-file", "--delimiter", "--eof", "--replace", "--max-lines",
-		"--max-args", "--max-procs", "--max-chars", "--process-slot-var":
+		"--arg-file", "--delimiter", "--max-args", "--max-procs", "--max-chars",
+		"--process-slot-var":
 		return true
 	default:
 		return false
@@ -1746,7 +1775,8 @@ func xargsKnownOption(value string) bool {
 	switch value {
 	case "-0", "-o", "-p", "-r", "-t", "-x",
 		"--null", "--open-tty", "--interactive", "--no-run-if-empty",
-		"--verbose", "--exit", "--show-limits", "--help", "--version":
+		"--verbose", "--exit", "--show-limits", "--help", "--version",
+		"--eof", "--replace", "--max-lines":
 		return true
 	default:
 		return false
