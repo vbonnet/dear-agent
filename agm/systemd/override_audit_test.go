@@ -62,7 +62,7 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	install := makefile[start:end]
 	for _, required := range []string{
 		"/usr/bin/sudo -k",
-		"/usr/bin/sudo -v",
+		"/usr/bin/sudo /usr/bin/true",
 		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
 		`expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"`,
 		`expected_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_artifact")"`,

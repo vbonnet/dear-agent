@@ -59,7 +59,7 @@ func TestOverrideAuditInstallerRequiresFreshOperatorBoundary(t *testing.T) {
 	for _, required := range []string{
 		"test -t 0",
 		"/usr/bin/sudo -k",
-		"/usr/bin/sudo -v",
+		"/usr/bin/sudo /usr/bin/true",
 		"operator_user=\"$$(id -un)\"",
 		"s|__OPERATOR_USER__|$$operator_user|g",
 		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
