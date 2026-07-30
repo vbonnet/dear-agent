@@ -745,6 +745,9 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 	if target, reason, handled := dynamicRuntimeOperand(command, call.Args[0], call.Args[1:]); handled {
 		return target, reason
 	}
+	if target, reason, handled := timeoutCommandOperand(command, call.Args[1:]); handled {
+		return target, reason
+	}
 	switch command {
 	case "command", "builtin", "exec", "nohup":
 		return dynamicWrapperCommand(call.Args[1:], false)
@@ -779,6 +782,9 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		if target, reason, handled := dynamicRuntimeOperand(value, word, args[index+1:]); handled {
 			return target, reason
 		}
+		if target, reason, handled := timeoutCommandOperand(value, args[index+1:]); handled {
+			return target, reason
+		}
 		switch value {
 		case "command", "builtin", "exec", "nohup":
 			return dynamicWrapperCommand(args[index+1:], false)
@@ -804,6 +810,52 @@ func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syn
 		return target, reason, true
 	default:
 		return nil, "", false
+	}
+}
+
+func timeoutCommandOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
+	if filepath.Base(command) != "timeout" {
+		return nil, "", false
+	}
+	options := true
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return word, "expanded timeout command-wrapper operand", true
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && timeoutOptionTakesArgument(value) {
+			if index+1 >= len(args) {
+				return nil, "", true
+			}
+			index++
+			if _, static := staticShellWord(args[index]); !static {
+				return args[index], "expanded timeout option operand", true
+			}
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			continue
+		}
+		if index+1 >= len(args) {
+			return nil, "", true
+		}
+		target, reason := dynamicWrapperCommand(args[index+1:], false)
+		return target, reason, true
+	}
+	return nil, "", true
+}
+
+func timeoutOptionTakesArgument(value string) bool {
+	switch value {
+	case "-k", "--kill-after", "-s", "--signal":
+		return true
+	default:
+		return false
 	}
 }
 

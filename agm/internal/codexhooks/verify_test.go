@@ -217,6 +217,9 @@ func TestValidateScriptAssetRejectsBareInterpreterAndSourceOperands(t *testing.T
 		"#!/bin/sh\nif /bin/sh helper; then exit 0; fi\n",
 		"#!/bin/bash\ntime /bin/bash helper\n",
 		"#!/bin/bash\ntime -p /usr/bin/env bash helper\n",
+		"#!/bin/sh\n/usr/bin/timeout 1 /bin/bash helper\n",
+		"#!/bin/sh\ntimeout --signal TERM --kill-after=1s 1 /usr/bin/env bash helper\n",
+		"#!/bin/sh\ncommand /usr/bin/timeout -s TERM 1 /bin/sh helper\n",
 		"#!/bin/bash\nsource helper\n",
 		"#!/bin/sh\n. helper\n",
 		"#!/bin/bash\nbuiltin source helper\n",
@@ -462,6 +465,8 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/sh\n/usr/bin/tar -cf /dev/null -- \"$FILE\"\n",
 		"#!/bin/sh\n/usr/bin/git -C \"$ROOT\" rev-parse --show-toplevel\n",
 		"#!/bin/bash\ntime /bin/bash /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/timeout --signal=TERM 1 /bin/bash /usr/bin/true\n",
+		"#!/bin/sh\ncommand /usr/bin/timeout -k 1s 2s /bin/true\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)
