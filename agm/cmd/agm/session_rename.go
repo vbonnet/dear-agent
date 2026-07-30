@@ -77,7 +77,7 @@ Examples:
 		}
 		stableSessionID := m.SessionID
 		var updated []string
-		if err := runSessionRenameTransactionWithLock(stableSessionID, ops.WithSessionLock, func() error {
+		if err := runSessionRenameTransactionWithLock(stableSessionID, ops.WithSessionLock, func() (retErr error) {
 			// Resolution by user-visible name happens before the lock only to find
 			// the stable identity. Reload that identity while holding the same lock
 			// used by resume so every tmux and storage decision is current.
@@ -103,6 +103,20 @@ Examples:
 					"Cannot rename: target name resolves to a different session",
 					fmt.Sprintf("  • Existing session ID: %s", existingByTmux.SessionID))
 				return fmt.Errorf("session name already exists: %s", newName)
+			}
+
+			if newName != oldName {
+				if err := adapter.ReserveSessionName(stableSessionID, newName); err != nil {
+					ui.PrintError(err,
+						"Cannot rename: target name could not be reserved",
+						"  • Another create or rename may already own this name")
+					return err
+				}
+				defer func() {
+					if err := adapter.ReleaseSessionNameReservation(stableSessionID); err != nil {
+						retErr = errors.Join(retErr, fmt.Errorf("release rename target-name reservation: %w", err))
+					}
+				}()
 			}
 
 			fmt.Printf("Renaming session: %s → %s\n", oldName, newName)

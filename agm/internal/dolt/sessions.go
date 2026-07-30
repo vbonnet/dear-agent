@@ -499,14 +499,17 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	}
 	reservationHeld := newName != previousName
 	if reservationHeld {
-		if err := a.ReserveSessionName(sessionID, newName); err != nil {
+		reservationCreated, err := a.reserveSessionName(sessionID, newName)
+		if err != nil {
 			return RenameSessionIdentityResult{}, err
 		}
-		defer func() {
-			if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
-				retErr = errors.Join(retErr, err)
-			}
-		}()
+		if reservationCreated {
+			defer func() {
+				if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
+					retErr = errors.Join(retErr, err)
+				}
+			}()
+		}
 	}
 	result, retErr = a.renameSessionIdentityReserved(
 		ctx,

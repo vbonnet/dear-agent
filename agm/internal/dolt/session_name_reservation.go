@@ -15,19 +15,27 @@ const sessionNameReservationTTL = 2 * time.Hour
 // Existing duplicate session rows remain readable and actionable; only new
 // creation attempts for an already active name are rejected.
 func (a *Adapter) ReserveSessionName(sessionID, name string) error {
+	_, err := a.reserveSessionName(sessionID, name)
+	return err
+}
+
+// reserveSessionName reports whether this call created the lease. A caller
+// that already owns the same workspace/name/session tuple keeps ownership, so
+// a nested durable mutation must not release the caller's longer-lived lease.
+func (a *Adapter) reserveSessionName(sessionID, name string) (bool, error) {
 	if sessionID == "" {
-		return fmt.Errorf("session_id cannot be empty")
+		return false, fmt.Errorf("session_id cannot be empty")
 	}
 	if name == "" {
-		return nil
+		return false, nil
 	}
 	if err := a.ApplyMigrations(); err != nil {
-		return fmt.Errorf("failed to apply migrations: %w", err)
+		return false, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
 	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
-		return fmt.Errorf("begin session-name reservation: %w", err)
+		return false, fmt.Errorf("begin session-name reservation: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -36,8 +44,9 @@ func (a *Adapter) ReserveSessionName(sessionID, name string) error {
 		`DELETE FROM agm_session_name_reservations WHERE expires_at <= ?`,
 		now,
 	); err != nil {
-		return fmt.Errorf("reclaim expired session-name reservations: %w", err)
+		return false, fmt.Errorf("reclaim expired session-name reservations: %w", err)
 	}
+	reservationCreated := true
 	if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
 		`INSERT INTO agm_session_name_reservations
 			(workspace, name, session_id, created_at, expires_at)
@@ -49,7 +58,7 @@ func (a *Adapter) ReserveSessionName(sessionID, name string) error {
 		now.Add(sessionNameReservationTTL),
 	); err != nil {
 		if !isUniqueConstraintError(err) {
-			return fmt.Errorf("reserve session name: %w", err)
+			return false, fmt.Errorf("reserve session name: %w", err)
 		}
 		var owner string
 		lookupErr := tx.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
@@ -59,8 +68,9 @@ func (a *Adapter) ReserveSessionName(sessionID, name string) error {
 			name,
 		).Scan(&owner)
 		if lookupErr != nil || owner != sessionID {
-			return &SessionNameConflictError{Name: name}
+			return false, &SessionNameConflictError{Name: name}
 		}
+		reservationCreated = false
 	}
 
 	var existingID string
@@ -73,15 +83,15 @@ func (a *Adapter) ReserveSessionName(sessionID, name string) error {
 	).Scan(&existingID)
 	switch {
 	case err == nil:
-		return &SessionNameConflictError{Name: name}
+		return false, &SessionNameConflictError{Name: name}
 	case !errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("inspect active session name: %w", err)
+		return false, fmt.Errorf("inspect active session name: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit session-name reservation: %w", err)
+		return false, fmt.Errorf("commit session-name reservation: %w", err)
 	}
-	return nil
+	return reservationCreated, nil
 }
 
 // ReleaseSessionNameReservation releases an operation lease owned by the

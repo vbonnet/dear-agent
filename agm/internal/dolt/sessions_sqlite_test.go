@@ -677,6 +677,9 @@ func TestSQLiteRenameSessionIdentityUsesTargetNameReservation(t *testing.T) {
 	if err := adapter.ReleaseSessionNameReservation("concurrent-creator"); err != nil {
 		t.Fatalf("ReleaseSessionNameReservation() error: %v", err)
 	}
+	if err := adapter.ReserveSessionName(unchanged.SessionID, "target-name"); err != nil {
+		t.Fatalf("ReserveSessionName(rename owner) error: %v", err)
+	}
 	if _, err := adapter.RenameSessionIdentity(
 		t.Context(),
 		unchanged.SessionID,
@@ -692,10 +695,37 @@ func TestSQLiteRenameSessionIdentityUsesTargetNameReservation(t *testing.T) {
 		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE session_id = ?`,
 		unchanged.SessionID,
 	).Scan(&reservations); err != nil {
-		t.Fatalf("count rename reservations: %v", err)
+		t.Fatalf("count caller-owned rename reservations: %v", err)
+	}
+	if reservations != 1 {
+		t.Fatalf("caller-owned rename reservations = %d, want 1", reservations)
+	}
+	if err := adapter.ReleaseSessionNameReservation(unchanged.SessionID); err != nil {
+		t.Fatalf("ReleaseSessionNameReservation(rename owner) error: %v", err)
+	}
+
+	renamed, err := adapter.GetSession(unchanged.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after caller-owned rename error: %v", err)
+	}
+	if _, err := adapter.RenameSessionIdentity(
+		t.Context(),
+		renamed.SessionID,
+		renamed.Name,
+		renamed.Tmux.SessionName,
+		renamed.Tmux.SessionRevision,
+		"final-name",
+	); err != nil {
+		t.Fatalf("RenameSessionIdentity() with self-owned lease error: %v", err)
+	}
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE session_id = ?`,
+		renamed.SessionID,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count self-owned rename reservations: %v", err)
 	}
 	if reservations != 0 {
-		t.Fatalf("rename reservations = %d, want 0", reservations)
+		t.Fatalf("self-owned rename reservations = %d, want 0", reservations)
 	}
 }
 
