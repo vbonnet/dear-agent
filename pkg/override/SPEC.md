@@ -56,6 +56,8 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-20** When AGM exposes override-management commands, the system shall not expose a standalone authorization command that records or consumes a use independently of the launch boundary governed by that override.
 
+**OVR-21** When AGM resolves the operator grant store on macOS, the system shall use the canonical `/private/etc` directory so the validator can reject untrusted symlinks without rejecting the operating system's `/etc` symlink.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
@@ -96,8 +98,11 @@ them unreviewed — and both fail closed.
     agm override audit --window 168h --threshold 5
     agm override revoke <kind>
 
-Approvals are stored as `/etc/dear-agent-override-<kind>.json`, owned by root
-and not writable by group or others. On macOS, `agm override approve` streams
+Approvals are stored as `/etc/dear-agent-override-<kind>.json` on other Unix
+platforms and
+`/private/etc/dear-agent-override-<kind>.json` on macOS (the canonical target
+of the system `/etc` symlink), owned by root and not writable by group or
+others. On macOS, `agm override approve` streams
 the confirmed bytes to the system `authopen` authorization service; on other
 Unix systems it streams them across the system `sudo` boundary. AGM itself is
 never elevated, so an agent-writable AGM binary is not executed as root. The

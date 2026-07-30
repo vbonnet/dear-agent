@@ -201,7 +201,6 @@ type Reservation struct {
 }
 
 const (
-	operatorGrantDir    = "/etc"
 	operatorGrantPrefix = "dear-agent-override-"
 	operatorLedgerPath  = "/var/log/dear-agent-overrides.jsonl"
 )
