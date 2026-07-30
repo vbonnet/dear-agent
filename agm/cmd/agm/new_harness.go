@@ -254,14 +254,26 @@ func waitForClaudeReady(ctx context.Context, sessionName string, claudeReady *tm
 // is true the wrapper has already attached/exited and the caller should
 // short-circuit the rest of session setup.
 func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
+	return startGeminiHarnessWithRuntime(ctx, spec, geminiWrapperRuntime{
+		lookPath:       exec.LookPath,
+		commandContext: exec.CommandContext,
+	})
+}
+
+type geminiWrapperRuntime struct {
+	lookPath       func(string) (string, error)
+	commandContext func(context.Context, string, ...string) *exec.Cmd
+}
+
+func startGeminiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime geminiWrapperRuntime) (bool, error) {
 	debug.Phase("Start Gemini")
-	wrapperPath, err := exec.LookPath("agm-agent-wrapper")
+	wrapperPath, err := runtime.lookPath("agm-agent-wrapper")
 	if err != nil {
 		return false, startGeminiDirect(ctx, spec)
 	}
 	debug.Log("Found agm-agent-wrapper at: %s", wrapperPath)
 	debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
-	cmd := exec.CommandContext(ctx, wrapperPath, "--agent=gemini-cli", spec.SessionName)
+	cmd := runtime.commandContext(ctx, wrapperPath, "--agent=gemini-cli", spec.SessionName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -269,13 +281,30 @@ func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, 
 	if err != nil {
 		return false, fmt.Errorf("gemini launch admission: %w", err)
 	}
+	if err := cmd.Start(); err != nil {
+		ui.PrintError(err,
+			"Failed to start agm-agent-wrapper",
+			"  • Check wrapper installed: which agm-agent-wrapper\n"+
+				"  • Try direct mode by temporarily renaming wrapper\n"+
+				"  • Attach and check: tmux attach -t "+spec.SessionName)
+		return false, err
+	}
 	if _, err := override.CommitAll(reservations...); err != nil {
-		return false, fmt.Errorf("gemini launch override transaction: %w", err)
+		killErr := cmd.Process.Kill()
+		if errors.Is(killErr, os.ErrProcessDone) {
+			killErr = nil
+		}
+		waitErr := cmd.Wait()
+		return false, errors.Join(
+			fmt.Errorf("gemini launch override transaction: %w", err),
+			killErr,
+			waitErr,
+		)
 	}
 	if spec.AfterAuthorization != nil {
 		spec.AfterAuthorization()
 	}
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Wait(); err != nil {
 		ui.PrintError(err,
 			"Failed to run agm-agent-wrapper",
 			"  • Check wrapper installed: which agm-agent-wrapper\n"+

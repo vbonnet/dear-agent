@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,52 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
+
+func TestGeminiWrapperStartFailureDoesNotCommitAdmissionEffects(t *testing.T) {
+	reservation := &override.Reservation{}
+	recorded := false
+	done, err := startGeminiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		SessionName: "gemini-start-failure",
+		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+			return []*override.Reservation{reservation}, nil
+		},
+		AfterAuthorization: func() {
+			recorded = true
+		},
+	}, geminiWrapperRuntime{
+		lookPath: func(string) (string, error) {
+			return "/definitely/missing/agm-agent-wrapper", nil
+		},
+		commandContext: exec.CommandContext,
+	})
+	if err == nil || done {
+		t.Fatalf("startGeminiHarnessWithRuntime() = done:%t error:%v, want definite start failure", done, err)
+	}
+	if recorded {
+		t.Fatal("definite wrapper start failure recorded post-authorization effects")
+	}
+	if _, commitErr := reservation.Commit(); errors.Is(commitErr, override.ErrReservationCommitted) {
+		t.Fatal("definite wrapper start failure consumed the override reservation")
+	}
+}
+
+func TestGeminiWrapperCommitsEffectsAfterSuccessfulStart(t *testing.T) {
+	recorded := false
+	done, err := startGeminiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		SessionName: "gemini-start-success",
+		AfterAuthorization: func() {
+			recorded = true
+		},
+	}, geminiWrapperRuntime{
+		lookPath: func(string) (string, error) {
+			return "/usr/bin/true", nil
+		},
+		commandContext: exec.CommandContext,
+	})
+	if err != nil || !done || !recorded {
+		t.Fatalf("startGeminiHarnessWithRuntime() = done:%t recorded:%t error:%v", done, recorded, err)
+	}
+}
 
 func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 	spec.DisableOAuth = true
