@@ -25,9 +25,19 @@ var sessionFlagsHookSource = func() string {
 }()
 
 const (
-	attestedHookPath          = "/usr/local/libexec:/usr/local/go/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	attestedHookPath          = "/usr/local/libexec:/usr/bin:/bin:/usr/sbin:/sbin"
 	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
+	systemJQPath              = "/usr/bin/jq"
 )
+
+var neutralizedAttestedHookEvents = map[string]struct{}{
+	"PostCompact":      {},
+	"PreCompact":       {},
+	"SessionStart":     {},
+	"Stop":             {},
+	"SubagentStop":     {},
+	"UserPromptSubmit": {},
+}
 
 // LaunchConfigOverrides returns a Codex CLI config override that loads the
 // attested hooks from the immutable materialization, pins their exact trust
@@ -51,6 +61,12 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 		return nil, err
 	}
 	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
+		return nil, err
+	}
+	if err := validateTrustedHookExecutable(systemJQPath); err != nil {
+		return nil, err
+	}
+	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
 		return nil, err
 	}
 	if err := hardenHookCommands(hooks); err != nil {
@@ -108,6 +124,50 @@ func readMaterializedHookManifest(hookRoot string) (map[string]any, error) {
 		return nil, fmt.Errorf("materialized Codex hook manifest has no hooks object")
 	}
 	return manifest.Hooks, nil
+}
+
+// neutralizeWorkspaceExecutingHooks preserves each project-layer handler's
+// index so hooksWithPinnedTrustState can disable the mutable copy, but replaces
+// its session handler with an OS-owned no-op. Context-refresh and stop-time
+// guardrail hooks intentionally execute workspace tools or code; they may run
+// after ordinary Codex path review, but never under AGM's unattended bypass.
+func neutralizeWorkspaceExecutingHooks(hooks map[string]any) error {
+	for eventName := range neutralizedAttestedHookEvents {
+		rawGroups, exists := hooks[eventName]
+		if !exists {
+			continue
+		}
+		groups, ok := rawGroups.([]any)
+		if !ok {
+			return fmt.Errorf("materialized Codex hook event %s must be an array", eventName)
+		}
+		for groupIndex, rawGroup := range groups {
+			group, ok := rawGroup.(map[string]any)
+			if !ok {
+				return fmt.Errorf("materialized Codex hook event %s group %d must be an object", eventName, groupIndex)
+			}
+			rawHandlers, ok := group["hooks"]
+			if !ok {
+				continue
+			}
+			handlers, ok := rawHandlers.([]any)
+			if !ok {
+				return fmt.Errorf("materialized Codex hook event %s group %d handlers must be an array", eventName, groupIndex)
+			}
+			for handlerIndex, rawHandler := range handlers {
+				handler, ok := rawHandler.(map[string]any)
+				if !ok {
+					return fmt.Errorf(
+						"materialized Codex hook event %s group %d handler %d must be an object",
+						eventName, groupIndex, handlerIndex,
+					)
+				}
+				handler["command"] = "/bin/true"
+				handler["statusMessage"] = "Workspace-executing hook disabled for attested bypass"
+			}
+		}
+	}
+	return nil
 }
 
 func hardenHookCommands(hooks map[string]any) error {

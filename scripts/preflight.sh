@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # preflight.sh — run the same checks GitHub Actions CI runs, locally.
 #
 # Shift-left for the inner dev loop. CI on GitHub is not a substitute for
@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="${PREFLIGHT_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 MODE="fast"

@@ -19,6 +19,32 @@ func validateTrustedExecutableSearchPath(searchPath string) error {
 	return nil
 }
 
+func validateTrustedHookExecutable(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return fmt.Errorf("trusted hook executable %q must be a clean absolute path", path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("resolve trusted hook executable %q: %w", path, err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return fmt.Errorf("inspect trusted hook executable %q: %w", resolved, err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("inspect ownership of trusted hook executable %q", resolved)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 ||
+		stat.Uid != 0 || info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf(
+			"trusted hook executable %q must be an operator-owned, non-writable executable regular file",
+			resolved,
+		)
+	}
+	return validateOperatorOwnedPathAncestors(filepath.Dir(resolved))
+}
+
 func validateTrustedExecutablePathEntry(candidate string) error {
 	if candidate == "" || !filepath.IsAbs(candidate) || filepath.Clean(candidate) != candidate {
 		return fmt.Errorf("attested hook PATH entry %q must be a clean absolute path", candidate)

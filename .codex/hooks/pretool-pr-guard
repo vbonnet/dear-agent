@@ -8,9 +8,9 @@
 set -uo pipefail
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_name // empty' 2>/dev/null || true)"
 [ "$tool" = "Bash" ] || exit 0
-cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+cmd="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 cmd="${cmd//\\$'\n'/ }"
 

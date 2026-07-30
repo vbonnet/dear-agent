@@ -7,10 +7,10 @@
 set -uo pipefail
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_name // empty' 2>/dev/null || true)"
 [ "$tool" = "Bash" ] || exit 0
 
-cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+cmd="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 
 block() {
@@ -24,7 +24,7 @@ If no approved path exists and this is an AGM session, escalate via:
   agm escalate ask --kind blocked-action --context \"<why this flag was needed>\" \"<describe what you need>\"
 Outside AGM, add --session <registered-session>; if none exists, ask the current user directly.
 The command creates a durable escalation record and routes it through supervisory review; it does not create or update a Bead."
-  jq -cn --arg m "$msg" \
+  /usr/bin/jq -cn --arg m "$msg" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m},permissionDecision:"deny",denialReason:$m}'
   exit 2
 }

@@ -31,24 +31,24 @@
 set -uo pipefail
 
 # --- fail-open preconditions -------------------------------------------------
-command -v jq >/dev/null 2>&1 || exit 0
+[ -x /usr/bin/jq ] || exit 0
 input="$(cat)"
 [ -n "$input" ] || exit 0
 
 # Global opt-out for an interactive session that doesn't want the loop.
 [ "${DEAR_GUARDRAIL_LOOP:-1}" = "0" ] && exit 0
 
-event="$(printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null || true)"
+event="$(printf '%s' "$input" | /usr/bin/jq -r '.hook_event_name // empty' 2>/dev/null || true)"
 case "$event" in
   Stop|SubagentStop) ;;
   *) exit 0 ;;  # never fire on other events
 esac
 
-session="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
+session="$(printf '%s' "$input" | /usr/bin/jq -r '.session_id // empty' 2>/dev/null || true)"
 # Secondary loop brake (used only if the attempt counter can't be persisted):
 # true when this stop was itself triggered by a prior stop-hook block.
-stop_active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)"
-cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+stop_active="$(printf '%s' "$input" | /usr/bin/jq -r '.stop_hook_active // false' 2>/dev/null || echo false)"
+cwd="$(printf '%s' "$input" | /usr/bin/jq -r '.cwd // empty' 2>/dev/null || true)"
 [ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 # Resolve the repo root from cwd; if it isn't a git repo, there is nothing to
@@ -56,11 +56,12 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
 root="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$root" ] || exit 0
 
-if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
-  bundle="${AGM_CODEX_HOOK_ROOT:-.}/scripts/guardrail-bundle.sh"
-else
-  bundle="$root/scripts/guardrail-bundle.sh"
-fi
+# A hook-trust bypass must never turn a trusted Stop hook into an execution
+# trampoline for mutable project code. Ordinary sessions retain the local
+# feedback loop; bypassed sessions rely on explicit agent-run preflight and CI.
+[ -z "${AGM_CODEX_HOOK_ROOT:-}" ] || exit 0
+
+bundle="$root/scripts/guardrail-bundle.sh"
 [ -f "$bundle" ] || exit 0
 
 # Only act when the agent actually changed something. A clean tree means the
@@ -80,7 +81,7 @@ count=0
 case "$count" in *[!0-9]*|'') count=0 ;; esac
 
 # --- run the guardrail bundle ------------------------------------------------
-out="$(cd "$root" && PREFLIGHT_PROJECT_ROOT="$root" /bin/bash "$bundle" 2>&1)"; rc=$?
+out="$(cd "$root" && bash "$bundle" 2>&1)"; rc=$?
 
 if [ "$rc" -eq 0 ]; then
   # Green: clear the counter and let the agent stop.
@@ -96,11 +97,11 @@ $trimmed"
 attempt=$((count + 1))
 
 emit_block() { # $1 = reason text -> block the stop, feed reason to the agent
-  jq -cn --arg r "$1" '{decision:"block",reason:$r}'
+  /usr/bin/jq -cn --arg r "$1" '{decision:"block",reason:$r}'
   exit 0
 }
 emit_context() { # $1 = text -> non-blocking note, let the agent stop
-  jq -cn --arg c "$1" --arg e "$event" \
+  /usr/bin/jq -cn --arg c "$1" --arg e "$event" \
     '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'
   exit 0
 }

@@ -44,11 +44,16 @@ func TestHardenHookCommandsReplacesCallerPath(t *testing.T) {
 }
 
 func TestAttestedHookPathContainsOnlyOperatorOwnedLocations(t *testing.T) {
-	if strings.Contains(attestedHookPath, "/opt/homebrew") || strings.Contains(attestedHookPath, "/usr/local/bin") {
+	if strings.Contains(attestedHookPath, "/opt/homebrew") ||
+		strings.Contains(attestedHookPath, "/usr/local/bin") ||
+		strings.Contains(attestedHookPath, "/usr/local/go/bin") {
 		t.Fatalf("attested hook PATH includes a commonly user-writable location: %q", attestedHookPath)
 	}
 	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
 		t.Fatalf("validateTrustedExecutableSearchPath(attestedHookPath): %v", err)
+	}
+	if err := validateTrustedHookExecutable(systemJQPath); err != nil {
+		t.Fatalf("validateTrustedHookExecutable(systemJQPath): %v", err)
 	}
 }
 
@@ -60,6 +65,78 @@ func TestTrustedExecutableSearchPathRejectsWritableDirectory(t *testing.T) {
 	if err := validateTrustedExecutableSearchPath(writable); err == nil ||
 		!strings.Contains(err.Error(), "operator-owned") {
 		t.Fatalf("validateTrustedExecutableSearchPath() error = %v, want ownership rejection", err)
+	}
+}
+
+func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) {
+	for eventName := range neutralizedAttestedHookEvents {
+		hooks := map[string]any{
+			eventName: []any{map[string]any{
+				"hooks": []any{map[string]any{
+					"type":    "command",
+					"command": "mutable-workspace-command",
+				}},
+			}},
+		}
+		if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
+			t.Fatalf("neutralizeWorkspaceExecutingHooks(%s): %v", eventName, err)
+		}
+		groups := hooks[eventName].([]any)
+		group := groups[0].(map[string]any)
+		handlers := group["hooks"].([]any)
+		if len(handlers) != 1 {
+			t.Fatalf("%s handler count = %d, want 1", eventName, len(handlers))
+		}
+		handler := handlers[0].(map[string]any)
+		if handler["command"] != "/bin/true" {
+			t.Fatalf("%s command = %q, want /bin/true", eventName, handler["command"])
+		}
+	}
+}
+
+func TestLaunchConfigOverridesDisablesMutableWorkspaceExecutingHooks(t *testing.T) {
+	hookRoot := t.TempDir()
+	writeFile(t, filepath.Join(hookRoot, ".codex", "hooks.json"), `{
+		"hooks":{
+			"Stop":[{"hooks":[{"type":"command","command":"scripts/guardrail-bundle.sh"}]}],
+			"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"bd codex-hook SessionStart"}]}]
+		}
+	}`, 0o444)
+	projectRoot := gittest.NewRepo(t)
+	overrides, err := LaunchConfigOverrides(hookRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("LaunchConfigOverrides() error: %v", err)
+	}
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(strings.Join(overrides, "\n")), &parsed); err != nil {
+		t.Fatalf("generated overrides are not valid TOML: %v", err)
+	}
+	hooks := parsed["hooks"].(map[string]any)
+	state := hooks["state"].(map[string]any)
+	canonicalProjectRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for eventName, eventKey := range map[string]string{"Stop": "stop", "SessionStart": "session_start"} {
+		groups := hooks[eventName].([]any)
+		group := groups[0].(map[string]any)
+		handlers := group["hooks"].([]any)
+		handler := handlers[0].(map[string]any)
+		command := handler["command"].(string)
+		if !strings.Contains(command, "/bin/true") ||
+			strings.Contains(command, "guardrail-bundle") ||
+			strings.Contains(command, "bd codex-hook") {
+			t.Fatalf("%s bypass command = %q, want trusted no-op", eventName, command)
+		}
+		projectKey := filepath.Join(canonicalProjectRoot, ".codex", "hooks.json") + ":" + eventKey + ":0:0"
+		projectState := state[projectKey].(map[string]any)
+		if projectState["enabled"] != false {
+			t.Fatalf("%s project hook state = %#v, want disabled", eventName, projectState)
+		}
+		sessionKey := sessionFlagsHookSource + ":" + eventKey + ":0:0"
+		if _, ok := state[sessionKey].(map[string]any)["trusted_hash"]; !ok {
+			t.Fatalf("%s session hook state = %#v, want trusted hash", eventName, state[sessionKey])
+		}
 	}
 }
 

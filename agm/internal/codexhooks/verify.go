@@ -148,13 +148,7 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 		return nil, fmt.Errorf("parse committed Codex hook manifest: %w", err)
 	}
 	assets := []asset{manifest}
-	seen := map[string]struct{}{hooksManifestPath: {}}
-	for len(references) > 0 {
-		reference := references[0]
-		references = references[1:]
-		if _, exists := seen[reference]; exists {
-			continue
-		}
+	for _, reference := range references {
 		item, err := committedAsset(ctx, attestation.SourceRepo, attestation.SourceCommit, reference)
 		if err != nil {
 			return nil, fmt.Errorf("read committed hook asset %q: %w", reference, err)
@@ -162,13 +156,7 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 		if err := validateHookInterpreter(item); err != nil {
 			return nil, err
 		}
-		seen[reference] = struct{}{}
 		assets = append(assets, item)
-		transitive, err := referencedHookAssets(item.content)
-		if err != nil {
-			return nil, fmt.Errorf("parse committed hook asset %q: %w", reference, err)
-		}
-		references = append(references, transitive...)
 	}
 	sort.Slice(assets, func(i, j int) bool { return assets[i].path < assets[j].path })
 	return assets, nil
@@ -324,30 +312,6 @@ func referencedProjectFiles(manifest []byte) ([]string, error) {
 			clean, err := cleanProjectPath(strings.TrimPrefix(match[1], "./"))
 			if err != nil {
 				return nil, fmt.Errorf("command %q: %w", command, err)
-			}
-			references[clean] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(references))
-	for path := range references {
-		out = append(out, path)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-// referencedHookAssets discovers explicit project or materialized-root
-// references inside an already referenced executable. This closes the
-// transitive trust gap without trying to interpret arbitrary shell: hook
-// authors must spell executable dependencies with one of the supported root
-// variables, and every such dependency is recursively pinned and materialized.
-func referencedHookAssets(content []byte) ([]string, error) {
-	references := make(map[string]struct{})
-	for _, pattern := range []*regexp.Regexp{projectDirReference, hookRootReference} {
-		for _, match := range pattern.FindAllSubmatch(content, -1) {
-			clean, err := cleanProjectPath(string(match[1]))
-			if err != nil {
-				return nil, err
 			}
 			references[clean] = struct{}{}
 		}

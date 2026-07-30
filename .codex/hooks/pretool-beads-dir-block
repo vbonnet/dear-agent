@@ -14,6 +14,7 @@
 set -uo pipefail
 
 MESSAGE='Use `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>` instead of BEADS_DIR.
+Use the explicit canonical database command for repository-relative operations too.
 
 BEADS_DIR is not a supported bd environment variable. Setting it has no
 effect on bd and leaves dead weight in the environment.
@@ -54,22 +55,22 @@ patch_touches_shell_file() {
 }
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_name // empty' 2>/dev/null || true)"
 [ -n "$tool" ] || exit 0
 
 case "$tool" in
 Bash)
-  cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  cmd="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_input.command // empty' 2>/dev/null || true)"
   [ -n "$cmd" ] || exit 0
   if uses_beads_dir "$cmd"; then
     block
   fi
   ;;
 Write | Edit | MultiEdit)
-  file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+  file_path="$(printf '%s' "$input" | /usr/bin/jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
   [ -n "$file_path" ] || exit 0
   printf '%s' "$file_path" | grep -qE "$SHELL_FILE_RE" || exit 0
-  text="$(printf '%s' "$input" | jq -r '
+  text="$(printf '%s' "$input" | /usr/bin/jq -r '
     .tool_input as $t |
     [($t.content // empty), ($t.new_string // empty),
      (($t.edits // [])[] | .new_string // empty)] | join("\n")
@@ -80,7 +81,7 @@ Write | Edit | MultiEdit)
   fi
   ;;
 apply_patch)
-  patch_text="$(printf '%s' "$input" | jq -r '
+  patch_text="$(printf '%s' "$input" | /usr/bin/jq -r '
     if (.tool_input | type) == "string" then .tool_input
     else (.tool_input.patch // .tool_input.input // .tool_input.content // empty)
     end
