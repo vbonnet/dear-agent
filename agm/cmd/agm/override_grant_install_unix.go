@@ -6,28 +6,30 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
 
-// installOperatorGrant streams the confirmed bytes directly across the sudo
-// boundary. There is no same-user staging file for an unattended agent to race
-// between confirmation and installation, and AGM itself is never elevated.
+// installOperatorGrant performs the complete write and mode change in one
+// fixed privileged command. The elevated shell program is a literal compiled
+// into AGM; only the already-validated destination path is positional. sudo -k
+// requires fresh authentication and, when used with a command, deliberately
+// does not create or refresh a timestamp another same-user process could reuse.
 func installOperatorGrant(data []byte, path string) error {
-	if err := requireFreshSudoAuthentication(); err != nil {
+	passwordless, err := sudoValidationIsPasswordless()
+	if err != nil {
 		return err
 	}
-	installErr := writeOperatorGrant(data, path)
-	return errors.Join(installErr, invalidateSudoAuthentication())
-}
-
-func requireFreshSudoAuthentication() error {
-	return requireFreshAuthentication(
-		invalidateSudoAuthentication,
-		sudoValidationIsPasswordless,
-		promptForSudoAuthentication,
-	)
+	if passwordless {
+		return errors.New("fresh operator authentication is unavailable: passwordless sudo cannot approve a dangerous override")
+	}
+	cmd := exec.Command("/usr/bin/sudo", operatorGrantInstallArgs(path)...)
+	cmd.Stdin = bytes.NewReader(data)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install operator-owned override grant: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func sudoValidationIsPasswordless() (bool, error) {
@@ -46,40 +48,8 @@ func sudoValidationIsPasswordless() (bool, error) {
 	return false, fmt.Errorf("probe passwordless sudo validation: %w", err)
 }
 
-func promptForSudoAuthentication() error {
-	// Authenticate this command specifically so the ledger helper's narrow
-	// NOPASSWD rule cannot satisfy the fresh human challenge.
-	cmd := exec.Command("/usr/bin/sudo", freshUnixAuthenticationArgs(false)...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func invalidateSudoAuthentication() error {
-	output, err := exec.Command("/usr/bin/sudo", "-k").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("invalidate cached sudo authentication: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func writeOperatorGrant(data []byte, path string) error {
-	cmd := exec.Command("/usr/bin/sudo", "/usr/bin/tee", path)
-	cmd.Stdin = bytes.NewReader(data)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("install operator-owned override grant: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	output, err = exec.Command("/usr/bin/sudo", "/bin/chmod", "0644", path).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("secure operator-owned override grant: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
 func removeOperatorGrant(path string) error {
-	output, err := exec.Command("/usr/bin/sudo", "/bin/rm", "-f", path).CombinedOutput()
+	output, err := exec.Command("/usr/bin/sudo", "-k", "/bin/rm", "-f", path).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("remove operator-owned override grant: %w: %s", err, strings.TrimSpace(string(output)))
 	}

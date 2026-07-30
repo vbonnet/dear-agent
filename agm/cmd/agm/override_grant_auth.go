@@ -1,43 +1,29 @@
 package main
 
-import (
-	"errors"
-	"fmt"
-)
-
 const unixFreshAuthenticationCommand = "/usr/bin/true"
+const unixOperatorGrantInstaller = "/bin/sh"
+const unixOperatorGrantInstallScript = `set -eu
+umask 022
+/usr/bin/tee "$1" >/dev/null
+/bin/chmod 0644 "$1"`
 
 func freshUnixAuthenticationArgs(nonInteractive bool) []string {
-	args := make([]string, 0, 2)
+	// With a command, sudo -k ignores cached credentials and does not update
+	// the credential cache after successful authentication.
+	args := []string{"-k"}
 	if nonInteractive {
 		args = append(args, "-n")
 	}
 	return append(args, unixFreshAuthenticationCommand)
 }
 
-func requireFreshAuthentication(
-	invalidate func() error,
-	passwordless func() (bool, error),
-	prompt func() error,
-) error {
-	if err := invalidate(); err != nil {
-		return err
+func operatorGrantInstallArgs(path string) []string {
+	return []string{
+		"-k",
+		unixOperatorGrantInstaller,
+		"-c",
+		unixOperatorGrantInstallScript,
+		"dear-agent-override-grant-installer",
+		path,
 	}
-	available, err := passwordless()
-	if err != nil {
-		return err
-	}
-	if available {
-		return errors.Join(
-			errors.New("fresh operator authentication is unavailable: passwordless sudo cannot approve a dangerous override"),
-			invalidate(),
-		)
-	}
-	if err := prompt(); err != nil {
-		return errors.Join(
-			fmt.Errorf("fresh operator authentication failed: %w", err),
-			invalidate(),
-		)
-	}
-	return nil
 }

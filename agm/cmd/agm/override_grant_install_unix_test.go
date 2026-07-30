@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,8 +12,8 @@ func TestFreshUnixAuthenticationArgsExcludeValidationPseudocommand(t *testing.T)
 		nonInteractive bool
 		want           []string
 	}{
-		{name: "probe", nonInteractive: true, want: []string{"-n", "/usr/bin/true"}},
-		{name: "prompt", want: []string{"/usr/bin/true"}},
+		{name: "probe", nonInteractive: true, want: []string{"-k", "-n", "/usr/bin/true"}},
+		{name: "prompt", want: []string{"-k", "/usr/bin/true"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := freshUnixAuthenticationArgs(tt.nonInteractive)
@@ -28,69 +27,17 @@ func TestFreshUnixAuthenticationArgsExcludeValidationPseudocommand(t *testing.T)
 	}
 }
 
-func TestRequireFreshAuthenticationRejectsPasswordlessSudo(t *testing.T) {
-	invalidations := 0
-	prompts := 0
-	err := requireFreshAuthentication(
-		func() error {
-			invalidations++
-			return nil
-		},
-		func() (bool, error) { return true, nil },
-		func() error {
-			prompts++
-			return nil
-		},
-	)
-	if err == nil || !strings.Contains(err.Error(), "passwordless sudo") {
-		t.Fatalf("error = %v, want passwordless-sudo rejection", err)
+func TestOperatorGrantInstallArgsUseOneNonCachingPrivilegedInstaller(t *testing.T) {
+	const path = "/etc/dear-agent/override-grants/admin.json"
+	want := []string{
+		"-k",
+		"/bin/sh",
+		"-c",
+		unixOperatorGrantInstallScript,
+		"dear-agent-override-grant-installer",
+		path,
 	}
-	if invalidations != 2 {
-		t.Fatalf("invalidations = %d, want before and after probe", invalidations)
-	}
-	if prompts != 0 {
-		t.Fatalf("prompts = %d, want no prompt after passwordless rejection", prompts)
-	}
-}
-
-func TestRequireFreshAuthenticationRequiresPromptAfterInvalidation(t *testing.T) {
-	sequence := []string{}
-	err := requireFreshAuthentication(
-		func() error {
-			sequence = append(sequence, "invalidate")
-			return nil
-		},
-		func() (bool, error) {
-			sequence = append(sequence, "probe")
-			return false, nil
-		},
-		func() error {
-			sequence = append(sequence, "prompt")
-			return nil
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(sequence, ","); got != "invalidate,probe,prompt" {
-		t.Fatalf("sequence = %s", got)
-	}
-}
-
-func TestRequireFreshAuthenticationInvalidatesAfterPromptFailure(t *testing.T) {
-	invalidations := 0
-	err := requireFreshAuthentication(
-		func() error {
-			invalidations++
-			return nil
-		},
-		func() (bool, error) { return false, nil },
-		func() error { return errors.New("authentication cancelled") },
-	)
-	if err == nil || !strings.Contains(err.Error(), "authentication cancelled") {
-		t.Fatalf("error = %v, want prompt failure", err)
-	}
-	if invalidations != 2 {
-		t.Fatalf("invalidations = %d, want before and after failed prompt", invalidations)
+	if got := operatorGrantInstallArgs(path); !reflect.DeepEqual(got, want) {
+		t.Fatalf("operatorGrantInstallArgs() = %q, want %q", got, want)
 	}
 }
