@@ -672,6 +672,7 @@ func rejectDynamicCommandResolution(script string) error {
 		return fmt.Errorf("parse trusted hook shell: %w", err)
 	}
 	functions := declaredShellFunctions(file)
+	jqForwarders, jqForwardingCalls := declaredJQForwarders(file)
 	var rejected syntax.Node
 	var reason string
 	syntax.Walk(file, func(node syntax.Node) bool {
@@ -691,6 +692,18 @@ func rejectDynamicCommandResolution(script string) error {
 		call, ok := node.(*syntax.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
+		}
+		if _, forwarding := jqForwardingCalls[call]; forwarding {
+			return true
+		}
+		command, static := staticShellWord(call.Args[0])
+		if static {
+			if _, forwardsJQ := jqForwarders[command]; forwardsJQ &&
+				jqArgumentsLoadExternalFile(call.Args[1:]) {
+				rejected = call.Args[0]
+				reason = "external-file-loading jq runtime"
+				return false
+			}
 		}
 		word, why := dynamicCommandTarget(call, functions)
 		if word != nil {
@@ -725,6 +738,58 @@ func declaredShellFunctions(file *syntax.File) map[string]struct{} {
 		return true
 	})
 	return functions
+}
+
+func declaredJQForwarders(file *syntax.File) (map[string]struct{}, map[*syntax.CallExpr]struct{}) {
+	forwarders := make(map[string]struct{})
+	forwardingCalls := make(map[*syntax.CallExpr]struct{})
+	syntax.Walk(file, func(node syntax.Node) bool {
+		declaration, ok := node.(*syntax.FuncDecl)
+		if !ok {
+			return true
+		}
+		var calls []*syntax.CallExpr
+		syntax.Walk(declaration.Body, func(bodyNode syntax.Node) bool {
+			call, ok := bodyNode.(*syntax.CallExpr)
+			if !ok || len(call.Args) != 2 {
+				return true
+			}
+			command, static := staticShellWord(call.Args[0])
+			if static && filepath.Base(command) == "jq" && shellWordIsAllArguments(call.Args[1]) {
+				calls = append(calls, call)
+			}
+			return true
+		})
+		if len(calls) == 0 {
+			return true
+		}
+		if declaration.Name != nil {
+			forwarders[declaration.Name.Value] = struct{}{}
+		}
+		for _, name := range declaration.Names {
+			forwarders[name.Value] = struct{}{}
+		}
+		for _, call := range calls {
+			forwardingCalls[call] = struct{}{}
+		}
+		return true
+	})
+	return forwarders, forwardingCalls
+}
+
+func shellWordIsAllArguments(word *syntax.Word) bool {
+	if len(word.Parts) != 1 {
+		return false
+	}
+	part := word.Parts[0]
+	if quoted, ok := part.(*syntax.DblQuoted); ok {
+		if quoted.Dollar || len(quoted.Parts) != 1 {
+			return false
+		}
+		part = quoted.Parts[0]
+	}
+	parameter, ok := part.(*syntax.ParamExp)
+	return ok && parameter.Short && parameter.Param != nil && parameter.Param.Value == "@"
 }
 
 func arithmeticNodeWritesVariable(node syntax.Node) bool {
@@ -1552,35 +1617,179 @@ func jqLoadsExternalFile(command string, args []*syntax.Word) bool {
 	if filepath.Base(command) != "jq" {
 		return false
 	}
-	for _, word := range args {
-		value, static := staticShellWord(word)
-		if !static {
-			continue
+	return jqArgumentsLoadExternalFile(args)
+}
+
+func jqArgumentsLoadExternalFile(args []*syntax.Word) bool {
+	filterSeen := false
+	for index := 0; index < len(args); index++ {
+		if filterSeen {
+			// Positional operands after the filter are input files. Trusted
+			// hooks receive their inspected event on stdin instead.
+			return true
 		}
-		for _, option := range []string{
-			"--from-file",
-			"--library-path",
-			"--argfile",
-			"--rawfile",
-			"--slurpfile",
-			"--run-tests",
-		} {
-			if value == option || strings.HasPrefix(value, option+"=") {
+		inspection := inspectJQArgument(args, index)
+		if inspection.unsafe {
+			return true
+		}
+		if inspection.terminal {
+			return false
+		}
+		index = inspection.next
+		if inspection.hasFilter {
+			// jq's import/include filters load modules from its library search
+			// path even without an explicit -L argument.
+			if jqModuleDirective.MatchString(inspection.filter) {
 				return true
 			}
-		}
-		if strings.HasPrefix(value, "-") &&
-			!strings.HasPrefix(value, "--") &&
-			strings.ContainsAny(value[1:], "fL") {
-			return true
-		}
-		// jq's import/include filters load modules from its library search
-		// path even without an explicit -L argument.
-		if jqModuleDirective.MatchString(value) {
-			return true
+			filterSeen = true
 		}
 	}
 	return false
+}
+
+type jqArgumentInspection struct {
+	next      int
+	filter    string
+	hasFilter bool
+	terminal  bool
+	unsafe    bool
+}
+
+func inspectJQArgument(args []*syntax.Word, index int) jqArgumentInspection {
+	value, static := staticShellWord(args[index])
+	if !static {
+		// A dynamic option or filter can select -f/-L or import/include.
+		// Dynamic values consumed by --arg/--argjson are skipped below.
+		return jqArgumentInspection{unsafe: true}
+	}
+	switch classifyJQArgument(value) {
+	case jqRejectArgument:
+		return jqArgumentInspection{unsafe: true}
+	case jqBindingArgument:
+		next, safe := jqStaticOptionOperands(args, index, 2, true)
+		return jqArgumentInspection{next: next, unsafe: !safe}
+	case jqIndentArgument:
+		next, safe := jqStaticOptionOperands(args, index, 1, false)
+		return jqArgumentInspection{next: next, unsafe: !safe}
+	case jqFlagArgument:
+		return jqArgumentInspection{next: index}
+	case jqTerminalArgument:
+		return jqArgumentInspection{terminal: true}
+	case jqSeparatorArgument:
+		next := index + 1
+		if next >= len(args) {
+			return jqArgumentInspection{unsafe: true}
+		}
+		filter, filterStatic := staticShellWord(args[next])
+		return jqArgumentInspection{
+			next:      next,
+			filter:    filter,
+			hasFilter: filterStatic,
+			unsafe:    !filterStatic,
+		}
+	case jqFilterArgument:
+		return jqArgumentInspection{next: index, filter: value, hasFilter: true}
+	default:
+		return jqArgumentInspection{unsafe: true}
+	}
+}
+
+func jqStaticOptionOperands(
+	args []*syntax.Word,
+	index, count int,
+	requireNamedFirst bool,
+) (int, bool) {
+	if index+count >= len(args) {
+		return index, false
+	}
+	if requireNamedFirst {
+		name, static := staticShellWord(args[index+1])
+		if !static || name == "" {
+			return index, false
+		}
+	}
+	if count == 1 {
+		_, static := staticShellWord(args[index+1])
+		return index + 1, static
+	}
+	// The final --arg/--argjson value is data and may be dynamic.
+	return index + count, true
+}
+
+type jqArgumentAction uint8
+
+const (
+	jqFilterArgument jqArgumentAction = iota
+	jqRejectArgument
+	jqBindingArgument
+	jqIndentArgument
+	jqFlagArgument
+	jqTerminalArgument
+	jqSeparatorArgument
+)
+
+func classifyJQArgument(value string) jqArgumentAction {
+	if jqExternalFileOption(value) {
+		return jqRejectArgument
+	}
+	switch value {
+	case "--arg", "--argjson":
+		return jqBindingArgument
+	case "--indent":
+		return jqIndentArgument
+	case "--args", "--jsonargs", "--binary", "--color-output",
+		"--compact-output", "--exit-status", "--join-output",
+		"--monochrome-output", "--null-input", "--raw-input",
+		"--raw-output", "--raw-output0", "--seq", "--slurp",
+		"--sort-keys", "--stream", "--stream-errors", "--tab",
+		"--unbuffered":
+		return jqFlagArgument
+	case "--help", "--version":
+		return jqTerminalArgument
+	case "--":
+		return jqSeparatorArgument
+	}
+	if strings.HasPrefix(value, "--") {
+		return jqRejectArgument
+	}
+	if strings.HasPrefix(value, "-") && value != "-" {
+		if jqSafeBundledShortOptions(value) {
+			return jqFlagArgument
+		}
+		return jqRejectArgument
+	}
+	return jqFilterArgument
+}
+
+func jqExternalFileOption(value string) bool {
+	for _, option := range []string{
+		"--from-file",
+		"--library-path",
+		"--argfile",
+		"--rawfile",
+		"--slurpfile",
+		"--run-tests",
+	} {
+		if value == option || strings.HasPrefix(value, option+"=") {
+			return true
+		}
+	}
+	return strings.HasPrefix(value, "-") &&
+		!strings.HasPrefix(value, "--") &&
+		strings.ContainsAny(value[1:], "fL")
+}
+
+func jqSafeBundledShortOptions(value string) bool {
+	if !strings.HasPrefix(value, "-") || strings.HasPrefix(value, "--") {
+		return false
+	}
+	for _, option := range strings.TrimPrefix(value, "-") {
+		if !strings.ContainsRune("abcCejMnrRsSV", option) {
+			return false
+		}
+	}
+	return len(value) > 1
 }
 
 func namerefDeclarationOption(args []*syntax.Word) *syntax.Word {

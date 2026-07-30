@@ -344,11 +344,25 @@ func TestValidateScriptAssetRejectsJQExternalFileModes(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/jq --rawfile payload ./helper '$payload'\n",
 		"#!/bin/sh\n/usr/bin/jq --run-tests ./helper\n",
 		"#!/bin/sh\n/usr/bin/jq 'import \"helper\" as h; h::value'\n",
+		"#!/bin/sh\nopts=-f\n/usr/bin/jq \"$opts\" helper\n",
+		"#!/bin/sh\nhook_json() { jq \"$@\"; }\nhook_json -n -f helper\n",
+		"#!/bin/sh\nhook_json() { jq \"$@\"; }\nhook_json --rawfile payload helper '$payload'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "external-file-loading jq runtime") {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want jq external-file rejection", script, err)
 		}
+	}
+}
+
+func TestValidateScriptAssetAllowsJQForwarderWithStaticFilterAndDynamicArgValue(t *testing.T) {
+	const script = `#!/bin/sh
+hook_json() { jq "$@"; }
+message=$1
+hook_json -cn --arg msg "$message" '{decision:"block",reason:$msg}'
+`
+	if err := validateScriptAsset([]byte(script)); err != nil {
+		t.Fatalf("validateScriptAsset() error = %v, want analyzed jq forwarder allowed", err)
 	}
 }
 
