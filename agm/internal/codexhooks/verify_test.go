@@ -403,6 +403,10 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/awk 'BEGIN{x=sprintf(\"%c%c%s\",46,47,\"helper\");system(x)}'\n",
 		"#!/bin/sh\n/usr/bin/awk '{ cmd | getline value }'\n",
 		"#!/bin/sh\ncommand /usr/bin/awk '{ print $0 | \"helper\" }'\n",
+		"#!/bin/sh\n/usr/bin/sed 'e x=$(printf \".%shelper\" /);$x'\n",
+		"#!/bin/sh\ncommand /usr/bin/sed -n 's/a/b/e'\n",
+		"#!/bin/sh\n/usr/bin/sed -e '1,${e ./helper\n}'\n",
+		"#!/bin/sh\n/usr/bin/sed \"$SED_PROGRAM\"\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
@@ -431,6 +435,8 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/sh\ncommand -v jq\n",
 		"#!/bin/sh\n/usr/bin/env -i /bin/true\n",
 		"#!/bin/bash\nbuiltin source /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/sed --sandbox -n 's/a/b/p'\n",
+		"#!/bin/sh\n/usr/bin/sed -n 's|e|x|g'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)

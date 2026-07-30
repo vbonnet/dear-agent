@@ -845,6 +845,265 @@ func awkProgramExecutesCommand(program string) bool {
 		awkOutputPipe.MatchString(program)
 }
 
+func sedUsesCommandExecution(command string, args []*syntax.Word) bool {
+	switch filepath.Base(command) {
+	case "sed", "gsed":
+	default:
+		return false
+	}
+
+	if len(args) > 0 {
+		first, static := staticShellWord(args[0])
+		if static && first == "--sandbox" {
+			return false
+		}
+	}
+	programs, static := staticSedPrograms(args)
+	if !static {
+		return true
+	}
+	return slices.ContainsFunc(programs, sedProgramExecutesCommand)
+}
+
+func staticSedPrograms(args []*syntax.Word) ([]string, bool) {
+	var programs []string
+	operandsOnly := false
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			return nil, false
+		}
+		if operandsOnly {
+			if len(programs) == 0 {
+				programs = append(programs, value)
+			}
+			continue
+		}
+		if value == "--" {
+			operandsOnly = true
+			continue
+		}
+		program, nextIndex, expression, valid := staticSedExpression(args, index, value)
+		if expression {
+			if !valid {
+				return nil, false
+			}
+			programs = append(programs, program)
+			index = nextIndex
+			continue
+		}
+		if sedProgramFileOption(value) {
+			return nil, false
+		}
+		if safeSedOption(value) {
+			continue
+		}
+		if strings.HasPrefix(value, "-") {
+			return nil, false
+		}
+		if len(programs) == 0 {
+			programs = append(programs, value)
+		}
+	}
+	return programs, len(programs) > 0
+}
+
+func staticSedExpression(args []*syntax.Word, index int, value string) (string, int, bool, bool) {
+	switch {
+	case value == "-e" || value == "--expression":
+		next := index + 1
+		if next >= len(args) {
+			return "", index, true, false
+		}
+		program, static := staticShellWord(args[next])
+		return program, next, true, static
+	case strings.HasPrefix(value, "--expression="):
+		return strings.TrimPrefix(value, "--expression="), index, true, true
+	case strings.HasPrefix(value, "-e") && len(value) > 2:
+		return value[2:], index, true, true
+	default:
+		return "", index, false, true
+	}
+}
+
+func sedProgramFileOption(value string) bool {
+	return value == "-f" || value == "--file" ||
+		strings.HasPrefix(value, "-f") ||
+		strings.HasPrefix(value, "--file=")
+}
+
+func safeSedOption(value string) bool {
+	switch value {
+	case "-n", "-E", "-r", "-u", "-z", "-s",
+		"--quiet", "--silent", "--regexp-extended", "--posix",
+		"--separate", "--unbuffered", "--null-data":
+		return true
+	default:
+		return false
+	}
+}
+
+func sedProgramExecutesCommand(program string) bool {
+	for index := 0; index < len(program); {
+		index = skipSedSeparators(program, index)
+		if index >= len(program) {
+			return false
+		}
+		if program[index] == '#' {
+			index = skipSedLine(program, index)
+			continue
+		}
+		index = skipSedAddresses(program, index)
+		index = skipSedSeparators(program, index)
+		if index < len(program) && program[index] == '!' {
+			index++
+			for index < len(program) && (program[index] == ' ' || program[index] == '\t') {
+				index++
+			}
+		}
+		if index >= len(program) {
+			return false
+		}
+		next, executes := skipSedParsedCommand(program, index)
+		if executes {
+			return true
+		}
+		index = next
+	}
+	return false
+}
+
+func skipSedParsedCommand(program string, index int) (int, bool) {
+	command := program[index]
+	index++
+	switch command {
+	case 'e':
+		return index, true
+	case 's':
+		return skipSedSubstitution(program, index)
+	case '{', '}':
+		return index, false
+	default:
+		return skipSedCommand(program, index, command), false
+	}
+}
+
+func skipSedSeparators(program string, index int) int {
+	for index < len(program) {
+		switch program[index] {
+		case ' ', '\t', '\r', '\n', ';', '{', '}':
+			index++
+		default:
+			return index
+		}
+	}
+	return index
+}
+
+func skipSedAddresses(program string, index int) int {
+	for range 2 {
+		for index < len(program) && (program[index] == ' ' || program[index] == '\t') {
+			index++
+		}
+		next, ok := skipSedAddress(program, index)
+		if !ok {
+			return index
+		}
+		index = next
+		for index < len(program) && (program[index] == ' ' || program[index] == '\t') {
+			index++
+		}
+		if index >= len(program) || program[index] != ',' {
+			return index
+		}
+		index++
+	}
+	return index
+}
+
+func skipSedAddress(program string, index int) (int, bool) {
+	if index >= len(program) {
+		return index, false
+	}
+	switch {
+	case program[index] >= '0' && program[index] <= '9':
+		for index < len(program) &&
+			((program[index] >= '0' && program[index] <= '9') ||
+				strings.ContainsRune("~+", rune(program[index]))) {
+			index++
+		}
+		return index, true
+	case program[index] == '$':
+		return index + 1, true
+	case program[index] == '/':
+		return skipSedDelimited(program, index+1, '/')
+	case program[index] == '\\' && index+1 < len(program):
+		delimiter := program[index+1]
+		return skipSedDelimited(program, index+2, delimiter)
+	default:
+		return index, false
+	}
+}
+
+func skipSedDelimited(program string, index int, delimiter byte) (int, bool) {
+	escaped := false
+	for index < len(program) {
+		switch {
+		case escaped:
+			escaped = false
+		case program[index] == '\\':
+			escaped = true
+		case program[index] == delimiter:
+			return index + 1, true
+		}
+		index++
+	}
+	return index, false
+}
+
+func skipSedSubstitution(program string, index int) (int, bool) {
+	if index >= len(program) || program[index] == '\n' {
+		return index, true
+	}
+	delimiter := program[index]
+	index++
+	var ok bool
+	index, ok = skipSedDelimited(program, index, delimiter)
+	if !ok {
+		return index, true
+	}
+	index, ok = skipSedDelimited(program, index, delimiter)
+	if !ok {
+		return index, true
+	}
+	for index < len(program) && !strings.ContainsRune(" \t\r\n;", rune(program[index])) {
+		if program[index] == 'e' {
+			return index, true
+		}
+		index++
+	}
+	return index, false
+}
+
+func skipSedCommand(program string, index int, command byte) int {
+	if command == 'a' || command == 'c' || command == 'i' ||
+		command == 'r' || command == 'R' || command == 'w' ||
+		command == 'W' {
+		return skipSedLine(program, index)
+	}
+	for index < len(program) && program[index] != ';' && program[index] != '\n' {
+		index++
+	}
+	return index
+}
+
+func skipSedLine(program string, index int) int {
+	for index < len(program) && program[index] != '\n' {
+		index++
+	}
+	return index
+}
+
 func dynamicBuiltinOperand(
 	command string,
 	commandWord *syntax.Word,
@@ -852,6 +1111,9 @@ func dynamicBuiltinOperand(
 ) (*syntax.Word, string) {
 	if awkUsesCommandExecution(command, args) {
 		return commandWord, "command-capable AWK runtime"
+	}
+	if sedUsesCommandExecution(command, args) {
+		return commandWord, "command-capable sed runtime"
 	}
 	switch command {
 	case "mapfile", "readarray":
