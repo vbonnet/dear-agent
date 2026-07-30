@@ -335,6 +335,23 @@ func TestValidateScriptAssetRejectsCommandOutsideCapabilityAllowlist(t *testing.
 	}
 }
 
+func TestValidateScriptAssetRejectsJQExternalFileModes(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\n/usr/bin/jq -n -f helper\n",
+		"#!/bin/sh\n/usr/bin/jq -nf helper\n",
+		"#!/bin/sh\ncommand /usr/bin/jq --from-file=./helper\n",
+		"#!/bin/sh\n/usr/bin/jq -L. 'include \"helper\"; .'\n",
+		"#!/bin/sh\n/usr/bin/jq --rawfile payload ./helper '$payload'\n",
+		"#!/bin/sh\n/usr/bin/jq --run-tests ./helper\n",
+		"#!/bin/sh\n/usr/bin/jq 'import \"helper\" as h; h::value'\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "external-file-loading jq runtime") {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want jq external-file rejection", script, err)
+		}
+	}
+}
+
 func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\nexport PATH=.; helper\n",

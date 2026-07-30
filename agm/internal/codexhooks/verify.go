@@ -40,6 +40,7 @@ var (
 	awkSystemCall        = regexp.MustCompile(`\bsystem[[:space:]]*\(`)
 	awkGetline           = regexp.MustCompile(`\bgetline\b`)
 	awkOutputPipe        = regexp.MustCompile(`\b(?:print|printf)\b[^;\n]*\|`)
+	jqModuleDirective    = regexp.MustCompile(`(?:^|[;[:space:]])(?:import|include)[[:space:]]+"`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -1541,7 +1542,45 @@ func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 	if gitUsesCommandExecution(command, args) {
 		return "command-capable Git runtime"
 	}
+	if jqLoadsExternalFile(command, args) {
+		return "external-file-loading jq runtime"
+	}
 	return ""
+}
+
+func jqLoadsExternalFile(command string, args []*syntax.Word) bool {
+	if filepath.Base(command) != "jq" {
+		return false
+	}
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			continue
+		}
+		for _, option := range []string{
+			"--from-file",
+			"--library-path",
+			"--argfile",
+			"--rawfile",
+			"--slurpfile",
+			"--run-tests",
+		} {
+			if value == option || strings.HasPrefix(value, option+"=") {
+				return true
+			}
+		}
+		if strings.HasPrefix(value, "-") &&
+			!strings.HasPrefix(value, "--") &&
+			strings.ContainsAny(value[1:], "fL") {
+			return true
+		}
+		// jq's import/include filters load modules from its library search
+		// path even without an explicit -L argument.
+		if jqModuleDirective.MatchString(value) {
+			return true
+		}
+	}
+	return false
 }
 
 func namerefDeclarationOption(args []*syntax.Word) *syntax.Word {

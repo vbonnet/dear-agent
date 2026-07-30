@@ -16,15 +16,15 @@ import (
 // requires fresh authentication and, when used with a command, deliberately
 // does not create or refresh a timestamp another same-user process could reuse.
 func installOperatorGrant(data []byte, path string) error {
-	passwordless, err := sudoValidationIsPasswordless()
+	passwordless, err := sudoInstallerIsPasswordless(path)
 	if err != nil {
 		return err
 	}
 	if passwordless {
 		return errors.New("fresh operator authentication is unavailable: passwordless sudo cannot approve a dangerous override")
 	}
-	cmd := exec.Command("/usr/bin/sudo", operatorGrantInstallArgs(path)...)
-	cmd.Stdin = bytes.NewReader(data)
+	cmd := exec.Command("/usr/bin/sudo", operatorGrantInstallArgs(path, false)...)
+	cmd.Stdin = bytes.NewReader(append([]byte(unixOperatorGrantInstallInput), data...))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("install operator-owned override grant: %w: %s", err, strings.TrimSpace(string(output)))
@@ -32,20 +32,27 @@ func installOperatorGrant(data []byte, path string) error {
 	return nil
 }
 
-func sudoValidationIsPasswordless() (bool, error) {
-	// Probe a harmless command that is deliberately outside the installed
-	// NOPASSWD ledger-helper rule. sudo's generic -v pseudocommand may succeed
-	// when any matching NOPASSWD rule exists, which would make the prerequisite
-	// helper installation disable every later approval.
-	err := exec.Command("/usr/bin/sudo", freshUnixAuthenticationArgs(true)...).Run()
+func sudoInstallerIsPasswordless(path string) (bool, error) {
+	// Probe the exact privileged command that will perform the installation.
+	// sudoers command matching sees the same executable and arguments in the
+	// probe and real calls; only sudo's -n flag and stdin differ. If that exact
+	// command is NOPASSWD, the fixed shell consumes the probe marker, performs
+	// no write, and returns the dedicated status below. Otherwise -n fails
+	// before the shell runs, and the real sudo -k call must authenticate.
+	cmd := exec.Command("/usr/bin/sudo", operatorGrantInstallArgs(path, true)...)
+	cmd.Stdin = strings.NewReader(unixOperatorGrantProbeInput)
+	output, err := cmd.CombinedOutput()
 	if err == nil {
-		return true, nil
+		return false, errors.New("probe privileged override installer: installer probe returned success unexpectedly")
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
+		if exitErr.ExitCode() == unixOperatorGrantProbeExitCode {
+			return true, nil
+		}
 		return false, nil
 	}
-	return false, fmt.Errorf("probe passwordless sudo validation: %w", err)
+	return false, fmt.Errorf("probe privileged override installer: %w: %s", err, strings.TrimSpace(string(output)))
 }
 
 func removeOperatorGrant(path string) error {
