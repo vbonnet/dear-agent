@@ -686,6 +686,8 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		switch value {
 		case "eval", "trap":
 			return word, "string-evaluating shell builtin"
+		case "source", ".":
+			return wrappedSourceOperand(args[index+1:])
 		case "command", "builtin", "exec", "nohup":
 			return dynamicWrapperCommand(args[index+1:], false)
 		case "env", "/usr/bin/env":
@@ -693,6 +695,23 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		default:
 			return nil, ""
 		}
+	}
+	return nil, ""
+}
+
+func wrappedSourceOperand(args []*syntax.Word) (*syntax.Word, string) {
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			return word, "mutable interpreter or sourced-file operand"
+		}
+		if value == "--" || strings.HasPrefix(value, "-") {
+			continue
+		}
+		if filepath.IsAbs(value) && isSystemRuntimePath(value) {
+			return nil, ""
+		}
+		return word, "mutable interpreter or sourced-file operand"
 	}
 	return nil, ""
 }

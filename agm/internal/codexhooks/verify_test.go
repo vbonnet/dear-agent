@@ -217,6 +217,8 @@ func TestValidateScriptAssetRejectsBareInterpreterAndSourceOperands(t *testing.T
 		"#!/bin/sh\nif /bin/sh helper; then exit 0; fi\n",
 		"#!/bin/bash\nsource helper\n",
 		"#!/bin/sh\n. helper\n",
+		"#!/bin/bash\nbuiltin source helper\n",
+		"#!/bin/bash\ncommand -- builtin . ./helper\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "mutable interpreter or sourced-file operand") {
@@ -339,6 +341,7 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/sh\n/bin/printf '%s\\n' \"$HOME\"\n",
 		"#!/bin/sh\ncommand -v jq\n",
 		"#!/bin/sh\n/usr/bin/env -i /bin/true\n",
+		"#!/bin/bash\nbuiltin source /usr/bin/true\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)
