@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
@@ -49,5 +51,134 @@ func TestOnlyAdmissionBrakeRefused(t *testing.T) {
 				t.Fatalf("onlyAdmissionBrakeRefused() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestApplyAdmissionBrakeAuthorizationPreservesOtherRefusals(t *testing.T) {
+	result := circuitbreaker.CheckResult{
+		Gates: []circuitbreaker.GateResult{
+			{Gate: "spawn_stagger", Passed: false, Message: "concurrent spawn"},
+			{Gate: "admission_brake", RequiresOverride: true, Message: "brake engaged"},
+		},
+	}
+	got := applyAdmissionBrakeAuthorization(result, "operator verified host recovery")
+	if got.Allowed {
+		t.Fatal("brake authorization erased a concurrent non-brake refusal")
+	}
+	if got.Gates[1].Passed != true || got.Gates[1].RequiresOverride {
+		t.Fatalf("brake gate was not marked authorized: %+v", got.Gates[1])
+	}
+	if got.Gates[0].Passed {
+		t.Fatalf("non-brake gate changed: %+v", got.Gates[0])
+	}
+}
+
+func TestApplyAdmissionBrakeAuthorizationAllowsSoleBrakeRefusal(t *testing.T) {
+	result := circuitbreaker.CheckResult{
+		Gates: []circuitbreaker.GateResult{
+			{Gate: "disk", Passed: true},
+			{Gate: "admission_brake", RequiresOverride: true, Message: "brake engaged"},
+		},
+	}
+	got := applyAdmissionBrakeAuthorization(result, "operator verified host recovery")
+	if !got.Allowed {
+		t.Fatalf("sole committed brake authorization remained refused: %+v", got)
+	}
+	if !got.Gates[1].Passed || got.Gates[1].RequiresOverride {
+		t.Fatalf("brake gate was not marked authorized: %+v", got.Gates[1])
+	}
+}
+
+func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) {
+	initial := circuitbreaker.CheckResult{Gates: []circuitbreaker.GateResult{{
+		Gate: "admission_brake", RequiresOverride: true,
+	}}}
+	var events []string
+	result, err := finalizeAdmissionBrakeOverride(
+		initial,
+		"operator verified host recovery",
+		"worker-ce-6xfu",
+		func() circuitbreaker.CheckResult {
+			events = append(events, "final-check")
+			return initial
+		},
+		func(reason, session string) (func() error, error) {
+			events = append(events, "reserve")
+			if reason == "" || session != "worker-ce-6xfu" {
+				t.Fatalf("reservation attribution = (%q, %q)", reason, session)
+			}
+			return func() error {
+				events = append(events, "commit")
+				return nil
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "reserve,final-check,commit"; got != want {
+		t.Fatalf("authorization events = %q, want %q", got, want)
+	}
+	if !result.Allowed {
+		t.Fatalf("committed sole-brake result remained refused: %+v", result)
+	}
+}
+
+func TestFinalizeAdmissionBrakeOverrideAbandonsReservationOnConcurrentRefusal(t *testing.T) {
+	initial := circuitbreaker.CheckResult{Gates: []circuitbreaker.GateResult{{
+		Gate: "admission_brake", RequiresOverride: true,
+	}}}
+	committed := false
+	result, err := finalizeAdmissionBrakeOverride(
+		initial,
+		"operator verified host recovery",
+		"worker-ce-6xfu",
+		func() circuitbreaker.CheckResult {
+			return circuitbreaker.CheckResult{Gates: []circuitbreaker.GateResult{
+				{Gate: "spawn_stagger", Passed: false},
+				{Gate: "admission_brake", RequiresOverride: true},
+			}}
+		},
+		func(string, string) (func() error, error) {
+			return func() error {
+				committed = true
+				return nil
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)
+	}
+	if committed {
+		t.Fatal("concurrent refusal consumed the reserved ledger use")
+	}
+	if result.Allowed {
+		t.Fatalf("concurrent refusal was erased: %+v", result)
+	}
+}
+
+func TestFinalizeAdmissionBrakeOverridePropagatesReservationFailure(t *testing.T) {
+	initial := circuitbreaker.CheckResult{Gates: []circuitbreaker.GateResult{{
+		Gate: "admission_brake", RequiresOverride: true,
+	}}}
+	wantErr := errors.New("grant expired")
+	finalChecked := false
+	_, err := finalizeAdmissionBrakeOverride(
+		initial,
+		"operator verified host recovery",
+		"worker-ce-6xfu",
+		func() circuitbreaker.CheckResult {
+			finalChecked = true
+			return initial
+		},
+		func(string, string) (func() error, error) {
+			return nil, wantErr
+		},
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if finalChecked {
+		t.Fatal("final check ran without a valid authorization reservation")
 	}
 }

@@ -836,18 +836,18 @@ func enforceCircuitBreakers(sessionName string) (func() error, error) {
 		mu.Unlock()
 
 		liveResult := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
-		if normalizedBrakeOverrideReason != "" && onlyAdmissionBrakeRefused(liveResult) {
-			// Every non-brake gate passed at the executable boundary. Consume
-			// the human grant now, then recheck once more so a changed host
-			// state still fails closed before submission.
-			if err := ops.AuthorizeAdmissionBrakeOverride(normalizedBrakeOverrideReason, sessionName); err != nil {
-				ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
-				return err
-			}
-			liveResult = circuitbreaker.Check(
-				cfg, lr, wc, st, mr,
-				append(checkOpts, circuitbreaker.WithAuthorizedBrakeOverride(normalizedBrakeOverrideReason))...,
-			)
+		liveResult, err := finalizeAdmissionBrakeOverride(
+			liveResult,
+			normalizedBrakeOverrideReason,
+			sessionName,
+			func() circuitbreaker.CheckResult {
+				return circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
+			},
+			ops.ReserveAdmissionBrakeOverride,
+		)
+		if err != nil {
+			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
+			return err
 		}
 		logCircuitBreakerResult(liveResult)
 		if !liveResult.Allowed {
@@ -858,6 +858,55 @@ func enforceCircuitBreakers(sessionName string) (func() error, error) {
 		}
 		return nil
 	}, nil
+}
+
+func finalizeAdmissionBrakeOverride(
+	initial circuitbreaker.CheckResult,
+	reason string,
+	sessionName string,
+	finalCheck func() circuitbreaker.CheckResult,
+	reserve func(string, string) (func() error, error),
+) (circuitbreaker.CheckResult, error) {
+	if reason == "" || !onlyAdmissionBrakeRefused(initial) {
+		return initial, nil
+	}
+
+	// Reserve current human authorization without consuming the ledger quota,
+	// then repeat every live gate. A concurrent resource or stagger refusal
+	// abandons the reservation without recording a use.
+	commit, err := reserve(reason, sessionName)
+	if err != nil {
+		return initial, err
+	}
+	result := finalCheck()
+	if !onlyAdmissionBrakeRefused(result) {
+		// The brake cleared, or another gate began refusing. Neither outcome
+		// crossed the brake, so the reserved use must not be committed.
+		return result, nil
+	}
+	if err := commit(); err != nil {
+		return result, err
+	}
+	return applyAdmissionBrakeAuthorization(result, reason), nil
+}
+
+func applyAdmissionBrakeAuthorization(
+	result circuitbreaker.CheckResult,
+	reason string,
+) circuitbreaker.CheckResult {
+	result.Allowed = true
+	for i := range result.Gates {
+		gate := &result.Gates[i]
+		if gate.Gate == "admission_brake" && !gate.Passed && gate.RequiresOverride {
+			gate.Passed = true
+			gate.RequiresOverride = false
+			gate.Message = fmt.Sprintf("%s Crossed under an audited override: %s", gate.Message, reason)
+		}
+		if !gate.Passed {
+			result.Allowed = false
+		}
+	}
+	return result
 }
 
 func logCircuitBreakerResult(result circuitbreaker.CheckResult) {

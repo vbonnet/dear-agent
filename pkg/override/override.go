@@ -36,6 +36,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -96,6 +97,7 @@ var (
 	ErrGrantKind            = errors.New("human approval is for a different override kind")
 	ErrGrantUntrusted       = errors.New("override approval is not in operator-owned storage")
 	ErrLedgerUntrusted      = errors.New("override ledger is not in operator-owned storage")
+	ErrReservationCommitted = errors.New("override authorization reservation was already committed")
 )
 
 // boilerplateReasons are refused outright. A reason that survives this list is
@@ -177,6 +179,18 @@ type Request struct {
 	Actor   string
 	Session string
 	Now     time.Time
+}
+
+// Reservation proves that the reason, attribution, and current human grant
+// were valid without yet consuming the privileged ledger quota. It is
+// deliberately one-shot: a caller that abandons a final live check must make a
+// fresh reservation rather than committing authorization against stale state.
+type Reservation struct {
+	use      Use
+	fixedNow bool
+
+	mu        sync.Mutex
+	attempted bool
 }
 
 const (
@@ -450,19 +464,21 @@ func LoadUses(since time.Time) ([]Use, error) {
 	return uses, nil
 }
 
-// Authorize runs every gate and records the use. The returned error is safe to
-// show a caller: it names the gate that refused and how to satisfy it.
+// Reserve runs every non-ledger gate and returns a one-shot authorization
+// reservation. It does not append a use. Callers with a separate live safety
+// check can therefore reserve human authorization, repeat that check, and
+// commit only after the final result permits the operation.
 //
-// Authorize is the only sanctioned entry point. Callers must not consult
-// ValidateReason or LoadGrant directly and decide for themselves — that is how
-// one path ends up skipping the ledger.
-func Authorize(req Request) (Use, error) {
+// Reserve and Authorize are the only sanctioned authorization entry points.
+// Callers must not consult ValidateReason or LoadGrant directly and decide for
+// themselves — that is how one path ends up skipping the ledger.
+func Reserve(req Request) (*Reservation, error) {
 	if !req.Kind.Valid() {
-		return Use{}, fmt.Errorf("%w: %q", ErrUnknownKind, req.Kind)
+		return nil, fmt.Errorf("%w: %q", ErrUnknownKind, req.Kind)
 	}
 	reason, err := ValidateReason(req.Reason)
 	if err != nil {
-		return Use{}, err
+		return nil, err
 	}
 	now := req.Now
 	if now.IsZero() {
@@ -471,10 +487,10 @@ func Authorize(req Request) (Use, error) {
 	grant, err := LoadGrant(req.Kind)
 	if err != nil {
 		// Fail closed: an unreadable grant is not an absent one.
-		return Use{}, err
+		return nil, err
 	}
 	if err := grant.Active(req.Kind, now); err != nil {
-		return Use{}, err
+		return nil, err
 	}
 	actor := req.Actor
 	if actor == "" {
@@ -487,10 +503,53 @@ func Authorize(req Request) (Use, error) {
 		Session: req.Session,
 		AtUTC:   now.UTC(),
 	}
+	if _, err := EncodeLedgerUse(use); err != nil {
+		return nil, err
+	}
+	return &Reservation{use: use, fixedNow: !req.Now.IsZero()}, nil
+}
+
+// Commit records a reserved authorization exactly once. It revalidates the
+// human grant at commit time, and the privileged append boundary independently
+// repeats that validation and enforces its rate limit in production.
+func (r *Reservation) Commit() (Use, error) {
+	if r == nil {
+		return Use{}, errors.New("nil override authorization reservation")
+	}
+	r.mu.Lock()
+	if r.attempted {
+		r.mu.Unlock()
+		return Use{}, ErrReservationCommitted
+	}
+	r.attempted = true
+	r.mu.Unlock()
+
+	use := r.use
+	if !r.fixedNow {
+		use.AtUTC = time.Now().UTC()
+	}
+	grant, err := LoadGrant(use.Kind)
+	if err != nil {
+		return Use{}, err
+	}
+	if err := grant.Active(use.Kind, use.AtUTC); err != nil {
+		return Use{}, err
+	}
 	if err := Record(use); err != nil {
 		return Use{}, err
 	}
 	return use, nil
+}
+
+// Authorize runs every gate and records the use immediately. Launch paths that
+// must repeat a live safety check should use Reserve and commit only after that
+// final check succeeds.
+func Authorize(req Request) (Use, error) {
+	reservation, err := Reserve(req)
+	if err != nil {
+		return Use{}, err
+	}
+	return reservation.Commit()
 }
 
 func defaultActor() string {

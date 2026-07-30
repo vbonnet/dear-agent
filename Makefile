@@ -922,10 +922,24 @@ install-override-ledger-helper: build-override-ledger-helper
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
 		root_group="$$(id -gn 0)"; \
+		artifact="bin/dear-agent-override-ledger-append"; \
 		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
+		helper_staging=""; \
 		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
 		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
 		rule="$$operator_user ALL=(root) NOPASSWD: $$helper"; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		printf 'Reviewed helper SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "helper digest confirmation did not match" >&2; exit 2; }; \
+		cleanup_helper_staging() { \
+			if test -n "$$helper_staging"; then \
+				/usr/bin/sudo /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
+			fi; \
+		}; \
+		trap cleanup_helper_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
 		if /usr/bin/sudo -n -v 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
@@ -933,7 +947,13 @@ install-override-ledger-helper: build-override-ledger-helper
 		fi; \
 		/usr/bin/sudo -v; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/dear-agent-override-ledger-append "$$helper"; \
+		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.XXXXXX)"; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
+		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"; \
+		staged_hash="$${staged_hash%% *}"; \
+		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged helper differs from the approved bytes" >&2; exit 1; }; \
+		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
+		helper_staging=""; \
 		printf '%s\n' "$$rule" | /usr/bin/sudo /usr/bin/tee "$$staging" >/dev/null; \
 		/usr/bin/sudo /bin/chmod 0440 "$$staging"; \
 		if ! /usr/bin/sudo /usr/sbin/visudo -cf "$$staging"; then \
@@ -942,8 +962,9 @@ install-override-ledger-helper: build-override-ledger-helper
 			exit 1; \
 		fi; \
 		/usr/bin/sudo /bin/mv -f "$$staging" "$$sudoers"; \
+		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		echo "Installed root-owned ledger helper and exact sudoers rule for $$operator_user"
+		echo "Installed digest-bound root-owned ledger helper and exact sudoers rule for $$operator_user"
 
 # Install the macOS audit under launchd's system domain without activating it.
 # Both scheduler and executable are root-owned, so an unattended same-user

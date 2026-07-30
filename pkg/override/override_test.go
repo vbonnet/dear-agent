@@ -145,6 +145,72 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 	}
 }
 
+func TestReservationRecordsOnlyAfterCommit(t *testing.T) {
+	configureTestStore(t)
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	if err := SaveGrant(Grant{
+		Kind:       KindAdmissionBrake,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("save grant: %v", err)
+	}
+
+	reservation, err := Reserve(Request{
+		Kind:    KindAdmissionBrake,
+		Reason:  "host recovered and the operator is verifying one guarded spawn",
+		Actor:   "vroom-dispatch",
+		Session: "worker-ce-6xfu",
+		Now:     now,
+	})
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if uses, err := LoadUses(time.Time{}); err != nil || len(uses) != 0 {
+		t.Fatalf("reservation consumed ledger quota before final check: uses=%+v err=%v", uses, err)
+	}
+
+	use, err := reservation.Commit()
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if use.Session != "worker-ce-6xfu" {
+		t.Fatalf("committed use lost attribution: %+v", use)
+	}
+	uses, err := LoadUses(time.Time{})
+	if err != nil {
+		t.Fatalf("load uses: %v", err)
+	}
+	if len(uses) != 1 || uses[0].Reason != use.Reason {
+		t.Fatalf("committed ledger = %+v, want one reserved use", uses)
+	}
+	if _, err := reservation.Commit(); !errors.Is(err, ErrReservationCommitted) {
+		t.Fatalf("second commit error = %v, want ErrReservationCommitted", err)
+	}
+}
+
+func TestAbandonedReservationDoesNotConsumeLedgerQuota(t *testing.T) {
+	configureTestStore(t)
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	if err := SaveGrant(Grant{
+		Kind:       KindAdmissionBrake,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("save grant: %v", err)
+	}
+	if _, err := Reserve(Request{
+		Kind:   KindAdmissionBrake,
+		Reason: "concurrent stagger gate changed before the final live check",
+		Now:    now,
+	}); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if uses, err := LoadUses(time.Time{}); err != nil || len(uses) != 0 {
+		t.Fatalf("abandoned reservation was recorded: uses=%+v err=%v", uses, err)
+	}
+}
+
 // The ledger is what the audit gate reads, so an override that cannot be
 // recorded must not be treated as authorized.
 func TestAuthorizeFailsClosedWhenLedgerUnwritable(t *testing.T) {

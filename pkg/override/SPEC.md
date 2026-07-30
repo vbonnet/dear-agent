@@ -41,7 +41,9 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-13** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
 
-**OVR-14** When an admission-brake override is requested, the system shall validate the reason during preflight but consume the grant and record the use only after routine launch preparation succeeds and immediately before the irreversible process or tmux submission boundary.
+**OVR-14** When an admission-brake override reaches the executable boundary, the system shall reserve current human authorization without recording a use, repeat every live admission gate, and commit the one-shot ledger use only when the brake remains the sole refusal immediately before the irreversible process or tmux submission boundary.
+
+**OVR-15** When the privileged ledger helper is installed, the system shall require the operator to confirm the complete artifact SHA-256, copy those bytes to a unique root-owned staging file, verify the staged digest against the confirmed digest, and atomically activate only the verified staged file.
 
 ## Override kinds
 
@@ -88,7 +90,10 @@ confirmation form the human boundary.
 
 On Unix, the operator first runs
 `make install-override-ledger-helper`. That separately authenticated setup
-installs the one-purpose root-owned
+prints and requires typed confirmation of the helper artifact's complete
+SHA-256, copies the approved bytes into a unique root-owned staging file,
+recomputes the staged digest, and atomically activates it only on an exact
+match. It then installs the one-purpose root-owned
 `/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact
 per-user NOPASSWD sudoers rule for that path. Runtime authorization invokes it
 with `sudo -n`: no fresh prompt or cached sudo credential is needed, and AGM,

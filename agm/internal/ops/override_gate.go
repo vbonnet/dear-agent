@@ -6,30 +6,32 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
-var authorizeOverride = override.Authorize
-
-// AuthorizeAdmissionBrakeOverride runs the shared dangerous-override gates for
-// crossing an engaged admission brake and records the use.
-//
-// The brake exists because a watchdog or an operator decided the host is not
-// fit to spawn. Crossing it is therefore always a claim a human should be able
-// to read back later, which is exactly what the ledger preserves.
-func AuthorizeAdmissionBrakeOverride(reason, sessionName string) error {
-	if _, err := authorizeOverride(override.Request{
+// ReserveAdmissionBrakeOverride validates human authorization without
+// recording a use. The returned one-shot callback commits the ledger entry;
+// callers invoke it only after their final live admission check proves that
+// the brake remains the sole refusal.
+func ReserveAdmissionBrakeOverride(reason, sessionName string) (func() error, error) {
+	reservation, err := override.Reserve(override.Request{
 		Kind:    override.KindAdmissionBrake,
 		Reason:  reason,
 		Actor:   OverrideActor(),
 		Session: sessionName,
-	}); err != nil {
-		return fmt.Errorf("admission-brake override refused: %w", err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("admission-brake override refused: %w", err)
 	}
-	return nil
+	return func() error {
+		if _, err := reservation.Commit(); err != nil {
+			return fmt.Errorf("admission-brake override refused: %w", err)
+		}
+		return nil
+	}, nil
 }
 
 // ValidateAdmissionBrakeOverrideReason rejects malformed or boilerplate
 // requests before admission probes run. This does not consume an approval or
-// write the ledger; AuthorizeAdmissionBrakeOverride must still be called at the
-// point where a live brake is actually crossed.
+// write the ledger; ReserveAdmissionBrakeOverride must still be committed at
+// the point where a final live check proves the brake is actually crossed.
 func ValidateAdmissionBrakeOverrideReason(reason string) (string, error) {
 	normalized, err := override.ValidateReason(reason)
 	if err != nil {
