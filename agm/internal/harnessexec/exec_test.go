@@ -236,10 +236,12 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 
 func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	request, err := parseClaude([]string{
+		"--binary", "/opt/claude/bin/claude",
 		"--session", "session", "--session-id", "session-id", "--model", "claude-test",
 		"--add-dir", "/tmp/one", "--add-dir", "/tmp/two", "--auto-mode",
 		"--permission", "plan", "--max-budget-usd", "12.50", "--forward-telemetry",
 		"--resume-id", "native-claude-id", "--workdir", "/tmp/resume",
+		"--extra-arg", "--verbose",
 	})
 	if err != nil {
 		t.Fatalf("parse Claude request: %v", err)
@@ -247,13 +249,14 @@ func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	want := []string{
 		"--model", "claude-test", "--add-dir", "/tmp/one", "--add-dir", "/tmp/two",
 		"--enable-auto-mode", "--permission-mode", "plan", "--max-budget-usd", "12.50",
-		"--resume", "native-claude-id",
+		"--resume", "native-claude-id", "--verbose",
 	}
 	if got := request.argv(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Claude argv = %q, want %q", got, want)
 	}
 	launch := request.launch()
-	if launch.SessionName != "session" || launch.SessionID != "session-id" ||
+	if launch.Binary != "/opt/claude/bin/claude" ||
+		launch.SessionName != "session" || launch.SessionID != "session-id" ||
 		launch.ResumeID != "native-claude-id" || launch.WorkDir != "/tmp/resume" || !launch.ForwardTelemetry {
 		t.Fatalf("Claude launch metadata not preserved: %+v", launch)
 	}

@@ -111,9 +111,8 @@ func reserveExecutorLaunchOverrides(
 		}
 		seen[proof.Kind] = struct{}{}
 		switch proof.Kind {
-		case override.KindAdmissionBrake, override.KindCodexHookTrust:
-		case override.KindSupervisorOAuthCheck:
-			return nil, fmt.Errorf("private harness launch contains unsupported override kind %q", proof.Kind)
+		case override.KindAdmissionBrake, override.KindCodexHookTrust,
+			override.KindSupervisorOAuthCheck:
 		default:
 			return nil, fmt.Errorf("private harness launch contains unsupported override kind %q", proof.Kind)
 		}
@@ -249,6 +248,7 @@ type CodexLaunch struct {
 // command. OAuth values are resolved only inside the executor.
 type ClaudeLaunch struct {
 	Executable             string
+	Binary                 string
 	HandoffPath            string
 	SessionName            string
 	SessionID              string
@@ -259,6 +259,7 @@ type ClaudeLaunch struct {
 	AutoMode               bool
 	Permission             string
 	MaxBudgetUSD           float64
+	ExtraArgs              []string
 	DisableOAuth           bool
 	ForwardTelemetry       bool
 	Persistent             bool
@@ -311,6 +312,9 @@ func BuildClaudeCommand(launch ClaudeLaunch) string {
 	if launch.HandoffPath != "" {
 		appendShellFlag(&b, "--handoff", launch.HandoffPath)
 	}
+	if launch.Binary != "" {
+		appendShellFlag(&b, "--binary", launch.Binary)
+	}
 	appendShellFlag(&b, "--session", launch.SessionName)
 	if launch.SessionID != "" {
 		appendShellFlag(&b, "--session-id", launch.SessionID)
@@ -336,6 +340,9 @@ func BuildClaudeCommand(launch ClaudeLaunch) string {
 	if launch.MaxBudgetUSD > 0 {
 		appendShellFlag(&b, "--max-budget-usd", fmt.Sprintf("%.2f", launch.MaxBudgetUSD))
 	}
+	for _, arg := range launch.ExtraArgs {
+		appendShellFlag(&b, "--extra-arg", arg)
+	}
 	if launch.DisableOAuth {
 		b.WriteString(" --disable-oauth")
 	}
@@ -346,6 +353,51 @@ func BuildClaudeCommand(launch ClaudeLaunch) string {
 		b.WriteString(" && exit")
 	}
 	return b.String()
+}
+
+func buildClaudeInvocationArgs(launch ClaudeLaunch) []string {
+	args := []string{ClaudeProtocol}
+	if launch.HandoffPath != "" {
+		args = append(args, "--handoff", launch.HandoffPath)
+	}
+	if launch.Binary != "" {
+		args = append(args, "--binary", launch.Binary)
+	}
+	args = append(args, "--session", launch.SessionName)
+	if launch.SessionID != "" {
+		args = append(args, "--session-id", launch.SessionID)
+	}
+	if launch.ResumeID != "" {
+		args = append(args, "--resume-id", launch.ResumeID)
+	}
+	if launch.WorkDir != "" {
+		args = append(args, "--workdir", launch.WorkDir)
+	}
+	if launch.Model != "" {
+		args = append(args, "--model", launch.Model)
+	}
+	for _, dir := range launch.AddDirs {
+		args = append(args, "--add-dir", dir)
+	}
+	if launch.AutoMode {
+		args = append(args, "--auto-mode")
+	}
+	if launch.Permission != "" {
+		args = append(args, "--permission", launch.Permission)
+	}
+	if launch.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", launch.MaxBudgetUSD))
+	}
+	for _, arg := range launch.ExtraArgs {
+		args = append(args, "--extra-arg", arg)
+	}
+	if launch.DisableOAuth {
+		args = append(args, "--disable-oauth")
+	}
+	if launch.ForwardTelemetry {
+		args = append(args, "--forward-telemetry")
+	}
+	return args
 }
 
 // BuildHarnessCommand returns the token-free executor command pasted into tmux.
@@ -558,11 +610,18 @@ func runClaude(args []string) error {
 		if handoffErr != nil {
 			return handoffErr
 		}
+		expected := bindClaudeLaunch(request.launch())
+		if handoff.ClaudeLaunch == nil ||
+			!handoff.ClaudeLaunch.matches(expected) {
+			return errors.New("private Claude handoff does not authorize the requested launch")
+		}
 		parent = removeEnvironment(parent, claudeHandoffEnvironment)
 		parent = overlayEnvironment(parent, handoff.Environment)
 		token = environmentMap(handoff.Environment)[auth.OAuthEnvVar]
 		request.OverrideProofs = append([]override.AuthorizationProof(nil), handoff.OverrideProofs...)
 		request.RecordSpawn = handoff.RecordSpawn
+	} else if request.Binary != "" || len(request.ExtraArgs) != 0 {
+		return errors.New("custom Claude executable and arguments require a prepared private handoff")
 	}
 	if token == "" && !request.DisableOAuth && request.HandoffPath == "" {
 		token = resolveClaudeOAuth()
@@ -575,10 +634,15 @@ func runClaude(args []string) error {
 		}
 		env = overlayEnvironment(env, []string{"PWD=" + request.WorkDir})
 	}
-	path, err := lookPathInEnvironment("claude", env)
+	binary := request.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	path, err := lookPathInEnvironment(binary, env)
 	if err != nil {
 		return fmt.Errorf("resolve claude executable: %w", err)
 	}
+	argv[0] = binary
 	if err := commitLaunchOverrideProofs(request.SessionName, request.OverrideProofs...); err != nil {
 		return fmt.Errorf("commit Claude launch override transaction: %w", err)
 	}
@@ -760,6 +824,7 @@ func (r codexRequest) launch() CodexLaunch {
 
 type claudeRequest struct {
 	HandoffPath      string
+	Binary           string
 	SessionName      string
 	SessionID        string
 	ResumeID         string
@@ -769,6 +834,7 @@ type claudeRequest struct {
 	AutoMode         bool
 	Permission       string
 	MaxBudgetUSD     float64
+	ExtraArgs        stringList
 	DisableOAuth     bool
 	ForwardTelemetry bool
 	OverrideProofs   []override.AuthorizationProof
@@ -781,6 +847,7 @@ func parseClaude(args []string) (claudeRequest, error) {
 	set := flag.NewFlagSet(ClaudeProtocol, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	set.StringVar(&request.HandoffPath, "handoff", "", "")
+	set.StringVar(&request.Binary, "binary", "", "")
 	set.StringVar(&request.SessionName, "session", "", "")
 	set.StringVar(&request.SessionID, "session-id", "", "")
 	set.StringVar(&request.ResumeID, "resume-id", "", "")
@@ -790,6 +857,7 @@ func parseClaude(args []string) (claudeRequest, error) {
 	set.BoolVar(&request.AutoMode, "auto-mode", false, "")
 	set.StringVar(&request.Permission, "permission", "", "")
 	set.StringVar(&maxBudget, "max-budget-usd", "", "")
+	set.Var(&request.ExtraArgs, "extra-arg", "")
 	set.BoolVar(&request.DisableOAuth, "disable-oauth", false, "")
 	set.BoolVar(&request.ForwardTelemetry, "forward-telemetry", false, "")
 	if err := set.Parse(args); err != nil {
@@ -812,7 +880,7 @@ func validateClaudeRequest(r *claudeRequest, maxBudget string) error {
 		return err
 	}
 	for _, field := range []struct{ name, value string }{
-		{"session-id", r.SessionID}, {"resume-id", r.ResumeID},
+		{"binary", r.Binary}, {"session-id", r.SessionID}, {"resume-id", r.ResumeID},
 		{"workdir", r.WorkDir}, {"model", r.Model},
 	} {
 		if err := validateOptionalText(field.name, field.value); err != nil {
@@ -820,6 +888,9 @@ func validateClaudeRequest(r *claudeRequest, maxBudget string) error {
 		}
 	}
 	if err := validateTextList("add-dir", r.AddDirs); err != nil {
+		return err
+	}
+	if err := validateTextList("extra-arg", r.ExtraArgs); err != nil {
 		return err
 	}
 	if r.Permission != "" && !oneOf(r.Permission, "auto", "plan", "default") {
@@ -864,12 +935,14 @@ func (r claudeRequest) argv() []string {
 	if r.ResumeID != "" {
 		args = append(args, "--resume", r.ResumeID)
 	}
+	args = append(args, r.ExtraArgs...)
 	return args
 }
 
 func (r claudeRequest) launch() ClaudeLaunch {
 	return ClaudeLaunch{
 		HandoffPath:      r.HandoffPath,
+		Binary:           r.Binary,
 		SessionName:      r.SessionName,
 		SessionID:        r.SessionID,
 		ResumeID:         r.ResumeID,
@@ -879,6 +952,7 @@ func (r claudeRequest) launch() ClaudeLaunch {
 		AutoMode:         r.AutoMode,
 		Permission:       r.Permission,
 		MaxBudgetUSD:     r.MaxBudgetUSD,
+		ExtraArgs:        append([]string(nil), r.ExtraArgs...),
 		DisableOAuth:     r.DisableOAuth,
 		ForwardTelemetry: r.ForwardTelemetry,
 	}

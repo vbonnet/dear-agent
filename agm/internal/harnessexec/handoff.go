@@ -46,7 +46,19 @@ type PreparedCommand struct {
 	Command       string
 	path          string
 	lease         io.Closer
+	executable    string
+	arguments     []string
 	bindOverrides func(bool, ...*override.Reservation) error
+}
+
+// DirectInvocation returns the private executor invocation without routing it
+// through a shell or tmux. This is used by foreground launchers that need the
+// same one-shot authorization boundary as pane launches.
+func (p PreparedCommand) DirectInvocation() (string, []string, error) {
+	if p.executable == "" || len(p.arguments) == 0 {
+		return "", nil, errors.New("prepared harness command has no direct invocation")
+	}
+	return p.executable, append([]string(nil), p.arguments...), nil
 }
 
 // Cancel removes an undelivered one-shot handoff and releases any producer
@@ -109,6 +121,7 @@ type launchHandoff struct {
 	RecordSpawn               bool                          `json:"record_spawn,omitempty"`
 	CodexHookRoot             string                        `json:"codex_hook_root,omitempty"`
 	CodexLaunch               *codexLaunchBinding           `json:"codex_launch,omitempty"`
+	ClaudeLaunch              *claudeLaunchBinding          `json:"claude_launch,omitempty"`
 	HarnessSessionName        string                        `json:"harness_session_name,omitempty"`
 	HarnessCommand            string                        `json:"harness_command,omitempty"`
 }
@@ -129,6 +142,22 @@ type codexLaunchBinding struct {
 	HookTrustSourceCommit string                      `json:"hook_trust_source_commit"`
 	HookTrustDigest       string                      `json:"hook_trust_digest"`
 	HookTrustProof        override.AuthorizationProof `json:"hook_trust_proof"`
+}
+
+type claudeLaunchBinding struct {
+	Binary           string   `json:"binary,omitempty"`
+	SessionName      string   `json:"session_name"`
+	SessionID        string   `json:"session_id,omitempty"`
+	ResumeID         string   `json:"resume_id,omitempty"`
+	WorkDir          string   `json:"workdir,omitempty"`
+	Model            string   `json:"model,omitempty"`
+	AddDirs          []string `json:"add_dirs,omitempty"`
+	AutoMode         bool     `json:"auto_mode,omitempty"`
+	Permission       string   `json:"permission,omitempty"`
+	MaxBudgetUSD     float64  `json:"max_budget_usd,omitempty"`
+	ExtraArgs        []string `json:"extra_args,omitempty"`
+	DisableOAuth     bool     `json:"disable_oauth,omitempty"`
+	ForwardTelemetry bool     `json:"forward_telemetry,omitempty"`
 }
 
 // PrepareCodexCommand snapshots only Codex's documented allowlist from the
@@ -216,7 +245,10 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 			}
 		}
 	}
-	handoffPath, err := stageHandoff(ClaudeProtocol, forward, launch.DeferUntilProducerExit, "")
+	claudeBinding := bindClaudeLaunch(launch)
+	handoffPath, err := stageClaudeHandoff(
+		forward, launch.DeferUntilProducerExit, &claudeBinding,
+	)
 	if err != nil {
 		return PreparedCommand{}, err
 	}
@@ -232,9 +264,11 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
 	return PreparedCommand{
-		Command: BuildClaudeCommand(launch),
-		path:    handoffPath,
-		lease:   lease,
+		Command:    BuildClaudeCommand(launch),
+		path:       handoffPath,
+		lease:      lease,
+		executable: executable,
+		arguments:  buildClaudeInvocationArgs(launch),
 		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
 			return bindHandoffOverrideReservations(
 				handoffPath, ClaudeProtocol, false, recordSpawn, reservations...,
@@ -526,6 +560,7 @@ func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
 func validateClaudePastedValues(launch ClaudeLaunch) error {
 	for _, field := range []struct{ name, value string }{
 		{"session", launch.SessionName},
+		{"binary", launch.Binary},
 		{"session-id", launch.SessionID},
 		{"resume-id", launch.ResumeID},
 		{"workdir", launch.WorkDir},
@@ -539,7 +574,66 @@ func validateClaudePastedValues(launch ClaudeLaunch) error {
 	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
 		return fmt.Errorf("validate Claude pane command: %w", err)
 	}
+	if err := validateTextList("extra-arg", launch.ExtraArgs); err != nil {
+		return fmt.Errorf("validate Claude pane command: %w", err)
+	}
+	if launch.Binary != "" &&
+		(!filepath.IsAbs(launch.Binary) || filepath.Clean(launch.Binary) != launch.Binary) {
+		return errors.New("validate Claude pane command: binary must be a clean absolute path")
+	}
 	return nil
+}
+
+func bindClaudeLaunch(launch ClaudeLaunch) claudeLaunchBinding {
+	return claudeLaunchBinding{
+		Binary:           launch.Binary,
+		SessionName:      launch.SessionName,
+		SessionID:        launch.SessionID,
+		ResumeID:         launch.ResumeID,
+		WorkDir:          launch.WorkDir,
+		Model:            launch.Model,
+		AddDirs:          append([]string(nil), launch.AddDirs...),
+		AutoMode:         launch.AutoMode,
+		Permission:       launch.Permission,
+		MaxBudgetUSD:     launch.MaxBudgetUSD,
+		ExtraArgs:        append([]string(nil), launch.ExtraArgs...),
+		DisableOAuth:     launch.DisableOAuth,
+		ForwardTelemetry: launch.ForwardTelemetry,
+	}
+}
+
+func (binding claudeLaunchBinding) matches(other claudeLaunchBinding) bool {
+	return binding.Binary == other.Binary &&
+		binding.SessionName == other.SessionName &&
+		binding.SessionID == other.SessionID &&
+		binding.ResumeID == other.ResumeID &&
+		binding.WorkDir == other.WorkDir &&
+		binding.Model == other.Model &&
+		slices.Equal(binding.AddDirs, other.AddDirs) &&
+		binding.AutoMode == other.AutoMode &&
+		binding.Permission == other.Permission &&
+		fmt.Sprintf("%.2f", binding.MaxBudgetUSD) == fmt.Sprintf("%.2f", other.MaxBudgetUSD) &&
+		slices.Equal(binding.ExtraArgs, other.ExtraArgs) &&
+		binding.DisableOAuth == other.DisableOAuth &&
+		binding.ForwardTelemetry == other.ForwardTelemetry
+}
+
+func (binding claudeLaunchBinding) launch() ClaudeLaunch {
+	return ClaudeLaunch{
+		Binary:           binding.Binary,
+		SessionName:      binding.SessionName,
+		SessionID:        binding.SessionID,
+		ResumeID:         binding.ResumeID,
+		WorkDir:          binding.WorkDir,
+		Model:            binding.Model,
+		AddDirs:          append([]string(nil), binding.AddDirs...),
+		AutoMode:         binding.AutoMode,
+		Permission:       binding.Permission,
+		MaxBudgetUSD:     binding.MaxBudgetUSD,
+		ExtraArgs:        append([]string(nil), binding.ExtraArgs...),
+		DisableOAuth:     binding.DisableOAuth,
+		ForwardTelemetry: binding.ForwardTelemetry,
+	}
 }
 
 func cleanupFailedHandoff(path string, scheduleErr error) error {
@@ -806,7 +900,25 @@ func stageHandoff(
 	if err != nil {
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
-	return writeHandoff(root, protocol, environment, deferred, codexHookRoot, binding, "", "")
+	return writeHandoff(
+		root, protocol, environment, deferred, codexHookRoot,
+		binding, nil, "", "",
+	)
+}
+
+func stageClaudeHandoff(
+	environment []string,
+	deferred bool,
+	binding *claudeLaunchBinding,
+) (string, error) {
+	root, err := resolvedHandoffRoot(false)
+	if err != nil {
+		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
+	}
+	return writeHandoff(
+		root, ClaudeProtocol, environment, deferred, "",
+		nil, binding, "", "",
+	)
 }
 
 func stageHarnessHandoff(
@@ -818,7 +930,7 @@ func stageHarnessHandoff(
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
 	return writeHandoff(
-		root, HarnessProtocol, nil, deferred, "", nil, sessionName, command,
+		root, HarnessProtocol, nil, deferred, "", nil, nil, sessionName, command,
 	)
 }
 
@@ -845,6 +957,7 @@ func writeHandoff(
 	deferred bool,
 	codexHookRoot string,
 	binding *codexLaunchBinding,
+	claudeLaunch *claudeLaunchBinding,
 	harnessSessionName, harnessCommand string,
 ) (string, error) {
 	if err := validateText("private handoff directory", root); err != nil {
@@ -881,6 +994,7 @@ func writeHandoff(
 		Environment:               append([]string(nil), environment...),
 		CodexHookRoot:             codexHookRoot,
 		CodexLaunch:               binding,
+		ClaudeLaunch:              claudeLaunch,
 		HarnessSessionName:        harnessSessionName,
 		HarnessCommand:            harnessCommand,
 	}
@@ -1100,6 +1214,16 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	} else if handoff.CodexLaunch != nil {
 		return errors.New("private launch handoff contains a Codex launch binding without a hook capability")
 	}
+	if protocol == ClaudeProtocol {
+		if handoff.ClaudeLaunch == nil {
+			return errors.New("private Claude handoff omits its exact launch binding")
+		}
+		if err := validateClaudePastedValues(handoff.ClaudeLaunch.launch()); err != nil {
+			return err
+		}
+	} else if handoff.ClaudeLaunch != nil {
+		return errors.New("private launch handoff contains an unrelated Claude launch binding")
+	}
 	if protocol == HarnessProtocol {
 		if handoff.HarnessSessionName == "" || handoff.HarnessCommand == "" {
 			return errors.New("private harness handoff omits its session or command")
@@ -1111,6 +1235,7 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 			return err
 		}
 		if handoff.CodexHookRoot != "" || handoff.CodexLaunch != nil ||
+			handoff.ClaudeLaunch != nil ||
 			len(handoff.Environment) != 0 {
 			return errors.New("private harness handoff contains unrelated launch state")
 		}
@@ -1152,26 +1277,54 @@ func validateHandoffOverrideProof(
 ) (bool, error) {
 	switch proof.Kind {
 	case override.KindAdmissionBrake:
-		if proof.Subject != "" {
-			return false, errors.New("private launch handoff contains an admission-brake subject")
-		}
-		if proof.Session == "" ||
-			(handoff.HarnessSessionName != "" &&
-				proof.Session != handoff.HarnessSessionName) ||
-			(handoff.CodexLaunch != nil && proof.Session != handoff.CodexLaunch.SessionName) {
-			return false, errors.New("private launch handoff contains an unrelated admission-brake proof")
-		}
-		return false, nil
+		return false, validateAdmissionBrakeProof(handoff, proof)
 	case override.KindCodexHookTrust:
-		if handoff.CodexLaunch == nil || proof != handoff.CodexLaunch.HookTrustProof {
-			return false, errors.New("private launch handoff contains an unrelated Codex hook-trust proof")
-		}
-		return true, nil
+		return validateCodexHookTrustProof(handoff, proof)
 	case override.KindSupervisorOAuthCheck:
-		return false, fmt.Errorf("private launch handoff contains unsupported override kind %q", proof.Kind)
+		return false, validateSupervisorOAuthProof(handoff, proof)
 	default:
 		return false, fmt.Errorf("private launch handoff contains unsupported override kind %q", proof.Kind)
 	}
+}
+
+func validateAdmissionBrakeProof(
+	handoff launchHandoff,
+	proof override.AuthorizationProof,
+) error {
+	if proof.Subject != "" {
+		return errors.New("private launch handoff contains an admission-brake subject")
+	}
+	if proof.Session == "" ||
+		(handoff.HarnessSessionName != "" &&
+			proof.Session != handoff.HarnessSessionName) ||
+		(handoff.ClaudeLaunch != nil &&
+			proof.Session != handoff.ClaudeLaunch.SessionName) ||
+		(handoff.CodexLaunch != nil &&
+			proof.Session != handoff.CodexLaunch.SessionName) {
+		return errors.New("private launch handoff contains an unrelated admission-brake proof")
+	}
+	return nil
+}
+
+func validateCodexHookTrustProof(
+	handoff launchHandoff,
+	proof override.AuthorizationProof,
+) (bool, error) {
+	if handoff.CodexLaunch == nil || proof != handoff.CodexLaunch.HookTrustProof {
+		return false, errors.New("private launch handoff contains an unrelated Codex hook-trust proof")
+	}
+	return true, nil
+}
+
+func validateSupervisorOAuthProof(
+	handoff launchHandoff,
+	proof override.AuthorizationProof,
+) error {
+	if handoff.ClaudeLaunch == nil || proof.Subject != "" ||
+		proof.Session != handoff.ClaudeLaunch.SessionName {
+		return errors.New("private launch handoff contains an unrelated supervisor OAuth proof")
+	}
+	return nil
 }
 
 func validateHandoffEnvironment(protocol string, environment []string) error {

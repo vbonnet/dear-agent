@@ -114,53 +114,73 @@ func TestReserveSupervisorOAuthOverrideUsesSharedDangerousOverrideKind(t *testin
 	}
 }
 
-func TestAuthorizeSupervisorLaunchBoundaryChecksAdmissionBeforeLedgerCommit(t *testing.T) {
+func TestSubmitSupervisorLaunchBindsEffectsAfterLiveAdmission(t *testing.T) {
 	var events []string
 	reservation := &override.Reservation{}
-	originalCommit := commitOverrideReservations
-	t.Cleanup(func() { commitOverrideReservations = originalCommit })
-	commitOverrideReservations = func(got ...*override.Reservation) error {
-		if len(got) != 1 || got[0] != reservation {
-			t.Fatalf("committed reservations = %v, want OAuth reservation", got)
-		}
-		events = append(events, "commit")
-		return nil
-	}
-	err := authorizeSupervisorLaunchBoundary(func(reservations ...*override.Reservation) ([]*override.Reservation, error) {
+	err := submitSupervisorLaunch(func(reservations ...*override.Reservation) ([]*override.Reservation, error) {
 		events = append(events, "admission")
 		return reservations, nil
-	}, func() {
-		events = append(events, "record-spawn")
+	}, func(recordSpawn bool, got ...*override.Reservation) error {
+		if !recordSpawn {
+			t.Fatal("supervisor launch did not bind the spawn-recording obligation")
+		}
+		if len(got) != 1 || got[0] != reservation {
+			t.Fatalf("bound reservations = %v, want OAuth reservation", got)
+		}
+		events = append(events, "bind")
+		return nil
+	}, func() error {
+		events = append(events, "run")
+		return nil
 	}, reservation)
 	if err != nil {
-		t.Fatalf("authorizeSupervisorLaunchBoundary() error: %v", err)
+		t.Fatalf("submitSupervisorLaunch() error: %v", err)
 	}
-	if got, want := strings.Join(events, ","), "admission,commit,record-spawn"; got != want {
+	if got, want := strings.Join(events, ","), "admission,bind,run"; got != want {
 		t.Fatalf("launch boundary events = %q, want %q", got, want)
 	}
 }
 
-func TestAuthorizeSupervisorLaunchBoundaryDoesNotCommitRefusedLaunch(t *testing.T) {
+func TestSubmitSupervisorLaunchDoesNotBindRefusedLaunch(t *testing.T) {
 	refusal := errors.New("concurrent admission brake engaged")
 	var events []string
 	reservation := &override.Reservation{}
-	originalCommit := commitOverrideReservations
-	t.Cleanup(func() { commitOverrideReservations = originalCommit })
-	commitOverrideReservations = func(...*override.Reservation) error {
-		events = append(events, "commit")
-		return nil
-	}
-	err := authorizeSupervisorLaunchBoundary(func(...*override.Reservation) ([]*override.Reservation, error) {
+	err := submitSupervisorLaunch(func(...*override.Reservation) ([]*override.Reservation, error) {
 		events = append(events, "admission")
 		return nil, refusal
-	}, func() {
-		events = append(events, "record-spawn")
+	}, func(bool, ...*override.Reservation) error {
+		events = append(events, "bind")
+		return nil
+	}, func() error {
+		events = append(events, "run")
+		return nil
 	}, reservation)
 	if !errors.Is(err, refusal) {
-		t.Fatalf("authorizeSupervisorLaunchBoundary() error = %v, want %v", err, refusal)
+		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, refusal)
 	}
 	if got, want := strings.Join(events, ","), "admission"; got != want {
 		t.Fatalf("refused launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitSupervisorLaunchReturnsConfirmedExecutorStartFailure(t *testing.T) {
+	startFailure := errors.New("private executor disappeared before start")
+	var events []string
+	err := submitSupervisorLaunch(nil, func(recordSpawn bool, _ ...*override.Reservation) error {
+		if !recordSpawn {
+			t.Fatal("supervisor launch did not bind spawn recording")
+		}
+		events = append(events, "bind")
+		return nil
+	}, func() error {
+		events = append(events, "run")
+		return startFailure
+	}, nil)
+	if !errors.Is(err, startFailure) {
+		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, startFailure)
+	}
+	if got, want := strings.Join(events, ","), "bind,run"; got != want {
+		t.Fatalf("failed executor events = %q, want %q", got, want)
 	}
 }
 
@@ -197,17 +217,13 @@ func TestCheckSupervisorEnvAcceptsFileToken(t *testing.T) {
 }
 
 func TestBuildSupervisorClaudeArgsAvoidsBootPromptsByDefault(t *testing.T) {
-	args := buildSupervisorClaudeArgs("", false, nil)
-	joined := strings.Join(args, " ")
-
-	for _, want := range []string{
-		"--model claude-sonnet-4-6",
-		"--enable-auto-mode",
-		"--permission-mode auto",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("supervisor Claude args missing %q: %v", want, args)
-		}
+	launch := buildSupervisorClaudeLaunch("/usr/local/bin/claude", "", false, nil, false)
+	if launch.Binary != "/usr/local/bin/claude" ||
+		launch.Model != "claude-sonnet-4-6" ||
+		!launch.AutoMode ||
+		launch.Permission != "auto" ||
+		!launch.Persistent {
+		t.Fatalf("supervisor Claude launch = %+v", launch)
 	}
 
 	for _, blocked := range []string{
@@ -215,25 +231,27 @@ func TestBuildSupervisorClaudeArgsAvoidsBootPromptsByDefault(t *testing.T) {
 		"server:agm-bus",
 		"claude-sonnet-4-6[1m]",
 	} {
-		if strings.Contains(joined, blocked) {
-			t.Errorf("supervisor Claude args include boot-prompt risk %q by default: %v", blocked, args)
+		if slices.Contains(launch.ExtraArgs, blocked) {
+			t.Errorf("supervisor Claude launch includes boot-prompt risk %q by default: %+v", blocked, launch)
 		}
 	}
 }
 
 func TestBuildSupervisorClaudeArgsCanOptIntoDevelopmentChannels(t *testing.T) {
-	args := buildSupervisorClaudeArgs("opus-200k", true, []string{"--verbose"})
-	joined := strings.Join(args, " ")
-
+	launch := buildSupervisorClaudeLaunch("claude-dev", "opus-200k", true, []string{"--verbose"}, true)
+	if launch.Binary != "claude-dev" ||
+		launch.Model != "claude-opus-4-8" ||
+		launch.Permission != "auto" ||
+		!launch.DisableOAuth {
+		t.Fatalf("supervisor Claude development launch = %+v", launch)
+	}
 	for _, want := range []string{
-		"--model claude-opus-4-8",
-		"--permission-mode auto",
 		"--dangerously-load-development-channels",
 		"server:agm-bus",
 		"--verbose",
 	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("supervisor Claude args missing %q: %v", want, args)
+		if !slices.Contains(launch.ExtraArgs, want) {
+			t.Errorf("supervisor Claude args missing %q: %+v", want, launch)
 		}
 	}
 }

@@ -474,6 +474,139 @@ func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	}
 }
 
+func TestPreparedClaudeDirectInvocationDoesNotCommitWhenBinaryDisappears(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	originalRecordLaunchSpawn := recordLaunchSpawn
+	originalResolveClaudeOAuth := resolveClaudeOAuth
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		lookPathInEnvironment = originalLookPathInEnvironment
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+		recordLaunchSpawn = originalRecordLaunchSpawn
+		resolveClaudeOAuth = originalResolveClaudeOAuth
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	resolveClaudeOAuth = func() string { return "fresh-supervisor-oauth" }
+
+	prepared, err := PrepareClaudeCommand(ClaudeLaunch{
+		Binary:      "/opt/claude/bin/claude",
+		SessionName: "supervisor-s1",
+		Model:       "claude-test",
+		AutoMode:    true,
+		Permission:  "auto",
+		ExtraArgs:   []string{"--verbose"},
+		Persistent:  true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare direct Claude command: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	supervisorProof := override.AuthorizationProof{
+		Kind:            override.KindSupervisorOAuthCheck,
+		Reason:          "development supervisor has no stored OAuth credentials",
+		Actor:           "operator-test",
+		Session:         "supervisor-s1",
+		AuthorizationID: "0123456789abcdef0123456789abcdef",
+	}
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		ClaudeProtocol,
+		false,
+		true,
+		[]override.AuthorizationProof{supervisorProof},
+	); err != nil {
+		t.Fatalf("bind direct Claude launch effects: %v", err)
+	}
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		t.Fatalf("direct Claude invocation: %v", err)
+	}
+	if executable != "/opt/agm/bin/agm" ||
+		len(arguments) == 0 ||
+		arguments[0] != ClaudeProtocol ||
+		!slices.Contains(arguments, "/opt/claude/bin/claude") ||
+		!slices.Contains(arguments, "--verbose") {
+		t.Fatalf("direct Claude invocation = %q %q", executable, arguments)
+	}
+
+	lookPathInEnvironment = func(name string, _ []string) (string, error) {
+		if name != "/opt/claude/bin/claude" {
+			t.Fatalf("resolved Claude binary = %q", name)
+		}
+		return "", errors.New("claude disappeared")
+	}
+	commits := 0
+	recordedSpawns := 0
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		commits++
+		return nil
+	}
+	recordLaunchSpawn = func() error {
+		recordedSpawns++
+		return nil
+	}
+	err = Run(arguments[0], arguments[1:])
+	if err == nil || !strings.Contains(err.Error(), "resolve claude executable") {
+		t.Fatalf("missing direct Claude binary error = %v", err)
+	}
+	if commits != 0 || recordedSpawns != 0 {
+		t.Fatalf("missing Claude binary committed %d transactions and recorded %d spawns", commits, recordedSpawns)
+	}
+}
+
+func TestPreparedClaudeDirectInvocationRejectsRequestSubstitution(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		lookPathInEnvironment = originalLookPathInEnvironment
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	prepared, err := PrepareClaudeCommand(ClaudeLaunch{
+		Binary:      "/opt/claude/bin/claude",
+		SessionName: "supervisor-bound",
+		Model:       "claude-test",
+		ExtraArgs:   []string{"--verbose"},
+		Persistent:  true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare direct Claude command: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		t.Fatalf("bind direct Claude launch effects: %v", err)
+	}
+	_, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		t.Fatalf("direct Claude invocation: %v", err)
+	}
+	for index := range arguments {
+		if arguments[index] == "--binary" && index+1 < len(arguments) {
+			arguments[index+1] = "/opt/unreviewed/bin/claude"
+			break
+		}
+	}
+	lookPathInEnvironment = func(string, []string) (string, error) {
+		t.Fatal("substituted Claude request reached executable resolution")
+		return "", nil
+	}
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		t.Fatal("substituted Claude request committed launch effects")
+		return nil
+	}
+	err = Run(arguments[0], arguments[1:])
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested launch") {
+		t.Fatalf("substituted direct Claude request error = %v", err)
+	}
+}
+
 func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "stale-pane-openai")

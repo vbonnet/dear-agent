@@ -14,8 +14,9 @@ For Codex, the executor prevents ambient cross-harness credential inheritance
 with a deny-by-default child environment. For Claude, it treats authentication
 and OpenTelemetry state as a complete caller snapshot, but otherwise preserves
 the harness environment. For other harnesses, it binds the exact submitted
-command and launch-admission effects to a one-shot executor handoff. It protects transported values
-from shell command, process-argument, pane-scrollback, and debug-log exposure.
+command and launch-admission effects to a one-shot executor handoff. It
+protects transported values from shell command, process-argument,
+pane-scrollback, and debug-log exposure.
 It assumes the installed AGM and harness executables, the user's environment,
 and the user's configuration and credential files are trusted. It does not
 sandbox the harness beyond the native permission mode requested by AGM.
@@ -54,7 +55,9 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-16** When the private Codex executor consumes a hook-trust handoff, the system shall require the handoff to bind the exact source repository, full commit, hook digest, hook-trust claim, and every other launch override claim; re-run persisted Git attestation, hook configuration, helper validation, executable resolution, and every live circuit-breaker gate before and after reauthorization whether or not the handoff carries an admission-brake claim; treat every carried proof as a non-authoritative claim; require and re-reserve a current exact admission-brake grant whenever either live check reports the brake as the sole refusal; re-reserve every other current exact grant with a fresh authorization ID; and append the complete override transaction as the final userspace action before executing Codex.
 
-**HEXEC-17** When a non-Codex tmux launch carries launch-admission reservations or a successful-spawn recording obligation, the system shall bind its exact session and command plus those effects into a cancellable one-shot handoff before submission; the private executor shall revalidate and commit every bound override immediately before recording the spawn and replacing itself with the submitted command, refuse execution if commit fails, remove the handoff after a definite pre-delivery failure, and preserve it when delivery is uncertain.
+**HEXEC-17** When a non-Codex tmux launch carries launch-admission reservations or a successful-spawn recording obligation, the system shall bind its exact session and command plus those effects into a cancellable one-shot handoff before submission; the private executor shall revalidate and commit every bound override immediately before recording the spawn and replacing itself with the submitted command, refuse execution if commit fails, remove the handoff after a definite pre-delivery failure, and preserve it when delivery is uncertain. A foreground Claude supervisor launch shall use the same one-shot boundary, bind its exact executable and argument request, re-resolve the executable before commitment, and leave every bound effect unconsumed when the executor or Claude executable cannot start.
+
+**HEXEC-18** When a foreground Claude launcher carries launch-admission effects, the system shall expose a direct invocation of the same prepared one-shot Claude executor, bind only Claude-compatible override claims and the successful-spawn obligation before starting that executor, re-resolve the configured Claude executable inside it, and consume no bound effect when executor delivery or executable resolution is confirmed to have failed.
 
 ## BDD Traceability
 

@@ -909,11 +909,6 @@ func finalizeAdmissionBrakeOverride(
 	return applyAdmissionBrakeAuthorization(result, reason), reservations, nil
 }
 
-var commitOverrideReservations = func(reservations ...*override.Reservation) error {
-	_, err := override.CommitAll(reservations...)
-	return err
-}
-
 func applyAdmissionBrakeAuthorization(
 	result circuitbreaker.CheckResult,
 	reason string,
