@@ -926,7 +926,7 @@ func pipedInterpreterCommand(args []*syntax.Word, env bool) *syntax.Word {
 		}
 		switch value {
 		case "command", "builtin", "exec", "nohup":
-			return pipedInterpreterCommand(args[index+1:], false)
+			return pipedShellWrapperCommand(value, args[index+1:])
 		case "env", "/usr/bin/env":
 			return pipedInterpreterCommand(args[index+1:], true)
 		}
@@ -938,13 +938,44 @@ func pipedInterpreterCommand(args []*syntax.Word, env bool) *syntax.Word {
 	return nil
 }
 
+func pipedShellWrapperCommand(wrapper string, args []*syntax.Word) *syntax.Word {
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			return nil
+		}
+		if value == "--" {
+			return pipedInterpreterCommand(args[index+1:], false)
+		}
+		if !strings.HasPrefix(value, "-") {
+			return pipedInterpreterCommand(args[index:], false)
+		}
+		if wrapper == "command" &&
+			strings.ContainsAny(strings.TrimLeft(value, "-"), "vV") {
+			return nil
+		}
+		if wrapper == "exec" && (value == "-a" || value == "--argv0") {
+			index++
+		}
+	}
+	return nil
+}
+
 func isRuntimeInterpreter(command string) bool {
-	switch filepath.Base(command) {
+	base := filepath.Base(command)
+	switch base {
 	case "sh", "bash", "dash", "zsh", "ksh", "perl", "ruby", "node":
 		return true
-	default:
-		return strings.HasPrefix(filepath.Base(command), "python")
 	}
+	if !strings.HasPrefix(base, "python") {
+		return false
+	}
+	for _, char := range strings.TrimPrefix(base, "python") {
+		if (char < '0' || char > '9') && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func staticShellWord(word *syntax.Word) (string, bool) {

