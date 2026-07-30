@@ -1,6 +1,7 @@
 package dolt
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -24,6 +25,20 @@ func (e *SessionNameReservationCommitUncertainError) Error() string {
 }
 
 func (e *SessionNameReservationCommitUncertainError) Unwrap() error {
+	return e.Err
+}
+
+// SessionIdentityMutationCommitUncertainError means an identity write may
+// still commit and its name reservation must remain leased until expiry.
+type SessionIdentityMutationCommitUncertainError struct {
+	Err error
+}
+
+func (e *SessionIdentityMutationCommitUncertainError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *SessionIdentityMutationCommitUncertainError) Unwrap() error {
 	return e.Err
 }
 
@@ -183,8 +198,12 @@ func (a *Adapter) ReactivateSession(session *manifest.Manifest) (result Reactiva
 		return ReactivateSessionResult{}, fmt.Errorf("session is not archived: %s", session.SessionID)
 	}
 	reservationCreated, err := a.reserveSessionName(session.SessionID, session.Name)
-	if reservationCreated {
+	releaseReservation := reservationCreated
+	if releaseReservation {
 		defer func() {
+			if !releaseReservation {
+				return
+			}
 			if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
 				retErr = errors.Join(retErr, err)
 			}
@@ -194,6 +213,10 @@ func (a *Adapter) ReactivateSession(session *manifest.Manifest) (result Reactiva
 		return ReactivateSessionResult{}, err
 	}
 	result, retErr = a.reactivateSessionReserved(session, session.Name)
+	var uncertain *SessionIdentityMutationCommitUncertainError
+	if errors.As(retErr, &uncertain) {
+		releaseReservation = false
+	}
 	return result, retErr
 }
 
@@ -243,14 +266,31 @@ func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest, reservat
 	} else {
 		err = fmt.Errorf("reactivate session: %w", err)
 	}
+	return a.reconcileSessionReactivation(session, reservationName, observedRevision, nextRevision, err)
+}
 
+func (a *Adapter) reconcileSessionReactivation(session *manifest.Manifest, reservationName string, observedRevision any, nextRevision string, primaryErr error) (ReactivateSessionResult, error) {
+	inspectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	fenceRevision := uuid.NewString()
+	fenceWon, fenceErr := a.fenceSessionReactivation(
+		inspectCtx,
+		session,
+		observedRevision,
+		fenceRevision,
+	)
+	if fenceErr != nil {
+		primaryErr = errors.Join(primaryErr, fenceErr)
+	}
 	current, inspectErr := a.GetSession(session.SessionID)
 	if inspectErr != nil {
-		return ReactivateSessionResult{}, errors.Join(err, fmt.Errorf("inspect session after reactivation error: %w", inspectErr))
+		primaryErr = errors.Join(primaryErr, fmt.Errorf("inspect session after reactivation error: %w", inspectErr))
+		if fenceWon {
+			return ReactivateSessionResult{}, primaryErr
+		}
+		return ReactivateSessionResult{}, &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
 	}
-	if current.Lifecycle != manifest.LifecycleArchived &&
-		current.Name == session.Name &&
-		current.Tmux.SessionName == session.Tmux.SessionName {
+	if sessionReactivationCommitted(current, session, nextRevision) {
 		session.Lifecycle = current.Lifecycle
 		session.UpdatedAt = current.UpdatedAt
 		session.Tmux.SessionRevision = current.Tmux.SessionRevision
@@ -259,13 +299,51 @@ func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest, reservat
 	if reservationName != "" {
 		owned, ownershipErr := a.sessionNameReservationOwned(session.SessionID, reservationName)
 		if ownershipErr != nil {
-			return ReactivateSessionResult{}, errors.Join(err, ownershipErr)
-		}
-		if !owned {
-			return ReactivateSessionResult{}, &SessionNameConflictError{Name: reservationName}
+			primaryErr = errors.Join(primaryErr, ownershipErr)
+		} else if !owned {
+			primaryErr = &SessionNameConflictError{Name: reservationName}
 		}
 	}
-	return ReactivateSessionResult{}, err
+	if sessionReactivationFenced(current, session, fenceWon) {
+		return ReactivateSessionResult{}, primaryErr
+	}
+	return ReactivateSessionResult{}, &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
+}
+
+func sessionReactivationCommitted(current, observed *manifest.Manifest, nextRevision string) bool {
+	return current.Tmux.SessionRevision == nextRevision ||
+		(current.Lifecycle != manifest.LifecycleArchived &&
+			current.Name == observed.Name &&
+			current.Tmux.SessionName == observed.Tmux.SessionName)
+}
+
+func sessionReactivationFenced(current, observed *manifest.Manifest, fenceWon bool) bool {
+	return fenceWon ||
+		current.Tmux.SessionRevision != observed.Tmux.SessionRevision ||
+		current.Lifecycle != manifest.LifecycleArchived ||
+		current.Name != observed.Name ||
+		current.Tmux.SessionName != observed.Tmux.SessionName
+}
+
+func (a *Adapter) fenceSessionReactivation(ctx context.Context, session *manifest.Manifest, observedRevision any, fenceRevision string) (bool, error) {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET tmux_session_revision = ?
+		WHERE id = ? AND workspace = ? AND status = 'archived'
+		  AND name = ? AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, fenceRevision, session.SessionID, a.workspace, session.Name, session.Tmux.SessionName, observedRevision, observedRevision)
+	if err != nil {
+		return false, fmt.Errorf("fence pending session reactivation: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get session reactivation fence rows affected: %w", err)
+	}
+	if rowsAffected > 1 {
+		return false, fmt.Errorf("session reactivation fence changed %d rows", rowsAffected)
+	}
+	return rowsAffected == 1, nil
 }
 
 func reservationOwnedBy(tx *sql.Tx, workspace, sessionID, name string) error {

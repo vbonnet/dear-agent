@@ -124,8 +124,12 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 	}
 
 	reservationCreated, reservationName, err := a.reserveParentLinkName(ctx, sessionID, inheritedName)
-	if reservationCreated {
+	releaseReservation := reservationCreated
+	if releaseReservation {
 		defer func() {
+			if !releaseReservation {
+				return
+			}
 			if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
 				retErr = errors.Join(retErr, err)
 			}
@@ -134,7 +138,12 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 	if err != nil {
 		return err
 	}
-	return a.linkSessionParentReserved(ctx, sessionID, observedRevision, parentSessionID, inheritedName, reservationName)
+	retErr = a.linkSessionParentReserved(ctx, sessionID, observedRevision, parentSessionID, inheritedName, reservationName)
+	var uncertain *SessionIdentityMutationCommitUncertainError
+	if errors.As(retErr, &uncertain) {
+		releaseReservation = false
+	}
+	return retErr
 }
 
 func (a *Adapter) linkSessionParentReserved(ctx context.Context, sessionID, observedRevision, parentSessionID string, inheritedName *string, reservationName string) error {
@@ -143,6 +152,7 @@ func (a *Adapter) linkSessionParentReserved(ctx context.Context, sessionID, obse
 	if inheritedName != nil {
 		inheritedNameValue = *inheritedName
 	}
+	nextRevision := uuid.NewString()
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
 		SET updated_at = ?, parent_session_id = ?,
@@ -154,36 +164,105 @@ func (a *Adapter) linkSessionParentReserved(ctx context.Context, sessionID, obse
 			  SELECT 1 FROM agm_session_name_reservations
 			  WHERE workspace = ? AND name = ? AND session_id = ?
 		  ))
-	`, time.Now(), parentSessionID, inheritedNameValue, inheritedNameValue, uuid.NewString(), sessionID, a.workspace, observed, observed,
+	`, time.Now(), parentSessionID, inheritedNameValue, inheritedNameValue, nextRevision, sessionID, a.workspace, observed, observed,
 		reservationName, a.workspace, reservationName, sessionID)
-	if err != nil {
-		return fmt.Errorf("link session parent: %w", err)
+	if err == nil {
+		rowsAffected, rowsErr := result.RowsAffected()
+		if rowsErr == nil && rowsAffected == 1 {
+			return nil
+		}
+		if rowsErr != nil {
+			err = fmt.Errorf("get linked session rows affected: %w", rowsErr)
+		} else {
+			err = fmt.Errorf("session identity changed concurrently while linking parent %s", sessionID)
+		}
+	} else {
+		err = fmt.Errorf("link session parent: %w", err)
 	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("get linked session rows affected: %w", err)
+	return a.reconcileSessionParentLink(
+		ctx,
+		sessionID,
+		observedRevision,
+		parentSessionID,
+		inheritedName,
+		reservationName,
+		nextRevision,
+		err,
+	)
+}
+
+func (a *Adapter) reconcileSessionParentLink(ctx context.Context, sessionID, observedRevision, parentSessionID string, inheritedName *string, reservationName, nextRevision string, primaryErr error) error {
+	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	observed := nullableStringValue(sql.NullString{String: observedRevision, Valid: observedRevision != ""})
+	fenceRevision := uuid.NewString()
+	fenceWon, fenceErr := a.fenceSessionParentLink(inspectCtx, sessionID, observed, fenceRevision)
+	if fenceErr != nil {
+		primaryErr = errors.Join(primaryErr, fenceErr)
 	}
-	if rowsAffected > 0 {
+	currentParentID, currentName, currentRevision, inspectErr := a.inspectSessionParentLink(inspectCtx, sessionID)
+	if inspectErr != nil {
+		primaryErr = errors.Join(primaryErr, inspectErr)
+		if fenceWon {
+			return primaryErr
+		}
+		return &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
+	}
+	intendedName := inheritedName == nil || currentName == *inheritedName
+	intendedParent := currentParentID.Valid && currentParentID.String == parentSessionID
+	if currentRevision == nextRevision || (intendedParent && intendedName) {
 		return nil
 	}
+
 	if reservationName != "" {
 		owned, ownershipErr := a.sessionNameReservationOwned(sessionID, reservationName)
 		if ownershipErr != nil {
-			return ownershipErr
-		}
-		if !owned {
-			return &SessionNameConflictError{Name: reservationName}
+			primaryErr = errors.Join(primaryErr, ownershipErr)
+		} else if !owned {
+			primaryErr = &SessionNameConflictError{Name: reservationName}
 		}
 	}
+	if fenceWon || currentRevision != observedRevision {
+		return primaryErr
+	}
+	return &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
+}
 
-	var currentRevision sql.NullString
-	if err := a.conn.QueryRowContext(ctx, `SELECT tmux_session_revision FROM agm_sessions WHERE id = ? AND workspace = ?`, sessionID, a.workspace).Scan(&currentRevision); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("session not found: %s", sessionID)
-		}
-		return fmt.Errorf("inspect session parent conflict: %w", err)
+func (a *Adapter) fenceSessionParentLink(ctx context.Context, sessionID string, observedRevision any, fenceRevision string) (bool, error) {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, fenceRevision, sessionID, a.workspace, observedRevision, observedRevision)
+	if err != nil {
+		return false, fmt.Errorf("fence pending session parent link: %w", err)
 	}
-	return fmt.Errorf("session identity changed concurrently while linking parent %s", sessionID)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get session parent-link fence rows affected: %w", err)
+	}
+	if rowsAffected > 1 {
+		return false, fmt.Errorf("session parent-link fence changed %d rows", rowsAffected)
+	}
+	return rowsAffected == 1, nil
+}
+
+func (a *Adapter) inspectSessionParentLink(ctx context.Context, sessionID string) (sql.NullString, string, string, error) {
+	var parentSessionID, revision sql.NullString
+	var name string
+	err := a.conn.QueryRowContext(ctx, `
+		SELECT parent_session_id, name, tmux_session_revision
+		FROM agm_sessions
+		WHERE id = ? AND workspace = ?
+	`, sessionID, a.workspace).Scan(&parentSessionID, &name, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sql.NullString{}, "", "", fmt.Errorf("session not found: %s", sessionID)
+	}
+	if err != nil {
+		return sql.NullString{}, "", "", fmt.Errorf("inspect session parent link after error: %w", err)
+	}
+	return parentSessionID, name, revision.String, nil
 }
 
 func (a *Adapter) ensureParentSessionExists(ctx context.Context, parentSessionID string) error {
