@@ -10,6 +10,10 @@
 
 **CHJSON-03** When a filter, argument shape, input document, or trailing JSON value is unsupported, the system shall fail without evaluating a general-purpose expression language.
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/root_safety_command_guardrails.feature`
+
 ## Verification
 
 - Unit tests: `cmd/codex-hook-json/main_test.go`
