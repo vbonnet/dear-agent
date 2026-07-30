@@ -152,7 +152,7 @@ func finalizeCLICreateSession(ctx context.Context, sessionName string, runtime c
 }
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
-func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (retErr error) {
+func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) error {
 	if err := preflight(); err != nil {
 		return err
 	}
@@ -195,14 +195,19 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
 		}
 	}()
-	runtime := newCLICreateSessionRuntime(sessionName, exists, true)
+	var trustPreConfigured bool
+	runtime := newCLICreateSessionRuntime(sessionName, exists, false)
+	runtime.launch = func(launchCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+		return launchCLICreateSession(launchCtx, spec, exists, trustPreConfigured)
+	}
 	runtime.prepare = func(prepareCtx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
 		preparedSandbox, preparedWorkDir, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
 		sandboxInfo = preparedSandbox
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
-		extraAddDirs, _ := collectExtraAddDirs(preparedSandbox)
+		var extraAddDirs []string
+		extraAddDirs, trustPreConfigured = collectExtraAddDirs(preparedSandbox)
 		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
