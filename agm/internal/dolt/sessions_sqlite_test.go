@@ -191,6 +191,72 @@ func TestSQLiteSessionNameReservationPrecedesAndIsConsumedByRegistration(t *test
 	}
 }
 
+func TestResolveSessionNameReservationCommitErrorReconcilesOwnership(t *testing.T) {
+	commitErr := errors.New("reservation commit acknowledgement lost")
+	inspectErr := errors.New("reservation re-read unavailable")
+	tests := []struct {
+		name               string
+		reservationCreated bool
+		owned              bool
+		inspectErr         error
+		wantOwned          bool
+		wantErr            bool
+		wantUncertain      bool
+	}{
+		{
+			name:               "new reservation committed",
+			reservationCreated: true,
+			owned:              true,
+			wantOwned:          true,
+		},
+		{
+			name:               "preexisting owned reservation remains owned",
+			reservationCreated: false,
+			owned:              true,
+		},
+		{
+			name:               "missing reservation proves no commit",
+			reservationCreated: true,
+			wantErr:            true,
+		},
+		{
+			name:               "failed inspection requires compensation",
+			reservationCreated: true,
+			inspectErr:         inspectErr,
+			wantOwned:          true,
+			wantErr:            true,
+			wantUncertain:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owned, err := resolveSessionNameReservationCommitError(
+				tt.reservationCreated,
+				commitErr,
+				tt.owned,
+				tt.inspectErr,
+			)
+			if owned != tt.wantOwned {
+				t.Fatalf("owned = %v, want %v", owned, tt.wantOwned)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, want error=%v", err, tt.wantErr)
+			}
+			if err != nil && !errors.Is(err, commitErr) {
+				t.Fatalf("error = %v, want commit error", err)
+			}
+			var uncertain *SessionNameReservationCommitUncertainError
+			if errors.As(err, &uncertain) != tt.wantUncertain {
+				t.Fatalf("uncertain error = %v, want %v", err, tt.wantUncertain)
+			}
+			if tt.inspectErr != nil && !errors.Is(err, tt.inspectErr) {
+				t.Fatalf("error = %v, want inspect error", err)
+			}
+		})
+	}
+}
+
 func TestSQLiteSessionNameReservationsPreserveLegacyDuplicateRows(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

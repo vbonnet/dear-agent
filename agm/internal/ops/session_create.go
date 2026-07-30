@@ -866,6 +866,12 @@ func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool,
 		if errors.As(err, &conflict) {
 			return false, sessionExistsError(name)
 		}
+		var uncertain *dolt.SessionNameReservationCommitUncertainError
+		if errors.As(err, &uncertain) {
+			// A lost commit acknowledgement can leave the lease durable. Mark
+			// it owned so finish retries explicit release before returning.
+			return true, ErrStorageError("storage.ReserveSessionName", err)
+		}
 		return false, ErrStorageError("storage.ReserveSessionName", err)
 	}
 	return true, nil

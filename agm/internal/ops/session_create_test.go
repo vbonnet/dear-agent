@@ -1129,6 +1129,70 @@ func TestCreateSession_UnknownRegistrationCleanupFailureIsReturned(t *testing.T)
 	}
 }
 
+func TestCreateSession_UnknownReservationCommitIsExplicitlyReleased(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	commitErr := errors.New("reservation commit acknowledgement lost")
+	store := &createMockStorage{
+		reserveErr: &dolt.SessionNameReservationCommitUncertainError{Err: commitErr},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "uncertain-reservation", Harness: "claude-code", Model: "sonnet",
+		SessionID: "uncertain-reservation-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want reservation uncertainty", err)
+	}
+	if !reflect.DeepEqual(store.released, []string{"uncertain-reservation-id"}) {
+		t.Fatalf("reservation cleanup = %v, want uncertain lease release", store.released)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux was mutated after uncertain reservation: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_HandledLifecycleIsExplicitlyNonPersistent(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	completed := false
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if len(store.reserved) != 1 || len(store.released) != 0 {
+				t.Fatalf("reservation during handled lifecycle = reserved:%v released:%v", store.reserved, store.released)
+			}
+			return CreateSessionLaunchResult{HandledLifecycle: true}, nil
+		},
+		complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		},
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "handled-gemini", Harness: "gemini-cli", Model: "gemini",
+		SessionID: "handled-gemini-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if result == nil || result.SessionID != "handled-gemini-id" {
+		t.Fatalf("CreateSessionWithContext() result = %#v", result)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("handled lifecycle durable registrations = %#v, want none", store.created)
+	}
+	if !reflect.DeepEqual(store.released, []string{"handled-gemini-id"}) {
+		t.Fatalf("handled lifecycle reservation cleanup = %v", store.released)
+	}
+	if completed {
+		t.Fatal("handled lifecycle ran shared runtime completion")
+	}
+}
+
 func TestCreateSession_DeferredCurrentTmuxPreservesRegistrationAfterQueuedLaunch(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	tmuxMock.Sessions["deferred-post-queue-cancel"] = true

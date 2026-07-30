@@ -124,15 +124,15 @@ func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevi
 	}
 
 	reservationCreated, err := a.reserveParentLinkName(ctx, sessionID, inheritedName)
-	if err != nil {
-		return err
-	}
 	if reservationCreated {
 		defer func() {
 			if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
 				retErr = errors.Join(retErr, err)
 			}
 		}()
+	}
+	if err != nil {
+		return err
 	}
 
 	observed := nullableStringValue(sql.NullString{String: observedRevision, Valid: observedRevision != ""})

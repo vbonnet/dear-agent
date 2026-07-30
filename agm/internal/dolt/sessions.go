@@ -553,15 +553,15 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	reservationHeld := newName != previousName
 	if reservationHeld {
 		reservationCreated, err := a.reserveSessionName(sessionID, newName)
-		if err != nil {
-			return RenameSessionIdentityResult{}, err
-		}
 		if reservationCreated {
 			defer func() {
 				if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
 					retErr = errors.Join(retErr, err)
 				}
 			}()
+		}
+		if err != nil {
+			return RenameSessionIdentityResult{}, err
 		}
 	}
 	result, retErr = a.renameSessionIdentityReserved(

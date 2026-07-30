@@ -107,6 +107,10 @@ Examples:
 
 			if newName != oldName {
 				if err := adapter.ReserveSessionName(stableSessionID, newName); err != nil {
+					var uncertain *dolt.SessionNameReservationCommitUncertainError
+					if errors.As(err, &uncertain) {
+						err = errors.Join(err, adapter.ReleaseSessionNameReservation(stableSessionID))
+					}
 					ui.PrintError(err,
 						"Cannot rename: target name could not be reserved",
 						"  • Another create or rename may already own this name")

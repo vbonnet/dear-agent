@@ -12,6 +12,21 @@ import (
 
 const sessionNameReservationTTL = 2 * time.Hour
 
+// SessionNameReservationCommitUncertainError means a reservation commit may
+// have succeeded but a durable re-read could not prove its exact owner.
+// Callers must compensate as though the session may own the lease.
+type SessionNameReservationCommitUncertainError struct {
+	Err error
+}
+
+func (e *SessionNameReservationCommitUncertainError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *SessionNameReservationCommitUncertainError) Unwrap() error {
+	return e.Err
+}
+
 // ReserveSessionName atomically leases a workspace-scoped active session name.
 // Existing duplicate session rows remain readable and actionable; only new
 // creation attempts for an already active name are rejected.
@@ -20,9 +35,10 @@ func (a *Adapter) ReserveSessionName(sessionID, name string) error {
 	return err
 }
 
-// reserveSessionName reports whether this call created the lease. A caller
-// that already owns the same workspace/name/session tuple keeps ownership, so
-// a nested durable mutation must not release the caller's longer-lived lease.
+// reserveSessionName reports whether this call created, or may have created,
+// the lease. A caller that already owns the same workspace/name/session tuple
+// keeps ownership, so a nested durable mutation must not release the caller's
+// longer-lived lease. A true result paired with an error requires cleanup.
 func (a *Adapter) reserveSessionName(sessionID, name string) (bool, error) {
 	if sessionID == "" {
 		return false, fmt.Errorf("session_id cannot be empty")
@@ -90,9 +106,40 @@ func (a *Adapter) reserveSessionName(sessionID, name string) (bool, error) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit session-name reservation: %w", err)
+		owned, inspectErr := a.sessionNameReservationOwned(sessionID, name)
+		return resolveSessionNameReservationCommitError(reservationCreated, err, owned, inspectErr)
 	}
 	return reservationCreated, nil
+}
+
+func (a *Adapter) sessionNameReservationOwned(sessionID, name string) (bool, error) {
+	var owner string
+	err := a.conn.QueryRow( //nolint:noctx // commit reconciliation must outlive the transaction response
+		`SELECT session_id FROM agm_session_name_reservations
+		 WHERE workspace = ? AND name = ?`,
+		a.workspace,
+		name,
+	).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("re-read session-name reservation after commit error: %w", err)
+	}
+	return owner == sessionID, nil
+}
+
+func resolveSessionNameReservationCommitError(reservationCreated bool, commitErr error, owned bool, inspectErr error) (bool, error) {
+	err := fmt.Errorf("commit session-name reservation: %w", commitErr)
+	if inspectErr != nil {
+		return true, &SessionNameReservationCommitUncertainError{
+			Err: errors.Join(err, inspectErr),
+		}
+	}
+	if owned {
+		return reservationCreated, nil
+	}
+	return false, err
 }
 
 // ReleaseSessionNameReservation releases an operation lease owned by the
@@ -136,16 +183,15 @@ func (a *Adapter) ReactivateSession(session *manifest.Manifest) (result Reactiva
 		return ReactivateSessionResult{}, fmt.Errorf("session is not archived: %s", session.SessionID)
 	}
 	reservationCreated, err := a.reserveSessionName(session.SessionID, session.Name)
-	if err != nil {
-		return ReactivateSessionResult{}, err
-	}
-
 	if reservationCreated {
 		defer func() {
 			if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
 				retErr = errors.Join(retErr, err)
 			}
 		}()
+	}
+	if err != nil {
+		return ReactivateSessionResult{}, err
 	}
 	result, retErr = a.reactivateSessionReserved(session)
 	return result, retErr
