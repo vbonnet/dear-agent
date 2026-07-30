@@ -650,13 +650,16 @@ func declarationCommandEnvironmentAssignment(args []*syntax.Word) (*syntax.Word,
 func isExecutionInfluencingEnvironment(name string) bool {
 	if strings.HasPrefix(name, "LD_") ||
 		strings.HasPrefix(name, "DYLD_") ||
-		strings.HasPrefix(name, "_RLD_") {
+		strings.HasPrefix(name, "_RLD_") ||
+		strings.HasPrefix(name, "GIT_CONFIG_") {
 		return true
 	}
 	switch name {
 	case "PATH",
 		"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS",
 		"TAR_OPTIONS",
+		"GIT_ASKPASS", "GIT_EDITOR", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF",
+		"GIT_PAGER", "GIT_SEQUENCE_EDITOR", "GIT_SSH", "GIT_SSH_COMMAND",
 		"GCONV_PATH", "LOCPATH", "LIBPATH", "SHLIB_PATH",
 		"LDR_PRELOAD", "LDR_LIBRARY_PATH",
 		"NODE_OPTIONS", "NODE_PATH",
@@ -963,6 +966,53 @@ func tarOldStyleCommandOption(value string) bool {
 	return strings.ContainsAny(value, "FIMT")
 }
 
+func gitUsesCommandExecution(command string, args []*syntax.Word) bool {
+	if filepath.Base(command) != "git" {
+		return false
+	}
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			// Before the subcommand, an expanded word can introduce -c,
+			// --config-env, --exec-path, or an external git-* command.
+			return true
+		}
+		if value == "--version" {
+			return false
+		}
+		if slices.Contains([]string{"-C", "--git-dir", "--work-tree", "--namespace"}, value) {
+			index++
+			if index >= len(args) {
+				return true
+			}
+			continue
+		}
+		if slices.Contains([]string{
+			"--no-pager", "--no-replace-objects", "--literal-pathspecs",
+			"--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs",
+			"--no-optional-locks",
+		}, value) {
+			continue
+		}
+		if value == "-c" ||
+			strings.HasPrefix(value, "-c") ||
+			value == "--config-env" ||
+			strings.HasPrefix(value, "--config-env=") ||
+			value == "--exec-path" ||
+			strings.HasPrefix(value, "--exec-path=") {
+			return true
+		}
+		if strings.HasPrefix(value, "-") {
+			// Unknown global options are not part of the small positive set
+			// attested hooks need.
+			return true
+		}
+		// Unknown names can resolve through aliases or PATH as git-<name>.
+		return !slices.Contains([]string{"rev-parse", "status"}, value)
+	}
+	return true
+}
+
 func staticSedPrograms(args []*syntax.Word) ([]string, bool) {
 	var programs []string
 	operandsOnly := false
@@ -1218,6 +1268,9 @@ func dynamicBuiltinOperand(
 	}
 	if tarUsesCommandExecution(command, args) {
 		return commandWord, "command-capable tar runtime"
+	}
+	if gitUsesCommandExecution(command, args) {
+		return commandWord, "command-capable Git runtime"
 	}
 	switch command {
 	case "mapfile", "readarray":
