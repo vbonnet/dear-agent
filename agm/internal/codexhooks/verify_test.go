@@ -28,6 +28,34 @@ func TestAttestAndVerifyUseCommittedHookObjects(t *testing.T) {
 	}
 }
 
+func TestGitAttestationIgnoresCallerProcessSelection(t *testing.T) {
+	source := gittest.NewRepo(t)
+	other := gittest.NewRepo(t)
+	shimDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "invoked")
+	writeFile(t, filepath.Join(shimDir, "git"), "#!/bin/sh\nprintf invoked >"+marker+"\n", 0o755)
+
+	t.Setenv("PATH", shimDir)
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	t.Setenv("GIT_OBJECT_DIRECTORY", filepath.Join(other, ".git", "objects"))
+
+	root, err := gitRoot(context.Background(), source)
+	if err != nil {
+		t.Fatalf("gitRoot() error: %v", err)
+	}
+	wantRoot, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != wantRoot {
+		t.Fatalf("gitRoot() = %q, want %q", root, wantRoot)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("caller-controlled Git shim ran: %v", err)
+	}
+}
+
 func TestVerifyRejectsMutatedImmutableMaterialization(t *testing.T) {
 	source, sandbox := hookFixture(t)
 	attestation, err := attestForTest(t, source, sandbox, []string{sandbox})

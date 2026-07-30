@@ -35,7 +35,7 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-10** When override use is aggregated, the system shall evaluate the alert threshold separately for each override kind.
 
-**OVR-11** When a raw Codex hook-trust bypass is requested outside AGM's attested launch path, the system shall deny it and direct the caller to the canonical attested `agm session new` flow.
+**OVR-11** When a raw Codex hook-trust bypass is requested outside AGM's attested launch path, including when shell quoting or escaping assembles the flag or expansion makes a raw Codex argv unprovable, the system shall deny it and direct the caller to the canonical attested `agm session new` flow.
 
 **OVR-12** When AGM's private Codex executor receives a hook-trust bypass, the system shall require a one-shot prepared handoff that binds the exact attested hook root and complete launch request and lives outside the workspace and every agent-writable root.
 

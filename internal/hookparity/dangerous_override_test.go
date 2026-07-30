@@ -40,10 +40,18 @@ func TestDangerousOverrideHookDeniesRawCodexWithoutParentReason(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("hook requires jq")
 	}
-	output := runDangerousOverrideHook(t, t.TempDir(),
-		"codex --dangerously-bypass-hook-trust; true",
-	)
-	assertDangerousOverrideDenied(t, output, "agm session new")
+	for name, command := range map[string]string{
+		"literal":              "codex --dangerously-bypass-hook-trust; true",
+		"double quoted join":   `codex --dangerously-bypass-hook-"trust"`,
+		"single quoted join":   `codex --dangerously-bypass-hook-'trust'`,
+		"backslash join":       `codex --dangerously-bypass-hook-\trust`,
+		"expanded raw command": `codex "$AGM_UNTRUSTED_ARGS"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			output := runDangerousOverrideHook(t, t.TempDir(), command)
+			assertDangerousOverrideDenied(t, output, "agm session new")
+		})
+	}
 }
 
 func TestDangerousOverrideHookDefersSingleInstalledAGMCommand(t *testing.T) {

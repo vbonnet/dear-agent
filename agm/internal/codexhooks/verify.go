@@ -18,7 +18,10 @@ import (
 	"strings"
 )
 
-const hooksManifestPath = ".codex/hooks.json"
+const (
+	hooksManifestPath = ".codex/hooks.json"
+	systemGitPath     = "/usr/bin/git"
+)
 
 var (
 	projectDirReference = regexp.MustCompile(`(?:\$\{(?:CLAUDE|CODEX)_PROJECT_DIR\}|\$(?:CLAUDE|CODEX)_PROJECT_DIR)/([A-Za-z0-9._/-]+)`)
@@ -385,8 +388,23 @@ func gitOutput(ctx context.Context, repo string, args ...string) (string, error)
 }
 
 func gitOutputBytes(ctx context.Context, repo string, args ...string) ([]byte, error) {
+	gitPath, err := trustedGitExecutable()
+	if err != nil {
+		return nil, err
+	}
 	full := append([]string{"-C", repo}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd := exec.CommandContext(ctx, gitPath, full...)
+	cmd.Env = []string{
+		"HOME=/var/empty",
+		"LC_ALL=C",
+		"PATH=/usr/bin:/bin",
+		"XDG_CONFIG_HOME=/var/empty",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_TERMINAL_PROMPT=0",
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
@@ -394,4 +412,19 @@ func gitOutputBytes(ctx context.Context, repo string, args ...string) ([]byte, e
 		return nil, fmt.Errorf("git %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return output, nil
+}
+
+func trustedGitExecutable() (string, error) {
+	path, err := filepath.EvalSymlinks(systemGitPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve trusted Git executable %s: %w", systemGitPath, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect trusted Git executable %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("trusted Git executable %s is not an executable regular file", path)
+	}
+	return path, nil
 }
