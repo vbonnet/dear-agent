@@ -23,6 +23,7 @@ var (
 	overrideAuditWindow    time.Duration
 	overrideAuditThreshold int
 	overrideAuditJSON      bool
+	overrideAuditNotify    bool
 )
 
 // overrideAuditBreachExit is the distinct exit code a scheduled audit uses to
@@ -82,8 +83,8 @@ var overrideAuditCmd = &cobra.Command{
 	Short: "Review collected override reasons and alert when use climbs",
 	Long: `Aggregate recorded override use over a window.
 
-Exits ` + fmt.Sprint(overrideAuditBreachExit) + ` when any kind reaches the alert threshold, so a scheduled run
-can page without a wrapper. A repeated reason is the signal to act on: the
+Exits ` + fmt.Sprint(overrideAuditBreachExit) + ` when any kind reaches the alert threshold. Scheduled runs use
+--notify to deliver the breach through the host notification service before exiting. A repeated reason is the signal to act on: the
 override has become a standing workaround for a root cause nobody fixed, and
 the fix is either to remove that cause or to close the loophole.`,
 	RunE: runOverrideAudit,
@@ -98,6 +99,7 @@ func init() {
 	overrideAuditCmd.Flags().DurationVar(&overrideAuditWindow, "window", 7*24*time.Hour, "Window to review")
 	overrideAuditCmd.Flags().IntVar(&overrideAuditThreshold, "threshold", 5, "Alert when a kind reaches this many uses (0 disables)")
 	overrideAuditCmd.Flags().BoolVar(&overrideAuditJSON, "json", false, "Emit the report as JSON")
+	overrideAuditCmd.Flags().BoolVar(&overrideAuditNotify, "notify", false, "Deliver threshold breaches through the host notification service")
 
 	overrideCmd.AddCommand(overrideApproveCmd, overrideAuthorizeCmd, overrideRevokeCmd, overrideStatusCmd, overrideAuditCmd)
 	rootCmd.AddCommand(overrideCmd)
@@ -314,9 +316,25 @@ func runOverrideAudit(cmd *cobra.Command, args []string) error {
 				"ALERT: %s used %d time(s), at or above the threshold of %d\n",
 				breach.Kind, breach.Count, report.Threshold)
 		}
+		if overrideAuditNotify {
+			if err := sendOverrideAuditNotification(overrideAuditAlertMessage(report)); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "ALERT DELIVERY FAILED: %v\n", err)
+			}
+		}
 		// Signal the alert without Cobra reprinting usage for a healthy run.
 		cmd.SilenceUsage = true
 		os.Exit(overrideAuditBreachExit)
 	}
 	return nil
+}
+
+func overrideAuditAlertMessage(report override.AuditReport) string {
+	parts := make([]string, 0, len(report.Breaches))
+	for _, breach := range report.Breaches {
+		parts = append(parts, fmt.Sprintf("%s=%d", breach.Kind, breach.Count))
+	}
+	return fmt.Sprintf(
+		"Dangerous override threshold %d breached: %s. Review %s.",
+		report.Threshold, strings.Join(parts, ", "), override.LedgerPath(),
+	)
 }

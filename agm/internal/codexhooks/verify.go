@@ -22,7 +22,7 @@ const hooksManifestPath = ".codex/hooks.json"
 
 var (
 	projectDirReference = regexp.MustCompile(`(?:\$\{(?:CLAUDE|CODEX)_PROJECT_DIR\}|\$(?:CLAUDE|CODEX)_PROJECT_DIR)/([A-Za-z0-9._/-]+)`)
-	hookRootReference   = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-\.\}/([A-Za-z0-9._/-]+)`)
+	hookRootReference   = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
 	relativePathToken   = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
 )
 

@@ -197,7 +197,7 @@ func hookFixture(t *testing.T) (string, string) {
 	t.Helper()
 	source := gittest.NewRepo(t)
 	writeFile(t, filepath.Join(source, ".codex", "hooks.json"),
-		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-.}/.codex/hooks/guard"},{"command":"tools/relative-guard"}]}]}}`,
+		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/guard"},{"command":"tools/relative-guard"}]}]}}`,
 		0o644,
 	)
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 0\n", 0o755)

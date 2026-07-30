@@ -86,9 +86,9 @@ artifacts:
     tokens:
       __HOME__: ${HOME}
 
-  # Daily audit of dangerous override use. The user agent reads the user-owned
-  # ledger; the approvals it validates remain separately root-owned under
-  # /etc/dear-agent-override-<kind>.json.
+  # Daily audit of dangerous override use. The user agent reads the root-owned
+  # /var/log/dear-agent-overrides.jsonl ledger and delivers threshold breaches
+  # through Notification Center and the unified system log.
   - name: com.dear-agent.override-audit
     source: deploy/launchd/com.dear-agent.override-audit.plist
     deployed: ~/Library/LaunchAgents/com.dear-agent.override-audit.plist

@@ -3,8 +3,8 @@
 <!--
   launchd agent for the recurring dangerous-override audit.
 
-  Runs `agm override audit` daily. The audit reads the override ledger
-  (~/.agm/overrides/ledger.jsonl) and reports every use of a dangerous override
+  Runs `agm override audit --notify` daily. The audit reads the root-owned
+  /var/log/dear-agent-overrides.jsonl ledger and reports every dangerous override
   — the Codex hook-trust bypass and the admission-brake override — grouped by
   the reason its caller gave.
 
@@ -15,9 +15,9 @@
   the loophole that makes it reachable. Renewing the approval instead is how a
   safety control decays into a formality.
 
-  It exits 3 when any single kind reaches the threshold, which is what turns
-  this from a report into an alert. A generic non-zero exit would be
-  indistinguishable from a broken job, so 3 is reserved for "used too often".
+  It sends a Notification Center alert and writes the breach to the unified
+  system log before exiting 3. A generic non-zero exit would be indistinguishable
+  from a broken job, so 3 is reserved for "used too often".
 
   The plist is a TEMPLATE: `make install-override-audit-launchagent` creates
   the log directory, substitutes __HOME__ for the real home directory, and
@@ -49,6 +49,7 @@
     <string>168h</string>
     <string>--threshold</string>
     <string>5</string>
+    <string>--notify</string>
   </array>
 
   <key>EnvironmentVariables</key>

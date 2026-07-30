@@ -29,6 +29,8 @@ reviewed source commit.
 
 **CHOOK-09** When the private executor receives a Codex hook-trust bypass, the system shall reject direct requests and ordinary handoffs, require a one-shot prepared capability bound to the exact hook root and complete launch request, and stage that capability outside the workspace and every agent-writable root.
 
+**CHOOK-10** When an ordinary non-bypassed Codex session runs from a repository subdirectory, every project hook shall fall back to the repository project root instead of resolving relative to that subdirectory.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

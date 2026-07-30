@@ -4,7 +4,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -13,6 +15,50 @@ import (
 // boundary. There is no same-user staging file for an unattended agent to race
 // between confirmation and installation, and AGM itself is never elevated.
 func installOperatorGrant(data []byte, path string) error {
+	if err := requireFreshSudoAuthentication(); err != nil {
+		return err
+	}
+	installErr := writeOperatorGrant(data, path)
+	return errors.Join(installErr, invalidateSudoAuthentication())
+}
+
+func requireFreshSudoAuthentication() error {
+	return requireFreshAuthentication(
+		invalidateSudoAuthentication,
+		sudoValidationIsPasswordless,
+		promptForSudoAuthentication,
+	)
+}
+
+func sudoValidationIsPasswordless() (bool, error) {
+	err := exec.Command("/usr/bin/sudo", "-n", "-v").Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("probe passwordless sudo validation: %w", err)
+}
+
+func promptForSudoAuthentication() error {
+	cmd := exec.Command("/usr/bin/sudo", "-v")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func invalidateSudoAuthentication() error {
+	output, err := exec.Command("/usr/bin/sudo", "-k").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("invalidate cached sudo authentication: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func writeOperatorGrant(data []byte, path string) error {
 	cmd := exec.Command("/usr/bin/sudo", "/usr/bin/tee", path)
 	cmd.Stdin = bytes.NewReader(data)
 	output, err := cmd.CombinedOutput()
