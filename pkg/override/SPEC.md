@@ -42,7 +42,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-13** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
 
-**OVR-14** When an admission-brake override reaches the executable boundary, the system shall reserve current human authorization without recording a use, repeat every live admission gate, and commit the one-shot ledger use only when the brake remains the sole refusal immediately before the irreversible process or tmux submission boundary.
+**OVR-14** When an admission-brake override reaches the executable boundary, the system shall reserve current human authorization without recording a use, repeat every live admission gate, and commit the one-shot ledger use only when the brake remains the sole refusal at the final harness-specific launch boundary: immediately before parent-side process or tmux submission, or in the private Codex executor after all fallible preparation and immediately before exec.
 
 **OVR-15** When the privileged ledger helper is installed, the system shall require the operator to confirm the complete artifact SHA-256, copy those bytes to a unique root-owned staging file, verify the staged digest against the confirmed digest, and atomically activate only the verified staged file.
 
@@ -62,7 +62,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-23** When a human approves `codex-hook-trust`, the system shall bind the root-owned grant to the canonical repository, full source commit, and committed hook-byte digest displayed during approval, and shall refuse a generic or mismatched hook-trust grant.
 
-**OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall carry the hook reservation into the same launch-bound ledger transaction and shall require the private executor to prove a fresh exact authorization receipt was committed and revalidate the persisted repository, commit, digest, materialized hook root, and sandbox assets before executing Codex.
+**OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
 
 ## Override kinds
 
@@ -142,11 +142,12 @@ containing at most one use per override kind. The helper appends only to
 `/var/log/dear-agent-overrides.jsonl`, revalidates every matching active
 root-owned grant, exact subject, unique random authorization ID, and near-current
 timestamp, synchronizes before returning, and stops at a 16 MiB ledger cap
-pending operator-owned rotation. The one-shot private Codex handoff carries the
-same authorization ID and immutable source fields; its executor requires a
-fresh matching ledger record and re-runs the persisted Git attestation before
-replacing AGM with Codex. The receipt is audit evidence, not a secret
-capability, and expires with the private handoff window.
+pending operator-owned rotation. The one-shot private Codex handoff carries
+prepared authorization claims with the same random IDs and immutable source
+fields. After re-running the persisted Git attestation and all other fallible
+launch checks, its executor revalidates the current grants and appends the
+complete transaction immediately before replacing AGM with Codex. The IDs are
+audit correlation, not secret capabilities.
 
 The ledger file and its parent are root-owned, so the scheduled audit process
 can read the audit while the agent user cannot truncate, replace, or remove

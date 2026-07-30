@@ -488,9 +488,9 @@ func submitAndAwaitResume(
 			}
 			return err
 		}
-		if _, err := override.CommitAll(launch.Reservations...); err != nil {
+		if err := launch.FinalizeOverrideReservations(launch.Reservations...); err != nil {
 			return errors.Join(
-				fmt.Errorf("commit %s resume override transaction: %w", harnessName, err),
+				fmt.Errorf("finalize %s resume override transaction: %w", harnessName, err),
 				launch.CancelUndelivered(),
 			)
 		}
@@ -795,10 +795,11 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
 			// Attestation re-runs here and fails closed. Command preparation
-			// reserves authorization bound to the exact source identity; resume
-			// commits it at submission and seals a fresh exact ledger receipt into
-			// the private handoff. A persisted launch policy therefore cannot
-			// become "approve once, resume forever".
+			// reserves authorization bound to the exact source identity and
+			// seals the prepared claim into the private handoff. The executor
+			// revalidates and commits it only after every other fallible launch
+			// check. A persisted launch policy therefore cannot become
+			// "approve once, resume forever".
 			if m.Sandbox.BypassCodexHookTrust {
 				reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
 				if reasonErr != nil {

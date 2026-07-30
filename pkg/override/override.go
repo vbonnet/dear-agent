@@ -94,15 +94,9 @@ const (
 	MaxSubjectBytes = 96
 
 	// AuthorizationIDBytes is the random correlation ID recorded for each new
-	// reservation. It is audit evidence rather than a secret capability: the
-	// private Codex executor accepts it only as a fresh exact ledger receipt.
+	// reservation. It is audit correlation rather than a secret capability;
+	// the privileged boundary still revalidates the current exact grant.
 	AuthorizationIDBytes = 16
-
-	// AuthorizationReceiptMaxAge bounds how long a committed receipt may be
-	// presented to a private executor. It matches the private handoff lifetime,
-	// preventing an old readable ledger record from becoming perpetual launch
-	// authority.
-	AuthorizationReceiptMaxAge = 10 * time.Minute
 
 	// MaxLedgerRecordBytes is the complete canonical JSONL record, including
 	// its trailing newline. The privileged helper enforces the same limit.
@@ -304,10 +298,10 @@ type Request struct {
 	Now     time.Time
 }
 
-// AuthorizationProof is the exact non-secret receipt sealed into a private
-// launch handoff. It does not authorize anything by itself: VerifyCommitted
-// accepts it only after the matching random ID and fields are present in the
-// operator-owned ledger.
+// AuthorizationProof is the exact non-secret reservation claim sealed into a
+// private launch handoff. It does not authorize anything by itself:
+// CommitProofs revalidates every matching root-owned grant at the executable
+// boundary before recording the complete transaction.
 type AuthorizationProof struct {
 	Kind            Kind   `json:"kind"`
 	Reason          string `json:"reason"`
@@ -329,8 +323,9 @@ type Reservation struct {
 	attempted bool
 }
 
-// Proof returns the immutable receipt fields for this reservation without
-// consuming it. The proof becomes valid only after Commit/CommitAll succeeds.
+// Proof returns the immutable fields for this reservation without consuming
+// it. A private executor may pass the proof to CommitProofs only after every
+// other fallible launch validation has succeeded.
 func (r *Reservation) Proof() AuthorizationProof {
 	if r == nil {
 		return AuthorizationProof{}
@@ -746,9 +741,11 @@ func LoadUses(since time.Time) ([]Use, error) {
 // check can therefore reserve human authorization, repeat that check, and
 // commit only after the final result permits the operation.
 //
-// Reserve and Authorize are the only sanctioned authorization entry points.
-// Callers must not consult ValidateReason or LoadGrant directly and decide for
-// themselves — that is how one path ends up skipping the ledger.
+// Reserve and Authorize are the public launch-surface entry points;
+// CommitProofs is reserved for the private executor that consumes claims
+// produced by Reserve. Callers must not consult ValidateReason or LoadGrant
+// directly and decide for themselves — that is how one path ends up skipping
+// the ledger.
 func Reserve(req Request) (*Reservation, error) {
 	if !req.Kind.Valid() {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownKind, req.Kind)
@@ -855,37 +852,62 @@ func newAuthorizationID() (string, error) {
 	return fmt.Sprintf("%x", random), nil
 }
 
-// VerifyCommitted proves that the exact reservation receipt reached the
-// operator-owned ledger. This is used by the private Codex executor after its
-// parent commits all launch overrides atomically and before it replaces itself
-// with Codex.
-func VerifyCommitted(proof AuthorizationProof) error {
-	if proof.AuthorizationID == "" || !authorizationIDRE.MatchString(proof.AuthorizationID) {
-		return fmt.Errorf("%w: authorization proof ID is missing or invalid", ErrLedgerRecord)
+// CommitProofs revalidates and records prepared authorization claims as one
+// transaction. The private executor calls it only after attestation, hook
+// configuration, helper validation, and executable lookup have succeeded.
+func CommitProofs(proofs ...AuthorizationProof) ([]Use, error) {
+	if len(proofs) == 0 {
+		return nil, nil
 	}
+	reservationCommitMu.Lock()
+	defer reservationCommitMu.Unlock()
+
 	now := time.Now().UTC()
-	uses, err := LoadUses(time.Time{})
-	if err != nil {
-		return fmt.Errorf("read committed override proof: %w", err)
+	uses := make([]Use, 0, len(proofs))
+	authorizationIDs := make(map[string]struct{}, len(proofs))
+	for _, proof := range proofs {
+		if !proof.Kind.Valid() {
+			return nil, fmt.Errorf("%w: %q", ErrUnknownKind, proof.Kind)
+		}
+		if proof.AuthorizationID == "" || !authorizationIDRE.MatchString(proof.AuthorizationID) {
+			return nil, fmt.Errorf("%w: authorization proof ID is missing or invalid", ErrLedgerRecord)
+		}
+		if _, duplicate := authorizationIDs[proof.AuthorizationID]; duplicate {
+			return nil, fmt.Errorf("%w: authorization proof ID is repeated", ErrLedgerRecord)
+		}
+		authorizationIDs[proof.AuthorizationID] = struct{}{}
+		reason, err := ValidateReason(proof.Reason)
+		if err != nil {
+			return nil, err
+		}
+		if reason != proof.Reason {
+			return nil, fmt.Errorf("%w: authorization proof reason is not normalized", ErrLedgerRecord)
+		}
+		grant, err := LoadGrant(proof.Kind)
+		if err != nil {
+			return nil, err
+		}
+		if err := grant.Authorizes(proof.Kind, proof.Subject, now); err != nil {
+			return nil, err
+		}
+		use := Use{
+			Kind:            proof.Kind,
+			Reason:          proof.Reason,
+			Actor:           proof.Actor,
+			Session:         proof.Session,
+			Subject:         proof.Subject,
+			AuthorizationID: proof.AuthorizationID,
+			AtUTC:           now,
+		}
+		if _, err := EncodeLedgerUse(use); err != nil {
+			return nil, err
+		}
+		uses = append(uses, use)
 	}
-	for _, use := range uses {
-		if use.AuthorizationID != proof.AuthorizationID {
-			continue
-		}
-		if use.Kind != proof.Kind ||
-			use.Reason != proof.Reason ||
-			use.Actor != proof.Actor ||
-			use.Session != proof.Session ||
-			use.Subject != proof.Subject {
-			return fmt.Errorf("%w: authorization proof fields do not match the committed use", ErrLedgerRecord)
-		}
-		if use.AtUTC.After(now) || use.AtUTC.Before(now.Add(-AuthorizationReceiptMaxAge)) {
-			return fmt.Errorf("%w: authorization proof is outside the %s receipt window",
-				ErrLedgerRecord, AuthorizationReceiptMaxAge)
-		}
-		return nil
+	if err := RecordAll(uses); err != nil {
+		return nil, err
 	}
-	return fmt.Errorf("%w: authorization proof was not committed", ErrLedgerRecord)
+	return uses, nil
 }
 
 // Commit records a reserved authorization exactly once.

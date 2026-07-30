@@ -126,9 +126,9 @@ func TestAuthorizeSupervisorLaunchBoundaryChecksAdmissionBeforeLedgerCommit(t *t
 		events = append(events, "commit")
 		return nil
 	}
-	err := authorizeSupervisorLaunchBoundary(func(reservations ...*override.Reservation) error {
+	err := authorizeSupervisorLaunchBoundary(func(reservations ...*override.Reservation) ([]*override.Reservation, error) {
 		events = append(events, "admission")
-		return commitOverrideReservations(reservations...)
+		return reservations, nil
 	}, reservation)
 	if err != nil {
 		t.Fatalf("authorizeSupervisorLaunchBoundary() error: %v", err)
@@ -148,9 +148,9 @@ func TestAuthorizeSupervisorLaunchBoundaryDoesNotCommitRefusedLaunch(t *testing.
 		events = append(events, "commit")
 		return nil
 	}
-	err := authorizeSupervisorLaunchBoundary(func(...*override.Reservation) error {
+	err := authorizeSupervisorLaunchBoundary(func(...*override.Reservation) ([]*override.Reservation, error) {
 		events = append(events, "admission")
-		return refusal
+		return nil, refusal
 	}, reservation)
 	if !errors.Is(err, refusal) {
 		t.Fatalf("authorizeSupervisorLaunchBoundary() error = %v, want %v", err, refusal)

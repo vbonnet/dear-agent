@@ -43,9 +43,10 @@ var (
 // was never delivered. Once the command executes, the private executor removes
 // the handoff before replacing itself with the harness.
 type PreparedCommand struct {
-	Command string
-	path    string
-	lease   io.Closer
+	Command       string
+	path          string
+	lease         io.Closer
+	bindOverrides func(...*override.Reservation) error
 }
 
 // Cancel removes an undelivered one-shot handoff and releases any producer
@@ -63,6 +64,19 @@ func (p PreparedCommand) Cancel() error {
 		leaseErr = p.lease.Close()
 	}
 	return errors.Join(removeErr, leaseErr)
+}
+
+// BindOverrideReservations seals the final launch-admission reservations into
+// a staged Codex handoff. The private executor revalidates and commits them as
+// one transaction only after every other fallible launch check succeeds.
+func (p PreparedCommand) BindOverrideReservations(reservations ...*override.Reservation) error {
+	if p.bindOverrides == nil {
+		if len(reservations) == 0 {
+			return nil
+		}
+		return errors.New("prepared harness command cannot defer override commitment")
+	}
+	return p.bindOverrides(reservations...)
 }
 
 // ResolveSubmission transfers ownership of a staged private launch across
@@ -83,13 +97,14 @@ func ResolveSubmission(submissionErr error, cancelUndelivered func() error) (boo
 }
 
 type launchHandoff struct {
-	Version                   int                 `json:"version"`
-	Protocol                  string              `json:"protocol"`
-	CreatedAt                 string              `json:"created_at"`
-	DeferredUntilProducerExit bool                `json:"deferred_until_producer_exit,omitempty"`
-	Environment               []string            `json:"environment"`
-	CodexHookRoot             string              `json:"codex_hook_root,omitempty"`
-	CodexLaunch               *codexLaunchBinding `json:"codex_launch,omitempty"`
+	Version                   int                           `json:"version"`
+	Protocol                  string                        `json:"protocol"`
+	CreatedAt                 string                        `json:"created_at"`
+	DeferredUntilProducerExit bool                          `json:"deferred_until_producer_exit,omitempty"`
+	Environment               []string                      `json:"environment"`
+	OverrideProofs            []override.AuthorizationProof `json:"override_proofs,omitempty"`
+	CodexHookRoot             string                        `json:"codex_hook_root,omitempty"`
+	CodexLaunch               *codexLaunchBinding           `json:"codex_launch,omitempty"`
 }
 
 type codexLaunchBinding struct {
@@ -151,7 +166,14 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
-	return PreparedCommand{Command: BuildCodexCommand(launch), path: handoffPath, lease: lease}, nil
+	return PreparedCommand{
+		Command: BuildCodexCommand(launch),
+		path:    handoffPath,
+		lease:   lease,
+		bindOverrides: func(reservations ...*override.Reservation) error {
+			return bindHandoffOverrideReservations(handoffPath, launch.BypassHookTrust, reservations...)
+		},
+	}, nil
 }
 
 // PrepareClaudeCommand snapshots the caller's selected authentication and
@@ -316,6 +338,83 @@ func bindCodexLaunch(launch CodexLaunch) codexLaunchBinding {
 		HookTrustDigest:       launch.HookTrustDigest,
 		HookTrustProof:        launch.HookTrustProof,
 	}
+}
+
+func bindHandoffOverrideReservations(
+	path string,
+	trusted bool,
+	reservations ...*override.Reservation,
+) error {
+	proofs := make([]override.AuthorizationProof, 0, len(reservations))
+	for _, reservation := range reservations {
+		if reservation == nil {
+			return errors.New("bind private launch overrides: nil reservation")
+		}
+		proofs = append(proofs, reservation.Proof())
+	}
+	return bindHandoffOverrideProofs(path, trusted, proofs)
+}
+
+func bindHandoffOverrideProofs(
+	path string,
+	trusted bool,
+	proofs []override.AuthorizationProof,
+) error {
+	if err := validatePrivateHandoffLocation(path, trusted); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect private launch handoff before binding overrides: %w", err)
+	}
+	if !isOwnerOnlyHandoffFile(info) {
+		return errors.New("private launch handoff is not an owner-only regular file")
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("open private launch handoff to bind overrides: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect opened private launch handoff before binding overrides: %w", err)
+	}
+	if !isOwnerOnlyHandoffFile(openedInfo) || !os.SameFile(info, openedInfo) {
+		return errors.New("private launch handoff changed while binding overrides")
+	}
+	handoff, err := decodeHandoff(file)
+	if err != nil {
+		return err
+	}
+	handoff.OverrideProofs = proofs
+	if err := validateHandoff(handoff, CodexProtocol, time.Now(), openedInfo.ModTime()); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(handoff)
+	if err != nil {
+		return fmt.Errorf("encode private launch handoff overrides: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if len(encoded) > handoffMaxSize {
+		return errors.New("private launch handoff exceeds the size limit")
+	}
+	if err := file.Truncate(0); err != nil {
+		return fmt.Errorf("truncate private launch handoff before binding overrides: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind private launch handoff before binding overrides: %w", err)
+	}
+	if _, err := file.Write(encoded); err != nil {
+		return fmt.Errorf("write private launch handoff overrides: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync private launch handoff overrides: %w", err)
+	}
+	currentInfo, err := os.Lstat(path)
+	if err != nil || !os.SameFile(openedInfo, currentInfo) {
+		return errors.New("private launch handoff was removed or replaced while binding overrides")
+	}
+	return nil
 }
 
 func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
@@ -858,6 +957,9 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	if handoff.Version != handoffVersion || handoff.Protocol != protocol {
 		return errors.New("private launch handoff does not match the requested protocol")
 	}
+	if err := validateHandoffOverrideProofs(handoff); err != nil {
+		return err
+	}
 	if handoff.CodexHookRoot != "" {
 		if protocol != CodexProtocol ||
 			!filepath.IsAbs(handoff.CodexHookRoot) ||
@@ -893,6 +995,41 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	}
 	if err := validateHandoffEnvironment(protocol, handoff.Environment); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateHandoffOverrideProofs(handoff launchHandoff) error {
+	seen := make(map[override.Kind]struct{}, len(handoff.OverrideProofs))
+	hookProofFound := false
+	for _, proof := range handoff.OverrideProofs {
+		switch proof.Kind {
+		case override.KindAdmissionBrake:
+			if proof.Subject != "" {
+				return errors.New("private launch handoff contains an admission-brake subject")
+			}
+			if proof.Session == "" ||
+				(handoff.CodexLaunch != nil && proof.Session != handoff.CodexLaunch.SessionName) {
+				return errors.New("private launch handoff contains an unrelated admission-brake proof")
+			}
+		case override.KindCodexHookTrust:
+			if handoff.CodexLaunch == nil || proof != handoff.CodexLaunch.HookTrustProof {
+				return errors.New("private launch handoff contains an unrelated Codex hook-trust proof")
+			}
+			hookProofFound = true
+		default:
+			return fmt.Errorf("private launch handoff contains unsupported override kind %q", proof.Kind)
+		}
+		if _, duplicate := seen[proof.Kind]; duplicate {
+			return fmt.Errorf("private launch handoff repeats override kind %q", proof.Kind)
+		}
+		seen[proof.Kind] = struct{}{}
+		if proof.Reason == "" || proof.Actor == "" || proof.AuthorizationID == "" {
+			return errors.New("private launch handoff contains incomplete override proof")
+		}
+	}
+	if handoff.CodexLaunch != nil && !hookProofFound {
+		return errors.New("private launch handoff omits the Codex hook-trust proof")
 	}
 	return nil
 }

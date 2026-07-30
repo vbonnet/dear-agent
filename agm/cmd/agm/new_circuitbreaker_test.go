@@ -90,14 +90,14 @@ func TestApplyAdmissionBrakeAuthorizationAllowsSoleBrakeRefusal(t *testing.T) {
 	}
 }
 
-func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) {
+func TestFinalizeAdmissionBrakeOverrideReturnsCombinedTransactionAfterFinalLiveCheck(t *testing.T) {
 	initial := circuitbreaker.CheckResult{Gates: []circuitbreaker.GateResult{{
 		Gate: "admission_brake", RequiresOverride: true,
 	}}}
 	var events []string
 	brakeReservation := &override.Reservation{}
 	codexHookReservation := &override.Reservation{}
-	result, err := finalizeAdmissionBrakeOverride(
+	result, reservations, err := finalizeAdmissionBrakeOverride(
 		initial,
 		"operator verified host recovery",
 		"worker-ce-6xfu",
@@ -112,22 +112,18 @@ func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) 
 			}
 			return brakeReservation, nil
 		},
-		func(reservations ...*override.Reservation) error {
-			events = append(events, "commit")
-			if len(reservations) != 2 ||
-				reservations[0] != brakeReservation ||
-				reservations[1] != codexHookReservation {
-				t.Fatalf("combined reservations = %v, want brake then Codex hook trust", reservations)
-			}
-			return nil
-		},
 		codexHookReservation,
 	)
 	if err != nil {
 		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)
 	}
-	if got, want := strings.Join(events, ","), "reserve,final-check,commit"; got != want {
+	if got, want := strings.Join(events, ","), "reserve,final-check"; got != want {
 		t.Fatalf("authorization events = %q, want %q", got, want)
+	}
+	if len(reservations) != 2 ||
+		reservations[0] != brakeReservation ||
+		reservations[1] != codexHookReservation {
+		t.Fatalf("combined reservations = %v, want brake then Codex hook trust", reservations)
 	}
 	if !result.Allowed {
 		t.Fatalf("committed sole-brake result remained refused: %+v", result)
@@ -138,8 +134,7 @@ func TestFinalizeAdmissionBrakeOverrideAbandonsReservationOnConcurrentRefusal(t 
 	initial := circuitbreaker.CheckResult{Gates: []circuitbreaker.GateResult{{
 		Gate: "admission_brake", RequiresOverride: true,
 	}}}
-	committed := false
-	result, err := finalizeAdmissionBrakeOverride(
+	result, reservations, err := finalizeAdmissionBrakeOverride(
 		initial,
 		"operator verified host recovery",
 		"worker-ce-6xfu",
@@ -152,17 +147,13 @@ func TestFinalizeAdmissionBrakeOverrideAbandonsReservationOnConcurrentRefusal(t 
 		func(string, string) (*override.Reservation, error) {
 			return &override.Reservation{}, nil
 		},
-		func(...*override.Reservation) error {
-			committed = true
-			return nil
-		},
 		&override.Reservation{},
 	)
 	if err != nil {
 		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)
 	}
-	if committed {
-		t.Fatal("concurrent refusal consumed the reserved ledger use")
+	if len(reservations) != 0 {
+		t.Fatalf("concurrent refusal returned reservations for commitment: %v", reservations)
 	}
 	if result.Allowed {
 		t.Fatalf("concurrent refusal was erased: %+v", result)
@@ -175,7 +166,7 @@ func TestFinalizeAdmissionBrakeOverridePropagatesReservationFailure(t *testing.T
 	}}}
 	wantErr := errors.New("grant expired")
 	finalChecked := false
-	_, err := finalizeAdmissionBrakeOverride(
+	_, _, err := finalizeAdmissionBrakeOverride(
 		initial,
 		"operator verified host recovery",
 		"worker-ce-6xfu",
@@ -185,10 +176,6 @@ func TestFinalizeAdmissionBrakeOverridePropagatesReservationFailure(t *testing.T
 		},
 		func(string, string) (*override.Reservation, error) {
 			return nil, wantErr
-		},
-		func(...*override.Reservation) error {
-			t.Fatal("commit ran without a valid brake reservation")
-			return nil
 		},
 	)
 	if !errors.Is(err, wantErr) {

@@ -214,13 +214,58 @@ func TestAttestRejectsUncommittedOrUnsupportedProjectReferences(t *testing.T) {
 	}{
 		{
 			name:    "uncommitted referenced script",
-			command: "${CLAUDE_PROJECT_DIR}/.codex/hooks/missing",
+			command: "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/missing",
 			want:    "not a committed blob",
+		},
+		{
+			name:    "mutable project directory",
+			command: "${CLAUDE_PROJECT_DIR}/.codex/hooks/guard",
+			want:    "unsupported mutable runtime path",
 		},
 		{
 			name:    "unsupported project variable syntax",
 			command: "${CLAUDE_PROJECT_DIR:-.}/.codex/hooks/guard",
-			want:    "unsupported project-directory reference",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "dot relative executable",
+			command: "./helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "parent relative executable",
+			command: "../helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "PWD executable",
+			command: "$PWD/helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "braced PWD executable",
+			command: "${PWD}/helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "nested relative executable",
+			command: "tools/helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "home relative executable",
+			command: "~/helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "temporary absolute executable",
+			command: "/tmp/helper",
+			want:    "unsupported mutable runtime path",
+		},
+		{
+			name:    "home variable executable",
+			command: "${HOME}/helper",
+			want:    "unsupported mutable runtime path",
 		},
 	}
 	for _, tt := range tests {
@@ -278,7 +323,7 @@ func hookFixture(t *testing.T) (string, string) {
 	t.Helper()
 	source := gittest.NewRepo(t)
 	writeFile(t, filepath.Join(source, ".codex", "hooks.json"),
-		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/guard"},{"command":"tools/relative-guard"}]}]}}`,
+		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/guard"},{"command":"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/tools/relative-guard"}]}]}}`,
 		0o644,
 	)
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 0\n", 0o755)

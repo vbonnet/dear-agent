@@ -47,11 +47,9 @@ var (
 	verifyCodexHookTrustAttestation = func(attestation codexhooks.Attestation, workDir string) error {
 		return codexhooks.Verify(context.Background(), attestation, workDir)
 	}
-	verifyCodexHookTrustAuthorization = func(proof override.AuthorizationProof) error {
-		if err := override.VerifyCommitted(proof); err != nil {
-			return fmt.Errorf("codex hook-trust override refused: %w", err)
-		}
-		return nil
+	commitLaunchOverrideProofs = func(proofs ...override.AuthorizationProof) error {
+		_, err := override.CommitProofs(proofs...)
+		return err
 	}
 )
 
@@ -313,6 +311,7 @@ func runCodex(args []string) error {
 			request.HookTrustDigest = handoff.CodexLaunch.HookTrustDigest
 			request.HookTrustProof = handoff.CodexLaunch.HookTrustProof
 		}
+		request.OverrideProofs = append([]override.AuthorizationProof(nil), handoff.OverrideProofs...)
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
 	}
@@ -342,14 +341,11 @@ func runCodex(args []string) error {
 		return fmt.Errorf("resolve codex executable: %w", err)
 	}
 	argv := append([]string{"codex"}, request.argv()...)
-	// The parent commits this exact reservation together with every other
-	// launch override before submitting the private executor. Prove that the
-	// random receipt reached the operator-owned ledger after every other
-	// fallible preparation step and before replacing AGM with Codex.
-	if request.BypassHooks {
-		if err := verifyCodexHookTrustAuthorization(request.HookTrustProof); err != nil {
-			return err
-		}
+	// Commit every prepared launch override as one transaction only after all
+	// fallible attestation, helper, configuration, and executable checks have
+	// succeeded. This is the final userspace boundary before exec.
+	if err := commitLaunchOverrideProofs(request.OverrideProofs...); err != nil {
+		return fmt.Errorf("commit Codex launch override transaction: %w", err)
 	}
 	if err := replaceProcess(path, argv, environ); err != nil {
 		return fmt.Errorf("execute codex: %w", err)
@@ -420,6 +416,7 @@ type codexRequest struct {
 	HookTrustSourceCommit string
 	HookTrustDigest       string
 	HookTrustProof        override.AuthorizationProof
+	OverrideProofs        []override.AuthorizationProof
 	ConfigOverrides       []string
 }
 

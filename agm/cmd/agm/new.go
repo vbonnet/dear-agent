@@ -781,7 +781,9 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // session new` (and its current-tmux variant) and `agm supervisor run`.
 // vroom-dispatch shells out to `agm session new`, so it inherits the same
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
-func enforceCircuitBreakers(sessionName string) (func(...*override.Reservation) error, error) {
+func enforceCircuitBreakers(
+	sessionName string,
+) (func(...*override.Reservation) ([]*override.Reservation, error), error) {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -827,17 +829,17 @@ func enforceCircuitBreakers(sessionName string) (func(...*override.Reservation) 
 		mu       sync.Mutex
 		consumed bool
 	)
-	return func(additionalReservations ...*override.Reservation) error {
+	return func(additionalReservations ...*override.Reservation) ([]*override.Reservation, error) {
 		mu.Lock()
 		if consumed {
 			mu.Unlock()
-			return fmt.Errorf("circuit-breaker launch admission was already consumed for %q", sessionName)
+			return nil, fmt.Errorf("circuit-breaker launch admission was already consumed for %q", sessionName)
 		}
 		consumed = true
 		mu.Unlock()
 
 		liveResult := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
-		liveResult, err := finalizeAdmissionBrakeOverride(
+		liveResult, reservations, err := finalizeAdmissionBrakeOverride(
 			liveResult,
 			normalizedBrakeOverrideReason,
 			sessionName,
@@ -845,21 +847,20 @@ func enforceCircuitBreakers(sessionName string) (func(...*override.Reservation) 
 				return circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
 			},
 			ops.ReserveAdmissionBrakeOverride,
-			commitOverrideReservations,
 			additionalReservations...,
 		)
 		if err != nil {
 			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
-			return err
+			return nil, err
 		}
 		logCircuitBreakerResult(liveResult)
 		if !liveResult.Allowed {
-			return fmt.Errorf("%s", circuitbreaker.FormatDenied(liveResult))
+			return nil, fmt.Errorf("%s", circuitbreaker.FormatDenied(liveResult))
 		}
 		if err := st.RecordSpawn(time.Now()); err != nil {
 			debug.Log("Warning: failed to record spawn time: %v", err)
 		}
-		return nil
+		return reservations, nil
 	}, nil
 }
 
@@ -869,19 +870,16 @@ func finalizeAdmissionBrakeOverride(
 	sessionName string,
 	finalCheck func() circuitbreaker.CheckResult,
 	reserve func(string, string) (*override.Reservation, error),
-	commit func(...*override.Reservation) error,
 	additionalReservations ...*override.Reservation,
-) (circuitbreaker.CheckResult, error) {
+) (circuitbreaker.CheckResult, []*override.Reservation, error) {
 	if !onlyAdmissionBrakeRefused(initial) {
 		if initial.Allowed {
-			if err := commit(additionalReservations...); err != nil {
-				return initial, fmt.Errorf("commit launch override transaction: %w", err)
-			}
+			return initial, additionalReservations, nil
 		}
-		return initial, nil
+		return initial, nil, nil
 	}
 	if reason == "" {
-		return initial, nil
+		return initial, nil, nil
 	}
 
 	// Reserve current human authorization without consuming the ledger quota,
@@ -889,24 +887,19 @@ func finalizeAdmissionBrakeOverride(
 	// abandons the reservation without recording a use.
 	brakeReservation, err := reserve(reason, sessionName)
 	if err != nil {
-		return initial, err
+		return initial, nil, err
 	}
 	result := finalCheck()
 	if !onlyAdmissionBrakeRefused(result) {
 		// The brake cleared, or another gate began refusing. Neither outcome
 		// crossed the brake, so the reserved use must not be committed.
 		if result.Allowed {
-			if err := commit(additionalReservations...); err != nil {
-				return result, fmt.Errorf("commit launch override transaction: %w", err)
-			}
+			return result, additionalReservations, nil
 		}
-		return result, nil
+		return result, nil, nil
 	}
 	reservations := append([]*override.Reservation{brakeReservation}, additionalReservations...)
-	if err := commit(reservations...); err != nil {
-		return result, fmt.Errorf("commit launch override transaction: %w", err)
-	}
-	return applyAdmissionBrakeAuthorization(result, reason), nil
+	return applyAdmissionBrakeAuthorization(result, reason), reservations, nil
 }
 
 var commitOverrideReservations = func(reservations ...*override.Reservation) error {

@@ -355,7 +355,7 @@ func reserveSupervisorOAuthOverride(reason, session string) (*override.Reservati
 // admission so it can be committed atomically with any brake reservation. A
 // refused launch must not spend privileged ledger quota.
 func authorizeSupervisorLaunchBoundary(
-	beforeSpawn func(...*override.Reservation) error,
+	beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error),
 	reservation *override.Reservation,
 ) error {
 	var reservations []*override.Reservation
@@ -363,10 +363,11 @@ func authorizeSupervisorLaunchBoundary(
 		reservations = append(reservations, reservation)
 	}
 	if beforeSpawn != nil {
-		if err := beforeSpawn(reservations...); err != nil {
+		var err error
+		reservations, err = beforeSpawn(reservations...)
+		if err != nil {
 			return fmt.Errorf("supervisor: launch admission: %w", err)
 		}
-		return nil
 	}
 	if err := commitOverrideReservations(reservations...); err != nil {
 		return fmt.Errorf("supervisor: commit launch override transaction: %w", err)
@@ -409,7 +410,7 @@ func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath strin
 }
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
-	var beforeSpawn func(...*override.Reservation) error
+	var beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
 		beforeSpawn, admissionErr = enforceCircuitBreakers(supervisorID)

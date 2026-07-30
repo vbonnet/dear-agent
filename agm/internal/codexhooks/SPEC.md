@@ -16,11 +16,11 @@ descendant script's later process execution and is not treated as that control.
 
 ## Requirements
 
-**CHOOK-01** When AGM attests repository-scoped Codex hooks, the system shall use a fixed OS-owned Git executable with caller-supplied Git repository/configuration environment removed, resolve the canonical source repository and full current commit, read `.codex/hooks.json` and every project-referenced hook only from that commit's Git objects, and produce a deterministic SHA-256 digest over their paths, Git modes, and bytes.
+**CHOOK-01** When AGM attests repository-scoped Codex hooks, the system shall use a fixed OS-owned Git executable with caller-supplied Git repository/configuration environment removed, resolve the canonical source repository and full current commit, read `.codex/hooks.json` and every trusted command asset referenced through `AGM_CODEX_HOOK_ROOT` only from that commit's Git objects, and produce a deterministic SHA-256 digest over their paths, Git modes, and bytes.
 
 **CHOOK-02** When the sandbox materialization is attested or revalidated, the system shall require its hook manifest and every referenced hook to be regular non-symlink files with executable modes and bytes matching the pinned commit.
 
-**CHOOK-03** When a hook manifest contains an unsupported project-directory reference, references a missing or uncommitted asset, or can be shadowed by a nested unattested hook manifest between the launch directory and repository root, the system shall reject the attestation.
+**CHOOK-03** When a trusted hook command references a mutable project, working, home, temporary, relative, or non-system absolute runtime path instead of a committed asset through `AGM_CODEX_HOOK_ROOT`, references a missing or uncommitted asset, or can be shadowed by a nested unattested hook manifest between the launch directory and repository root, the system shall reject the attestation; commands for events that are replaced with an OS-owned no-op before bypassed launch are excluded from runtime-asset attestation.
 
 **CHOOK-04** When persisted hook evidence is revalidated, the system shall require the same canonical source-repository identity, a full hexadecimal Git object ID, a hexadecimal SHA-256 digest, reachable committed assets, and an exact sandbox digest match.
 
@@ -36,7 +36,7 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-10** When an ordinary non-bypassed Codex session runs from a repository subdirectory, the system shall resolve every project hook relative to the repository project root instead of that subdirectory.
 
-**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject every existing search-path directory or ancestor that is not root-owned and non-writable by group or other, reject executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, and keep required hook helpers reachable only through an operator-owned absolute installation path.
+**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject every existing search-path directory or ancestor that is not root-owned and non-writable by group or other, reject mutable runtime paths and executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, and keep required hook helpers reachable only through an operator-owned absolute installation path or the content-addressed hook root.
 
 **CHOOK-12** When a bypassed Codex session reaches a trusted Stop or SubagentStop hook, the system shall not execute project-root programs, build recipes, or other mutable workspace code automatically.
 

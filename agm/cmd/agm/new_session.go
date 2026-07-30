@@ -66,7 +66,7 @@ func (r *cliCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context
 func newCLICreateSessionRuntime(
 	sessionName string,
 	existed, trustPreConfigured bool,
-	beforeSpawn func(...*override.Reservation) error,
+	beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error),
 ) *cliCreateSessionRuntime {
 	return &cliCreateSessionRuntime{
 		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
@@ -209,7 +209,7 @@ func runCreateSessionLifecycle(
 	extraAddDirs []string,
 	trustPreConfigured bool,
 	sandboxInfo *manifest.SandboxConfig,
-	beforeSpawn func(...*override.Reservation) error,
+	beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error),
 ) error {
 	if harnessName == "codex-cli" {
 		if err := validateCodexCredentials(); err != nil {
@@ -277,9 +277,9 @@ func runCreateSessionLifecycle(
 
 // prepareCodexHookTrustBypass validates and attests a requested hook-trust
 // override. Command preparation reserves authorization for this exact source
-// identity; the launch callback records it atomically with any admission-brake
-// use immediately before submission, and the private executor verifies the
-// resulting fresh exact ledger receipt before exec.
+// identity; the launch callback seals it atomically with any admission-brake
+// claim into the private handoff, and the executor revalidates and commits the
+// complete transaction only after every other fallible launch check.
 func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig) (bool, error) {
 	reason := codexHookTrustBypassReason
 	if reason == "" {
@@ -339,7 +339,7 @@ func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (strin
 // preflight runs the per-session checks that must succeed before we start
 // touching tmux: test-environment setup, duplicate-name check, and circuit
 // breakers.
-func preflight(sessionName string) (func(...*override.Reservation) error, error) {
+func preflight(sessionName string) (func(...*override.Reservation) ([]*override.Reservation, error), error) {
 	if err := setupTestEnvironment(); err != nil {
 		return nil, err
 	}

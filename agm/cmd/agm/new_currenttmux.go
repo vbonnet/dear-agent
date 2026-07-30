@@ -22,7 +22,7 @@ import (
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
 func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
-	var beforeSpawn func(...*override.Reservation) error
+	var beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr

@@ -49,7 +49,7 @@ type HarnessLaunchSpec struct {
 	// BeforeSpawn is an optional surface-owned admission callback. Launch
 	// adapters invoke it after command preparation and executable resolution,
 	// immediately before the irreversible process or tmux submission boundary.
-	BeforeSpawn func(...*override.Reservation) error
+	BeforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
 	// DeferredUntilCallerExit is set only by current-pane launchers whose
 	// queued command cannot run until the producing AGM process releases tmux.
 	DeferredUntilCallerExit bool
@@ -58,10 +58,11 @@ type HarnessLaunchSpec struct {
 // HarnessLaunchCommand is the command plus the startup-policy outcome needed
 // by post-create handling.
 type HarnessLaunchCommand struct {
-	Command              string
-	ModeAppliedAtStartup bool
-	Cancel               func() error
-	Reservations         []*override.Reservation
+	Command                  string
+	ModeAppliedAtStartup     bool
+	Cancel                   func() error
+	Reservations             []*override.Reservation
+	BindOverrideReservations func(...*override.Reservation) error
 }
 
 var reserveCodexHookTrust = func(
@@ -88,6 +89,19 @@ func (c HarnessLaunchCommand) CancelUndelivered() error {
 		return nil
 	}
 	return c.Cancel()
+}
+
+// FinalizeOverrideReservations either seals reservations into a private Codex
+// handoff for executor-bound commitment or commits them at this process's
+// irreversible launch boundary for other harnesses.
+func (c HarnessLaunchCommand) FinalizeOverrideReservations(
+	reservations ...*override.Reservation,
+) error {
+	if c.BindOverrideReservations != nil {
+		return c.BindOverrideReservations(reservations...)
+	}
+	_, err := override.CommitAll(reservations...)
+	return err
 }
 
 // ResolveHarnessLaunchSubmission converts tmux's irreversible submission
@@ -151,7 +165,8 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 		}
 		return HarnessLaunchCommand{
 			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
-			Reservations: reservations,
+			Reservations:             reservations,
+			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
 	default:
 		return BuildHarnessLaunchCommand(spec), nil

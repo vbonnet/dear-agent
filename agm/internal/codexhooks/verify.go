@@ -24,9 +24,12 @@ const (
 )
 
 var (
-	projectDirReference = regexp.MustCompile(`(?:\$\{(?:CLAUDE|CODEX)_PROJECT_DIR\}|\$(?:CLAUDE|CODEX)_PROJECT_DIR)/([A-Za-z0-9._/-]+)`)
-	hookRootReference   = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
-	relativePathToken   = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
+	projectDirReference  = regexp.MustCompile(`(?:\$\{(?:CLAUDE|CODEX)_PROJECT_DIR\}|\$(?:CLAUDE|CODEX)_PROJECT_DIR)/([A-Za-z0-9._/-]+)`)
+	hookRootReference    = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-(?:\.|\$\{CLAUDE_PROJECT_DIR:-\.\})\}/([A-Za-z0-9._/-]+)`)
+	relativePathToken    = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
+	runtimeDirReference  = regexp.MustCompile(`(?:\$\{(?:PWD|HOME|TMPDIR|TMP|TEMP)\}|\$(?:PWD|HOME|TMPDIR|TMP|TEMP))/[A-Za-z0-9._/-]+`)
+	explicitRelativePath = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
+	absolutePathToken    = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -54,9 +57,9 @@ type asset struct {
 }
 
 // Attest records the source repository's current commit and verifies that the
-// sandbox hook manifest and every project-referenced hook are byte-identical
-// to regular files in that commit. Source content is read from Git objects,
-// never from the mutable source working tree.
+// sandbox hook manifest and every trusted command asset are byte-identical to
+// regular files in that commit. Source content is read from Git objects, never
+// from the mutable source working tree.
 func Attest(
 	ctx context.Context,
 	sourceRepo, sandboxWorkDir, storeBase string,
@@ -176,7 +179,7 @@ func committedAssets(ctx context.Context, attestation Attestation) ([]asset, err
 	if err != nil {
 		return nil, fmt.Errorf("read committed Codex hook manifest: %w", err)
 	}
-	references, err := referencedProjectFiles(manifest.content)
+	references, err := referencedHookAssets(manifest.content)
 	if err != nil {
 		return nil, fmt.Errorf("parse committed Codex hook manifest: %w", err)
 	}
@@ -311,42 +314,48 @@ func verifyManifestLocation(sandboxRoot, sandboxWorkDir string) error {
 	return nil
 }
 
-func referencedProjectFiles(manifest []byte) ([]string, error) {
-	var document any
+func referencedHookAssets(manifest []byte) ([]string, error) {
+	var document struct {
+		Hooks map[string]any `json:"hooks"`
+	}
 	if err := json.Unmarshal(manifest, &document); err != nil {
 		return nil, err
 	}
-	commands, err := collectCommands(document)
-	if err != nil {
-		return nil, err
+	if document.Hooks == nil {
+		return nil, fmt.Errorf("Codex hook manifest has no hooks object")
 	}
 	references := make(map[string]struct{})
-	for _, command := range commands {
-		matches := projectDirReference.FindAllStringSubmatch(command, -1)
-		for _, match := range matches {
-			clean, err := cleanProjectPath(match[1])
-			if err != nil {
-				return nil, fmt.Errorf("command %q: %w", command, err)
-			}
-			references[clean] = struct{}{}
+	for eventName, event := range document.Hooks {
+		// These commands are replaced with an OS-owned no-op before the
+		// attested manifest reaches Codex. They intentionally reference
+		// mutable workspace state in the ordinary, reviewed launch mode.
+		if _, neutralized := neutralizedAttestedHookEvents[eventName]; neutralized {
+			continue
 		}
-		for _, match := range hookRootReference.FindAllStringSubmatch(command, -1) {
-			clean, err := cleanProjectPath(match[1])
-			if err != nil {
-				return nil, fmt.Errorf("command %q: %w", command, err)
-			}
-			references[clean] = struct{}{}
+		commands, err := collectCommands(event)
+		if err != nil {
+			return nil, err
 		}
-		unmatched := hookRootReference.ReplaceAllString(projectDirReference.ReplaceAllString(command, ""), "")
-		if strings.Contains(unmatched, "PROJECT_DIR") {
-			return nil, fmt.Errorf("unsupported project-directory reference in command %q", command)
-		}
-		for _, match := range relativePathToken.FindAllStringSubmatch(command, -1) {
-			clean, err := cleanProjectPath(strings.TrimPrefix(match[1], "./"))
-			if err != nil {
-				return nil, fmt.Errorf("command %q: %w", command, err)
+		for _, command := range commands {
+			for _, match := range hookRootReference.FindAllStringSubmatch(command, -1) {
+				clean, err := cleanProjectPath(match[1])
+				if err != nil {
+					return nil, fmt.Errorf("command %q: %w", command, err)
+				}
+				references[clean] = struct{}{}
 			}
-			references[clean] = struct{}{}
+			unmatched := hookRootReference.ReplaceAllString(command, "")
+			if projectDirReference.MatchString(unmatched) ||
+				strings.Contains(unmatched, "PROJECT_DIR") ||
+				runtimeDirReference.MatchString(unmatched) ||
+				explicitRelativePath.MatchString(unmatched) ||
+				relativePathToken.MatchString(unmatched) ||
+				containsMutableAbsolutePath(unmatched) {
+				return nil, fmt.Errorf(
+					"unsupported mutable runtime path in command %q; trusted hooks must execute committed assets through AGM_CODEX_HOOK_ROOT",
+					command,
+				)
+			}
 		}
 	}
 	out := make([]string, 0, len(references))
@@ -355,6 +364,21 @@ func referencedProjectFiles(manifest []byte) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func containsMutableAbsolutePath(command string) bool {
+	for _, match := range absolutePathToken.FindAllStringSubmatch(command, -1) {
+		path := filepath.Clean(match[1])
+		if path == "/bin" || strings.HasPrefix(path, "/bin/") ||
+			path == "/sbin" || strings.HasPrefix(path, "/sbin/") ||
+			path == "/usr/bin" || strings.HasPrefix(path, "/usr/bin/") ||
+			path == "/usr/sbin" || strings.HasPrefix(path, "/usr/sbin/") ||
+			path == "/usr/local/libexec" || strings.HasPrefix(path, "/usr/local/libexec/") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func collectCommands(value any) ([]string, error) {

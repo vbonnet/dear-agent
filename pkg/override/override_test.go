@@ -220,7 +220,7 @@ func TestCodexHookGrantIsBoundToReviewedBytes(t *testing.T) {
 	}
 }
 
-func TestReservationProofRequiresExactCommittedUse(t *testing.T) {
+func TestCommitProofsRevalidatesAndRecordsExactReservation(t *testing.T) {
 	configureTestStore(t)
 	now := time.Now().UTC()
 	if err := SaveGrant(Grant{
@@ -243,48 +243,31 @@ func TestReservationProofRequiresExactCommittedUse(t *testing.T) {
 		t.Fatalf("reserve: %v", err)
 	}
 	proof := reservation.Proof()
-	if err := VerifyCommitted(proof); err == nil {
-		t.Fatal("uncommitted reservation proof was accepted")
+	if _, err := CommitProofs(proof); err != nil {
+		t.Fatalf("commit prepared proof: %v", err)
 	}
-	if _, err := reservation.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
+	if uses, err := LoadUses(time.Time{}); err != nil || len(uses) != 1 ||
+		uses[0].AuthorizationID != proof.AuthorizationID {
+		t.Fatalf("committed proof uses = %+v, err = %v", uses, err)
 	}
-	if err := VerifyCommitted(proof); err != nil {
-		t.Fatalf("verify committed proof: %v", err)
-	}
-	proof.Session = "different-worker"
-	if err := VerifyCommitted(proof); err == nil {
-		t.Fatal("tampered committed proof was accepted")
-	}
-}
 
-func TestReservationProofExpiresWithPrivateHandoffWindow(t *testing.T) {
-	configureTestStore(t)
-	now := time.Now().UTC().Add(-AuthorizationReceiptMaxAge - time.Second)
-	if err := SaveGrant(Grant{
-		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
-		ExpiresUTC: time.Now().Add(time.Hour),
-		CodexHooks: testCodexHookSource(),
-	}); err != nil {
-		t.Fatalf("save grant: %v", err)
+	proof.Session = "different-worker"
+	proof.Subject = "codex-hooks:sha256:" + strings.Repeat("c", 64)
+	if _, err := CommitProofs(proof); !errors.Is(err, ErrGrantSubject) {
+		t.Fatalf("tampered prepared proof error = %v, want ErrGrantSubject", err)
 	}
-	reservation, err := Reserve(Request{
-		Kind:    KindCodexHookTrust,
-		Reason:  "sandbox path rotates per spawn so hooks cannot be pre-trusted",
-		Actor:   "vroom-dispatch",
-		Session: "worker-ce-6xfu",
-		Subject: testCodexHookSubject(t),
-		Now:     now,
-	})
-	if err != nil {
-		t.Fatalf("reserve stale receipt: %v", err)
+
+	unknown := proof
+	unknown.Kind = Kind("future-override")
+	if _, err := CommitProofs(unknown); !errors.Is(err, ErrUnknownKind) {
+		t.Fatalf("unknown prepared proof error = %v, want ErrUnknownKind", err)
 	}
-	if _, err := reservation.Commit(); err != nil {
-		t.Fatalf("commit stale receipt fixture: %v", err)
-	}
-	if err := VerifyCommitted(reservation.Proof()); err == nil {
-		t.Fatal("stale committed receipt was accepted")
+
+	duplicate := reservation.Proof()
+	duplicate.Kind = KindAdmissionBrake
+	duplicate.Subject = ""
+	if _, err := CommitProofs(reservation.Proof(), duplicate); !errors.Is(err, ErrLedgerRecord) {
+		t.Fatalf("duplicate authorization ID error = %v, want ErrLedgerRecord", err)
 	}
 }
 

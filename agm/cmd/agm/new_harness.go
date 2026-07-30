@@ -68,10 +68,12 @@ func resolveHarnessLaunchSubmission(harness string, launch ops.HarnessLaunchComm
 	return err
 }
 
-func runBeforeHarnessSpawn(spec ops.HarnessLaunchSpec, reservations ...*override.Reservation) error {
+func runBeforeHarnessSpawn(
+	spec ops.HarnessLaunchSpec,
+	reservations ...*override.Reservation,
+) ([]*override.Reservation, error) {
 	if spec.BeforeSpawn == nil {
-		_, err := override.CommitAll(reservations...)
-		return err
+		return reservations, nil
 	}
 	return spec.BeforeSpawn(reservations...)
 }
@@ -82,9 +84,16 @@ func submitHarnessLaunch(
 	launch ops.HarnessLaunchCommand,
 	submit func() error,
 ) error {
-	if err := runBeforeHarnessSpawn(spec, launch.Reservations...); err != nil {
+	reservations, err := runBeforeHarnessSpawn(spec, launch.Reservations...)
+	if err != nil {
 		return errors.Join(
 			fmt.Errorf("%s launch admission: %w", harness, err),
+			launch.CancelUndelivered(),
+		)
+	}
+	if err := launch.FinalizeOverrideReservations(reservations...); err != nil {
+		return errors.Join(
+			fmt.Errorf("%s launch override transaction: %w", harness, err),
 			launch.CancelUndelivered(),
 		)
 	}
@@ -247,8 +256,12 @@ func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := runBeforeHarnessSpawn(spec); err != nil {
+	reservations, err := runBeforeHarnessSpawn(spec)
+	if err != nil {
 		return false, fmt.Errorf("gemini launch admission: %w", err)
+	}
+	if _, err := override.CommitAll(reservations...); err != nil {
+		return false, fmt.Errorf("gemini launch override transaction: %w", err)
 	}
 	if err := cmd.Run(); err != nil {
 		ui.PrintError(err,

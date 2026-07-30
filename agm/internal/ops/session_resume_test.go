@@ -1032,6 +1032,44 @@ func TestSubmitAndAwaitResumeCancellationDoesNotLaunchPreparedCommand(t *testing
 	}
 }
 
+func TestSubmitAndAwaitResumeBindsDeferredOverrideTransactionBeforeSubmission(t *testing.T) {
+	fakeTmux := &resumeTestTmux{}
+	reservation := &override.Reservation{}
+	bound := false
+	fakeTmux.sendHook = func() {
+		if !bound {
+			t.Fatal("resume command submitted before deferred overrides were bound")
+		}
+	}
+	err := submitAndAwaitResume(
+		t.Context(),
+		fakeTmux,
+		nil,
+		&ResumeSessionRequest{},
+		&ResumeSessionResult{},
+		"codex-cli",
+		ResumeSessionHealth{TmuxSessionName: "codex-session", WorktreePath: t.TempDir()},
+		"",
+		HarnessLaunchCommand{
+			Command:      "agm __exec-codex --handoff fixture",
+			Reservations: []*override.Reservation{reservation},
+			BindOverrideReservations: func(got ...*override.Reservation) error {
+				if len(got) != 1 || got[0] != reservation {
+					t.Fatalf("bound resume reservations = %v, want exact reservation", got)
+				}
+				bound = true
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("submitAndAwaitResume() error = %v", err)
+	}
+	if !bound || len(fakeTmux.commands) != 1 {
+		t.Fatalf("resume boundary = bound %v, commands %v", bound, fakeTmux.commands)
+	}
+}
+
 func TestResumeSessionPreservesColdRuntimeWhenMetadataCompensationIsUnproven(t *testing.T) {
 	adapter, m, fakeTmux := setupResumeOperation(t, "codex-cli", false)
 	t.Setenv("AGM_STATE_DIR", t.TempDir())

@@ -55,13 +55,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestCodexAuthorizationReceiptWindowMatchesPrivateHandoff(t *testing.T) {
-	if override.AuthorizationReceiptMaxAge != handoffMaxAge {
-		t.Fatalf("authorization receipt max age = %s, private handoff max age = %s",
-			override.AuthorizationReceiptMaxAge, handoffMaxAge)
-	}
-}
-
 func TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -263,14 +256,14 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	originalReplaceProcess := replaceProcess
 	originalCodexHookOverrides := codexHookOverrides
 	originalVerifyCodexHookTrustAttestation := verifyCodexHookTrustAttestation
-	originalVerifyCodexHookTrustAuthorization := verifyCodexHookTrustAuthorization
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
 		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		codexHookOverrides = originalCodexHookOverrides
 		verifyCodexHookTrustAttestation = originalVerifyCodexHookTrustAttestation
-		verifyCodexHookTrustAuthorization = originalVerifyCodexHookTrustAuthorization
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
 	hookConfigurationPrepared := false
@@ -290,6 +283,14 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	const hookRoot = "/trusted/hooks/0123456789abcdef"
 	const hookTrustReason = "sandbox path rotates per spawn so hooks cannot be pre-trusted"
 	const hookTrustActor = "dispatcher-test"
+	brakeProof := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator verified host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "bypass-codex",
+		AuthorizationID: "fedcba9876543210fedcba9876543210",
+	}
+	hookProof := testCodexHookProof("bypass-codex", hookTrustReason, hookTrustActor)
 	verifyCodexHookTrustAttestation = func(attestation codexhooks.Attestation, workDir string) error {
 		if attestation.SourceRepo != testCodexHookSourceRepo ||
 			attestation.SourceCommit != testCodexHookSourceCommit ||
@@ -301,15 +302,22 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		return nil
 	}
 	authorizedUses := 0
-	verifyCodexHookTrustAuthorization = func(proof override.AuthorizationProof) error {
+	commitLaunchOverrideProofs = func(proofs ...override.AuthorizationProof) error {
 		if !hookConfigurationPrepared || !executableResolved {
 			t.Fatal("hook-trust use recorded before launch preparation completed")
 		}
-		if proof != testCodexHookProof("bypass-codex", hookTrustReason, hookTrustActor) {
-			t.Fatalf("hook-trust authorization proof = %+v", proof)
+		want := []override.AuthorizationProof{brakeProof, hookProof}
+		if !slices.Equal(proofs, want) {
+			t.Fatalf("committed override proofs = %+v, want complete transaction %+v", proofs, want)
 		}
 		authorizedUses++
 		return nil
+	}
+	bindProof := func(prepared PreparedCommand, proofs ...override.AuthorizationProof) {
+		t.Helper()
+		if err := bindHandoffOverrideProofs(prepared.path, true, proofs); err != nil {
+			t.Fatalf("bind override proof into trusted Codex handoff: %v", err)
+		}
 	}
 	prepared, err := PrepareCodexCommand(CodexLaunch{
 		SessionName:           "bypass-codex",
@@ -336,6 +344,16 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if filepath.Dir(prepared.path) != trustedRoot {
 		t.Fatalf("bypass handoff directory = %q, want %q", filepath.Dir(prepared.path), trustedRoot)
 	}
+	misboundBrakeProof := brakeProof
+	misboundBrakeProof.Session = "different-worker"
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		true,
+		[]override.AuthorizationProof{misboundBrakeProof, hookProof},
+	); err == nil || !strings.Contains(err.Error(), "unrelated admission-brake proof") {
+		t.Fatalf("misbound admission-brake proof error = %v", err)
+	}
+	bindProof(prepared, brakeProof, hookProof)
 
 	var childArguments, childEnvironment []string
 	replaceProcess = func(_ string, argv, env []string) error {
@@ -383,6 +401,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare bound Codex bypass: %v", err)
 	}
+	bindProof(bound, testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor))
 	err = Run(CodexProtocol, []string{
 		"--handoff", bound.path,
 		"--session", "bound-bypass",
@@ -414,6 +433,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare launch-bound Codex bypass: %v", err)
 	}
+	bindProof(bound, testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor))
 	err = Run(CodexProtocol, []string{
 		"--handoff", bound.path,
 		"--session", "bound-bypass",
@@ -482,6 +502,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare config-failure Codex bypass: %v", err)
 	}
+	bindProof(configFailure, testCodexHookProof("config-failure", hookTrustReason, hookTrustActor))
 	codexHookOverrides = func(string, string) ([]string, error) {
 		return nil, errors.New("configuration failed")
 	}
@@ -516,6 +537,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare resolve-failure Codex bypass: %v", err)
 	}
+	bindProof(resolveFailure, testCodexHookProof("resolve-failure", hookTrustReason, hookTrustActor))
 	codexHookOverrides = func(string, string) ([]string, error) { return nil, nil }
 	lookPathInEnvironment = func(string, []string) (string, error) {
 		return "", errors.New("codex missing")
@@ -591,6 +613,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare attestation-failure Codex bypass: %v", err)
 	}
+	bindProof(attestationFailure, testCodexHookProof("attestation-failure", hookTrustReason, hookTrustActor))
 	verifyCodexHookTrustAttestation = func(codexhooks.Attestation, string) error {
 		return errors.New("persisted Git attestation changed")
 	}

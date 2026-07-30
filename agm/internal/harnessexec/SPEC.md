@@ -51,7 +51,7 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-15** When AGM resolves an executable or stages a private handoff path that will be interpolated into a pasted pane command, the system shall reject invalid UTF-8 and terminal control characters in that generated value before building or delivering the command.
 
-**HEXEC-16** When the private Codex executor consumes a hook-trust handoff, the system shall bind its source repository, full commit, and hook digest to the fresh exact ledger receipt and shall re-run the persisted Git attestation before constructing trusted hook configuration or executing Codex.
+**HEXEC-16** When the private Codex executor consumes a hook-trust handoff, the system shall require the handoff to bind the exact source repository, full commit, hook digest, hook-trust claim, and every other launch override claim; re-run persisted Git attestation, hook configuration, helper validation, and executable resolution; then revalidate the current exact grants and append the complete override transaction as the final userspace action before executing Codex.
 
 ## BDD Traceability
 
