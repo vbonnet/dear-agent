@@ -232,6 +232,12 @@ func persistRenamedSessionIdentity(ctx context.Context, store sessionIdentityRen
 	previousTmuxName := m.Tmux.SessionName
 	result, err := store.RenameSessionIdentity(ctx, m.SessionID, previousName, previousTmuxName, m.Tmux.SessionRevision, newName)
 	if err != nil {
+		if result.StorageCommitted {
+			m.Name = newName
+			m.Tmux.SessionName = newName
+			m.UpdatedAt = time.Now()
+			return err
+		}
 		if tmuxRenamed && result.TmuxRollbackSafe {
 			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()

@@ -627,6 +627,78 @@ func TestSQLiteLinkSessionParentUsesExplicitIdentityCAS(t *testing.T) {
 	}
 }
 
+func TestSQLiteRenameSessionIdentityUsesTargetNameReservation(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "sqlite-reserved-rename",
+		Name:          "old-name",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "old-name"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	observed, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if err := adapter.ReserveSessionName("concurrent-creator", "target-name"); err != nil {
+		t.Fatalf("ReserveSessionName(concurrent creator) error: %v", err)
+	}
+
+	_, err = adapter.RenameSessionIdentity(
+		t.Context(),
+		observed.SessionID,
+		observed.Name,
+		observed.Tmux.SessionName,
+		observed.Tmux.SessionRevision,
+		"target-name",
+	)
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) || conflict.Name != "target-name" {
+		t.Fatalf("RenameSessionIdentity() error = %v, want target-name conflict", err)
+	}
+	unchanged, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after conflict error: %v", err)
+	}
+	if unchanged.Name != "old-name" || unchanged.Tmux.SessionName != "old-name" {
+		t.Fatalf("identity after reservation conflict = (%q, %q), want unchanged", unchanged.Name, unchanged.Tmux.SessionName)
+	}
+
+	if err := adapter.ReleaseSessionNameReservation("concurrent-creator"); err != nil {
+		t.Fatalf("ReleaseSessionNameReservation() error: %v", err)
+	}
+	if _, err := adapter.RenameSessionIdentity(
+		t.Context(),
+		unchanged.SessionID,
+		unchanged.Name,
+		unchanged.Tmux.SessionName,
+		unchanged.Tmux.SessionRevision,
+		"target-name",
+	); err != nil {
+		t.Fatalf("RenameSessionIdentity() after release error: %v", err)
+	}
+	var reservations int
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE session_id = ?`,
+		unchanged.SessionID,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count rename reservations: %v", err)
+	}
+	if reservations != 0 {
+		t.Fatalf("rename reservations = %d, want 0", reservations)
+	}
+}
+
 func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

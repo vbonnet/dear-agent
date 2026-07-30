@@ -480,13 +480,14 @@ func (a *Adapter) TouchSessionActivity(ctx context.Context, sessionID string) er
 // moved tmux session is safe when the storage mutation returns an error.
 type RenameSessionIdentityResult struct {
 	TmuxRollbackSafe bool
+	StorageCommitted bool
 }
 
 // RenameSessionIdentity atomically changes both user-visible and tmux names
 // from the exact identity revision observed by the caller. Unlike a broad
 // UpdateSession, an authoritative rename must report a concurrent change
 // instead of silently preserving the old tmux name after the live pane moved.
-func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (RenameSessionIdentityResult, error) {
+func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (result RenameSessionIdentityResult, retErr error) {
 	if sessionID == "" {
 		return RenameSessionIdentityResult{}, fmt.Errorf("session_id cannot be empty")
 	}
@@ -496,6 +497,32 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	if err := a.ApplyMigrations(); err != nil {
 		return RenameSessionIdentityResult{}, fmt.Errorf("failed to apply migrations: %w", err)
 	}
+	reservationHeld := newName != previousName
+	if reservationHeld {
+		if err := a.ReserveSessionName(sessionID, newName); err != nil {
+			return RenameSessionIdentityResult{}, err
+		}
+		defer func() {
+			if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
+				retErr = errors.Join(retErr, err)
+			}
+		}()
+	}
+	result, retErr = a.renameSessionIdentityReserved(
+		ctx,
+		sessionID,
+		previousName,
+		previousTmuxName,
+		observedRevision,
+		newName,
+	)
+	if retErr == nil {
+		result.StorageCommitted = true
+	}
+	return result, retErr
+}
+
+func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (RenameSessionIdentityResult, error) {
 	observedRevisionValue := nullableStringValue(sql.NullString{
 		String: observedRevision,
 		Valid:  observedRevision != "",
