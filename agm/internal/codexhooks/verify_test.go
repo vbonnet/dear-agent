@@ -324,10 +324,14 @@ func TestValidateScriptAssetRejectsUnapprovedLibexecDescendant(t *testing.T) {
 }
 
 func TestValidateScriptAssetRejectsCommandOutsideCapabilityAllowlist(t *testing.T) {
-	const script = "#!/bin/sh\n/usr/bin/unknown-hook-tool payload.conf\n"
-	if err := validateScriptAsset([]byte(script)); err == nil ||
-		!strings.Contains(err.Error(), "command outside trusted capability allowlist") {
-		t.Fatalf("validateScriptAsset() error = %v, want command-capability rejection", err)
+	for _, script := range []string{
+		"#!/bin/sh\n/usr/bin/unknown-hook-tool payload.conf\n",
+		"#!/bin/sh\n/usr/bin/prlimit -- /bin/bash helper\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "command outside trusted capability allowlist") {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want command-capability rejection", script, err)
+		}
 	}
 }
 
