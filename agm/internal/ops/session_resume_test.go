@@ -1053,7 +1053,10 @@ func TestSubmitAndAwaitResumeBindsDeferredOverrideTransactionBeforeSubmission(t 
 		HarnessLaunchCommand{
 			Command:      "agm __exec-codex --handoff fixture",
 			Reservations: []*override.Reservation{reservation},
-			BindOverrideReservations: func(got ...*override.Reservation) error {
+			BindOverrideReservations: func(recordSpawn bool, got ...*override.Reservation) error {
+				if recordSpawn {
+					t.Fatal("cold resume was recorded as a new spawn")
+				}
 				if len(got) != 1 || got[0] != reservation {
 					t.Fatalf("bound resume reservations = %v, want exact reservation", got)
 				}

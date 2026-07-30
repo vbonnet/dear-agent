@@ -257,6 +257,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	originalCodexHookOverrides := codexHookOverrides
 	originalVerifyCodexHookTrustAttestation := verifyCodexHookTrustAttestation
 	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	originalRecordLaunchSpawn := recordLaunchSpawn
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
 		lookPathInEnvironment = originalLookPathInEnvironment
@@ -264,6 +265,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		codexHookOverrides = originalCodexHookOverrides
 		verifyCodexHookTrustAttestation = originalVerifyCodexHookTrustAttestation
 		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+		recordLaunchSpawn = originalRecordLaunchSpawn
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
 	hookConfigurationPrepared := false
@@ -302,6 +304,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		return nil
 	}
 	authorizedUses := 0
+	recordedSpawns := 0
 	commitLaunchOverrideProofs = func(proofs ...override.AuthorizationProof) error {
 		if !hookConfigurationPrepared || !executableResolved {
 			t.Fatal("hook-trust use recorded before launch preparation completed")
@@ -313,9 +316,16 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		authorizedUses++
 		return nil
 	}
+	recordLaunchSpawn = func() error {
+		if authorizedUses != 1 {
+			t.Fatalf("spawn recorded after %d authorization calls, want 1", authorizedUses)
+		}
+		recordedSpawns++
+		return nil
+	}
 	bindProof := func(prepared PreparedCommand, proofs ...override.AuthorizationProof) {
 		t.Helper()
-		if err := bindHandoffOverrideProofs(prepared.path, true, proofs); err != nil {
+		if err := bindHandoffOverrideProofs(prepared.path, true, true, proofs); err != nil {
 			t.Fatalf("bind override proof into trusted Codex handoff: %v", err)
 		}
 	}
@@ -349,6 +359,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	if err := bindHandoffOverrideProofs(
 		prepared.path,
 		true,
+		true,
 		[]override.AuthorizationProof{misboundBrakeProof, hookProof},
 	); err == nil || !strings.Contains(err.Error(), "unrelated admission-brake proof") {
 		t.Fatalf("misbound admission-brake proof error = %v", err)
@@ -359,6 +370,9 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	replaceProcess = func(_ string, argv, env []string) error {
 		if authorizedUses != 1 {
 			t.Fatalf("Codex replacement began after %d authorization calls, want 1", authorizedUses)
+		}
+		if recordedSpawns != 1 {
+			t.Fatalf("Codex replacement began after %d spawn records, want 1", recordedSpawns)
 		}
 		childArguments = append([]string(nil), argv...)
 		childEnvironment = append([]string(nil), env...)

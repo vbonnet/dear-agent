@@ -98,6 +98,40 @@ func TestEncodeLedgerUseBoundsEveryCallerControlledField(t *testing.T) {
 	}
 }
 
+func TestPrivilegedAppendRequestIsCanonicalAndLauncherBound(t *testing.T) {
+	use := Use{
+		Kind:            KindAdmissionBrake,
+		Reason:          "host recovered and the operator is verifying one guarded spawn",
+		Actor:           "vroom-dispatch",
+		Session:         "vroom-orchestrator",
+		AuthorizationID: strings.Repeat("a", AuthorizationIDBytes*2),
+		AtUTC:           time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+	}
+	request, err := EncodePrivilegedAppendRequest([]Use{use}, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uses, transaction, launcherPID, err := DecodePrivilegedAppendRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launcherPID != 4242 || len(uses) != 1 || uses[0] != use {
+		t.Fatalf("decoded request = uses %+v pid %d", uses, launcherPID)
+	}
+	wantTransaction, err := EncodeLedgerUses([]Use{use})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(transaction) != string(wantTransaction) {
+		t.Fatalf("decoded transaction = %q, want %q", transaction, wantTransaction)
+	}
+
+	nonCanonical := append([]byte(" "), request...)
+	if _, _, _, err := DecodePrivilegedAppendRequest(nonCanonical); err == nil {
+		t.Fatal("non-canonical privileged append request was accepted")
+	}
+}
+
 // An override with no human approval must refuse, and must not leave a ledger
 // entry: a refused attempt is not a use.
 func TestAuthorizeRefusesWithoutGrant(t *testing.T) {

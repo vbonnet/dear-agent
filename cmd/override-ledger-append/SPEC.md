@@ -23,6 +23,8 @@ nor an operator-selected destination.
 
 **OLA-06** When a new authorization transaction crosses the privileged boundary, the command shall require a unique random authorization ID for every use and shall revalidate each use's exact subject against its matching root-owned grant before appending any record.
 
+**OLA-07** When the NOPASSWD helper is invoked, the command shall require its launcher PID to be the first non-sudo ancestor, allow only root-owned `/usr/bin/sudo` intermediaries, inspect the live launcher code identity through the kernel, and require that identity to match the root-owned installed-AGM policy before appending.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/dangerous_override_governance.feature`

@@ -4,10 +4,10 @@
 // dangerous-override audit records on Unix systems.
 //
 // It accepts no arguments and appends one bounded, canonical Use JSONL
-// transaction from stdin to the fixed production ledger. A transaction has at
-// most one record per override kind. A sudoers rule may grant NOPASSWD access
-// to this command without granting access to tee, chmod, AGM, or an
-// operator-selected path.
+// transaction from a launcher-bound request on stdin to the fixed production
+// ledger. A transaction has at most one record per override kind. A sudoers
+// rule may grant NOPASSWD access to this command without granting access to tee,
+// chmod, AGM, or an operator-selected path.
 package main
 
 import (
@@ -46,18 +46,23 @@ func appendInput(input io.Reader, path string, requireRoot bool) error {
 		return errors.New("must run as root through the installed sudoers rule")
 	}
 
-	limited := &io.LimitedReader{R: input, N: override.MaxLedgerBatchBytes + 1}
+	limited := &io.LimitedReader{R: input, N: override.MaxPrivilegedAppendBytes + 1}
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return fmt.Errorf("read transaction: %w", err)
 	}
-	if len(data) > override.MaxLedgerBatchBytes {
-		return fmt.Errorf("%w: input exceeds %d bytes", override.ErrLedgerRecordTooLarge, override.MaxLedgerBatchBytes)
+	if len(data) > override.MaxPrivilegedAppendBytes {
+		return fmt.Errorf("%w: input exceeds %d bytes", override.ErrLedgerRecordTooLarge, override.MaxPrivilegedAppendBytes)
 	}
 
-	uses, canonical, err := decodeTransaction(data)
+	uses, canonical, launcherPID, err := decodeTransaction(data)
 	if err != nil {
 		return err
+	}
+	if requireRoot {
+		if err := authenticateLauncher(launcherPID); err != nil {
+			return fmt.Errorf("authenticate launch-bound append caller: %w", err)
+		}
 	}
 	now := uses[0].AtUTC
 	if requireRoot {
@@ -67,15 +72,17 @@ func appendInput(input io.Reader, path string, requireRoot bool) error {
 	return appendRecords(path, canonical, uses, now, requireRoot)
 }
 
-func decodeTransaction(data []byte) ([]override.Use, []byte, error) {
-	uses, err := override.DecodeLedgerUses(data)
-	if err != nil {
-		return nil, nil, err
-	}
-	return uses, data, nil
+func decodeTransaction(data []byte) ([]override.Use, []byte, int, error) {
+	return override.DecodePrivilegedAppendRequest(data)
 }
 
-func appendRecords(path string, data []byte, uses []override.Use, now time.Time, requireRoot bool) error {
+func appendRecords(
+	path string,
+	data []byte,
+	uses []override.Use,
+	now time.Time,
+	requireRoot bool,
+) error {
 	if requireRoot {
 		if err := validateRootOwnedPath(filepath.Dir(path), true); err != nil {
 			return fmt.Errorf("validate ledger directory: %w", err)

@@ -64,6 +64,10 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
 
+**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and root-owned caller policy to the exact installed AGM code identity, carry the live launcher PID in the canonical append request, require that PID to be the helper's first non-sudo ancestor, and authenticate its running identity before appending.
+
+**OVR-26** When final launch admission succeeds, the system shall record the circuit-breaker spawn timestamp only after every launch-bound override reservation has been committed or sealed successfully and immediately before process or tmux submission.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
@@ -128,14 +132,16 @@ repository cannot reuse the approval.
 
 On Unix, the operator first runs
 `make install-override-ledger-helper`. That separately authenticated setup
-prints and requires typed confirmation of the helper artifact's complete
-SHA-256, copies the approved bytes into a unique root-owned staging file,
-recomputes the staged digest, and atomically activates it only on an exact
-match. It then installs the one-purpose root-owned
+installs the matching AGM build, prints and requires typed confirmation of the
+helper artifact's complete SHA-256 and installed AGM code identity, copies the
+approved helper bytes and caller policy into unique root-owned staging files,
+and atomically activates each only on an exact match. It then installs the
+one-purpose root-owned
 `/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact
-per-user NOPASSWD sudoers rule for that path. Runtime authorization invokes it
-with `sudo -n`: no fresh prompt or cached sudo credential is needed, and AGM,
-`tee`, `chmod`, arbitrary arguments, and arbitrary paths are never privileged.
+per-user, helper-digest-qualified NOPASSWD sudoers rule for that path. Runtime
+authorization invokes it with `sudo -n`: no fresh prompt or cached sudo
+credential is needed, and AGM, `tee`, `chmod`, arbitrary arguments, and
+arbitrary paths are never privileged.
 The helper accepts exactly one canonical bounded JSONL transaction on stdin.
 A transaction is either one historical-compatible use record or one envelope
 containing at most one use per override kind. The helper appends only to
@@ -148,6 +154,17 @@ fields. After re-running the persisted Git attestation and all other fallible
 launch checks, its executor revalidates the current grants and appends the
 complete transaction immediately before replacing AGM with Codex. The IDs are
 audit correlation, not secret capabilities.
+
+The installer also installs the matching AGM build, displays its
+kernel-verifiable code identity for separate typed confirmation, and records
+that identity in a root-owned policy next to the helper. The canonical
+privileged request binds the transaction to the live AGM PID that reached the
+launch boundary. The helper permits only root-owned `/usr/bin/sudo` processes
+between itself and that exact PID and requires the running macOS code-directory
+hash or Linux executable SHA-256 to match the policy. Direct shell calls,
+descendant agent shells under a persistent supervisor, unrelated PIDs, and
+changed AGM bytes therefore fail closed. Updating AGM requires reinstalling the
+helper policy before another privileged append can succeed.
 
 The ledger file and its parent are root-owned, so the scheduled audit process
 can read the audit while the agent user cannot truncate, replace, or remove

@@ -356,6 +356,7 @@ func reserveSupervisorOAuthOverride(reason, session string) (*override.Reservati
 // refused launch must not spend privileged ledger quota.
 func authorizeSupervisorLaunchBoundary(
 	beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error),
+	afterAuthorization func(),
 	reservation *override.Reservation,
 ) error {
 	var reservations []*override.Reservation
@@ -371,6 +372,9 @@ func authorizeSupervisorLaunchBoundary(
 	}
 	if err := commitOverrideReservations(reservations...); err != nil {
 		return fmt.Errorf("supervisor: commit launch override transaction: %w", err)
+	}
+	if afterAuthorization != nil {
+		afterAuthorization()
 	}
 	return nil
 }
@@ -410,10 +414,10 @@ func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath strin
 }
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
-	var beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
+	var admission *circuitBreakerAdmission
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
-		beforeSpawn, admissionErr = enforceCircuitBreakers(supervisorID)
+		admission, admissionErr = enforceCircuitBreakers(supervisorID)
 		return admissionErr
 	})
 	if err != nil {
@@ -458,7 +462,11 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"AGM_SUPERVISOR_TERTIARY_FOR="+supervisorTertiaryFor,
 	)
 
-	if err := authorizeSupervisorLaunchBoundary(beforeSpawn, oauthOverride); err != nil {
+	if err := authorizeSupervisorLaunchBoundary(
+		admission.beforeSpawn,
+		admission.afterAuthorization,
+		oauthOverride,
+	); err != nil {
 		return err
 	}
 	if err := claudeCmd.Run(); err != nil {

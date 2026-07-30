@@ -3,8 +3,8 @@
 package override
 
 import (
-	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,7 +16,7 @@ const operatorLedgerAppendHelper = "/usr/local/libexec/dear-agent-override-ledge
 // The helper accepts no arguments, validates and bounds one canonical
 // transaction, and owns the fixed destination. The invoking AGM binary is
 // never elevated.
-func appendOperatorLedger(data []byte, path string) error {
+func appendOperatorLedger(uses []Use, path string) error {
 	if path != operatorLedgerPath {
 		return fmt.Errorf("%w: privileged append destination is %q, want fixed %q",
 			ErrLedgerUntrusted, path, operatorLedgerPath)
@@ -33,8 +33,12 @@ func appendOperatorLedger(data []byte, path string) error {
 			ErrLedgerUntrusted, operatorLedgerAppendHelper, err,
 		)
 	}
+	data, err := EncodePrivilegedAppendRequest(uses, os.Getpid())
+	if err != nil {
+		return err
+	}
 	cmd := exec.Command("/usr/bin/sudo", "-n", operatorLedgerAppendHelper)
-	cmd.Stdin = bytes.NewReader(data)
+	cmd.Stdin = strings.NewReader(string(data))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf(

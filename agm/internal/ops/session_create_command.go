@@ -50,6 +50,9 @@ type HarnessLaunchSpec struct {
 	// adapters invoke it after command preparation and executable resolution,
 	// immediately before the irreversible process or tmux submission boundary.
 	BeforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
+	// AfterAuthorization runs only after every launch-bound override has been
+	// committed or sealed successfully and immediately before submission.
+	AfterAuthorization func()
 	// DeferredUntilCallerExit is set only by current-pane launchers whose
 	// queued command cannot run until the producing AGM process releases tmux.
 	DeferredUntilCallerExit bool
@@ -62,7 +65,7 @@ type HarnessLaunchCommand struct {
 	ModeAppliedAtStartup     bool
 	Cancel                   func() error
 	Reservations             []*override.Reservation
-	BindOverrideReservations func(...*override.Reservation) error
+	BindOverrideReservations func(bool, ...*override.Reservation) error
 }
 
 var reserveCodexHookTrust = func(
@@ -91,17 +94,28 @@ func (c HarnessLaunchCommand) CancelUndelivered() error {
 	return c.Cancel()
 }
 
-// FinalizeOverrideReservations either seals reservations into a private Codex
-// handoff for executor-bound commitment or commits them at this process's
-// irreversible launch boundary for other harnesses.
-func (c HarnessLaunchCommand) FinalizeOverrideReservations(
+// FinalizeLaunch either seals reservations and the spawn-recording obligation
+// into a private Codex handoff for executor-bound commitment, or commits the
+// reservations at this process's irreversible launch boundary. Non-Codex
+// callers run their surface-owned AfterAuthorization callback only after this
+// method succeeds.
+func (c HarnessLaunchCommand) FinalizeLaunch(
+	recordSpawn bool,
 	reservations ...*override.Reservation,
 ) error {
 	if c.BindOverrideReservations != nil {
-		return c.BindOverrideReservations(reservations...)
+		return c.BindOverrideReservations(recordSpawn, reservations...)
 	}
 	_, err := override.CommitAll(reservations...)
 	return err
+}
+
+// FinalizeOverrideReservations commits resume-only overrides without recording
+// a new-spawn stagger timestamp.
+func (c HarnessLaunchCommand) FinalizeOverrideReservations(
+	reservations ...*override.Reservation,
+) error {
+	return c.FinalizeLaunch(false, reservations...)
 }
 
 // ResolveHarnessLaunchSubmission converts tmux's irreversible submission

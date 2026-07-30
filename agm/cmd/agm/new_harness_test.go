@@ -20,17 +20,25 @@ func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 func TestSubmitHarnessLaunchAuthorizesAtSubmissionBoundary(t *testing.T) {
 	var events []string
 	hookReservation := &override.Reservation{}
-	spec := ops.HarnessLaunchSpec{BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
-		if len(got) != 1 || got[0] != hookReservation {
-			t.Fatalf("launch reservations = %v, want exact Codex hook reservation", got)
-		}
-		events = append(events, "authorize")
-		return got, nil
-	}}
+	spec := ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			if len(got) != 1 || got[0] != hookReservation {
+				t.Fatalf("launch reservations = %v, want exact Codex hook reservation", got)
+			}
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}
 	launch := ops.HarnessLaunchCommand{
 		Command:      "fixture",
 		Reservations: []*override.Reservation{hookReservation},
-		BindOverrideReservations: func(got ...*override.Reservation) error {
+		BindOverrideReservations: func(recordSpawn bool, got ...*override.Reservation) error {
+			if !recordSpawn {
+				t.Fatal("new Codex launch did not defer spawn recording to its executor")
+			}
 			if len(got) != 1 || got[0] != hookReservation {
 				t.Fatalf("bound reservations = %v, want exact final reservation", got)
 			}
@@ -50,6 +58,29 @@ func TestSubmitHarnessLaunchAuthorizesAtSubmissionBoundary(t *testing.T) {
 		t.Fatalf("submitHarnessLaunch() error = %v", err)
 	}
 	if got, want := strings.Join(events, ","), "authorize,bind,submit"; got != want {
+		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchRecordsNonDeferredSpawnAfterAuthorization(t *testing.T) {
+	var events []string
+	spec := ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}
+	err := submitHarnessLaunch("fixture", spec, ops.HarnessLaunchCommand{}, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "authorize,record-spawn,submit"; got != want {
 		t.Fatalf("launch boundary events = %q, want %q", got, want)
 	}
 }
@@ -85,7 +116,7 @@ func TestSubmitHarnessLaunchBindingFailureCancelsWithoutSubmission(t *testing.T)
 	var events []string
 	launch := ops.HarnessLaunchCommand{
 		Command: "fixture",
-		BindOverrideReservations: func(...*override.Reservation) error {
+		BindOverrideReservations: func(bool, ...*override.Reservation) error {
 			events = append(events, "bind")
 			return refusal
 		},
@@ -94,7 +125,11 @@ func TestSubmitHarnessLaunchBindingFailureCancelsWithoutSubmission(t *testing.T)
 			return nil
 		},
 	}
-	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{}, launch, func() error {
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}, launch, func() error {
 		events = append(events, "submit")
 		return nil
 	})

@@ -27,10 +27,14 @@ func TestAppendInputAcceptsOnlyOneCanonicalBoundedRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := appendInput(bytes.NewReader(line), path, false); err != nil {
+	request, err := override.EncodePrivilegedAppendRequest([]override.Use{use}, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appendInput(bytes.NewReader(request), path, false); err != nil {
 		t.Fatalf("append valid record: %v", err)
 	}
-	if err := appendInput(bytes.NewReader(line), path, false); err != nil {
+	if err := appendInput(bytes.NewReader(request), path, false); err != nil {
 		t.Fatalf("append second valid record: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -78,7 +82,11 @@ func TestAppendInputWritesDistinctKindsAsOneTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := appendInput(bytes.NewReader(transaction), path, false); err != nil {
+	request, err := override.EncodePrivilegedAppendRequest(uses, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appendInput(bytes.NewReader(request), path, false); err != nil {
 		t.Fatalf("append combined transaction: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -100,14 +108,14 @@ func TestAppendInputRejectsReplayedAuthorizationID(t *testing.T) {
 		AuthorizationID: "0123456789abcdef0123456789abcdef",
 		AtUTC:           time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
 	}
-	line, err := override.EncodeLedgerUse(use)
+	request, err := override.EncodePrivilegedAppendRequest([]override.Use{use}, 4242)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := appendInput(bytes.NewReader(line), path, false); err != nil {
+	if err := appendInput(bytes.NewReader(request), path, false); err != nil {
 		t.Fatalf("append first authorization: %v", err)
 	}
-	if err := appendInput(bytes.NewReader(line), path, false); err == nil ||
+	if err := appendInput(bytes.NewReader(request), path, false); err == nil ||
 		!strings.Contains(err.Error(), "already recorded") {
 		t.Fatalf("replayed authorization error = %v, want duplicate rejection", err)
 	}
@@ -127,11 +135,11 @@ func TestAppendInputCapsTheFixedLedger(t *testing.T) {
 		Actor:  "vroom-dispatch",
 		AtUTC:  time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
 	}
-	line, err := override.EncodeLedgerUse(use)
+	request, err := override.EncodePrivilegedAppendRequest([]override.Use{use}, 4242)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := appendInput(bytes.NewReader(line), path, false); err == nil {
+	if err := appendInput(bytes.NewReader(request), path, false); err == nil {
 		t.Fatal("append exceeded the fixed ledger cap")
 	}
 }
@@ -145,27 +153,27 @@ func TestAppendInputRateLimitsEachKindWithAutomaticRecovery(t *testing.T) {
 		Actor:  "vroom-dispatch",
 		AtUTC:  now,
 	}
-	line, err := override.EncodeLedgerUse(use)
+	request, err := override.EncodePrivilegedAppendRequest([]override.Use{use}, 4242)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range maxUsesPerKindPerWindow {
-		if err := appendInput(bytes.NewReader(line), path, false); err != nil {
+		if err := appendInput(bytes.NewReader(request), path, false); err != nil {
 			t.Fatalf("append below rate limit: %v", err)
 		}
 	}
-	if err := appendInput(bytes.NewReader(line), path, false); err == nil ||
+	if err := appendInput(bytes.NewReader(request), path, false); err == nil ||
 		!strings.Contains(err.Error(), "retry after") {
 		t.Fatalf("rate limit error = %v, want bounded retry guidance", err)
 	}
 
 	recovered := use
 	recovered.AtUTC = now.Add(privilegedRateWindow + time.Second)
-	recoveredLine, err := override.EncodeLedgerUse(recovered)
+	recoveredRequest, err := override.EncodePrivilegedAppendRequest([]override.Use{recovered}, 4242)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := appendInput(bytes.NewReader(recoveredLine), path, false); err != nil {
+	if err := appendInput(bytes.NewReader(recoveredRequest), path, false); err != nil {
 		t.Fatalf("rate window did not recover automatically: %v", err)
 	}
 }

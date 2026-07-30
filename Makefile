@@ -987,27 +987,54 @@ build-override-ledger-helper:
 	@mkdir -p bin
 	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
 
-install-override-ledger-helper: build-override-ledger-helper
+install-override-ledger-helper: build-override-ledger-helper install-agm
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
 		root_group="$$(id -gn 0)"; \
 		artifact="bin/dear-agent-override-ledger-append"; \
+		agm_executable="$(HOME)/go/bin/agm"; \
 		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
 		helper_staging=""; \
+		identity="/usr/local/libexec/dear-agent-override-ledger-agm.identity"; \
+		identity_staging=""; \
 		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
 		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
-		rule="$$operator_user ALL=(root) NOPASSWD: $$helper"; \
 		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
 		expected_hash="$${expected_hash%% *}"; \
+		case "$$(uname -s)" in \
+			Darwin) \
+				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p')"; \
+				test -n "$$caller_digest" || { echo "installed AGM has no kernel-verifiable code identity" >&2; exit 1; }; \
+				caller_identity="darwin-cdhash:$$caller_digest"; \
+				;; \
+			Linux) \
+				caller_digest="$$(/usr/bin/sha256sum "$$agm_executable")"; \
+				caller_digest="$${caller_digest%% *}"; \
+				caller_identity="linux-sha256:$$caller_digest"; \
+				;; \
+			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
+		esac; \
+		rule="$$operator_user ALL=(root) NOPASSWD: sha256:$$expected_hash $$helper"; \
 		printf 'Reviewed helper SHA-256: %s\n' "$$expected_hash"; \
 		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
 		IFS= read -r confirmed_hash; \
 		test "$$confirmed_hash" = "$$expected_hash" || { echo "helper digest confirmation did not match" >&2; exit 2; }; \
+		printf 'Reviewed installed AGM caller identity: %s\n' "$$caller_identity"; \
+		printf 'Type that complete identity to bind privileged appends to these exact AGM bytes: '; \
+		IFS= read -r confirmed_identity; \
+		test "$$confirmed_identity" = "$$caller_identity" || { echo "AGM caller identity confirmation did not match" >&2; exit 2; }; \
 		cleanup_helper_staging() { \
 			if test -n "$$helper_staging"; then \
-				/usr/bin/sudo /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
+				/usr/bin/sudo -n /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
 			fi; \
+			if test -n "$$identity_staging"; then \
+				/usr/bin/sudo -n /bin/rm -f "$$identity_staging" >/dev/null 2>&1 || true; \
+			fi; \
+			if test -n "$$staging"; then \
+				/usr/bin/sudo -n /bin/rm -f "$$staging" >/dev/null 2>&1 || true; \
+			fi; \
+			/usr/bin/sudo -k >/dev/null 2>&1 || true; \
 		}; \
 		trap cleanup_helper_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
@@ -1017,24 +1044,30 @@ install-override-ledger-helper: build-override-ledger-helper
 		fi; \
 		/usr/bin/sudo -v; \
 		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
+		identity_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm.identity.XXXXXX)"; \
+		printf '%s\n' "$$caller_identity" | /usr/bin/sudo /usr/bin/tee "$$identity_staging" >/dev/null; \
+		/usr/bin/sudo /bin/chmod 0444 "$$identity_staging"; \
+		staged_identity="$$(/usr/bin/sudo /bin/cat "$$identity_staging")"; \
+		test "$$staged_identity" = "$$caller_identity" || { echo "root-owned staged AGM caller identity differs from the approved identity" >&2; exit 1; }; \
 		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.XXXXXX)"; \
 		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
 		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"; \
 		staged_hash="$${staged_hash%% *}"; \
 		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged helper differs from the approved bytes" >&2; exit 1; }; \
-		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
-		helper_staging=""; \
 		printf '%s\n' "$$rule" | /usr/bin/sudo /usr/bin/tee "$$staging" >/dev/null; \
 		/usr/bin/sudo /bin/chmod 0440 "$$staging"; \
 		if ! /usr/bin/sudo /usr/sbin/visudo -cf "$$staging"; then \
-			/usr/bin/sudo /bin/rm -f "$$staging"; \
-			/usr/bin/sudo -k; \
 			exit 1; \
 		fi; \
 		/usr/bin/sudo /bin/mv -f "$$staging" "$$sudoers"; \
+		staging=""; \
+		/usr/bin/sudo /bin/mv -f "$$identity_staging" "$$identity"; \
+		identity_staging=""; \
+		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
+		helper_staging=""; \
 		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
-		echo "Installed digest-bound root-owned ledger helper and exact sudoers rule for $$operator_user"
+		echo "Installed digest-bound root-owned ledger helper, AGM caller identity, and exact sudoers rule for $$operator_user"
 
 # Install the macOS audit under launchd's system domain without activating it.
 # Both scheduler and executable are root-owned, so an unattended same-user

@@ -91,11 +91,14 @@ func submitHarnessLaunch(
 			launch.CancelUndelivered(),
 		)
 	}
-	if err := launch.FinalizeOverrideReservations(reservations...); err != nil {
+	if err := launch.FinalizeLaunch(true, reservations...); err != nil {
 		return errors.Join(
 			fmt.Errorf("%s launch override transaction: %w", harness, err),
 			launch.CancelUndelivered(),
 		)
+	}
+	if launch.BindOverrideReservations == nil && spec.AfterAuthorization != nil {
+		spec.AfterAuthorization()
 	}
 	return resolveHarnessLaunchSubmission(harness, launch, submit())
 }
@@ -262,6 +265,9 @@ func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, 
 	}
 	if _, err := override.CommitAll(reservations...); err != nil {
 		return false, fmt.Errorf("gemini launch override transaction: %w", err)
+	}
+	if spec.AfterAuthorization != nil {
+		spec.AfterAuthorization()
 	}
 	if err := cmd.Run(); err != nil {
 		ui.PrintError(err,

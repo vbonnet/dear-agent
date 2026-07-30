@@ -29,6 +29,7 @@
 package override
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
@@ -110,6 +111,15 @@ const (
 	// MaxLedgerBatchBytes bounds one atomic launch-bound transaction, including
 	// the multi-use JSON envelope in addition to each individually bounded use.
 	MaxLedgerBatchBytes = MaxLedgerRecordBytes*MaxLedgerUsesPerTransaction + 64
+
+	// PrivilegedAppendVersion identifies the root-helper request envelope. The
+	// envelope binds a canonical ledger transaction to the live AGM process
+	// that reached the launch boundary.
+	PrivilegedAppendVersion = 1
+
+	// MaxPrivilegedAppendBytes bounds the canonical transaction plus the fixed
+	// launcher-identity envelope accepted by the root helper.
+	MaxPrivilegedAppendBytes = MaxLedgerBatchBytes + 256
 )
 
 // Sentinel errors so callers can distinguish "you may not" from "you did it
@@ -286,6 +296,70 @@ type Use struct {
 
 type ledgerTransaction struct {
 	Uses []Use `json:"uses"`
+}
+
+type privilegedAppendRequest struct {
+	Version     int             `json:"version"`
+	LauncherPID int             `json:"launcher_pid"`
+	Transaction json.RawMessage `json:"transaction"`
+}
+
+// EncodePrivilegedAppendRequest binds a canonical ledger transaction to the
+// live AGM PID that invoked the fixed sudo helper.
+func EncodePrivilegedAppendRequest(uses []Use, launcherPID int) ([]byte, error) {
+	if launcherPID <= 1 {
+		return nil, fmt.Errorf("%w: privileged append launcher PID is invalid", ErrLedgerRecord)
+	}
+	transaction, err := EncodeLedgerUses(uses)
+	if err != nil {
+		return nil, err
+	}
+	request := privilegedAppendRequest{
+		Version:     PrivilegedAppendVersion,
+		LauncherPID: launcherPID,
+		Transaction: bytes.TrimSuffix(transaction, []byte("\n")),
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode privileged override append request: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if len(encoded) > MaxPrivilegedAppendBytes {
+		return nil, fmt.Errorf("%w: privileged append request has %d bytes, maximum is %d",
+			ErrLedgerRecordTooLarge, len(encoded), MaxPrivilegedAppendBytes)
+	}
+	return encoded, nil
+}
+
+// DecodePrivilegedAppendRequest accepts only the canonical launcher-bound
+// request produced by EncodePrivilegedAppendRequest.
+func DecodePrivilegedAppendRequest(data []byte) ([]Use, []byte, int, error) {
+	var request privilegedAppendRequest
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := requireLedgerEOF(decoder); err != nil {
+		return nil, nil, 0, err
+	}
+	if request.Version != PrivilegedAppendVersion {
+		return nil, nil, 0, fmt.Errorf("%w: unsupported privileged append version %d",
+			ErrLedgerRecord, request.Version)
+	}
+	transaction := append(append([]byte(nil), request.Transaction...), '\n')
+	uses, err := DecodeLedgerUses(transaction)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	canonical, err := EncodePrivilegedAppendRequest(uses, request.LauncherPID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if !bytes.Equal(data, canonical) {
+		return nil, nil, 0, fmt.Errorf("%w: privileged append request is not canonical", ErrLedgerRecord)
+	}
+	return uses, transaction, request.LauncherPID, nil
 }
 
 // Request is one attempt to use a dangerous override.
@@ -634,7 +708,7 @@ func RecordAll(uses []Use) error {
 		if err := inspectExistingLedger(path); err != nil {
 			return err
 		}
-		if err := appendOperatorLedger(data, path); err != nil {
+		if err := appendOperatorLedger(uses, path); err != nil {
 			return err
 		}
 		if err := validateLedgerPath(path); err != nil {

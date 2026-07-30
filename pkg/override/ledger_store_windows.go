@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-func appendOperatorLedger([]byte, string) error {
+func appendOperatorLedger([]Use, string) error {
 	return fmt.Errorf("%w: operator-owned ledger storage is not implemented on Windows", ErrLedgerUntrusted)
 }
 

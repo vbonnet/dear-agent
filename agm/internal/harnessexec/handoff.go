@@ -46,7 +46,7 @@ type PreparedCommand struct {
 	Command       string
 	path          string
 	lease         io.Closer
-	bindOverrides func(...*override.Reservation) error
+	bindOverrides func(bool, ...*override.Reservation) error
 }
 
 // Cancel removes an undelivered one-shot handoff and releases any producer
@@ -69,14 +69,17 @@ func (p PreparedCommand) Cancel() error {
 // BindOverrideReservations seals the final launch-admission reservations into
 // a staged Codex handoff. The private executor revalidates and commits them as
 // one transaction only after every other fallible launch check succeeds.
-func (p PreparedCommand) BindOverrideReservations(reservations ...*override.Reservation) error {
+func (p PreparedCommand) BindOverrideReservations(
+	recordSpawn bool,
+	reservations ...*override.Reservation,
+) error {
 	if p.bindOverrides == nil {
-		if len(reservations) == 0 {
+		if len(reservations) == 0 && !recordSpawn {
 			return nil
 		}
 		return errors.New("prepared harness command cannot defer override commitment")
 	}
-	return p.bindOverrides(reservations...)
+	return p.bindOverrides(recordSpawn, reservations...)
 }
 
 // ResolveSubmission transfers ownership of a staged private launch across
@@ -103,6 +106,7 @@ type launchHandoff struct {
 	DeferredUntilProducerExit bool                          `json:"deferred_until_producer_exit,omitempty"`
 	Environment               []string                      `json:"environment"`
 	OverrideProofs            []override.AuthorizationProof `json:"override_proofs,omitempty"`
+	RecordSpawn               bool                          `json:"record_spawn,omitempty"`
 	CodexHookRoot             string                        `json:"codex_hook_root,omitempty"`
 	CodexLaunch               *codexLaunchBinding           `json:"codex_launch,omitempty"`
 }
@@ -170,8 +174,10 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 		Command: BuildCodexCommand(launch),
 		path:    handoffPath,
 		lease:   lease,
-		bindOverrides: func(reservations ...*override.Reservation) error {
-			return bindHandoffOverrideReservations(handoffPath, launch.BypassHookTrust, reservations...)
+		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
+			return bindHandoffOverrideReservations(
+				handoffPath, launch.BypassHookTrust, recordSpawn, reservations...,
+			)
 		},
 	}, nil
 }
@@ -343,6 +349,7 @@ func bindCodexLaunch(launch CodexLaunch) codexLaunchBinding {
 func bindHandoffOverrideReservations(
 	path string,
 	trusted bool,
+	recordSpawn bool,
 	reservations ...*override.Reservation,
 ) error {
 	proofs := make([]override.AuthorizationProof, 0, len(reservations))
@@ -352,12 +359,13 @@ func bindHandoffOverrideReservations(
 		}
 		proofs = append(proofs, reservation.Proof())
 	}
-	return bindHandoffOverrideProofs(path, trusted, proofs)
+	return bindHandoffOverrideProofs(path, trusted, recordSpawn, proofs)
 }
 
 func bindHandoffOverrideProofs(
 	path string,
 	trusted bool,
+	recordSpawn bool,
 	proofs []override.AuthorizationProof,
 ) error {
 	file, openedInfo, err := openHandoffForOverrideBinding(path, trusted)
@@ -370,6 +378,7 @@ func bindHandoffOverrideProofs(
 		return err
 	}
 	handoff.OverrideProofs = proofs
+	handoff.RecordSpawn = recordSpawn
 	if err := validateHandoff(handoff, CodexProtocol, time.Now(), openedInfo.ModTime()); err != nil {
 		return err
 	}

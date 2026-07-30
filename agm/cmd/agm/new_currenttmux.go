@@ -17,21 +17,20 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
-	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
 func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
-	var beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
+	var admission *circuitBreakerAdmission
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
 		}
-		admission, err := enforceCircuitBreakers(sessionName)
+		var err error
+		admission, err = enforceCircuitBreakers(sessionName)
 		if err != nil {
 			return err
 		}
-		beforeSpawn = admission
 	}
 
 	fmt.Printf("Starting new Claude session in current tmux: %s\n", sessionName)
@@ -53,7 +52,10 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 			if pwd := os.Getenv("PWD"); pwd != "" {
 				spec.WorkDir = pwd
 			}
-			spec.BeforeSpawn = beforeSpawn
+			if admission != nil {
+				spec.BeforeSpawn = admission.beforeSpawn
+				spec.AfterAuthorization = admission.afterAuthorization
+			}
 			if err := startCurrentTmuxHarness(ctx, spec); err != nil {
 				return ops.CreateSessionLaunchResult{}, err
 			}

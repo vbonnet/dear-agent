@@ -773,17 +773,20 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 }
 
 // enforceCircuitBreakers runs an initial circuit-breaker check and returns an
-// error if the request cannot proceed toward launch. On success it returns a
-// one-shot callback that repeats the live gates, consumes any admission-brake
-// override, and records the spawn time at the launch-submission boundary.
+// error if the request cannot proceed toward launch. On success it returns
+// callbacks that repeat the live gates and consume any admission-brake
+// override, then record the spawn only after every override has been finalized.
 //
 // It is the single admission point for every sanctioned spawn path: `agm
 // session new` (and its current-tmux variant) and `agm supervisor run`.
 // vroom-dispatch shells out to `agm session new`, so it inherits the same
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
-func enforceCircuitBreakers(
-	sessionName string,
-) (func(...*override.Reservation) ([]*override.Reservation, error), error) {
+type circuitBreakerAdmission struct {
+	beforeSpawn        func(...*override.Reservation) ([]*override.Reservation, error)
+	afterAuthorization func()
+}
+
+func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error) {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -829,7 +832,8 @@ func enforceCircuitBreakers(
 		mu       sync.Mutex
 		consumed bool
 	)
-	return func(additionalReservations ...*override.Reservation) ([]*override.Reservation, error) {
+	admission := &circuitBreakerAdmission{}
+	admission.beforeSpawn = func(additionalReservations ...*override.Reservation) ([]*override.Reservation, error) {
 		mu.Lock()
 		if consumed {
 			mu.Unlock()
@@ -857,11 +861,14 @@ func enforceCircuitBreakers(
 		if !liveResult.Allowed {
 			return nil, fmt.Errorf("%s", circuitbreaker.FormatDenied(liveResult))
 		}
+		return reservations, nil
+	}
+	admission.afterAuthorization = func() {
 		if err := st.RecordSpawn(time.Now()); err != nil {
 			debug.Log("Warning: failed to record spawn time: %v", err)
 		}
-		return reservations, nil
-	}, nil
+	}
+	return admission, nil
 }
 
 func finalizeAdmissionBrakeOverride(

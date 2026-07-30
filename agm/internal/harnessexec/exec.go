@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -50,6 +51,9 @@ var (
 	commitLaunchOverrideProofs = func(proofs ...override.AuthorizationProof) error {
 		_, err := override.CommitProofs(proofs...)
 		return err
+	}
+	recordLaunchSpawn = func() error {
+		return circuitbreaker.NewFileSpawnTimer().RecordSpawn(time.Now())
 	}
 )
 
@@ -312,6 +316,7 @@ func runCodex(args []string) error {
 			request.HookTrustProof = handoff.CodexLaunch.HookTrustProof
 		}
 		request.OverrideProofs = append([]override.AuthorizationProof(nil), handoff.OverrideProofs...)
+		request.RecordSpawn = handoff.RecordSpawn
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
 	}
@@ -346,6 +351,11 @@ func runCodex(args []string) error {
 	// succeeded. This is the final userspace boundary before exec.
 	if err := commitLaunchOverrideProofs(request.OverrideProofs...); err != nil {
 		return fmt.Errorf("commit Codex launch override transaction: %w", err)
+	}
+	if request.RecordSpawn {
+		if err := recordLaunchSpawn(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "agm: warning: failed to record successful Codex spawn: %v\n", err)
+		}
 	}
 	if err := replaceProcess(path, argv, environ); err != nil {
 		return fmt.Errorf("execute codex: %w", err)
@@ -417,6 +427,7 @@ type codexRequest struct {
 	HookTrustDigest       string
 	HookTrustProof        override.AuthorizationProof
 	OverrideProofs        []override.AuthorizationProof
+	RecordSpawn           bool
 	ConfigOverrides       []string
 }
 
