@@ -169,6 +169,26 @@ func TestSQLiteSessionNameReservationPrecedesAndIsConsumedByRegistration(t *test
 	if err := adapter.ReserveSessionName("loser", "reserved-name"); !errors.As(err, &conflict) {
 		t.Fatalf("ReserveSessionName(loser after registration) error = %v, want conflict", err)
 	}
+	committed, err := adapter.sessionRegistrationCommitted(
+		&manifest.Manifest{
+			SessionID: "winner",
+			Name:      "reserved-name",
+			Tmux:      manifest.Tmux{SessionName: ""},
+		},
+		"active",
+		"claude-code",
+	)
+	if err != nil || !committed {
+		t.Fatalf("sessionRegistrationCommitted() = (%t, %v), want (true, nil)", committed, err)
+	}
+	_, err = adapter.sessionRegistrationCommitted(
+		&manifest.Manifest{SessionID: "winner", Name: "different-name"},
+		"active",
+		"claude-code",
+	)
+	if err == nil {
+		t.Fatal("sessionRegistrationCommitted() accepted a mismatched durable identity")
+	}
 }
 
 func TestSQLiteSessionNameReservationsPreserveLegacyDuplicateRows(t *testing.T) {
@@ -242,7 +262,7 @@ func TestSQLiteReactivateSessionRejectsReusedActiveName(t *testing.T) {
 		t.Fatalf("CreateSession(replacement) error: %v", err)
 	}
 
-	err = adapter.ReactivateSession(archived)
+	_, err = adapter.ReactivateSession(archived)
 	var conflict *SessionNameConflictError
 	if !errors.As(err, &conflict) || conflict.Name != archived.Name {
 		t.Fatalf("ReactivateSession() error = %v, want conflict for %q", err, archived.Name)
@@ -262,8 +282,12 @@ func TestSQLiteReactivateSessionRejectsReusedActiveName(t *testing.T) {
 	if err := adapter.UpdateSession(replacement); err != nil {
 		t.Fatalf("archive replacement: %v", err)
 	}
-	if err := adapter.ReactivateSession(archived); err != nil {
+	result, err := adapter.ReactivateSession(archived)
+	if err != nil {
 		t.Fatalf("ReactivateSession(after archive) error: %v", err)
+	}
+	if !result.StorageCommitted {
+		t.Fatal("ReactivateSession(after archive) did not report committed storage")
 	}
 	stored, err = adapter.GetSession(archived.SessionID)
 	if err != nil {
@@ -281,6 +305,84 @@ func TestSQLiteReactivateSessionRejectsReusedActiveName(t *testing.T) {
 	}
 	if reservations != 0 {
 		t.Fatalf("reactivation reservations = %d, want 0", reservations)
+	}
+}
+
+func TestSQLiteArchivedParentLinkFencesStaleReactivation(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	parent := &manifest.Manifest{
+		SessionID: "archived-link-parent",
+		Name:      "planning",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	child := &manifest.Manifest{
+		SessionID: "archived-link-child",
+		Name:      "old-archived-name",
+		Lifecycle: manifest.LifecycleArchived,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Tmux:      manifest.Tmux{SessionName: "archived-child-tmux"},
+	}
+	for _, session := range []*manifest.Manifest{parent, child} {
+		if err := adapter.CreateSession(session); err != nil {
+			t.Fatalf("CreateSession(%s) error: %v", session.SessionID, err)
+		}
+	}
+	staleReactivation, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() stale reactivation: %v", err)
+	}
+	inheritedName := "planning-exec"
+	if err := adapter.LinkSessionParent(
+		t.Context(),
+		child.SessionID,
+		staleReactivation.Tmux.SessionRevision,
+		parent.SessionID,
+		&inheritedName,
+	); err != nil {
+		t.Fatalf("LinkSessionParent() archived child: %v", err)
+	}
+	if err := adapter.ReserveSessionName("concurrent-creator", inheritedName); err != nil {
+		t.Fatalf("ReserveSessionName() concurrent creator: %v", err)
+	}
+
+	result, err := adapter.ReactivateSession(staleReactivation)
+	if err == nil || result.StorageCommitted {
+		t.Fatalf("ReactivateSession(stale identity) = (%+v, %v), want uncommitted conflict", result, err)
+	}
+	current, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after stale reactivation: %v", err)
+	}
+	if current.Lifecycle != manifest.LifecycleArchived || current.Name != inheritedName {
+		t.Fatalf("linked child after stale reactivation = lifecycle %q name %q, want archived/%q", current.Lifecycle, current.Name, inheritedName)
+	}
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "concurrent-creator",
+		Name:      inheritedName,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSession() concurrent creator: %v", err)
+	}
+	var activeNames int
+	if err := adapter.Conn().QueryRow(
+		`SELECT COUNT(*) FROM agm_sessions
+		 WHERE workspace = ? AND name = ? AND status != 'archived'`,
+		adapter.Workspace(),
+		inheritedName,
+	).Scan(&activeNames); err != nil {
+		t.Fatalf("count active inherited names: %v", err)
+	}
+	if activeNames != 1 {
+		t.Fatalf("active inherited names = %d, want 1", activeNames)
 	}
 }
 

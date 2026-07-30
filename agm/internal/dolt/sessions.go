@@ -247,9 +247,45 @@ func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservat
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit session registration: %w", err)
+		commitErr := fmt.Errorf("commit session registration: %w", err)
+		committed, inspectErr := a.sessionRegistrationCommitted(session, status, harness)
+		if inspectErr != nil {
+			return errors.Join(commitErr, inspectErr)
+		}
+		if committed {
+			return nil
+		}
+		return commitErr
 	}
 	return nil
+}
+
+func (a *Adapter) sessionRegistrationCommitted(session *manifest.Manifest, expectedStatus, expectedHarness string) (bool, error) {
+	var name, status, harness, tmuxSessionName string
+	err := a.conn.QueryRow( //nolint:noctx // commit reconciliation must outlive the transaction response
+		`SELECT name, status, harness, tmux_session_name
+		 FROM agm_sessions
+		 WHERE id = ? AND workspace = ?`,
+		session.SessionID,
+		a.workspace,
+	).Scan(&name, &status, &harness, &tmuxSessionName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect session registration after commit error: %w", err)
+	}
+	if name != session.Name || status != expectedStatus || harness != expectedHarness || tmuxSessionName != session.Tmux.SessionName {
+		return false, fmt.Errorf(
+			"session registration identity after commit error does not match request: id=%s name=%q status=%q harness=%q tmux=%q",
+			session.SessionID,
+			name,
+			status,
+			harness,
+			tmuxSessionName,
+		)
+	}
+	return true, nil
 }
 
 // GetSession retrieves a session by ID

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -193,12 +194,19 @@ func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSes
 	}
 
 	// Atomically claim the active name before restoring the durable lifecycle.
-	if err := adapter.ReactivateSession(m); err != nil {
-		ui.PrintError(err, "Failed to update session in Dolt",
+	reactivation, reactivateErr := adapter.ReactivateSession(m)
+	if reactivateErr != nil && !reactivation.StorageCommitted {
+		ui.PrintError(reactivateErr, "Failed to update session in Dolt",
 			"  • Check for another non-archived session with this name\n"+
 				"  • Check database connection\n"+
 				"  • Verify Dolt server is running")
-		return err
+		return reactivateErr
+	}
+	if reactivateErr != nil {
+		ui.PrintWarning(fmt.Sprintf(
+			"Session lifecycle committed, but reservation cleanup needs attention: %v",
+			reactivateErr,
+		))
 	}
 
 	// Auto-commit manifest change if in git repo
@@ -229,7 +237,7 @@ func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSes
 				fmt.Sprintf("  • From: %s\n"+
 					"  • To: %s\n"+
 					"  • Check permissions", sessionDir, activeDir))
-			return err
+			return errors.Join(reactivateErr, err)
 		}
 
 		ui.PrintSuccess(fmt.Sprintf("Restored session: %s", m.Name))
@@ -242,7 +250,7 @@ func restoreArchivedSession(adapter *dolt.Adapter, archived *session.ArchivedSes
 		fmt.Printf("\nThe session is now visible in 'agm session list' as active/stopped.\n")
 	}
 
-	return nil
+	return reactivateErr
 }
 
 func unarchiveCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

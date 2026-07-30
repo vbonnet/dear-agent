@@ -202,6 +202,9 @@ func (a *Adapter) reserveParentLinkName(ctx context.Context, sessionID string, i
 		return false, fmt.Errorf("inspect session before linking parent: %w", err)
 	}
 	if lifecycle == manifest.LifecycleArchived || currentName == *inheritedName {
+		// Archived rows do not occupy the active-name set. ReactivateSession
+		// uses an exact archived identity CAS, so a link that advances this
+		// revision fences every stale reactivation snapshot.
 		return false, nil
 	}
 	return a.reserveSessionName(sessionID, *inheritedName)

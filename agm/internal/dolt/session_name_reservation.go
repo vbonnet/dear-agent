@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -114,42 +115,94 @@ func (a *Adapter) ReleaseSessionNameReservation(sessionID string) error {
 	return nil
 }
 
+// ReactivateSessionResult distinguishes a failed lifecycle mutation from a
+// committed reactivation whose reservation cleanup still needs attention.
+type ReactivateSessionResult struct {
+	StorageCommitted bool
+}
+
 // ReactivateSession restores an archived session only after atomically
 // reserving its workspace-scoped active name. The reservation stays live until
-// the durable lifecycle update finishes, so creation and concurrent restore
-// attempts cannot install the same active name.
-func (a *Adapter) ReactivateSession(session *manifest.Manifest) (retErr error) {
+// an identity-fenced lifecycle update finishes, so creation, parent linking,
+// and concurrent restore attempts cannot install the same active name.
+func (a *Adapter) ReactivateSession(session *manifest.Manifest) (result ReactivateSessionResult, retErr error) {
 	if session == nil {
-		return fmt.Errorf("session cannot be nil")
+		return ReactivateSessionResult{}, fmt.Errorf("session cannot be nil")
 	}
 	if session.SessionID == "" {
-		return fmt.Errorf("session_id cannot be empty")
+		return ReactivateSessionResult{}, fmt.Errorf("session_id cannot be empty")
 	}
 	if session.Lifecycle != manifest.LifecycleArchived {
-		return fmt.Errorf("session is not archived: %s", session.SessionID)
+		return ReactivateSessionResult{}, fmt.Errorf("session is not archived: %s", session.SessionID)
 	}
-	if err := a.ReserveSessionName(session.SessionID, session.Name); err != nil {
-		return err
+	reservationCreated, err := a.reserveSessionName(session.SessionID, session.Name)
+	if err != nil {
+		return ReactivateSessionResult{}, err
 	}
 
-	previousUpdatedAt := session.UpdatedAt
-	updateSucceeded := false
-	defer func() {
-		if !updateSucceeded {
-			session.Lifecycle = manifest.LifecycleArchived
-			session.UpdatedAt = previousUpdatedAt
-		}
-		if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
-			retErr = errors.Join(retErr, err)
-		}
-	}()
-
-	session.Lifecycle = ""
-	if err := a.UpdateSession(session); err != nil {
-		return err
+	if reservationCreated {
+		defer func() {
+			if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
+				retErr = errors.Join(retErr, err)
+			}
+		}()
 	}
-	updateSucceeded = true
-	return nil
+	result, retErr = a.reactivateSessionReserved(session)
+	return result, retErr
+}
+
+func (a *Adapter) reactivateSessionReserved(session *manifest.Manifest) (ReactivateSessionResult, error) {
+	observedRevision := nullableStringValue(sql.NullString{
+		String: session.Tmux.SessionRevision,
+		Valid:  session.Tmux.SessionRevision != "",
+	})
+	nextRevision := uuid.NewString()
+	updatedAt := time.Now()
+	updateResult, err := a.conn.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`UPDATE agm_sessions
+		 SET status = 'active', updated_at = ?, tmux_session_revision = ?
+		 WHERE id = ? AND workspace = ? AND status = 'archived'
+		   AND name = ? AND tmux_session_name = ?
+		   AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)`,
+		updatedAt,
+		nextRevision,
+		session.SessionID,
+		a.workspace,
+		session.Name,
+		session.Tmux.SessionName,
+		observedRevision,
+		observedRevision,
+	)
+	if err == nil {
+		rowsAffected, rowsErr := updateResult.RowsAffected()
+		if rowsErr == nil && rowsAffected == 1 {
+			session.Lifecycle = ""
+			session.UpdatedAt = updatedAt
+			session.Tmux.SessionRevision = nextRevision
+			return ReactivateSessionResult{StorageCommitted: true}, nil
+		}
+		if rowsErr != nil {
+			err = fmt.Errorf("get reactivated session rows affected: %w", rowsErr)
+		} else {
+			err = fmt.Errorf("archived session identity changed concurrently: %s", session.SessionID)
+		}
+	} else {
+		err = fmt.Errorf("reactivate session: %w", err)
+	}
+
+	current, inspectErr := a.GetSession(session.SessionID)
+	if inspectErr != nil {
+		return ReactivateSessionResult{}, errors.Join(err, fmt.Errorf("inspect session after reactivation error: %w", inspectErr))
+	}
+	if current.Lifecycle != manifest.LifecycleArchived &&
+		current.Name == session.Name &&
+		current.Tmux.SessionName == session.Tmux.SessionName {
+		session.Lifecycle = current.Lifecycle
+		session.UpdatedAt = current.UpdatedAt
+		session.Tmux.SessionRevision = current.Tmux.SessionRevision
+		return ReactivateSessionResult{StorageCommitted: true}, nil
+	}
+	return ReactivateSessionResult{}, err
 }
 
 func reservationOwnedBy(tx *sql.Tx, workspace, sessionID, name string) error {
