@@ -1214,7 +1214,7 @@ install-override-audit-launchdaemon: build-agm
 		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
 		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
 		cleanup_audit_staging() { \
-			status=$$?; \
+			status=$$1; \
 			trap - EXIT HUP INT TERM; \
 			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
 				if test "$$audit_existed" = 1; then if test -n "$$audit_backup" && /usr/bin/sudo -n /bin/mv -f "$$audit_backup" "$$audit_live"; then audit_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$audit_live" >/dev/null 2>&1 || true; fi; \
@@ -1226,7 +1226,10 @@ install-override-audit-launchdaemon: build-agm
 			if test "$$activation_started" != 1 || test "$$activation_complete" = 1; then /usr/bin/sudo -n /bin/rm -f "$$audit_backup" "$$plist_backup" >/dev/null 2>&1 || true; fi; \
 			exit "$$status"; \
 		}; \
-		trap cleanup_audit_staging EXIT HUP INT TERM; \
+		trap 'cleanup_audit_staging $$?' EXIT; \
+		trap 'cleanup_audit_staging 129' HUP; \
+		trap 'cleanup_audit_staging 130' INT; \
+		trap 'cleanup_audit_staging 143' TERM; \
 		/usr/bin/sudo -k; \
 		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
 			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \

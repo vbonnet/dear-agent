@@ -1501,12 +1501,21 @@ func interpreterLoadsExternalCode(command, value string) bool {
 	if filepath.Base(command) != "ruby" {
 		return false
 	}
-	return value == "-I" ||
+	if value == "-I" ||
 		value == "-r" ||
 		value == "--require" ||
 		strings.HasPrefix(value, "-I") ||
 		strings.HasPrefix(value, "-r") ||
-		strings.HasPrefix(value, "--require=")
+		strings.HasPrefix(value, "--require=") {
+		return true
+	}
+	// Ruby permits short switches to be bundled, so -wI. and -wrhelper
+	// retain the same preload behavior as -I. and -rhelper. Fail closed on
+	// either code-loading switch anywhere in a single-dash option bundle.
+	if strings.HasPrefix(value, "-") && !strings.HasPrefix(value, "--") {
+		return strings.ContainsAny(value[1:], "Ir")
+	}
+	return false
 }
 
 func interpreterInlineCodeOption(value string) bool {

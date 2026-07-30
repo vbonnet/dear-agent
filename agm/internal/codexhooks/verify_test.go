@@ -428,6 +428,8 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/setsid -f /bin/bash helper\n",
 		"#!/bin/sh\ncommand /usr/bin/flock -s /usr/bin/true /bin/bash helper\n",
 		"#!/bin/sh\n/usr/bin/ruby -I. -rhelper\n",
+		"#!/bin/sh\n/usr/bin/ruby -wI. /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/ruby -wrhelper /usr/bin/true\n",
 		"#!/bin/sh\ncommand /usr/bin/ruby --require=helper\n",
 		"#!/bin/sh\n/usr/bin/tar --checkpoint-action=exec='x=$(printf \".%shelper\" /); \"$x\"' -cf /dev/null /usr/bin/true\n",
 		"#!/bin/sh\ncommand /usr/bin/tar --to-command='./helper' -xf /dev/null\n",
