@@ -89,12 +89,12 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   even when another policy emits diagnostics; a Deny with no applicable
   permit also remains **deny**, regardless of diagnostics. Only after positive
   invocation authorization may confirmation-free diagnostics produce
-  `policy_unavailable`. Escalation requires a nonce receipt bound to the request, policy/input digests, expiry, approver identity/capability, and presentation
-  digest. The trusted channel displays principal, every typed action/resource-role pair, all decision-relevant typed context (including effect flags), and versions;
+  `policy_unavailable`. Escalation requires a nonce receipt bound to the request, policy/input digests, expiry, approver identity/capability, and presentation digest.
+  The trusted channel renders principal, every typed action/resource-role pair, all decision-relevant context/effect flags, and versions as length-delimited canonical escaped bytes, never raw terminal text;
   any display/request/receipt, resource-role, context, or approver-scope mismatch denies. Tmux input, harness callbacks, and agent-addressable messages cannot prove approval;
   without an integrity-protected channel, confirmation fails closed. A harness-independent pre-receipt deadline makes silence/cancellation return typed
-  `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is not that bound. Diagnostics never make a
-  forbid or missing permit user-overridable. Final dispatch uses a privileged nonce-consumption authority outside every agent-writable root; durable atomic consumption lets one contender execute and denies replay.
+  `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is separate and finalization compares it with a trusted clock. Diagnostics never make a
+  forbid or missing permit user-overridable. Final dispatch checks expiry and uses a privileged nonce-consumption authority outside every agent-writable root; durable atomic consumption lets one contender execute and denies replay.
 - Bound every evaluator call by a harness-independent deadline. A panic,
   process crash, signal, nonzero exit, EOF, transport closure, timeout,
   cancellation without a complete decision, or incomplete response is a typed
@@ -232,12 +232,12 @@ tests must prove all of the following:
    exit, EOF, timeout, and incomplete responses at each gate. Before positive
    invocation authorization these return typed non-confirmable unavailability
    by the deadline and execute nothing; only later confirmation-free failure
-   may escalate. Every harness rejects an authenticated but unauthorized signer
-   and any mismatch among displayed canonical inputs, context, request, and
-   receipt; changing only a resource role or context (such as a force flag) rejects approval.
-   Terminal keys, callbacks, and agent messages cannot mint a human receipt.
-   Trusted display and approval of unchanged snapshots reauthorizes one dispatch;
-   a privileged nonce authority accepts one duplicate/concurrent receipt; store deletion/rollback, replay, silence, and cancellation dispatch nothing.
+   may escalate. Every harness rejects an authenticated but unauthorized signer and any mismatch among displayed canonical inputs, context, request, and
+   receipt; changing only a resource role or context (such as a force flag) rejects approval. Paths, hostnames, and context containing newlines, bidi controls,
+   terminal escapes, delimiters, or lookalike bytes render unambiguously and cannot produce approval for different canonical bytes. Terminal keys, callbacks, and
+   agent messages cannot mint a human receipt. Trusted display and approval of unchanged snapshots reauthorizes one dispatch; finalization under a trusted clock
+   rejects a receipt delayed beyond expiry even when its signature/digests remain valid. A privileged nonce authority accepts one duplicate/concurrent receipt;
+   store deletion/rollback, replay, expired receipt, silence, and cancellation dispatch nothing.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
