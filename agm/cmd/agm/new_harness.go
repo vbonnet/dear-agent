@@ -100,16 +100,13 @@ func submitHarnessLaunch(
 		}
 		return resolveHarnessLaunchSubmission(harness, launch, submit())
 	}
-	if err := resolveHarnessLaunchSubmission(harness, launch, submit()); err != nil {
-		return err
+	if len(reservations) != 0 || spec.AfterAuthorization != nil {
+		return errors.Join(
+			fmt.Errorf("%s launch cannot bind admission effects to its executor", harness),
+			launch.CancelUndelivered(),
+		)
 	}
-	if err := launch.FinalizeLaunch(true, reservations...); err != nil {
-		return fmt.Errorf("%s delivered launch override transaction: %w", harness, err)
-	}
-	if spec.AfterAuthorization != nil {
-		spec.AfterAuthorization()
-	}
-	return nil
+	return resolveHarnessLaunchSubmission(harness, launch, submit())
 }
 
 type piHarnessRuntime struct {

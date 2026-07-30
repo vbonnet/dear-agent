@@ -399,6 +399,9 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/bash\ngetopts x PATH; helper\n",
 		"#!/bin/bash\n/bin/printf 'x\\n' | mapfile -C '/bin/bash helper' -c 1\n",
 		"#!/bin/bash\n/bin/printf 'x\\n' | command readarray -C '/bin/bash helper' -c 1\n",
+		"#!/bin/sh\n/usr/bin/awk 'BEGIN{x=sprintf(\"%c%c%s\",46,47,\"helper\");system(x)}'\n",
+		"#!/bin/sh\n/usr/bin/awk '{ cmd | getline value }'\n",
+		"#!/bin/sh\ncommand /usr/bin/awk '{ print $0 | \"helper\" }'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {

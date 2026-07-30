@@ -39,6 +39,9 @@ var (
 	pathAssignment        = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:(?:/usr/bin/)?env[\t ]+(?:--?[A-Za-z0-9_-]+(?:=[^ \t;|&]+)?[\t ]+)*)?(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:export|readonly|typeset|declare|local)[\t ]+)?PATH(?:\+)?[\t ]*=`)
 	pathUnset             = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:unset|export[\t ]+-n)[\t ]+(?:--[\t ]+)?PATH(?:[\t ;\n]|$)`)
 	envPathUnset          = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:/usr/bin/)?env[\t ]+(?:-[^- \t]*u|--unset)(?:=|[\t ]+)PATH(?:[\t ;\n]|$)`)
+	awkSystemCall         = regexp.MustCompile(`\bsystem[[:space:]]*\(`)
+	awkGetline            = regexp.MustCompile(`\bgetline\b`)
+	awkOutputPipe         = regexp.MustCompile(`\b(?:print|printf)\b[^;\n]*\|`)
 )
 
 // Attestation pins hook trust to immutable Git objects and their exact
@@ -753,11 +756,62 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 	return nil, ""
 }
 
+func awkUsesCommandExecution(command string, args []*syntax.Word) bool {
+	switch filepath.Base(command) {
+	case "awk", "nawk", "mawk", "gawk":
+	default:
+		return false
+	}
+	program, static := staticAWKProgram(args)
+	return !static || awkProgramExecutesCommand(program)
+}
+
+func staticAWKProgram(args []*syntax.Word) (string, bool) {
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			return "", false
+		}
+		if value == "--" {
+			if index+1 >= len(args) {
+				return "", false
+			}
+			return staticShellWord(args[index+1])
+		}
+		if value == "-f" || value == "--file" ||
+			strings.HasPrefix(value, "-f") ||
+			strings.HasPrefix(value, "--file=") {
+			return "", false
+		}
+		if value == "-F" || value == "-v" || value == "--assign" {
+			index++
+			continue
+		}
+		if strings.HasPrefix(value, "-") {
+			continue
+		}
+		if strings.Contains(value, "=") && !strings.ContainsAny(value, "{}") {
+			continue
+		}
+		return value, true
+	}
+	return "", false
+}
+
+func awkProgramExecutesCommand(program string) bool {
+	return awkSystemCall.MatchString(program) ||
+		awkGetline.MatchString(program) ||
+		awkOutputPipe.MatchString(program)
+}
+
 func dynamicBuiltinOperand(
 	command string,
 	commandWord *syntax.Word,
 	args []*syntax.Word,
 ) (*syntax.Word, string) {
+	if awkUsesCommandExecution(command, args) {
+		return commandWord, "command-capable AWK runtime"
+	}
 	switch command {
 	case "mapfile", "readarray":
 		return commandWord, "stateful string-evaluating shell builtin"

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
@@ -145,6 +146,57 @@ func TestPrepareGeminiLaunchCommandValidatesOnlyPastedModel(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "control characters") {
 		t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want model control rejection", err)
+	}
+}
+
+func TestPrepareNonCodexLaunchWithAdmissionUsesPrivateExecutor(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	launch, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness:     "agy",
+		SessionName: "admission-bound-agy",
+		WorkDir:     "/tmp",
+		BeforeSpawn: func(
+			reservations ...*override.Reservation,
+		) ([]*override.Reservation, error) {
+			return reservations, nil
+		},
+		AfterAuthorization: func() {},
+	})
+	if err != nil {
+		t.Fatalf("PrepareHarnessLaunchCommand() error = %v", err)
+	}
+	t.Cleanup(func() { _ = launch.CancelUndelivered() })
+	if !strings.Contains(launch.Command, harnessexec.HarnessProtocol) {
+		t.Fatalf("prepared launch = %q, want private harness executor", launch.Command)
+	}
+	if launch.BindOverrideReservations == nil || launch.Cancel == nil {
+		t.Fatal("admission-bound launch omitted handoff binding or cancellation")
+	}
+}
+
+func TestPrepareClaudeLaunchCarriesAdmissionBinding(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	launch, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness:     "claude-code",
+		SessionName: "admission-bound-claude",
+		WorkDir:     "/tmp",
+		BeforeSpawn: func(
+			reservations ...*override.Reservation,
+		) ([]*override.Reservation, error) {
+			return reservations, nil
+		},
+		AfterAuthorization: func() {},
+		DisableOAuth:       true,
+	})
+	if err != nil {
+		t.Fatalf("PrepareHarnessLaunchCommand() error = %v", err)
+	}
+	t.Cleanup(func() { _ = launch.CancelUndelivered() })
+	if !strings.Contains(launch.Command, harnessexec.ClaudeProtocol) {
+		t.Fatalf("prepared launch = %q, want private Claude executor", launch.Command)
+	}
+	if launch.BindOverrideReservations == nil || launch.Cancel == nil {
+		t.Fatal("admission-bound Claude launch omitted handoff binding or cancellation")
 	}
 }
 

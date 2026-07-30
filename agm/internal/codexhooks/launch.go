@@ -133,9 +133,6 @@ func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any,
 func validateMaterializedSystemExecutables(assets map[string]asset) error {
 	paths := make(map[string]struct{})
 	for _, item := range assets {
-		if !item.executable {
-			continue
-		}
 		for _, match := range absolutePathToken.FindAllStringSubmatch(
 			withoutFullLineComments(string(item.content)),
 			-1,

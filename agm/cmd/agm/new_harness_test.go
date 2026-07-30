@@ -74,14 +74,22 @@ func TestSubmitHarnessLaunchRecordsNonDeferredSpawnAfterAuthorization(t *testing
 			events = append(events, "record-spawn")
 		},
 	}
-	err := submitHarnessLaunch("fixture", spec, ops.HarnessLaunchCommand{}, func() error {
+	err := submitHarnessLaunch("fixture", spec, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(recordSpawn bool, _ ...*override.Reservation) error {
+			if !recordSpawn {
+				t.Fatal("executor did not receive the spawn-recording obligation")
+			}
+			events = append(events, "bind")
+			return nil
+		},
+	}, func() error {
 		events = append(events, "submit")
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("submitHarnessLaunch() error = %v", err)
 	}
-	if got, want := strings.Join(events, ","), "authorize,submit,record-spawn"; got != want {
+	if got, want := strings.Join(events, ","), "authorize,bind,submit"; got != want {
 		t.Fatalf("launch boundary events = %q, want %q", got, want)
 	}
 }
@@ -90,6 +98,7 @@ func TestSubmitHarnessLaunchConfirmedFailureDoesNotFinalizeNonDeferredEffects(t 
 	refusal := errors.New("tmux rejected submission")
 	reservation := &override.Reservation{}
 	recorded := false
+	canceled := false
 	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
 		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
 			return []*override.Reservation{reservation}, nil
@@ -97,7 +106,15 @@ func TestSubmitHarnessLaunchConfirmedFailureDoesNotFinalizeNonDeferredEffects(t 
 		AfterAuthorization: func() {
 			recorded = true
 		},
-	}, ops.HarnessLaunchCommand{}, func() error {
+	}, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(bool, ...*override.Reservation) error {
+			return nil
+		},
+		Cancel: func() error {
+			canceled = true
+			return nil
+		},
+	}, func() error {
 		return refusal
 	})
 	if !errors.Is(err, refusal) {
@@ -105,6 +122,9 @@ func TestSubmitHarnessLaunchConfirmedFailureDoesNotFinalizeNonDeferredEffects(t 
 	}
 	if recorded {
 		t.Fatal("confirmed submission failure recorded a spawn")
+	}
+	if !canceled {
+		t.Fatal("confirmed submission failure preserved an undelivered handoff")
 	}
 	if _, commitErr := reservation.Commit(); errors.Is(commitErr, override.ErrReservationCommitted) {
 		t.Fatal("confirmed submission failure consumed the launch override reservation")
@@ -121,14 +141,22 @@ func TestSubmitHarnessLaunchUncertainDeliveryFinalizesNonDeferredEffects(t *test
 		AfterAuthorization: func() {
 			events = append(events, "record-spawn")
 		},
-	}, ops.HarnessLaunchCommand{}, func() error {
+	}, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(recordSpawn bool, _ ...*override.Reservation) error {
+			if !recordSpawn {
+				t.Fatal("uncertain executor launch omitted spawn recording")
+			}
+			events = append(events, "bind")
+			return nil
+		},
+	}, func() error {
 		events = append(events, "submit-uncertain")
 		return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
 	})
 	if err != nil {
 		t.Fatalf("submitHarnessLaunch() error = %v", err)
 	}
-	if got, want := strings.Join(events, ","), "authorize,submit-uncertain,record-spawn"; got != want {
+	if got, want := strings.Join(events, ","), "authorize,bind,submit-uncertain"; got != want {
 		t.Fatalf("uncertain launch boundary events = %q, want %q", got, want)
 	}
 }

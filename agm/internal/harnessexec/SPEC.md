@@ -5,15 +5,16 @@
 ## Overview
 
 `agm/internal/harnessexec` is the private process boundary between token-free
-tmux commands and interactive Codex or Claude processes. The protocol is
-intercepted before normal AGM startup and is not a user-facing command surface.
+tmux commands and interactive harness processes. The protocol is intercepted
+before normal AGM startup and is not a user-facing command surface.
 
 ## Security Boundary
 
 For Codex, the executor prevents ambient cross-harness credential inheritance
 with a deny-by-default child environment. For Claude, it treats authentication
 and OpenTelemetry state as a complete caller snapshot, but otherwise preserves
-the harness environment. For both harnesses, it protects transported values
+the harness environment. For other harnesses, it binds the exact submitted
+command and launch-admission effects to a one-shot executor handoff. It protects transported values
 from shell command, process-argument, pane-scrollback, and debug-log exposure.
 It assumes the installed AGM and harness executables, the user's environment,
 and the user's configuration and credential files are trusted. It does not
@@ -52,6 +53,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 **HEXEC-15** When AGM resolves an executable or stages a private handoff path that will be interpolated into a pasted pane command, the system shall reject invalid UTF-8 and terminal control characters in that generated value before building or delivering the command.
 
 **HEXEC-16** When the private Codex executor consumes a hook-trust handoff, the system shall require the handoff to bind the exact source repository, full commit, hook digest, hook-trust claim, and every other launch override claim; re-run persisted Git attestation, hook configuration, helper validation, executable resolution, and every live circuit-breaker gate before and after reauthorization whether or not the handoff carries an admission-brake claim; treat every carried proof as a non-authoritative claim; require and re-reserve a current exact admission-brake grant whenever either live check reports the brake as the sole refusal; re-reserve every other current exact grant with a fresh authorization ID; and append the complete override transaction as the final userspace action before executing Codex.
+
+**HEXEC-17** When a non-Codex tmux launch carries launch-admission reservations or a successful-spawn recording obligation, the system shall bind its exact session and command plus those effects into a cancellable one-shot handoff before submission; the private executor shall revalidate and commit every bound override immediately before recording the spawn and replacing itself with the submitted command, refuse execution if commit fails, remove the handoff after a definite pre-delivery failure, and preserve it when delivery is uncertain.
 
 ## BDD Traceability
 

@@ -109,6 +109,8 @@ type launchHandoff struct {
 	RecordSpawn               bool                          `json:"record_spawn,omitempty"`
 	CodexHookRoot             string                        `json:"codex_hook_root,omitempty"`
 	CodexLaunch               *codexLaunchBinding           `json:"codex_launch,omitempty"`
+	HarnessSessionName        string                        `json:"harness_session_name,omitempty"`
+	HarnessCommand            string                        `json:"harness_command,omitempty"`
 }
 
 type codexLaunchBinding struct {
@@ -176,7 +178,8 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 		lease:   lease,
 		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
 			return bindHandoffOverrideReservations(
-				handoffPath, launch.BypassHookTrust, recordSpawn, reservations...,
+				handoffPath, CodexProtocol, launch.BypassHookTrust,
+				recordSpawn, reservations...,
 			)
 		},
 	}, nil
@@ -228,7 +231,54 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
-	return PreparedCommand{Command: BuildClaudeCommand(launch), path: handoffPath, lease: lease}, nil
+	return PreparedCommand{
+		Command: BuildClaudeCommand(launch),
+		path:    handoffPath,
+		lease:   lease,
+		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
+			return bindHandoffOverrideReservations(
+				handoffPath, ClaudeProtocol, false, recordSpawn, reservations...,
+			)
+		},
+	}, nil
+}
+
+// PrepareHarnessCommand stages a non-Codex, non-Claude tmux command behind a
+// private executor so launch overrides are committed immediately before exec.
+func PrepareHarnessCommand(
+	sessionName, command string,
+	persistent, deferred bool,
+) (PreparedCommand, error) {
+	if err := validateText("session", sessionName); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate private harness command: %w", err)
+	}
+	if err := validateText("command", command); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate private harness command: %w", err)
+	}
+	executable, err := resolvePrivateExecutable()
+	if err != nil {
+		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
+	}
+	path, err := stageHarnessHandoff(sessionName, command, deferred)
+	if err != nil {
+		return PreparedCommand{}, err
+	}
+	lease, err := scheduleHandoffExpiry(
+		executable, path, time.Now().Add(handoffMaxAge), deferred,
+	)
+	if err != nil {
+		return PreparedCommand{}, cleanupFailedHandoff(path, err)
+	}
+	return PreparedCommand{
+		Command: BuildHarnessCommand(executable, path, sessionName, persistent),
+		path:    path,
+		lease:   lease,
+		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
+			return bindHandoffOverrideReservations(
+				path, HarnessProtocol, false, recordSpawn, reservations...,
+			)
+		},
+	}, nil
 }
 
 func validateCodexPastedValues(launch CodexLaunch) error {
@@ -348,6 +398,7 @@ func bindCodexLaunch(launch CodexLaunch) codexLaunchBinding {
 
 func bindHandoffOverrideReservations(
 	path string,
+	protocol string,
 	trusted bool,
 	recordSpawn bool,
 	reservations ...*override.Reservation,
@@ -359,11 +410,12 @@ func bindHandoffOverrideReservations(
 		}
 		proofs = append(proofs, reservation.Proof())
 	}
-	return bindHandoffOverrideProofs(path, trusted, recordSpawn, proofs)
+	return bindHandoffOverrideProofs(path, protocol, trusted, recordSpawn, proofs)
 }
 
 func bindHandoffOverrideProofs(
 	path string,
+	protocol string,
 	trusted bool,
 	recordSpawn bool,
 	proofs []override.AuthorizationProof,
@@ -379,7 +431,7 @@ func bindHandoffOverrideProofs(
 	}
 	handoff.OverrideProofs = proofs
 	handoff.RecordSpawn = recordSpawn
-	if err := validateHandoff(handoff, CodexProtocol, time.Now(), openedInfo.ModTime()); err != nil {
+	if err := validateHandoff(handoff, protocol, time.Now(), openedInfo.ModTime()); err != nil {
 		return err
 	}
 	encoded, err := encodeBoundHandoff(handoff)
@@ -754,7 +806,20 @@ func stageHandoff(
 	if err != nil {
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
-	return writeHandoff(root, protocol, environment, deferred, codexHookRoot, binding)
+	return writeHandoff(root, protocol, environment, deferred, codexHookRoot, binding, "", "")
+}
+
+func stageHarnessHandoff(
+	sessionName, command string,
+	deferred bool,
+) (string, error) {
+	root, err := resolvedHandoffRoot(false)
+	if err != nil {
+		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
+	}
+	return writeHandoff(
+		root, HarnessProtocol, nil, deferred, "", nil, sessionName, command,
+	)
 }
 
 func stagedCodexBinding(
@@ -780,6 +845,7 @@ func writeHandoff(
 	deferred bool,
 	codexHookRoot string,
 	binding *codexLaunchBinding,
+	harnessSessionName, harnessCommand string,
 ) (string, error) {
 	if err := validateText("private handoff directory", root); err != nil {
 		return "", err
@@ -815,6 +881,8 @@ func writeHandoff(
 		Environment:               append([]string(nil), environment...),
 		CodexHookRoot:             codexHookRoot,
 		CodexLaunch:               binding,
+		HarnessSessionName:        harnessSessionName,
+		HarnessCommand:            harnessCommand,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -1032,6 +1100,23 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	} else if handoff.CodexLaunch != nil {
 		return errors.New("private launch handoff contains a Codex launch binding without a hook capability")
 	}
+	if protocol == HarnessProtocol {
+		if handoff.HarnessSessionName == "" || handoff.HarnessCommand == "" {
+			return errors.New("private harness handoff omits its session or command")
+		}
+		if err := validateText("private harness session", handoff.HarnessSessionName); err != nil {
+			return err
+		}
+		if err := validateText("private harness command", handoff.HarnessCommand); err != nil {
+			return err
+		}
+		if handoff.CodexHookRoot != "" || handoff.CodexLaunch != nil ||
+			len(handoff.Environment) != 0 {
+			return errors.New("private harness handoff contains unrelated launch state")
+		}
+	} else if handoff.HarnessSessionName != "" || handoff.HarnessCommand != "" {
+		return errors.New("private launch handoff contains unrelated harness command state")
+	}
 	if err := validateHandoffEnvironment(protocol, handoff.Environment); err != nil {
 		return err
 	}
@@ -1071,6 +1156,8 @@ func validateHandoffOverrideProof(
 			return false, errors.New("private launch handoff contains an admission-brake subject")
 		}
 		if proof.Session == "" ||
+			(handoff.HarnessSessionName != "" &&
+				proof.Session != handoff.HarnessSessionName) ||
 			(handoff.CodexLaunch != nil && proof.Session != handoff.CodexLaunch.SessionName) {
 			return false, errors.New("private launch handoff contains an unrelated admission-brake proof")
 		}

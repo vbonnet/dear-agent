@@ -95,11 +95,9 @@ func (c HarnessLaunchCommand) CancelUndelivered() error {
 	return c.Cancel()
 }
 
-// FinalizeLaunch either seals reservations and the spawn-recording obligation
-// into a private Codex handoff for executor-bound commitment, or commits the
-// reservations after non-Codex command delivery succeeds or becomes
-// uncertain. Non-Codex callers run their surface-owned AfterAuthorization
-// callback only after this method succeeds.
+// FinalizeLaunch seals reservations and the spawn-recording obligation into a
+// private handoff for executor-bound commitment. Legacy effect-free launch
+// commands fall back to direct reservation commitment.
 func (c HarnessLaunchCommand) FinalizeLaunch(
 	recordSpawn bool,
 	reservations ...*override.Reservation,
@@ -150,10 +148,11 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	}
 }
 
-// PrepareHarnessLaunchCommand stages caller-only credentials and telemetry for
-// private Codex and Claude execution. The returned command contains only the
-// absolute current AGM path, validated non-secret metadata, and an opaque
-// owner-only handoff path. Call Cancel only when the command was not delivered.
+// PrepareHarnessLaunchCommand stages caller-only credentials, telemetry, and
+// launch-admission effects for private harness execution. Private commands
+// contain only the absolute current AGM path, validated non-secret metadata,
+// and an opaque owner-only handoff path. Call Cancel only when the command was
+// not delivered.
 func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, error) {
 	if err := validateHarnessLaunchSpec(spec); err != nil {
 		return HarnessLaunchCommand{}, err
@@ -167,6 +166,7 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 		}
 		return HarnessLaunchCommand{
 			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
 	case "codex-cli":
 		launch, modeApplied := codexLaunch(spec)
@@ -184,7 +184,28 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
 	default:
-		return BuildHarnessLaunchCommand(spec), nil
+		launch := BuildHarnessLaunchCommand(spec)
+		if spec.SessionName == "" ||
+			(spec.BeforeSpawn == nil && spec.AfterAuthorization == nil) {
+			return launch, nil
+		}
+		command := launch.Command
+		if !spec.Persistent {
+			command = strings.TrimSuffix(command, launchparity.ExitSuffix(false))
+		}
+		prepared, err := harnessexec.PrepareHarnessCommand(
+			spec.SessionName,
+			command,
+			spec.Persistent,
+			spec.DeferredUntilCallerExit,
+		)
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		launch.Command = prepared.Command
+		launch.Cancel = prepared.Cancel
+		launch.BindOverrideReservations = prepared.BindOverrideReservations
+		return launch, nil
 	}
 }
 

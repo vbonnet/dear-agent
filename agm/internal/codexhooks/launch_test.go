@@ -85,7 +85,7 @@ func TestValidateMaterializedSystemExecutablesChecksExactAllowlistedFiles(t *tes
 
 	assets := map[string]asset{
 		".codex/hooks/fixture": {
-			executable: true,
+			executable: false,
 			content: []byte(
 				"#!/bin/sh\n" +
 					"/usr/local/libexec/dear-agent-codex-hook-json -r .\n" +
@@ -105,7 +105,7 @@ func TestValidateMaterializedSystemExecutablesChecksExactAllowlistedFiles(t *tes
 	}
 
 	assets[".codex/hooks/fixture"] = asset{
-		executable: true,
+		executable: false,
 		content:    []byte("#!/bin/sh\n/usr/local/libexec/user-tools/helper\n"),
 	}
 	if err := validateMaterializedSystemExecutables(assets); err == nil ||

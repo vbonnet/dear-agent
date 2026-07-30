@@ -34,6 +34,10 @@ const (
 	// configuration, telemetry, or debug logging starts. It carries only
 	// non-secret Claude metadata; OAuth is resolved inside the executor.
 	ClaudeProtocol = "__exec-claude"
+	// HarnessProtocol is the private launch boundary for non-Codex, non-Claude
+	// tmux commands. The executor commits launch-bound override proofs
+	// immediately before replacing itself with the validated shell command.
+	HarnessProtocol = "__exec-harness"
 	// ExpiryProtocol is the private cleanup protocol used by a detached,
 	// credential-free helper to expire an unconsumed launch handoff.
 	ExpiryProtocol = "__expire-harness-handoff"
@@ -80,7 +84,7 @@ func reserveExecutorLaunchOverrides(
 	check checkLaunchAdmission,
 	reserve reserveOverrideClaim,
 ) ([]*override.Reservation, error) {
-	// Ordinary Codex launches carry no override claims and remain governed by
+	// Ordinary harness launches carry no override claims and remain governed by
 	// the parent launch path. A trusted hook handoff always carries its required
 	// hook-trust claim, so it cannot use this boundary to suppress the executor's
 	// live admission checks.
@@ -103,18 +107,18 @@ func reserveExecutorLaunchOverrides(
 	seen := make(map[override.Kind]struct{}, len(proofs))
 	for _, proof := range proofs {
 		if _, duplicate := seen[proof.Kind]; duplicate {
-			return nil, fmt.Errorf("private Codex launch repeats override kind %q", proof.Kind)
+			return nil, fmt.Errorf("private harness launch repeats override kind %q", proof.Kind)
 		}
 		seen[proof.Kind] = struct{}{}
 		switch proof.Kind {
 		case override.KindAdmissionBrake, override.KindCodexHookTrust:
 		case override.KindSupervisorOAuthCheck:
-			return nil, fmt.Errorf("private Codex launch contains unsupported override kind %q", proof.Kind)
+			return nil, fmt.Errorf("private harness launch contains unsupported override kind %q", proof.Kind)
 		default:
-			return nil, fmt.Errorf("private Codex launch contains unsupported override kind %q", proof.Kind)
+			return nil, fmt.Errorf("private harness launch contains unsupported override kind %q", proof.Kind)
 		}
 		if proof.Session != sessionName {
-			return nil, errors.New("private Codex launch override claim is for another session")
+			return nil, errors.New("private harness launch override claim is for another session")
 		}
 		reservation, err := reserve(override.Request{
 			Kind:    proof.Kind,
@@ -124,7 +128,7 @@ func reserveExecutorLaunchOverrides(
 			Subject: proof.Subject,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("re-authorize private Codex launch override %q: %w", proof.Kind, err)
+			return nil, fmt.Errorf("re-authorize private harness launch override %q: %w", proof.Kind, err)
 		}
 		authenticated = append(authenticated, authenticatedReservation{
 			kind: proof.Kind, reservation: reservation,
@@ -155,7 +159,7 @@ func validateExecutorAdmissionClaim(
 	}
 	crossesAdmissionBrake := circuitbreaker.RequiresAdmissionBrakeOverride(result)
 	if crossesAdmissionBrake && !hasAdmissionBrake {
-		return false, errors.New("private Codex launch requires an admission-brake authorization claim")
+		return false, errors.New("private harness launch requires an admission-brake authorization claim")
 	}
 	return crossesAdmissionBrake, nil
 }
@@ -165,7 +169,7 @@ func validateExecutorAdmissionResult(result circuitbreaker.CheckResult) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"private Codex launch denied by live circuit breakers: %s",
+		"private harness launch denied by live circuit breakers: %s",
 		circuitbreaker.FormatDenied(result),
 	)
 }
@@ -263,7 +267,8 @@ type ClaudeLaunch struct {
 
 // IsProtocol reports whether arg names one of the private launch protocols.
 func IsProtocol(arg string) bool {
-	return arg == CodexProtocol || arg == ClaudeProtocol || arg == ExpiryProtocol
+	return arg == CodexProtocol || arg == ClaudeProtocol ||
+		arg == HarnessProtocol || arg == ExpiryProtocol
 }
 
 // BuildCodexCommand returns the token-free shell command pasted into tmux.
@@ -343,6 +348,21 @@ func BuildClaudeCommand(launch ClaudeLaunch) string {
 	return b.String()
 }
 
+// BuildHarnessCommand returns the token-free executor command pasted into tmux.
+func BuildHarnessCommand(
+	executable, handoffPath, sessionName string,
+	persistent bool,
+) string {
+	var b strings.Builder
+	b.WriteString(privateCommandPrefix(executable, HarnessProtocol))
+	appendShellFlag(&b, "--handoff", handoffPath)
+	appendShellFlag(&b, "--session", sessionName)
+	if !persistent {
+		b.WriteString(" && exit")
+	}
+	return b.String()
+}
+
 func appendShellFlag(b *strings.Builder, name, value string) {
 	b.WriteByte(' ')
 	b.WriteString(name)
@@ -366,11 +386,46 @@ func Run(protocol string, args []string) error {
 		return runCodex(args)
 	case ClaudeProtocol:
 		return runClaude(args)
+	case HarnessProtocol:
+		return runHarness(args)
 	case ExpiryProtocol:
 		return runExpiry(args)
 	default:
 		return fmt.Errorf("unsupported private harness protocol %q", protocol)
 	}
+}
+
+func runHarness(args []string) error {
+	request, err := parseHarness(args)
+	if err != nil {
+		return err
+	}
+	handoff, err := consumeHandoff(request.HandoffPath, HarnessProtocol, "")
+	if err != nil {
+		return err
+	}
+	if handoff.HarnessSessionName != request.SessionName {
+		return errors.New("private harness handoff is for another session")
+	}
+	if err := commitLaunchOverrideProofs(
+		request.SessionName,
+		handoff.OverrideProofs...,
+	); err != nil {
+		return fmt.Errorf("commit harness launch override transaction: %w", err)
+	}
+	if handoff.RecordSpawn {
+		if err := recordLaunchSpawn(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "agm: warning: failed to record successful harness spawn: %v\n", err)
+		}
+	}
+	if err := replaceProcess(
+		"/bin/sh",
+		[]string{"sh", "-c", handoff.HarnessCommand},
+		os.Environ(),
+	); err != nil {
+		return fmt.Errorf("execute harness command: %w", err)
+	}
+	return errors.New("harness executor returned unexpectedly")
 }
 
 func runExpiry(args []string) error {
@@ -506,6 +561,8 @@ func runClaude(args []string) error {
 		parent = removeEnvironment(parent, claudeHandoffEnvironment)
 		parent = overlayEnvironment(parent, handoff.Environment)
 		token = environmentMap(handoff.Environment)[auth.OAuthEnvVar]
+		request.OverrideProofs = append([]override.AuthorizationProof(nil), handoff.OverrideProofs...)
+		request.RecordSpawn = handoff.RecordSpawn
 	}
 	if token == "" && !request.DisableOAuth && request.HandoffPath == "" {
 		token = resolveClaudeOAuth()
@@ -522,10 +579,48 @@ func runClaude(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve claude executable: %w", err)
 	}
+	if err := commitLaunchOverrideProofs(request.SessionName, request.OverrideProofs...); err != nil {
+		return fmt.Errorf("commit Claude launch override transaction: %w", err)
+	}
+	if request.RecordSpawn {
+		if err := recordLaunchSpawn(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "agm: warning: failed to record successful Claude spawn: %v\n", err)
+		}
+	}
 	if err := replaceProcess(path, argv, env); err != nil {
 		return fmt.Errorf("execute claude: %w", err)
 	}
 	return errors.New("claude executor returned unexpectedly")
+}
+
+type harnessRequest struct {
+	HandoffPath string
+	SessionName string
+}
+
+func parseHarness(args []string) (harnessRequest, error) {
+	var request harnessRequest
+	set := flag.NewFlagSet(HarnessProtocol, flag.ContinueOnError)
+	set.SetOutput(io.Discard)
+	set.StringVar(&request.HandoffPath, "handoff", "", "")
+	set.StringVar(&request.SessionName, "session", "", "")
+	if err := set.Parse(args); err != nil {
+		return harnessRequest{}, fmt.Errorf("invalid private harness launch request: %w", err)
+	}
+	if set.NArg() != 0 {
+		return harnessRequest{}, errors.New("invalid private harness launch request: positional arguments are not allowed")
+	}
+	if err := validateText("handoff", request.HandoffPath); err != nil {
+		return harnessRequest{}, err
+	}
+	if !filepath.IsAbs(request.HandoffPath) ||
+		filepath.Clean(request.HandoffPath) != request.HandoffPath {
+		return harnessRequest{}, errors.New("invalid private harness launch request: handoff must be a clean absolute path")
+	}
+	if err := validateText("session", request.SessionName); err != nil {
+		return harnessRequest{}, err
+	}
+	return request, nil
 }
 
 type stringList []string
@@ -676,6 +771,8 @@ type claudeRequest struct {
 	MaxBudgetUSD     float64
 	DisableOAuth     bool
 	ForwardTelemetry bool
+	OverrideProofs   []override.AuthorizationProof
+	RecordSpawn      bool
 }
 
 func parseClaude(args []string) (claudeRequest, error) {

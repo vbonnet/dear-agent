@@ -291,6 +291,116 @@ func TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testin
 	}
 }
 
+func TestPreparedHarnessCommandCommitsBeforeExec(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalScheduleExpiry := scheduleHandoffExpiry
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalRecordSpawn := recordLaunchSpawn
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduleExpiry
+		commitLaunchOverrideProofs = originalCommitProofs
+		recordLaunchSpawn = originalRecordSpawn
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) {
+		return nil, nil
+	}
+
+	const command = "cd '/tmp/agy work' && agy --model fixture"
+	prepared, err := PrepareHarnessCommand("agy-worker", command, false, false)
+	if err != nil {
+		t.Fatalf("PrepareHarnessCommand() error = %v", err)
+	}
+	if !strings.HasPrefix(prepared.Command, "'/opt/agm/bin/agm' "+HarnessProtocol) ||
+		!strings.HasSuffix(prepared.Command, " && exit") {
+		t.Fatalf("prepared harness command = %q", prepared.Command)
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		t.Fatalf("bind harness launch effects: %v", err)
+	}
+
+	var events []string
+	commitLaunchOverrideProofs = func(sessionName string, proofs ...override.AuthorizationProof) error {
+		if sessionName != "agy-worker" || len(proofs) != 0 {
+			t.Fatalf("commit launch = (%q, %v)", sessionName, proofs)
+		}
+		events = append(events, "commit")
+		return nil
+	}
+	recordLaunchSpawn = func() error {
+		events = append(events, "record-spawn")
+		return nil
+	}
+	replaceProcess = func(path string, argv, _ []string) error {
+		if path != "/bin/sh" || !slices.Equal(argv, []string{"sh", "-c", command}) {
+			t.Fatalf("replace process = (%q, %v)", path, argv)
+		}
+		events = append(events, "exec")
+		return errors.New("fixture exec returned")
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "agy-worker",
+	})
+	if err == nil || !strings.Contains(err.Error(), "fixture exec returned") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "commit,record-spawn,exec"; got != want {
+		t.Fatalf("executor events = %q, want %q", got, want)
+	}
+}
+
+func TestPreparedHarnessCommandRefusesExecWhenCommitFails(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalScheduleExpiry := scheduleHandoffExpiry
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalRecordSpawn := recordLaunchSpawn
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduleExpiry
+		commitLaunchOverrideProofs = originalCommitProofs
+		recordLaunchSpawn = originalRecordSpawn
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) {
+		return nil, nil
+	}
+	prepared, err := PrepareHarnessCommand("agy-denied", "agy --model fixture", true, false)
+	if err != nil {
+		t.Fatalf("PrepareHarnessCommand() error = %v", err)
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		t.Fatalf("bind harness launch effects: %v", err)
+	}
+
+	refusal := errors.New("override ledger unavailable")
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		return refusal
+	}
+	recordLaunchSpawn = func() error {
+		t.Fatal("spawn recorded after override commit failed")
+		return nil
+	}
+	replaceProcess = func(string, []string, []string) error {
+		t.Fatal("harness executed after override commit failed")
+		return nil
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "agy-denied",
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("Run() error = %v, want %v", err, refusal)
+	}
+}
+
 func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("AGM_STATE_DIR", stateDir)
@@ -527,7 +637,9 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 	bindProof := func(prepared PreparedCommand, proofs ...override.AuthorizationProof) {
 		t.Helper()
-		if err := bindHandoffOverrideProofs(prepared.path, true, true, proofs); err != nil {
+		if err := bindHandoffOverrideProofs(
+			prepared.path, CodexProtocol, true, true, proofs,
+		); err != nil {
 			t.Fatalf("bind override proof into trusted Codex handoff: %v", err)
 		}
 	}
@@ -560,6 +672,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	misboundBrakeProof.Session = "different-worker"
 	if err := bindHandoffOverrideProofs(
 		prepared.path,
+		CodexProtocol,
 		true,
 		true,
 		[]override.AuthorizationProof{misboundBrakeProof, hookProof},
