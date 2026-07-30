@@ -217,7 +217,10 @@ type createSessionState struct {
 
 func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) error {
 	if operationErr != nil {
-		rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered)
+		operationErr = errors.Join(
+			operationErr,
+			rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered),
+		)
 	}
 	if state.nameReserved {
 		if err := releaseCreateSessionNameReservation(state.store, sessionID); err != nil {
@@ -1124,22 +1127,27 @@ func createCallerSource(req *CreateSessionRequest) string {
 	return CreateSurfaceInternal
 }
 
-func rollbackCreateSession(opCtx *OpContext, req *CreateSessionRequest, store dolt.Storage, name, sessionID string, createdTmux, createdManifestDir, registered bool) {
+func rollbackCreateSession(opCtx *OpContext, req *CreateSessionRequest, store dolt.Storage, name, sessionID string, createdTmux, createdManifestDir, registered bool) error {
+	var cleanupErr error
 	if registered && store != nil && sessionID != "" {
 		if err := store.DeleteSession(sessionID); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to delete session registration %q during create rollback: %v\n", sessionID, err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete session registration %q during create rollback: %w", sessionID, err))
 		}
 	}
 	if createdTmux {
 		if killer, ok := opCtx.Tmux.(session.TmuxSessionKiller); ok {
 			if err := killer.KillSession(name); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to kill tmux session %q during create rollback: %v\n", name, err)
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill tmux session %q during create rollback: %w", name, err))
 			}
 		}
 	}
 	if createdManifestDir && req.ManifestDir != "" {
 		if err := os.RemoveAll(req.ManifestDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to remove manifest directory %q during create rollback: %v\n", req.ManifestDir, err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove manifest directory %q during create rollback: %w", req.ManifestDir, err))
 		}
 	}
+	return cleanupErr
 }

@@ -1100,6 +1100,35 @@ func TestCreateSession_UnknownRegistrationCommitIsExplicitlyCompensated(t *testi
 	}
 }
 
+func TestCreateSession_UnknownRegistrationCleanupFailureIsReturned(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	commitErr := errors.New("registration commit acknowledgement lost")
+	cleanupErr := errors.New("registration compensation failed")
+	store := &createMockStorage{
+		createErr: &dolt.SessionRegistrationCommitUncertainError{Err: commitErr},
+		deleteErr: cleanupErr,
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "uncertain-registration-cleanup", Harness: "claude-code", Model: "sonnet",
+		SessionID: "uncertain-registration-cleanup-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want commit uncertainty", err)
+	}
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want cleanup failure", err)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"uncertain-registration-cleanup-id"}) {
+		t.Fatalf("registration cleanup = %v, want explicit uncertain-row deletion", store.deleted)
+	}
+	if tmuxMock.Sessions["uncertain-registration-cleanup"] {
+		t.Fatal("new tmux session survived uncertain registration rollback")
+	}
+}
+
 func TestCreateSession_DeferredCurrentTmuxPreservesRegistrationAfterQueuedLaunch(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	tmuxMock.Sessions["deferred-post-queue-cancel"] = true
@@ -1981,10 +2010,12 @@ func TestCreateSessionOptionalManifestFailureRegistersAfterReadiness(t *testing.
 }
 
 func TestRollbackCreateSessionReportsCleanupFailures(t *testing.T) {
-	store := &createMockStorage{deleteErr: errors.New("delete failed")}
+	deleteErr := errors.New("delete failed")
+	killErr := errors.New("kill failed")
+	store := &createMockStorage{deleteErr: deleteErr}
 	tmuxMock := &createFailingKillTmux{
 		TmuxInterface: session.NewMockTmux(),
-		err:           errors.New("kill failed"),
+		err:           killErr,
 	}
 
 	stderrPath := filepath.Join(t.TempDir(), "stderr")
@@ -1996,10 +2027,13 @@ func TestRollbackCreateSessionReportsCleanupFailures(t *testing.T) {
 	os.Stderr = stderrFile
 	t.Cleanup(func() { os.Stderr = oldStderr })
 
-	rollbackCreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{}, store, "rollback", "rollback-id", true, false, true)
+	rollbackErr := rollbackCreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{}, store, "rollback", "rollback-id", true, false, true)
 	os.Stderr = oldStderr
 	if err := stderrFile.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if !errors.Is(rollbackErr, deleteErr) || !errors.Is(rollbackErr, killErr) {
+		t.Fatalf("rollback error = %v, want joined delete and kill failures", rollbackErr)
 	}
 	output, err := os.ReadFile(stderrPath)
 	if err != nil {
