@@ -1412,7 +1412,7 @@ func dynamicBuiltinOperand(
 
 func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 	switch filepath.Base(command) {
-	case "setsid", "flock":
+	case "setsid", "flock", "stdbuf":
 		return "command-capable process wrapper"
 	}
 	if awkUsesCommandExecution(command, args) {
@@ -1498,24 +1498,52 @@ func interpreterScriptOperand(command string, args []*syntax.Word) (*syntax.Word
 }
 
 func interpreterLoadsExternalCode(command, value string) bool {
-	if filepath.Base(command) != "ruby" {
+	switch filepath.Base(command) {
+	case "perl":
+		return perlLoadsExternalCode(value)
+	case "ruby":
+		return rubyLoadsExternalCode(value)
+	case "node":
+		return nodeLoadsExternalCode(value)
+	default:
 		return false
 	}
-	if value == "-I" ||
-		value == "-r" ||
-		value == "--require" ||
-		strings.HasPrefix(value, "-I") ||
-		strings.HasPrefix(value, "-r") ||
-		strings.HasPrefix(value, "--require=") {
+}
+
+func perlLoadsExternalCode(value string) bool {
+	if value == "--debugger" || strings.HasPrefix(value, "--debugger=") {
 		return true
 	}
-	// Ruby permits short switches to be bundled, so -wI. and -wrhelper
-	// retain the same preload behavior as -I. and -rhelper. Fail closed on
-	// either code-loading switch anywhere in a single-dash option bundle.
-	if strings.HasPrefix(value, "-") && !strings.HasPrefix(value, "--") {
-		return strings.ContainsAny(value[1:], "Ir")
+	// Perl permits short switches to be bundled. -I extends @INC,
+	// -M/-m preload modules, and -d may load a debugger module.
+	return strings.HasPrefix(value, "-") &&
+		!strings.HasPrefix(value, "--") &&
+		strings.ContainsAny(value[1:], "IMmd")
+}
+
+func rubyLoadsExternalCode(value string) bool {
+	if value == "--require" || strings.HasPrefix(value, "--require=") {
+		return true
 	}
-	return false
+	// Ruby likewise permits bundles such as -wI. and -wrhelper.
+	return strings.HasPrefix(value, "-") &&
+		!strings.HasPrefix(value, "--") &&
+		strings.ContainsAny(value[1:], "Ir")
+}
+
+func nodeLoadsExternalCode(value string) bool {
+	for _, option := range []string{
+		"-r",
+		"--require",
+		"--import",
+		"--loader",
+		"--experimental-loader",
+	} {
+		if value == option || strings.HasPrefix(value, option+"=") {
+			return true
+		}
+	}
+	return strings.HasPrefix(value, "-r") && !strings.HasPrefix(value, "--")
 }
 
 func interpreterInlineCodeOption(value string) bool {
