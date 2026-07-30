@@ -56,9 +56,9 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   plus context. Sources, destinations, and parents retain their operation roles;
   every pair is separately authorized and all must allow; raw maps and adapter-local aliases are forbidden.
   TCP identity includes canonical hostname, resolved IP, and port; hostname policy requires an application-aware trusted proxy enforcing approved SNI/HTTP Host plus IP/port, while socket-only enforcement is IP-granular.
-  Every DNS answer/redirect is separately authorized and dispatch binds the approved tuple. Local IPC emits typed `local-socket/connect` plus canonical filesystem/abstract-namespace path and socket identity, bound at connect;
-  an unpinned endpoint or protected AGM, tmux, Docker, or control socket denies. Pi `find`/`Glob` map to search, `ls` to directory-list, and `path`/`file_path`
-  normalize; multi-resource calls emit all resources; invalid/lossy TCP, local-socket, or file shapes deny before Cedar.
+  Every DNS answer/redirect is separately authorized and dispatch binds the approved tuple. Local IPC emits typed `local-socket/connect` plus canonical filesystem/abstract-namespace path and socket identity, bound at connect; datagrams emit typed `datagram/send` plus canonical IP/port or Unix filesystem/abstract-namespace destination and socket identity, bound anew at every `sendto`/`sendmsg`.
+  An unpinned endpoint or protected AGM, tmux, Docker, or control socket denies. Pi `find`/`Glob` map to search, `ls` to directory-list, and `path`/`file_path`
+  normalize; multi-resource calls emit all resources; invalid/lossy TCP, local-socket, datagram, or file shapes deny before Cedar.
 - Treat the interceptor executable and its harness registration as privileged
   enforcement assets, not project files. Each blocking integration must load
   both from an operator-managed location outside the workspace and every
@@ -222,8 +222,8 @@ tests must prove all of the following:
    A copy from a denied source to an allowed destination evaluates both roles and the all-of result denies dispatch; an all-allowed multi-resource copy
    evaluates every source, destination, and parent pair and dispatches. A live allowed hostname dispatches while a denied co-hosted Host/SNI and
    private/control-plane tuple stay blocked across DNS, redirect, and rebinding; socket-only TCP mode proves IP-granular semantics. Each harness
-   denies canonical AGM, tmux, and Docker local-socket resources and dispatches to an explicitly allowed test socket; endpoint replacement between
-   evaluation and `connect` cannot redirect the operation. Equivalent filesystem paths unify and protected symlink/missing-leaf targets deny before Cedar.
+   denies canonical AGM, tmux, and Docker local-socket resources and dispatches to an explicitly allowed test socket; endpoint replacement between evaluation and `connect` cannot redirect the operation. It denies and dispatches canonical UDP and Unix-datagram destinations and proves replacement at every `sendto`/`sendmsg` cannot redirect.
+   Equivalent filesystem paths unify and protected symlink/missing-leaf targets deny before Cedar.
 8. After positive invocation authorization, every harness drives an authored
    confirmation-free Deny: interactive mode enters `ask`, while non-interactive
    mode fails closed and dispatches nothing. Positively authorized interactive
@@ -265,12 +265,12 @@ tests must prove all of the following:
     An external uncorrelated link makes it incomplete and fail closed until
     rescan; pathname allow never overrides protected-inode identity.
 15. Every harness runs an unrecognized binary with runtime-computed file, TCP,
-    local-socket, and `cd` targets. Opaque/computed protected reads/writes,
-    private/control-plane connections, and AGM/tmux/Docker control sockets are
-    blocked by the sandbox/socket/trusted-proxy boundary or denied before launch,
-    while an approved external endpoint and explicitly allowed test socket prove
-    liveness. A projectable `git status --short` dispatches; raw-string/post-hoc,
-    opaque-all, or reject-all enforcement does not pass.
+    local-socket, IP/Unix datagram, and `cd` targets. Opaque/computed protected
+    reads/writes, private/control-plane connections, and AGM/tmux/Docker control
+    sockets are blocked by the sandbox/socket/trusted-proxy boundary or denied
+    before launch, while approved external TCP/UDP endpoints and explicitly
+    allowed stream/datagram test sockets prove liveness. A projectable
+    `git status --short` dispatches; raw-string/post-hoc, opaque-all, or reject-all enforcement does not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
