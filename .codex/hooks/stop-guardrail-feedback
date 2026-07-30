@@ -56,7 +56,11 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
 root="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$root" ] || exit 0
 
-bundle="$root/scripts/guardrail-bundle.sh"
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  bundle="${AGM_CODEX_HOOK_ROOT:-.}/scripts/guardrail-bundle.sh"
+else
+  bundle="$root/scripts/guardrail-bundle.sh"
+fi
 [ -f "$bundle" ] || exit 0
 
 # Only act when the agent actually changed something. A clean tree means the
@@ -76,7 +80,7 @@ count=0
 case "$count" in *[!0-9]*|'') count=0 ;; esac
 
 # --- run the guardrail bundle ------------------------------------------------
-out="$(cd "$root" && bash "$bundle" 2>&1)"; rc=$?
+out="$(cd "$root" && PREFLIGHT_PROJECT_ROOT="$root" /bin/bash "$bundle" 2>&1)"; rc=$?
 
 if [ "$rc" -eq 0 ]; then
   # Green: clear the counter and let the agent stop.

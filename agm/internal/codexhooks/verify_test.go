@@ -144,6 +144,12 @@ func TestVerifyRejectsMutatedSandboxHookAssets(t *testing.T) {
 			},
 		},
 		{
+			name: "transitively referenced script",
+			mutate: func(t *testing.T, sandbox string) {
+				writeFile(t, filepath.Join(sandbox, "tools", "transitive-guard"), "#!/bin/sh\nexit 99\n", 0o755)
+			},
+		},
+		{
 			name: "referenced script symlink",
 			mutate: func(t *testing.T, sandbox string) {
 				path := filepath.Join(sandbox, ".codex", "hooks", "guard")
@@ -267,7 +273,10 @@ func hookFixture(t *testing.T) (string, string) {
 	)
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 0\n", 0o755)
 	writeFile(t, filepath.Join(source, "tools", "relative-guard"), "#!/bin/sh\nexit 0\n", 0o755)
-	gittest.Run(t, source, "add", ".codex", "tools/relative-guard")
+	writeFile(t, filepath.Join(source, "tools", "transitive-guard"), "#!/bin/sh\nexit 0\n", 0o755)
+	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"),
+		"#!/bin/sh\n${AGM_CODEX_HOOK_ROOT:-.}/tools/transitive-guard\n", 0o755)
+	gittest.Run(t, source, "add", ".codex", "tools/relative-guard", "tools/transitive-guard")
 	gittest.Run(t, source, "commit", "-m", "add reviewed hooks")
 
 	sandbox := filepath.Join(t.TempDir(), "sandbox")

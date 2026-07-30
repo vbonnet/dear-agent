@@ -25,7 +25,7 @@ var sessionFlagsHookSource = func() string {
 }()
 
 const (
-	attestedHookPath          = "/opt/homebrew/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	attestedHookPath          = "/usr/local/libexec:/usr/local/go/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
 )
 
@@ -48,6 +48,9 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 
 	hooks, err := readMaterializedHookManifest(hookRoot)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
 		return nil, err
 	}
 	if err := hardenHookCommands(hooks); err != nil {

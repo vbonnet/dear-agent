@@ -43,6 +43,26 @@ func TestHardenHookCommandsReplacesCallerPath(t *testing.T) {
 	}
 }
 
+func TestAttestedHookPathContainsOnlyOperatorOwnedLocations(t *testing.T) {
+	if strings.Contains(attestedHookPath, "/opt/homebrew") || strings.Contains(attestedHookPath, "/usr/local/bin") {
+		t.Fatalf("attested hook PATH includes a commonly user-writable location: %q", attestedHookPath)
+	}
+	if err := validateTrustedExecutableSearchPath(attestedHookPath); err != nil {
+		t.Fatalf("validateTrustedExecutableSearchPath(attestedHookPath): %v", err)
+	}
+}
+
+func TestTrustedExecutableSearchPathRejectsWritableDirectory(t *testing.T) {
+	writable := t.TempDir()
+	if err := os.Chmod(writable, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateTrustedExecutableSearchPath(writable); err == nil ||
+		!strings.Contains(err.Error(), "operator-owned") {
+		t.Fatalf("validateTrustedExecutableSearchPath() error = %v, want ownership rejection", err)
+	}
+}
+
 func TestLaunchConfigOverridesPinsManifestAndDisablesProjectHookCopies(t *testing.T) {
 	hookRoot := t.TempDir()
 	manifestPath := filepath.Join(hookRoot, ".codex", "hooks.json")

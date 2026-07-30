@@ -16,7 +16,7 @@ descendant script's later process execution and is not treated as that control.
 
 ## Requirements
 
-**CHOOK-01** When AGM attests repository-scoped Codex hooks, the system shall use a fixed OS-owned Git executable with caller-supplied Git repository/configuration environment removed, resolve the canonical source repository and full current commit, read `.codex/hooks.json` and every project-referenced hook only from that commit's Git objects, and produce a deterministic SHA-256 digest over their paths, Git modes, and bytes.
+**CHOOK-01** When AGM attests repository-scoped Codex hooks, the system shall use a fixed OS-owned Git executable with caller-supplied Git repository/configuration environment removed, resolve the canonical source repository and full current commit, recursively read `.codex/hooks.json`, every project-referenced hook, and every explicitly root-referenced transitive hook executable only from that commit's Git objects, and produce a deterministic SHA-256 digest over their paths, Git modes, and bytes.
 
 **CHOOK-02** When the sandbox materialization is attested or revalidated, the system shall require its hook manifest and every referenced hook to be regular non-symlink files with executable modes and bytes matching the pinned commit.
 
@@ -36,7 +36,9 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-10** When an ordinary non-bypassed Codex session runs from a repository subdirectory, the system shall resolve every project hook relative to the repository project root instead of that subdirectory.
 
-**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, and keep required hook helpers reachable only through an operator-owned absolute installation path.
+**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject every existing search-path directory or ancestor that is not root-owned and non-writable by group or other, reject executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, and keep required hook helpers reachable only through an operator-owned absolute installation path.
+
+**CHOOK-12** When an attested hook invokes a repository executable through a supported project-root or materialized-hook-root reference, the system shall recursively include that dependency in the committed, sandbox, digest, and immutable-materialization checks before authorizing the bypass.
 
 ## BDD Traceability
 
