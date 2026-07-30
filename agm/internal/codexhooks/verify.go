@@ -670,6 +670,7 @@ func rejectDynamicCommandResolution(script string) error {
 	if err != nil {
 		return fmt.Errorf("parse trusted hook shell: %w", err)
 	}
+	functions := declaredShellFunctions(file)
 	var rejected syntax.Node
 	var reason string
 	syntax.Walk(file, func(node syntax.Node) bool {
@@ -690,7 +691,7 @@ func rejectDynamicCommandResolution(script string) error {
 		if !ok || len(call.Args) == 0 {
 			return true
 		}
-		word, why := dynamicCommandTarget(call)
+		word, why := dynamicCommandTarget(call, functions)
 		if word != nil {
 			rejected = word
 			reason = why
@@ -705,6 +706,24 @@ func rejectDynamicCommandResolution(script string) error {
 		rejected.Pos().Line(),
 		reason,
 	)
+}
+
+func declaredShellFunctions(file *syntax.File) map[string]struct{} {
+	functions := make(map[string]struct{})
+	syntax.Walk(file, func(node syntax.Node) bool {
+		declaration, ok := node.(*syntax.FuncDecl)
+		if !ok {
+			return true
+		}
+		if declaration.Name != nil {
+			functions[declaration.Name.Value] = struct{}{}
+		}
+		for _, name := range declaration.Names {
+			functions[name.Value] = struct{}{}
+		}
+		return true
+	})
+	return functions
 }
 
 func arithmeticNodeWritesVariable(node syntax.Node) bool {
@@ -733,18 +752,19 @@ func arithmeticNodeWritesVariable(node syntax.Node) bool {
 	return false
 }
 
-func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
+func dynamicCommandTarget(call *syntax.CallExpr, functions map[string]struct{}) (*syntax.Word, string) {
 	command, static := staticShellWord(call.Args[0])
 	if !static {
 		return call.Args[0], "expanded command word"
 	}
-	return dynamicNormalizedCommand(command, call.Args[0], call.Args[1:])
+	return dynamicNormalizedCommand(command, call.Args[0], call.Args[1:], functions)
 }
 
 func dynamicNormalizedCommand(
 	command string,
 	commandWord *syntax.Word,
 	args []*syntax.Word,
+	functions map[string]struct{},
 ) (*syntax.Word, string) {
 	if rejected, reason := dynamicBuiltinOperand(command, commandWord, args); rejected != nil {
 		return rejected, reason
@@ -755,18 +775,23 @@ func dynamicNormalizedCommand(
 	if target, reason, handled := dynamicRuntimeOperand(command, commandWord, args); handled {
 		return target, reason
 	}
-	if target, reason, handled := nestedCommandWrapperOperand(command, args); handled {
+	if target, reason, handled := nestedCommandWrapperOperand(command, args, functions); handled {
 		return target, reason
 	}
 	switch filepath.Base(command) {
 	case "command", "builtin", "exec", "nohup", "env":
-		return dynamicWrapperCommand(command, args)
-	default:
+		return dynamicWrapperCommand(command, args, functions)
+	}
+	if _, declared := functions[command]; declared {
 		return nil, ""
 	}
+	if trustedHookCommandAllowed(command) {
+		return nil, ""
+	}
+	return commandWord, "command outside trusted capability allowlist"
 }
 
-func dynamicWrapperCommand(wrapper string, args []*syntax.Word) (*syntax.Word, string) {
+func dynamicWrapperCommand(wrapper string, args []*syntax.Word, functions map[string]struct{}) (*syntax.Word, string) {
 	env := filepath.Base(wrapper) == "env"
 	options := true
 	for index := 0; index < len(args); index++ {
@@ -796,7 +821,7 @@ func dynamicWrapperCommand(wrapper string, args []*syntax.Word) (*syntax.Word, s
 		if env && strings.Contains(value, "=") {
 			continue
 		}
-		return dynamicNormalizedCommand(value, word, args[index+1:])
+		return dynamicNormalizedCommand(value, word, args[index+1:], functions)
 	}
 	return nil, ""
 }
@@ -826,11 +851,11 @@ func dynamicWrapperOptionConsumesNext(wrapper, value string) bool {
 	}
 }
 
-func nestedCommandWrapperOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
-	if target, reason, handled := timeoutCommandOperand(command, args); handled {
+func nestedCommandWrapperOperand(command string, args []*syntax.Word, functions map[string]struct{}) (*syntax.Word, string, bool) {
+	if target, reason, handled := timeoutCommandOperand(command, args, functions); handled {
 		return target, reason, true
 	}
-	return niceCommandOperand(command, args)
+	return niceCommandOperand(command, args, functions)
 }
 
 func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syntax.Word) (*syntax.Word, string, bool) {
@@ -855,7 +880,7 @@ func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syn
 	}
 }
 
-func timeoutCommandOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
+func timeoutCommandOperand(command string, args []*syntax.Word, functions map[string]struct{}) (*syntax.Word, string, bool) {
 	if filepath.Base(command) != "timeout" {
 		return nil, "", false
 	}
@@ -886,7 +911,7 @@ func timeoutCommandOperand(command string, args []*syntax.Word) (*syntax.Word, s
 		if index+1 >= len(args) {
 			return nil, "", true
 		}
-		target, reason := dynamicWrapperCommand("command", args[index+1:])
+		target, reason := dynamicWrapperCommand("command", args[index+1:], functions)
 		return target, reason, true
 	}
 	return nil, "", true
@@ -901,7 +926,7 @@ func timeoutOptionTakesArgument(value string) bool {
 	}
 }
 
-func niceCommandOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
+func niceCommandOperand(command string, args []*syntax.Word, functions map[string]struct{}) (*syntax.Word, string, bool) {
 	if filepath.Base(command) != "nice" {
 		return nil, "", false
 	}
@@ -929,7 +954,7 @@ func niceCommandOperand(command string, args []*syntax.Word) (*syntax.Word, stri
 		if options && strings.HasPrefix(value, "-") {
 			continue
 		}
-		target, reason := dynamicWrapperCommand("command", args[index:])
+		target, reason := dynamicWrapperCommand("command", args[index:], functions)
 		return target, reason, true
 	}
 	return nil, "", true
@@ -1674,6 +1699,33 @@ func envSplitStringOption(value string) bool {
 func commandResolutionStateBuiltin(command string) bool {
 	switch command {
 	case "alias", "unalias", "hash", "enable", "nameref":
+		return true
+	default:
+		return false
+	}
+}
+
+// trustedHookCommandAllowed is the positive capability boundary for commands
+// that remain after the mode-specific runtime and wrapper analysis above.
+// Adding a new executable here requires a reviewed argument-mode analysis when
+// that executable can load code, dispatch children, or change resolution.
+func trustedHookCommandAllowed(command string) bool {
+	switch filepath.Base(command) {
+	case
+		// Side-effect-limited shell builtins and control helpers.
+		":", "[", "break", "continue", "echo", "exit", "export", "false",
+		"local", "printf", "readonly", "return", "set", "shift", "test",
+		"true", "typeset", "unset",
+		// Data and filesystem utilities used by the committed hook assets.
+		"basename", "cat", "chmod", "cp", "curl", "cut", "date", "dirname", "grep",
+		"egrep", "fgrep", "head", "jq", "mkdir", "mktemp", "mv", "rm",
+		"sleep", "tail", "tee", "touch", "tr", "wc",
+		// Tools whose command-capable modes are rejected before this boundary.
+		"awk", "gawk", "mawk", "nawk", "find", "git", "gsed", "gtar",
+		"sed", "sort", "tar",
+		// Operator-owned hook helpers with fixed installed capabilities.
+		"agm", "bd", "bead-close-guard", "dear-agent-bead-close-guard",
+		"dear-agent-codex-hook-json", "gh":
 		return true
 	default:
 		return false

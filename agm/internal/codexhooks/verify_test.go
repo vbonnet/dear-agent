@@ -306,7 +306,7 @@ func TestValidateScriptAssetAllowsNonInterpreterPipeline(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/grep data\n",
 		"#!/bin/bash\n/usr/bin/printf data | command -v bash\n",
-		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/python-build-tool\n",
+		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/wc -c\n",
 		"#!/bin/bash\n/usr/bin/printf data | /usr/bin/xargs -n 1\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
@@ -320,6 +320,14 @@ func TestValidateScriptAssetRejectsUnapprovedLibexecDescendant(t *testing.T) {
 	if err := validateScriptAsset([]byte(script)); err == nil ||
 		!strings.Contains(err.Error(), "mutable command path") {
 		t.Fatalf("validateScriptAsset() error = %v, want unapproved-libexec rejection", err)
+	}
+}
+
+func TestValidateScriptAssetRejectsCommandOutsideCapabilityAllowlist(t *testing.T) {
+	const script = "#!/bin/sh\n/usr/bin/unknown-hook-tool payload.conf\n"
+	if err := validateScriptAsset([]byte(script)); err == nil ||
+		!strings.Contains(err.Error(), "command outside trusted capability allowlist") {
+		t.Fatalf("validateScriptAsset() error = %v, want command-capability rejection", err)
 	}
 }
 
