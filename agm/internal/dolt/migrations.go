@@ -65,6 +65,12 @@ var migration017 string
 //go:embed migrations/018_add_tmux_session_revision.sql
 var migration018 string
 
+//go:embed migrations/019_add_non_archived_session_name.sql
+var migration019 string
+
+//go:embed migrations/020_unique_non_archived_session_names.sql
+var migration020 string
+
 // Migration represents a single database migration
 type Migration struct {
 	Version       int
@@ -267,6 +273,36 @@ func AllMigrations() []Migration {
 					WHERE TABLE_SCHEMA = DATABASE()
 					  AND TABLE_NAME = 'agm_sessions'
 					  AND COLUMN_NAME = 'tmux_session_revision'
+				)
+			`,
+		},
+		{
+			Version:       19,
+			Name:          "add_non_archived_session_name",
+			SQL:           migration019,
+			Checksum:      computeChecksum(migration019),
+			TablesCreated: []string{},
+			PreConditionSQL: `
+				SELECT 1 WHERE NOT EXISTS (
+					SELECT 1 FROM information_schema.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'agm_sessions'
+					  AND COLUMN_NAME = 'non_archived_name'
+				)
+			`,
+		},
+		{
+			Version:       20,
+			Name:          "unique_non_archived_session_names",
+			SQL:           migration020,
+			Checksum:      computeChecksum(migration020),
+			TablesCreated: []string{},
+			PreConditionSQL: `
+				SELECT 1 WHERE NOT EXISTS (
+					SELECT 1 FROM information_schema.STATISTICS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'agm_sessions'
+					  AND INDEX_NAME = 'uq_agm_sessions_workspace_non_archived_name'
 				)
 			`,
 		},

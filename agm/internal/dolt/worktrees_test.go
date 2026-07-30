@@ -252,6 +252,31 @@ func TestMigration018AddsTmuxSessionRevision(t *testing.T) {
 	t.Fatal("migration 018 not found")
 }
 
+func TestMigrations019And020EnforceUniqueNonArchivedSessionNames(t *testing.T) {
+	found := make(map[int]Migration)
+	for _, migration := range AllMigrations() {
+		found[migration.Version] = migration
+	}
+	for _, required := range []string{
+		"GENERATED ALWAYS AS",
+		"status != 'archived'",
+		"non_archived_name",
+	} {
+		if !strings.Contains(found[19].SQL, required) {
+			t.Fatalf("migration 019 lacks %q", required)
+		}
+	}
+	for _, required := range []string{
+		"UNIQUE KEY uq_agm_sessions_workspace_non_archived_name",
+		"workspace",
+		"non_archived_name",
+	} {
+		if !strings.Contains(found[20].SQL, required) {
+			t.Fatalf("migration 020 lacks %q", required)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests (require DOLT_TEST_INTEGRATION=1)
 // ---------------------------------------------------------------------------

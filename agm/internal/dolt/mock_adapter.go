@@ -49,6 +49,13 @@ func (m *MockAdapter) CreateSession(session *manifest.Manifest) error {
 	if _, exists := m.sessions[session.SessionID]; exists {
 		return fmt.Errorf("session already exists: %s", session.SessionID)
 	}
+	if session.Name != "" && session.Lifecycle != manifest.LifecycleArchived {
+		for _, existing := range m.sessions {
+			if existing.Lifecycle != manifest.LifecycleArchived && existing.Name == session.Name {
+				return &SessionNameConflictError{Name: session.Name}
+			}
+		}
+	}
 
 	// Store a deep copy to prevent external modifications
 	m.sessions[session.SessionID] = m.copyManifest(session)

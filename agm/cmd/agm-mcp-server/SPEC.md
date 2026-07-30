@@ -37,7 +37,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-11** When `agm_send_message` resolves a pure API manifest while the MCP operation context also carries tmux, the MCP adapter shall delegate to shared operations, which shall perform the stable-ID lifecycle, adapter-readiness, and context-aware provider transaction before any tmux probe or delivery.
 
-**MCS-12** When `agm_create_session` receives a title that matches a non-archived session record, the shared creation lifecycle shall reject the request before tmux session creation and shall return the same duplicate-name guidance as the CLI.
+**MCS-12** When `agm_create_session` receives a title that matches a non-archived session record, including when another creator commits that title concurrently, the shared creation lifecycle shall reject the request, roll back any owned launch state, and return the same duplicate-name guidance as the CLI.
 
 ## BDD Traceability
 

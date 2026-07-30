@@ -670,6 +670,10 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 		return false, nil
 	}
 	if err := store.CreateSession(m); err != nil {
+		var conflict *dolt.SessionNameConflictError
+		if errors.As(err, &conflict) {
+			return false, sessionExistsError(m.Name)
+		}
 		if !req.RegistrationOptional {
 			return false, ErrStorageError("storage.CreateSession", err)
 		}

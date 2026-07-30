@@ -200,6 +200,19 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 	)
 
 	if err != nil {
+		if isUniqueConstraintError(err) {
+			var exists int
+			lookupErr := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+				`SELECT 1 FROM agm_sessions
+				 WHERE workspace = ? AND name = ? AND status != 'archived'
+				 LIMIT 1`,
+				a.workspace,
+				session.Name,
+			).Scan(&exists)
+			if lookupErr == nil {
+				return &SessionNameConflictError{Name: session.Name}
+			}
+		}
 		return fmt.Errorf("failed to insert session: %w", err)
 	}
 

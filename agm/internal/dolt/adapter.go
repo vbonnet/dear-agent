@@ -171,6 +171,9 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_agm_sessions_workspace_updated
   ON agm_sessions(workspace, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agm_sessions_workspace_non_archived_name
+  ON agm_sessions(workspace, name)
+  WHERE status != 'archived' AND name IS NOT NULL AND name != '';
 CREATE TABLE IF NOT EXISTS agm_harness_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,

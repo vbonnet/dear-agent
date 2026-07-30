@@ -5,11 +5,79 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
+
+func TestSQLiteCreateSessionAtomicallyRejectsDuplicateNonArchivedName(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, id := range []string{"concurrent-a", "concurrent-b"} {
+		go func(sessionID string) {
+			ready.Done()
+			<-start
+			now := time.Now()
+			results <- adapter.CreateSession(&manifest.Manifest{
+				SessionID: sessionID,
+				Name:      "shared-name",
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+		}(id)
+	}
+	ready.Wait()
+	close(start)
+
+	var successes, conflicts int
+	for range 2 {
+		createErr := <-results
+		if createErr == nil {
+			successes++
+			continue
+		}
+		var conflict *SessionNameConflictError
+		if errors.As(createErr, &conflict) && conflict.Name == "shared-name" {
+			conflicts++
+			continue
+		}
+		t.Fatalf("concurrent CreateSession() error = %v", createErr)
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent creates = %d success, %d conflict; want 1 and 1", successes, conflicts)
+	}
+
+	sessions, err := adapter.ListSessions(&SessionFilter{ExcludeArchived: true})
+	if err != nil {
+		t.Fatalf("ListSessions() error: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("non-archived sessions = %d, want 1", len(sessions))
+	}
+	sessions[0].Lifecycle = manifest.LifecycleArchived
+	if err := adapter.UpdateSession(sessions[0]); err != nil {
+		t.Fatalf("archive winning session: %v", err)
+	}
+	now := time.Now()
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "replacement",
+		Name:      "shared-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("reuse archived session name: %v", err)
+	}
+}
 
 func TestSQLiteGetSessionByUUID_ClaudeUUID(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
