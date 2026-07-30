@@ -476,31 +476,8 @@ func rejectExecutionInfluencingEnvironment(script string) error {
 		if rejected != nil {
 			return false
 		}
-		switch typed := node.(type) {
-		case *syntax.CallExpr:
-			for _, assignment := range typed.Assigns {
-				if name = executionInfluencingEnvironmentName(assignment); name != "" {
-					rejected = assignment
-					return false
-				}
-			}
-			if word, found := envWrapperEnvironmentAssignment(typed.Args); word != nil {
-				rejected, name = word, found
-				return false
-			}
-		case *syntax.DeclClause:
-			for _, assignment := range typed.Args {
-				if assignment.Name == nil && assignment.Value != nil {
-					rejected, name = assignment, "<dynamic environment name>"
-					return false
-				}
-				if name = executionInfluencingEnvironmentName(assignment); name != "" {
-					rejected = assignment
-					return false
-				}
-			}
-		}
-		return true
+		rejected, name = executionInfluencingNode(node)
+		return rejected == nil
 	})
 	if rejected == nil {
 		return nil
@@ -509,6 +486,64 @@ func rejectExecutionInfluencingEnvironment(script string) error {
 		"unsupported execution-influencing environment assignment %q at line %d; trusted hooks must not load unverified runtime code",
 		name, rejected.Pos().Line(),
 	)
+}
+
+func executionInfluencingNode(node syntax.Node) (syntax.Node, string) {
+	switch typed := node.(type) {
+	case *syntax.CallExpr:
+		return executionInfluencingCall(typed)
+	case *syntax.DeclClause:
+		return executionInfluencingDeclaration(typed)
+	case *syntax.ForClause:
+		return executionInfluencingIteration(typed)
+	case *syntax.ParamExp:
+		return executionInfluencingParameterExpansion(typed)
+	default:
+		return nil, ""
+	}
+}
+
+func executionInfluencingCall(call *syntax.CallExpr) (syntax.Node, string) {
+	for _, assignment := range call.Assigns {
+		if name := executionInfluencingEnvironmentName(assignment); name != "" {
+			return assignment, name
+		}
+	}
+	word, name := envWrapperEnvironmentAssignment(call.Args)
+	if word == nil {
+		return nil, ""
+	}
+	return word, name
+}
+
+func executionInfluencingDeclaration(declaration *syntax.DeclClause) (syntax.Node, string) {
+	for _, assignment := range declaration.Args {
+		if assignment.Name == nil && assignment.Value != nil {
+			return assignment, "<dynamic environment name>"
+		}
+		if name := executionInfluencingEnvironmentName(assignment); name != "" {
+			return assignment, name
+		}
+	}
+	return nil, ""
+}
+
+func executionInfluencingIteration(clause *syntax.ForClause) (syntax.Node, string) {
+	iteration, ok := clause.Loop.(*syntax.WordIter)
+	if !ok || iteration.Name == nil || !isExecutionInfluencingEnvironment(iteration.Name.Value) {
+		return nil, ""
+	}
+	return iteration.Name, iteration.Name.Value
+}
+
+func executionInfluencingParameterExpansion(expansion *syntax.ParamExp) (syntax.Node, string) {
+	if expansion.Param == nil ||
+		expansion.Exp == nil ||
+		(expansion.Exp.Op != syntax.AssignUnset && expansion.Exp.Op != syntax.AssignUnsetOrNull) ||
+		!isExecutionInfluencingEnvironment(expansion.Param.Value) {
+		return nil, ""
+	}
+	return expansion, expansion.Param.Value
 }
 
 func executionInfluencingEnvironmentName(assignment *syntax.Assign) string {
@@ -603,7 +638,8 @@ func isExecutionInfluencingEnvironment(name string) bool {
 		return true
 	}
 	switch name {
-	case "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS",
+	case "PATH",
+		"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS",
 		"GCONV_PATH", "LOCPATH", "LIBPATH", "SHLIB_PATH",
 		"LDR_PRELOAD", "LDR_LIBRARY_PATH",
 		"NODE_OPTIONS", "NODE_PATH",
@@ -713,6 +749,12 @@ func dynamicBuiltinOperand(
 	switch command {
 	case "mapfile", "readarray":
 		return commandWord, "stateful string-evaluating shell builtin"
+	case "read", "getopts":
+		return commandWord, "stateful variable-writing shell builtin"
+	case "declare", "local", "typeset":
+		if word := namerefDeclarationOption(args); word != nil {
+			return word, "indirect variable-writing shell builtin"
+		}
 	case "printf":
 		for _, word := range args {
 			value, static := staticShellWord(word)
@@ -725,6 +767,19 @@ func dynamicBuiltinOperand(
 		}
 	}
 	return nil, ""
+}
+
+func namerefDeclarationOption(args []*syntax.Word) *syntax.Word {
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static || value == "--" || !strings.HasPrefix(value, "-") {
+			return nil
+		}
+		if value == "--nameref" || strings.Contains(strings.TrimLeft(value, "-"), "n") {
+			return word
+		}
+	}
+	return nil
 }
 
 func wrappedSourceOperand(args []*syntax.Word) (*syntax.Word, string) {
@@ -753,7 +808,7 @@ func envSplitStringOption(value string) bool {
 
 func commandResolutionStateBuiltin(command string) bool {
 	switch command {
-	case "alias", "unalias", "hash", "enable":
+	case "alias", "unalias", "hash", "enable", "nameref":
 		return true
 	default:
 		return false

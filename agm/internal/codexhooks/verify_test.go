@@ -281,6 +281,9 @@ func TestTrustedHookAssetsRejectExecutionInfluencingEnvironment(t *testing.T) {
 		"#!/bin/sh\nbuiltin export LD_AUDIT=./audit.so\n",
 		"#!/bin/sh\nexec /usr/bin/env BASH_ENV=./startup /bin/bash\n",
 		"#!/bin/sh\nPYTHONPATH=./lib python3 helper.py\n",
+		"#!/bin/bash\nfor PATH in .; do helper; done\n",
+		"#!/bin/bash\n: \"${PATH:=.}\"; helper\n",
+		"#!/bin/bash\ndeclare -n resolver=PATH; resolver=.; helper\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "execution-influencing environment") {
@@ -330,6 +333,8 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/bash\nenable -f ./helper.so run\n",
 		"#!/bin/bash\nprintf -v PATH .; helper\n",
 		"#!/bin/bash\nbuiltin printf -v PATH .; helper\n",
+		"#!/bin/bash\nread PATH <<< .; helper\n",
+		"#!/bin/bash\ngetopts x PATH; helper\n",
 		"#!/bin/bash\n/bin/printf 'x\\n' | mapfile -C '/bin/bash helper' -c 1\n",
 		"#!/bin/bash\n/bin/printf 'x\\n' | command readarray -C '/bin/bash helper' -c 1\n",
 	} {
