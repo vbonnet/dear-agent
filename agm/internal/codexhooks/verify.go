@@ -650,6 +650,9 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 	if !static {
 		return call.Args[0], "expanded command word"
 	}
+	if rejected, reason := dynamicBuiltinOperand(command, call.Args[0], call.Args[1:]); rejected != nil {
+		return rejected, reason
+	}
 	if commandResolutionStateBuiltin(command) {
 		return call.Args[0], "command-resolution state builtin"
 	}
@@ -680,6 +683,9 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		if env && strings.Contains(value, "=") {
 			continue
 		}
+		if rejected, reason := dynamicBuiltinOperand(value, word, args[index+1:]); rejected != nil {
+			return rejected, reason
+		}
 		if commandResolutionStateBuiltin(value) {
 			return word, "command-resolution state builtin"
 		}
@@ -694,6 +700,28 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 			return dynamicWrapperCommand(args[index+1:], true)
 		default:
 			return nil, ""
+		}
+	}
+	return nil, ""
+}
+
+func dynamicBuiltinOperand(
+	command string,
+	commandWord *syntax.Word,
+	args []*syntax.Word,
+) (*syntax.Word, string) {
+	switch command {
+	case "mapfile", "readarray":
+		return commandWord, "stateful string-evaluating shell builtin"
+	case "printf":
+		for _, word := range args {
+			value, static := staticShellWord(word)
+			if !static {
+				continue
+			}
+			if value == "-v" || strings.HasPrefix(value, "-v") {
+				return word, "variable-writing shell builtin"
+			}
 		}
 	}
 	return nil, ""

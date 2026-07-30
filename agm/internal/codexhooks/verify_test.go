@@ -328,6 +328,10 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/bash\nhash -p ./helper run\n",
 		"#!/bin/bash\ncommand builtin hash -p ./helper run\n",
 		"#!/bin/bash\nenable -f ./helper.so run\n",
+		"#!/bin/bash\nprintf -v PATH .; helper\n",
+		"#!/bin/bash\nbuiltin printf -v PATH .; helper\n",
+		"#!/bin/bash\n/bin/printf 'x\\n' | mapfile -C '/bin/bash helper' -c 1\n",
+		"#!/bin/bash\n/bin/printf 'x\\n' | command readarray -C '/bin/bash helper' -c 1\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
