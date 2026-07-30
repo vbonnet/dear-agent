@@ -360,28 +360,11 @@ func bindHandoffOverrideProofs(
 	trusted bool,
 	proofs []override.AuthorizationProof,
 ) error {
-	if err := validatePrivateHandoffLocation(path, trusted); err != nil {
+	file, openedInfo, err := openHandoffForOverrideBinding(path, trusted)
+	if err != nil {
 		return err
 	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("inspect private launch handoff before binding overrides: %w", err)
-	}
-	if !isOwnerOnlyHandoffFile(info) {
-		return errors.New("private launch handoff is not an owner-only regular file")
-	}
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("open private launch handoff to bind overrides: %w", err)
-	}
 	defer func() { _ = file.Close() }()
-	openedInfo, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("inspect opened private launch handoff before binding overrides: %w", err)
-	}
-	if !isOwnerOnlyHandoffFile(openedInfo) || !os.SameFile(info, openedInfo) {
-		return errors.New("private launch handoff changed while binding overrides")
-	}
 	handoff, err := decodeHandoff(file)
 	if err != nil {
 		return err
@@ -390,14 +373,61 @@ func bindHandoffOverrideProofs(
 	if err := validateHandoff(handoff, CodexProtocol, time.Now(), openedInfo.ModTime()); err != nil {
 		return err
 	}
+	encoded, err := encodeBoundHandoff(handoff)
+	if err != nil {
+		return err
+	}
+	return writeBoundHandoff(file, path, openedInfo, encoded)
+}
+
+func openHandoffForOverrideBinding(
+	path string,
+	trusted bool,
+) (*os.File, os.FileInfo, error) {
+	if err := validatePrivateHandoffLocation(path, trusted); err != nil {
+		return nil, nil, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect private launch handoff before binding overrides: %w", err)
+	}
+	if !isOwnerOnlyHandoffFile(info) {
+		return nil, nil, errors.New("private launch handoff is not an owner-only regular file")
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open private launch handoff to bind overrides: %w", err)
+	}
+	openedInfo, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("inspect opened private launch handoff before binding overrides: %w", err)
+	}
+	if !isOwnerOnlyHandoffFile(openedInfo) || !os.SameFile(info, openedInfo) {
+		_ = file.Close()
+		return nil, nil, errors.New("private launch handoff changed while binding overrides")
+	}
+	return file, openedInfo, nil
+}
+
+func encodeBoundHandoff(handoff launchHandoff) ([]byte, error) {
 	encoded, err := json.Marshal(handoff)
 	if err != nil {
-		return fmt.Errorf("encode private launch handoff overrides: %w", err)
+		return nil, fmt.Errorf("encode private launch handoff overrides: %w", err)
 	}
 	encoded = append(encoded, '\n')
 	if len(encoded) > handoffMaxSize {
-		return errors.New("private launch handoff exceeds the size limit")
+		return nil, errors.New("private launch handoff exceeds the size limit")
 	}
+	return encoded, nil
+}
+
+func writeBoundHandoff(
+	file *os.File,
+	path string,
+	openedInfo os.FileInfo,
+	encoded []byte,
+) error {
 	if err := file.Truncate(0); err != nil {
 		return fmt.Errorf("truncate private launch handoff before binding overrides: %w", err)
 	}
@@ -1003,23 +1033,11 @@ func validateHandoffOverrideProofs(handoff launchHandoff) error {
 	seen := make(map[override.Kind]struct{}, len(handoff.OverrideProofs))
 	hookProofFound := false
 	for _, proof := range handoff.OverrideProofs {
-		switch proof.Kind {
-		case override.KindAdmissionBrake:
-			if proof.Subject != "" {
-				return errors.New("private launch handoff contains an admission-brake subject")
-			}
-			if proof.Session == "" ||
-				(handoff.CodexLaunch != nil && proof.Session != handoff.CodexLaunch.SessionName) {
-				return errors.New("private launch handoff contains an unrelated admission-brake proof")
-			}
-		case override.KindCodexHookTrust:
-			if handoff.CodexLaunch == nil || proof != handoff.CodexLaunch.HookTrustProof {
-				return errors.New("private launch handoff contains an unrelated Codex hook-trust proof")
-			}
-			hookProofFound = true
-		default:
-			return fmt.Errorf("private launch handoff contains unsupported override kind %q", proof.Kind)
+		isHookProof, err := validateHandoffOverrideProof(handoff, proof)
+		if err != nil {
+			return err
 		}
+		hookProofFound = hookProofFound || isHookProof
 		if _, duplicate := seen[proof.Kind]; duplicate {
 			return fmt.Errorf("private launch handoff repeats override kind %q", proof.Kind)
 		}
@@ -1032,6 +1050,32 @@ func validateHandoffOverrideProofs(handoff launchHandoff) error {
 		return errors.New("private launch handoff omits the Codex hook-trust proof")
 	}
 	return nil
+}
+
+func validateHandoffOverrideProof(
+	handoff launchHandoff,
+	proof override.AuthorizationProof,
+) (bool, error) {
+	switch proof.Kind {
+	case override.KindAdmissionBrake:
+		if proof.Subject != "" {
+			return false, errors.New("private launch handoff contains an admission-brake subject")
+		}
+		if proof.Session == "" ||
+			(handoff.CodexLaunch != nil && proof.Session != handoff.CodexLaunch.SessionName) {
+			return false, errors.New("private launch handoff contains an unrelated admission-brake proof")
+		}
+		return false, nil
+	case override.KindCodexHookTrust:
+		if handoff.CodexLaunch == nil || proof != handoff.CodexLaunch.HookTrustProof {
+			return false, errors.New("private launch handoff contains an unrelated Codex hook-trust proof")
+		}
+		return true, nil
+	case override.KindSupervisorOAuthCheck:
+		return false, fmt.Errorf("private launch handoff contains unsupported override kind %q", proof.Kind)
+	default:
+		return false, fmt.Errorf("private launch handoff contains unsupported override kind %q", proof.Kind)
+	}
 }
 
 func validateHandoffEnvironment(protocol string, environment []string) error {

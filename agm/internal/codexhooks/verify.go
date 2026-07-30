@@ -322,7 +322,7 @@ func referencedHookAssets(manifest []byte) ([]string, error) {
 		return nil, err
 	}
 	if document.Hooks == nil {
-		return nil, fmt.Errorf("Codex hook manifest has no hooks object")
+		return nil, fmt.Errorf("codex hook manifest has no hooks object")
 	}
 	references := make(map[string]struct{})
 	for eventName, event := range document.Hooks {
@@ -337,24 +337,8 @@ func referencedHookAssets(manifest []byte) ([]string, error) {
 			return nil, err
 		}
 		for _, command := range commands {
-			for _, match := range hookRootReference.FindAllStringSubmatch(command, -1) {
-				clean, err := cleanProjectPath(match[1])
-				if err != nil {
-					return nil, fmt.Errorf("command %q: %w", command, err)
-				}
-				references[clean] = struct{}{}
-			}
-			unmatched := hookRootReference.ReplaceAllString(command, "")
-			if projectDirReference.MatchString(unmatched) ||
-				strings.Contains(unmatched, "PROJECT_DIR") ||
-				runtimeDirReference.MatchString(unmatched) ||
-				explicitRelativePath.MatchString(unmatched) ||
-				relativePathToken.MatchString(unmatched) ||
-				containsMutableAbsolutePath(unmatched) {
-				return nil, fmt.Errorf(
-					"unsupported mutable runtime path in command %q; trusted hooks must execute committed assets through AGM_CODEX_HOOK_ROOT",
-					command,
-				)
+			if err := addTrustedCommandAssets(references, command); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -364,6 +348,33 @@ func referencedHookAssets(manifest []byte) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func addTrustedCommandAssets(references map[string]struct{}, command string) error {
+	for _, match := range hookRootReference.FindAllStringSubmatch(command, -1) {
+		clean, err := cleanProjectPath(match[1])
+		if err != nil {
+			return fmt.Errorf("command %q: %w", command, err)
+		}
+		references[clean] = struct{}{}
+	}
+	unmatched := hookRootReference.ReplaceAllString(command, "")
+	if containsMutableRuntimePath(unmatched) {
+		return fmt.Errorf(
+			"unsupported mutable runtime path in command %q; trusted hooks must execute committed assets through AGM_CODEX_HOOK_ROOT",
+			command,
+		)
+	}
+	return nil
+}
+
+func containsMutableRuntimePath(command string) bool {
+	return projectDirReference.MatchString(command) ||
+		strings.Contains(command, "PROJECT_DIR") ||
+		runtimeDirReference.MatchString(command) ||
+		explicitRelativePath.MatchString(command) ||
+		relativePathToken.MatchString(command) ||
+		containsMutableAbsolutePath(command)
 }
 
 func containsMutableAbsolutePath(command string) bool {
