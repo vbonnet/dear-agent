@@ -103,13 +103,16 @@ can read the audit while the agent user cannot truncate, replace, or remove
 prior records. AGM also validates the privileged result before permitting the
 requested launch.
 
-The recurring audit ships as `deploy/launchd/com.dear-agent.override-audit.plist`
-and is staged with `make install-override-audit-launchagent`; its `--notify`
-mode delivers threshold breaches outside the launchd stdout/stderr files. On
-Linux, `make install-override-audit-systemd` uses fresh operator authentication
-to install a root-owned audit executable and system-manager templates; the
-service runs as the named unprivileged operator, but an unattended same-user
-agent cannot disable its timer through `systemctl --user`.
+On macOS, `make install-override-audit-launchdaemon` uses fresh operator
+authentication to install both
+`deploy/launchd/com.dear-agent.override-audit.plist` and a reviewed AGM copy
+into root-owned system locations. The system LaunchDaemon cannot be disabled
+through the same-user GUI domain, and its `--notify` mode delivers threshold
+breaches to the unified system log even when Notification Center is
+unavailable. On Linux, `make install-override-audit-systemd` uses the same
+operator boundary to install a root-owned audit executable and system-manager
+templates; the service runs as the named unprivileged operator, but an
+unattended same-user agent cannot disable its timer through `systemctl --user`.
 
 ## BDD Traceability
 

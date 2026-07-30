@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	slashpath "path"
 	"path/filepath"
 	"sort"
@@ -11,14 +12,16 @@ import (
 )
 
 // DefaultStoreBase is the host-side root for hook materializations. AGM never
-// adds this path to a sandbox's writable roots.
+// adds this path to a sandbox's writable roots. Resolve the process account
+// through the OS user database instead of trusting a caller-supplied HOME.
 func DefaultStoreBase() (string, error) {
-	home, err := os.UserHomeDir()
+	account, err := user.Current()
 	if err != nil {
-		return "", fmt.Errorf("resolve home for trusted hook store: %w", err)
+		return "", fmt.Errorf("resolve process account for trusted hook store: %w", err)
 	}
+	home := strings.TrimSpace(account.HomeDir)
 	if home == "" {
-		return "", errors.New("resolve home for trusted hook store: home directory is empty")
+		return "", errors.New("resolve process account for trusted hook store: home directory is empty")
 	}
 	return filepath.Join(home, ".local", "share", "dear-agent", "trusted-codex-hooks"), nil
 }

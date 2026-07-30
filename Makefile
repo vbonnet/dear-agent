@@ -89,8 +89,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   uninstall-disk-watchdog-launchagent Remove the disk-watchdog launch agent
 #   build-override-ledger-helper        Build the fixed privileged Unix ledger append helper
 #   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Unix)
-#   install-override-audit-launchagent  Stage the daily dangerous-override audit
-#   uninstall-override-audit-launchagent Remove the dangerous-override audit
+#   install-override-audit-launchdaemon Install the macOS dangerous-override audit
+#   uninstall-override-audit-launchdaemon Remove the macOS dangerous-override audit
 #   install-override-audit-systemd      Operator-install the daily dangerous-override audit (Linux)
 #   uninstall-override-audit-systemd    Remove the Linux dangerous-override audit
 #   install-gobin-guard             Install the ~/go/bin SENSE+ESCALATE guard outside GOBIN (ce-24f1)
@@ -123,7 +123,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchagent uninstall-override-audit-launchagent install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchdaemon uninstall-override-audit-launchdaemon install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
@@ -932,19 +932,45 @@ install-override-ledger-helper: build-override-ledger-helper
 		/usr/bin/sudo -k; \
 		echo "Installed root-owned ledger helper and exact sudoers rule for $$operator_user"
 
-# Stage the daily dangerous-override audit. Staging does not activate launchd;
-# the operator reviews and bootstraps the scheduled audit separately.
-install-override-audit-launchagent: install-agm build-dear-deploy
-	@mkdir -p $(HOME)/.local/state/dear-agent
-	./bin/dear-deploy sync com.dear-agent.override-audit
-	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.override-audit.plist"
-	@echo "Activate it yourself (ask-gated host action):"
-	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.override-audit.plist"
+# Install the macOS audit under launchd's system domain without activating it.
+# Both scheduler and executable are root-owned, so an unattended same-user
+# agent cannot replace them or disable the job through its GUI launchd domain.
+# Installation is an explicit, freshly authenticated operator action.
+install-override-audit-launchdaemon: build-agm
+	@set -eu; \
+		test "$$(uname -s)" = "Darwin" || { echo "launchd audit installation is macOS-only" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
+		root_group="$$(id -gn 0)"; \
+		/usr/bin/plutil -lint deploy/launchd/com.dear-agent.override-audit.plist >/dev/null; \
+		/usr/bin/sudo -k; \
+		if /usr/bin/sudo -n -v 2>/dev/null; then \
+			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
+			exit 2; \
+		fi; \
+		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/agm /usr/local/libexec/dear-agent-override-audit; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 deploy/launchd/com.dear-agent.override-audit.plist /Library/LaunchDaemons/com.dear-agent.override-audit.plist; \
+		/usr/bin/sudo -k; \
+		echo "Installed root-owned audit executable and system LaunchDaemon"; \
+		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \
+		echo "  sudo launchctl bootstrap system /Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \
+		echo "  log stream --predicate 'senderImagePath == \"/usr/bin/logger\"'"
 
-uninstall-override-audit-launchagent:
-	@launchctl bootout gui/$$(id -u)/com.dear-agent.override-audit 2>/dev/null || true
-	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.override-audit.plist
-	@echo "Removed: com.dear-agent.override-audit launch agent"
+uninstall-override-audit-launchdaemon:
+	@set -eu; \
+		test "$$(uname -s)" = "Darwin" || { echo "launchd audit removal is macOS-only" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
+		/usr/bin/sudo -k; \
+		if /usr/bin/sudo -n -v 2>/dev/null; then \
+			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
+			exit 2; \
+		fi; \
+		/usr/bin/sudo -v; \
+		/usr/bin/sudo /bin/launchctl bootout system/com.dear-agent.override-audit 2>/dev/null || true; \
+		/usr/bin/sudo /bin/rm -f /Library/LaunchDaemons/com.dear-agent.override-audit.plist /usr/local/libexec/dear-agent-override-audit; \
+		/usr/bin/sudo -k; \
+		echo "Removed the root-owned dangerous-override audit LaunchDaemon and executable"
 
 # Install the Linux audit under the system manager without activating it. The
 # template runs a root-owned AGM copy as the named unprivileged operator, so an

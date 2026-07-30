@@ -3,12 +3,34 @@ package codexhooks
 import (
 	"context"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+func TestDefaultStoreBaseIgnoresCallerControlledHome(t *testing.T) {
+	account, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	callerHome := t.TempDir()
+	t.Setenv("HOME", callerHome)
+
+	got, err := DefaultStoreBase()
+	if err != nil {
+		t.Fatalf("DefaultStoreBase() error: %v", err)
+	}
+	want := filepath.Join(account.HomeDir, ".local", "share", "dear-agent", "trusted-codex-hooks")
+	if got != want {
+		t.Fatalf("DefaultStoreBase() = %q, want OS-account path %q", got, want)
+	}
+	if pathWithin(got, callerHome) {
+		t.Fatalf("trusted hook store %q follows caller-controlled HOME %q", got, callerHome)
+	}
+}
 
 func TestAttestAndVerifyUseCommittedHookObjects(t *testing.T) {
 	source, sandbox := hookFixture(t)

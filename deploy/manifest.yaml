@@ -86,16 +86,6 @@ artifacts:
     tokens:
       __HOME__: ${HOME}
 
-  # Daily audit of dangerous override use. The user agent reads the root-owned
-  # /var/log/dear-agent-overrides.jsonl ledger and delivers threshold breaches
-  # through Notification Center and the unified system log.
-  - name: com.dear-agent.override-audit
-    source: deploy/launchd/com.dear-agent.override-audit.plist
-    deployed: ~/Library/LaunchAgents/com.dear-agent.override-audit.plist
-    mode: "0644"
-    tokens:
-      __HOME__: ${HOME}
-
   # --- Claude Code PreToolUse write-guard hooks ------------------------------
   # Compiled binaries built by `make build-write-guards` into bin/. They are
   # marked optional so `dear-deploy sync` on a machine that has not built them

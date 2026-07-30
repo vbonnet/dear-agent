@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  launchd agent for the recurring dangerous-override audit.
+  Root-owned system LaunchDaemon for the recurring dangerous-override audit.
 
   Runs `agm override audit --notify` daily. The audit reads the root-owned
   /var/log/dear-agent-overrides.jsonl ledger and reports every dangerous override
@@ -19,21 +19,21 @@
   system log before exiting 3. A generic non-zero exit would be indistinguishable
   from a broken job, so 3 is reserved for "used too often".
 
-  The plist is a TEMPLATE: `make install-override-audit-launchagent` creates
-  the log directory, substitutes __HOME__ for the real home directory, and
-  stages it through deploy/manifest.yaml into ~/Library/LaunchAgents (launchd
-  does not expand ~ or shell variables).
+  `make install-override-audit-launchdaemon` uses fresh interactive operator
+  authentication to install both this plist and a reviewed AGM copy into
+  root-owned system locations. An unattended same-user agent therefore cannot
+  replace the executable, edit the schedule, or disable it through the GUI
+  launchd domain.
 
   Activate (ask-gated host action):
-    launchctl bootstrap gui/$(id -u) \
-      ~/Library/LaunchAgents/com.dear-agent.override-audit.plist
+    sudo launchctl bootstrap system \
+      /Library/LaunchDaemons/com.dear-agent.override-audit.plist
 
   Trigger an immediate run outside the schedule:
-    launchctl kickstart gui/$(id -u)/com.dear-agent.override-audit
+    sudo launchctl kickstart system/com.dear-agent.override-audit
 
   Remove:
-    launchctl bootout gui/$(id -u)/com.dear-agent.override-audit
-    rm ~/Library/LaunchAgents/com.dear-agent.override-audit.plist
+    make uninstall-override-audit-launchdaemon
 -->
 <plist version="1.0">
 <dict>
@@ -42,7 +42,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>__HOME__/go/bin/agm</string>
+    <string>/usr/local/libexec/dear-agent-override-audit</string>
     <string>override</string>
     <string>audit</string>
     <string>--window</string>
@@ -55,9 +55,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>HOME</key>
-    <string>__HOME__</string>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 
   <!-- Daily, mid-morning: a review is only useful if a human is around to read
@@ -74,15 +72,16 @@
   <false/>
 
   <key>StandardOutPath</key>
-  <string>__HOME__/.local/state/dear-agent/override-audit.out.log</string>
+  <string>/var/log/dear-agent-override-audit.out.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/.local/state/dear-agent/override-audit.err.log</string>
+  <string>/var/log/dear-agent-override-audit.err.log</string>
 
   <key>ProcessType</key>
   <string>Background</string>
 
-  <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+  <!-- The audit has no project-relative inputs. Keep its cwd outside every
+       agent-controlled workspace. -->
   <key>WorkingDirectory</key>
-  <string>__HOME__</string>
+  <string>/var/empty</string>
 </dict>
 </plist>
