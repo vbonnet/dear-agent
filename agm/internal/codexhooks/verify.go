@@ -1712,8 +1712,65 @@ func jqStaticOptionOperands(
 		_, static := staticShellWord(args[index+1])
 		return index + 1, static
 	}
-	// The final --arg/--argjson value is data and may be dynamic.
-	return index + count, true
+	// The final --arg/--argjson value may be dynamic, but it must be
+	// syntactically protected from field splitting and pathname expansion so
+	// it cannot inject additional jq options.
+	return index + count, shellWordExpandsToOneArgument(args[index+count])
+}
+
+func shellWordExpandsToOneArgument(word *syntax.Word) bool {
+	if word == nil || len(word.Parts) == 0 {
+		return false
+	}
+	for _, part := range word.Parts {
+		switch typed := part.(type) {
+		case *syntax.Lit:
+			if strings.ContainsAny(typed.Value, "*?[{,}") {
+				return false
+			}
+		case *syntax.SglQuoted:
+			continue
+		case *syntax.DblQuoted:
+			if !doubleQuotedPartsExpandToOneArgument(typed.Parts) {
+				return false
+			}
+		default:
+			// Unquoted parameter, command, arithmetic, process, and glob
+			// expansions may split into multiple argv elements.
+			return false
+		}
+	}
+	return true
+}
+
+func doubleQuotedPartsExpandToOneArgument(parts []syntax.WordPart) bool {
+	for _, part := range parts {
+		switch typed := part.(type) {
+		case *syntax.Lit, *syntax.SglQuoted, *syntax.CmdSubst,
+			*syntax.ArithmExp, *syntax.ProcSubst, *syntax.ExtGlob:
+			continue
+		case *syntax.DblQuoted:
+			if !doubleQuotedPartsExpandToOneArgument(typed.Parts) {
+				return false
+			}
+		case *syntax.ParamExp:
+			if !parameterExpansionIsScalar(typed) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func parameterExpansionIsScalar(expansion *syntax.ParamExp) bool {
+	return expansion.Param != nil && expansion.Param.Value != "" &&
+		expansion.Param.Value != "@" && expansion.Flags == nil &&
+		!expansion.Excl && !expansion.Length && !expansion.Width && !expansion.IsSet &&
+		expansion.NestedParam == nil && expansion.Index == nil &&
+		len(expansion.Modifiers) == 0 && expansion.Slice == nil &&
+		expansion.Repl == nil && expansion.Names == 0 && expansion.Exp == nil
 }
 
 type jqArgumentAction uint8

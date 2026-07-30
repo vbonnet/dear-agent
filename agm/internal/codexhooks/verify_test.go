@@ -348,6 +348,11 @@ func TestValidateScriptAssetRejectsJQExternalFileModes(t *testing.T) {
 		"#!/bin/sh\nhook_json() { jq \"$@\"; }\nhook_json -n -f helper\n",
 		"#!/bin/sh\nhook_json() { jq \"$@\"; }\nhook_json --rawfile payload helper '$payload'\n",
 		"#!/bin/sh\nhook_json() { set -- -f helper; jq \"$@\"; }\nhook_json -n '.'\n",
+		"#!/bin/sh\nmessage='value -f helper'\n/usr/bin/jq -n --arg msg $message '.'\n",
+		"#!/bin/bash\nvalues=(value -f helper)\n/usr/bin/jq -n --arg msg \"${values[@]}\" '.'\n",
+		"#!/bin/sh\n/usr/bin/jq -n --arg msg \"$@\" '.'\n",
+		"#!/bin/sh\n/usr/bin/jq -n --arg msg * '.'\n",
+		"#!/bin/sh\nmessage=set\n/usr/bin/jq -n --arg msg \"${message:+$@}\" '.'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "external-file-loading jq runtime") {
@@ -364,6 +369,16 @@ hook_json -cn --arg msg "$message" '{decision:"block",reason:$msg}'
 `
 	if err := validateScriptAsset([]byte(script)); err != nil {
 		t.Fatalf("validateScriptAsset() error = %v, want analyzed jq forwarder allowed", err)
+	}
+}
+
+func TestValidateScriptAssetAllowsJQQuotedScalarBindingValue(t *testing.T) {
+	const script = `#!/bin/sh
+message=$1
+/usr/bin/jq -n --arg msg "prefix:$message" '{decision:"block",reason:$msg}'
+`
+	if err := validateScriptAsset([]byte(script)); err != nil {
+		t.Fatalf("validateScriptAsset() error = %v, want quoted scalar jq binding allowed", err)
 	}
 }
 
