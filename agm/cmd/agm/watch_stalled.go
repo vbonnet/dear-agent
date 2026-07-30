@@ -10,6 +10,15 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
+// resultsCourierCheckInterval and resultsCourierIdleGrace configure the
+// results-courier goroutine started alongside the stall watcher (see
+// results_courier.go). They are not exposed as flags: this is a fixed-cost
+// rider on an existing daemon, not a separately-tunable subcommand.
+const (
+	resultsCourierCheckInterval = 3 * time.Minute
+	resultsCourierIdleGrace     = 45 * time.Second
+)
+
 // stallEventOutput represents the JSON output for a stall event.
 type stallEventOutput struct {
 	Timestamp         string `json:"timestamp"`
@@ -99,6 +108,18 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	detector.ErrorRepeatThreshold = stalledErrorRepeatThreshold
 
 	recovery := ops.NewStallRecovery(opCtx, stalledOrchestratorName)
+
+	// Results courier (ce-vyu9 follow-up): rides this same always-on,
+	// host-level daemon to poll ~/.claude/projects for session completions
+	// and notify Valentin directly, since nothing else does. See
+	// results_courier.go for why this lives here rather than as its own
+	// launchd job.
+	if home, herr := os.UserHomeDir(); herr == nil {
+		go startResultsCourier(ctx, opCtx, home, stalledOrchestratorName,
+			resultsCourierCheckInterval, resultsCourierIdleGrace)
+	} else {
+		fmt.Fprintf(os.Stderr, "results-courier: could not resolve home dir, courier disabled: %v\n", herr)
+	}
 
 	// Main watch loop
 	ticker := time.NewTicker(stalledCheckInterval)

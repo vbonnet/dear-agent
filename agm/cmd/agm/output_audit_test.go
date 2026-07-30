@@ -31,6 +31,9 @@ func TestStructuredOutputGoesThroughCentralPath(t *testing.T) {
 			"each cycle — a monitoring stream, not a single masked result",
 		"watch_stalled.go": "streams line-delimited NDJSON (one compact JSON object per " +
 			"stalled session); a pretty-printed/masked blob would break the stream",
+		"results_courier.go": "rides watch_stalled's same NDJSON stream (detected-events and " +
+			"delivery-receipt lines); same reason as watch_stalled.go — it's a monitoring " +
+			"log feed, not a single --fields-maskable command result",
 	}
 
 	// fmt.Print / Println / Printf all write to stdout. Fprint* (e.g. to
