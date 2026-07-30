@@ -35,13 +35,11 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-10** When override use is aggregated, the system shall evaluate the alert threshold separately for each override kind.
 
-**OVR-11** When a raw Codex hook-trust bypass is requested outside AGM's attested launch path, including when shell quoting or escaping assembles the flag or expansion makes a raw Codex argv unprovable, the system shall deny it and direct the caller to the canonical attested `agm session new` flow.
+**OVR-11** When AGM's private Codex executor receives a hook-trust bypass, the system shall require a one-shot prepared handoff that binds the exact attested hook root and complete launch request and lives outside the workspace and every agent-writable root.
 
-**OVR-12** When AGM's private Codex executor receives a hook-trust bypass, the system shall require a one-shot prepared handoff that binds the exact attested hook root and complete launch request and lives outside the workspace and every agent-writable root.
+**OVR-12** When the scheduled override audit reaches a threshold, the system shall deliver the breach through Notification Center or the system log before exiting with the reserved breach status.
 
-**OVR-13** When the scheduled macOS override audit reaches a threshold, the system shall deliver the breach through Notification Center or the unified system log before exiting with the reserved breach status.
-
-**OVR-14** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
+**OVR-13** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
 
 ## Override kinds
 
@@ -57,13 +55,12 @@ It does not depend on a harness hook firing, because a hook that silently fails
 to run is exactly how a guardrail becomes decorative (see
 `.codex/hooks/SPEC.md` and the `${CLAUDE_PROJECT_DIR}` path defect).
 
-`.codex/hooks/pretool-dangerous-override-guard` is defence in depth for the
-case where an agent shells out to a raw `codex --dangerously-bypass-hook-trust`
-instead of going through AGM. It denies that raw path because authorization
-alone cannot attest or install an immutable hook root. Its sole exemption is a
-positively allowlisted complete `agm session new` command, whose binary path
-performs both controls. The hook refuses via Codex's `permissionDecision:
-"deny"` wire form; a non-zero hook exit is **not** a refusal in Codex.
+This boundary governs AGM-owned create and resume paths. A repository
+PreToolUse hook cannot mediate descendant process execution (for example, a
+script that launches an external Codex binary), so it must not be represented
+as enforcement for raw external launches. Operators that must prohibit direct
+Codex execution need an operator-owned executable policy outside this
+repository; AGM does not substitute command-text scanning for that boundary.
 
 For the Codex hook-trust kind, authorization composes with attestation
 (`agm/internal/codexhooks`). They answer different questions — whether the

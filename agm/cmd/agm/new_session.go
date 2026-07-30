@@ -333,7 +333,7 @@ func preflight(sessionName string) error {
 	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 		return dupErr
 	}
-	return enforceCircuitBreakers()
+	return enforceCircuitBreakers(sessionName)
 }
 
 // resolveTmuxSession checks for an existing tmux session and either prompts to

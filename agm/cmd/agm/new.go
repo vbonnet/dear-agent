@@ -778,7 +778,7 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // session new` (and its current-tmux variant) and `agm supervisor run`.
 // vroom-dispatch shells out to `agm session new`, so it inherits the same
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
-func enforceCircuitBreakers() error {
+func enforceCircuitBreakers(sessionName string) error {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -803,7 +803,7 @@ func enforceCircuitBreakers() error {
 	// brake turns out not to be engaged, so that an unapproved override is
 	// refused rather than quietly succeeding whenever it happens to be moot.
 	if brakeOverrideReason != "" {
-		if err := ops.AuthorizeAdmissionBrakeOverride(brakeOverrideReason, ""); err != nil {
+		if err := ops.AuthorizeAdmissionBrakeOverride(brakeOverrideReason, sessionName); err != nil {
 			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
 			return err
 		}

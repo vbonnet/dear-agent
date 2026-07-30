@@ -25,7 +25,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
 		}
-		if err := enforceCircuitBreakers(); err != nil {
+		if err := enforceCircuitBreakers(sessionName); err != nil {
 			return err
 		}
 	}

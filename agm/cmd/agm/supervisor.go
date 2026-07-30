@@ -386,7 +386,9 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", enforceCircuitBreakers)
+	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
+		return enforceCircuitBreakers(supervisorID)
+	})
 	if err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)

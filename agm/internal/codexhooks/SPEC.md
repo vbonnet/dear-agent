@@ -9,6 +9,11 @@ uses before requesting Codex's dangerous per-path hook-trust bypass. It binds
 one sandbox hook surface to immutable, content-addressed files from one
 reviewed source commit.
 
+This boundary governs Codex processes launched or resumed through AGM. Direct
+execution of an external Codex binary is outside AGM's process boundary and
+requires operator-owned executable policy; a repository hook cannot mediate a
+descendant script's later process execution and is not treated as that control.
+
 ## Requirements
 
 **CHOOK-01** When AGM attests repository-scoped Codex hooks, the system shall use a fixed OS-owned Git executable with caller-supplied Git repository/configuration environment removed, resolve the canonical source repository and full current commit, read `.codex/hooks.json` and every project-referenced hook only from that commit's Git objects, and produce a deterministic SHA-256 digest over their paths, Git modes, and bytes.

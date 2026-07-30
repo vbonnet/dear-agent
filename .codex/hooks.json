@@ -55,17 +55,6 @@
             "type": "command"
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/pretool-dangerous-override-guard",
-            "statusMessage": "Checking dangerous-override approval",
-            "timeout": 5,
-            "type": "command"
-          }
-        ]
       }
     ],
     "Stop": [
