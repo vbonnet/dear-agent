@@ -650,6 +650,9 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 	if !static {
 		return call.Args[0], "expanded command word"
 	}
+	if commandResolutionStateBuiltin(command) {
+		return call.Args[0], "command-resolution state builtin"
+	}
 	switch command {
 	case "eval", "trap":
 		return call.Args[0], "string-evaluating shell builtin"
@@ -668,10 +671,7 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		if !static {
 			return word, "expanded command-wrapper operand"
 		}
-		if env && (value == "-S" ||
-			value == "--split-string" ||
-			strings.HasPrefix(value, "-S") ||
-			strings.HasPrefix(value, "--split-string=")) {
+		if env && envSplitStringOption(value) {
 			return word, "env split-string command"
 		}
 		if value == "--" || strings.HasPrefix(value, "-") {
@@ -679,6 +679,9 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		}
 		if env && strings.Contains(value, "=") {
 			continue
+		}
+		if commandResolutionStateBuiltin(value) {
+			return word, "command-resolution state builtin"
 		}
 		switch value {
 		case "eval", "trap":
@@ -692,6 +695,22 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		}
 	}
 	return nil, ""
+}
+
+func envSplitStringOption(value string) bool {
+	return value == "-S" ||
+		value == "--split-string" ||
+		strings.HasPrefix(value, "-S") ||
+		strings.HasPrefix(value, "--split-string=")
+}
+
+func commandResolutionStateBuiltin(command string) bool {
+	switch command {
+	case "alias", "unalias", "hash", "enable":
+		return true
+	default:
+		return false
+	}
 }
 
 func staticShellWord(word *syntax.Word) (string, bool) {

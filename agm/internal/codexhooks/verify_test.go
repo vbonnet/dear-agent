@@ -320,6 +320,12 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/bash\nnohup builtin eval \"$(<helper)\"\n",
 		"#!/bin/bash\ntrap 'source helper' DEBUG; /bin/true\n",
 		"#!/bin/bash\ncommand builtin trap 'source helper' DEBUG; /bin/true\n",
+		"#!/bin/bash\nshopt -s expand_aliases\nalias run=\"$(printf '.%shelper' /)\"\nrun\n",
+		"#!/bin/bash\nbuiltin alias run=/bin/true\n",
+		"#!/bin/bash\ncommand unalias run\n",
+		"#!/bin/bash\nhash -p ./helper run\n",
+		"#!/bin/bash\ncommand builtin hash -p ./helper run\n",
+		"#!/bin/bash\nenable -f ./helper.so run\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
