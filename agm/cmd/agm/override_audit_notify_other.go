@@ -2,8 +2,23 @@
 
 package main
 
-import "errors"
+import (
+	"fmt"
+	"os/exec"
+	"strings"
+)
 
-func sendOverrideAuditNotification(string) error {
-	return errors.New("override audit notifications are only implemented for the macOS launchd deployment")
+var runOverrideAuditLogger = func(message string) ([]byte, error) {
+	// #nosec G204 -- executable and options are fixed; message is one argv value.
+	return exec.Command(
+		"logger", "-t", "dear-agent-override-audit", "--", message,
+	).CombinedOutput()
+}
+
+func sendOverrideAuditNotification(message string) error {
+	output, err := runOverrideAuditLogger(message)
+	if err != nil {
+		return fmt.Errorf("deliver override alert to the system log: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }

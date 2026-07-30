@@ -194,6 +194,18 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("bypass Codex argv = %q, want %q", got, want)
 	}
+	bypass.ConfigOverrides = []string{
+		`projects={"/tmp/work"={trust_level="untrusted"}}`,
+		`hooks={"PreToolUse"=[]}`,
+	}
+	if got, want := bypass.argv(), []string{
+		"-m", "gpt-test", "-C", "/tmp/work", "-s", "workspace-write",
+		"-c", `projects={"/tmp/work"={trust_level="untrusted"}}`,
+		"-c", `hooks={"PreToolUse"=[]}`,
+		"--dangerously-bypass-hook-trust",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("immutable-hook Codex argv = %q, want %q", got, want)
+	}
 
 	noBypass, err := parseCodex([]string{
 		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",

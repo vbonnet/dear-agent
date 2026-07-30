@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Dear Agent dangerous-override audit daily
+Documentation=https://github.com/vbonnet/dear-agent
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=dear-agent-override-audit.service
+
+[Install]
+WantedBy=timers.target
+

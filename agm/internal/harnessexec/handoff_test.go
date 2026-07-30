@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -223,13 +224,21 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	originalExecutablePath := executablePath
 	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
+	originalCodexHookOverrides := codexHookOverrides
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
 		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
+		codexHookOverrides = originalCodexHookOverrides
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
 	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/codex", nil }
+	codexHookOverrides = func(root, workDir string) ([]string, error) {
+		return []string{
+			`projects={"` + workDir + `"={trust_level="untrusted"}}`,
+			`hooks={"PreToolUse":[]}`,
+		}, nil
+	}
 
 	const hookRoot = "/trusted/hooks/0123456789abcdef"
 	prepared, err := PrepareCodexCommand(CodexLaunch{
@@ -251,8 +260,9 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		t.Fatalf("bypass handoff directory = %q, want %q", filepath.Dir(prepared.path), trustedRoot)
 	}
 
-	var childEnvironment []string
-	replaceProcess = func(_ string, _ []string, env []string) error {
+	var childArguments, childEnvironment []string
+	replaceProcess = func(_ string, argv, env []string) error {
+		childArguments = append([]string(nil), argv...)
 		childEnvironment = append([]string(nil), env...)
 		return nil
 	}
@@ -270,6 +280,9 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 	if got := environmentMap(childEnvironment)["AGM_CODEX_HOOK_ROOT"]; got != hookRoot {
 		t.Fatalf("Codex hook root environment = %q, want %q", got, hookRoot)
+	}
+	if !slices.Contains(childArguments, `hooks={"PreToolUse":[]}`) {
+		t.Fatalf("Codex argv does not carry immutable hook configuration: %q", childArguments)
 	}
 
 	bound, err := PrepareCodexCommand(CodexLaunch{

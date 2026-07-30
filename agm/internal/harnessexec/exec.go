@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -40,6 +41,7 @@ var (
 	replaceProcess        = syscall.Exec
 	changeDirectory       = os.Chdir
 	resolveClaudeOAuth    = auth.ResolveOAuthToken
+	codexHookOverrides    = codexhooks.LaunchConfigOverrides
 )
 
 var codexAllowedEnvironment = []string{
@@ -294,6 +296,11 @@ func runCodex(args []string) error {
 	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
 	if request.BypassHooks {
 		environ = overlayEnvironment(environ, []string{"AGM_CODEX_HOOK_ROOT=" + request.HookRoot})
+		overrides, overrideErr := codexHookOverrides(request.HookRoot, request.WorkDir)
+		if overrideErr != nil {
+			return fmt.Errorf("prepare immutable Codex hook configuration: %w", overrideErr)
+		}
+		request.ConfigOverrides = overrides
 	}
 	path, err := lookPathInEnvironment("codex", environ)
 	if err != nil {
@@ -352,17 +359,18 @@ func (s *stringList) Set(value string) error {
 }
 
 type codexRequest struct {
-	HandoffPath string
-	SessionName string
-	Model       string
-	WorkDir     string
-	Sandbox     string
-	Approval    string
-	AddDirs     stringList
-	ResumeID    string
-	Remote      bool
-	BypassHooks bool
-	HookRoot    string
+	HandoffPath     string
+	SessionName     string
+	Model           string
+	WorkDir         string
+	Sandbox         string
+	Approval        string
+	AddDirs         stringList
+	ResumeID        string
+	Remote          bool
+	BypassHooks     bool
+	HookRoot        string
+	ConfigOverrides []string
 }
 
 func parseCodex(args []string) (codexRequest, error) {
@@ -430,13 +438,16 @@ func validateCodexRequest(request codexRequest) error {
 }
 
 func (r codexRequest) argv() []string {
-	args := make([]string, 0, 12+len(r.AddDirs)*2)
+	args := make([]string, 0, 12+len(r.AddDirs)*2+len(r.ConfigOverrides)*2)
 	if r.Remote {
 		args = append(args, "resume", "--remote", "unix://")
 	}
 	args = append(args, "-m", r.Model, "-C", r.WorkDir, "-s", r.Sandbox)
 	for _, dir := range r.AddDirs {
 		args = append(args, "--add-dir", dir)
+	}
+	for _, override := range r.ConfigOverrides {
+		args = append(args, "-c", override)
 	}
 	if r.BypassHooks {
 		// Codex keys hook trust by absolute hooks.json path, which is new on

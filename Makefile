@@ -91,6 +91,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Unix)
 #   install-override-audit-launchagent  Stage the daily dangerous-override audit
 #   uninstall-override-audit-launchagent Remove the dangerous-override audit
+#   install-override-audit-systemd-user Stage the daily dangerous-override audit (Linux)
+#   uninstall-override-audit-systemd-user Remove the Linux dangerous-override audit
 #   install-gobin-guard             Install the ~/go/bin SENSE+ESCALATE guard outside GOBIN (ce-24f1)
 #   install-gobin-guard-launchagent Stage the gobin-guard launch agent (60-sec tick)
 #   uninstall-gobin-guard-launchagent Remove the gobin-guard launch agent
@@ -121,7 +123,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchagent uninstall-override-audit-launchagent install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchagent uninstall-override-audit-launchagent install-override-audit-systemd-user uninstall-override-audit-systemd-user install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
@@ -943,6 +945,28 @@ uninstall-override-audit-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.dear-agent.override-audit 2>/dev/null || true
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.override-audit.plist
 	@echo "Removed: com.dear-agent.override-audit launch agent"
+
+# Stage the Linux systemd user timer without activating it. The service writes
+# threshold alerts to the journal through both stderr and the logger-backed
+# --notify path; activation remains an explicit operator action.
+install-override-audit-systemd-user: install-agm
+	@test "$$(uname -s)" = "Linux" || { echo "systemd user timer installation is Linux-only" >&2; exit 2; }
+	@command -v systemctl >/dev/null || { echo "systemctl is required" >&2; exit 2; }
+	@mkdir -p $(HOME)/.config/systemd/user
+	@install -m 0644 agm/systemd/dear-agent-override-audit.service $(HOME)/.config/systemd/user/dear-agent-override-audit.service
+	@install -m 0644 agm/systemd/dear-agent-override-audit.timer $(HOME)/.config/systemd/user/dear-agent-override-audit.timer
+	@echo "Staged: dear-agent-override-audit.service and dear-agent-override-audit.timer"
+	@echo "Review, activate, and monitor them yourself (ask-gated host actions):"
+	@echo "  systemctl --user daemon-reload"
+	@echo "  systemctl --user enable --now dear-agent-override-audit.timer"
+	@echo "  journalctl --user -t dear-agent-override-audit"
+
+uninstall-override-audit-systemd-user:
+	@systemctl --user disable --now dear-agent-override-audit.timer 2>/dev/null || true
+	@rm -f $(HOME)/.config/systemd/user/dear-agent-override-audit.service
+	@rm -f $(HOME)/.config/systemd/user/dear-agent-override-audit.timer
+	@systemctl --user daemon-reload 2>/dev/null || true
+	@echo "Removed: dear-agent-override-audit systemd user timer"
 
 # gobin-guard (ce-24f1): SENSE + ESCALATE guard for ~/go/bin. Installed OUTSIDE
 # ~/go/bin (into ~/.local/state/dear-agent/bin) so it survives the very wipe it
