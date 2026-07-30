@@ -294,6 +294,9 @@ func TestLaunchConfigOverridesPreservesEmbeddedBashInterpreter(t *testing.T) {
 		t.Fatalf("LaunchConfigOverrides() error: %v", err)
 	}
 	command := commandFromOverrides(t, overrides, "PreToolUse")
+	if !strings.Contains(command, "/bin/bash -c") {
+		t.Fatalf("embedded Bash hook command = %q, want absolute Bash interpreter", command)
+	}
 	output, err := exec.Command("/bin/sh", "-c", command).CombinedOutput()
 	if err != nil {
 		t.Fatalf("run embedded Bash hook command: %v\n%s", err, output)
