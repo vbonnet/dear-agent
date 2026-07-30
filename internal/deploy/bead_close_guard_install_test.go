@@ -27,7 +27,7 @@ func TestCodexBeadCloseGuardUsesOperatorOwnedInstall(t *testing.T) {
 	if bypassDeny < 0 || guardResolve < 0 || bypassDeny >= guardResolve {
 		t.Fatal("attested Codex hook does not deny closure before resolving the guard and its CLI dependencies")
 	}
-	if !strings.Contains(hook[bypassDeny:guardResolve], `--force does not bypass this boundary`) {
+	if !strings.Contains(hook[bypassDeny:guardResolve], `--force does not bypass this direct hook decision`) {
 		t.Fatal("attested Codex hook does not explicitly keep force-close behind the reviewed-session boundary")
 	}
 

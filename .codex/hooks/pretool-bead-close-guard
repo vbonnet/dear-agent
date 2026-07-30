@@ -19,9 +19,10 @@
 # Does NOT match bd list, bd show, bd comment, etc.
 # Ordinary reviewed sessions fail open when input is malformed or the
 # bead-close-guard binary is missing. Attested unattended sessions deny close
-# intent here for immediate feedback and also inherit BD_READONLY=true from the
-# private executor, so quoted argv and invoked scripts fail at bd's own write
-# boundary even when this raw command inspection cannot recognize them.
+# intent that this input-inspection hook recognizes, before resolving the
+# guard's user-authenticated dependencies. A repository PreToolUse hook cannot
+# mediate a descendant script's later process execution or authorize the Beads
+# store, so this direct feedback is not presented as that enforcement boundary.
 set -uo pipefail
 
 json_tool="/usr/local/libexec/dear-agent-codex-hook-json"
@@ -80,10 +81,11 @@ esac
 # The compiled DoD guard resolves bd and gh from the ordinary user's
 # authenticated PATH. Those package-managed tools and their evolving runtime
 # dependencies do not belong in AGM's operator-owned hook trust boundary.
-# Unattended sessions therefore cannot close or force-close Beads at all; a
-# reviewed session must perform the lifecycle transition after verifying DoD.
+# Deny a directly recognized unattended close request before resolving those
+# dependencies; a reviewed session must perform that lifecycle transition
+# after verifying DoD.
 if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
-  "$json_tool" -cn --arg msg "bead-close-guard: bead closure is disabled in unattended hook-trust override sessions because the Definition-of-Done verifier requires reviewed user-authenticated bd and gh state. Re-run this closure from an ordinary reviewed session after verifying referenced PRs are merged; --force does not bypass this boundary." \
+  "$json_tool" -cn --arg msg "bead-close-guard: this directly recognized bead-closure request is disabled in unattended hook-trust override sessions because the Definition-of-Done verifier requires reviewed user-authenticated bd and gh state. Re-run this closure from an ordinary reviewed session after verifying referenced PRs are merged; --force does not bypass this direct hook decision." \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
   exit 2
 fi

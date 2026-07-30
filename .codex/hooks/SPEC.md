@@ -23,9 +23,7 @@ OpenCode receive through their native hook or bridge surfaces.
 
 **CODEX-HOOK-06** When a variable name merely contains `BEADS_DIR` as a suffix or prefix, the system shall not treat it as unsupported `BEADS_DIR` usage.
 
-**CODEX-HOOK-07** When an attested unattended AGM hook-trust session attempts to close or force-close a Bead, the system shall deny the transition before invoking the close guard or its user-authenticated CLI dependencies.
-
-**CODEX-HOOK-08** When shell spelling prevents the unattended close hook from recognizing a Bead mutation directly, the private executor shall still make the inherited `bd` process enforce strict read-only mode at its effective-argv storage boundary.
+**CODEX-HOOK-07** When an attested unattended AGM hook-trust session presents a directly recognizable Bead close or force-close command to the PreToolUse hook, the system shall deny that immediate tool request before invoking the close guard or its user-authenticated CLI dependencies. This input-inspection hook does not claim to mediate descendant process execution or authorize the Beads store.
 
 ## BDD Traceability
 

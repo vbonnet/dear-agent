@@ -455,10 +455,6 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	if got := environmentMap(gotEnv)["AGM_CODEX_HOOK_ROOT"]; got != "" {
 		t.Fatalf("ordinary Codex replacement inherited untrusted hook root %q", got)
 	}
-	if got := environmentMap(gotEnv)["BD_READONLY"]; got != "" {
-		t.Fatalf("ordinary Codex replacement inherited bypass-only Beads policy %q", got)
-	}
-
 	resolveClaudeOAuth = func() string { return "resolved-oauth" }
 	err = Run(ClaudeProtocol, []string{
 		"--session", "claude-session", "--model", "claude-test", "--auto-mode",
