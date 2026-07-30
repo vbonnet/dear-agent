@@ -18,8 +18,10 @@
 #   - `update ... --status closed`
 # Does NOT match bd list, bd show, bd comment, etc.
 # Ordinary reviewed sessions fail open when input is malformed or the
-# bead-close-guard binary is missing. Attested unattended sessions fail closed
-# on every close intent before reaching the guard's user-authenticated CLIs.
+# bead-close-guard binary is missing. Attested unattended sessions deny close
+# intent here for immediate feedback and also inherit BD_READONLY=true from the
+# private executor, so quoted argv and invoked scripts fail at bd's own write
+# boundary even when this raw command inspection cannot recognize them.
 set -uo pipefail
 
 json_tool="/usr/local/libexec/dear-agent-codex-hook-json"

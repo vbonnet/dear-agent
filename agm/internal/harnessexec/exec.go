@@ -313,7 +313,14 @@ func runCodex(args []string) error {
 	// -C target instead of forwarding a stale caller PWD.
 	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
 	if request.BypassHooks {
-		environ = overlayEnvironment(environ, []string{"AGM_CODEX_HOOK_ROOT=" + request.HookRoot})
+		environ = overlayEnvironment(environ, []string{
+			"AGM_CODEX_HOOK_ROOT=" + request.HookRoot,
+			// The shell-text hook remains useful feedback, but shell quoting
+			// and invoked scripts can hide effective argv. Pin Beads' strict
+			// read-only policy in the Codex child as the mutation boundary so
+			// every inherited bd process refuses close/update writes itself.
+			"BD_READONLY=true",
+		})
 		overrides, overrideErr := codexHookOverrides(request.HookRoot, request.WorkDir)
 		if overrideErr != nil {
 			return fmt.Errorf("prepare immutable Codex hook configuration: %w", overrideErr)

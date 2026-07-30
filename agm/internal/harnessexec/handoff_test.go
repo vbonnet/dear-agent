@@ -271,7 +271,7 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		HookRoot:        hookRoot,
 		HookTrustReason: hookTrustReason,
 		HookTrustActor:  hookTrustActor,
-	}, nil)
+	}, []string{"BD_READONLY=false"})
 	if err != nil {
 		t.Fatalf("prepare trusted Codex bypass: %v", err)
 	}
@@ -306,6 +306,9 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 	if got := environmentMap(childEnvironment)["AGM_CODEX_HOOK_ROOT"]; got != hookRoot {
 		t.Fatalf("Codex hook root environment = %q, want %q", got, hookRoot)
+	}
+	if got := environmentMap(childEnvironment)["BD_READONLY"]; got != "true" {
+		t.Fatalf("Codex bypass Beads policy = %q, want strict read-only", got)
 	}
 	if !slices.Contains(childArguments, `hooks={"PreToolUse":[]}`) {
 		t.Fatalf("Codex argv does not carry immutable hook configuration: %q", childArguments)

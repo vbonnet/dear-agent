@@ -25,6 +25,8 @@ OpenCode receive through their native hook or bridge surfaces.
 
 **CODEX-HOOK-07** When an attested unattended AGM hook-trust session attempts to close or force-close a Bead, the system shall deny the transition before invoking the close guard or its user-authenticated CLI dependencies.
 
+**CODEX-HOOK-08** When shell spelling prevents the unattended close hook from recognizing a Bead mutation directly, the private executor shall still make the inherited `bd` process enforce strict read-only mode at its effective-argv storage boundary.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/hook_parity.feature`
