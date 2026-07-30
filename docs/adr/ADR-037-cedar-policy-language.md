@@ -55,10 +55,10 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   registry owns aliases/arguments and emits typed action/resource-role pairs
   plus context. Sources, destinations, and parents retain their operation roles;
   every pair is separately authorized and all must allow; raw maps and adapter-local aliases are forbidden.
-  Network identity includes canonical hostname, resolved IP, and port; every
-  DNS answer/redirect is separately authorized and dispatch binds approved
-  IP/port at the socket or trusted proxy, preventing rebinding. Pi `find`/`Glob`
-  map to search, `ls` to directory-list, and `path`/`file_path` normalize; multi-resource calls emit all resources; invalid/lossy shapes deny before Cedar.
+  Network identity includes canonical hostname, resolved IP, and port. Hostname-scoped policy requires an application-aware trusted proxy that enforces approved TLS SNI/HTTP Host plus IP/port;
+  socket-only enforcement is explicitly IP-granular and rejects hostname-scoped rules. Every DNS answer/redirect is separately authorized and dispatch binds the approved tuple, preventing rebinding.
+  Pi `find`/`Glob` map to search, `ls` to directory-list, and `path`/`file_path`
+  normalize; multi-resource calls emit all resources; invalid/lossy shapes deny before Cedar.
 - Treat the interceptor executable and its harness registration as privileged
   enforcement assets, not project files. Each blocking integration must load
   both from an operator-managed location outside the workspace and every
@@ -94,7 +94,7 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   any display/request/receipt, resource-role, context, or approver-scope mismatch denies. Tmux input, harness callbacks, and agent-addressable messages cannot prove approval;
   without an integrity-protected channel, confirmation fails closed. A harness-independent pre-receipt deadline makes silence/cancellation return typed
   `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is not that bound. Diagnostics never make a
-  forbid or missing permit user-overridable. Final dispatch atomically consumes the nonce in durable storage; only one contender executes and replay denies.
+  forbid or missing permit user-overridable. Final dispatch uses a privileged nonce-consumption authority outside every agent-writable root; durable atomic consumption lets one contender execute and denies replay.
 - Bound every evaluator call by a harness-independent deadline. A panic,
   process crash, signal, nonzero exit, EOF, transport closure, timeout,
   cancellation without a complete decision, or incomplete response is a typed
@@ -222,8 +222,8 @@ tests must prove all of the following:
    A copy from a denied source to an allowed destination evaluates both roles
    and the all-of result denies dispatch; an all-allowed multi-resource copy
    evaluates every source, destination, and parent pair and dispatches. A live
-   allowed external endpoint dispatches while private/control-plane IP/ports
-   stay denied across DNS, redirect, and rebinding; equivalent paths unify and protected symlink/missing-leaf targets deny before Cedar.
+   allowed hostname dispatches while a denied co-hosted Host/SNI and private/control-plane tuple stay blocked across DNS, redirect, and rebinding;
+   socket-only mode proves IP-granular semantics; equivalent paths unify and protected symlink/missing-leaf targets deny before Cedar.
 8. After positive invocation authorization, every harness drives an authored
    confirmation-free Deny: interactive mode enters `ask`, while non-interactive
    mode fails closed and dispatches nothing. Positively authorized interactive
@@ -237,7 +237,7 @@ tests must prove all of the following:
    receipt; changing only a resource role or context (such as a force flag) rejects approval.
    Terminal keys, callbacks, and agent messages cannot mint a human receipt.
    Trusted display and approval of unchanged snapshots reauthorizes one dispatch;
-   duplicate/concurrent receipts atomically accept one; replay, silence, and cancellation dispatch nothing.
+   a privileged nonce authority accepts one duplicate/concurrent receipt; store deletion/rollback, replay, silence, and cancellation dispatch nothing.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
