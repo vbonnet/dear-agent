@@ -945,6 +945,19 @@ func findUsesCommandExecution(command string, args []*syntax.Word) bool {
 	})
 }
 
+func makeUsesCommandExecution(command string) bool {
+	switch filepath.Base(command) {
+	case "make", "gmake":
+		// Make evaluates recipes from makefiles, --eval, environment-provided
+		// MAKEFLAGS, and command-line variable assignments. Even a literal
+		// system-path executable can therefore dispatch mutable workspace
+		// commands that were not part of the hook attestation.
+		return true
+	default:
+		return false
+	}
+}
+
 func tarUsesCommandExecution(command string, args []*syntax.Word) bool {
 	switch filepath.Base(command) {
 	case "tar", "gtar", "bsdtar":
@@ -1317,20 +1330,8 @@ func dynamicBuiltinOperand(
 	commandWord *syntax.Word,
 	args []*syntax.Word,
 ) (*syntax.Word, string) {
-	if awkUsesCommandExecution(command, args) {
-		return commandWord, "command-capable AWK runtime"
-	}
-	if sedUsesCommandExecution(command, args) {
-		return commandWord, "command-capable sed runtime"
-	}
-	if findUsesCommandExecution(command, args) {
-		return commandWord, "command-capable find runtime"
-	}
-	if tarUsesCommandExecution(command, args) {
-		return commandWord, "command-capable tar runtime"
-	}
-	if gitUsesCommandExecution(command, args) {
-		return commandWord, "command-capable Git runtime"
+	if reason := commandCapableRuntimeReason(command, args); reason != "" {
+		return commandWord, reason
 	}
 	switch command {
 	case "mapfile", "readarray":
@@ -1353,6 +1354,28 @@ func dynamicBuiltinOperand(
 		}
 	}
 	return nil, ""
+}
+
+func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
+	if awkUsesCommandExecution(command, args) {
+		return "command-capable AWK runtime"
+	}
+	if sedUsesCommandExecution(command, args) {
+		return "command-capable sed runtime"
+	}
+	if findUsesCommandExecution(command, args) {
+		return "command-capable find runtime"
+	}
+	if makeUsesCommandExecution(command) {
+		return "command-capable Make runtime"
+	}
+	if tarUsesCommandExecution(command, args) {
+		return "command-capable tar runtime"
+	}
+	if gitUsesCommandExecution(command, args) {
+		return "command-capable Git runtime"
+	}
+	return ""
 }
 
 func namerefDeclarationOption(args []*syntax.Word) *syntax.Word {
