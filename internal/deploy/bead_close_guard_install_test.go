@@ -22,6 +22,14 @@ func TestCodexBeadCloseGuardUsesOperatorOwnedInstall(t *testing.T) {
 	if !strings.Contains(hook, `guard="/usr/local/libexec/dear-agent-bead-close-guard"`) {
 		t.Fatal("attested Codex hook does not prefer the operator-owned guard path")
 	}
+	bypassDeny := strings.Index(hook, `if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]`)
+	guardResolve := strings.Index(hook, `guard="/usr/local/libexec/dear-agent-bead-close-guard"`)
+	if bypassDeny < 0 || guardResolve < 0 || bypassDeny >= guardResolve {
+		t.Fatal("attested Codex hook does not deny closure before resolving the guard and its CLI dependencies")
+	}
+	if !strings.Contains(hook[bypassDeny:guardResolve], `--force does not bypass this boundary`) {
+		t.Fatal("attested Codex hook does not explicitly keep force-close behind the reviewed-session boundary")
+	}
 
 	makefile := read("Makefile")
 	start := strings.Index(makefile, "install-bead-close-guard: build-bead-close-guard")

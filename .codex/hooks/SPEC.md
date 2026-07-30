@@ -23,6 +23,8 @@ OpenCode receive through their native hook or bridge surfaces.
 
 **CODEX-HOOK-06** When a variable name merely contains `BEADS_DIR` as a suffix or prefix, the system shall not treat it as unsupported `BEADS_DIR` usage.
 
+**CODEX-HOOK-07** When an attested unattended AGM hook-trust session attempts to close or force-close a Bead, the system shall deny the transition before invoking the close guard or its user-authenticated CLI dependencies.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/hook_parity.feature`
@@ -30,3 +32,4 @@ OpenCode receive through their native hook or bridge surfaces.
 ## Test Traceability
 
 - `tests/bats/pretool-beads-dir-block.bats`
+- `tests/bats/pretool-bead-close-guard.bats`

@@ -17,7 +17,9 @@
 #   - `close` subcommand
 #   - `update ... --status closed`
 # Does NOT match bd list, bd show, bd comment, etc.
-# Fails open: unparseable input or missing bead-close-guard binary exits 0.
+# Ordinary reviewed sessions fail open when input is malformed or the
+# bead-close-guard binary is missing. Attested unattended sessions fail closed
+# on every close intent before reaching the guard's user-authenticated CLIs.
 set -uo pipefail
 
 json_tool="/usr/local/libexec/dear-agent-codex-hook-json"
@@ -72,6 +74,17 @@ fi
 case " $stripped " in
   *" --help "*|*" -h "*) exit 0 ;;
 esac
+
+# The compiled DoD guard resolves bd and gh from the ordinary user's
+# authenticated PATH. Those package-managed tools and their evolving runtime
+# dependencies do not belong in AGM's operator-owned hook trust boundary.
+# Unattended sessions therefore cannot close or force-close Beads at all; a
+# reviewed session must perform the lifecycle transition after verifying DoD.
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  "$json_tool" -cn --arg msg "bead-close-guard: bead closure is disabled in unattended hook-trust override sessions because the Definition-of-Done verifier requires reviewed user-authenticated bd and gh state. Re-run this closure from an ordinary reviewed session after verifying referenced PRs are merged; --force does not bypass this boundary." \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
+  exit 2
+fi
 
 # Check if --force is present (allow bypass for abandoned beads). A leading
 # "\b" never matches before "--" (space→dash is non-word→non-word, no word
