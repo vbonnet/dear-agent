@@ -45,6 +45,9 @@ func authenticateLauncher(launcherPID int, allowCompanion bool) error {
 	); err != nil {
 		return err
 	}
+	if err := validateProcessImage(launcherPID); err != nil {
+		return fmt.Errorf("validate non-injectable launcher process: %w", err)
+	}
 	expectedAGM, err := loadLauncherIdentity(launcherIdentityPath)
 	if err != nil {
 		return err

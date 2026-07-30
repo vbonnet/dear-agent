@@ -13,6 +13,43 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	csOpsStatus      = 0
+	csValid          = 0x00000001
+	csGetTaskAllow   = 0x00000004
+	csInvalidAllowed = 0x00000020
+	csRuntime        = 0x00010000
+	csDebugged       = 0x10000000
+)
+
+func validateProcessImage(pid int) error {
+	var status uint32
+	_, _, errno := unix.Syscall6(
+		unix.SYS_CSOPS, //nolint:staticcheck // x/sys/unix exposes no libSystem csops wrapper.
+		uintptr(pid),
+		csOpsStatus,
+		uintptr(unsafe.Pointer(&status)),
+		uintptr(unsafe.Sizeof(status)),
+		0,
+		0,
+	)
+	runtime.KeepAlive(&status)
+	if errno != 0 {
+		return errno
+	}
+	return validateDarwinCodeStatus(status)
+}
+
+func validateDarwinCodeStatus(status uint32) error {
+	if status&csValid == 0 || status&csRuntime == 0 {
+		return errors.New("launcher is not a valid hardened-runtime process")
+	}
+	if status&(csGetTaskAllow|csInvalidAllowed|csDebugged) != 0 {
+		return errors.New("launcher permits injected or debug-modified code")
+	}
+	return nil
+}
+
 func processParentPID(pid int) (int, error) {
 	const maxInt32 = int64(1<<31 - 1)
 	if pid <= 1 || int64(pid) > maxInt32 {

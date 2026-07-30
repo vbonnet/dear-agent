@@ -23,7 +23,7 @@ nor an operator-selected destination.
 
 **OLA-06** When a new authorization transaction crosses the privileged boundary, the command shall require a unique random authorization ID for every use and shall revalidate each use's exact subject against its matching root-owned grant before appending any record.
 
-**OLA-07** When the NOPASSWD helper is invoked, the command shall require its launcher PID to be the first non-sudo ancestor, allow only root-owned `/usr/bin/sudo` intermediaries, inspect the live launcher code identity through the kernel, and require that identity to match the root-owned installed-AGM policy before appending.
+**OLA-07** When the NOPASSWD helper is invoked, the command shall require its launcher PID to be the first non-sudo ancestor, allow only root-owned `/usr/bin/sudo` intermediaries, inspect the live launcher code identity through the kernel, and require that identity to match the root-owned installed-launcher policy; on Linux it shall additionally reject any ELF interpreter so loader injection is impossible, and on macOS it shall require a valid hardened-runtime process that has never allowed debugging or invalid code.
 
 **OLA-08** When the authenticated AGM launcher, or the separately attested co-installed AGM MCP companion, binds override proofs into a private handoff, the command shall issue a short-lived root-owned capability for the exact protocol, path, handoff digest, proofs, and accompanying spawn obligation; when an AGM-only executor presents that complete capability, the command shall compare it with the root-owned canonical bytes and atomically unlink it under an exclusive lock so concurrent or copied handoffs cannot consume it more than once.
 

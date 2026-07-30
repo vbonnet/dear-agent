@@ -73,3 +73,24 @@ define install-go-bin
 	mv -f "$$stage" "$$dest"; \
 	echo "Installed: $$dest"
 endef
+
+# install-go-bin-hardened is reserved for binaries whose live process identity
+# authorizes the fixed privileged override helper. Linux callers are built
+# cgo-free and verified as static by that helper. On macOS, the hardened
+# runtime makes dyld environment injection fail before process startup; the
+# helper independently requires the live CS_RUNTIME status bit.
+define install-go-bin-hardened
+	@set -e; \
+	dest='$(if $(2),$(2),$(HOME)/go/bin)/$(notdir $(1))'; \
+	stage="$$(mktemp "$$dest.XXXXXX")"; \
+	trap 'rm -f "$$stage"' EXIT; \
+	cp '$(1)' "$$stage"; \
+	chmod 755 "$$stage"; \
+	case "$$(uname -s)" in \
+		Darwin) codesign -f -s - --options runtime "$$stage" ;; \
+		Linux) ;; \
+		*) echo "authenticated launcher installation is unsupported on this platform" >&2; exit 2 ;; \
+	esac; \
+	mv -f "$$stage" "$$dest"; \
+	echo "Installed hardened: $$dest"
+endef

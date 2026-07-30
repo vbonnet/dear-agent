@@ -4,6 +4,10 @@ package main
 
 import "errors"
 
+func validateProcessImage(int) error {
+	return errors.New("non-injectable process authentication is unsupported on this platform")
+}
+
 func processParentPID(int) (int, error) {
 	return 0, errors.New("launch-bound process authentication is unsupported on this platform")
 }

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" // sqlite3 driver
+	_ "modernc.org/sqlite" // pure-Go SQLite driver keeps authenticated launchers cgo-free
 )
 
 // QueueEntry represents a queued message waiting for delivery
@@ -65,7 +65,10 @@ func NewMessageQueue() (*MessageQueue, error) {
 	dbPath := filepath.Join(configDir, "message_queue.db")
 
 	// Open database with WAL mode for concurrent access
-	db, err := sql.Open("sqlite3", fmt.Sprintf("%s?_journal_mode=WAL&_timeout=5000", dbPath))
+	db, err := sql.Open(
+		"sqlite",
+		fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -101,7 +104,7 @@ func NewMessageQueue() (*MessageQueue, error) {
 	// We ignore errors since the column might already exist
 	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 1;`) //nolint:noctx // TODO(context): plumb ctx through this layer
 	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_received INTEGER NOT NULL DEFAULT 0;`) //nolint:noctx // TODO(context): plumb ctx through this layer
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`) //nolint:noctx // TODO(context): plumb ctx through this layer
+	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`)                   //nolint:noctx // TODO(context): plumb ctx through this layer
 
 	// Create index if it doesn't exist (idempotent) - must be after ALTER TABLE
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_ack_required ON message_queue(ack_required, ack_received);`) //nolint:noctx // TODO(context): plumb ctx through this layer

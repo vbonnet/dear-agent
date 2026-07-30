@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"crypto/sha256"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,31 @@ import (
 	"strconv"
 	"strings"
 )
+
+func validateProcessImage(pid int) error {
+	file, err := os.Open(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	image, err := elf.NewFile(file)
+	if err != nil {
+		return fmt.Errorf("parse launcher ELF image: %w", err)
+	}
+	defer func() { _ = image.Close() }()
+	return validateELFProgramHeaders(image.Progs)
+}
+
+func validateELFProgramHeaders(programs []*elf.Prog) error {
+	for _, program := range programs {
+		if program.Type == elf.PT_INTERP {
+			return errors.New(
+				"launcher uses a dynamic ELF interpreter; reinstall the cgo-free authenticated build",
+			)
+		}
+	}
+	return nil
+}
 
 func processParentPID(pid int) (int, error) {
 	file, err := os.Open(fmt.Sprintf("/proc/%d/status", pid))

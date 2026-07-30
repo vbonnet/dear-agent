@@ -23,6 +23,8 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	target := makefile[start : start+end]
 
 	requiredInOrder := []string{
+		`$(call install-go-bin-hardened,bin/agm)`,
+		`$(call install-go-bin-hardened,bin/agm-mcp-server)`,
 		`expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"`,
 		`IFS= read -r confirmed_hash`,
 		`test "$$confirmed_hash" = "$$expected_hash"`,
@@ -51,5 +53,17 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	}
 	if strings.Contains(target, `-m 0755 bin/dear-agent-override-ledger-append "$$helper"`) {
 		t.Fatal("install target still copies mutable same-user bytes directly to the privileged helper")
+	}
+	installMacro, err := os.ReadFile("../../mk/install-go-bin.mk")
+	if err != nil {
+		t.Fatalf("read shared install macro: %v", err)
+	}
+	for _, required := range []string{
+		"define install-go-bin-hardened",
+		`codesign -f -s - --options runtime "$$stage"`,
+	} {
+		if !strings.Contains(string(installMacro), required) {
+			t.Fatalf("hardened launcher install macro lacks %q", required)
+		}
 	}
 }

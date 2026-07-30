@@ -64,7 +64,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, re-reserve every claim with a fresh authorization ID, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
 
-**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and separate root-owned caller policies to the exact installed AGM and co-installed MCP companion code identities, carry the live launcher PID in every canonical privileged request, require that PID to be the helper's first non-sudo ancestor, permit the companion identity only for capability issuance, and require the AGM identity for capability consumption and ledger append.
+**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and separate root-owned caller policies to the exact installed AGM and co-installed MCP companion code identities, build those launchers without cgo, apply the macOS hardened runtime, carry the live launcher PID in every canonical privileged request, require that PID to be the helper's first non-sudo ancestor, reject Linux ELF interpreters and macOS processes that lack valid non-debugged hardened-runtime status, permit the companion identity only for capability issuance, and require the AGM identity for capability consumption and ledger append.
 
 **OVR-26** When final launch admission succeeds, the system shall record the circuit-breaker spawn timestamp only after every launch-bound override reservation has been committed or sealed successfully and immediately before process or tmux submission.
 
@@ -144,7 +144,9 @@ installs the matching AGM and AGM MCP companion builds, prints and requires
 typed confirmation of the helper artifact's complete SHA-256 and both installed
 code identities, copies the approved helper bytes and caller policies into
 unique root-owned staging files, and atomically activates each only on an exact
-match. It then installs the
+match. The installed launchers are cgo-free so Linux produces static ELF
+processes with no `LD_PRELOAD` interpreter, and their macOS signatures opt into
+the hardened runtime so dyld environment injection is rejected. It then installs the
 one-purpose root-owned
 `/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact
 per-user, helper-digest-qualified NOPASSWD sudoers rule for that path. Runtime
@@ -182,8 +184,11 @@ launch boundary. The helper permits only root-owned `/usr/bin/sudo` processes
 between itself and that exact PID. Ledger appends and capability consumption
 require the installed AGM identity; capability issuance also accepts the
 separately installed companion identity because it prepares MCP launches
-directly. Direct shell calls, descendant agent shells under a persistent
-supervisor, unrelated PIDs, and changed launcher bytes therefore fail closed.
+directly. The live Linux process must have no ELF interpreter; the live macOS
+process must remain valid, hardened, non-debuggable, and never debug-modified.
+Direct shell calls, injected or debug-modified processes, descendant agent
+shells under a persistent supervisor, unrelated PIDs, and changed launcher
+bytes therefore fail closed.
 Updating either launcher requires reinstalling the helper policies before that
 launcher can perform another privileged operation.
 

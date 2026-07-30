@@ -988,6 +988,8 @@ build-override-ledger-helper:
 	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
 
 install-override-ledger-helper: build-override-ledger-helper install-agm install-agm-mcp-server
+	$(call install-go-bin-hardened,bin/agm)
+	$(call install-go-bin-hardened,bin/agm-mcp-server)
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
@@ -1387,8 +1389,8 @@ install-vroom-governor: build-vroom-governor
 build-agm:
 	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
-	go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
 
 install-agm: build-agm
@@ -1398,7 +1400,7 @@ install-agm: build-agm
 build-agm-mcp-server:
 	@echo "Building agm-mcp-server..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/agm-mcp-server ./agm/cmd/agm-mcp-server/
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-mcp-server ./agm/cmd/agm-mcp-server/
 	@echo "Built: bin/agm-mcp-server"
 
 install-agm-mcp-server: build-agm-mcp-server
