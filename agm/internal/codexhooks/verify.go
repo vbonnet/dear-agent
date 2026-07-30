@@ -396,6 +396,9 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 	if err := rejectMutableInputRedirections(unmatched); err != nil {
 		return fmt.Errorf("command %q: %w", command, err)
 	}
+	if err := rejectInterpreterPipelines(unmatched); err != nil {
+		return fmt.Errorf("command %q: %w", command, err)
+	}
 	if err := rejectMutableScriptOperands(unmatched); err != nil {
 		return fmt.Errorf("command %q: %w", command, err)
 	}
@@ -461,6 +464,9 @@ func validateScriptAsset(content []byte) error {
 		return err
 	}
 	if err := rejectMutableInputRedirections(scannable); err != nil {
+		return err
+	}
+	if err := rejectInterpreterPipelines(scannable); err != nil {
 		return err
 	}
 	if err := rejectMutableScriptOperands(scannable); err != nil {
@@ -859,6 +865,86 @@ func inputRedirectionPathIsSystemOwned(path string) bool {
 		return true
 	}
 	return filepath.IsAbs(path) && isSystemRuntimePath(path)
+}
+
+func rejectInterpreterPipelines(script string) error {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).
+		Parse(strings.NewReader(script), "trusted-hook")
+	if err != nil {
+		return fmt.Errorf("parse trusted hook shell: %w", err)
+	}
+	var rejected *syntax.Word
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if rejected != nil {
+			return false
+		}
+		pipeline, ok := node.(*syntax.BinaryCmd)
+		if !ok || (pipeline.Op != syntax.Pipe && pipeline.Op != syntax.PipeAll) {
+			return true
+		}
+		syntax.Walk(pipeline.Y, func(right syntax.Node) bool {
+			if rejected != nil {
+				return false
+			}
+			call, ok := right.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			rejected = pipedInterpreterCommand(call.Args, false)
+			return rejected == nil
+		})
+		return rejected == nil
+	})
+	if rejected == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"unsupported interpreter pipeline at line %d; trusted hooks must not execute piped bytes as runtime code",
+		rejected.Pos().Line(),
+	)
+}
+
+func pipedInterpreterCommand(args []*syntax.Word, env bool) *syntax.Word {
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return nil
+		}
+		if value == "--" {
+			continue
+		}
+		if env && envOptionConsumesNext(value) {
+			index++
+			continue
+		}
+		if strings.HasPrefix(value, "-") {
+			continue
+		}
+		if env && strings.Contains(value, "=") {
+			continue
+		}
+		switch value {
+		case "command", "builtin", "exec", "nohup":
+			return pipedInterpreterCommand(args[index+1:], false)
+		case "env", "/usr/bin/env":
+			return pipedInterpreterCommand(args[index+1:], true)
+		}
+		if isRuntimeInterpreter(value) {
+			return word
+		}
+		return nil
+	}
+	return nil
+}
+
+func isRuntimeInterpreter(command string) bool {
+	switch filepath.Base(command) {
+	case "sh", "bash", "dash", "zsh", "ksh", "perl", "ruby", "node":
+		return true
+	default:
+		return strings.HasPrefix(filepath.Base(command), "python")
+	}
 }
 
 func staticShellWord(word *syntax.Word) (string, bool) {

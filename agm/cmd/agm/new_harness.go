@@ -91,16 +91,25 @@ func submitHarnessLaunch(
 			launch.CancelUndelivered(),
 		)
 	}
-	if err := launch.FinalizeLaunch(true, reservations...); err != nil {
-		return errors.Join(
-			fmt.Errorf("%s launch override transaction: %w", harness, err),
-			launch.CancelUndelivered(),
-		)
+	if launch.BindOverrideReservations != nil {
+		if err := launch.FinalizeLaunch(true, reservations...); err != nil {
+			return errors.Join(
+				fmt.Errorf("%s launch override transaction: %w", harness, err),
+				launch.CancelUndelivered(),
+			)
+		}
+		return resolveHarnessLaunchSubmission(harness, launch, submit())
 	}
-	if launch.BindOverrideReservations == nil && spec.AfterAuthorization != nil {
+	if err := resolveHarnessLaunchSubmission(harness, launch, submit()); err != nil {
+		return err
+	}
+	if err := launch.FinalizeLaunch(true, reservations...); err != nil {
+		return fmt.Errorf("%s delivered launch override transaction: %w", harness, err)
+	}
+	if spec.AfterAuthorization != nil {
 		spec.AfterAuthorization()
 	}
-	return resolveHarnessLaunchSubmission(harness, launch, submit())
+	return nil
 }
 
 type piHarnessRuntime struct {

