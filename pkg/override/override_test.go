@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+func testCodexHookSource() *CodexHookSource {
+	return &CodexHookSource{
+		Repository: "/reviewed/dear-agent",
+		Commit:     strings.Repeat("a", 40),
+		Digest:     strings.Repeat("b", 64),
+	}
+}
+
+func testCodexHookSubject(t *testing.T) string {
+	t.Helper()
+	subject, err := testCodexHookSource().Subject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return subject
+}
+
 func TestValidateReasonRefusesUnauditableReasons(t *testing.T) {
 	for name, reason := range map[string]string{
 		"empty":                  "",
@@ -139,6 +156,7 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 		Kind:       KindCodexHookTrust,
 		ApprovedBy: "valentin",
 		ExpiresUTC: now.Add(time.Hour),
+		CodexHooks: testCodexHookSource(),
 	}); err != nil {
 		t.Fatalf("save grant: %v", err)
 	}
@@ -148,6 +166,7 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 		Reason:  "sandbox path rotates per spawn so hooks cannot be pre-trusted",
 		Actor:   "vroom-dispatch",
 		Session: "worker-ce-2ved",
+		Subject: testCodexHookSubject(t),
 		Now:     now,
 	})
 	if err != nil {
@@ -163,6 +182,109 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 	}
 	if len(uses) != 1 || uses[0].Reason != use.Reason || uses[0].Kind != KindCodexHookTrust {
 		t.Fatalf("ledger = %+v, want the single authorized use", uses)
+	}
+}
+
+func TestCodexHookGrantIsBoundToReviewedBytes(t *testing.T) {
+	configureTestStore(t)
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	if err := SaveGrant(Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+		CodexHooks: testCodexHookSource(),
+	}); err != nil {
+		t.Fatalf("save grant: %v", err)
+	}
+	request := Request{
+		Kind:    KindCodexHookTrust,
+		Reason:  "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+		Subject: testCodexHookSubject(t),
+		Now:     now,
+	}
+	request.Subject = "codex-hooks:sha256:" + strings.Repeat("c", 64)
+	if _, err := Reserve(request); !errors.Is(err, ErrGrantSubject) {
+		t.Fatalf("mismatched hook subject error = %v, want ErrGrantSubject", err)
+	}
+
+	if err := SaveGrant(Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("save legacy generic grant: %v", err)
+	}
+	request.Subject = testCodexHookSubject(t)
+	if _, err := Reserve(request); !errors.Is(err, ErrGrantSubject) {
+		t.Fatalf("generic hook grant error = %v, want ErrGrantSubject", err)
+	}
+}
+
+func TestReservationProofRequiresExactCommittedUse(t *testing.T) {
+	configureTestStore(t)
+	now := time.Now().UTC()
+	if err := SaveGrant(Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+		CodexHooks: testCodexHookSource(),
+	}); err != nil {
+		t.Fatalf("save grant: %v", err)
+	}
+	reservation, err := Reserve(Request{
+		Kind:    KindCodexHookTrust,
+		Reason:  "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+		Actor:   "vroom-dispatch",
+		Session: "worker-ce-6xfu",
+		Subject: testCodexHookSubject(t),
+		Now:     now,
+	})
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	proof := reservation.Proof()
+	if err := VerifyCommitted(proof); err == nil {
+		t.Fatal("uncommitted reservation proof was accepted")
+	}
+	if _, err := reservation.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := VerifyCommitted(proof); err != nil {
+		t.Fatalf("verify committed proof: %v", err)
+	}
+	proof.Session = "different-worker"
+	if err := VerifyCommitted(proof); err == nil {
+		t.Fatal("tampered committed proof was accepted")
+	}
+}
+
+func TestReservationProofExpiresWithPrivateHandoffWindow(t *testing.T) {
+	configureTestStore(t)
+	now := time.Now().UTC().Add(-AuthorizationReceiptMaxAge - time.Second)
+	if err := SaveGrant(Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "valentin",
+		ExpiresUTC: time.Now().Add(time.Hour),
+		CodexHooks: testCodexHookSource(),
+	}); err != nil {
+		t.Fatalf("save grant: %v", err)
+	}
+	reservation, err := Reserve(Request{
+		Kind:    KindCodexHookTrust,
+		Reason:  "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+		Actor:   "vroom-dispatch",
+		Session: "worker-ce-6xfu",
+		Subject: testCodexHookSubject(t),
+		Now:     now,
+	})
+	if err != nil {
+		t.Fatalf("reserve stale receipt: %v", err)
+	}
+	if _, err := reservation.Commit(); err != nil {
+		t.Fatalf("commit stale receipt fixture: %v", err)
+	}
+	if err := VerifyCommitted(reservation.Proof()); err == nil {
+		t.Fatal("stale committed receipt was accepted")
 	}
 }
 
@@ -280,6 +402,57 @@ func TestCommitAllRecordsCombinedReservationsAtomically(t *testing.T) {
 		recorded[0].Kind != KindAdmissionBrake ||
 		recorded[1].Kind != KindSupervisorOAuthCheck {
 		t.Fatalf("combined ledger = %+v, want brake and OAuth records", recorded)
+	}
+}
+
+func TestCommitAllDoesNotSpendBrakeWhenCodexGrantExpires(t *testing.T) {
+	configureTestStore(t)
+	now := time.Now()
+	if err := SaveGrant(Grant{
+		Kind:       KindAdmissionBrake,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("save brake grant: %v", err)
+	}
+	if err := SaveGrant(Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(time.Hour),
+		CodexHooks: testCodexHookSource(),
+	}); err != nil {
+		t.Fatalf("save Codex grant: %v", err)
+	}
+	brake, err := Reserve(Request{
+		Kind:    KindAdmissionBrake,
+		Reason:  "host recovered and the operator is verifying one guarded spawn",
+		Session: "worker-ce-6xfu",
+	})
+	if err != nil {
+		t.Fatalf("reserve brake: %v", err)
+	}
+	hooks, err := Reserve(Request{
+		Kind:    KindCodexHookTrust,
+		Reason:  "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+		Session: "worker-ce-6xfu",
+		Subject: testCodexHookSubject(t),
+	})
+	if err != nil {
+		t.Fatalf("reserve Codex hooks: %v", err)
+	}
+	if err := SaveGrant(Grant{
+		Kind:       KindCodexHookTrust,
+		ApprovedBy: "valentin",
+		ExpiresUTC: now.Add(-time.Minute),
+		CodexHooks: testCodexHookSource(),
+	}); err != nil {
+		t.Fatalf("expire Codex grant: %v", err)
+	}
+	if _, err := CommitAll(brake, hooks); !errors.Is(err, ErrGrantExpired) {
+		t.Fatalf("combined brake/Codex commit error = %v, want ErrGrantExpired", err)
+	}
+	if uses, err := LoadUses(time.Time{}); err != nil || len(uses) != 0 {
+		t.Fatalf("expired Codex grant spent brake use: uses=%+v err=%v", uses, err)
 	}
 }
 

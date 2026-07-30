@@ -17,11 +17,12 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
 func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
-	var beforeSpawn func() error
+	var beforeSpawn func(...*override.Reservation) error
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
@@ -30,7 +31,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		if err != nil {
 			return err
 		}
-		beforeSpawn = func() error { return admission() }
+		beforeSpawn = admission
 	}
 
 	fmt.Printf("Starting new Claude session in current tmux: %s\n", sessionName)

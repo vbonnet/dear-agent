@@ -21,6 +21,8 @@ nor an operator-selected destination.
 
 **OLA-05** When a valid record is accepted, the command shall append only to `/var/log/dear-agent-overrides.jsonl`, set the ledger to a non-writable-by-users mode, and durably synchronize it before returning success.
 
+**OLA-06** When a new authorization transaction crosses the privileged boundary, the command shall require a unique random authorization ID for every use and shall revalidate each use's exact subject against its matching root-owned grant before appending any record.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/dangerous_override_governance.feature`

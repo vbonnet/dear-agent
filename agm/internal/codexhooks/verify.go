@@ -38,6 +38,14 @@ type Attestation struct {
 	HookRoot     string
 }
 
+// SourceIdentity is the immutable repository/commit/hook-byte identity an
+// operator approves before AGM may bypass Codex's per-path hook prompt.
+type SourceIdentity struct {
+	SourceRepo   string
+	SourceCommit string
+	Digest       string
+}
+
 type asset struct {
 	path       string
 	gitMode    string
@@ -54,26 +62,18 @@ func Attest(
 	sourceRepo, sandboxWorkDir, storeBase string,
 	writableRoots []string,
 ) (Attestation, error) {
-	sourceRoot, err := gitRoot(ctx, sourceRepo)
+	identity, sourceAssets, err := inspectSource(ctx, sourceRepo)
 	if err != nil {
-		return Attestation{}, fmt.Errorf("resolve hook source repository: %w", err)
-	}
-	if err := rejectWritableOverlap("hook source repository", sourceRoot, writableRoots); err != nil {
 		return Attestation{}, err
 	}
-	commit, err := gitOutput(ctx, sourceRoot, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil {
-		return Attestation{}, fmt.Errorf("resolve hook source commit: %w", err)
+	if err := rejectWritableOverlap("hook source repository", identity.SourceRepo, writableRoots); err != nil {
+		return Attestation{}, err
 	}
 	attestation := Attestation{
-		SourceRepo:   sourceRoot,
-		SourceCommit: strings.TrimSpace(commit),
+		SourceRepo:   identity.SourceRepo,
+		SourceCommit: identity.SourceCommit,
+		Digest:       identity.Digest,
 	}
-	sourceAssets, err := committedAssets(ctx, attestation)
-	if err != nil {
-		return Attestation{}, err
-	}
-	attestation.Digest = digestAssets(sourceAssets)
 	if err := verifySandboxAssets(ctx, attestation, sandboxWorkDir, sourceAssets); err != nil {
 		return Attestation{}, err
 	}
@@ -84,6 +84,39 @@ func Attest(
 	}
 	attestation.HookRoot = hookRoot
 	return attestation, nil
+}
+
+// InspectSource resolves the exact immutable hook identity that an operator is
+// about to approve. It reads committed Git objects rather than mutable working
+// tree bytes and performs no materialization or sandbox mutation.
+func InspectSource(ctx context.Context, sourceRepo string) (SourceIdentity, error) {
+	identity, _, err := inspectSource(ctx, sourceRepo)
+	return identity, err
+}
+
+func inspectSource(ctx context.Context, sourceRepo string) (SourceIdentity, []asset, error) {
+	sourceRoot, err := gitRoot(ctx, sourceRepo)
+	if err != nil {
+		return SourceIdentity{}, nil, fmt.Errorf("resolve hook source repository: %w", err)
+	}
+	commit, err := gitOutput(ctx, sourceRoot, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return SourceIdentity{}, nil, fmt.Errorf("resolve hook source commit: %w", err)
+	}
+	attestation := Attestation{
+		SourceRepo:   sourceRoot,
+		SourceCommit: strings.TrimSpace(commit),
+	}
+	sourceAssets, err := committedAssets(ctx, attestation)
+	if err != nil {
+		return SourceIdentity{}, nil, err
+	}
+	identity := SourceIdentity{
+		SourceRepo:   attestation.SourceRepo,
+		SourceCommit: attestation.SourceCommit,
+		Digest:       digestAssets(sourceAssets),
+	}
+	return identity, sourceAssets, nil
 }
 
 // Verify rechecks a persisted attestation immediately before a Codex launch.

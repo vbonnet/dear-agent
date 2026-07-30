@@ -63,7 +63,11 @@ func (r *cliCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context
 	return r.bootstrapAgyIdentity(ctx, input)
 }
 
-func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool, beforeSpawn func() error) *cliCreateSessionRuntime {
+func newCLICreateSessionRuntime(
+	sessionName string,
+	existed, trustPreConfigured bool,
+	beforeSpawn func(...*override.Reservation) error,
+) *cliCreateSessionRuntime {
 	return &cliCreateSessionRuntime{
 		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 			spec.BeforeSpawn = beforeSpawn
@@ -198,7 +202,15 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 
 // runCreateSessionLifecycle adapts CLI presentation and readiness behavior to
 // the shared ops lifecycle. Business ordering and rollback stay in ops.
-func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig, beforeSpawn func() error) error {
+func runCreateSessionLifecycle(
+	ctx context.Context,
+	sessionName, sessionID, workDir string,
+	exists bool,
+	extraAddDirs []string,
+	trustPreConfigured bool,
+	sandboxInfo *manifest.SandboxConfig,
+	beforeSpawn func(...*override.Reservation) error,
+) error {
 	if harnessName == "codex-cli" {
 		if err := validateCodexCredentials(); err != nil {
 			return err
@@ -264,8 +276,10 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 }
 
 // prepareCodexHookTrustBypass validates and attests a requested hook-trust
-// override. The private executor performs authorization and records the use at
-// the final executable launch boundary, after all other preparation succeeds.
+// override. Command preparation reserves authorization for this exact source
+// identity; the launch callback records it atomically with any admission-brake
+// use immediately before submission, and the private executor verifies the
+// resulting fresh exact ledger receipt before exec.
 func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig) (bool, error) {
 	reason := codexHookTrustBypassReason
 	if reason == "" {
@@ -303,7 +317,7 @@ func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.Sand
 	sandboxInfo.CodexHookDigest = attestation.Digest
 	sandboxInfo.CodexHookRoot = attestation.HookRoot
 	sandboxInfo.BypassCodexHookTrustReason = reason
-	ui.PrintSuccess("Codex hook-trust override attested; authorization will be recorded at launch")
+	ui.PrintSuccess("Codex hook-trust override attested; exact-source authorization will be recorded at launch")
 	return true, nil
 }
 
@@ -325,7 +339,7 @@ func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (strin
 // preflight runs the per-session checks that must succeed before we start
 // touching tmux: test-environment setup, duplicate-name check, and circuit
 // breakers.
-func preflight(sessionName string) (func() error, error) {
+func preflight(sessionName string) (func(...*override.Reservation) error, error) {
 	if err := setupTestEnvironment(); err != nil {
 		return nil, err
 	}
@@ -339,7 +353,7 @@ func preflight(sessionName string) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	return func() error { return admission() }, nil
+	return admission, nil
 }
 
 // resolveTmuxSession checks for an existing tmux session and either prompts to

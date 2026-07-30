@@ -44,6 +44,8 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-14** When an attested input-inspection hook parses Codex JSON, the system shall require the fixed `/usr/local/libexec/dear-agent-codex-hook-json` identity to resolve to a root-owned, non-writable executable regular file behind root-owned, non-writable ancestors before launch.
 
+**CHOOK-15** When an operator approves a Codex hook-trust source, the system shall resolve and display the canonical repository, full current commit, and committed hook-byte digest without trusting mutable working-tree bytes, and every private executor shall revalidate that exact persisted identity, materialization, and sandbox asset set before launch.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

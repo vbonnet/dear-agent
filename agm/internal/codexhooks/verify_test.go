@@ -41,12 +41,28 @@ func TestAttestAndVerifyUseCommittedHookObjects(t *testing.T) {
 	if len(attestation.SourceCommit) != 40 || len(attestation.Digest) != 64 {
 		t.Fatalf("Attest() = %#v", attestation)
 	}
+	identity, err := InspectSource(context.Background(), source)
+	if err != nil {
+		t.Fatalf("InspectSource() error: %v", err)
+	}
+	if identity.SourceRepo != attestation.SourceRepo ||
+		identity.SourceCommit != attestation.SourceCommit ||
+		identity.Digest != attestation.Digest {
+		t.Fatalf("InspectSource() = %#v, want attested source identity %#v", identity, attestation)
+	}
 
 	// A mutable source working-tree edit cannot redefine what was reviewed:
 	// verification reads the pinned Git object instead.
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 99\n", 0o755)
 	if err := Verify(context.Background(), attestation, sandbox); err != nil {
 		t.Fatalf("Verify() after source working-tree edit: %v", err)
+	}
+	identityAfterEdit, err := InspectSource(context.Background(), source)
+	if err != nil {
+		t.Fatalf("InspectSource() after working-tree edit: %v", err)
+	}
+	if identityAfterEdit != identity {
+		t.Fatalf("mutable working-tree edit changed reviewed identity: before=%#v after=%#v", identity, identityAfterEdit)
 	}
 }
 

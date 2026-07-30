@@ -1060,7 +1060,7 @@ func init() {
 	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
 	newCmd.Flags().StringVar(&codexHookTrustBypassReason, "dangerously-bypass-hook-trust", "",
-		"Request the audited Codex hook-trust override, stating why (requires `agm override approve codex-hook-trust`)")
+		"Request the audited Codex hook-trust override, stating why (requires `agm override approve codex-hook-trust --codex-hook-source <reviewed-repo>`)")
 	newCmd.Flags().StringVar(&brakeOverrideReason, "brake-override", "",
 		"Cross an engaged admission brake once, stating why (requires `agm override approve admission-brake`)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

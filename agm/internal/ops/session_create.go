@@ -641,6 +641,11 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		PiPolicyJSON:         req.Metadata.PiPolicyJSON,
 		PiPolicyFile:         req.Metadata.PiPolicyFile,
 	}
+	if bypassCodexHookTrust {
+		spec.CodexHookSourceRepo = req.Metadata.Sandbox.CodexHookSourceRepo
+		spec.CodexHookSourceCommit = req.Metadata.Sandbox.CodexHookSourceCommit
+		spec.CodexHookDigest = req.Metadata.Sandbox.CodexHookDigest
+	}
 	if params.harness == "pi-cli" {
 		spec.PiLaunchID = launchparity.NewPiLaunchID()
 	}

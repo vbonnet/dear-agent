@@ -19,6 +19,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 type resumeTestTmux struct {
@@ -472,6 +473,20 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 
 func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalReserveCodexHookTrust := reserveCodexHookTrust
+	t.Cleanup(func() { reserveCodexHookTrust = originalReserveCodexHookTrust })
+	reserveCodexHookTrust = func(reason, actor, session, subject string) (
+		*override.Reservation, override.AuthorizationProof, error,
+	) {
+		return nil, override.AuthorizationProof{
+			Kind:            override.KindCodexHookTrust,
+			Reason:          reason,
+			Actor:           actor,
+			Session:         session,
+			Subject:         subject,
+			AuthorizationID: "0123456789abcdef0123456789abcdef",
+		}, nil
+	}
 	configDir := t.TempDir()
 	t.Setenv("AGM_CONFIG_DIR", configDir)
 	worktreePath, hookTrust := resumeCodexHookFixture(t)

@@ -488,6 +488,12 @@ func submitAndAwaitResume(
 			}
 			return err
 		}
+		if _, err := override.CommitAll(launch.Reservations...); err != nil {
+			return errors.Join(
+				fmt.Errorf("commit %s resume override transaction: %w", harnessName, err),
+				launch.CancelUndelivered(),
+			)
+		}
 		uncertain, err := ResolveHarnessLaunchSubmission(launch, tmuxAdapter.SendKeys(health.TmuxSessionName, launch.Command))
 		if uncertain {
 			addResumeWarning(result, req, fmt.Sprintf("%s launch submission acknowledgement was lost; preserving the launch because the command may already be queued", harnessName))
@@ -788,11 +794,11 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		warnings := []string{}
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
-			// Attestation re-runs here and fails closed. The normalized reason
-			// and caller identity are sealed into the private handoff; live
-			// authorization is consumed by its executor immediately before exec.
-			// A persisted launch policy therefore cannot become "approve once,
-			// resume forever", while preparation failures spend no grant use.
+			// Attestation re-runs here and fails closed. Command preparation
+			// reserves authorization bound to the exact source identity; resume
+			// commits it at submission and seals a fresh exact ledger receipt into
+			// the private handoff. A persisted launch policy therefore cannot
+			// become "approve once, resume forever".
 			if m.Sandbox.BypassCodexHookTrust {
 				reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
 				if reasonErr != nil {
@@ -810,6 +816,9 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 				spec.CodexHookRoot = m.Sandbox.CodexHookRoot
 				spec.CodexHookTrustReason = reason
 				spec.CodexHookTrustActor = OverrideActor()
+				spec.CodexHookSourceRepo = m.Sandbox.CodexHookSourceRepo
+				spec.CodexHookSourceCommit = m.Sandbox.CodexHookSourceCommit
+				spec.CodexHookDigest = m.Sandbox.CodexHookDigest
 			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {

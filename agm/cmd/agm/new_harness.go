@@ -16,6 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 // startHarness dispatches per-harness initialization.
@@ -67,11 +68,12 @@ func resolveHarnessLaunchSubmission(harness string, launch ops.HarnessLaunchComm
 	return err
 }
 
-func runBeforeHarnessSpawn(spec ops.HarnessLaunchSpec) error {
+func runBeforeHarnessSpawn(spec ops.HarnessLaunchSpec, reservations ...*override.Reservation) error {
 	if spec.BeforeSpawn == nil {
-		return nil
+		_, err := override.CommitAll(reservations...)
+		return err
 	}
-	return spec.BeforeSpawn()
+	return spec.BeforeSpawn(reservations...)
 }
 
 func submitHarnessLaunch(
@@ -80,7 +82,7 @@ func submitHarnessLaunch(
 	launch ops.HarnessLaunchCommand,
 	submit func() error,
 ) error {
-	if err := runBeforeHarnessSpawn(spec); err != nil {
+	if err := runBeforeHarnessSpawn(spec, launch.Reservations...); err != nil {
 		return errors.Join(
 			fmt.Errorf("%s launch admission: %w", harness, err),
 			launch.CancelUndelivered(),

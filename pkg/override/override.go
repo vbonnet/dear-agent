@@ -29,12 +29,15 @@
 package override
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -85,6 +88,22 @@ const (
 	// MaxSessionBytes bounds the optional session identifier.
 	MaxSessionBytes = 256
 
+	// MaxSubjectBytes bounds the immutable target an operator approved. The
+	// current subject is a tagged SHA-256 value rather than a caller-controlled
+	// repository path, keeping privileged ledger records compact and canonical.
+	MaxSubjectBytes = 96
+
+	// AuthorizationIDBytes is the random correlation ID recorded for each new
+	// reservation. It is audit evidence rather than a secret capability: the
+	// private Codex executor accepts it only as a fresh exact ledger receipt.
+	AuthorizationIDBytes = 16
+
+	// AuthorizationReceiptMaxAge bounds how long a committed receipt may be
+	// presented to a private executor. It matches the private handoff lifetime,
+	// preventing an old readable ledger record from becoming perpetual launch
+	// authority.
+	AuthorizationReceiptMaxAge = 10 * time.Minute
+
 	// MaxLedgerRecordBytes is the complete canonical JSONL record, including
 	// its trailing newline. The privileged helper enforces the same limit.
 	MaxLedgerRecordBytes = 2048
@@ -112,9 +131,16 @@ var (
 	ErrNoGrant              = errors.New("no human approval on file for this override")
 	ErrGrantExpired         = errors.New("human approval for this override has expired")
 	ErrGrantKind            = errors.New("human approval is for a different override kind")
+	ErrGrantSubject         = errors.New("human approval is for a different override subject")
 	ErrGrantUntrusted       = errors.New("override approval is not in operator-owned storage")
 	ErrLedgerUntrusted      = errors.New("override ledger is not in operator-owned storage")
 	ErrReservationCommitted = errors.New("override authorization reservation was already committed")
+)
+
+var (
+	fullGitObjectID   = regexp.MustCompile(`\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z`)
+	fullSHA256        = regexp.MustCompile(`\A[0-9a-f]{64}\z`)
+	authorizationIDRE = regexp.MustCompile(`\A[0-9a-f]{32}\z`)
 )
 
 // boilerplateReasons are refused outright. A reason that survives this list is
@@ -155,15 +181,56 @@ func ValidateReason(reason string) (string, error) {
 	return normalized, nil
 }
 
+// CodexHookSource is the immutable source identity a human reviewed before
+// allowing Codex to trust repository-scoped hooks without a per-path prompt.
+// Repository is retained for operator/audit readability; the compact Subject
+// derived from all three fields is what crosses the privileged ledger boundary.
+type CodexHookSource struct {
+	Repository string `json:"repository"`
+	Commit     string `json:"commit"`
+	Digest     string `json:"digest"`
+}
+
+// Subject returns the canonical compact identity for this exact repository,
+// commit, and committed hook-byte digest.
+func (s *CodexHookSource) Subject() (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("%w: Codex hook source is required", ErrGrantSubject)
+	}
+	if !filepath.IsAbs(s.Repository) || filepath.Clean(s.Repository) != s.Repository {
+		return "", fmt.Errorf("%w: Codex hook repository must be a clean absolute path", ErrGrantSubject)
+	}
+	if !fullGitObjectID.MatchString(s.Commit) {
+		return "", fmt.Errorf("%w: Codex hook commit must be a full lowercase Git object ID", ErrGrantSubject)
+	}
+	if !fullSHA256.MatchString(s.Digest) {
+		return "", fmt.Errorf("%w: Codex hook digest must be a lowercase SHA-256 value", ErrGrantSubject)
+	}
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return "", fmt.Errorf("%w: encode Codex hook source: %w", ErrGrantSubject, err)
+	}
+	sum := sha256.Sum256(encoded)
+	return fmt.Sprintf("codex-hooks:sha256:%x", sum), nil
+}
+
+// CodexHookTrustSubject validates and identifies the exact hook source that a
+// launch requests. It intentionally shares the Grant representation so the
+// unprivileged caller and privileged helper cannot disagree about its bytes.
+func CodexHookTrustSubject(repository, commit, digest string) (string, error) {
+	return (&CodexHookSource{Repository: repository, Commit: commit, Digest: digest}).Subject()
+}
+
 // Grant records that a human approved an override kind for a bounded window.
 // It is the only gate an unattended agent cannot satisfy on its own: grants are
 // minted through an interactive confirmation into root-owned storage.
 type Grant struct {
-	Kind          Kind      `json:"kind"`
-	ApprovedBy    string    `json:"approved_by"`
-	ApprovedAtUTC time.Time `json:"approved_at_utc"`
-	ExpiresUTC    time.Time `json:"expires_utc"`
-	Note          string    `json:"note,omitempty"`
+	Kind          Kind             `json:"kind"`
+	ApprovedBy    string           `json:"approved_by"`
+	ApprovedAtUTC time.Time        `json:"approved_at_utc"`
+	ExpiresUTC    time.Time        `json:"expires_utc"`
+	Note          string           `json:"note,omitempty"`
+	CodexHooks    *CodexHookSource `json:"codex_hooks,omitempty"`
 }
 
 // Active reports whether g authorizes kind at now.
@@ -177,16 +244,50 @@ func (g *Grant) Active(kind Kind, now time.Time) error {
 	if !now.Before(g.ExpiresUTC) {
 		return fmt.Errorf("%w: expired at %s", ErrGrantExpired, g.ExpiresUTC.UTC().Format(time.RFC3339))
 	}
+	switch kind {
+	case KindCodexHookTrust:
+		if _, err := g.CodexHooks.Subject(); err != nil {
+			return err
+		}
+	case KindAdmissionBrake, KindSupervisorOAuthCheck:
+		if g.CodexHooks != nil {
+			return fmt.Errorf("%w: %q approval carries an unrelated Codex hook subject", ErrGrantSubject, kind)
+		}
+	}
+	return nil
+}
+
+// Authorizes reports whether g is active and bound to the exact requested
+// subject. Non-hook overrides are deliberately subjectless.
+func (g *Grant) Authorizes(kind Kind, subject string, now time.Time) error {
+	if err := g.Active(kind, now); err != nil {
+		return err
+	}
+	if kind != KindCodexHookTrust {
+		if subject != "" {
+			return fmt.Errorf("%w: %q does not accept a subject", ErrGrantSubject, kind)
+		}
+		return nil
+	}
+	want, err := g.CodexHooks.Subject()
+	if err != nil {
+		return err
+	}
+	if subject != want {
+		return fmt.Errorf("%w: approval covers %q, requested %q", ErrGrantSubject, want, subject)
+	}
 	return nil
 }
 
 // Use is one authorized override, as written to the ledger.
 type Use struct {
-	Kind    Kind      `json:"kind"`
-	Reason  string    `json:"reason"`
-	Actor   string    `json:"actor"`
-	Session string    `json:"session,omitempty"`
-	AtUTC   time.Time `json:"at_utc"`
+	Kind            Kind      `json:"kind"`
+	Reason          string    `json:"reason"`
+	Actor           string    `json:"actor"`
+	Session         string    `json:"session,omitempty"`
+	Subject         string    `json:"subject,omitempty"`
+	AuthorizationID string    `json:"authorization_id,omitempty"`
+	AtUTC           time.Time `json:"at_utc"`
 }
 
 type ledgerTransaction struct {
@@ -199,7 +300,21 @@ type Request struct {
 	Reason  string
 	Actor   string
 	Session string
+	Subject string
 	Now     time.Time
+}
+
+// AuthorizationProof is the exact non-secret receipt sealed into a private
+// launch handoff. It does not authorize anything by itself: VerifyCommitted
+// accepts it only after the matching random ID and fields are present in the
+// operator-owned ledger.
+type AuthorizationProof struct {
+	Kind            Kind   `json:"kind"`
+	Reason          string `json:"reason"`
+	Actor           string `json:"actor"`
+	Session         string `json:"session,omitempty"`
+	Subject         string `json:"subject,omitempty"`
+	AuthorizationID string `json:"authorization_id"`
 }
 
 // Reservation proves that the reason, attribution, and current human grant
@@ -212,6 +327,22 @@ type Reservation struct {
 
 	mu        sync.Mutex
 	attempted bool
+}
+
+// Proof returns the immutable receipt fields for this reservation without
+// consuming it. The proof becomes valid only after Commit/CommitAll succeeds.
+func (r *Reservation) Proof() AuthorizationProof {
+	if r == nil {
+		return AuthorizationProof{}
+	}
+	return AuthorizationProof{
+		Kind:            r.use.Kind,
+		Reason:          r.use.Reason,
+		Actor:           r.use.Actor,
+		Session:         r.use.Session,
+		Subject:         r.use.Subject,
+		AuthorizationID: r.use.AuthorizationID,
+	}
 }
 
 const (
@@ -346,19 +477,8 @@ func EncodeLedgerUse(use Use) ([]byte, error) {
 	if reason != use.Reason {
 		return nil, fmt.Errorf("%w: reason is not normalized", ErrLedgerRecord)
 	}
-	if use.Actor == "" {
-		return nil, fmt.Errorf("%w: actor is required", ErrLedgerRecord)
-	}
-	if len(use.Actor) > MaxActorBytes {
-		return nil, fmt.Errorf("%w: actor is %d encoded bytes, maximum is %d",
-			ErrLedgerRecord, len(use.Actor), MaxActorBytes)
-	}
-	if len(use.Session) > MaxSessionBytes {
-		return nil, fmt.Errorf("%w: session is %d encoded bytes, maximum is %d",
-			ErrLedgerRecord, len(use.Session), MaxSessionBytes)
-	}
-	if use.AtUTC.IsZero() {
-		return nil, fmt.Errorf("%w: timestamp is required", ErrLedgerRecord)
+	if err := validateLedgerUseFields(use); err != nil {
+		return nil, err
 	}
 	line, err := json.Marshal(use)
 	if err != nil {
@@ -370,6 +490,44 @@ func EncodeLedgerUse(use Use) ([]byte, error) {
 			ErrLedgerRecordTooLarge, len(line), MaxLedgerRecordBytes)
 	}
 	return line, nil
+}
+
+func validateLedgerUseFields(use Use) error {
+	if use.Actor == "" {
+		return fmt.Errorf("%w: actor is required", ErrLedgerRecord)
+	}
+	if len(use.Actor) > MaxActorBytes {
+		return fmt.Errorf("%w: actor is %d encoded bytes, maximum is %d",
+			ErrLedgerRecord, len(use.Actor), MaxActorBytes)
+	}
+	if len(use.Session) > MaxSessionBytes {
+		return fmt.Errorf("%w: session is %d encoded bytes, maximum is %d",
+			ErrLedgerRecord, len(use.Session), MaxSessionBytes)
+	}
+	if err := validateLedgerSubject(use.Kind, use.Subject); err != nil {
+		return err
+	}
+	if use.AuthorizationID != "" && !authorizationIDRE.MatchString(use.AuthorizationID) {
+		return fmt.Errorf("%w: authorization ID is not a lowercase 128-bit value", ErrLedgerRecord)
+	}
+	if use.AtUTC.IsZero() {
+		return fmt.Errorf("%w: timestamp is required", ErrLedgerRecord)
+	}
+	return nil
+}
+
+func validateLedgerSubject(kind Kind, subject string) error {
+	if len(subject) > MaxSubjectBytes {
+		return fmt.Errorf("%w: subject is %d encoded bytes, maximum is %d",
+			ErrLedgerRecord, len(subject), MaxSubjectBytes)
+	}
+	if subject != "" {
+		if kind != KindCodexHookTrust || !strings.HasPrefix(subject, "codex-hooks:sha256:") ||
+			!fullSHA256.MatchString(strings.TrimPrefix(subject, "codex-hooks:sha256:")) {
+			return fmt.Errorf("%w: subject is not canonical for %q", ErrLedgerRecord, kind)
+		}
+	}
+	return nil
 }
 
 // EncodeLedgerUses validates and canonically encodes one atomic transaction.
@@ -608,19 +766,25 @@ func Reserve(req Request) (*Reservation, error) {
 		// Fail closed: an unreadable grant is not an absent one.
 		return nil, err
 	}
-	if err := grant.Active(req.Kind, now); err != nil {
+	if err := grant.Authorizes(req.Kind, req.Subject, now); err != nil {
 		return nil, err
 	}
 	actor := req.Actor
 	if actor == "" {
 		actor = defaultActor()
 	}
+	authorizationID, err := newAuthorizationID()
+	if err != nil {
+		return nil, err
+	}
 	use := Use{
-		Kind:    req.Kind,
-		Reason:  reason,
-		Actor:   actor,
-		Session: req.Session,
-		AtUTC:   now.UTC(),
+		Kind:            req.Kind,
+		Reason:          reason,
+		Actor:           actor,
+		Session:         req.Session,
+		Subject:         req.Subject,
+		AuthorizationID: authorizationID,
+		AtUTC:           now.UTC(),
 	}
 	if _, err := EncodeLedgerUse(use); err != nil {
 		return nil, err
@@ -672,7 +836,7 @@ func CommitAll(reservations ...*Reservation) ([]Use, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := grant.Active(use.Kind, use.AtUTC); err != nil {
+		if err := grant.Authorizes(use.Kind, use.Subject, use.AtUTC); err != nil {
 			return nil, err
 		}
 		uses = append(uses, use)
@@ -681,6 +845,47 @@ func CommitAll(reservations ...*Reservation) ([]Use, error) {
 		return nil, err
 	}
 	return uses, nil
+}
+
+func newAuthorizationID() (string, error) {
+	random := make([]byte, AuthorizationIDBytes)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate override authorization ID: %w", err)
+	}
+	return fmt.Sprintf("%x", random), nil
+}
+
+// VerifyCommitted proves that the exact reservation receipt reached the
+// operator-owned ledger. This is used by the private Codex executor after its
+// parent commits all launch overrides atomically and before it replaces itself
+// with Codex.
+func VerifyCommitted(proof AuthorizationProof) error {
+	if proof.AuthorizationID == "" || !authorizationIDRE.MatchString(proof.AuthorizationID) {
+		return fmt.Errorf("%w: authorization proof ID is missing or invalid", ErrLedgerRecord)
+	}
+	now := time.Now().UTC()
+	uses, err := LoadUses(time.Time{})
+	if err != nil {
+		return fmt.Errorf("read committed override proof: %w", err)
+	}
+	for _, use := range uses {
+		if use.AuthorizationID != proof.AuthorizationID {
+			continue
+		}
+		if use.Kind != proof.Kind ||
+			use.Reason != proof.Reason ||
+			use.Actor != proof.Actor ||
+			use.Session != proof.Session ||
+			use.Subject != proof.Subject {
+			return fmt.Errorf("%w: authorization proof fields do not match the committed use", ErrLedgerRecord)
+		}
+		if use.AtUTC.After(now) || use.AtUTC.Before(now.Add(-AuthorizationReceiptMaxAge)) {
+			return fmt.Errorf("%w: authorization proof is outside the %s receipt window",
+				ErrLedgerRecord, AuthorizationReceiptMaxAge)
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: authorization proof was not committed", ErrLedgerRecord)
 }
 
 // Commit records a reserved authorization exactly once.

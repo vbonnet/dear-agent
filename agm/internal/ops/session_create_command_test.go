@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 func TestResolveHarnessLaunchSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
@@ -69,6 +70,58 @@ func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing
 				}
 			})
 		}
+	}
+}
+
+func TestReserveCodexLaunchCarriesExactReservationToSubmission(t *testing.T) {
+	originalReserve := reserveCodexHookTrust
+	t.Cleanup(func() { reserveCodexHookTrust = originalReserve })
+
+	const (
+		reason  = "sandbox path rotates per spawn so hooks cannot be pre-trusted"
+		actor   = "vroom-dispatch"
+		session = "worker-ce-6xfu"
+	)
+	reservation := &override.Reservation{}
+	var wantProof override.AuthorizationProof
+	reserveCodexHookTrust = func(gotReason, gotActor, gotSession, subject string) (
+		*override.Reservation, override.AuthorizationProof, error,
+	) {
+		if gotReason != reason || gotActor != actor || gotSession != session || subject == "" {
+			t.Fatalf("reservation request = (%q, %q, %q, %q)", gotReason, gotActor, gotSession, subject)
+		}
+		wantProof = override.AuthorizationProof{
+			Kind:            override.KindCodexHookTrust,
+			Reason:          gotReason,
+			Actor:           gotActor,
+			Session:         gotSession,
+			Subject:         subject,
+			AuthorizationID: "0123456789abcdef0123456789abcdef",
+		}
+		return reservation, wantProof, nil
+	}
+	launch, _ := codexLaunch(HarnessLaunchSpec{
+		Harness:               "codex-cli",
+		Model:                 "gpt-test",
+		SessionName:           session,
+		WorkDir:               "/tmp/work",
+		BypassCodexHookTrust:  true,
+		CodexHookRoot:         "/trusted/hooks/digest",
+		CodexHookTrustReason:  reason,
+		CodexHookTrustActor:   actor,
+		CodexHookSourceRepo:   "/reviewed/dear-agent",
+		CodexHookSourceCommit: strings.Repeat("a", 40),
+		CodexHookDigest:       strings.Repeat("b", 64),
+	})
+	prepared, reservations, err := reserveCodexLaunch(launch)
+	if err != nil {
+		t.Fatalf("reserve Codex launch: %v", err)
+	}
+	if prepared.HookTrustProof != wantProof || prepared.HookTrustSubject != wantProof.Subject {
+		t.Fatalf("prepared Codex proof = %+v, subject %q; want %+v", prepared.HookTrustProof, prepared.HookTrustSubject, wantProof)
+	}
+	if len(reservations) != 1 || reservations[0] != reservation {
+		t.Fatalf("prepared reservations = %v, want exact hook-trust reservation", reservations)
 	}
 }
 

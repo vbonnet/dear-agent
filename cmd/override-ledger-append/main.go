@@ -62,19 +62,6 @@ func appendInput(input io.Reader, path string, requireRoot bool) error {
 	now := uses[0].AtUTC
 	if requireRoot {
 		now = time.Now()
-		for _, use := range uses {
-			if use.AtUTC.Before(now.Add(-maxRecordClockSkew)) || use.AtUTC.After(now.Add(maxRecordClockSkew)) {
-				return fmt.Errorf("%w: timestamp is outside the %s append window",
-					override.ErrLedgerRecord, maxRecordClockSkew)
-			}
-			grant, err := override.LoadGrant(use.Kind)
-			if err != nil {
-				return fmt.Errorf("load approval at privileged boundary: %w", err)
-			}
-			if err := grant.Active(use.Kind, now); err != nil {
-				return fmt.Errorf("validate approval at privileged boundary: %w", err)
-			}
-		}
 	}
 
 	return appendRecords(path, canonical, uses, now, requireRoot)
@@ -157,6 +144,11 @@ func appendLockedRecords(
 	if info.Size() > maxOperatorLedgerBytes-int64(len(data)) {
 		return fmt.Errorf("fixed ledger size cap of %d bytes would be exceeded", maxOperatorLedgerBytes)
 	}
+	if requireRoot {
+		if err := validatePrivilegedUses(uses, now); err != nil {
+			return err
+		}
+	}
 	if err := enforcePrivilegedRateLimits(file, uses, now); err != nil {
 		return err
 	}
@@ -172,15 +164,64 @@ func appendLockedRecords(
 	return nil
 }
 
+func validatePrivilegedUses(uses []override.Use, now time.Time) error {
+	for _, use := range uses {
+		if use.AtUTC.Before(now.Add(-maxRecordClockSkew)) || use.AtUTC.After(now.Add(maxRecordClockSkew)) {
+			return fmt.Errorf("%w: timestamp is outside the %s append window",
+				override.ErrLedgerRecord, maxRecordClockSkew)
+		}
+		if use.AuthorizationID == "" {
+			return fmt.Errorf("%w: authorization ID is required at the privileged boundary",
+				override.ErrLedgerRecord)
+		}
+		grant, err := override.LoadGrant(use.Kind)
+		if err != nil {
+			return fmt.Errorf("load approval at privileged boundary: %w", err)
+		}
+		if err := grant.Authorizes(use.Kind, use.Subject, now); err != nil {
+			return fmt.Errorf("validate approval at privileged boundary: %w", err)
+		}
+	}
+	return nil
+}
+
 func enforcePrivilegedRateLimits(file *os.File, uses []override.Use, now time.Time) error {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek fixed ledger for rate limit: %w", err)
 	}
 	additions := make(map[override.Kind]int, len(uses))
+	transactionIDs := make(map[string]struct{}, len(uses))
 	for _, use := range uses {
 		additions[use.Kind]++
+		if use.AuthorizationID != "" {
+			if _, duplicate := transactionIDs[use.AuthorizationID]; duplicate {
+				return fmt.Errorf("%w: transaction repeats authorization ID", override.ErrLedgerRecord)
+			}
+			transactionIDs[use.AuthorizationID] = struct{}{}
+		}
 	}
 	cutoff := now.Add(-privilegedRateWindow)
+	counts, oldest, err := scanRecentUses(file, additions, transactionIDs, cutoff, now)
+	if err != nil {
+		return err
+	}
+	for kind, addition := range additions {
+		if counts[kind]+addition > maxUsesPerKindPerWindow {
+			return fmt.Errorf(
+				"%s override rate limit reached (%d uses per %s); retry after %s and audit or revoke an unexpectedly busy grant",
+				kind, maxUsesPerKindPerWindow, privilegedRateWindow, oldest[kind].Add(privilegedRateWindow).UTC().Format(time.RFC3339),
+			)
+		}
+	}
+	return nil
+}
+
+func scanRecentUses(
+	file *os.File,
+	additions map[override.Kind]int,
+	transactionIDs map[string]struct{},
+	cutoff, now time.Time,
+) (map[override.Kind]int, map[override.Kind]time.Time, error) {
 	counts := make(map[override.Kind]int, len(additions))
 	oldest := make(map[override.Kind]time.Time, len(additions))
 	scanner := bufio.NewScanner(file)
@@ -191,6 +232,11 @@ func enforcePrivilegedRateLimits(file *os.File, uses []override.Use, now time.Ti
 			continue
 		}
 		for _, recorded := range recordedUses {
+			if recorded.AuthorizationID != "" {
+				if _, duplicate := transactionIDs[recorded.AuthorizationID]; duplicate {
+					return nil, nil, fmt.Errorf("%w: authorization ID was already recorded", override.ErrLedgerRecord)
+				}
+			}
 			if additions[recorded.Kind] == 0 ||
 				recorded.AtUTC.Before(cutoff) ||
 				recorded.AtUTC.After(now.Add(maxRecordClockSkew)) {
@@ -203,17 +249,9 @@ func enforcePrivilegedRateLimits(file *os.File, uses []override.Use, now time.Ti
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan fixed ledger for rate limit: %w", err)
+		return nil, nil, fmt.Errorf("scan fixed ledger for rate limit: %w", err)
 	}
-	for kind, addition := range additions {
-		if counts[kind]+addition > maxUsesPerKindPerWindow {
-			return fmt.Errorf(
-				"%s override rate limit reached (%d uses per %s); retry after %s and audit or revoke an unexpectedly busy grant",
-				kind, maxUsesPerKindPerWindow, privilegedRateWindow, oldest[kind].Add(privilegedRateWindow).UTC().Format(time.RFC3339),
-			)
-		}
-	}
-	return nil
+	return counts, oldest, nil
 }
 
 func validateRootOwnedPath(path string, wantDir bool) error {

@@ -1,6 +1,6 @@
 # Private Harness Executor Specification
 
-<!-- Last audited at: 2026-07-22 -->
+<!-- Last audited at: 2026-07-30 -->
 
 ## Overview
 
@@ -50,6 +50,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 **HEXEC-14** When tmux accepts a private launch submission but its acknowledgement is lost, the system shall require every current-pane, detached CLI, MCP, shared operations, agent adapter, legacy resume, and resumability-validation surface to treat the launch as potentially delivered, preserve its handoff and producer lease, and continue the lifecycle without retrying or compensating the possibly queued command.
 
 **HEXEC-15** When AGM resolves an executable or stages a private handoff path that will be interpolated into a pasted pane command, the system shall reject invalid UTF-8 and terminal control characters in that generated value before building or delivering the command.
+
+**HEXEC-16** When the private Codex executor consumes a hook-trust handoff, the system shall bind its source repository, full commit, and hook digest to the fresh exact ledger receipt and shall re-run the persisted Git attestation before constructing trusted hook configuration or executing Codex.
 
 ## BDD Traceability
 

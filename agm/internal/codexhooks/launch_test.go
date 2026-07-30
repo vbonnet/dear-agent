@@ -53,15 +53,13 @@ func TestAttestedHookPathContainsOnlyOperatorOwnedLocations(t *testing.T) {
 		strings.Contains(attestedHookPath, "/usr/local/go/bin") {
 		t.Fatalf("attested hook PATH includes a commonly user-writable location: %q", attestedHookPath)
 	}
-	if err := validateTrustedExecutableSearchPath("/usr/bin:/bin:/usr/sbin:/sbin"); err != nil {
-		t.Fatalf("validate root-owned system PATH entries: %v", err)
-	}
 	if trustedHookJSONPath != "/usr/local/libexec/dear-agent-codex-hook-json" {
 		t.Fatalf("trusted hook JSON path = %q", trustedHookJSONPath)
 	}
-	if err := validateTrustedHookExecutable("/bin/sh"); err != nil {
-		t.Fatalf("validateTrustedHookExecutable(/bin/sh): %v", err)
-	}
+	// Do not assert host/container ownership here. GitHub's Ubuntu container
+	// maps system paths such as /usr to the runner UID even though production
+	// must continue to require uid 0. The rejection fixture below exercises the
+	// validator without weakening that runtime boundary.
 }
 
 func TestTrustedExecutableSearchPathRejectsWritableDirectory(t *testing.T) {
@@ -272,6 +270,7 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	t.Helper()
 	previousJSONPath := trustedHookJSONPath
 	previousPathValidator := validateAttestedExecutablePath
+	previousJSONValidator := validateTrustedHookJSONExecutable
 	trustedHookJSONPath = "/bin/sh"
 	validateAttestedExecutablePath = func(got string) error {
 		if got != attestedHookPath {
@@ -279,8 +278,15 @@ func useTrustedHookJSONFixture(t *testing.T) {
 		}
 		return nil
 	}
+	validateTrustedHookJSONExecutable = func(got string) error {
+		if got != trustedHookJSONPath {
+			t.Fatalf("validate trusted hook JSON executable %q, want %q", got, trustedHookJSONPath)
+		}
+		return nil
+	}
 	t.Cleanup(func() {
 		trustedHookJSONPath = previousJSONPath
 		validateAttestedExecutablePath = previousPathValidator
+		validateTrustedHookJSONExecutable = previousJSONValidator
 	})
 }

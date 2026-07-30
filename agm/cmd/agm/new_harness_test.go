@@ -9,6 +9,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
@@ -18,12 +19,17 @@ func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 
 func TestSubmitHarnessLaunchAuthorizesAtSubmissionBoundary(t *testing.T) {
 	var events []string
-	spec := ops.HarnessLaunchSpec{BeforeSpawn: func() error {
+	hookReservation := &override.Reservation{}
+	spec := ops.HarnessLaunchSpec{BeforeSpawn: func(got ...*override.Reservation) error {
+		if len(got) != 1 || got[0] != hookReservation {
+			t.Fatalf("launch reservations = %v, want exact Codex hook reservation", got)
+		}
 		events = append(events, "authorize")
 		return nil
 	}}
 	launch := ops.HarnessLaunchCommand{
-		Command: "fixture",
+		Command:      "fixture",
+		Reservations: []*override.Reservation{hookReservation},
 		Cancel: func() error {
 			events = append(events, "cancel")
 			return nil
@@ -44,7 +50,7 @@ func TestSubmitHarnessLaunchAuthorizesAtSubmissionBoundary(t *testing.T) {
 func TestSubmitHarnessLaunchAdmissionFailureCancelsWithoutSubmission(t *testing.T) {
 	refusal := errors.New("admission refused")
 	var events []string
-	spec := ops.HarnessLaunchSpec{BeforeSpawn: func() error {
+	spec := ops.HarnessLaunchSpec{BeforeSpawn: func(...*override.Reservation) error {
 		events = append(events, "authorize")
 		return refusal
 	}}
@@ -150,7 +156,7 @@ func TestStartAgyHarnessDoesNotAuthorizeBeforeExecutableResolution(t *testing.T)
 	}
 	_, err := startAgyHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
 		Harness: "agy", SessionName: "agy-missing", WorkDir: "/tmp",
-		BeforeSpawn: func() error {
+		BeforeSpawn: func(...*override.Reservation) error {
 			authorized = true
 			return nil
 		},

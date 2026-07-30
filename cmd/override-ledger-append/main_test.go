@@ -90,6 +90,29 @@ func TestAppendInputWritesDistinctKindsAsOneTransaction(t *testing.T) {
 	}
 }
 
+func TestAppendInputRejectsReplayedAuthorizationID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.jsonl")
+	use := override.Use{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "host recovered and the operator is verifying one guarded spawn",
+		Actor:           "vroom-dispatch",
+		Session:         "vroom-orchestrator",
+		AuthorizationID: "0123456789abcdef0123456789abcdef",
+		AtUTC:           time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+	}
+	line, err := override.EncodeLedgerUse(use)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appendInput(bytes.NewReader(line), path, false); err != nil {
+		t.Fatalf("append first authorization: %v", err)
+	}
+	if err := appendInput(bytes.NewReader(line), path, false); err == nil ||
+		!strings.Contains(err.Error(), "already recorded") {
+		t.Fatalf("replayed authorization error = %v, want duplicate rejection", err)
+	}
+}
+
 func TestAppendInputCapsTheFixedLedger(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ledger.jsonl")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {

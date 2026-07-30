@@ -60,6 +60,10 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-22** When one launch crosses more than one dangerous override, the system shall revalidate every reservation and every per-kind rate limit before recording any use, then append the complete set under one ledger lock and one write so a failed combined authorization records none of its uses.
 
+**OVR-23** When a human approves `codex-hook-trust`, the system shall bind the root-owned grant to the canonical repository, full source commit, and committed hook-byte digest displayed during approval, and shall refuse a generic or mismatched hook-trust grant.
+
+**OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall carry the hook reservation into the same launch-bound ledger transaction and shall require the private executor to prove a fresh exact authorization receipt was committed and revalidate the persisted repository, commit, digest, materialized hook root, and sandbox assets before executing Codex.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
@@ -95,7 +99,8 @@ them unreviewed — and both fail closed.
 
 ## Operations
 
-    agm override approve <kind> --ttl 1h
+    agm override approve codex-hook-trust --codex-hook-source /reviewed/repo --ttl 1h
+    agm override approve <other-kind> --ttl 1h
     agm override status                    # approvals and recent use
     agm override audit --window 168h --threshold 5
     agm override revoke <kind>
@@ -113,6 +118,14 @@ requires a fresh password challenge, and invalidates the new timestamp after
 installation. That OS authentication and the command's interactive typed
 confirmation form the human boundary.
 
+Hook-trust approval additionally resolves the source repository's canonical
+path and current full commit, reads the manifest and referenced hook files from
+immutable Git objects, displays that identity and committed-byte digest, and
+stores all three in the root-owned grant. Each launch derives a compact subject
+from the same fields. Both the unprivileged reservation gate and privileged
+append helper require an exact subject match, so a later commit or a different
+repository cannot reuse the approval.
+
 On Unix, the operator first runs
 `make install-override-ledger-helper`. That separately authenticated setup
 prints and requires typed confirmation of the helper artifact's complete
@@ -127,8 +140,13 @@ The helper accepts exactly one canonical bounded JSONL transaction on stdin.
 A transaction is either one historical-compatible use record or one envelope
 containing at most one use per override kind. The helper appends only to
 `/var/log/dear-agent-overrides.jsonl`, revalidates every matching active
-root-owned grant and near-current timestamp, synchronizes before returning, and
-stops at a 16 MiB ledger cap pending operator-owned rotation.
+root-owned grant, exact subject, unique random authorization ID, and near-current
+timestamp, synchronizes before returning, and stops at a 16 MiB ledger cap
+pending operator-owned rotation. The one-shot private Codex handoff carries the
+same authorization ID and immutable source fields; its executor requires a
+fresh matching ledger record and re-runs the persisted Git attestation before
+replacing AGM with Codex. The receipt is audit evidence, not a secret
+capability, and expires with the private handoff window.
 
 The ledger file and its parent are root-owned, so the scheduled audit process
 can read the audit while the agent user cannot truncate, replace, or remove

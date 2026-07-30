@@ -96,7 +96,7 @@ func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) 
 	}}}
 	var events []string
 	brakeReservation := &override.Reservation{}
-	oauthReservation := &override.Reservation{}
+	codexHookReservation := &override.Reservation{}
 	result, err := finalizeAdmissionBrakeOverride(
 		initial,
 		"operator verified host recovery",
@@ -116,12 +116,12 @@ func TestFinalizeAdmissionBrakeOverrideCommitsAfterFinalLiveCheck(t *testing.T) 
 			events = append(events, "commit")
 			if len(reservations) != 2 ||
 				reservations[0] != brakeReservation ||
-				reservations[1] != oauthReservation {
-				t.Fatalf("combined reservations = %v, want brake then OAuth", reservations)
+				reservations[1] != codexHookReservation {
+				t.Fatalf("combined reservations = %v, want brake then Codex hook trust", reservations)
 			}
 			return nil
 		},
-		oauthReservation,
+		codexHookReservation,
 	)
 	if err != nil {
 		t.Fatalf("finalizeAdmissionBrakeOverride() error = %v", err)

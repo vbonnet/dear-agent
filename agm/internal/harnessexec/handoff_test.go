@@ -13,9 +13,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
+
+var (
+	testCodexHookSourceRepo   = "/reviewed/dear-agent"
+	testCodexHookSourceCommit = strings.Repeat("a", 40)
+	testCodexHookDigest       = strings.Repeat("b", 64)
+	testCodexHookSubject      = func() string {
+		subject, err := override.CodexHookTrustSubject(
+			testCodexHookSourceRepo,
+			testCodexHookSourceCommit,
+			testCodexHookDigest,
+		)
+		if err != nil {
+			panic(err)
+		}
+		return subject
+	}()
+)
+
+func testCodexHookProof(session, reason, actor string) override.AuthorizationProof {
+	return override.AuthorizationProof{
+		Kind:            override.KindCodexHookTrust,
+		Reason:          reason,
+		Actor:           actor,
+		Session:         session,
+		Subject:         testCodexHookSubject,
+		AuthorizationID: "0123456789abcdef0123456789abcdef",
+	}
+}
 
 func TestMain(m *testing.M) {
 	original := scheduleHandoffExpiry
@@ -23,6 +53,13 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	scheduleHandoffExpiry = original
 	os.Exit(code)
+}
+
+func TestCodexAuthorizationReceiptWindowMatchesPrivateHandoff(t *testing.T) {
+	if override.AuthorizationReceiptMaxAge != handoffMaxAge {
+		t.Fatalf("authorization receipt max age = %s, private handoff max age = %s",
+			override.AuthorizationReceiptMaxAge, handoffMaxAge)
+	}
 }
 
 func TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
@@ -225,13 +262,15 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalCodexHookOverrides := codexHookOverrides
-	originalAuthorizeCodexHookTrust := authorizeCodexHookTrust
+	originalVerifyCodexHookTrustAttestation := verifyCodexHookTrustAttestation
+	originalVerifyCodexHookTrustAuthorization := verifyCodexHookTrustAuthorization
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
 		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		codexHookOverrides = originalCodexHookOverrides
-		authorizeCodexHookTrust = originalAuthorizeCodexHookTrust
+		verifyCodexHookTrustAttestation = originalVerifyCodexHookTrustAttestation
+		verifyCodexHookTrustAuthorization = originalVerifyCodexHookTrustAuthorization
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
 	hookConfigurationPrepared := false
@@ -251,26 +290,41 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	const hookRoot = "/trusted/hooks/0123456789abcdef"
 	const hookTrustReason = "sandbox path rotates per spawn so hooks cannot be pre-trusted"
 	const hookTrustActor = "dispatcher-test"
+	verifyCodexHookTrustAttestation = func(attestation codexhooks.Attestation, workDir string) error {
+		if attestation.SourceRepo != testCodexHookSourceRepo ||
+			attestation.SourceCommit != testCodexHookSourceCommit ||
+			attestation.Digest != testCodexHookDigest ||
+			attestation.HookRoot != hookRoot ||
+			workDir != "/tmp/work" {
+			t.Fatalf("hook attestation = %#v, workdir %q", attestation, workDir)
+		}
+		return nil
+	}
 	authorizedUses := 0
-	authorizeCodexHookTrust = func(reason, actor, sessionName string) error {
+	verifyCodexHookTrustAuthorization = func(proof override.AuthorizationProof) error {
 		if !hookConfigurationPrepared || !executableResolved {
 			t.Fatal("hook-trust use recorded before launch preparation completed")
 		}
-		if reason != hookTrustReason || actor != hookTrustActor || sessionName != "bypass-codex" {
-			t.Fatalf("hook-trust authorization = %q, %q, %q", reason, actor, sessionName)
+		if proof != testCodexHookProof("bypass-codex", hookTrustReason, hookTrustActor) {
+			t.Fatalf("hook-trust authorization proof = %+v", proof)
 		}
 		authorizedUses++
 		return nil
 	}
 	prepared, err := PrepareCodexCommand(CodexLaunch{
-		SessionName:     "bypass-codex",
-		Model:           "gpt-test",
-		WorkDir:         "/tmp/work",
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "bypass-codex",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bypass-codex", hookTrustReason, hookTrustActor),
 	}, nil)
 	if err != nil {
 		t.Fatalf("prepare trusted Codex bypass: %v", err)
@@ -312,14 +366,19 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 
 	bound, err := PrepareCodexCommand(CodexLaunch{
-		SessionName:     "bound-bypass",
-		Model:           "gpt-test",
-		WorkDir:         "/tmp/work",
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "bound-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor),
 	}, nil)
 	if err != nil {
 		t.Fatalf("prepare bound Codex bypass: %v", err)
@@ -338,14 +397,19 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 
 	bound, err = PrepareCodexCommand(CodexLaunch{
-		SessionName:     "bound-bypass",
-		Model:           "gpt-test",
-		WorkDir:         "/tmp/work",
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "bound-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor),
 	}, nil)
 	if err != nil {
 		t.Fatalf("prepare launch-bound Codex bypass: %v", err)
@@ -401,14 +465,19 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 
 	configFailure, err := PrepareCodexCommand(CodexLaunch{
-		SessionName:     "config-failure",
-		Model:           "gpt-test",
-		WorkDir:         "/tmp/work",
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "config-failure",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("config-failure", hookTrustReason, hookTrustActor),
 	}, nil)
 	if err != nil {
 		t.Fatalf("prepare config-failure Codex bypass: %v", err)
@@ -430,14 +499,19 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 
 	resolveFailure, err := PrepareCodexCommand(CodexLaunch{
-		SessionName:     "resolve-failure",
-		Model:           "gpt-test",
-		WorkDir:         "/tmp/work",
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "resolve-failure",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("resolve-failure", hookTrustReason, hookTrustActor),
 	}, nil)
 	if err != nil {
 		t.Fatalf("prepare resolve-failure Codex bypass: %v", err)
@@ -460,14 +534,19 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 	}
 
 	if _, err := PrepareCodexCommand(CodexLaunch{
-		SessionName:     "overlapping-bypass",
-		Model:           "gpt-test",
-		WorkDir:         filepath.Dir(trustedRoot),
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "overlapping-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               filepath.Dir(trustedRoot),
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("overlapping-bypass", hookTrustReason, hookTrustActor),
 	}, nil); err == nil || !strings.Contains(err.Error(), "overlaps agent-writable root") {
 		t.Fatalf("overlapping trusted handoff error = %v", err)
 	}
@@ -477,16 +556,55 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		t.Fatalf("symlink trusted handoff root: %v", err)
 	}
 	if _, err := PrepareCodexCommand(CodexLaunch{
-		SessionName:     "symlink-overlapping-bypass",
-		Model:           "gpt-test",
-		WorkDir:         symlinkedRoot,
-		Sandbox:         "workspace-write",
-		BypassHookTrust: true,
-		HookRoot:        hookRoot,
-		HookTrustReason: hookTrustReason,
-		HookTrustActor:  hookTrustActor,
+		SessionName:           "symlink-overlapping-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               symlinkedRoot,
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("symlink-overlapping-bypass", hookTrustReason, hookTrustActor),
 	}, nil); err == nil || !strings.Contains(err.Error(), "overlaps agent-writable root") {
 		t.Fatalf("symlink-overlapping trusted handoff error = %v", err)
+	}
+
+	attestationFailure, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "attestation-failure",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("attestation-failure", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare attestation-failure Codex bypass: %v", err)
+	}
+	verifyCodexHookTrustAttestation = func(codexhooks.Attestation, string) error {
+		return errors.New("persisted Git attestation changed")
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", attestationFailure.path,
+		"--session", "attestation-failure",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "revalidate approved Codex hook source") {
+		t.Fatalf("changed attestation error = %v", err)
 	}
 	if authorizedUses != 1 {
 		t.Fatalf("failed or ordinary launches recorded %d hook-trust uses, want only the real launch", authorizedUses)

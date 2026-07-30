@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/pkg/override"
@@ -17,6 +19,7 @@ import (
 var (
 	overrideTTL            time.Duration
 	overrideNote           string
+	overrideCodexSource    string
 	overrideAuditWindow    time.Duration
 	overrideAuditThreshold int
 	overrideAuditJSON      bool
@@ -80,6 +83,8 @@ the fix is either to remove that cause or to close the loophole.`,
 func init() {
 	overrideApproveCmd.Flags().DurationVar(&overrideTTL, "ttl", time.Hour, "How long the approval remains valid")
 	overrideApproveCmd.Flags().StringVar(&overrideNote, "note", "", "Optional note recorded with the approval")
+	overrideApproveCmd.Flags().StringVar(&overrideCodexSource, "codex-hook-source", "",
+		"Repository whose current committed Codex hook bytes are being approved (required for codex-hook-trust)")
 	overrideAuditCmd.Flags().DurationVar(&overrideAuditWindow, "window", 7*24*time.Hour, "Window to review")
 	overrideAuditCmd.Flags().IntVar(&overrideAuditThreshold, "threshold", 5, "Alert when a kind reaches this many uses (0 disables)")
 	overrideAuditCmd.Flags().BoolVar(&overrideAuditJSON, "json", false, "Emit the report as JSON")
@@ -127,6 +132,10 @@ func runOverrideApprove(cmd *cobra.Command, args []string) error {
 	if overrideTTL <= 0 {
 		return fmt.Errorf("--ttl must be positive")
 	}
+	codexSource, err := resolveOverrideApprovalCodexSource(cmd.Context(), kind, overrideCodexSource)
+	if err != nil {
+		return err
+	}
 	if _, err := override.LoadGrant(kind); err != nil {
 		return fmt.Errorf("inspect existing override grant before approval: %w", err)
 	}
@@ -134,6 +143,11 @@ func runOverrideApprove(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "\nApproving dangerous override %q for %s.\n", kind, overrideTTL)
 	fmt.Fprintf(cmd.OutOrStdout(), "The approval is installed in operator-owned storage at %s.\n", override.GrantPath(kind))
 	fmt.Fprintf(cmd.OutOrStdout(), "This disables a safety control. Every use is recorded to %s.\n", override.LedgerPath())
+	if codexSource != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "Reviewed Codex hook repository: %s\n", codexSource.Repository)
+		fmt.Fprintf(cmd.OutOrStdout(), "Reviewed source commit: %s\n", codexSource.Commit)
+		fmt.Fprintf(cmd.OutOrStdout(), "Reviewed committed hook digest: %s\n", codexSource.Digest)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "\nType the override kind to confirm: ")
 
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -151,12 +165,38 @@ func runOverrideApprove(cmd *cobra.Command, args []string) error {
 		ApprovedAtUTC: now,
 		ExpiresUTC:    now.Add(overrideTTL),
 		Note:          overrideNote,
+		CodexHooks:    codexSource,
 	}
 	if err := installConfirmedGrant(grant); err != nil {
 		return err
 	}
 	ui.PrintSuccess(fmt.Sprintf("Approved %s until %s", kind, grant.ExpiresUTC.Format(time.RFC3339)))
 	return nil
+}
+
+func resolveOverrideApprovalCodexSource(
+	ctx context.Context,
+	kind override.Kind,
+	sourceRepo string,
+) (*override.CodexHookSource, error) {
+	if kind != override.KindCodexHookTrust {
+		if sourceRepo != "" {
+			return nil, fmt.Errorf("--codex-hook-source is valid only for %q", override.KindCodexHookTrust)
+		}
+		return nil, nil
+	}
+	if sourceRepo == "" {
+		return nil, fmt.Errorf("--codex-hook-source is required for %q so approval is bound to reviewed bytes", kind)
+	}
+	identity, err := codexhooks.InspectSource(ctx, sourceRepo)
+	if err != nil {
+		return nil, fmt.Errorf("inspect Codex hook source before approval: %w", err)
+	}
+	return &override.CodexHookSource{
+		Repository: identity.SourceRepo,
+		Commit:     identity.SourceCommit,
+		Digest:     identity.Digest,
+	}, nil
 }
 
 func installConfirmedGrant(grant override.Grant) error {
@@ -175,13 +215,21 @@ func installConfirmedGrant(grant override.Grant) error {
 		!installed.ApprovedAtUTC.Equal(grant.ApprovedAtUTC) ||
 		!installed.ExpiresUTC.Equal(grant.ExpiresUTC) ||
 		installed.ApprovedBy != grant.ApprovedBy ||
-		installed.Note != grant.Note {
+		installed.Note != grant.Note ||
+		!equalCodexHookSource(installed.CodexHooks, grant.CodexHooks) {
 		return fmt.Errorf("verify installed override grant: installed content does not match the confirmed approval")
 	}
 	if err := installed.Active(grant.Kind, time.Now()); err != nil {
 		return fmt.Errorf("verify installed override grant: %w", err)
 	}
 	return nil
+}
+
+func equalCodexHookSource(left, right *override.CodexHookSource) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func approvalActor() string {
@@ -214,16 +262,24 @@ func runOverrideStatus(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(out, "Approvals:")
 	for _, kind := range override.Kinds() {
 		grant, err := override.LoadGrant(kind)
-		switch {
-		case err != nil:
+		if err != nil {
 			fmt.Fprintf(out, "  %-18s unreadable: %v\n", kind, err)
-		case grant == nil:
-			fmt.Fprintf(out, "  %-18s not approved\n", kind)
-		case grant.Active(kind, now) != nil:
-			fmt.Fprintf(out, "  %-18s expired %s\n", kind, grant.ExpiresUTC.Format(time.RFC3339))
-		default:
-			fmt.Fprintf(out, "  %-18s approved by %s until %s\n", kind, grant.ApprovedBy, grant.ExpiresUTC.Format(time.RFC3339))
+			continue
 		}
+		if grant == nil {
+			fmt.Fprintf(out, "  %-18s not approved\n", kind)
+			continue
+		}
+		if activeErr := grant.Active(kind, now); activeErr != nil {
+			fmt.Fprintf(out, "  %-18s unavailable: %v\n", kind, activeErr)
+			continue
+		}
+		fmt.Fprintf(out, "  %-18s approved by %s until %s", kind, grant.ApprovedBy, grant.ExpiresUTC.Format(time.RFC3339))
+		if grant.CodexHooks != nil {
+			fmt.Fprintf(out, " (%s @ %s, digest %s)",
+				grant.CodexHooks.Repository, grant.CodexHooks.Commit, grant.CodexHooks.Digest)
+		}
+		fmt.Fprintln(out)
 	}
 
 	uses, err := override.LoadUses(now.Add(-7 * 24 * time.Hour))

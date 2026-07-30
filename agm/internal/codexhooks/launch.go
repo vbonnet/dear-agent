@@ -30,8 +30,9 @@ const (
 )
 
 var (
-	trustedHookJSONPath            = "/usr/local/libexec/dear-agent-codex-hook-json"
-	validateAttestedExecutablePath = validateTrustedExecutableSearchPath
+	trustedHookJSONPath               = "/usr/local/libexec/dear-agent-codex-hook-json"
+	validateAttestedExecutablePath    = validateTrustedExecutableSearchPath
+	validateTrustedHookJSONExecutable = validateTrustedHookExecutable
 )
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
@@ -67,7 +68,7 @@ func LaunchConfigOverrides(hookRoot, workDir string) ([]string, error) {
 	if err := validateAttestedExecutablePath(attestedHookPath); err != nil {
 		return nil, err
 	}
-	if err := validateTrustedHookExecutable(trustedHookJSONPath); err != nil {
+	if err := validateTrustedHookJSONExecutable(trustedHookJSONPath); err != nil {
 		return nil, fmt.Errorf(
 			"validate trusted Codex hook JSON helper (install with make install-codex-hook-json): %w",
 			err,

@@ -3,6 +3,7 @@
 package harnessexec
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -38,18 +39,16 @@ const (
 )
 
 var (
-	lookPathInEnvironment   = resolveExecutableInEnvironment
-	replaceProcess          = syscall.Exec
-	changeDirectory         = os.Chdir
-	resolveClaudeOAuth      = auth.ResolveOAuthToken
-	codexHookOverrides      = codexhooks.LaunchConfigOverrides
-	authorizeCodexHookTrust = func(reason, actor, sessionName string) error {
-		if _, err := override.Authorize(override.Request{
-			Kind:    override.KindCodexHookTrust,
-			Reason:  reason,
-			Actor:   actor,
-			Session: sessionName,
-		}); err != nil {
+	lookPathInEnvironment           = resolveExecutableInEnvironment
+	replaceProcess                  = syscall.Exec
+	changeDirectory                 = os.Chdir
+	resolveClaudeOAuth              = auth.ResolveOAuthToken
+	codexHookOverrides              = codexhooks.LaunchConfigOverrides
+	verifyCodexHookTrustAttestation = func(attestation codexhooks.Attestation, workDir string) error {
+		return codexhooks.Verify(context.Background(), attestation, workDir)
+	}
+	verifyCodexHookTrustAuthorization = func(proof override.AuthorizationProof) error {
+		if err := override.VerifyCommitted(proof); err != nil {
 			return fmt.Errorf("codex hook-trust override refused: %w", err)
 		}
 		return nil
@@ -105,6 +104,11 @@ type CodexLaunch struct {
 	HookRoot               string
 	HookTrustReason        string
 	HookTrustActor         string
+	HookTrustSubject       string
+	HookTrustSourceRepo    string
+	HookTrustSourceCommit  string
+	HookTrustDigest        string
+	HookTrustProof         override.AuthorizationProof
 	Persistent             bool
 	DeferUntilProducerExit bool
 }
@@ -304,6 +308,10 @@ func runCodex(args []string) error {
 		if request.BypassHooks {
 			request.HookTrustReason = handoff.CodexLaunch.HookTrustReason
 			request.HookTrustActor = handoff.CodexLaunch.HookTrustActor
+			request.HookTrustSourceRepo = handoff.CodexLaunch.HookTrustSourceRepo
+			request.HookTrustSourceCommit = handoff.CodexLaunch.HookTrustSourceCommit
+			request.HookTrustDigest = handoff.CodexLaunch.HookTrustDigest
+			request.HookTrustProof = handoff.CodexLaunch.HookTrustProof
 		}
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
@@ -313,6 +321,15 @@ func runCodex(args []string) error {
 	// -C target instead of forwarding a stale caller PWD.
 	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
 	if request.BypassHooks {
+		attestation := codexhooks.Attestation{
+			SourceRepo:   request.HookTrustSourceRepo,
+			SourceCommit: request.HookTrustSourceCommit,
+			Digest:       request.HookTrustDigest,
+			HookRoot:     request.HookRoot,
+		}
+		if err := verifyCodexHookTrustAttestation(attestation, request.WorkDir); err != nil {
+			return fmt.Errorf("revalidate approved Codex hook source: %w", err)
+		}
 		environ = overlayEnvironment(environ, []string{"AGM_CODEX_HOOK_ROOT=" + request.HookRoot})
 		overrides, overrideErr := codexHookOverrides(request.HookRoot, request.WorkDir)
 		if overrideErr != nil {
@@ -325,11 +342,12 @@ func runCodex(args []string) error {
 		return fmt.Errorf("resolve codex executable: %w", err)
 	}
 	argv := append([]string{"codex"}, request.argv()...)
-	// Consume the bounded grant and record its audit use only after every
-	// fallible preparation step has succeeded. This is the last userspace
-	// boundary before the real Codex executable replaces AGM.
+	// The parent commits this exact reservation together with every other
+	// launch override before submitting the private executor. Prove that the
+	// random receipt reached the operator-owned ledger after every other
+	// fallible preparation step and before replacing AGM with Codex.
 	if request.BypassHooks {
-		if err := authorizeCodexHookTrust(request.HookTrustReason, request.HookTrustActor, request.SessionName); err != nil {
+		if err := verifyCodexHookTrustAuthorization(request.HookTrustProof); err != nil {
 			return err
 		}
 	}
@@ -385,20 +403,24 @@ func (s *stringList) Set(value string) error {
 }
 
 type codexRequest struct {
-	HandoffPath     string
-	SessionName     string
-	Model           string
-	WorkDir         string
-	Sandbox         string
-	Approval        string
-	AddDirs         stringList
-	ResumeID        string
-	Remote          bool
-	BypassHooks     bool
-	HookRoot        string
-	HookTrustReason string
-	HookTrustActor  string
-	ConfigOverrides []string
+	HandoffPath           string
+	SessionName           string
+	Model                 string
+	WorkDir               string
+	Sandbox               string
+	Approval              string
+	AddDirs               stringList
+	ResumeID              string
+	Remote                bool
+	BypassHooks           bool
+	HookRoot              string
+	HookTrustReason       string
+	HookTrustActor        string
+	HookTrustSourceRepo   string
+	HookTrustSourceCommit string
+	HookTrustDigest       string
+	HookTrustProof        override.AuthorizationProof
+	ConfigOverrides       []string
 }
 
 func parseCodex(args []string) (codexRequest, error) {

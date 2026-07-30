@@ -1887,6 +1887,9 @@ func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing
 			sandbox: &manifest.SandboxConfig{
 				Enabled:                    true,
 				BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+				CodexHookSourceRepo:        "/reviewed/dear-agent",
+				CodexHookSourceCommit:      strings.Repeat("a", 40),
+				CodexHookDigest:            strings.Repeat("b", 64),
 			},
 			want: true,
 		},
@@ -1906,6 +1909,13 @@ func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing
 			}
 			if tt.want && got.CodexHookTrustActor != "vroom-dispatch" {
 				t.Fatalf("CodexHookTrustActor = %q, want caller identity", got.CodexHookTrustActor)
+			}
+			if tt.want &&
+				(got.CodexHookSourceRepo != tt.sandbox.CodexHookSourceRepo ||
+					got.CodexHookSourceCommit != tt.sandbox.CodexHookSourceCommit ||
+					got.CodexHookDigest != tt.sandbox.CodexHookDigest) {
+				t.Fatalf("Codex hook source identity = (%q, %q, %q), want sandbox evidence",
+					got.CodexHookSourceRepo, got.CodexHookSourceCommit, got.CodexHookDigest)
 			}
 		})
 	}
