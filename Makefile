@@ -1191,6 +1191,14 @@ install-override-audit-launchdaemon: build-agm
 		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
 		audit_staging=""; \
 		plist_staging=""; \
+		audit_live="/usr/local/libexec/dear-agent-override-audit"; \
+		plist_live="/Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \
+		audit_backup=""; \
+		plist_backup=""; \
+		audit_existed=0; \
+		plist_existed=0; \
+		activation_started=0; \
+		activation_complete=0; \
 		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" deploy/launchd/com.dear-agent.override-audit.plist >"$$plist_candidate"; \
 		/usr/bin/plutil -lint "$$plist_candidate" >/dev/null; \
 		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
@@ -1206,9 +1214,14 @@ install-override-audit-launchdaemon: build-agm
 		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
 		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
 		cleanup_audit_staging() { \
+			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
+				if test "$$audit_existed" = 1; then if test -n "$$audit_backup" && /usr/bin/sudo -n /bin/mv -f "$$audit_backup" "$$audit_live"; then audit_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$audit_live" >/dev/null 2>&1 || true; fi; \
+				if test "$$plist_existed" = 1; then if test -n "$$plist_backup" && /usr/bin/sudo -n /bin/mv -f "$$plist_backup" "$$plist_live"; then plist_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$plist_live" >/dev/null 2>&1 || true; fi; \
+			fi; \
 			/bin/rm -f "$$plist_candidate"; \
 			if test -n "$$audit_staging"; then /usr/bin/sudo /bin/rm -f "$$audit_staging" >/dev/null 2>&1 || true; fi; \
 			if test -n "$$plist_staging"; then /usr/bin/sudo /bin/rm -f "$$plist_staging" >/dev/null 2>&1 || true; fi; \
+			if test "$$activation_started" != 1 || test "$$activation_complete" = 1; then /usr/bin/sudo -n /bin/rm -f "$$audit_backup" "$$plist_backup" >/dev/null 2>&1 || true; fi; \
 		}; \
 		trap cleanup_audit_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
@@ -1229,10 +1242,25 @@ install-override-audit-launchdaemon: build-agm
 		test "$$staged_audit_hash" = "$$expected_audit_hash" || { echo "root-owned staged audit executable differs from the approved bytes" >&2; exit 1; }; \
 		test "$$staged_plist_hash" = "$$expected_plist_hash" || { echo "root-owned staged LaunchDaemon differs from the approved bytes" >&2; exit 1; }; \
 		/usr/bin/sudo /usr/bin/plutil -lint "$$plist_staging" >/dev/null; \
-		/usr/bin/sudo /bin/mv -f "$$audit_staging" /usr/local/libexec/dear-agent-override-audit; \
+		if /usr/bin/sudo /usr/bin/test -e "$$audit_live"; then \
+			audit_existed=1; \
+			audit_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$audit_live" "$$audit_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$plist_live"; then \
+			plist_existed=1; \
+			plist_backup="$$(/usr/bin/sudo /usr/bin/mktemp /Library/LaunchDaemons/.com.dear-agent.override-audit.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$plist_live" "$$plist_backup"; \
+		fi; \
+		activation_started=1; \
+		/usr/bin/sudo /bin/mv -f "$$audit_staging" "$$audit_live"; \
 		audit_staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$plist_staging" /Library/LaunchDaemons/com.dear-agent.override-audit.plist; \
+		/usr/bin/sudo /bin/mv -f "$$plist_staging" "$$plist_live"; \
 		plist_staging=""; \
+		activation_complete=1; \
+		/usr/bin/sudo /bin/rm -f "$$audit_backup" "$$plist_backup"; \
+		audit_backup=""; \
+		plist_backup=""; \
 		/bin/rm -f "$$plist_candidate"; \
 		plist_candidate=""; \
 		trap - EXIT HUP INT TERM; \

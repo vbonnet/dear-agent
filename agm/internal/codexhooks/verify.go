@@ -745,7 +745,7 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 	if target, reason, handled := dynamicRuntimeOperand(command, call.Args[0], call.Args[1:]); handled {
 		return target, reason
 	}
-	if target, reason, handled := timeoutCommandOperand(command, call.Args[1:]); handled {
+	if target, reason, handled := nestedCommandWrapperOperand(command, call.Args[1:]); handled {
 		return target, reason
 	}
 	switch command {
@@ -782,7 +782,7 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		if target, reason, handled := dynamicRuntimeOperand(value, word, args[index+1:]); handled {
 			return target, reason
 		}
-		if target, reason, handled := timeoutCommandOperand(value, args[index+1:]); handled {
+		if target, reason, handled := nestedCommandWrapperOperand(value, args[index+1:]); handled {
 			return target, reason
 		}
 		switch value {
@@ -795,6 +795,13 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		}
 	}
 	return nil, ""
+}
+
+func nestedCommandWrapperOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
+	if target, reason, handled := timeoutCommandOperand(command, args); handled {
+		return target, reason, true
+	}
+	return niceCommandOperand(command, args)
 }
 
 func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syntax.Word) (*syntax.Word, string, bool) {
@@ -857,6 +864,40 @@ func timeoutOptionTakesArgument(value string) bool {
 	default:
 		return false
 	}
+}
+
+func niceCommandOperand(command string, args []*syntax.Word) (*syntax.Word, string, bool) {
+	if filepath.Base(command) != "nice" {
+		return nil, "", false
+	}
+	options := true
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return word, "expanded nice command-wrapper operand", true
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && (value == "-n" || value == "--adjustment") {
+			if index+1 >= len(args) {
+				return nil, "", true
+			}
+			index++
+			if _, static := staticShellWord(args[index]); !static {
+				return args[index], "expanded nice option operand", true
+			}
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			continue
+		}
+		target, reason := dynamicWrapperCommand(args[index:], false)
+		return target, reason, true
+	}
+	return nil, "", true
 }
 
 func awkUsesCommandExecution(command string, args []*syntax.Word) bool {
@@ -952,6 +993,19 @@ func makeUsesCommandExecution(command string) bool {
 		// MAKEFLAGS, and command-line variable assignments. Even a literal
 		// system-path executable can therefore dispatch mutable workspace
 		// commands that were not part of the hook attestation.
+		return true
+	default:
+		return false
+	}
+}
+
+func sshUsesCommandExecution(command string) bool {
+	switch filepath.Base(command) {
+	case "ssh", "scp", "sftp":
+		// OpenSSH clients can dispatch local commands through user-controlled
+		// configuration and options such as ProxyCommand and LocalCommand.
+		// Reject the client family instead of trying to parse every config
+		// source and percent/token expansion that can influence execution.
 		return true
 	default:
 		return false
@@ -1368,6 +1422,9 @@ func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 	}
 	if makeUsesCommandExecution(command) {
 		return "command-capable Make runtime"
+	}
+	if sshUsesCommandExecution(command) {
+		return "command-capable OpenSSH runtime"
 	}
 	if tarUsesCommandExecution(command, args) {
 		return "command-capable tar runtime"

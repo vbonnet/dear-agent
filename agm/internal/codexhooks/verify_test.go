@@ -419,6 +419,12 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/make --eval='all:;x=$$(printf \".%shelper\" /); \"$$x\"' all\n",
 		"#!/bin/sh\ncommand /usr/bin/make -f /usr/bin/true all\n",
 		"#!/bin/sh\n/usr/bin/env -i /usr/bin/gmake all\n",
+		"#!/bin/sh\n/usr/bin/ssh -F none -o 'ProxyCommand=/bin/sh -c '\\''x=$(printf \"\\\\056\\\\057helper\"); \"$x\"'\\''' host\n",
+		"#!/bin/sh\ncommand /usr/bin/scp -o ProxyCommand=./helper source host:target\n",
+		"#!/bin/sh\n/usr/bin/env -i /usr/bin/sftp host\n",
+		"#!/bin/sh\n/usr/bin/nice /bin/bash helper\n",
+		"#!/bin/sh\ncommand /usr/bin/nice -n 5 /bin/sh helper\n",
+		"#!/bin/sh\n/usr/bin/env -i /usr/bin/nice --adjustment=5 /bin/bash helper\n",
 		"#!/bin/sh\n/usr/bin/tar --checkpoint-action=exec='x=$(printf \".%shelper\" /); \"$x\"' -cf /dev/null /usr/bin/true\n",
 		"#!/bin/sh\ncommand /usr/bin/tar --to-command='./helper' -xf /dev/null\n",
 		"#!/bin/sh\n/usr/bin/tar --use-compress-program ./helper -cf /dev/null /usr/bin/true\n",
@@ -470,6 +476,8 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/bash\ntime /bin/bash /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/timeout --signal=TERM 1 /bin/bash /usr/bin/true\n",
 		"#!/bin/sh\ncommand /usr/bin/timeout -k 1s 2s /bin/true\n",
+		"#!/bin/sh\n/usr/bin/nice /bin/true\n",
+		"#!/bin/sh\ncommand /usr/bin/nice -n 5 /bin/bash /usr/bin/true\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)

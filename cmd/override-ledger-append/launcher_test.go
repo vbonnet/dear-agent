@@ -137,3 +137,41 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 		t.Fatal("helper installer still uses sudo's generic validation pseudocommand")
 	}
 }
+
+func TestLaunchDaemonInstallerRollsBackPartialActivation(t *testing.T) {
+	makefile, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(makefile)
+	start := strings.Index(text, "install-override-audit-launchdaemon:")
+	if start < 0 {
+		t.Fatal("could not find LaunchDaemon installer target")
+	}
+	end := strings.Index(text[start:], "\nuninstall-override-audit-launchdaemon:")
+	if end < 0 {
+		t.Fatal("could not find target after LaunchDaemon installation")
+	}
+	installer := text[start : start+end]
+	for _, required := range []string{
+		`audit_live="/usr/local/libexec/dear-agent-override-audit"`,
+		`plist_live="/Library/LaunchDaemons/com.dear-agent.override-audit.plist"`,
+		`audit_backup=`,
+		`plist_backup=`,
+		`activation_started=1`,
+		`activation_complete=1`,
+		`/bin/mv -f "$$audit_backup" "$$audit_live"`,
+		`/bin/mv -f "$$plist_backup" "$$plist_live"`,
+		`/bin/rm -f "$$audit_live"`,
+		`/bin/rm -f "$$plist_live"`,
+	} {
+		if !strings.Contains(installer, required) {
+			t.Errorf("LaunchDaemon installer is missing transactional activation fragment %q", required)
+		}
+	}
+	backup := strings.Index(installer, `audit_backup="$$(/usr/bin/sudo /usr/bin/mktemp`)
+	activate := strings.Index(installer, "activation_started=1")
+	if backup < 0 || activate < 0 || backup > activate {
+		t.Fatal("LaunchDaemon installer does not back up live artifacts before activation")
+	}
+}

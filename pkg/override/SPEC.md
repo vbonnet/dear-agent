@@ -46,7 +46,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-15** When the privileged ledger helper is installed, the system shall require the operator to confirm the complete artifact SHA-256, copy those bytes to a unique root-owned staging file, verify the staged digest against the confirmed digest, and atomically activate only the verified staged file.
 
-**OVR-16** When the macOS system audit is installed, the system shall require the operator to confirm the executable and rendered LaunchDaemon SHA-256 values, copy both artifacts into unique root-owned staging, verify both staged digests, validate the exact staged plist, and atomically activate only those verified bytes.
+**OVR-16** When the macOS system audit is installed, the system shall require the operator to confirm the executable and rendered LaunchDaemon SHA-256 values, copy both artifacts into unique root-owned staging, verify both staged digests, validate the exact staged plist, back up the complete live artifact set, and transactionally activate only those verified bytes; any partial activation shall restore every prior artifact and remove any newly introduced artifact.
 
 **OVR-17** When the Linux system audit is installed, the system shall require the operator to confirm the executable, service, and timer SHA-256 values, copy all three artifacts into unique root-owned staging, verify every staged digest, back up the complete live artifact set, and transactionally activate only those verified bytes before reloading the system manager; any partial activation shall restore every prior artifact and remove any newly introduced artifact.
 
