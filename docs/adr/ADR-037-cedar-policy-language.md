@@ -56,7 +56,7 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   plus context. Sources, destinations, and parents retain their operation roles;
   every pair is separately authorized and all must allow; raw maps and adapter-local aliases are forbidden.
   TCP identity includes canonical hostname, resolved IP, and port; hostname policy requires an application-aware trusted proxy enforcing approved SNI/HTTP Host plus IP/port, while socket-only enforcement is IP-granular.
-  Every DNS answer/redirect is separately authorized and dispatch binds the approved tuple. Local IPC emits typed `local-socket/connect` plus canonical filesystem/abstract-namespace path and socket identity, bound at connect; datagrams emit typed `datagram/send` plus canonical IP/port or Unix filesystem/abstract-namespace destination and socket identity, bound anew at every `sendto`/`sendmsg`.
+  Every DNS answer/redirect is separately authorized and dispatch binds the approved tuple. Local IPC emits typed `local-socket/connect` plus canonical filesystem/abstract-namespace path and socket identity, bound at connect; datagrams emit typed `datagram/send` plus canonical IP/port or Unix filesystem/abstract-namespace peer and socket identity, authorized at datagram `connect` and bound anew across `send`/`sendto`/`sendmsg`/`write`/`writev`.
   An unpinned endpoint or protected AGM, tmux, Docker, or control socket denies. Pi `find`/`Glob` map to search, `ls` to directory-list, and `path`/`file_path`
   normalize; multi-resource calls emit all resources; invalid/lossy TCP, local-socket, datagram, or file shapes deny before Cedar.
 - Treat the interceptor executable and its harness registration as privileged
@@ -124,8 +124,8 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   manifests or `~/.agm` state writable by a harness are never authoritative.
   Reuse the exact snapshots for confirmation-free evaluation. After `ask`, the
   dispatcher reacquires both at final dispatch; a version, digest, or provenance
-  change invalidates approval and reruns both decisions. `deny` stops, `allow`
-  proceeds, and `ask` needs a new receipt bound to both snapshots.
+  change invalidates approval and reruns both decisions. A direct `allow` also has a bounded lifetime; final dispatch revalidates every decision-relevant expiry against a trusted clock.
+  `deny` stops, unexpired `allow` proceeds, and `ask` needs a new receipt bound to both snapshots.
 - Serialize the atomic final version/input check and consumption of an
   authorization against bundle publication and authorization-input revision
   changes. Do not hold that finalization lease while waiting for a person.
@@ -141,7 +141,7 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   runs, including prior shell `cd`; the initial interceptor cwd is insufficient.
   Unprovable cwd/control flow makes the resource unprojectable. Object reads or
   opens resolve symlinks; missing leaves resolve the deepest existing ancestor
-  and reattach components, preserving the `internal/fsguard` invariant.
+  and reattach components, preserving the `internal/fsguard` invariant. Recursive traversal authorizes and pins every discovered descendant before access, or an independent OS sandbox constrains the full traversal; protected bind mounts or followed symlinks deny.
 - Directory-entry operations use a no-follow projection instead. `unlink`,
   replacement, and each side of `rename` authorize the canonical parent
   directory plus the leaf entry without resolving the leaf symlink; rename
@@ -177,11 +177,11 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
 
 This proposal does not yet supersede the active permission-parity contract.
 Until the Cedar evaluator, migration, and acceptance gates land together,
-`agm/internal/permissionparity/SPEC.md` and the manifest
-`permission_policy` projections, plus `internal/fsguard` policy/configuration and the
-pretool Bash/filesystem guard hooks, SPECs, and tests remain authoritative.
-Acceptance requires updating or retiring that complete inventory and the
-harness BDD contract in one migration; there must never be two policy owners.
+`agm/internal/permissionparity/SPEC.md` and manifest `permission_policy`
+projections, `internal/fsguard` policy/configuration and pretool Bash/filesystem
+guards, plus `~/.config/agm/gateway.yaml`, `agm/internal/gateway/scope.go`, AGM MCP server wiring, their SPECs, and tests remain authoritative.
+Acceptance requires updating or retiring that complete inventory and the harness
+BDD contract in one migration; there must never be two policy owners.
 
 ## Implementation acceptance gates
 
@@ -204,7 +204,7 @@ tests must prove all of the following:
    invalidates it and denies final dispatch. Bundle or authoritative-input
    revision changes at the final dispatch boundary cause reevaluation for both
    direct `allow` and `ask`; tests prove no stale snapshot check/use window and
-   that revoked direct authorization cannot dispatch. Role/entity/context
+   that revoked direct authorization cannot dispatch. A direct allow delayed past a time-sensitive context expiry denies without any revision change; dispatch before expiry proves liveness. Role/entity/context
    changes without policy reload also invalidate confirmation and rerun both
    decisions. Agent-authored role/context data in a writable manifest is
    rejected; only authenticated control-plane updates advance the input revision.
@@ -222,7 +222,7 @@ tests must prove all of the following:
    A copy from a denied source to an allowed destination evaluates both roles and the all-of result denies dispatch; an all-allowed multi-resource copy
    evaluates every source, destination, and parent pair and dispatches. A live allowed hostname dispatches while a denied co-hosted Host/SNI and
    private/control-plane tuple stay blocked across DNS, redirect, and rebinding; socket-only TCP mode proves IP-granular semantics. Each harness
-   denies canonical AGM, tmux, and Docker local-socket resources and dispatches to an explicitly allowed test socket; endpoint replacement between evaluation and `connect` cannot redirect the operation. It denies and dispatches canonical UDP and Unix-datagram destinations and proves replacement at every `sendto`/`sendmsg` cannot redirect.
+   denies canonical AGM, tmux, and Docker local-socket resources and dispatches to an explicitly allowed test socket; endpoint replacement between evaluation and `connect` cannot redirect the operation. It denies and dispatches connected and unconnected UDP/Unix datagram peers, authorizes datagram `connect`, and binds every `send`/`sendto`/`sendmsg`/`write`/`writev`.
    Equivalent filesystem paths unify and protected symlink/missing-leaf targets deny before Cedar.
 8. After positive invocation authorization, every harness drives an authored
    confirmation-free Deny: interactive mode enters `ask`, while non-interactive
@@ -247,9 +247,9 @@ tests must prove all of the following:
     cover both the executable and registration.
 11. A concurrent process that swaps an authorized target or any writable
     ancestor for a symlink between projection and dispatch cannot redirect the
-    operation into a protected tree. Tests must exercise existing targets and
-    missing-leaf creation and prove execution consumes the pinned object or
-    ancestor rather than reopening the lexical path.
+    operation into a protected tree. Recursive `chmod -R` and followed-link copy tests deny an allowed root containing a protected bind mount/symlink before touching that descendant, while a fully allowed traversal dispatches.
+    Existing-target and missing-leaf tests prove execution consumes each pinned
+    object/ancestor or a full-traversal sandbox, never the caller's lexical path.
 12. Sustained bundle-publication or authorization-input churn cannot keep a
     request in an internal retry loop indefinitely. Tests force more
     invalidations than the configured limit and observe a typed
@@ -265,7 +265,7 @@ tests must prove all of the following:
     An external uncorrelated link makes it incomplete and fail closed until
     rescan; pathname allow never overrides protected-inode identity.
 15. Every harness runs an unrecognized binary with runtime-computed file, TCP,
-    local-socket, IP/Unix datagram, and `cd` targets. Opaque/computed protected
+    local-socket, connected/unconnected IP/Unix datagram, and `cd` targets. Opaque/computed protected
     reads/writes, private/control-plane connections, and AGM/tmux/Docker control
     sockets are blocked by the sandbox/socket/trusted-proxy boundary or denied
     before launch, while approved external TCP/UDP endpoints and explicitly
