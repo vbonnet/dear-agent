@@ -1126,6 +1126,42 @@ func tarOldStyleCommandOption(value string) bool {
 	return strings.ContainsAny(value, "FIMT")
 }
 
+func sortUsesCommandExecution(command string, args []*syntax.Word) bool {
+	if filepath.Base(command) != "sort" {
+		return false
+	}
+	for _, argument := range args {
+		value, static := staticShellWord(argument)
+		if !static {
+			// GNU sort accepts options after operands. An expanded word before
+			// "--" can therefore introduce --compress-program at any point.
+			return true
+		}
+		if value == "--" {
+			return false
+		}
+		if sortCommandOption(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortCommandOption(value string) bool {
+	if !strings.HasPrefix(value, "--") {
+		return false
+	}
+	option := value
+	if separator := strings.IndexByte(option, '='); separator >= 0 {
+		option = option[:separator]
+	}
+	// GNU long options accept unique abbreviations. "--co" is the shortest
+	// prefix that distinguishes --compress-program from --check.
+	return len(option) >= len("--co") &&
+		len(option) <= len("--compress-program") &&
+		"--compress-program"[:len(option)] == option
+}
+
 func gitUsesCommandExecution(command string, args []*syntax.Word) bool {
 	if filepath.Base(command) != "git" {
 		return false
@@ -1470,6 +1506,9 @@ func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 	if tarUsesCommandExecution(command, args) {
 		return "command-capable tar runtime"
 	}
+	if sortUsesCommandExecution(command, args) {
+		return "command-capable sort runtime"
+	}
 	if gitUsesCommandExecution(command, args) {
 		return "command-capable Git runtime"
 	}
@@ -1543,8 +1582,19 @@ func interpreterLoadsExternalCode(command, value string) bool {
 	case "node":
 		return nodeLoadsExternalCode(value)
 	default:
+		if strings.HasPrefix(filepath.Base(command), "python") {
+			return pythonLoadsExternalCode(value)
+		}
 		return false
 	}
+}
+
+func pythonLoadsExternalCode(value string) bool {
+	if value == "-m" {
+		return true
+	}
+	// CPython accepts the module name joined to -m, including -mhelper.
+	return strings.HasPrefix(value, "-m") && !strings.HasPrefix(value, "--")
 }
 
 func perlLoadsExternalCode(value string) bool {
