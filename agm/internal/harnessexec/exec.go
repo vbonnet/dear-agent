@@ -438,7 +438,7 @@ func validateCodexRequest(request codexRequest) error {
 }
 
 func (r codexRequest) argv() []string {
-	args := make([]string, 0, 12+len(r.AddDirs)*2+len(r.ConfigOverrides)*2)
+	args := make([]string, 0, 12)
 	if r.Remote {
 		args = append(args, "resume", "--remote", "unix://")
 	}
@@ -567,7 +567,7 @@ func parsePositiveBudget(value string) (float64, error) {
 }
 
 func (r claudeRequest) argv() []string {
-	args := make([]string, 0, 12+len(r.AddDirs)*2)
+	args := make([]string, 0, 12)
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}
