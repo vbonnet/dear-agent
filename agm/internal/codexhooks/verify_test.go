@@ -343,6 +343,7 @@ func TestTrustedHookAssetsRejectExecutionInfluencingEnvironment(t *testing.T) {
 		"#!/bin/sh\nbuiltin export LD_AUDIT=./audit.so\n",
 		"#!/bin/sh\nexec /usr/bin/env BASH_ENV=./startup /bin/bash\n",
 		"#!/bin/sh\nPYTHONPATH=./lib python3 helper.py\n",
+		"#!/bin/sh\nTAR_OPTIONS='--checkpoint-action=exec=x=$(printf \".%shelper\" /);$x' /usr/bin/tar -cf /dev/null /usr/bin/true\n",
 		"#!/bin/bash\nfor PATH in .; do helper; done\n",
 		"#!/bin/bash\n: \"${PATH:=.}\"; helper\n",
 		"#!/bin/bash\ndeclare -n resolver=PATH; resolver=.; helper\n",
@@ -410,6 +411,13 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/find /usr/bin/true -exec /bin/bash -c 'x=$(printf \".%shelper\" /); \"$x\"' ';'\n",
 		"#!/bin/sh\ncommand /usr/bin/find /usr/bin -execdir /bin/true '{}' +\n",
 		"#!/bin/sh\n/usr/bin/find /usr/bin \"$FIND_ACTION\" /bin/true '{}' ';'\n",
+		"#!/bin/sh\n/usr/bin/tar --checkpoint-action=exec='x=$(printf \".%shelper\" /); \"$x\"' -cf /dev/null /usr/bin/true\n",
+		"#!/bin/sh\ncommand /usr/bin/tar --to-command='./helper' -xf /dev/null\n",
+		"#!/bin/sh\n/usr/bin/tar --use-compress-program ./helper -cf /dev/null /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/tar -I./helper -cf /dev/null /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/tar cF ./helper /dev/null /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/tar --files-from=/tmp/archive-files -cf /dev/null\n",
+		"#!/bin/sh\n/usr/bin/tar \"$TAR_OPTIONS\" -cf /dev/null /usr/bin/true\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {
@@ -441,6 +449,10 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/sh\n/usr/bin/sed --sandbox -n 's/a/b/p'\n",
 		"#!/bin/sh\n/usr/bin/sed -n 's|e|x|g'\n",
 		"#!/bin/sh\n/usr/bin/find /usr/bin -name true -print\n",
+		"#!/bin/sh\n/usr/bin/tar -cf /dev/null /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/tar --create --file=/dev/null /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/tar --checkpoint=1 -cf /dev/null /usr/bin/true\n",
+		"#!/bin/sh\n/usr/bin/tar -cf /dev/null -- \"$FILE\"\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want static command allowed", script, err)

@@ -656,6 +656,7 @@ func isExecutionInfluencingEnvironment(name string) bool {
 	switch name {
 	case "PATH",
 		"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS",
+		"TAR_OPTIONS",
 		"GCONV_PATH", "LOCPATH", "LIBPATH", "SHLIB_PATH",
 		"LDR_PRELOAD", "LDR_LIBRARY_PATH",
 		"NODE_OPTIONS", "NODE_PATH",
@@ -881,6 +882,85 @@ func findUsesCommandExecution(command string, args []*syntax.Word) bool {
 			return false
 		}
 	})
+}
+
+func tarUsesCommandExecution(command string, args []*syntax.Word) bool {
+	switch filepath.Base(command) {
+	case "tar", "gtar", "bsdtar":
+	default:
+		return false
+	}
+
+	operandsOnly := false
+	for index, argument := range args {
+		if operandsOnly {
+			continue
+		}
+		value, static := staticShellWord(argument)
+		if !static {
+			// An expanded pre-"--" operand can introduce a command-capable
+			// option even when the script contains no visible option text.
+			return true
+		}
+		if value == "--" {
+			operandsOnly = true
+			continue
+		}
+		if tarCommandOption(value) || index == 0 && tarOldStyleCommandOption(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func tarCommandOption(value string) bool {
+	const minimumLongOption = len("--x")
+	if strings.HasPrefix(value, "--") {
+		option := value
+		if separator := strings.IndexByte(option, '='); separator >= 0 {
+			option = option[:separator]
+		}
+		if len(option) < minimumLongOption {
+			return false
+		}
+		if option == "--checkpoint" || option == "--file" {
+			return false
+		}
+		for _, dangerous := range []string{
+			"--checkpoint-action",
+			"--files-from",
+			"--info-script",
+			"--multi-volume",
+			"--new-volume-script",
+			"--rmt-command",
+			"--rsh-command",
+			"--to-command",
+			"--use-compress-program",
+		} {
+			// GNU long options accept unique abbreviations. Fail closed for
+			// every prefix that could select a command-capable option.
+			if strings.HasPrefix(dangerous, option) {
+				return true
+			}
+		}
+		return false
+	}
+	if !strings.HasPrefix(value, "-") {
+		return false
+	}
+	return strings.ContainsAny(strings.TrimPrefix(value, "-"), "FIMT")
+}
+
+func tarOldStyleCommandOption(value string) bool {
+	if value == "" || strings.HasPrefix(value, "-") {
+		return false
+	}
+	for _, character := range value {
+		if character < 'A' || character > 'Z' && character < 'a' || character > 'z' {
+			return false
+		}
+	}
+	return strings.ContainsAny(value, "FIMT")
 }
 
 func staticSedPrograms(args []*syntax.Word) ([]string, bool) {
@@ -1135,6 +1215,9 @@ func dynamicBuiltinOperand(
 	}
 	if findUsesCommandExecution(command, args) {
 		return commandWord, "command-capable find runtime"
+	}
+	if tarUsesCommandExecution(command, args) {
+		return commandWord, "command-capable tar runtime"
 	}
 	switch command {
 	case "mapfile", "readarray":
