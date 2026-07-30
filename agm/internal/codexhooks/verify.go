@@ -505,7 +505,7 @@ func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
 }
 
 func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string) {
-	for _, word := range args {
+	for index, word := range args {
 		value, static := staticShellWord(word)
 		if !static {
 			return word, "expanded command-wrapper operand"
@@ -516,7 +516,16 @@ func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string)
 		if env && strings.Contains(value, "=") {
 			continue
 		}
-		return nil, ""
+		switch value {
+		case "eval":
+			return word, "eval command"
+		case "command", "builtin", "exec", "nohup":
+			return dynamicWrapperCommand(args[index+1:], false)
+		case "env", "/usr/bin/env":
+			return dynamicWrapperCommand(args[index+1:], true)
+		default:
+			return nil, ""
+		}
 	}
 	return nil, ""
 }

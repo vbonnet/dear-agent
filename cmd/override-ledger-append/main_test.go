@@ -121,6 +121,47 @@ func TestAppendInputRejectsReplayedAuthorizationID(t *testing.T) {
 	}
 }
 
+func TestAppendInputRejectsIncompleteOrMalformedLedger(t *testing.T) {
+	use := override.Use{
+		Kind:    override.KindAdmissionBrake,
+		Reason:  "host recovered and the operator is verifying one guarded spawn",
+		Actor:   "vroom-dispatch",
+		Session: "vroom-orchestrator",
+		AtUTC:   time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+	}
+	line, err := override.EncodeLedgerUse(use)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := override.EncodePrivilegedAppendRequest([]override.Use{use}, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, existing := range map[string][]byte{
+		"partial tail":        []byte(`{"kind":"admission-brake"`),
+		"complete no newline": bytes.TrimSuffix(line, []byte("\n")),
+		"malformed line":      []byte("{not-json}\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ledger.jsonl")
+			if err := os.WriteFile(path, existing, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := appendInput(bytes.NewReader(request), path, false); err == nil ||
+				!errors.Is(err, override.ErrLedgerRecord) {
+				t.Fatalf("appendInput() error = %v, want malformed-ledger rejection", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, existing) {
+				t.Fatalf("ledger changed after rejected append: got %q, want %q", got, existing)
+			}
+		})
+	}
+}
+
 func TestAppendInputCapsTheFixedLedger(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ledger.jsonl")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {

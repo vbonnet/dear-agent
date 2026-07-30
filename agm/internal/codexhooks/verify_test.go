@@ -290,6 +290,10 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\nroot=.; exec \"$root/helper\"\n",
 		"#!/bin/sh\nroot=.; /usr/bin/env \"$root/helper\"\n",
 		"#!/bin/sh\ncmd=helper; eval \"$cmd\"\n",
+		"#!/bin/bash\nbuiltin eval \"$(<helper)\"\n",
+		"#!/bin/bash\ncommand -- builtin eval \"$(<helper)\"\n",
+		"#!/bin/bash\nexec /usr/bin/env -i builtin eval \"$(<helper)\"\n",
+		"#!/bin/bash\nnohup builtin eval \"$(<helper)\"\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "dynamic command resolution") {

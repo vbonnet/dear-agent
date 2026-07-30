@@ -70,6 +70,8 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-27** When the private Codex executor receives any hook-trust handoff, the system shall treat every claim and authorization ID as non-authoritative, repeat every live circuit-breaker gate before and after reserving current human authorization whether or not an admission-brake claim is present, require and commit a fresh admission-brake reservation only when the brake remains the sole refusal, and reject the launch when the required brake claim is omitted or any other gate refuses.
 
+**OVR-28** When the privileged ledger helper holds the append lock, the system shall refuse every new override transaction if the existing ledger ends without a newline or contains any malformed record, preserving the existing bytes so an incomplete write cannot absorb or hide a later successful authorization.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |

@@ -193,6 +193,9 @@ func validatePrivilegedUses(uses []override.Use, now time.Time) error {
 }
 
 func enforcePrivilegedRateLimits(file *os.File, uses []override.Use, now time.Time) error {
+	if err := requireCompleteLedgerTail(file); err != nil {
+		return err
+	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek fixed ledger for rate limit: %w", err)
 	}
@@ -223,6 +226,24 @@ func enforcePrivilegedRateLimits(file *os.File, uses []override.Use, now time.Ti
 	return nil
 }
 
+func requireCompleteLedgerTail(file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect fixed ledger tail: %w", err)
+	}
+	if info.Size() == 0 {
+		return nil
+	}
+	var last [1]byte
+	if _, err := file.ReadAt(last[:], info.Size()-1); err != nil {
+		return fmt.Errorf("read fixed ledger tail: %w", err)
+	}
+	if last[0] != '\n' {
+		return fmt.Errorf("%w: fixed ledger has an incomplete final record", override.ErrLedgerRecord)
+	}
+	return nil
+}
+
 func scanRecentUses(
 	file *os.File,
 	additions map[override.Kind]int,
@@ -236,7 +257,8 @@ func scanRecentUses(
 	for scanner.Scan() {
 		recordedUses, err := override.DecodeLedgerUses(append(append([]byte(nil), scanner.Bytes()...), '\n'))
 		if err != nil {
-			continue
+			return nil, nil, fmt.Errorf("%w: fixed ledger contains a malformed record: %w",
+				override.ErrLedgerRecord, err)
 		}
 		for _, recorded := range recordedUses {
 			if recorded.AuthorizationID != "" {
