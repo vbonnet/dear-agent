@@ -23,11 +23,13 @@ nor an operator-selected destination.
 
 **OLA-06** When a new authorization transaction crosses the privileged boundary, the command shall require a unique random authorization ID for every use and shall revalidate each use's exact subject against its matching root-owned grant before appending any record.
 
-**OLA-07** When the NOPASSWD helper is invoked, the command shall require its launcher PID to be the first non-sudo ancestor, allow only root-owned `/usr/bin/sudo` intermediaries, inspect the live launcher code identity through the kernel, and require that identity to match the root-owned installed-launcher policy; on Linux it shall additionally reject any ELF interpreter so loader injection is impossible, and on macOS it shall require a valid hardened-runtime process that has never allowed debugging or invalid code.
+**OLA-07** When the NOPASSWD helper is invoked, the command shall require its launcher PID to be the first non-sudo ancestor, allow only root-owned `/usr/bin/sudo` intermediaries, inspect the live launcher code identity through the kernel, and require that identity to match the root-owned installed-launcher policy; on Linux it shall require an admin-only Yama ptrace policy, no live tracer, and no ELF interpreter so same-user debug and loader injection are impossible, and on macOS it shall require a valid hardened-runtime process that has never allowed debugging or invalid code.
 
 **OLA-08** When the authenticated AGM launcher, or the separately attested co-installed AGM MCP companion, binds override proofs into a private handoff, the command shall issue a short-lived root-owned capability for the exact protocol, path, handoff digest, proofs, and accompanying spawn obligation; when an AGM-only executor presents that complete capability, the command shall compare it with the root-owned canonical bytes and atomically unlink it under an exclusive lock so concurrent or copied handoffs cannot consume it more than once.
 
 **OLA-09** When launch capabilities are issued, the command shall serialize directory mutation through a root-only lock, remove expired canonical sidecars, reject unexpected directory entries, and refuse issuance beyond a fixed outstanding-capability limit so aborted launches cannot grow privileged runtime state without bound.
+
+**OLA-10** When the privileged helper and its authenticated launchers are upgraded, installation shall stage and validate the complete helper, sudoers, identity-policy, AGM, and MCP-companion artifact set before replacing any live path; if any activation step fails, it shall restore every prior artifact or remove every newly created artifact before returning failure.
 
 ## BDD Traceability
 

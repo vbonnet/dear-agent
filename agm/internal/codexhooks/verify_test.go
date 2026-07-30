@@ -397,6 +397,7 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/bash\nbuiltin printf -v PATH .; helper\n",
 		"#!/bin/bash\nread PATH <<< .; helper\n",
 		"#!/bin/bash\ngetopts x PATH; helper\n",
+		"#!/bin/bash\nlet PATH=1; helper\n",
 		"#!/bin/bash\n/bin/printf 'x\\n' | mapfile -C '/bin/bash helper' -c 1\n",
 		"#!/bin/bash\n/bin/printf 'x\\n' | command readarray -C '/bin/bash helper' -c 1\n",
 		"#!/bin/sh\n/usr/bin/awk 'BEGIN{x=sprintf(\"%c%c%s\",46,47,\"helper\");system(x)}'\n",

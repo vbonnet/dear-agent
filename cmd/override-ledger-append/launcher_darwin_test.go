@@ -3,12 +3,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
+	"time"
 )
 
 func TestProcessCodeIdentityReadsRunningCDHash(t *testing.T) {
@@ -63,16 +66,20 @@ func TestValidateDarwinCodeStatusRequiresUnmodifiedHardenedRuntime(t *testing.T)
 }
 
 func TestValidateProcessImageAcceptsHardenedRuntimeChild(t *testing.T) {
-	source, err := os.ReadFile("/bin/sleep")
+	sourcePath, err := os.Executable()
 	if err != nil {
-		t.Fatalf("read sleep fixture: %v", err)
+		t.Fatalf("resolve test executable: %v", err)
 	}
-	executable := filepath.Join(t.TempDir(), "hardened-sleep")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatalf("read test executable: %v", err)
+	}
+	executable := filepath.Join(t.TempDir(), "hardened-test-child")
 	if err := os.WriteFile(executable, source, 0o600); err != nil {
-		t.Fatalf("write sleep fixture: %v", err)
+		t.Fatalf("write test executable: %v", err)
 	}
-	if err := syscall.Chmod(executable, 0o700); err != nil {
-		t.Fatalf("make sleep fixture executable: %v", err)
+	if err := os.Chmod(executable, 0o700); err != nil {
+		t.Fatalf("make test executable executable: %v", err)
 	}
 	output, err := exec.Command(
 		"/usr/bin/codesign",
@@ -80,17 +87,42 @@ func TestValidateProcessImageAcceptsHardenedRuntimeChild(t *testing.T) {
 		executable,
 	).CombinedOutput()
 	if err != nil {
-		t.Fatalf("harden sleep fixture: %v: %s", err, output)
+		t.Fatalf("harden test executable: %v: %s", err, output)
 	}
-	child := exec.Command(executable, "30")
+	child := exec.Command(executable, "-test.run=^TestHardenedRuntimeChildHelper$")
+	child.Env = append(os.Environ(), "AGM_HARDENED_RUNTIME_TEST_CHILD=1")
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatalf("capture hardened child readiness: %v", err)
+	}
+	var stderr bytes.Buffer
+	child.Stderr = &stderr
 	if err := child.Start(); err != nil {
-		t.Fatalf("start hardened sleep fixture: %v", err)
+		t.Fatalf("start hardened test child: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = child.Process.Kill()
 		_ = child.Wait()
 	})
+	ready, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		_ = child.Wait()
+		t.Fatalf("wait for hardened test child: %v: %s", err, stderr.String())
+	}
+	if strings.TrimSpace(ready) != "ready" {
+		t.Fatalf("hardened test child readiness = %q", ready)
+	}
 	if err := validateProcessImage(child.Process.Pid); err != nil {
 		t.Fatalf("hardened runtime child rejected: %v", err)
+	}
+}
+
+func TestHardenedRuntimeChildHelper(t *testing.T) {
+	if os.Getenv("AGM_HARDENED_RUNTIME_TEST_CHILD") != "1" {
+		return
+	}
+	fmt.Println("ready")
+	for {
+		time.Sleep(time.Hour)
 	}
 }

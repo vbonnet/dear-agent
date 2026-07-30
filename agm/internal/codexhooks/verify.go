@@ -673,17 +673,26 @@ func rejectDynamicCommandResolution(script string) error {
 	if err != nil {
 		return fmt.Errorf("parse trusted hook shell: %w", err)
 	}
-	var rejected *syntax.Word
+	var rejected syntax.Node
 	var reason string
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if rejected != nil {
+			return false
+		}
+		if _, ok := node.(*syntax.LetClause); ok {
+			rejected = node
+			reason = "stateful variable-writing shell builtin"
 			return false
 		}
 		call, ok := node.(*syntax.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
 		}
-		rejected, reason = dynamicCommandTarget(call)
+		word, why := dynamicCommandTarget(call)
+		if word != nil {
+			rejected = word
+			reason = why
+		}
 		return rejected == nil
 	})
 	if rejected == nil {
@@ -815,7 +824,7 @@ func dynamicBuiltinOperand(
 	switch command {
 	case "mapfile", "readarray":
 		return commandWord, "stateful string-evaluating shell builtin"
-	case "read", "getopts":
+	case "read", "getopts", "let":
 		return commandWord, "stateful variable-writing shell builtin"
 	case "declare", "local", "typeset":
 		if word := namerefDeclarationOption(args); word != nil {

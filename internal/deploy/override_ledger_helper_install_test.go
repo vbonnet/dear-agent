@@ -23,8 +23,10 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	target := makefile[start : start+end]
 
 	requiredInOrder := []string{
-		`$(call install-go-bin-hardened,bin/agm)`,
-		`$(call install-go-bin-hardened,bin/agm-mcp-server)`,
+		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
+		`companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"`,
+		`/bin/cp "$$agm_artifact" "$$agm_staging"`,
+		`/bin/cp "$$companion_artifact" "$$companion_staging"`,
 		`expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"`,
 		`IFS= read -r confirmed_hash`,
 		`test "$$confirmed_hash" = "$$expected_hash"`,
@@ -39,9 +41,14 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"`,
 		`staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"`,
 		`test "$$staged_hash" = "$$expected_hash"`,
+		`agm_backup="$$(/usr/bin/mktemp "$$agm_executable.backup.XXXXXX")"`,
+		`activation_started=1`,
 		`/usr/bin/sudo /bin/mv -f "$$identity_staging" "$$identity"`,
 		`/usr/bin/sudo /bin/mv -f "$$companion_identity_staging" "$$companion_policy"`,
 		`/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"`,
+		`/bin/mv -f "$$agm_staging" "$$agm_executable"`,
+		`/bin/mv -f "$$companion_staging" "$$companion_executable"`,
+		`activation_complete=1`,
 	}
 	offset := 0
 	for _, want := range requiredInOrder {
@@ -54,16 +61,12 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	if strings.Contains(target, `-m 0755 bin/dear-agent-override-ledger-append "$$helper"`) {
 		t.Fatal("install target still copies mutable same-user bytes directly to the privileged helper")
 	}
-	installMacro, err := os.ReadFile("../../mk/install-go-bin.mk")
-	if err != nil {
-		t.Fatalf("read shared install macro: %v", err)
+	confirmed := strings.Index(target, `test "$$confirmed_companion_identity" = "$$companion_caller_identity"`)
+	activate := strings.Index(target, `activation_started=1`)
+	if confirmed < 0 || activate < 0 || activate <= confirmed {
+		t.Fatal("launcher activation is not delayed until all operator confirmations pass")
 	}
-	for _, required := range []string{
-		"define install-go-bin-hardened",
-		`codesign -f -s - --options runtime "$$stage"`,
-	} {
-		if !strings.Contains(string(installMacro), required) {
-			t.Fatalf("hardened launcher install macro lacks %q", required)
-		}
+	if !strings.Contains(target, `test "$$activation_started" = 1 && test "$$activation_complete" != 1`) {
+		t.Fatal("installer lacks rollback for a partially activated artifact set")
 	}
 }

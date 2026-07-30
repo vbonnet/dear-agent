@@ -14,7 +14,20 @@ import (
 	"strings"
 )
 
+const linuxYAMAPtraceScopePath = "/proc/sys/kernel/yama/ptrace_scope"
+
 func validateProcessImage(pid int) error {
+	scope, err := os.ReadFile(linuxYAMAPtraceScopePath)
+	if err != nil {
+		return fmt.Errorf("read Linux ptrace policy: %w", err)
+	}
+	tracerPID, err := processStatusPID(pid, "TracerPid:")
+	if err != nil {
+		return fmt.Errorf("inspect launcher tracer: %w", err)
+	}
+	if err := validateLinuxProcessIsolation(scope, tracerPID); err != nil {
+		return err
+	}
 	file, err := os.Open(fmt.Sprintf("/proc/%d/exe", pid))
 	if err != nil {
 		return err
@@ -26,6 +39,22 @@ func validateProcessImage(pid int) error {
 	}
 	defer func() { _ = image.Close() }()
 	return validateELFProgramHeaders(image.Progs)
+}
+
+func validateLinuxProcessIsolation(scope []byte, tracerPID int) error {
+	value, err := strconv.Atoi(strings.TrimSpace(string(scope)))
+	if err != nil {
+		return fmt.Errorf("parse Linux ptrace policy: %w", err)
+	}
+	if value < 2 {
+		return errors.New(
+			"linux ptrace policy permits same-user process modification; require kernel.yama.ptrace_scope >= 2",
+		)
+	}
+	if tracerPID != 0 {
+		return fmt.Errorf("launcher is currently traced by PID %d", tracerPID)
+	}
+	return nil
 }
 
 func validateELFProgramHeaders(programs []*elf.Prog) error {
@@ -40,6 +69,10 @@ func validateELFProgramHeaders(programs []*elf.Prog) error {
 }
 
 func processParentPID(pid int) (int, error) {
+	return processStatusPID(pid, "PPid:")
+}
+
+func processStatusPID(pid int, field string) (int, error) {
 	file, err := os.Open(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
 		return 0, err
@@ -48,15 +81,15 @@ func processParentPID(pid int) (int, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "PPid:") {
+		if !strings.HasPrefix(line, field) {
 			continue
 		}
-		return strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:")))
+		return strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, field)))
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, err
 	}
-	return 0, errors.New("process status has no parent PID")
+	return 0, fmt.Errorf("process status has no %s field", strings.TrimSuffix(field, ":"))
 }
 
 func processExecutableSHA256(pid int) (string, error) {

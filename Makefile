@@ -987,40 +987,71 @@ build-override-ledger-helper:
 	@mkdir -p bin
 	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
 
-install-override-ledger-helper: build-override-ledger-helper install-agm install-agm-mcp-server
-	$(call install-go-bin-hardened,bin/agm)
-	$(call install-go-bin-hardened,bin/agm-mcp-server)
+install-override-ledger-helper: build-override-ledger-helper build-agm build-agm-mcp-server
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
 		root_group="$$(id -gn 0)"; \
 		artifact="bin/dear-agent-override-ledger-append"; \
+		agm_artifact="bin/agm"; \
+		companion_artifact="bin/agm-mcp-server"; \
 		agm_executable="$(HOME)/go/bin/agm"; \
 		companion_executable="$(HOME)/go/bin/agm-mcp-server"; \
+		agm_staging=""; \
+		companion_staging=""; \
+		agm_backup=""; \
+		companion_backup=""; \
+		agm_existed=0; \
+		companion_existed=0; \
 		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
 		helper_staging=""; \
+		helper_backup=""; \
+		helper_existed=0; \
 		identity="/usr/local/libexec/dear-agent-override-ledger-agm.identity"; \
 		identity_staging=""; \
+		identity_backup=""; \
+		identity_existed=0; \
 		companion_policy="/usr/local/libexec/dear-agent-override-ledger-agm-mcp-server.identity"; \
 		companion_identity_staging=""; \
+		companion_identity_backup=""; \
+		companion_identity_existed=0; \
 		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
 		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
+		sudoers_backup=""; \
+		sudoers_existed=0; \
+		activation_started=0; \
+		activation_complete=0; \
+		/bin/mkdir -p "$(HOME)/go/bin"; \
+		agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"; \
+		companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"; \
+		/bin/cp "$$agm_artifact" "$$agm_staging"; \
+		/bin/cp "$$companion_artifact" "$$companion_staging"; \
+		/bin/chmod 0755 "$$agm_staging" "$$companion_staging"; \
+		case "$$(uname -s)" in \
+			Darwin) \
+				/usr/bin/codesign -f -s - --options runtime "$$agm_staging"; \
+				/usr/bin/codesign -f -s - --options runtime "$$companion_staging"; \
+				;; \
+			Linux) ;; \
+			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
+		esac; \
+		trap '/bin/rm -f "$$agm_staging" "$$companion_staging"' EXIT HUP INT TERM; \
 		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
 		expected_hash="$${expected_hash%% *}"; \
 		case "$$(uname -s)" in \
 			Darwin) \
-				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
-				test -n "$$caller_digest" || { echo "installed AGM has no kernel-verifiable code identity" >&2; exit 1; }; \
+				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_staging" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
+				test -n "$$caller_digest" || { echo "staged AGM has no kernel-verifiable code identity" >&2; exit 1; }; \
 				caller_identity="darwin-cdhash:$$caller_digest"; \
-				companion_digest="$$(/usr/bin/codesign -dvvv "$$companion_executable" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
-				test -n "$$companion_digest" || { echo "installed AGM MCP companion has no kernel-verifiable code identity" >&2; exit 1; }; \
+				companion_digest="$$(/usr/bin/codesign -dvvv "$$companion_staging" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
+				test -n "$$companion_digest" || { echo "staged AGM MCP companion has no kernel-verifiable code identity" >&2; exit 1; }; \
 				companion_caller_identity="darwin-cdhash:$$companion_digest"; \
 				;; \
 			Linux) \
-				caller_digest="$$(/usr/bin/sha256sum "$$agm_executable")"; \
+				caller_digest="$$(/usr/bin/sha256sum "$$agm_staging")"; \
 				caller_digest="$${caller_digest%% *}"; \
 				caller_identity="linux-sha256:$$caller_digest"; \
-				companion_digest="$$(/usr/bin/sha256sum "$$companion_executable")"; \
+				companion_digest="$$(/usr/bin/sha256sum "$$companion_staging")"; \
 				companion_digest="$${companion_digest%% *}"; \
 				companion_caller_identity="linux-sha256:$$companion_digest"; \
 				;; \
@@ -1040,6 +1071,17 @@ install-override-ledger-helper: build-override-ledger-helper install-agm install
 		IFS= read -r confirmed_companion_identity; \
 		test "$$confirmed_companion_identity" = "$$companion_caller_identity" || { echo "AGM MCP companion identity confirmation did not match" >&2; exit 2; }; \
 		cleanup_helper_staging() { \
+			status=$$?; \
+			trap - EXIT HUP INT TERM; \
+			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
+				if test "$$agm_existed" = 1 && test -n "$$agm_backup"; then /bin/mv -f "$$agm_backup" "$$agm_executable" || true; else /bin/rm -f "$$agm_executable" || true; fi; \
+				if test "$$companion_existed" = 1 && test -n "$$companion_backup"; then /bin/mv -f "$$companion_backup" "$$companion_executable" || true; else /bin/rm -f "$$companion_executable" || true; fi; \
+				if test "$$sudoers_existed" = 1 && test -n "$$sudoers_backup"; then /usr/bin/sudo -n /bin/mv -f "$$sudoers_backup" "$$sudoers" || true; else /usr/bin/sudo -n /bin/rm -f "$$sudoers" || true; fi; \
+				if test "$$identity_existed" = 1 && test -n "$$identity_backup"; then /usr/bin/sudo -n /bin/mv -f "$$identity_backup" "$$identity" || true; else /usr/bin/sudo -n /bin/rm -f "$$identity" || true; fi; \
+				if test "$$companion_identity_existed" = 1 && test -n "$$companion_identity_backup"; then /usr/bin/sudo -n /bin/mv -f "$$companion_identity_backup" "$$companion_policy" || true; else /usr/bin/sudo -n /bin/rm -f "$$companion_policy" || true; fi; \
+				if test "$$helper_existed" = 1 && test -n "$$helper_backup"; then /usr/bin/sudo -n /bin/mv -f "$$helper_backup" "$$helper" || true; else /usr/bin/sudo -n /bin/rm -f "$$helper" || true; fi; \
+			fi; \
+			/bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_backup" "$$companion_backup" >/dev/null 2>&1 || true; \
 			if test -n "$$helper_staging"; then \
 				/usr/bin/sudo -n /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
 			fi; \
@@ -1052,7 +1094,9 @@ install-override-ledger-helper: build-override-ledger-helper install-agm install
 			if test -n "$$staging"; then \
 				/usr/bin/sudo -n /bin/rm -f "$$staging" >/dev/null 2>&1 || true; \
 			fi; \
+			/usr/bin/sudo -n /bin/rm -f "$$helper_backup" "$$identity_backup" "$$companion_identity_backup" "$$sudoers_backup" >/dev/null 2>&1 || true; \
 			/usr/bin/sudo -k >/dev/null 2>&1 || true; \
+			exit "$$status"; \
 		}; \
 		trap cleanup_helper_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
@@ -1082,6 +1126,37 @@ install-override-ledger-helper: build-override-ledger-helper install-agm install
 		if ! /usr/bin/sudo /usr/sbin/visudo -cf "$$staging"; then \
 			exit 1; \
 		fi; \
+		if test -e "$$agm_executable"; then \
+			agm_existed=1; \
+			agm_backup="$$(/usr/bin/mktemp "$$agm_executable.backup.XXXXXX")"; \
+			/bin/cp -p "$$agm_executable" "$$agm_backup"; \
+		fi; \
+		if test -e "$$companion_executable"; then \
+			companion_existed=1; \
+			companion_backup="$$(/usr/bin/mktemp "$$companion_executable.backup.XXXXXX")"; \
+			/bin/cp -p "$$companion_executable" "$$companion_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$sudoers"; then \
+			sudoers_existed=1; \
+			sudoers_backup="$$(/usr/bin/sudo /usr/bin/mktemp /etc/sudoers.d/.dear-agent-override-ledger.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$sudoers" "$$sudoers_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$identity"; then \
+			identity_existed=1; \
+			identity_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm.identity.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$identity" "$$identity_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$companion_policy"; then \
+			companion_identity_existed=1; \
+			companion_identity_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm-mcp-server.identity.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$companion_policy" "$$companion_identity_backup"; \
+		fi; \
+		if /usr/bin/sudo /usr/bin/test -e "$$helper"; then \
+			helper_existed=1; \
+			helper_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.backup.XXXXXX)"; \
+			/usr/bin/sudo /bin/cp -p "$$helper" "$$helper_backup"; \
+		fi; \
+		activation_started=1; \
 		/usr/bin/sudo /bin/mv -f "$$staging" "$$sudoers"; \
 		staging=""; \
 		/usr/bin/sudo /bin/mv -f "$$identity_staging" "$$identity"; \
@@ -1090,6 +1165,13 @@ install-override-ledger-helper: build-override-ledger-helper install-agm install
 		companion_identity_staging=""; \
 		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
 		helper_staging=""; \
+		/bin/mv -f "$$agm_staging" "$$agm_executable"; \
+		agm_staging=""; \
+		/bin/mv -f "$$companion_staging" "$$companion_executable"; \
+		companion_staging=""; \
+		activation_complete=1; \
+		/bin/rm -f "$$agm_backup" "$$companion_backup" >/dev/null 2>&1 || true; \
+		/usr/bin/sudo /bin/rm -f "$$helper_backup" "$$identity_backup" "$$companion_identity_backup" "$$sudoers_backup" >/dev/null 2>&1 || true; \
 		trap - EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \
 		echo "Installed digest-bound root-owned ledger helper, AGM and MCP companion caller identities, and exact sudoers rule for $$operator_user"

@@ -94,13 +94,16 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	}
 	text := string(makefile)
 	for _, required := range []string{
-		"install-override-ledger-helper: build-override-ledger-helper install-agm install-agm-mcp-server",
+		"install-override-ledger-helper: build-override-ledger-helper build-agm build-agm-mcp-server",
 		"dear-agent-override-ledger-agm.identity",
 		"dear-agent-override-ledger-agm-mcp-server.identity",
 		"companion_caller_identity",
 		"staged_companion_identity",
-		"$(call install-go-bin-hardened,bin/agm)",
-		"$(call install-go-bin-hardened,bin/agm-mcp-server)",
+		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
+		`companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"`,
+		`/usr/bin/codesign -f -s - --options runtime "$$agm_staging"`,
+		`activation_started=1`,
+		`activation_complete=1`,
 		"CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm ",
 		"CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-mcp-server ",
 		"darwin-cdhash:",

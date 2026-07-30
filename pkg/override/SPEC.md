@@ -64,7 +64,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-24** When a Codex launch crosses hook trust together with another dangerous override, the system shall seal every prepared exact authorization claim into the same private handoff, require the executor to revalidate the persisted repository, commit, digest, materialized hook root, sandbox assets, current exact grants, and per-kind limits, re-reserve every claim with a fresh authorization ID, and append the complete ledger transaction only after every other fallible launch check and immediately before executing Codex.
 
-**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and separate root-owned caller policies to the exact installed AGM and co-installed MCP companion code identities, build those launchers without cgo, apply the macOS hardened runtime, carry the live launcher PID in every canonical privileged request, require that PID to be the helper's first non-sudo ancestor, reject Linux ELF interpreters and macOS processes that lack valid non-debugged hardened-runtime status, permit the companion identity only for capability issuance, and require the AGM identity for capability consumption and ledger append.
+**OVR-25** When AGM installs or invokes the Unix privileged ledger helper, the system shall bind its digest-qualified NOPASSWD rule and separate root-owned caller policies to the exact installed AGM and co-installed MCP companion code identities, build those launchers without cgo, apply the macOS hardened runtime, carry the live launcher PID in every canonical privileged request, require that PID to be the helper's first non-sudo ancestor, require Linux Yama ptrace scope 2 or stricter with no live tracer and no ELF interpreter, reject macOS processes that lack valid non-debugged hardened-runtime status, permit the companion identity only for capability issuance, and require the AGM identity for capability consumption and ledger append.
 
 **OVR-26** When final launch admission succeeds, the system shall record the circuit-breaker spawn timestamp only after every launch-bound override reservation has been committed or sealed successfully and immediately before process or tmux submission.
 
@@ -75,6 +75,8 @@ Rather than three bespoke implementations, all three travel one pattern:
 **OVR-29** When any private handoff carries an override proof, the authenticated parent AGM process, or the separately attested co-installed AGM MCP companion that prepares MCP launches directly, shall bind the exact handoff bytes, proofs, and accompanying successful-spawn obligation to a short-lived root-owned launch capability; the AGM-only executor shall require an exact match and atomically consume that capability before accepting any carried claim, so a same-user process cannot mint a capability and a copied handoff cannot replay one.
 
 **OVR-30** When privileged launch-capability state contains abandoned entries, the helper shall prune expired canonical sidecars under a root-only directory lock and enforce a fixed maximum number of outstanding capabilities, failing closed on unexpected entries so repeated aborted launches cannot cause unbounded privileged-state growth.
+
+**OVR-31** When the installed authenticated launcher set changes, the installer shall stage and validate the exact helper, caller identities, sudoers rule, AGM launcher, and MCP companion before activation, and shall roll back the entire live set on a partial activation failure so rejected confirmation, authentication failure, or later staging failure cannot strand the prior installation behind mismatched caller policies.
 
 ## Override kinds
 
@@ -141,12 +143,16 @@ repository cannot reuse the approval.
 On Unix, the operator first runs
 `make install-override-ledger-helper`. That separately authenticated setup
 installs the matching AGM and AGM MCP companion builds, prints and requires
-typed confirmation of the helper artifact's complete SHA-256 and both installed
-code identities, copies the approved helper bytes and caller policies into
-unique root-owned staging files, and atomically activates each only on an exact
-match. The installed launchers are cgo-free so Linux produces static ELF
-processes with no `LD_PRELOAD` interpreter, and their macOS signatures opt into
-the hardened runtime so dyld environment injection is rejected. It then installs the
+typed confirmation of the helper artifact's complete SHA-256 and both staged
+code identities, copies the approved helper bytes, caller policies, and
+launchers into unique staging files, and activates them only after every
+confirmation and validation succeeds. The installer backs up every existing
+live artifact and restores the complete prior set if any replacement fails.
+The installed launchers are cgo-free so Linux produces static ELF
+processes with no `LD_PRELOAD` interpreter, and the helper requires the host's
+Yama ptrace scope to be admin-only so a same-user parent cannot modify the
+process from startup. Their macOS signatures opt into the hardened runtime so
+dyld environment injection is rejected. It then installs the
 one-purpose root-owned
 `/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact
 per-user, helper-digest-qualified NOPASSWD sudoers rule for that path. Runtime
@@ -184,8 +190,9 @@ launch boundary. The helper permits only root-owned `/usr/bin/sudo` processes
 between itself and that exact PID. Ledger appends and capability consumption
 require the installed AGM identity; capability issuance also accepts the
 separately installed companion identity because it prepares MCP launches
-directly. The live Linux process must have no ELF interpreter; the live macOS
-process must remain valid, hardened, non-debuggable, and never debug-modified.
+directly. The live Linux process must have no ELF interpreter, no tracer, and
+an active Yama ptrace scope of at least 2; the live macOS process must remain
+valid, hardened, non-debuggable, and never debug-modified.
 Direct shell calls, injected or debug-modified processes, descendant agent
 shells under a persistent supervisor, unrelated PIDs, and changed launcher
 bytes therefore fail closed.
