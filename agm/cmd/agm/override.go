@@ -31,6 +31,8 @@ var (
 // indistinguishable from a broken cron entry.
 const overrideAuditBreachExit = 3
 
+var deliverOverrideAuditNotification = sendOverrideAuditNotification
+
 var overrideCmd = &cobra.Command{
 	Use:   "override",
 	Short: "Approve, inspect, and audit dangerous overrides",
@@ -337,16 +339,23 @@ func runOverrideAudit(cmd *cobra.Command, args []string) error {
 				"ALERT: %s used %d time(s), at or above the threshold of %d\n",
 				breach.Kind, breach.Count, report.Threshold)
 		}
-		if overrideAuditNotify {
-			if err := sendOverrideAuditNotification(overrideAuditAlertMessage(report)); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "ALERT DELIVERY FAILED: %v\n", err)
-			}
+		if err := notifyOverrideAuditBreach(report); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "ALERT DELIVERY FAILED: %v\n", err)
+			cmd.SilenceUsage = true
+			return fmt.Errorf("dangerous override threshold breached but alert delivery failed: %w", err)
 		}
 		// Signal the alert without Cobra reprinting usage for a healthy run.
 		cmd.SilenceUsage = true
 		os.Exit(overrideAuditBreachExit)
 	}
 	return nil
+}
+
+func notifyOverrideAuditBreach(report override.AuditReport) error {
+	if !overrideAuditNotify {
+		return nil
+	}
+	return deliverOverrideAuditNotification(overrideAuditAlertMessage(report))
 }
 
 func overrideAuditAlertMessage(report override.AuditReport) string {

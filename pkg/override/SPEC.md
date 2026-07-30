@@ -38,7 +38,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-11** When AGM's private Codex executor receives a hook-trust bypass, the system shall require a one-shot prepared handoff that binds the exact attested hook root and complete launch request and lives outside the workspace and every agent-writable root.
 
-**OVR-12** When the scheduled override audit reaches a threshold, the system shall deliver the breach through Notification Center or the system log before exiting with the reserved breach status.
+**OVR-12** When the scheduled override audit reaches a threshold, the system shall deliver the breach through Notification Center or the system log before exiting with the reserved breach status; if every configured delivery path fails, the command shall return a generic failure instead of the delivered-breach status.
 
 **OVR-13** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
 
@@ -48,7 +48,7 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-16** When the macOS system audit is installed, the system shall require the operator to confirm the executable and rendered LaunchDaemon SHA-256 values, copy both artifacts into unique root-owned staging, verify both staged digests, validate the exact staged plist, back up the complete live artifact set, and transactionally activate only those verified bytes; any partial activation shall restore every prior artifact and remove any newly introduced artifact.
 
-**OVR-17** When the Linux system audit is installed, the system shall require the operator to confirm the executable, service, and timer SHA-256 values, copy all three artifacts into unique root-owned staging, verify every staged digest, back up the complete live artifact set, and transactionally activate only those verified bytes before reloading the system manager; any partial activation shall restore every prior artifact and remove any newly introduced artifact.
+**OVR-17** When the Linux system audit is installed, the system shall require the operator to confirm the executable, service, timer, and fixed privileged-installer SHA-256 values, reject a passwordless probe of that exact installer, and run the complete staging, digest verification, backup, activation, and system-manager reload inside one fresh non-caching privileged command; any failure or HUP, INT, or TERM during partial activation shall restore every prior artifact, remove newly introduced artifacts, and exit nonzero without resuming the transaction.
 
 **OVR-18** When a system-scheduled override audit runs, the system shall load default-only AGM configuration from the fixed OS null device and use a root-owned non-writable home instead of consulting mutable user configuration.
 

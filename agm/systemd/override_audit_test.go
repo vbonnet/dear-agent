@@ -1,7 +1,9 @@
 package systemd_test
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -60,39 +62,29 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 		t.Fatal("Makefile does not retain bounded system audit install targets")
 	}
 	install := makefile[start:end]
+	rootInstaller := readUnit(t, filepath.Join(root, "scripts", "install-override-audit-systemd-root.sh"))
 	for _, required := range []string{
-		"/usr/bin/sudo -k",
-		"/usr/bin/sudo /usr/bin/true",
+		`root_installer="$$(/bin/cat "$$root_installer_path")"`,
 		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
 		`expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"`,
 		`expected_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_artifact")"`,
+		`expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"`,
 		"IFS= read -r confirmed_audit_hash",
 		"IFS= read -r confirmed_service_hash",
 		"IFS= read -r confirmed_timer_hash",
-		"/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX",
-		"/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-service.XXXXXX",
-		"/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-timer.XXXXXX",
-		`test "$$staged_audit_hash" = "$$expected_audit_hash"`,
-		`test "$$staged_service_hash" = "$$expected_service_hash"`,
-		`test "$$staged_timer_hash" = "$$expected_timer_hash"`,
-		`activation_started=1`,
-		`activation_complete=1`,
-		`test "$$activation_started" = 1 && test "$$activation_complete" != 1`,
-		`audit_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.backup.XXXXXX)"`,
-		`service_backup="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-service.backup.XXXXXX)"`,
-		`timer_backup="$$(/usr/bin/sudo /usr/bin/mktemp /etc/systemd/system/.dear-agent-override-audit-timer.backup.XXXXXX)"`,
-		`/usr/bin/sudo -n /bin/mv -f "$$audit_backup" "$$audit_live"`,
-		`/usr/bin/sudo -n /bin/mv -f "$$service_backup" "$$service_live"`,
-		`/usr/bin/sudo -n /bin/mv -f "$$timer_backup" "$$timer_live"`,
-		"/usr/local/libexec/dear-agent-override-audit",
-		"/etc/systemd/system/dear-agent-override-audit@.service",
-		"/etc/systemd/system/dear-agent-override-audit@.timer",
-		"/usr/bin/sudo /usr/bin/systemctl daemon-reload",
+		"IFS= read -r confirmed_installer_hash",
+		`test "$$confirmed_installer_hash" = "$$expected_installer_hash"`,
+		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer"`,
+		`test "$$probe_status" = 1`,
+		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
 		"sudo systemctl enable --now dear-agent-override-audit@",
 	} {
 		if !strings.Contains(install, required) {
 			t.Errorf("system audit installer does not retain %q", required)
 		}
+	}
+	if strings.Count(install, "/usr/bin/sudo") != 2 {
+		t.Errorf("system audit installer must use exactly one probe and one non-caching privileged transaction")
 	}
 	for _, forbidden := range []string{".config/systemd/user", "install-override-audit-systemd-user"} {
 		if strings.Contains(makefile, forbidden) {
@@ -105,6 +97,8 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"/usr/bin/sudo /usr/bin/true",
+		"/usr/bin/sudo /usr/bin/install",
 		`bin/agm /usr/local/libexec/dear-agent-override-audit`,
 		`agm/systemd/dear-agent-override-audit@.service /etc/systemd/system/dear-agent-override-audit@.service`,
 		`agm/systemd/dear-agent-override-audit@.timer /etc/systemd/system/dear-agent-override-audit@.timer`,
@@ -112,6 +106,48 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 		if strings.Contains(install, forbidden) {
 			t.Errorf("system audit installer copies mutable bytes directly to a privileged path: %q", forbidden)
 		}
+	}
+
+	requiredRootTransaction := []string{
+		`if test "$mode" = "PROBE"; then`,
+		`exit "$probe_exit"`,
+		`trap 'cleanup_systemd_staging "$?"' EXIT`,
+		`trap 'cleanup_systemd_staging 129' HUP`,
+		`trap 'cleanup_systemd_staging 130' INT`,
+		`trap 'cleanup_systemd_staging 143' TERM`,
+		`trap - EXIT HUP INT TERM`,
+		`set +e`,
+		`/usr/bin/install -o root -g "$root_group" -m 0755 "$audit_artifact" "$audit_staging"`,
+		`test "$staged_audit_hash" = "$expected_audit_hash"`,
+		`activation_started=1`,
+		`/bin/mv -f "$audit_staging" "$audit_live"`,
+		`/bin/mv -f "$service_staging" "$service_live"`,
+		`/bin/mv -f "$timer_staging" "$timer_live"`,
+		`/usr/bin/systemctl daemon-reload`,
+		`activation_complete=1`,
+	}
+	offset := 0
+	for _, required := range requiredRootTransaction {
+		next := strings.Index(rootInstaller[offset:], required)
+		if next < 0 {
+			t.Fatalf("fixed root installer lacks ordered transaction boundary %q", required)
+		}
+		offset += next + len(required)
+	}
+	if strings.Contains(rootInstaller, "sudo") {
+		t.Fatal("fixed root installer recursively invokes sudo")
+	}
+
+	cmd := exec.Command(
+		"/bin/sh", "-c", rootInstaller,
+		"dear-agent-override-audit-systemd-installer",
+		"root", "audit", "service", "timer", "audit-hash", "service-hash", "timer-hash",
+	)
+	cmd.Stdin = strings.NewReader("PROBE\n")
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 42 {
+		t.Fatalf("fixed root installer probe error = %v, want exit 42", err)
 	}
 }
 
