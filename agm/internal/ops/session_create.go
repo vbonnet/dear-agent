@@ -196,16 +196,19 @@ type createSessionState struct {
 	storageCleanup     func()
 }
 
-func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) {
+func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) error {
 	if operationErr != nil {
 		rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered)
 	}
 	if state.nameReserved {
-		releaseCreateSessionNameReservation(state.store, sessionID)
+		if err := releaseCreateSessionNameReservation(state.store, sessionID); err != nil {
+			operationErr = errors.Join(operationErr, ErrStorageError("storage.ReleaseSessionNameReservation", err))
+		}
 	}
 	if state.storageCleanup != nil {
 		state.storageCleanup()
 	}
+	return operationErr
 }
 
 func isSafeNameRune(r rune) bool {
@@ -377,7 +380,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		req = prepared
 	}
 	state := &createSessionState{}
-	defer func() { state.finish(opCtx, req, params.name, sessionID, retErr) }()
+	defer func() { retErr = state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
 	if err := prepareCreateStorage(callCtx, opCtx, req, params.name, state); err != nil {
 		return nil, err
@@ -712,14 +715,12 @@ func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool,
 	return true, nil
 }
 
-func releaseCreateSessionNameReservation(store dolt.Storage, sessionID string) {
+func releaseCreateSessionNameReservation(store dolt.Storage, sessionID string) error {
 	reservations, ok := store.(dolt.SessionNameReservationStore)
 	if !ok {
-		return
+		return nil
 	}
-	if err := reservations.ReleaseSessionNameReservation(sessionID); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to release session-name reservation %q during create cleanup: %v\n", sessionID, err)
-	}
+	return reservations.ReleaseSessionNameReservation(sessionID)
 }
 
 func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {

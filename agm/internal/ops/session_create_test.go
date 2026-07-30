@@ -31,6 +31,7 @@ type createMockStorage struct {
 	listErr     error
 	createErr   error
 	reserveErr  error
+	releaseErr  error
 	deleteErr   error
 	createOrder *[]string
 	onCreate    func()
@@ -229,7 +230,7 @@ func (s *createMockStorage) ReserveSessionName(sessionID, name string) error {
 
 func (s *createMockStorage) ReleaseSessionNameReservation(sessionID string) error {
 	s.released = append(s.released, sessionID)
-	return nil
+	return s.releaseErr
 }
 
 func testHarnessCommand(harness, model, sessionName, workDir string, persistent bool) string {
@@ -1613,6 +1614,26 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 				t.Fatalf("reservation releases = %d, want %d", got, boolInt(tt.wantRelease))
 			}
 		})
+	}
+}
+
+func TestCreateSession_ReportsReservationReleaseFailure(t *testing.T) {
+	launchErr := errors.New("launch failed")
+	releaseErr := errors.New("reservation release failed")
+	store := &createMockStorage{releaseErr: releaseErr}
+
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux:    session.NewMockTmux(),
+		Storage: store,
+		CreationRuntime: &createTestRuntime{launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			return CreateSessionLaunchResult{}, launchErr
+		}},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "release-failure", Model: "sonnet", Harness: "claude-code",
+		SessionID: "release-failure-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, launchErr) || !errors.Is(err, releaseErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want joined launch and reservation-release failures", err)
 	}
 }
 
