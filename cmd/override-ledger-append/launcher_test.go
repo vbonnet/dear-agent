@@ -158,7 +158,7 @@ func TestLaunchDaemonInstallerRollsBackPartialActivation(t *testing.T) {
 		`plist_live="/Library/LaunchDaemons/com.dear-agent.override-audit.plist"`,
 		`audit_backup=`,
 		`plist_backup=`,
-		`status=$$?`,
+		`status=$$1`,
 		`trap - EXIT HUP INT TERM`,
 		`activation_started=1`,
 		`activation_complete=1`,
