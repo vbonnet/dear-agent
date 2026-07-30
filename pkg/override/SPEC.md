@@ -54,6 +54,8 @@ Rather than three bespoke implementations, all three travel one pattern:
 
 **OVR-19** When `agm supervisor run --skip-oauth-check` reaches the executable boundary, the system shall require the shared supervisor OAuth-check override kind, reserve current human authorization without recording a use, repeat final live admission, and commit the privileged ledger use immediately before launching Claude.
 
+**OVR-20** When AGM exposes override-management commands, the system shall not expose a standalone authorization command that records or consumes a use independently of the launch boundary governed by that override.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |

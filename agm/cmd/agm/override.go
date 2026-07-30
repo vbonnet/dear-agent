@@ -17,9 +17,6 @@ import (
 var (
 	overrideTTL            time.Duration
 	overrideNote           string
-	overrideReason         string
-	overrideActor          string
-	overrideSession        string
 	overrideAuditWindow    time.Duration
 	overrideAuditThreshold int
 	overrideAuditJSON      bool
@@ -62,18 +59,6 @@ var overrideRevokeCmd = &cobra.Command{
 	RunE:  runOverrideRevoke,
 }
 
-var overrideAuthorizeCmd = &cobra.Command{
-	Use:   "authorize <kind>",
-	Short: "Run every authorization gate and record one override use",
-	Long: `Authorize one dangerous override use through the shared gate.
-
-This is the canonical entry point for enforcement surfaces that cannot import
-pkg/override directly, including the Codex PreToolUse guard. It never creates
-an approval: the operator-owned grant must already exist.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runOverrideAuthorize,
-}
-
 var overrideStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current approvals and recent override use",
@@ -95,15 +80,12 @@ the fix is either to remove that cause or to close the loophole.`,
 func init() {
 	overrideApproveCmd.Flags().DurationVar(&overrideTTL, "ttl", time.Hour, "How long the approval remains valid")
 	overrideApproveCmd.Flags().StringVar(&overrideNote, "note", "", "Optional note recorded with the approval")
-	overrideAuthorizeCmd.Flags().StringVar(&overrideReason, "reason", "", "Why this safety control must be overridden")
-	overrideAuthorizeCmd.Flags().StringVar(&overrideActor, "actor", "", "Actor recorded in the audit ledger")
-	overrideAuthorizeCmd.Flags().StringVar(&overrideSession, "session", "", "Optional session recorded in the audit ledger")
 	overrideAuditCmd.Flags().DurationVar(&overrideAuditWindow, "window", 7*24*time.Hour, "Window to review")
 	overrideAuditCmd.Flags().IntVar(&overrideAuditThreshold, "threshold", 5, "Alert when a kind reaches this many uses (0 disables)")
 	overrideAuditCmd.Flags().BoolVar(&overrideAuditJSON, "json", false, "Emit the report as JSON")
 	overrideAuditCmd.Flags().BoolVar(&overrideAuditNotify, "notify", false, "Deliver threshold breaches through the host notification service")
 
-	overrideCmd.AddCommand(overrideApproveCmd, overrideAuthorizeCmd, overrideRevokeCmd, overrideStatusCmd, overrideAuditCmd)
+	overrideCmd.AddCommand(overrideApproveCmd, overrideRevokeCmd, overrideStatusCmd, overrideAuditCmd)
 	rootCmd.AddCommand(overrideCmd)
 }
 
@@ -207,25 +189,6 @@ func approvalActor() string {
 		return user
 	}
 	return ops.OverrideActor()
-}
-
-func runOverrideAuthorize(cmd *cobra.Command, args []string) error {
-	kind, err := parseOverrideKind(args[0])
-	if err != nil {
-		return err
-	}
-	use, err := override.Authorize(override.Request{
-		Kind:    kind,
-		Reason:  overrideReason,
-		Actor:   overrideActor,
-		Session: overrideSession,
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Authorized %s at %s; use recorded in %s\n",
-		use.Kind, use.AtUTC.Format(time.RFC3339), override.LedgerPath())
-	return nil
 }
 
 func runOverrideRevoke(cmd *cobra.Command, args []string) error {

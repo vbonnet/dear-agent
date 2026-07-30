@@ -548,9 +548,10 @@ func (r *Reservation) Commit() (Use, error) {
 	return use, nil
 }
 
-// Authorize runs every gate and records the use immediately. Launch paths that
-// must repeat a live safety check should use Reserve and commit only after that
-// final check succeeds.
+// Authorize runs every gate and records the use immediately. It is reserved
+// for launch paths whose next operation is the irreversible process boundary.
+// Paths that must repeat a live safety check use Reserve and commit only after
+// that final check succeeds.
 func Authorize(req Request) (Use, error) {
 	reservation, err := Reserve(req)
 	if err != nil {
