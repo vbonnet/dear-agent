@@ -347,6 +347,7 @@ func TestValidateScriptAssetRejectsJQExternalFileModes(t *testing.T) {
 		"#!/bin/sh\nopts=-f\n/usr/bin/jq \"$opts\" helper\n",
 		"#!/bin/sh\nhook_json() { jq \"$@\"; }\nhook_json -n -f helper\n",
 		"#!/bin/sh\nhook_json() { jq \"$@\"; }\nhook_json --rawfile payload helper '$payload'\n",
+		"#!/bin/sh\nhook_json() { set -- -f helper; jq \"$@\"; }\nhook_json -n '.'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "external-file-loading jq runtime") {

@@ -751,16 +751,17 @@ func declaredJQForwarders(file *syntax.File) (map[string]struct{}, map[*syntax.C
 		var calls []*syntax.CallExpr
 		syntax.Walk(declaration.Body, func(bodyNode syntax.Node) bool {
 			call, ok := bodyNode.(*syntax.CallExpr)
-			if !ok || len(call.Args) != 2 {
+			if !ok {
 				return true
 			}
-			command, static := staticShellWord(call.Args[0])
-			if static && filepath.Base(command) == "jq" && shellWordIsAllArguments(call.Args[1]) {
-				calls = append(calls, call)
-			}
+			calls = append(calls, call)
 			return true
 		})
-		if len(calls) == 0 {
+		if len(calls) != 1 || len(calls[0].Assigns) != 0 || len(calls[0].Args) != 2 {
+			return true
+		}
+		command, static := staticShellWord(calls[0].Args[0])
+		if !static || filepath.Base(command) != "jq" || !shellWordIsAllArguments(calls[0].Args[1]) {
 			return true
 		}
 		if declaration.Name != nil {
@@ -769,9 +770,7 @@ func declaredJQForwarders(file *syntax.File) (map[string]struct{}, map[*syntax.C
 		for _, name := range declaration.Names {
 			forwarders[name.Value] = struct{}{}
 		}
-		for _, call := range calls {
-			forwardingCalls[call] = struct{}{}
-		}
+		forwardingCalls[calls[0]] = struct{}{}
 		return true
 	})
 	return forwarders, forwardingCalls
