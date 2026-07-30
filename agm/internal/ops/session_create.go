@@ -382,7 +382,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	state := &createSessionState{}
 	defer func() { retErr = state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
-	if err := prepareCreateStorage(callCtx, opCtx, req, params.name, state); err != nil {
+	if err := prepareCreateStorage(callCtx, opCtx, req, state); err != nil {
 		return nil, err
 	}
 	state.nameReserved, err = reserveCreateSessionName(state.store, sessionID, params.name)
@@ -569,7 +569,7 @@ func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string)
 	return false, nil
 }
 
-func prepareCreateStorage(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name string, state *createSessionState) error {
+func prepareCreateStorage(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, state *createSessionState) error {
 	store, cleanup, err := openCreateStorage(callCtx, opCtx)
 	state.store = store
 	state.storageCleanup = cleanup
@@ -581,13 +581,6 @@ func prepareCreateStorage(callCtx context.Context, opCtx *OpContext, req *Create
 			return ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
 		}
 		return nil
-	}
-	if err := EnsureNonArchivedSessionNameAvailable(store, name); err != nil {
-		var existsErr *SessionNameExistsError
-		if errors.As(err, &existsErr) {
-			return sessionExistsError(name)
-		}
-		return ErrStorageError("storage.ListSessions", err)
 	}
 	return nil
 }
@@ -698,8 +691,11 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 }
 
 func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool, error) {
-	if store == nil || name == "" {
+	if name == "" {
 		return false, nil
+	}
+	if store == nil {
+		return false, ErrStorageError("storage.ReserveSessionName", fmt.Errorf("session storage is required for named sessions"))
 	}
 	reservations, ok := store.(dolt.SessionNameReservationStore)
 	if !ok {

@@ -145,7 +145,7 @@ func finalizeCLICreateSession(ctx context.Context, sessionName string, runtime c
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (retErr error) {
-	if err := preflight(sessionName); err != nil {
+	if err := preflight(); err != nil {
 		return err
 	}
 
@@ -270,18 +270,14 @@ func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (strin
 	return string(content), nil
 }
 
-// preflight runs the per-session checks that must succeed before we start
-// touching tmux: test-environment setup, duplicate-name check, and circuit
-// breakers.
-func preflight(sessionName string) error {
+// preflight runs the process-level checks that must succeed before we start
+// touching tmux. The shared ops lifecycle owns atomic name admission.
+func preflight() error {
 	if err := setupTestEnvironment(); err != nil {
 		return err
 	}
 	if testMode {
 		return nil
-	}
-	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
-		return dupErr
 	}
 	return enforceCircuitBreakers()
 }
@@ -742,26 +738,6 @@ func handleExistingTmuxSession(sessionName string) (string, existingTmuxAction, 
 		fmt.Println("Cancelled.")
 		return sessionName, existingActionCancel, nil
 	}
-}
-
-// checkDuplicateSessionName checks if a non-archived session with the given name already exists in Dolt
-func checkDuplicateSessionName(sessionName string) error {
-	adapter, err := getStorage()
-	if err != nil {
-		// If Dolt is unavailable, skip the check (non-fatal)
-		return nil
-	}
-	defer func() { _ = adapter.Close() }()
-
-	if err := ops.EnsureNonArchivedSessionNameAvailable(adapter, sessionName); err != nil {
-		var existsErr *ops.SessionNameExistsError
-		if errors.As(err, &existsErr) {
-			return err
-		}
-		// If listing fails, skip the check (non-fatal)
-		return nil
-	}
-	return nil
 }
 
 // getSessionsDir returns the sessions directory (respects --sessions-dir flag and --test mode)

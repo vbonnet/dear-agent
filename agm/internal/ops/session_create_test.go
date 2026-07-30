@@ -639,6 +639,7 @@ func TestCreateSession_DefaultsModelAndHarness(t *testing.T) {
 
 	ctx := &OpContext{
 		Tmux:       tmuxMock,
+		Storage:    &createMockStorage{},
 		OutputMode: "json",
 	}
 
@@ -670,7 +671,7 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		t.Run(tt.harness, func(t *testing.T) {
 			// Isolate the codex trust pre-write from the developer's real ~/.codex.
 			t.Setenv("CODEX_HOME", t.TempDir())
-			opCtx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+			opCtx := &OpContext{Tmux: session.NewMockTmux(), Storage: &createMockStorage{}, OutputMode: "json"}
 			if tt.harness == "agy" {
 				opCtx.AgyCreateIdentityTracker = successfulCreateTestAgyIdentityTracker()
 			}
@@ -695,7 +696,7 @@ func TestCreateSession_DerivesNameFromCwd(t *testing.T) {
 	dirName := filepath.Base(dir)
 	tmuxMock := session.NewMockTmux()
 
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
@@ -750,7 +751,7 @@ func TestCreateSession_GeminiAllowsControlWorkdirWhenNoRepairIsNeeded(t *testing
 	}
 	tmuxMock := session.NewMockTmux()
 
-	result, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd:     workdir,
 		Prompt:  "test",
 		Title:   "safe-title",
@@ -864,7 +865,7 @@ func TestCreateSession_RejectsInvalidTitleChars(t *testing.T) {
 func TestCreateSession_AcceptsValidModel(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
@@ -882,7 +883,7 @@ func TestCreateSession_AcceptsValidModel(t *testing.T) {
 func TestCreateSession_AcceptsRegistryModelIdentifier(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:     dir,
@@ -903,7 +904,7 @@ func TestCreateSession_RejectsDuplicateTmuxSession(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	tmuxMock.Sessions["existing"] = true
 
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 	_, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
 		Prompt: "test",
@@ -921,13 +922,11 @@ func TestCreateSession_RejectsDuplicateTmuxSession(t *testing.T) {
 	}
 }
 
-func TestCreateSession_RejectsDuplicateStoredSessionNameBeforeTmuxCreate(t *testing.T) {
+func TestCreateSession_RejectsReservedSessionNameBeforeTmuxCreate(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
 	store := &createMockStorage{
-		sessions: []*manifest.Manifest{
-			newManifest("old-id", "existing", dir),
-		},
+		reserveErr: &dolt.SessionNameConflictError{Name: "existing"},
 	}
 
 	ctx := &OpContext{Tmux: tmuxMock, Storage: store, OutputMode: "json"}
@@ -948,9 +947,6 @@ func TestCreateSession_RejectsDuplicateStoredSessionNameBeforeTmuxCreate(t *test
 	}
 	if opErr.Detail != sessionNameExistsMessage("existing") {
 		t.Errorf("detail = %q, want %q", opErr.Detail, sessionNameExistsMessage("existing"))
-	}
-	if store.listFilter == nil || !store.listFilter.ExcludeArchived {
-		t.Fatalf("ListSessions filter = %#v, want ExcludeArchived", store.listFilter)
 	}
 	if len(tmuxMock.CreatedSessions) != 0 {
 		t.Fatalf("tmux sessions created before duplicate rejection: %v", tmuxMock.CreatedSessions)
@@ -1070,7 +1066,7 @@ func TestCreateSession_NilRequest(t *testing.T) {
 	}
 }
 
-func TestCreateSession_WorksWithoutStorage(t *testing.T) {
+func TestCreateSession_RejectsNamedSessionWithoutStorageBeforeTmuxCreate(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
 
@@ -1079,22 +1075,22 @@ func TestCreateSession_WorksWithoutStorage(t *testing.T) {
 		OutputMode: "json",
 	}
 
-	result, err := CreateSession(ctx, &CreateSessionRequest{
+	_, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
 		Prompt: "test",
 		Title:  "no-storage",
 	})
-	if err != nil {
-		t.Fatalf("CreateSession without storage: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "session storage is required for named sessions") {
+		t.Fatalf("CreateSession without storage error = %v, want named-session reservation failure", err)
 	}
-	if !result.Created {
-		t.Error("created = false, want true")
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux sessions created without name reservation: %v", tmuxMock.CreatedSessions)
 	}
 }
 
 func TestCreateSession_RequiresRollbackCapableTmuxBeforeCreate(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
-	_, err := CreateSession(&OpContext{Tmux: &createOnlyTmux{TmuxInterface: tmuxMock}}, &CreateSessionRequest{
+	_, err := CreateSession(&OpContext{Tmux: &createOnlyTmux{TmuxInterface: tmuxMock}, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Prompt: "test", Title: "no-rollback",
 	})
 	if err == nil || !strings.Contains(err.Error(), "KillSession") {
@@ -1526,7 +1522,7 @@ func TestCreateSession_ReadinessFailurePreservesReusedTmux(t *testing.T) {
 	}
 	tmuxMock.Sessions["reused-readiness"] = true
 
-	_, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Title: "reused-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
 		ReuseExistingTmux: true,
 	})
@@ -1548,7 +1544,7 @@ func TestCreateSession_NoRuntimeRequiresReadinessCapability(t *testing.T) {
 		kill:          base.KillSession,
 	}
 
-	_, err := CreateSession(&OpContext{Tmux: tmuxWithoutReadiness}, &CreateSessionRequest{
+	_, err := CreateSession(&OpContext{Tmux: tmuxWithoutReadiness, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Title: "no-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not expose harness readiness") {
@@ -1729,7 +1725,8 @@ func TestCreateSession_CodexRemoteBootIsBounded(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	started := time.Now()
 	_, err := CreateSessionWithContext(context.Background(), &OpContext{
-		Tmux: tmuxMock,
+		Tmux:    tmuxMock,
+		Storage: &createMockStorage{},
 		CodexThreadCreator: func(ctx context.Context, _, _, _ string) (*manifest.Codex, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
