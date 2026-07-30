@@ -668,7 +668,6 @@ func rejectDynamicCommandResolution(script string) error {
 	if err != nil {
 		return fmt.Errorf("parse trusted hook shell: %w", err)
 	}
-	pipelineCalls := pipelineStageCalls(file)
 	var rejected syntax.Node
 	var reason string
 	syntax.Walk(file, func(node syntax.Node) bool {
@@ -689,11 +688,6 @@ func rejectDynamicCommandResolution(script string) error {
 		if !ok || len(call.Args) == 0 {
 			return true
 		}
-		if word := directXargsCommand(call, pipelineCalls); word != nil {
-			rejected = word
-			reason = "command-capable process wrapper"
-			return false
-		}
 		word, why := dynamicCommandTarget(call)
 		if word != nil {
 			rejected = word
@@ -709,43 +703,6 @@ func rejectDynamicCommandResolution(script string) error {
 		rejected.Pos().Line(),
 		reason,
 	)
-}
-
-func pipelineStageCalls(file *syntax.File) map[*syntax.CallExpr]struct{} {
-	calls := make(map[*syntax.CallExpr]struct{})
-	syntax.Walk(file, func(node syntax.Node) bool {
-		binary, ok := node.(*syntax.BinaryCmd)
-		if !ok || (binary.Op != syntax.Pipe && binary.Op != syntax.PipeAll) {
-			return true
-		}
-		recordPipelineStageCall(binary.X.Cmd, calls)
-		recordPipelineStageCall(binary.Y.Cmd, calls)
-		return true
-	})
-	return calls
-}
-
-func recordPipelineStageCall(command syntax.Command, calls map[*syntax.CallExpr]struct{}) {
-	switch node := command.(type) {
-	case *syntax.CallExpr:
-		calls[node] = struct{}{}
-	case *syntax.BinaryCmd:
-		if node.Op == syntax.Pipe || node.Op == syntax.PipeAll {
-			recordPipelineStageCall(node.X.Cmd, calls)
-			recordPipelineStageCall(node.Y.Cmd, calls)
-		}
-	}
-}
-
-func directXargsCommand(call *syntax.CallExpr, pipelineCalls map[*syntax.CallExpr]struct{}) *syntax.Word {
-	if _, piped := pipelineCalls[call]; piped {
-		return nil
-	}
-	command, static := staticShellWord(call.Args[0])
-	if static && filepath.Base(command) == "xargs" {
-		return call.Args[0]
-	}
-	return nil
 }
 
 func arithmeticNodeWritesVariable(node syntax.Node) bool {
@@ -851,6 +808,12 @@ func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syn
 	if isRuntimeInterpreter(command) {
 		target, reason := interpreterScriptOperand(command, args)
 		return target, reason, true
+	}
+	if filepath.Base(command) == "xargs" {
+		if xargsRunsCustomCommand(args) {
+			return commandWord, "command-capable xargs runtime", true
+		}
+		return nil, "", true
 	}
 	switch command {
 	case "eval", "trap":

