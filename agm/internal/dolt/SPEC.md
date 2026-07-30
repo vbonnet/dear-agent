@@ -26,6 +26,8 @@
 
 **DOLTR-12** When AGM stores a sandboxed session, the storage adapter shall round-trip the complete non-secret sandbox ownership record across create, read, and update so a later archive reload retains the exact sandbox ID, provider, cleanup boundary, mapped working directory, enabled state, and creation time required for owned cleanup; if any ownership field or boundary invariant is invalid, the adapter shall not install the record as cleanup authority.
 
+**DOLTR-13** When AGM checks whether a new session name is available, the Dolt-backed helper shall list only non-archived session records in the current workspace and shall report a collision when any record's user-visible name matches the requested name.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
@@ -328,6 +330,7 @@ stats, err := adapter.GetToolCallStats(sessionID)
 - Session count matches: `find ~/.agm/sessions -name manifest.yaml | wc -l`
 - All sessions have workspace: `SELECT COUNT(*) FROM agm_sessions WHERE workspace IS NULL` = 0
 - No duplicate IDs: `SELECT id, COUNT(*) FROM agm_sessions GROUP BY id HAVING COUNT(*) > 1` = 0
+- No duplicate non-archived session names: `SELECT workspace, name, COUNT(*) FROM agm_sessions WHERE status != 'archived' GROUP BY workspace, name HAVING COUNT(*) > 1` = 0
 - Timestamps preserved: Spot-check 5-10 random sessions
 
 ## Testing Strategy

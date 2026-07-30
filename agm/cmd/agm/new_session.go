@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -752,16 +753,13 @@ func checkDuplicateSessionName(sessionName string) error {
 	}
 	defer func() { _ = adapter.Close() }()
 
-	sessions, err := adapter.ListSessions(nil)
-	if err != nil {
+	if err := ops.EnsureNonArchivedSessionNameAvailable(adapter, sessionName); err != nil {
+		var existsErr *ops.SessionNameExistsError
+		if errors.As(err, &existsErr) {
+			return err
+		}
 		// If listing fails, skip the check (non-fatal)
 		return nil
-	}
-
-	for _, s := range sessions {
-		if s.Name == sessionName && s.Lifecycle != manifest.LifecycleArchived {
-			return fmt.Errorf("session '%s' already exists. Use a different name or archive the existing session with: agm session archive %s", sessionName, sessionName)
-		}
 	}
 	return nil
 }

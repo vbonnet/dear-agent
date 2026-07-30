@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -363,10 +364,6 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 	}
 
-	exists, err := prepareCreateTmux(opCtx, req, params.name)
-	if err != nil {
-		return nil, err
-	}
 	sessionID := createSessionID(req.SessionID)
 	if params.harness == "pi-cli" {
 		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
@@ -378,6 +375,13 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	state := &createSessionState{}
 	defer func() { state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
+	if err := prepareCreateStorage(callCtx, opCtx, req, params.name, state); err != nil {
+		return nil, err
+	}
+	exists, err := prepareCreateTmux(opCtx, req, params.name)
+	if err != nil {
+		return nil, err
+	}
 	if err := createTmuxForSession(opCtx, req, params.name, exists); err != nil {
 		return nil, err
 	}
@@ -417,7 +421,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		applyAgyCreateIdentity(m, metadata)
 	}
 	if registrationAllowed {
-		state.store, state.storageCleanup, state.registered, err = registerCreatedSession(callCtx, opCtx, req, m)
+		state.registered, err = registerCreatedSession(req, state.store, m)
 		if err != nil {
 			return nil, err
 		}
@@ -551,6 +555,29 @@ func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string)
 	return false, nil
 }
 
+func prepareCreateStorage(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name string, state *createSessionState) error {
+	store, cleanup, err := openCreateStorage(callCtx, opCtx)
+	state.store = store
+	state.storageCleanup = cleanup
+	if err != nil {
+		return ErrStorageError("storage.open", err)
+	}
+	if store == nil {
+		if req.RequireStorage {
+			return ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
+		}
+		return nil
+	}
+	if err := EnsureNonArchivedSessionNameAvailable(store, name); err != nil {
+		var existsErr *SessionNameExistsError
+		if errors.As(err, &existsErr) {
+			return sessionExistsError(name)
+		}
+		return ErrStorageError("storage.ListSessions", err)
+	}
+	return nil
+}
+
 func createSessionID(requested string) string {
 	if requested != "" {
 		return requested
@@ -635,25 +662,21 @@ func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, r
 	return manifestPath, true, created, nil
 }
 
-func registerCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, m *manifest.Manifest) (dolt.Storage, func(), bool, error) {
-	store, cleanup, err := openCreateStorage(callCtx, opCtx)
-	if err != nil {
-		return store, cleanup, false, ErrStorageError("storage.open", err)
-	}
+func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *manifest.Manifest) (bool, error) {
 	if store == nil {
 		if req.RequireStorage {
-			return nil, cleanup, false, ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
+			return false, ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
 		}
-		return nil, cleanup, false, nil
+		return false, nil
 	}
 	if err := store.CreateSession(m); err != nil {
 		if !req.RegistrationOptional {
-			return store, cleanup, false, ErrStorageError("storage.CreateSession", err)
+			return false, ErrStorageError("storage.CreateSession", err)
 		}
 		fmt.Fprintf(os.Stderr, "Warning: failed to register session: %v; the harness remains usable\n", err)
-		return nil, cleanup, false, nil
+		return false, nil
 	}
-	return store, cleanup, true, nil
+	return true, nil
 }
 
 func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {
@@ -715,7 +738,7 @@ func sessionExistsError(name string) error {
 		Type:   "session/exists",
 		Code:   ErrCodeSessionExists,
 		Title:  "Session already exists",
-		Detail: fmt.Sprintf("A tmux session named %q already exists.", name),
+		Detail: sessionNameExistsMessage(name),
 		Suggestions: []string{
 			"Use a different title.",
 			fmt.Sprintf("Archive the existing session: agm session archive %s", name),

@@ -25,6 +25,9 @@ import (
 type createMockStorage struct {
 	created     []*manifest.Manifest
 	deleted     []string
+	sessions    []*manifest.Manifest
+	listFilter  *dolt.SessionFilter
+	listErr     error
 	createErr   error
 	deleteErr   error
 	createOrder *[]string
@@ -173,8 +176,19 @@ func (s *createMockStorage) DeleteSession(id string) error {
 	return s.deleteErr
 }
 
-func (s *createMockStorage) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) {
-	return nil, nil
+func (s *createMockStorage) ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error) {
+	s.listFilter = filter
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	results := make([]*manifest.Manifest, 0, len(s.sessions))
+	for _, m := range s.sessions {
+		if filter != nil && filter.ExcludeArchived && m.Lifecycle == manifest.LifecycleArchived {
+			continue
+		}
+		results = append(results, m)
+	}
+	return results, nil
 }
 
 func (s *createMockStorage) GetSessionByUUID(string) (*manifest.Manifest, error) {
@@ -879,6 +893,45 @@ func TestCreateSession_RejectsDuplicateTmuxSession(t *testing.T) {
 	}
 }
 
+func TestCreateSession_RejectsDuplicateStoredSessionNameBeforeTmuxCreate(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{
+		sessions: []*manifest.Manifest{
+			newManifest("old-id", "existing", dir),
+		},
+	}
+
+	ctx := &OpContext{Tmux: tmuxMock, Storage: store, OutputMode: "json"}
+	_, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:    dir,
+		Prompt: "test",
+		Title:  "existing",
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate stored session name")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("expected *OpError, got %T", err)
+	}
+	if opErr.Code != ErrCodeSessionExists {
+		t.Errorf("code = %q, want %q", opErr.Code, ErrCodeSessionExists)
+	}
+	if opErr.Detail != sessionNameExistsMessage("existing") {
+		t.Errorf("detail = %q, want %q", opErr.Detail, sessionNameExistsMessage("existing"))
+	}
+	if store.listFilter == nil || !store.listFilter.ExcludeArchived {
+		t.Fatalf("ListSessions filter = %#v, want ExcludeArchived", store.listFilter)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux sessions created before duplicate rejection: %v", tmuxMock.CreatedSessions)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("stored sessions created after duplicate rejection: %d", len(store.created))
+	}
+}
+
 func TestCreateSession_FailsWithoutTmux(t *testing.T) {
 	dir := t.TempDir()
 	ctx := &OpContext{OutputMode: "json"}
@@ -969,7 +1022,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
+	want := []string{"storage", "launch", "ready", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
