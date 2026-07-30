@@ -1214,6 +1214,8 @@ install-override-audit-launchdaemon: build-agm
 		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
 		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
 		cleanup_audit_staging() { \
+			status=$$?; \
+			trap - EXIT HUP INT TERM; \
 			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
 				if test "$$audit_existed" = 1; then if test -n "$$audit_backup" && /usr/bin/sudo -n /bin/mv -f "$$audit_backup" "$$audit_live"; then audit_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$audit_live" >/dev/null 2>&1 || true; fi; \
 				if test "$$plist_existed" = 1; then if test -n "$$plist_backup" && /usr/bin/sudo -n /bin/mv -f "$$plist_backup" "$$plist_live"; then plist_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$plist_live" >/dev/null 2>&1 || true; fi; \
@@ -1222,6 +1224,7 @@ install-override-audit-launchdaemon: build-agm
 			if test -n "$$audit_staging"; then /usr/bin/sudo /bin/rm -f "$$audit_staging" >/dev/null 2>&1 || true; fi; \
 			if test -n "$$plist_staging"; then /usr/bin/sudo /bin/rm -f "$$plist_staging" >/dev/null 2>&1 || true; fi; \
 			if test "$$activation_started" != 1 || test "$$activation_complete" = 1; then /usr/bin/sudo -n /bin/rm -f "$$audit_backup" "$$plist_backup" >/dev/null 2>&1 || true; fi; \
+			exit "$$status"; \
 		}; \
 		trap cleanup_audit_staging EXIT HUP INT TERM; \
 		/usr/bin/sudo -k; \

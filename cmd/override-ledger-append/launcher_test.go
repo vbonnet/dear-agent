@@ -158,12 +158,15 @@ func TestLaunchDaemonInstallerRollsBackPartialActivation(t *testing.T) {
 		`plist_live="/Library/LaunchDaemons/com.dear-agent.override-audit.plist"`,
 		`audit_backup=`,
 		`plist_backup=`,
+		`status=$$?`,
+		`trap - EXIT HUP INT TERM`,
 		`activation_started=1`,
 		`activation_complete=1`,
 		`/bin/mv -f "$$audit_backup" "$$audit_live"`,
 		`/bin/mv -f "$$plist_backup" "$$plist_live"`,
 		`/bin/rm -f "$$audit_live"`,
 		`/bin/rm -f "$$plist_live"`,
+		`exit "$$status"`,
 	} {
 		if !strings.Contains(installer, required) {
 			t.Errorf("LaunchDaemon installer is missing transactional activation fragment %q", required)

@@ -806,7 +806,7 @@ func nestedCommandWrapperOperand(command string, args []*syntax.Word) (*syntax.W
 
 func dynamicRuntimeOperand(command string, commandWord *syntax.Word, args []*syntax.Word) (*syntax.Word, string, bool) {
 	if isRuntimeInterpreter(command) {
-		target, reason := interpreterScriptOperand(args)
+		target, reason := interpreterScriptOperand(command, args)
 		return target, reason, true
 	}
 	switch command {
@@ -1411,6 +1411,10 @@ func dynamicBuiltinOperand(
 }
 
 func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
+	switch filepath.Base(command) {
+	case "setsid", "flock":
+		return "command-capable process wrapper"
+	}
 	if awkUsesCommandExecution(command, args) {
 		return "command-capable AWK runtime"
 	}
@@ -1465,7 +1469,7 @@ func sourcedFileOperand(args []*syntax.Word) (*syntax.Word, string) {
 	return nil, ""
 }
 
-func interpreterScriptOperand(args []*syntax.Word) (*syntax.Word, string) {
+func interpreterScriptOperand(command string, args []*syntax.Word) (*syntax.Word, string) {
 	operandsOnly := false
 	for _, word := range args {
 		value, static := staticShellWord(word)
@@ -1477,6 +1481,9 @@ func interpreterScriptOperand(args []*syntax.Word) (*syntax.Word, string) {
 			continue
 		}
 		if !operandsOnly && strings.HasPrefix(value, "-") {
+			if interpreterLoadsExternalCode(command, value) {
+				return word, "interpreter preload option"
+			}
 			if interpreterInlineCodeOption(value) {
 				return word, "inline interpreter code"
 			}
@@ -1488,6 +1495,18 @@ func interpreterScriptOperand(args []*syntax.Word) (*syntax.Word, string) {
 		return word, "mutable interpreter or sourced-file operand"
 	}
 	return nil, ""
+}
+
+func interpreterLoadsExternalCode(command, value string) bool {
+	if filepath.Base(command) != "ruby" {
+		return false
+	}
+	return value == "-I" ||
+		value == "-r" ||
+		value == "--require" ||
+		strings.HasPrefix(value, "-I") ||
+		strings.HasPrefix(value, "-r") ||
+		strings.HasPrefix(value, "--require=")
 }
 
 func interpreterInlineCodeOption(value string) bool {
