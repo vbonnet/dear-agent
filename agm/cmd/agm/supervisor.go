@@ -336,9 +336,7 @@ func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.Look
 // API-key-present guard. Unwrapped as exit code 2.
 var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; unset it or use an OAuth-only env")
 
-var reserveSupervisorDangerousOverride = func(req override.Request) (*override.Reservation, error) {
-	return override.Reserve(req)
-}
+var reserveSupervisorDangerousOverride = override.Reserve
 
 func reserveSupervisorOAuthOverride(reason, session string) (*override.Reservation, error) {
 	reservation, err := reserveSupervisorDangerousOverride(override.Request{
