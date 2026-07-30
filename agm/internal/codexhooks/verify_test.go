@@ -292,6 +292,34 @@ func TestTrustedHookAssetsAllowNonCommandPathText(t *testing.T) {
 	}
 }
 
+func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\nroot=$PWD; \"$root/helper\"\n",
+		"#!/bin/sh\nroot=.; ${root}/helper\n",
+		"#!/bin/sh\nroot=.; command \"$root/helper\"\n",
+		"#!/bin/sh\nroot=.; exec \"$root/helper\"\n",
+		"#!/bin/sh\nroot=.; /usr/bin/env \"$root/helper\"\n",
+		"#!/bin/sh\ncmd=helper; eval \"$cmd\"\n",
+	} {
+		if _, err := referencedScriptAssets([]byte(script)); err == nil ||
+			!strings.Contains(err.Error(), "dynamic command resolution") {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want dynamic-command rejection", script, err)
+		}
+	}
+}
+
+func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\n/bin/printf '%s\\n' \"$HOME\"\n",
+		"#!/bin/sh\ncommand -v jq\n",
+		"#!/bin/sh\n/usr/bin/env -i /bin/true\n",
+	} {
+		if _, err := referencedScriptAssets([]byte(script)); err != nil {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want static command allowed", script, err)
+		}
+	}
+}
+
 func TestRepositoryEnabledHookScriptsHaveClosedRuntimeDependencies(t *testing.T) {
 	repositoryRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	manifest, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(hooksManifestPath)))

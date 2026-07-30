@@ -36,25 +36,25 @@ set -uo pipefail
 # feedback loop; bypassed sessions rely on explicit agent-run preflight and CI.
 [ -z "${AGM_CODEX_HOOK_ROOT:-}" ] || exit 0
 
-json_tool="$(command -v jq 2>/dev/null || true)"
-[ -x "$json_tool" ] || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+hook_json() { jq "$@"; }
 input="$(cat)"
 [ -n "$input" ] || exit 0
 
 # Global opt-out for an interactive session that doesn't want the loop.
 [ "${DEAR_GUARDRAIL_LOOP:-1}" = "0" ] && exit 0
 
-event="$(printf '%s' "$input" | "$json_tool" -r '.hook_event_name // empty' 2>/dev/null || true)"
+event="$(printf '%s' "$input" | hook_json -r '.hook_event_name // empty' 2>/dev/null || true)"
 case "$event" in
   Stop|SubagentStop) ;;
   *) exit 0 ;;  # never fire on other events
 esac
 
-session="$(printf '%s' "$input" | "$json_tool" -r '.session_id // empty' 2>/dev/null || true)"
+session="$(printf '%s' "$input" | hook_json -r '.session_id // empty' 2>/dev/null || true)"
 # Secondary loop brake (used only if the attempt counter can't be persisted):
 # true when this stop was itself triggered by a prior stop-hook block.
-stop_active="$(printf '%s' "$input" | "$json_tool" -r '.stop_hook_active // false' 2>/dev/null || echo false)"
-cwd="$(printf '%s' "$input" | "$json_tool" -r '.cwd // empty' 2>/dev/null || true)"
+stop_active="$(printf '%s' "$input" | hook_json -r '.stop_hook_active // false' 2>/dev/null || echo false)"
+cwd="$(printf '%s' "$input" | hook_json -r '.cwd // empty' 2>/dev/null || true)"
 [ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 # Resolve the repo root from cwd; if it isn't a git repo, there is nothing to
@@ -98,11 +98,11 @@ $trimmed"
 attempt=$((count + 1))
 
 emit_block() { # $1 = reason text -> block the stop, feed reason to the agent
-  "$json_tool" -cn --arg r "$1" '{decision:"block",reason:$r}'
+  hook_json -cn --arg r "$1" '{decision:"block",reason:$r}'
   exit 0
 }
 emit_context() { # $1 = text -> non-blocking note, let the agent stop
-  "$json_tool" -cn --arg c "$1" --arg e "$event" \
+  hook_json -cn --arg c "$1" --arg e "$event" \
     '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}'
   exit 0
 }

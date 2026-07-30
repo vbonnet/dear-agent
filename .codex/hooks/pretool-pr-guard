@@ -7,16 +7,18 @@
 
 set -uo pipefail
 
-json_tool="/usr/local/libexec/dear-agent-codex-hook-json"
-if [ -z "${AGM_CODEX_HOOK_ROOT:-}" ]; then
-  json_tool="$(command -v jq 2>/dev/null || true)"
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  [ -x /usr/local/libexec/dear-agent-codex-hook-json ] || exit 0
+  hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }
+else
+  command -v jq >/dev/null 2>&1 || exit 0
+  hook_json() { jq "$@"; }
 fi
-[ -x "$json_tool" ] || exit 0
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | "$json_tool" -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | hook_json -r '.tool_name // empty' 2>/dev/null || true)"
 [ "$tool" = "Bash" ] || exit 0
-cmd="$(printf '%s' "$input" | "$json_tool" -r '.tool_input.command // empty' 2>/dev/null || true)"
+cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 cmd="${cmd//\\$'\n'/ }"
 

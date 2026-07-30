@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const (
@@ -387,6 +389,9 @@ func addTrustedCommandAssets(references map[string]struct{}, command string) err
 			command,
 		)
 	}
+	if err := rejectDynamicCommandResolution(unmatched); err != nil {
+		return fmt.Errorf("command %q: %w", command, err)
+	}
 	if err := rejectMutableScriptOperands(unmatched); err != nil {
 		return fmt.Errorf("command %q: %w", command, err)
 	}
@@ -447,6 +452,9 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 			path,
 		)
 	}
+	if err := rejectDynamicCommandResolution(scannable); err != nil {
+		return nil, err
+	}
 	if err := rejectMutableScriptOperands(scannable); err != nil {
 		return nil, err
 	}
@@ -457,6 +465,95 @@ func referencedScriptAssets(content []byte) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func rejectDynamicCommandResolution(script string) error {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).
+		Parse(strings.NewReader(script), "trusted-hook")
+	if err != nil {
+		return fmt.Errorf("parse trusted hook shell: %w", err)
+	}
+	var rejected *syntax.Word
+	var reason string
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if rejected != nil {
+			return false
+		}
+		call, ok := node.(*syntax.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		rejected, reason = dynamicCommandTarget(call)
+		return rejected == nil
+	})
+	if rejected == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"unsupported dynamic command resolution at line %d (%s); trusted hook commands must be literal committed or system-path executables",
+		rejected.Pos().Line(),
+		reason,
+	)
+}
+
+func dynamicCommandTarget(call *syntax.CallExpr) (*syntax.Word, string) {
+	command, static := staticShellWord(call.Args[0])
+	if !static {
+		return call.Args[0], "expanded command word"
+	}
+	switch command {
+	case "eval":
+		return call.Args[0], "eval command"
+	case "command", "builtin", "exec", "nohup":
+		return dynamicWrapperCommand(call.Args[1:], false)
+	case "env", "/usr/bin/env":
+		return dynamicWrapperCommand(call.Args[1:], true)
+	default:
+		return nil, ""
+	}
+}
+
+func dynamicWrapperCommand(args []*syntax.Word, env bool) (*syntax.Word, string) {
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			return word, "expanded command-wrapper operand"
+		}
+		if value == "--" || strings.HasPrefix(value, "-") {
+			continue
+		}
+		if env && strings.Contains(value, "=") {
+			continue
+		}
+		return nil, ""
+	}
+	return nil, ""
+}
+
+func staticShellWord(word *syntax.Word) (string, bool) {
+	var value strings.Builder
+	if !appendStaticShellParts(&value, word.Parts) {
+		return "", false
+	}
+	return value.String(), true
+}
+
+func appendStaticShellParts(value *strings.Builder, parts []syntax.WordPart) bool {
+	for _, part := range parts {
+		switch typed := part.(type) {
+		case *syntax.Lit:
+			value.WriteString(typed.Value)
+		case *syntax.SglQuoted:
+			value.WriteString(typed.Value)
+		case *syntax.DblQuoted:
+			if !appendStaticShellParts(value, typed.Parts) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func mutatesExecutableSearchPath(script string) bool {

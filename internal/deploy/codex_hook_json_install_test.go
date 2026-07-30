@@ -52,11 +52,12 @@ func TestCodexHookJSONHelperUsesDigestBoundOperatorInstall(t *testing.T) {
 			t.Fatal(readErr)
 		}
 		hook := string(hookBytes)
-		if !strings.Contains(hook, `json_tool="/usr/local/libexec/dear-agent-codex-hook-json"`) {
+		if !strings.Contains(hook, `hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }`) {
 			t.Errorf("%s does not select the operator-owned JSON helper for bypassed hooks", name)
 		}
-		if !strings.Contains(hook, `if [ -z "${AGM_CODEX_HOOK_ROOT:-}" ]`) ||
-			!strings.Contains(hook, "command -v jq") {
+		if !strings.Contains(hook, `if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]`) ||
+			!strings.Contains(hook, "command -v jq") ||
+			!strings.Contains(hook, `hook_json() { jq "$@"; }`) {
 			t.Errorf("%s does not preserve ordinary reviewed-session jq lookup", name)
 		}
 	}

@@ -21,20 +21,22 @@
 # net for the programmatic path, not a complete gate. See AGENTS.why.md.
 set -uo pipefail
 
-json_tool="/usr/local/libexec/dear-agent-codex-hook-json"
-if [ -z "${AGM_CODEX_HOOK_ROOT:-}" ]; then
-  json_tool="$(command -v jq 2>/dev/null || true)"
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  [ -x /usr/local/libexec/dear-agent-codex-hook-json ] || exit 0
+  hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }
+else
+  command -v jq >/dev/null 2>&1 || exit 0
+  hook_json() { jq "$@"; }
 fi
-[ -x "$json_tool" ] || exit 0
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | "$json_tool" -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | hook_json -r '.tool_name // empty' 2>/dev/null || true)"
 [ -n "$tool" ] || exit 0
 
 AGM_HELP='Route it through AGM so it feeds the self-improvement flywheel and lands in the VROOM decision trail: write the task to a unique temporary file, run `agm session new --workspace <workspace> --detached --prompt-file <path> <name>`, then remove the file after success or failure (or use `agm supervisor run` for governance-relevant multi-step work). See dear-agent AGENTS.md §Dogfooding. This is a reminder, not a block — your call proceeds normally.'
 
 emit() { # $1 = guidance text -> additionalContext only, then allow normal flow
-  "$json_tool" -cn --arg c "$1" \
+  hook_json -cn --arg c "$1" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}'
   exit 0
 }
@@ -44,7 +46,7 @@ case "$tool" in
     emit "You are creating a Cowork scheduled task outside AGM/VROOM. $AGM_HELP"
     ;;
   Bash)
-    cmd="$(printf '%s' "$input" | "$json_tool" -r '.tool_input.command // empty' 2>/dev/null || true)"
+    cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev/null || true)"
     [ -n "$cmd" ] || exit 0
     # First real token of each simple command (split on ; | & newline), with
     # leading VAR=val env-assignments dropped and the path reduced to a basename.

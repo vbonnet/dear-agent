@@ -13,11 +13,13 @@
 
 set -uo pipefail
 
-json_tool="/usr/local/libexec/dear-agent-codex-hook-json"
-if [ -z "${AGM_CODEX_HOOK_ROOT:-}" ]; then
-  json_tool="$(command -v jq 2>/dev/null || true)"
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  [ -x /usr/local/libexec/dear-agent-codex-hook-json ] || exit 0
+  hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }
+else
+  command -v jq >/dev/null 2>&1 || exit 0
+  hook_json() { jq "$@"; }
 fi
-[ -x "$json_tool" ] || exit 0
 
 MESSAGE='Use `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>` instead of BEADS_DIR.
 Use the explicit canonical database command for repository-relative operations too.
@@ -61,22 +63,22 @@ patch_touches_shell_file() {
 }
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | "$json_tool" -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | hook_json -r '.tool_name // empty' 2>/dev/null || true)"
 [ -n "$tool" ] || exit 0
 
 case "$tool" in
 Bash)
-  cmd="$(printf '%s' "$input" | "$json_tool" -r '.tool_input.command // empty' 2>/dev/null || true)"
+  cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev/null || true)"
   [ -n "$cmd" ] || exit 0
   if uses_beads_dir "$cmd"; then
     block
   fi
   ;;
 Write | Edit | MultiEdit)
-  file_path="$(printf '%s' "$input" | "$json_tool" -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+  file_path="$(printf '%s' "$input" | hook_json -r '.tool_input.file_path // empty' 2>/dev/null || true)"
   [ -n "$file_path" ] || exit 0
   printf '%s' "$file_path" | grep -qE "$SHELL_FILE_RE" || exit 0
-  text="$(printf '%s' "$input" | "$json_tool" -r '
+  text="$(printf '%s' "$input" | hook_json -r '
     .tool_input as $t |
     [($t.content // empty), ($t.new_string // empty),
      (($t.edits // [])[] | .new_string // empty)] | join("\n")
@@ -87,7 +89,7 @@ Write | Edit | MultiEdit)
   fi
   ;;
 apply_patch)
-  patch_text="$(printf '%s' "$input" | "$json_tool" -r '
+  patch_text="$(printf '%s' "$input" | hook_json -r '
     if (.tool_input | type) == "string" then .tool_input
     else (.tool_input.patch // .tool_input.input // .tool_input.content // empty)
     end

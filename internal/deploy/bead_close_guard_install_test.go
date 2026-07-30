@@ -19,16 +19,20 @@ func TestCodexBeadCloseGuardUsesOperatorOwnedInstall(t *testing.T) {
 	}
 
 	hook := read(filepath.Join(".codex", "hooks", "pretool-bead-close-guard"))
-	if !strings.Contains(hook, `guard="/usr/local/libexec/dear-agent-bead-close-guard"`) {
+	if !strings.Contains(hook, `result="$(/usr/local/libexec/dear-agent-bead-close-guard $guard_args 2>&1)"`) {
 		t.Fatal("attested Codex hook does not prefer the operator-owned guard path")
 	}
-	bypassDeny := strings.Index(hook, `if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]`)
-	guardResolve := strings.Index(hook, `guard="/usr/local/libexec/dear-agent-bead-close-guard"`)
+	bypassDeny := strings.Index(hook, `this directly recognized bead-closure request is disabled`)
+	guardResolve := strings.Index(hook, `result="$(/usr/local/libexec/dear-agent-bead-close-guard`)
 	if bypassDeny < 0 || guardResolve < 0 || bypassDeny >= guardResolve {
 		t.Fatal("attested Codex hook does not deny closure before resolving the guard and its CLI dependencies")
 	}
 	if !strings.Contains(hook[bypassDeny:guardResolve], `--force does not bypass this direct hook decision`) {
 		t.Fatal("attested Codex hook does not explicitly keep force-close behind the reviewed-session boundary")
+	}
+	if !strings.Contains(hook, "command -v bead-close-guard") ||
+		!strings.Contains(hook, `result="$(bead-close-guard $guard_args 2>&1)"`) {
+		t.Fatal("ordinary Codex hook does not preserve the reviewed-session guard fallback")
 	}
 
 	makefile := read("Makefile")
