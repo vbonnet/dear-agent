@@ -991,7 +991,7 @@ func TestCreateSession_AtomicNameConflictPreventsQueuedCurrentTmuxLaunch(t *test
 	}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Title: "concurrent-name", Harness: "claude-code", Model: "sonnet",
 		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, AllowEmptyPrompt: true,
-		ReuseExistingTmux: true, RequireStorage: true,
+		ReuseExistingTmux: true, RequireStorage: true, RegisterBeforeLaunch: true,
 	})
 	var opErr *OpError
 	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionExists {
@@ -1005,6 +1005,105 @@ func TestCreateSession_AtomicNameConflictPreventsQueuedCurrentTmuxLaunch(t *test
 	}
 	if !tmuxMock.Sessions["concurrent-name"] {
 		t.Fatal("name-conflict rollback removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_DeferredCurrentTmuxRegistersBeforeIrreversibleLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["deferred-current"] = true
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			order = append(order, "launch")
+			if len(store.created) != 1 {
+				t.Fatal("deferred current-tmux launch ran before durable registration")
+			}
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "deferred-current", Harness: "claude-code", Model: "sonnet",
+		SessionID: "deferred-current-id", Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+		RegisterBeforeLaunch: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if want := []string{"reserve", "register", "launch"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("deferred creation order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_DeferredCurrentTmuxRegistrationFailurePreventsLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["deferred-registration-failure"] = true
+	store := &createMockStorage{createErr: errors.New("registration failed")}
+	launched := false
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launched = true
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "deferred-registration-failure", Harness: "claude-code", Model: "sonnet",
+		SessionID: "deferred-registration-failure-id", Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+		RegisterBeforeLaunch: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "registration failed") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want registration failure", err)
+	}
+	if launched {
+		t.Fatal("deferred current-tmux launch ran after registration failure")
+	}
+	if got, want := store.released, []string{"deferred-registration-failure-id"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("released reservations = %v, want %v", got, want)
+	}
+	if !tmuxMock.Sessions["deferred-registration-failure"] {
+		t.Fatal("registration rollback removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_DeferredCurrentTmuxPreservesRegistrationAfterQueuedLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["deferred-post-queue-cancel"] = true
+	store := &createMockStorage{}
+	ctx, cancel := context.WithCancel(t.Context())
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			cancel()
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "deferred-post-queue-cancel", Harness: "claude-code", Model: "sonnet",
+		SessionID: "deferred-post-queue-cancel-id", Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+		RegisterBeforeLaunch: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want context.Canceled", err)
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("durable registrations = %d, want 1", len(store.created))
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("queued launch registration was rolled back: %v", store.deleted)
+	}
+	if !tmuxMock.Sessions["deferred-post-queue-cancel"] {
+		t.Fatal("post-queue cancellation removed the reused tmux session")
 	}
 }
 
@@ -1116,6 +1215,7 @@ func TestCreateSession_ConcurrentCurrentTmuxCreatorsLaunchExactlyOnce(t *testing
 				Cwd: workDir, Title: "concurrent-name", Harness: "claude-code", Model: "sonnet",
 				SessionID: id, Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
 				AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+				RegisterBeforeLaunch: true,
 			})
 			results <- err
 		}(sessionID)
@@ -1317,6 +1417,7 @@ func TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral(t *
 
 	validRequest := &CreateSessionRequest{
 		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true,
+		RegisterBeforeLaunch: true,
 	}
 	validParams := &createSessionParams{name: "current", harness: "codex-cli"}
 	launch := CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}

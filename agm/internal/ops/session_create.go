@@ -180,7 +180,7 @@ type CreateSessionRequest struct {
 	AllowUnsafeTitle       bool                  `json:"-"`
 	ReuseExistingTmux      bool                  `json:"-"`
 	RequireStorage         bool                  `json:"-"`
-	RegistrationOptional   bool                  `json:"-"`
+	RegisterBeforeLaunch   bool                  `json:"-"`
 	ManifestDir            string                `json:"-"`
 	ManifestDirOptional    bool                  `json:"-"`
 	SkipCodexRemoteControl bool                  `json:"-"`
@@ -306,6 +306,17 @@ func validateCreateRequest(opCtx *OpContext, req *CreateSessionRequest) (*create
 	if err := agent.ValidateModel(p.harness, p.model); err != nil {
 		return nil, ErrInvalidInput("model", err.Error())
 	}
+	if req.RegisterBeforeLaunch &&
+		(req.Caller.Surface != CreateSurfaceCLI ||
+			!req.ReuseExistingTmux ||
+			!req.RequireStorage ||
+			req.Prompt != "" ||
+			!supportsDeferredCurrentTmuxReadiness(p.harness)) {
+		return nil, ErrInvalidInput(
+			"register_before_launch",
+			"Pre-launch registration is valid only for a supported, prompt-free current-tmux CLI creation with required storage.",
+		)
+	}
 	if p.harness == "agy" && strings.TrimSpace(req.Prompt) == "" {
 		return nil, ErrInvalidInput("prompt", "A startup prompt is required for a fresh AGY session because AGY persists its native conversation only after first input.")
 	}
@@ -429,9 +440,35 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	var manifestPath string
+	var m *manifest.Manifest
+	if req.RegisterBeforeLaunch {
+		manifestPath, m, err = prepareAndRegisterCreatedSession(
+			callCtx,
+			req,
+			state,
+			params,
+			sessionID,
+			codexMeta,
+			nil,
+			"",
+			true,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 	launchResult, err := launchCreateSession(callCtx, opCtx, buildHarnessLaunchSpec(req, params, sessionID, codexMeta))
 	if err != nil {
 		return nil, err
+	}
+	if req.RegisterBeforeLaunch {
+		// Queue submission into the current pane is irreversible once accepted:
+		// the shell will consume it after AGM exits. Preserve the already-durable
+		// registration and its manifest directory across every later error so a
+		// queued harness can never outlive its unique active-name owner.
+		state.registered = false
+		state.createdManifestDir = false
 	}
 	if launchResult.HandledLifecycle {
 		return createSessionResult(req, params, sessionID), nil
@@ -445,27 +482,20 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 		launchResult.PromptDelivered = true
 	}
-
-	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
-	if err != nil {
-		return nil, err
-	}
-	state.createdManifestDir = createdManifestDir
-	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
-	if agyIdentityTracker != nil {
-		metadata, identityErr := agyIdentityTracker.Discover(callCtx, req.Cwd, previousAgyConversationID)
-		if identityErr != nil {
-			return nil, ErrStorageError("agy.identity.discover", identityErr)
-		}
-		applyAgyCreateIdentity(m, metadata)
-	}
-	if registrationAllowed {
-		state.registered, err = registerCreatedSession(req, state.store, m)
+	if !req.RegisterBeforeLaunch {
+		manifestPath, m, err = prepareAndRegisterCreatedSession(
+			callCtx,
+			req,
+			state,
+			params,
+			sessionID,
+			codexMeta,
+			agyIdentityTracker,
+			previousAgyConversationID,
+			false,
+		)
 		if err != nil {
 			return nil, err
-		}
-		if state.registered {
-			state.nameReserved = false
 		}
 	}
 	// Native identity is now persisted in registration. Release before runtime
@@ -614,7 +644,11 @@ func establishCreatedHarnessReadiness(ctx context.Context, opCtx *OpContext, req
 	case CreateSessionReadinessVerified:
 		return nil
 	case CreateSessionReadinessDeferredUntilCallerExit:
-		if req.Caller.Surface != CreateSurfaceCLI || !supportsDeferredCurrentTmuxReadiness(params.harness) || !req.ReuseExistingTmux || req.Prompt != "" {
+		if req.Caller.Surface != CreateSurfaceCLI ||
+			!supportsDeferredCurrentTmuxReadiness(params.harness) ||
+			!req.ReuseExistingTmux ||
+			!req.RegisterBeforeLaunch ||
+			req.Prompt != "" {
 			return ErrStorageError("create.readiness", fmt.Errorf("deferred readiness is valid only for supported current-tmux harness creation without an initial prompt"))
 		}
 		return nil
@@ -749,6 +783,55 @@ func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, r
 	return manifestPath, true, created, nil
 }
 
+func prepareAndRegisterCreatedSession(
+	ctx context.Context,
+	req *CreateSessionRequest,
+	state *createSessionState,
+	params *createSessionParams,
+	sessionID string,
+	codexMeta *manifest.Codex,
+	agyIdentityTracker agysession.CreateIdentityTracker,
+	previousAgyConversationID string,
+	requireRegistration bool,
+) (string, *manifest.Manifest, error) {
+	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
+	if err != nil {
+		return "", nil, err
+	}
+	state.createdManifestDir = createdManifestDir
+	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
+	if agyIdentityTracker != nil {
+		metadata, identityErr := agyIdentityTracker.Discover(ctx, req.Cwd, previousAgyConversationID)
+		if identityErr != nil {
+			return "", nil, ErrStorageError("agy.identity.discover", identityErr)
+		}
+		applyAgyCreateIdentity(m, metadata)
+	}
+	if !registrationAllowed {
+		if requireRegistration {
+			return "", nil, ErrStorageError(
+				"storage.CreateSession",
+				fmt.Errorf("durable session registration is required before launch"),
+			)
+		}
+		return manifestPath, m, nil
+	}
+	state.registered, err = registerCreatedSession(req, state.store, m)
+	if err != nil {
+		return "", nil, err
+	}
+	if state.registered {
+		state.nameReserved = false
+	}
+	if requireRegistration && !state.registered {
+		return "", nil, ErrStorageError(
+			"storage.CreateSession",
+			fmt.Errorf("durable session registration is required before launch"),
+		)
+	}
+	return manifestPath, m, nil
+}
+
 func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *manifest.Manifest) (bool, error) {
 	if store == nil {
 		if req.RequireStorage {
@@ -761,11 +844,7 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 		if errors.As(err, &conflict) {
 			return false, sessionExistsError(m.Name)
 		}
-		if !req.RegistrationOptional {
-			return false, ErrStorageError("storage.CreateSession", err)
-		}
-		fmt.Fprintf(os.Stderr, "Warning: failed to register session: %v; the harness remains usable\n", err)
-		return false, nil
+		return false, ErrStorageError("storage.CreateSession", err)
 	}
 	return true, nil
 }

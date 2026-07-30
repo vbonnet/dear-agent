@@ -87,9 +87,8 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		AllowUnsafeTitle:       true,
 		ReuseExistingTmux:      true,
 		RequireStorage:         true,
-		RegistrationOptional:   true,
+		RegisterBeforeLaunch:   true,
 		ManifestDir:            manifestDir,
-		ManifestDirOptional:    true,
 		SkipCodexRemoteControl: true,
 		Metadata: ops.CreateSessionMetadata{
 			Workspace:        cfg.Workspace,
