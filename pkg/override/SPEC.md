@@ -4,11 +4,12 @@
 
 ## Purpose
 
-`pkg/override` is the shared contract for every escape hatch that switches off
-a safety control. Three exist today — the Codex hook-trust bypass, the
-admission-brake override, and the supervisor OAuth-check bypass — and all reach
-the same failure mode if left ungoverned: an unattended agent flips one to get
-past a blocker, nobody notices, and the control is silently dead.
+`pkg/override` is the shared contract for every unattended launch escape hatch
+that switches off a launch-time safety control. Three exist today — the Codex
+hook-trust bypass, the admission-brake override, and the supervisor OAuth-check
+bypass — and all reach the same failure mode if left ungoverned: an unattended
+agent flips one to get past a blocker, nobody notices, and the control is
+silently dead.
 
 Rather than three bespoke implementations, all three travel one pattern:
 **stated reason, human approval, ledger, recurring audit**.
@@ -74,6 +75,12 @@ script that launches an external Codex binary), so it must not be represented
 as enforcement for raw external launches. Operators that must prohibit direct
 Codex execution need an operator-owned executable policy outside this
 repository; AGM does not substitute command-text scanning for that boundary.
+
+This privileged contract is deliberately narrower than command-scoped
+confirmation for interactive lifecycle operations. Existing-session
+`--force` actions that do not authorize a new unattended harness process remain
+under `internal/override`'s reason, confirmation, and user audit contract; they
+are not launch override kinds and cannot satisfy this package's grant gate.
 
 For the Codex hook-trust kind, authorization composes with attestation
 (`agm/internal/codexhooks`). They answer different questions — whether the

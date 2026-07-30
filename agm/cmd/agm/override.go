@@ -34,12 +34,12 @@ const overrideAuditBreachExit = 3
 var overrideCmd = &cobra.Command{
 	Use:   "override",
 	Short: "Approve, inspect, and audit dangerous overrides",
-	Long: `Manage the dangerous overrides that switch off a safety control.
+	Long: `Manage unattended launch overrides that switch off a launch-time safety control.
 
-Every override requires a stated reason, an operator-owned approval that
-expires, and a ledger entry. Approvals require both an interactive terminal
-and elevated access to the system approval store, so a same-user unattended
-agent cannot approve its own override.
+Every unattended launch override requires a stated reason, an operator-owned
+approval that expires, and a ledger entry. Approvals require both an
+interactive terminal and elevated access to the system approval store, so a
+same-user unattended agent cannot approve its own override.
 
 Kinds:
   codex-hook-trust   run Codex hooks without per-path trust review

@@ -1,5 +1,6 @@
-// Package override is the shared contract for dangerous overrides — the
-// escape hatches that let an operator switch off a safety control.
+// Package override is the shared contract for dangerous unattended launch
+// overrides — escape hatches that let an operator start an unattended process
+// while switching off a launch-time safety control.
 //
 // Three exist today: the Codex hook-trust override, which trusts an exact
 // attested hook materialization without per-path review; the admission-brake
