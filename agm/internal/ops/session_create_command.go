@@ -42,6 +42,10 @@ type HarnessLaunchSpec struct {
 	PiExtension          string
 	PiPolicyJSON         string
 	PiPolicyFile         string
+	// BeforeSpawn is an optional surface-owned admission callback. Launch
+	// adapters invoke it after command preparation and executable resolution,
+	// immediately before the irreversible process or tmux submission boundary.
+	BeforeSpawn func() error
 	// DeferredUntilCallerExit is set only by current-pane launchers whose
 	// queued command cannot run until the producing AGM process releases tmux.
 	DeferredUntilCallerExit bool

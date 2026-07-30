@@ -41,6 +41,8 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-13** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
 
+**OVR-14** When an admission-brake override is requested, the system shall validate the reason during preflight but consume the grant and record the use only after routine launch preparation succeeds and immediately before the irreversible process or tmux submission boundary.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
@@ -96,14 +98,18 @@ only to `/var/log/dear-agent-overrides.jsonl`, revalidates the matching active
 root-owned grant and a near-current timestamp, synchronizes before returning,
 and stops at a 16 MiB ledger cap pending operator-owned rotation.
 
-The ledger file and its parent are root-owned, so the scheduled user agent can
-read the audit while the agent user cannot truncate, replace, or remove prior
-records. AGM also validates the privileged result before permitting the
+The ledger file and its parent are root-owned, so the scheduled audit process
+can read the audit while the agent user cannot truncate, replace, or remove
+prior records. AGM also validates the privileged result before permitting the
 requested launch.
 
 The recurring audit ships as `deploy/launchd/com.dear-agent.override-audit.plist`
 and is staged with `make install-override-audit-launchagent`; its `--notify`
-mode delivers threshold breaches outside the launchd stdout/stderr files.
+mode delivers threshold breaches outside the launchd stdout/stderr files. On
+Linux, `make install-override-audit-systemd` uses fresh operator authentication
+to install a root-owned audit executable and system-manager templates; the
+service runs as the named unprivileged operator, but an unattended same-user
+agent cannot disable its timer through `systemctl --user`.
 
 ## BDD Traceability
 

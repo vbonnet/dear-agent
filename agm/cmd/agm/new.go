@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -770,15 +771,16 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 	}
 }
 
-// enforceCircuitBreakers runs all circuit breaker gates and returns an
-// error if any gate refuses the spawn. On success it records the spawn time
-// so the stagger gate works for subsequent spawns.
+// enforceCircuitBreakers runs an initial circuit-breaker check and returns an
+// error if the request cannot proceed toward launch. On success it returns a
+// one-shot callback that repeats the live gates, consumes any admission-brake
+// override, and records the spawn time at the launch-submission boundary.
 //
 // It is the single admission point for every sanctioned spawn path: `agm
 // session new` (and its current-tmux variant) and `agm supervisor run`.
 // vroom-dispatch shells out to `agm session new`, so it inherits the same
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
-func enforceCircuitBreakers(sessionName string) error {
+func enforceCircuitBreakers(sessionName string) (func() error, error) {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -805,42 +807,64 @@ func enforceCircuitBreakers(sessionName string) error {
 		normalizedBrakeOverrideReason, err = ops.ValidateAdmissionBrakeOverrideReason(brakeOverrideReason)
 		if err != nil {
 			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
-			return err
+			return nil, err
 		}
 	}
 
 	result := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
-	if normalizedBrakeOverrideReason != "" && onlyAdmissionBrakeRefused(result) {
-		// Consume and record the authorization only after every resource gate
-		// has passed and the live brake is the sole remaining refusal. A second
-		// check keeps the actual spawn fail-closed if host state changes while
-		// the privileged ledger append is in flight.
-		if err := ops.AuthorizeAdmissionBrakeOverride(normalizedBrakeOverrideReason, sessionName); err != nil {
-			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
-			return err
-		}
-		result = circuitbreaker.Check(
-			cfg, lr, wc, st, mr,
-			append(checkOpts, circuitbreaker.WithAuthorizedBrakeOverride(normalizedBrakeOverrideReason))...,
-		)
+	logCircuitBreakerResult(result)
+
+	if !result.Allowed && (normalizedBrakeOverrideReason == "" || !onlyAdmissionBrakeRefused(result)) {
+		return nil, fmt.Errorf("%s", circuitbreaker.FormatDenied(result))
 	}
 
-	// Log DEAR level regardless of outcome
+	// Preflight proves that the request can reach launch, but does not consume
+	// an override or record a spawn. The returned one-shot callback repeats the
+	// live gates and crosses those boundaries only after every routine launch
+	// preparation step has succeeded.
+	var (
+		mu       sync.Mutex
+		consumed bool
+	)
+	return func() error {
+		mu.Lock()
+		if consumed {
+			mu.Unlock()
+			return fmt.Errorf("circuit-breaker launch admission was already consumed for %q", sessionName)
+		}
+		consumed = true
+		mu.Unlock()
+
+		liveResult := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
+		if normalizedBrakeOverrideReason != "" && onlyAdmissionBrakeRefused(liveResult) {
+			// Every non-brake gate passed at the executable boundary. Consume
+			// the human grant now, then recheck once more so a changed host
+			// state still fails closed before submission.
+			if err := ops.AuthorizeAdmissionBrakeOverride(normalizedBrakeOverrideReason, sessionName); err != nil {
+				ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
+				return err
+			}
+			liveResult = circuitbreaker.Check(
+				cfg, lr, wc, st, mr,
+				append(checkOpts, circuitbreaker.WithAuthorizedBrakeOverride(normalizedBrakeOverrideReason))...,
+			)
+		}
+		logCircuitBreakerResult(liveResult)
+		if !liveResult.Allowed {
+			return fmt.Errorf("%s", circuitbreaker.FormatDenied(liveResult))
+		}
+		if err := st.RecordSpawn(time.Now()); err != nil {
+			debug.Log("Warning: failed to record spawn time: %v", err)
+		}
+		return nil
+	}, nil
+}
+
+func logCircuitBreakerResult(result circuitbreaker.CheckResult) {
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
 	for _, g := range result.Gates {
 		debug.Log("  gate %s: passed=%v — %s", g.Gate, g.Passed, g.Message)
 	}
-
-	if !result.Allowed {
-		return fmt.Errorf("%s", circuitbreaker.FormatDenied(result))
-	}
-
-	// Record spawn time for stagger gate
-	if err := st.RecordSpawn(time.Now()); err != nil {
-		debug.Log("Warning: failed to record spawn time: %v", err)
-	}
-
-	return nil
 }
 
 func onlyAdmissionBrakeRefused(result circuitbreaker.CheckResult) bool {

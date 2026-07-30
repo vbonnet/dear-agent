@@ -63,9 +63,10 @@ func (r *cliCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context
 	return r.bootstrapAgyIdentity(ctx, input)
 }
 
-func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool) *cliCreateSessionRuntime {
+func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool, beforeSpawn func() error) *cliCreateSessionRuntime {
 	return &cliCreateSessionRuntime{
 		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			spec.BeforeSpawn = beforeSpawn
 			return launchCLICreateSession(ctx, spec, existed, trustPreConfigured)
 		},
 		bootstrapAgyIdentity: func(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
@@ -146,7 +147,8 @@ func finalizeCLICreateSession(ctx context.Context, sessionName string, runtime c
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (retErr error) {
-	if err := preflight(sessionName); err != nil {
+	beforeSpawn, err := preflight(sessionName)
+	if err != nil {
 		return err
 	}
 
@@ -191,12 +193,12 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 		return createTmuxSessionAndStartClaude(ctx, retry)
 	}
 
-	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
+	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo, beforeSpawn)
 }
 
 // runCreateSessionLifecycle adapts CLI presentation and readiness behavior to
 // the shared ops lifecycle. Business ordering and rollback stay in ops.
-func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) error {
+func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig, beforeSpawn func() error) error {
 	if harnessName == "codex-cli" {
 		if err := validateCodexCredentials(); err != nil {
 			return err
@@ -207,7 +209,7 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 	if err != nil {
 		return err
 	}
-	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
+	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured, beforeSpawn)
 	bypassCodexHookTrust, err := prepareCodexHookTrustBypass(ctx, sandboxInfo)
 	if err != nil {
 		return err
@@ -323,15 +325,15 @@ func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (strin
 // preflight runs the per-session checks that must succeed before we start
 // touching tmux: test-environment setup, duplicate-name check, and circuit
 // breakers.
-func preflight(sessionName string) error {
+func preflight(sessionName string) (func() error, error) {
 	if err := setupTestEnvironment(); err != nil {
-		return err
+		return nil, err
 	}
 	if testMode {
-		return nil
+		return nil, nil
 	}
 	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
-		return dupErr
+		return nil, dupErr
 	}
 	return enforceCircuitBreakers(sessionName)
 }

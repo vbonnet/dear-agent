@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -66,6 +67,28 @@ func resolveHarnessLaunchSubmission(harness string, launch ops.HarnessLaunchComm
 	return err
 }
 
+func runBeforeHarnessSpawn(spec ops.HarnessLaunchSpec) error {
+	if spec.BeforeSpawn == nil {
+		return nil
+	}
+	return spec.BeforeSpawn()
+}
+
+func submitHarnessLaunch(
+	harness string,
+	spec ops.HarnessLaunchSpec,
+	launch ops.HarnessLaunchCommand,
+	submit func() error,
+) error {
+	if err := runBeforeHarnessSpawn(spec); err != nil {
+		return errors.Join(
+			fmt.Errorf("%s launch admission: %w", harness, err),
+			launch.CancelUndelivered(),
+		)
+	}
+	return resolveHarnessLaunchSubmission(harness, launch, submit())
+}
+
 type piHarnessRuntime struct {
 	lookPath      func(string) (string, error)
 	sendCommand   func(string, string) error
@@ -96,7 +119,9 @@ func startPiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, 
 	if err != nil {
 		return false, fmt.Errorf("prepare Pi launch: %w", err)
 	}
-	if err := resolveHarnessLaunchSubmission("Pi", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch("Pi", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		return launch.ModeAppliedAtStartup, fmt.Errorf("start Pi in tmux: %w", err)
 	}
 	runtime.sleep(500 * time.Millisecond)
@@ -122,7 +147,9 @@ func startClaudeHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPr
 	}
 	claudeCmd, modeAppliedAtStartup := launch.Command, launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", claudeCmd)
-	if err := resolveHarnessLaunchSubmission("Claude", launch, tmux.SendCommand(spec.SessionName, claudeCmd)); err != nil {
+	if err := submitHarnessLaunch("Claude", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, claudeCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start Claude in tmux session",
 			"  • Verify Claude is installed: which claude\n"+
@@ -218,6 +245,9 @@ func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, 
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if err := runBeforeHarnessSpawn(spec); err != nil {
+		return false, fmt.Errorf("gemini launch admission: %w", err)
+	}
 	if err := cmd.Run(); err != nil {
 		ui.PrintError(err,
 			"Failed to run agm-agent-wrapper",
@@ -240,7 +270,9 @@ func startGeminiDirect(ctx context.Context, spec ops.HarnessLaunchSpec) error {
 	}
 	geminiCmd := launch.Command
 	debug.Log("Sending command: %s", geminiCmd)
-	if err := resolveHarnessLaunchSubmission("Gemini", launch, tmux.SendCommand(spec.SessionName, geminiCmd)); err != nil {
+	if err := submitHarnessLaunch("Gemini", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, geminiCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start Gemini in tmux session",
 			"  • Verify Gemini is installed: which gemini\n"+
@@ -322,7 +354,9 @@ func startAgyHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec,
 	agyCmd := launch.Command
 	modeAppliedAtStartup := launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", agyCmd)
-	if err := resolveHarnessLaunchSubmission("AGY", launch, runtime.sendCommand(spec.SessionName, agyCmd)); err != nil {
+	if err := submitHarnessLaunch("AGY", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, agyCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start AGY in tmux session",
 			"  • Verify AGY is installed: which agy\n"+
@@ -364,7 +398,9 @@ func startCodexHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, e
 	}
 	codexCmd := launch.Command
 	debug.Log("Sending command: %s", codexCmd)
-	if err := resolveHarnessLaunchSubmission("Codex", launch, tmux.SendCommand(spec.SessionName, codexCmd)); err != nil {
+	if err := submitHarnessLaunch("Codex", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, codexCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start Codex in tmux session",
 			"  • Verify Codex is installed: which codex\n"+
@@ -428,7 +464,9 @@ func startOpenCodeHarness(spec ops.HarnessLaunchSpec) error {
 	}
 	opencodeCmd := launch.Command
 	debug.Log("Sending command: %s", opencodeCmd)
-	if err := resolveHarnessLaunchSubmission("OpenCode", launch, tmux.SendCommand(spec.SessionName, opencodeCmd)); err != nil {
+	if err := submitHarnessLaunch("OpenCode", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, opencodeCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start OpenCode in tmux session",
 			"  • Verify OpenCode server is running: curl http://localhost:4096/health\n"+

@@ -343,8 +343,8 @@ var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; un
 //
 // Order matters. The env and binary guards come first so a misconfigured
 // invocation reports its real problem (no OAuth token, no claude on PATH)
-// instead of a resource refusal. Admission comes last, immediately before the
-// caller execs.
+// instead of a resource refusal. The admission precheck comes last; the caller
+// separately commits the returned one-shot admission immediately before Run.
 //
 // credsPath overrides the OAuth credentials-file location (empty means the real
 // ~/.claude/.credentials.json), matching checkSupervisorEnv, so tests do not
@@ -386,8 +386,11 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	var beforeSpawn func() error
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
-		return enforceCircuitBreakers(supervisorID)
+		var admissionErr error
+		beforeSpawn, admissionErr = enforceCircuitBreakers(supervisorID)
+		return admissionErr
 	})
 	if err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
@@ -422,6 +425,11 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"AGM_SUPERVISOR_TERTIARY_FOR="+supervisorTertiaryFor,
 	)
 
+	if beforeSpawn != nil {
+		if err := beforeSpawn(); err != nil {
+			return fmt.Errorf("supervisor: launch admission: %w", err)
+		}
+	}
 	if err := claudeCmd.Run(); err != nil {
 		return fmt.Errorf("supervisor: claude exited: %w", err)
 	}

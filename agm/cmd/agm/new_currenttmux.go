@@ -21,11 +21,14 @@ import (
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
 func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
+	var beforeSpawn func() error
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
 		}
-		if err := enforceCircuitBreakers(sessionName); err != nil {
+		var err error
+		beforeSpawn, err = enforceCircuitBreakers(sessionName)
+		if err != nil {
 			return err
 		}
 	}
@@ -49,6 +52,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 			if pwd := os.Getenv("PWD"); pwd != "" {
 				spec.WorkDir = pwd
 			}
+			spec.BeforeSpawn = beforeSpawn
 			if err := startCurrentTmuxHarness(ctx, spec); err != nil {
 				return ops.CreateSessionLaunchResult{}, err
 			}
@@ -174,7 +178,9 @@ func queueCurrentTmuxPiWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTm
 	if err != nil {
 		return false, fmt.Errorf("prepare Pi launch: %w", err)
 	}
-	if err := resolveHarnessLaunchSubmission("Pi", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch("Pi", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Pi in current tmux pane",
 			"  • Verify Pi is installed: which pi\n"+
@@ -213,7 +219,9 @@ func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime curren
 	if err != nil {
 		return false, fmt.Errorf("prepare Codex launch: %w", err)
 	}
-	if err := resolveHarnessLaunchSubmission("Codex", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch("Codex", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Codex in current tmux pane",
 			"  • Verify Codex is installed: which codex\n"+
@@ -305,7 +313,9 @@ func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchS
 	if err != nil {
 		return fmt.Errorf("prepare %s launch: %w", spec.Harness, err)
 	}
-	if err := resolveHarnessLaunchSubmission(spec.Harness, launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch(spec.Harness, spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		return err
 	}
 	return nil

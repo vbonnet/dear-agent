@@ -1,14 +1,15 @@
 [Unit]
-Description=Dear Agent dangerous-override audit
+Description=Dear Agent dangerous-override audit for %i
 Documentation=https://github.com/vbonnet/dear-agent
-After=default.target
+After=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/go/bin/agm override audit --window 168h --threshold 5 --notify
+User=%i
+ExecStart=/usr/local/libexec/dear-agent-override-audit override audit --window 168h --threshold 5 --notify
 WorkingDirectory=%h
 Environment="HOME=%h"
-Environment="PATH=%h/go/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=dear-agent-override-audit
@@ -16,4 +17,3 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-

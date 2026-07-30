@@ -229,7 +229,7 @@ func TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste(t *testing.T) {
 		}
 		return tmux.HarnessInputReadiness{Ready: true, State: tmux.HarnessInputReady, TargetPane: "%7"}, nil
 	}
-	runtime := newCLICreateSessionRuntime("agy-bootstrap", false, true)
+	runtime := newCLICreateSessionRuntime("agy-bootstrap", false, true, nil)
 	if err := runtime.BootstrapAgyCreateIdentity(t.Context(), ops.AgyCreateIdentityBootstrap{
 		SessionName: "agy-bootstrap",
 		Prompt:      "first line\nsecond line",

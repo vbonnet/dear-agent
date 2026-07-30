@@ -16,6 +16,57 @@ func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 	return ops.BuildHarnessLaunchCommand(spec).Command
 }
 
+func TestSubmitHarnessLaunchAuthorizesAtSubmissionBoundary(t *testing.T) {
+	var events []string
+	spec := ops.HarnessLaunchSpec{BeforeSpawn: func() error {
+		events = append(events, "authorize")
+		return nil
+	}}
+	launch := ops.HarnessLaunchCommand{
+		Command: "fixture",
+		Cancel: func() error {
+			events = append(events, "cancel")
+			return nil
+		},
+	}
+	err := submitHarnessLaunch("fixture", spec, launch, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "authorize,submit"; got != want {
+		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchAdmissionFailureCancelsWithoutSubmission(t *testing.T) {
+	refusal := errors.New("admission refused")
+	var events []string
+	spec := ops.HarnessLaunchSpec{BeforeSpawn: func() error {
+		events = append(events, "authorize")
+		return refusal
+	}}
+	launch := ops.HarnessLaunchCommand{
+		Command: "fixture",
+		Cancel: func() error {
+			events = append(events, "cancel")
+			return nil
+		},
+	}
+	err := submitHarnessLaunch("fixture", spec, launch, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitHarnessLaunch() error = %v, want %v", err, refusal)
+	}
+	if got, want := strings.Join(events, ","), "authorize,cancel"; got != want {
+		t.Fatalf("refused launch boundary events = %q, want %q", got, want)
+	}
+}
+
 func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
 	callerCtx := t.Context()
 	var sentCommand string
@@ -86,6 +137,32 @@ func TestStartAgyHarnessPropagatesReadinessFailure(t *testing.T) {
 	}, runtime)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("readiness error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestStartAgyHarnessDoesNotAuthorizeBeforeExecutableResolution(t *testing.T) {
+	wantErr := errors.New("agy is unavailable")
+	authorized := false
+	submitted := false
+	runtime := agyHarnessRuntime{
+		lookPath:    func(string) (string, error) { return "", wantErr },
+		sendCommand: func(string, string) error { submitted = true; return nil },
+	}
+	_, err := startAgyHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "agy", SessionName: "agy-missing", WorkDir: "/tmp",
+		BeforeSpawn: func() error {
+			authorized = true
+			return nil
+		},
+	}, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want executable lookup error %v", err, wantErr)
+	}
+	if authorized {
+		t.Fatal("launch admission was consumed before executable resolution")
+	}
+	if submitted {
+		t.Fatal("launch was submitted after executable resolution failed")
 	}
 }
 
