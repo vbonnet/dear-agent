@@ -570,11 +570,13 @@ func envWrapperEnvironmentAssignment(args []*syntax.Word) (*syntax.Word, string)
 	if !static {
 		return nil, ""
 	}
-	switch command {
+	switch filepath.Base(command) {
 	case "command", "builtin", "exec", "nohup":
 		return envWrapperEnvironmentAssignment(args[1:])
-	case "env", "/usr/bin/env":
+	case "env":
 		return envCommandEnvironmentAssignment(args[1:])
+	}
+	switch command {
 	case "declare", "export", "local", "nameref", "readonly", "typeset":
 		return declarationCommandEnvironmentAssignment(args[1:])
 	default:
@@ -756,10 +758,8 @@ func dynamicNormalizedCommand(
 	if target, reason, handled := nestedCommandWrapperOperand(command, args); handled {
 		return target, reason
 	}
-	switch command {
-	case "command", "builtin", "exec", "nohup":
-		return dynamicWrapperCommand(command, args)
-	case "env", "/usr/bin/env":
+	switch filepath.Base(command) {
+	case "command", "builtin", "exec", "nohup", "env":
 		return dynamicWrapperCommand(command, args)
 	default:
 		return nil, ""
@@ -1773,10 +1773,10 @@ func pipedInterpreterCommand(args []*syntax.Word, env bool) *syntax.Word {
 		if env && strings.Contains(value, "=") {
 			continue
 		}
-		switch value {
+		switch filepath.Base(value) {
 		case "command", "builtin", "exec", "nohup":
-			return pipedShellWrapperCommand(value, args[index+1:])
-		case "env", "/usr/bin/env":
+			return pipedShellWrapperCommand(filepath.Base(value), args[index+1:])
+		case "env":
 			return pipedInterpreterCommand(args[index+1:], true)
 		}
 		if filepath.Base(value) == "xargs" && xargsRunsCustomCommand(args[index+1:]) {

