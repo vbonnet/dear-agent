@@ -18,17 +18,19 @@ type mockAccessData struct {
 
 // MockAdapter is an in-memory implementation of the Adapter interface for testing
 type MockAdapter struct {
-	mu       sync.RWMutex
-	sessions map[string]*manifest.Manifest
-	access   map[string]*mockAccessData
-	closed   bool
+	mu               sync.RWMutex
+	sessions         map[string]*manifest.Manifest
+	nameReservations map[string]string
+	access           map[string]*mockAccessData
+	closed           bool
 }
 
 // NewMockAdapter creates a new in-memory mock adapter for testing
 func NewMockAdapter() *MockAdapter {
 	return &MockAdapter{
-		sessions: make(map[string]*manifest.Manifest),
-		access:   make(map[string]*mockAccessData),
+		sessions:         make(map[string]*manifest.Manifest),
+		nameReservations: make(map[string]string),
+		access:           make(map[string]*mockAccessData),
 	}
 }
 
@@ -50,6 +52,11 @@ func (m *MockAdapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("session already exists: %s", session.SessionID)
 	}
 	if session.Name != "" && session.Lifecycle != manifest.LifecycleArchived {
+		if owner, reserved := m.nameReservations[session.Name]; reserved && owner != session.SessionID {
+			return &SessionNameConflictError{Name: session.Name}
+		}
+		m.nameReservations[session.Name] = session.SessionID
+		defer delete(m.nameReservations, session.Name)
 		for _, existing := range m.sessions {
 			if existing.Lifecycle != manifest.LifecycleArchived && existing.Name == session.Name {
 				return &SessionNameConflictError{Name: session.Name}
@@ -59,6 +66,49 @@ func (m *MockAdapter) CreateSession(session *manifest.Manifest) error {
 
 	// Store a deep copy to prevent external modifications
 	m.sessions[session.SessionID] = m.copyManifest(session)
+	return nil
+}
+
+// ReserveSessionName atomically leases an active name in the mock store.
+func (m *MockAdapter) ReserveSessionName(sessionID, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return fmt.Errorf("adapter is closed")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if name == "" {
+		return nil
+	}
+	if owner, reserved := m.nameReservations[name]; reserved {
+		if owner == sessionID {
+			return nil
+		}
+		return &SessionNameConflictError{Name: name}
+	}
+	for _, existing := range m.sessions {
+		if existing.Lifecycle != manifest.LifecycleArchived && existing.Name == name {
+			return &SessionNameConflictError{Name: name}
+		}
+	}
+	m.nameReservations[name] = sessionID
+	return nil
+}
+
+// ReleaseSessionNameReservation releases a mock operation lease.
+func (m *MockAdapter) ReleaseSessionNameReservation(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return fmt.Errorf("adapter is closed")
+	}
+	for name, owner := range m.nameReservations {
+		if owner == sessionID {
+			delete(m.nameReservations, name)
+		}
+	}
 	return nil
 }
 
@@ -219,6 +269,7 @@ func (m *MockAdapter) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions = make(map[string]*manifest.Manifest)
+	m.nameReservations = make(map[string]string)
 	m.access = make(map[string]*mockAccessData)
 	m.closed = false
 }

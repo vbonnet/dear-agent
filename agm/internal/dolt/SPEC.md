@@ -26,7 +26,7 @@
 
 **DOLTR-12** When AGM stores a sandboxed session, the storage adapter shall round-trip the complete non-secret sandbox ownership record across create, read, and update so a later archive reload retains the exact sandbox ID, provider, cleanup boundary, mapped working directory, enabled state, and creation time required for owned cleanup; if any ownership field or boundary invariant is invalid, the adapter shall not install the record as cleanup authority.
 
-**DOLTR-13** When AGM checks whether a new session name is available, the Dolt-backed helper shall list only non-archived session records in the current workspace and shall report a collision when any record's user-visible name matches the requested name; session registration shall also enforce that invariant atomically with a workspace-scoped unique key so concurrent creators cannot both commit the same non-archived name.
+**DOLTR-13** When AGM checks whether a new session name is available, the Dolt-backed helper shall list only non-archived session records in the current workspace and shall report a collision when any record's user-visible name matches the requested name; before any launch side effect, creation shall atomically lease that workspace-scoped name in a dedicated reservation table, registration shall consume the lease in its durable transaction, failed creation shall release it, and installing this mechanism shall preserve every legacy duplicate session row unchanged.
 
 ## BDD Traceability
 

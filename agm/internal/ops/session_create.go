@@ -128,8 +128,8 @@ type CreateSessionRuntime interface {
 	Complete(context.Context, CreateSessionCompletion) error
 }
 
-// SessionStorageOpener lazily constructs surface-specific storage after the
-// harness has launched. The returned cleanup runs after rollback.
+// SessionStorageOpener lazily constructs surface-specific storage before any
+// harness launch side effect. The returned cleanup runs after rollback.
 type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
 
 // CodexThreadCreator adapts the external Codex remote-control dependency.
@@ -191,6 +191,7 @@ type createSessionState struct {
 	createdTmux        bool
 	createdManifestDir bool
 	registered         bool
+	nameReserved       bool
 	store              dolt.Storage
 	storageCleanup     func()
 }
@@ -198,6 +199,9 @@ type createSessionState struct {
 func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) {
 	if operationErr != nil {
 		rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered)
+	}
+	if state.nameReserved {
+		releaseCreateSessionNameReservation(state.store, sessionID)
 	}
 	if state.storageCleanup != nil {
 		state.storageCleanup()
@@ -378,6 +382,10 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err := prepareCreateStorage(callCtx, opCtx, req, params.name, state); err != nil {
 		return nil, err
 	}
+	state.nameReserved, err = reserveCreateSessionName(state.store, sessionID, params.name)
+	if err != nil {
+		return nil, err
+	}
 	exists, err := prepareCreateTmux(opCtx, req, params.name)
 	if err != nil {
 		return nil, err
@@ -424,6 +432,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		state.registered, err = registerCreatedSession(req, state.store, m)
 		if err != nil {
 			return nil, err
+		}
+		if state.registered {
+			state.nameReserved = false
 		}
 	}
 	// Native identity is now persisted in registration. Release before runtime
@@ -683,6 +694,34 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 	return true, nil
 }
 
+func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool, error) {
+	if store == nil || name == "" {
+		return false, nil
+	}
+	reservations, ok := store.(dolt.SessionNameReservationStore)
+	if !ok {
+		return false, ErrStorageError("storage.ReserveSessionName", fmt.Errorf("session storage does not support atomic name reservations"))
+	}
+	if err := reservations.ReserveSessionName(sessionID, name); err != nil {
+		var conflict *dolt.SessionNameConflictError
+		if errors.As(err, &conflict) {
+			return false, sessionExistsError(name)
+		}
+		return false, ErrStorageError("storage.ReserveSessionName", err)
+	}
+	return true, nil
+}
+
+func releaseCreateSessionNameReservation(store dolt.Storage, sessionID string) {
+	reservations, ok := store.(dolt.SessionNameReservationStore)
+	if !ok {
+		return
+	}
+	if err := reservations.ReleaseSessionNameReservation(sessionID); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to release session-name reservation %q during create cleanup: %v\n", sessionID, err)
+	}
+}
+
 func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {
 	if opCtx.CreationRuntime != nil {
 		return opCtx.CreationRuntime.Complete(callCtx, CreateSessionCompletion{
@@ -934,10 +973,10 @@ func rollbackCreateSession(opCtx *OpContext, req *CreateSessionRequest, store do
 				fmt.Fprintf(os.Stderr, "Warning: failed to kill tmux session %q during create rollback: %v\n", name, err)
 			}
 		}
-		if createdManifestDir && req.ManifestDir != "" {
-			if err := os.RemoveAll(req.ManifestDir); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove manifest directory %q during create rollback: %v\n", req.ManifestDir, err)
-			}
+	}
+	if createdManifestDir && req.ManifestDir != "" {
+		if err := os.RemoveAll(req.ManifestDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove manifest directory %q during create rollback: %v\n", req.ManifestDir, err)
 		}
 	}
 }

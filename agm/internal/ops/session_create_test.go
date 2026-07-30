@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,9 +30,13 @@ type createMockStorage struct {
 	listFilter  *dolt.SessionFilter
 	listErr     error
 	createErr   error
+	reserveErr  error
 	deleteErr   error
 	createOrder *[]string
 	onCreate    func()
+	onReserve   func()
+	reserved    []string
+	released    []string
 }
 
 type createOnlyTmux struct {
@@ -210,6 +215,22 @@ func (s *createMockStorage) Delete(string) error                                
 func (s *createMockStorage) List(*manifest.Filter) ([]*manifest.Manifest, error) { return nil, nil }
 func (s *createMockStorage) Close() error                                        { return nil }
 func (s *createMockStorage) ApplyMigrations() error                              { return nil }
+
+func (s *createMockStorage) ReserveSessionName(sessionID, name string) error {
+	if s.createOrder != nil {
+		*s.createOrder = append(*s.createOrder, "reserve")
+	}
+	s.reserved = append(s.reserved, sessionID+":"+name)
+	if s.onReserve != nil {
+		s.onReserve()
+	}
+	return s.reserveErr
+}
+
+func (s *createMockStorage) ReleaseSessionNameReservation(sessionID string) error {
+	s.released = append(s.released, sessionID)
+	return nil
+}
 
 func testHarnessCommand(harness, model, sessionName, workDir string, persistent bool) string {
 	return BuildHarnessLaunchCommand(HarnessLaunchSpec{
@@ -390,6 +411,12 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
 		},
 	}
+	store.onReserve = func() {
+		if !locked || promptDeliveries != 0 {
+			t.Fatalf("reservation state = locked:%t prompt deliveries:%d", locked, promptDeliveries)
+		}
+		order = append(order, "reserve")
+	}
 	store.onCreate = func() {
 		if !locked || promptDeliveries != 1 || store.created[0].Agy == nil || store.created[0].Agy.ConversationID != "new-native-id" {
 			t.Fatalf("registration state = locked:%t prompt deliveries:%d manifest:%+v", locked, promptDeliveries, store.created[0])
@@ -419,7 +446,7 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 	if result.SessionID != "agy-lazy-id" || promptDeliveries != 1 {
 		t.Fatalf("result/prompt deliveries = %+v/%d", result, promptDeliveries)
 	}
-	wantOrder := []string{"lock", "snapshot", "launch", "prompt", "discover", "register", "unlock", "complete"}
+	wantOrder := []string{"lock", "snapshot", "reserve", "launch", "prompt", "discover", "register", "unlock", "complete"}
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("AGY lazy identity lifecycle = %v, want %v", order, wantOrder)
 	}
@@ -469,8 +496,8 @@ func TestCreateSession_AgyBootstrapFailureRollsBackBeforeDiscoveryAndRegistratio
 	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
 		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
 	}
-	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-failure"] {
-		t.Fatalf("post-failure state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-failure"])
+	if discovered || completed || len(store.created) != 0 || len(store.released) != 1 || tmuxMock.Sessions["agy-bootstrap-failure"] {
+		t.Fatalf("post-failure state = discovered:%t completed:%t registrations:%d released:%v tmux:%t", discovered, completed, len(store.created), store.released, tmuxMock.Sessions["agy-bootstrap-failure"])
 	}
 }
 
@@ -504,8 +531,8 @@ func TestCreateSession_AgyCancellationDuringIdentityBootstrapRollsBackWithCaller
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
 	}
-	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-cancel"] {
-		t.Fatalf("post-cancel state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-cancel"])
+	if discovered || completed || len(store.created) != 0 || len(store.released) != 1 || tmuxMock.Sessions["agy-bootstrap-cancel"] {
+		t.Fatalf("post-cancel state = discovered:%t completed:%t registrations:%d released:%v tmux:%t", discovered, completed, len(store.created), store.released, tmuxMock.Sessions["agy-bootstrap-cancel"])
 	}
 }
 
@@ -932,6 +959,96 @@ func TestCreateSession_RejectsDuplicateStoredSessionNameBeforeTmuxCreate(t *test
 	}
 }
 
+func TestCreateSession_AtomicNameConflictPreventsQueuedCurrentTmuxLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["concurrent-name"] = true
+	store := &createMockStorage{
+		reserveErr: &dolt.SessionNameConflictError{Name: "concurrent-name"},
+	}
+	launched := false
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launched = true
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "concurrent-name", Harness: "claude-code", Model: "sonnet",
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, AllowEmptyPrompt: true,
+		ReuseExistingTmux: true, RequireStorage: true,
+	})
+	var opErr *OpError
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionExists {
+		t.Fatalf("CreateSessionWithContext() error = %v, want %s", err, ErrCodeSessionExists)
+	}
+	if launched || len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("losing creator launched harness: runtime=%t commands=%v", launched, tmuxMock.SentCommands)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("losing creator reached registration: %d writes", len(store.created))
+	}
+	if !tmuxMock.Sessions["concurrent-name"] {
+		t.Fatal("name-conflict rollback removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_ConcurrentCurrentTmuxCreatorsLaunchExactlyOnce(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["concurrent-name"] = true
+	store := dolt.NewMockAdapter()
+	workDir := t.TempDir()
+	var launches atomic.Int32
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launches.Add(1)
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, sessionID := range []string{"creator-a", "creator-b"} {
+		go func(id string) {
+			<-start
+			_, err := CreateSessionWithContext(t.Context(), &OpContext{
+				Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+			}, &CreateSessionRequest{
+				Cwd: workDir, Title: "concurrent-name", Harness: "claude-code", Model: "sonnet",
+				SessionID: id, Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+				AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+			})
+			results <- err
+		}(sessionID)
+	}
+	close(start)
+
+	var successes, conflicts int
+	for range 2 {
+		err := <-results
+		if err == nil {
+			successes++
+			continue
+		}
+		var opErr *OpError
+		if errors.As(err, &opErr) && opErr.Code == ErrCodeSessionExists {
+			conflicts++
+			continue
+		}
+		t.Fatalf("concurrent creator error = %v", err)
+	}
+	if successes != 1 || conflicts != 1 || launches.Load() != 1 {
+		t.Fatalf(
+			"concurrent creators = %d success, %d conflict, %d launch; want 1, 1, 1",
+			successes,
+			conflicts,
+			launches.Load(),
+		)
+	}
+}
+
 func TestCreateSession_FailsWithoutTmux(t *testing.T) {
 	dir := t.TempDir()
 	ctx := &OpContext{OutputMode: "json"}
@@ -1022,7 +1139,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"storage", "launch", "ready", "register", "complete", "cleanup"}
+	want := []string{"storage", "reserve", "launch", "ready", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
@@ -1145,6 +1262,12 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	var order []string
 	locked := false
 	store := &createMockStorage{}
+	store.onReserve = func() {
+		if !locked {
+			t.Fatal("AGY workspace lock was released before reservation")
+		}
+		order = append(order, "reserve")
+	}
 	store.onCreate = func() {
 		if !locked {
 			t.Fatal("AGY workspace lock was released before registration")
@@ -1225,7 +1348,7 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	if result.Cwd != dir {
 		t.Fatalf("result cwd = %q, want canonical workspace %q", result.Cwd, dir)
 	}
-	want := []string{"lock", "snapshot", "launch", "discover", "unlock", "complete"}
+	want := []string{"lock", "snapshot", "reserve", "launch", "discover", "unlock", "complete"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
 	}
@@ -1274,8 +1397,8 @@ func TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration(t 
 	if tmuxMock.Sessions["agy-discovery-failure"] {
 		t.Fatal("tmux survived failed identity discovery")
 	}
-	if len(store.created) != 0 {
-		t.Fatalf("registered manifests after failed identity discovery = %d, want 0", len(store.created))
+	if len(store.created) != 0 || !slices.Contains(store.released, "agy-discovery-failure-id") {
+		t.Fatalf("reservation rollback after failed identity discovery = created:%d released:%v", len(store.created), store.released)
 	}
 }
 
@@ -1329,7 +1452,7 @@ func TestCreateSession_NoRuntimeWaitsBeforeRegistrationAndPrompt(t *testing.T) {
 	if !result.Created {
 		t.Fatal("CreateSession() did not report creation")
 	}
-	want := []string{"launch", "ready", "register", "prompt"}
+	want := []string{"reserve", "launch", "ready", "register", "prompt"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("creation order = %v, want %v", order, want)
 	}
@@ -1354,13 +1477,13 @@ func TestCreateSession_ReadinessFailureRollsBackBeforeRegistrationOrPrompt(t *te
 	if tmuxMock.Sessions["readiness-failure"] {
 		t.Fatal("new tmux session survived readiness failure")
 	}
-	if len(store.created) != 0 {
-		t.Fatalf("readiness failure registered sessions: %d", len(store.created))
+	if len(store.created) != 0 || len(store.released) != 1 {
+		t.Fatalf("readiness failure reservation rollback = created:%d released:%v", len(store.created), store.released)
 	}
 	if len(tmuxMock.SentCommands) != 1 {
 		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
 	}
-	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+	if want := []string{"reserve", "launch", "ready"}; !reflect.DeepEqual(order, want) {
 		t.Fatalf("creation order = %v, want %v", order, want)
 	}
 }
@@ -1384,13 +1507,13 @@ func TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt(t *te
 	if tmuxMock.Sessions["hook-review"] {
 		t.Fatal("new tmux session survived Codex hook review failure")
 	}
-	if len(store.created) != 0 {
-		t.Fatalf("Codex hook review registered sessions: %d", len(store.created))
+	if len(store.created) != 0 || len(store.released) != 1 {
+		t.Fatalf("Codex hook review reservation rollback = created:%d released:%v", len(store.created), store.released)
 	}
 	if len(tmuxMock.SentCommands) != 1 {
 		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
 	}
-	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+	if want := []string{"reserve", "launch", "ready"}; !reflect.DeepEqual(order, want) {
 		t.Fatalf("creation order = %v, want %v", order, want)
 	}
 }
@@ -1440,9 +1563,10 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 		name             string
 		stage            string
 		wantRegistration bool
+		wantRelease      bool
 	}{
-		{name: "launch", stage: "launch"},
-		{name: "registration", stage: "registration"},
+		{name: "launch", stage: "launch", wantRelease: true},
+		{name: "registration", stage: "registration", wantRelease: true},
 		{name: "completion", stage: "completion", wantRegistration: true},
 	}
 	for _, tt := range tests {
@@ -1484,6 +1608,9 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 			}
 			if got := len(store.deleted); got != boolInt(tt.wantRegistration) {
 				t.Fatalf("storage deletes = %d, want %d", got, boolInt(tt.wantRegistration))
+			}
+			if got := len(store.released); got != boolInt(tt.wantRelease) {
+				t.Fatalf("reservation releases = %d, want %d", got, boolInt(tt.wantRelease))
 			}
 		})
 	}

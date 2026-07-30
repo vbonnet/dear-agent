@@ -114,7 +114,7 @@ func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, any, 
 }
 
 // CreateSession inserts a new session into the database
-func (a *Adapter) CreateSession(session *manifest.Manifest) error {
+func (a *Adapter) CreateSession(session *manifest.Manifest) (retErr error) {
 	if session == nil {
 		return fmt.Errorf("session cannot be nil")
 	}
@@ -127,6 +127,28 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
+	reservationHeld := session.Name != "" && session.Lifecycle != manifest.LifecycleArchived
+	if reservationHeld {
+		if err := a.ReserveSessionName(session.SessionID, session.Name); err != nil {
+			return err
+		}
+		defer func() {
+			if !reservationHeld {
+				return
+			}
+			if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
+				retErr = errors.Join(retErr, err)
+			}
+		}()
+	}
+	if err := a.insertSessionRegistration(session, reservationHeld); err != nil {
+		return err
+	}
+	reservationHeld = false
+	return nil
+}
+
+func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservationHeld bool) error {
 	contextTags, metadataJSON, monitorsJSON, err := marshalCreateSessionJSON(session)
 	if err != nil {
 		return err
@@ -172,7 +194,18 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		model = "claude-sonnet-4-5"
 	}
 
-	_, err = a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
+	if err != nil {
+		return fmt.Errorf("begin session registration: %w", err)
+	}
+	defer tx.Rollback()
+	if reservationHeld {
+		if err := reservationOwnedBy(tx, a.workspace, session.SessionID, session.Name); err != nil {
+			return err
+		}
+	}
+
+	_, err = tx.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.SessionID,
 		session.CreatedAt,
 		session.UpdatedAt,
@@ -200,22 +233,22 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 	)
 
 	if err != nil {
-		if isUniqueConstraintError(err) {
-			var exists int
-			lookupErr := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
-				`SELECT 1 FROM agm_sessions
-				 WHERE workspace = ? AND name = ? AND status != 'archived'
-				 LIMIT 1`,
-				a.workspace,
-				session.Name,
-			).Scan(&exists)
-			if lookupErr == nil {
-				return &SessionNameConflictError{Name: session.Name}
-			}
-		}
 		return fmt.Errorf("failed to insert session: %w", err)
 	}
 
+	if reservationHeld {
+		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+			`DELETE FROM agm_session_name_reservations
+			 WHERE workspace = ? AND session_id = ?`,
+			a.workspace,
+			session.SessionID,
+		); err != nil {
+			return fmt.Errorf("finalize session-name reservation: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session registration: %w", err)
+	}
 	return nil
 }
 

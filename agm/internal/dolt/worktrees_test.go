@@ -252,28 +252,26 @@ func TestMigration018AddsTmuxSessionRevision(t *testing.T) {
 	t.Fatal("migration 018 not found")
 }
 
-func TestMigrations019And020EnforceUniqueNonArchivedSessionNames(t *testing.T) {
-	found := make(map[int]Migration)
+func TestMigration019AddsSessionNameReservations(t *testing.T) {
+	var found Migration
 	for _, migration := range AllMigrations() {
-		found[migration.Version] = migration
+		if migration.Version == 19 {
+			found = migration
+			break
+		}
 	}
 	for _, required := range []string{
-		"GENERATED ALWAYS AS",
-		"status != 'archived'",
-		"non_archived_name",
+		"CREATE TABLE IF NOT EXISTS agm_session_name_reservations",
+		"PRIMARY KEY (workspace, name)",
+		"UNIQUE KEY uq_agm_session_name_reservation_owner",
+		"expires_at",
 	} {
-		if !strings.Contains(found[19].SQL, required) {
+		if !strings.Contains(found.SQL, required) {
 			t.Fatalf("migration 019 lacks %q", required)
 		}
 	}
-	for _, required := range []string{
-		"UNIQUE KEY uq_agm_sessions_workspace_non_archived_name",
-		"workspace",
-		"non_archived_name",
-	} {
-		if !strings.Contains(found[20].SQL, required) {
-			t.Fatalf("migration 020 lacks %q", required)
-		}
+	if !strings.Contains(found.PreConditionSQL, "TABLE_NAME = 'agm_session_name_reservations'") {
+		t.Fatalf("migration 019 precondition does not guard the reservation table: %q", found.PreConditionSQL)
 	}
 }
 

@@ -79,6 +79,141 @@ func TestSQLiteCreateSessionAtomicallyRejectsDuplicateNonArchivedName(t *testing
 	}
 }
 
+func TestSQLiteNameReservationsPreserveLegacyDuplicates(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	for _, id := range []string{"legacy-a", "legacy-b"} {
+		if _, err := adapter.Conn().Exec(
+			`INSERT INTO agm_sessions (id, status, workspace, name, is_test)
+			 VALUES (?, 'active', 'test', 'legacy-duplicate', TRUE)`,
+			id,
+		); err != nil {
+			t.Fatalf("seed legacy duplicate %q: %v", id, err)
+		}
+	}
+
+	now := time.Now()
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "unrelated",
+		Name:      "unrelated-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("unrelated registration with legacy duplicates: %v", err)
+	}
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "third-duplicate",
+		Name:      "legacy-duplicate",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err == nil {
+		t.Fatal("CreateSession() accepted a new legacy-duplicate row")
+	} else {
+		var conflict *SessionNameConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("CreateSession() duplicate error = %v, want SessionNameConflictError", err)
+		}
+	}
+
+	var duplicateCount int
+	if err := adapter.Conn().QueryRow(
+		`SELECT COUNT(*) FROM agm_sessions
+		 WHERE workspace = 'test' AND name = 'legacy-duplicate'`,
+	).Scan(&duplicateCount); err != nil {
+		t.Fatalf("count preserved legacy duplicates: %v", err)
+	}
+	if duplicateCount != 2 {
+		t.Fatalf("legacy duplicate rows = %d, want 2 preserved", duplicateCount)
+	}
+}
+
+func TestSQLiteSessionNameReservationPrecedesAndIsConsumedByRegistration(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	if err := adapter.ReserveSessionName("winner", "reserved-name"); err != nil {
+		t.Fatalf("ReserveSessionName(winner) error: %v", err)
+	}
+	err = adapter.ReserveSessionName("loser", "reserved-name")
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("ReserveSessionName(loser) error = %v, want SessionNameConflictError", err)
+	}
+
+	now := time.Now()
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "winner",
+		Name:      "reserved-name",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateSession(winner) error: %v", err)
+	}
+	var reservations int
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE session_id = ?`,
+		"winner",
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count consumed reservations: %v", err)
+	}
+	if reservations != 0 {
+		t.Fatalf("winner reservations after registration = %d, want 0", reservations)
+	}
+	if err := adapter.ReserveSessionName("loser", "reserved-name"); !errors.As(err, &conflict) {
+		t.Fatalf("ReserveSessionName(loser after registration) error = %v, want conflict", err)
+	}
+}
+
+func TestSQLiteSessionNameReservationsPreserveLegacyDuplicateRows(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	for _, id := range []string{"legacy-a", "legacy-b"} {
+		if _, err := adapter.conn.Exec(
+			`INSERT INTO agm_sessions
+			 (id, created_at, updated_at, status, workspace, name)
+			 VALUES (?, ?, ?, 'active', 'test', 'legacy-duplicate')`,
+			id,
+			now,
+			now,
+		); err != nil {
+			t.Fatalf("insert legacy duplicate %s: %v", id, err)
+		}
+	}
+
+	err = adapter.ReserveSessionName("new-session", "legacy-duplicate")
+	var conflict *SessionNameConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("ReserveSessionName() error = %v, want SessionNameConflictError", err)
+	}
+	var activeRows, reservations int
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_sessions
+		 WHERE workspace = 'test' AND name = 'legacy-duplicate' AND status != 'archived'`,
+	).Scan(&activeRows); err != nil {
+		t.Fatalf("count legacy duplicates: %v", err)
+	}
+	if err := adapter.conn.QueryRow(
+		`SELECT COUNT(*) FROM agm_session_name_reservations WHERE name = 'legacy-duplicate'`,
+	).Scan(&reservations); err != nil {
+		t.Fatalf("count rolled-back reservations: %v", err)
+	}
+	if activeRows != 2 || reservations != 0 {
+		t.Fatalf("legacy duplicate state = active:%d reservations:%d, want 2/0", activeRows, reservations)
+	}
+}
+
 func TestSQLiteGetSessionByUUID_ClaudeUUID(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

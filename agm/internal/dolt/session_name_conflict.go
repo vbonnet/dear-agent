@@ -8,8 +8,6 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-const nonArchivedSessionNameIndex = "uq_agm_sessions_workspace_non_archived_name"
-
 // SessionNameConflictError reports an atomic durable collision on a
 // non-archived session name.
 type SessionNameConflictError struct {
@@ -29,6 +27,6 @@ func isUniqueConstraintError(err error) bool {
 		return true
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, nonArchivedSessionNameIndex) ||
+	return strings.Contains(message, "uq_agm_session_name_reservation_owner") ||
 		strings.Contains(message, "unique constraint failed")
 }
