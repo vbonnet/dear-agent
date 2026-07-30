@@ -31,8 +31,8 @@ var (
 	explicitRelativePath  = regexp.MustCompile(`(?:^|[\s"'();|&])((?:\.\.?/|~/)[A-Za-z0-9._/-]+)`)
 	absolutePathToken     = regexp.MustCompile(`(?:^|[\s"'();|&])(/[A-Za-z0-9._/-]+)`)
 	scriptCommandPath     = regexp.MustCompile(`(?m)(?:^|[;\n]|&&|\|\|)[\t ]*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*((?:\.\.?/|~/)[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+|/[A-Za-z0-9._/-]+)`)
-	interpreterOperand    = regexp.MustCompile(`(?:^|[\s"'();|&])(?:(?:/bin/|/usr/bin/)?(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node))[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*([^ \t\r\n;|&]+)`)
-	envInterpreterOperand = regexp.MustCompile(`(?:^|[\s"'();|&])/usr/bin/env[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node)[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*([^ \t\r\n;|&]+)`)
+	interpreterOperand    = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*(?:(?:/bin/|/usr/bin/)?(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node))[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
+	envInterpreterOperand = regexp.MustCompile(`(?m)(?:^|[;\n({|&])[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t;|&]+[\t ]+)*/usr/bin/env[\t ]+(?:--?[A-Za-z0-9_-]+[\t ]+)*(?:sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|node)[\t ]+((?:--?[A-Za-z0-9_-]+[\t ]+)*)([^ \t\r\n;|&]+)`)
 	sourceOperand         = regexp.MustCompile(`(?m)(?:^|[;\n({]|&&|\|\|)[\t ]*(?:(?:if|then|elif|while|until|do|exec|command|!)[\t ]+)*(?:source|\.)[\t ]+([^ \t\r\n;|&]+)`)
 )
 
@@ -463,10 +463,12 @@ func rejectMutableScriptOperands(script string) error {
 	for _, matcher := range []*regexp.Regexp{
 		envInterpreterOperand,
 		interpreterOperand,
-		sourceOperand,
 	} {
 		for _, match := range matcher.FindAllStringSubmatch(script, -1) {
-			operand := strings.Trim(match[1], `"'`)
+			if interpreterRunsInlineCode(strings.Fields(match[1])) {
+				continue
+			}
+			operand := strings.Trim(match[2], `"'`)
 			if operand == "" || (filepath.IsAbs(operand) && isSystemRuntimePath(operand)) {
 				continue
 			}
@@ -476,7 +478,27 @@ func rejectMutableScriptOperands(script string) error {
 			)
 		}
 	}
+	for _, match := range sourceOperand.FindAllStringSubmatch(script, -1) {
+		operand := strings.Trim(match[1], `"'`)
+		if operand == "" || (filepath.IsAbs(operand) && isSystemRuntimePath(operand)) {
+			continue
+		}
+		return fmt.Errorf(
+			"unsupported mutable interpreter or sourced-file operand %q; trusted hook scripts must reference committed operands through AGM_CODEX_HOOK_ROOT",
+			operand,
+		)
+	}
 	return nil
+}
+
+func interpreterRunsInlineCode(options []string) bool {
+	for _, option := range options {
+		switch option {
+		case "-c", "-e", "--eval", "--print", "-p":
+			return true
+		}
+	}
+	return false
 }
 
 func isSystemRuntimePath(path string) bool {

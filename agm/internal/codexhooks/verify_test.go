@@ -243,6 +243,19 @@ func TestReferencedScriptAssetsAllowsCommittedInterpreterOperand(t *testing.T) {
 	}
 }
 
+func TestReferencedScriptAssetsAllowsInterpreterInlineCode(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\n/bin/sh -c 'printf ok'\n",
+		"#!/bin/sh\n/usr/bin/env bash -c 'printf ok'\n",
+		"#!/bin/sh\npython3 -c 'print(1)'\n",
+		"#!/bin/sh\nprintf '%s\\n' 'use sh and bash carefully'\n",
+	} {
+		if _, err := referencedScriptAssets([]byte(script)); err != nil {
+			t.Fatalf("referencedScriptAssets(%q) error = %v, want inline code allowed", script, err)
+		}
+	}
+}
+
 func TestRepositoryEnabledHookScriptsHaveClosedRuntimeDependencies(t *testing.T) {
 	repositoryRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	manifest, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(hooksManifestPath)))
