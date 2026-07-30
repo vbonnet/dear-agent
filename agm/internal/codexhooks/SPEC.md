@@ -36,7 +36,7 @@ descendant script's later process execution and is not treated as that control.
 
 **CHOOK-10** When an ordinary non-bypassed Codex session runs from a repository subdirectory, the system shall resolve every project hook relative to the repository project root instead of that subdirectory.
 
-**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, and shall reject executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter.
+**CHOOK-11** When AGM loads attested command hooks into a bypassed Codex session, the system shall invoke every command through an absolute OS shell with a fixed hook-only executable search path, independent of the caller's interactive `PATH`, reject executable referenced hook assets whose interpreter is not an allowed absolute OS interpreter, and keep required hook helpers reachable only through an operator-owned absolute installation path.
 
 ## BDD Traceability
 

@@ -65,7 +65,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
-#   install-bead-close-guard Install bead-close-guard to ~/go/bin
+#   install-bead-close-guard Install bead-close-guard to ~/go/bin and the operator-owned Codex hook path
 #   build-drift-check       Build the legacy deployment-drift detector (cmd/drift-check)
 #   install-drift-check     Install drift-check to ~/go/bin
 #   deploy-status           Manifest-driven drift audit (dear-deploy status: hooks/plists + binary version stamps)
@@ -563,6 +563,19 @@ build-bead-close-guard:
 	@echo "Built: bin/bead-close-guard"
 
 install-bead-close-guard: build-bead-close-guard
+	@set -eu; \
+		test -t 0 || { echo "refusing non-interactive privileged bead-close guard installation" >&2; exit 2; }; \
+		root_group="$$(id -gn 0)"; \
+		/usr/bin/sudo -k; \
+		if /usr/bin/sudo -n -v 2>/dev/null; then \
+			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
+			exit 2; \
+		fi; \
+		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
+		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 bin/bead-close-guard /usr/local/libexec/dear-agent-bead-close-guard; \
+		/usr/bin/sudo -k; \
+		echo "Installed operator-owned Codex hook guard: /usr/local/libexec/dear-agent-bead-close-guard"
 	$(call install-go-bin,bin/bead-close-guard)
 
 # Detects deployment drift: deployed artifacts (Claude Code hooks, launchd

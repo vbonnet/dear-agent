@@ -109,8 +109,13 @@ if [ -z "$bead_id" ]; then
   exit 2
 fi
 
-# Locate bead-close-guard binary
-guard="$(command -v bead-close-guard 2>/dev/null || true)"
+# Prefer the freshly authenticated, root-owned installation used by attested
+# Codex hooks. The PATH fallback preserves ordinary non-bypassed development
+# sessions without making the bypassed path depend on ~/go/bin.
+guard="/usr/local/libexec/dear-agent-bead-close-guard"
+if [ ! -x "$guard" ]; then
+  guard="$(command -v bead-close-guard 2>/dev/null || true)"
+fi
 if [ -z "$guard" ]; then
   # Fail open: guard not installed, allow the close
   exit 0
