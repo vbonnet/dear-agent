@@ -179,9 +179,9 @@ This proposal does not yet supersede the active permission-parity contract.
 Until the Cedar evaluator, migration, and acceptance gates land together,
 `agm/internal/permissionparity/SPEC.md` and manifest `permission_policy`
 projections, `internal/fsguard` policy/configuration and pretool Bash/filesystem
-guards, plus `~/.config/agm/gateway.yaml`, `agm/internal/gateway/scope.go`, AGM MCP server wiring, their SPECs, and tests remain authoritative.
-Acceptance requires updating or retiring that complete inventory and the harness
-BDD contract in one migration; there must never be two policy owners.
+guards, `agm/internal/rbac` resolution/profiles/SPEC/tests, `agm new`'s `--permission-profile` flag and `ConfigureProjectPermissions`
+native-config writer/call sites/tests, plus `~/.config/agm/gateway.yaml`, `agm/internal/gateway/scope.go`, AGM MCP server wiring, their SPECs, and tests remain authoritative.
+Acceptance requires updating or retiring that complete inventory and the harness BDD contract in one migration; there must never be two policy owners.
 
 ## Implementation acceptance gates
 
@@ -269,8 +269,8 @@ tests must prove all of the following:
     reads/writes, private/control-plane connections, and AGM/tmux/Docker control
     sockets are blocked by the sandbox/socket/trusted-proxy boundary or denied
     before launch, while approved external TCP/UDP endpoints and explicitly
-    allowed stream/datagram test sockets prove liveness. A projectable
-    `git status --short` dispatches; raw-string/post-hoc, opaque-all, or reject-all enforcement does not pass.
+    allowed stream/datagram test sockets prove liveness. Every unrecognized family/type/protocol tuple—including `AF_VSOCK`, raw IP, SCTP, and DCCP—must
+    fail closed before launch in executable tests; unsupported projection never falls through. A projectable `git status --short` dispatches; raw-string/post-hoc, opaque-all, or reject-all enforcement does not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
