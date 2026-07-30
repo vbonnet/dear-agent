@@ -115,8 +115,6 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 		`trap 'cleanup_systemd_staging 129' HUP`,
 		`trap 'cleanup_systemd_staging 130' INT`,
 		`trap 'cleanup_systemd_staging 143' TERM`,
-		`trap - EXIT HUP INT TERM`,
-		`set +e`,
 		`/usr/bin/install -o root -g "$root_group" -m 0755 "$audit_artifact" "$audit_staging"`,
 		`test "$staged_audit_hash" = "$expected_audit_hash"`,
 		`activation_started=1`,
@@ -136,6 +134,17 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	}
 	if strings.Contains(rootInstaller, "sudo") {
 		t.Fatal("fixed root installer recursively invokes sudo")
+	}
+	cleanupStart := strings.Index(rootInstaller, "cleanup_systemd_staging()")
+	signalTraps := strings.Index(rootInstaller, `trap 'cleanup_systemd_staging "$?"' EXIT`)
+	if cleanupStart < 0 || signalTraps <= cleanupStart {
+		t.Fatal("fixed root installer lacks a bounded cleanup function")
+	}
+	cleanup := rootInstaller[cleanupStart:signalTraps]
+	if clear := strings.Index(cleanup, "trap - EXIT HUP INT TERM"); clear < 0 {
+		t.Fatal("root transaction cleanup does not clear signal traps")
+	} else if bestEffort := strings.Index(cleanup, "set +e"); bestEffort < clear {
+		t.Fatal("root transaction cleanup does not clear traps before best-effort rollback")
 	}
 
 	cmd := exec.Command(
