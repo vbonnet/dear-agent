@@ -1,4 +1,5 @@
 # SPEC: pkg/override/SPEC.md
+# RELATED-SPEC: cmd/override-ledger-append/SPEC.md
 Feature: Dangerous override governance
   Every escape hatch that switches off a safety control travels one contract:
   a stated reason, an expiring human approval, a ledger entry, and a recurring
@@ -11,5 +12,6 @@ Feature: Dangerous override governance
     Then dangerous override package "<package>" should have a co-located SPEC
 
     Examples:
-      | package      |
-      | pkg/override |
+      | package                    |
+      | cmd/override-ledger-append |
+      | pkg/override               |

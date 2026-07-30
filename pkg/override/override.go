@@ -59,22 +59,43 @@ func Kinds() []Kind { return []Kind{KindCodexHookTrust, KindAdmissionBrake} }
 // Valid reports whether k is a known override kind.
 func (k Kind) Valid() bool { return slices.Contains(Kinds(), k) }
 
-// MinReasonRunes is the shortest accepted reason. It is long enough to make
-// "because" and "fix" fail while staying short enough for a real one-liner.
-const MinReasonRunes = 16
+const (
+	// MinReasonRunes is the shortest accepted reason. It is long enough to
+	// make "because" and "fix" fail while staying short enough for a real
+	// one-liner.
+	MinReasonRunes = 16
+
+	// MaxReasonBytes bounds the operator-controlled explanation before it can
+	// cross a privileged append boundary.
+	MaxReasonBytes = 1024
+
+	// MaxActorBytes keeps the actor identifier from becoming a second place
+	// for an unbounded explanation.
+	MaxActorBytes = 256
+
+	// MaxSessionBytes bounds the optional session identifier.
+	MaxSessionBytes = 256
+
+	// MaxLedgerRecordBytes is the complete canonical JSONL record, including
+	// its trailing newline. The privileged helper enforces the same limit.
+	MaxLedgerRecordBytes = 2048
+)
 
 // Sentinel errors so callers can distinguish "you may not" from "you did it
 // wrong" and print the right remediation.
 var (
-	ErrUnknownKind     = errors.New("unknown override kind")
-	ErrReasonMissing   = errors.New("override requires a reason")
-	ErrReasonTooShort  = errors.New("override reason is too short to audit")
-	ErrReasonBoilerpl8 = errors.New("override reason is boilerplate")
-	ErrNoGrant         = errors.New("no human approval on file for this override")
-	ErrGrantExpired    = errors.New("human approval for this override has expired")
-	ErrGrantKind       = errors.New("human approval is for a different override kind")
-	ErrGrantUntrusted  = errors.New("override approval is not in operator-owned storage")
-	ErrLedgerUntrusted = errors.New("override ledger is not in operator-owned storage")
+	ErrUnknownKind          = errors.New("unknown override kind")
+	ErrReasonMissing        = errors.New("override requires a reason")
+	ErrReasonTooShort       = errors.New("override reason is too short to audit")
+	ErrReasonTooLong        = errors.New("override reason is too long to audit safely")
+	ErrReasonBoilerpl8      = errors.New("override reason is boilerplate")
+	ErrLedgerRecord         = errors.New("invalid override ledger record")
+	ErrLedgerRecordTooLarge = errors.New("override ledger record is too large")
+	ErrNoGrant              = errors.New("no human approval on file for this override")
+	ErrGrantExpired         = errors.New("human approval for this override has expired")
+	ErrGrantKind            = errors.New("human approval is for a different override kind")
+	ErrGrantUntrusted       = errors.New("override approval is not in operator-owned storage")
+	ErrLedgerUntrusted      = errors.New("override ledger is not in operator-owned storage")
 )
 
 // boilerplateReasons are refused outright. A reason that survives this list is
@@ -92,9 +113,17 @@ var boilerplateReasons = []string{
 // normalized form. Whitespace is collapsed so a reason cannot pad its way past
 // the length gate.
 func ValidateReason(reason string) (string, error) {
+	if len(reason) > MaxReasonBytes {
+		return "", fmt.Errorf("%w: got %d encoded bytes, maximum is %d",
+			ErrReasonTooLong, len(reason), MaxReasonBytes)
+	}
 	normalized := strings.Join(strings.Fields(reason), " ")
 	if normalized == "" {
 		return "", ErrReasonMissing
+	}
+	if len(normalized) > MaxReasonBytes {
+		return "", fmt.Errorf("%w: got %d encoded bytes after normalization, maximum is %d",
+			ErrReasonTooLong, len(normalized), MaxReasonBytes)
 	}
 	if len([]rune(normalized)) < MinReasonRunes {
 		return "", fmt.Errorf("%w: %q is %d characters, need %d",
@@ -267,16 +296,56 @@ func RevokeGrant(kind Kind) error {
 	return nil
 }
 
+// EncodeLedgerUse validates and canonically encodes the single JSONL record
+// accepted by the privileged append helper. Keeping this boundary in the
+// package prevents the unprivileged caller and helper from drifting onto
+// different size or field rules.
+func EncodeLedgerUse(use Use) ([]byte, error) {
+	if !use.Kind.Valid() {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownKind, use.Kind)
+	}
+	reason, err := ValidateReason(use.Reason)
+	if err != nil {
+		return nil, err
+	}
+	if reason != use.Reason {
+		return nil, fmt.Errorf("%w: reason is not normalized", ErrLedgerRecord)
+	}
+	if use.Actor == "" {
+		return nil, fmt.Errorf("%w: actor is required", ErrLedgerRecord)
+	}
+	if len(use.Actor) > MaxActorBytes {
+		return nil, fmt.Errorf("%w: actor is %d encoded bytes, maximum is %d",
+			ErrLedgerRecord, len(use.Actor), MaxActorBytes)
+	}
+	if len(use.Session) > MaxSessionBytes {
+		return nil, fmt.Errorf("%w: session is %d encoded bytes, maximum is %d",
+			ErrLedgerRecord, len(use.Session), MaxSessionBytes)
+	}
+	if use.AtUTC.IsZero() {
+		return nil, fmt.Errorf("%w: timestamp is required", ErrLedgerRecord)
+	}
+	line, err := json.Marshal(use)
+	if err != nil {
+		return nil, fmt.Errorf("encode override use: %w", err)
+	}
+	line = append(line, '\n')
+	if len(line) > MaxLedgerRecordBytes {
+		return nil, fmt.Errorf("%w: got %d bytes, maximum is %d",
+			ErrLedgerRecordTooLarge, len(line), MaxLedgerRecordBytes)
+	}
+	return line, nil
+}
+
 // Record appends a use to the ledger. A use that cannot be recorded is an
 // error the caller must surface: the ledger is what the audit gate reads, and
 // an unrecorded override is an invisible one.
 func Record(use Use) error {
 	path := LedgerPath()
-	line, err := json.Marshal(use)
+	line, err := EncodeLedgerUse(use)
 	if err != nil {
-		return fmt.Errorf("encode override use: %w", err)
+		return err
 	}
-	line = append(line, '\n')
 	if enforceOperatorLedger {
 		if err := inspectExistingLedger(path); err != nil {
 			return err

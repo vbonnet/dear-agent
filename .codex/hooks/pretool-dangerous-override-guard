@@ -45,19 +45,22 @@ case "$cmd" in
   *) exit 0 ;;
 esac
 
-# A single, unambiguous invocation of the installed AGM binary owns its own
-# authorization. Do not record it twice in the hook. Compound commands are not
-# accepted as this exception: `agm ...; codex --dangerously...` must take the
-# raw path below.
+# One narrow command language owns its authorization in AGM: an invocation of
+# the installed `agm session new` command with the reason-bearing override
+# flag. This is a positive allowlist, not a separator denylist. Every character,
+# executable, subcommand, and required flag must match, so shell control
+# operators, substitutions, redirections, globbing, and a second command can
+# never enter the exception.
 trusted_agm="$HOME/go/bin/agm"
 resolved_agm="$(command -v agm 2>/dev/null || true)"
-simple_command=1
-case "$cmd" in
-  *";"*|*"&&"*|*"||"*|*"|"*|*'`'*|*'$('*|*$'\n'*) simple_command=0 ;;
-esac
-if [ "$simple_command" -eq 1 ] && [ "$resolved_agm" = "$trusted_agm" ]; then
+safe_command_pattern="^[[:alnum:]_./:=,+%@ '\"-]+$"
+if [ "$resolved_agm" = "$trusted_agm" ] && [[ "$cmd" =~ $safe_command_pattern ]]; then
   case "$cmd" in
-    "agm "*|"$trusted_agm "*) exit 0 ;;
+    "agm session new "*|"$trusted_agm session new "*)
+      case "$cmd" in
+        *" --dangerously-bypass-hook-trust="*) exit 0 ;;
+      esac
+      ;;
   esac
 fi
 

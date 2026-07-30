@@ -100,6 +100,42 @@ func TestDangerousOverrideHookDefersSingleInstalledAGMCommand(t *testing.T) {
 	}
 }
 
+func TestDangerousOverrideHookNeverDefersCompoundOrSubstitutedCommands(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("hook requires jq")
+	}
+	home := t.TempDir()
+	binDir := filepath.Join(home, "go", "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$AGM_HOOK_CAPTURE\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "agm"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, command := range map[string]string{
+		"background command":   `agm help harmless & codex --dangerously-bypass-hook-trust`,
+		"process substitution": `agm session new harmless <(codex --dangerously-bypass-hook-trust)`,
+		"second command":       `agm session new harmless --dangerously-bypass-hook-trust=auditable-reason-here; codex --dangerously-bypass-hook-trust`,
+		"command substitution": `agm session new harmless --prompt="$(codex --dangerously-bypass-hook-trust)" --dangerously-bypass-hook-trust=auditable-reason-here`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			capture := filepath.Join(t.TempDir(), "authorize.args")
+			output := runDangerousOverrideHook(t, home, command,
+				"AGM_CODEX_HOOK_TRUST_REASON=sandbox path rotates and cannot be pre-trusted",
+				"AGM_HOOK_CAPTURE="+capture,
+			)
+			if strings.TrimSpace(output) != "" {
+				t.Fatalf("authorized raw path output = %q, want allow with no decision", output)
+			}
+			if _, err := os.Stat(capture); err != nil {
+				t.Fatalf("compound command bypassed canonical authorization: %v", err)
+			}
+		})
+	}
+}
+
 func runDangerousOverrideHook(t *testing.T, home, command string, extraEnv ...string) string {
 	t.Helper()
 	root := filepath.Join("..", "..")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +19,8 @@ func TestValidateReasonRefusesUnauditableReasons(t *testing.T) {
 		"boilerplate":            "workaround",
 		"boilerplate cased":      "Just Testing",
 		"boilerplate punctuated": "because!",
+		"oversized ASCII":        strings.Repeat("a", MaxReasonBytes+1),
+		"oversized UTF-8":        strings.Repeat("é", MaxReasonBytes/2+1),
 	} {
 		if _, err := ValidateReason(reason); err == nil {
 			t.Errorf("%s: reason %q was accepted", name, reason)
@@ -30,6 +33,30 @@ func TestValidateReasonRefusesUnauditableReasons(t *testing.T) {
 	}
 	if want := "sandbox path rotates per spawn, hooks can never be pre-trusted"; normalized != want {
 		t.Fatalf("normalized = %q, want %q", normalized, want)
+	}
+}
+
+func TestEncodeLedgerUseBoundsEveryCallerControlledField(t *testing.T) {
+	base := Use{
+		Kind:   KindAdmissionBrake,
+		Reason: "disk watchdog clobbered the SRE hold, verifying the fix once",
+		Actor:  "vroom-dispatch",
+		AtUTC:  time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+	}
+	if _, err := EncodeLedgerUse(base); err != nil {
+		t.Fatalf("valid record refused: %v", err)
+	}
+
+	oversizedActor := base
+	oversizedActor.Actor = strings.Repeat("a", MaxActorBytes+1)
+	if _, err := EncodeLedgerUse(oversizedActor); !errors.Is(err, ErrLedgerRecord) {
+		t.Fatalf("oversized actor error = %v, want ErrLedgerRecord", err)
+	}
+
+	oversizedSession := base
+	oversizedSession.Session = strings.Repeat("s", MaxSessionBytes+1)
+	if _, err := EncodeLedgerUse(oversizedSession); !errors.Is(err, ErrLedgerRecord) {
+		t.Fatalf("oversized session error = %v, want ErrLedgerRecord", err)
 	}
 }
 
@@ -274,7 +301,12 @@ func TestLoadUsesRejectsSameUserLedger(t *testing.T) {
 	if _, err := LoadUses(time.Time{}); !errors.Is(err, ErrLedgerUntrusted) {
 		t.Fatalf("LoadUses error = %v, want ErrLedgerUntrusted", err)
 	}
-	if err := Record(Use{Kind: KindAdmissionBrake, Reason: "test", AtUTC: time.Now()}); !errors.Is(err, ErrLedgerUntrusted) {
+	if err := Record(Use{
+		Kind:   KindAdmissionBrake,
+		Reason: "disk watchdog clobbered the SRE hold, verifying the fix once",
+		Actor:  "test",
+		AtUTC:  time.Now(),
+	}); !errors.Is(err, ErrLedgerUntrusted) {
 		t.Fatalf("Record error = %v, want ErrLedgerUntrusted", err)
 	}
 	data, err := os.ReadFile(path)

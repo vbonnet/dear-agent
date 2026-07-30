@@ -41,12 +41,14 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-13** When the scheduled macOS override audit reaches a threshold, the system shall deliver the breach through Notification Center or the unified system log before exiting with the reserved breach status.
 
+**OVR-14** When an override record crosses a privileged append boundary, the system shall reject oversized reasons, attribution fields, records, and ledger growth before writing.
+
 ## Override kinds
 
 | Kind | Disables | Requested by |
 |---|---|---|
-| `codex-hook-trust` | Codex per-path hook trust review | `sandbox.bypass_codex_hook_trust_reason`, or `agm new --dangerously-bypass-hook-trust="<reason>"` |
-| `admission-brake` | The watchdog admission brake | `agm new --brake-override="<reason>"` |
+| `codex-hook-trust` | Codex per-path hook trust review | `sandbox.bypass_codex_hook_trust_reason`, or `agm session new --dangerously-bypass-hook-trust="<reason>"` |
+| `admission-brake` | The watchdog admission brake | `agm session new --brake-override="<reason>"` |
 
 ## Enforcement surfaces
 
@@ -84,11 +86,24 @@ never elevated, so an agent-writable AGM binary is not executed as root. The
 Unix path invalidates any sudo timestamp, rejects passwordless validation,
 requires a fresh password challenge, and invalidates the new timestamp after
 installation. That OS authentication and the command's interactive typed
-confirmation form the human boundary. Uses append through the same fixed helper
-to `/var/log/dear-agent-overrides.jsonl`. The file and its parent are
-root-owned, so the scheduled user agent can read the audit while the agent user
-cannot truncate, replace, or remove prior records. AGM synchronizes the
-privileged append before permitting the requested launch.
+confirmation form the human boundary.
+
+On non-macOS Unix, the operator first runs
+`make install-override-ledger-helper`. That separately authenticated setup
+installs the one-purpose root-owned
+`/usr/local/libexec/dear-agent-override-ledger-append` binary and an exact
+per-user NOPASSWD sudoers rule for that path. Runtime authorization invokes it
+with `sudo -n`: no fresh prompt or cached sudo credential is needed, and AGM,
+`tee`, `chmod`, arbitrary arguments, and arbitrary paths are never privileged.
+The helper accepts exactly one canonical bounded JSONL record on stdin, appends
+only to `/var/log/dear-agent-overrides.jsonl`, revalidates the matching active
+root-owned grant and a near-current timestamp, synchronizes before returning,
+and stops at a 16 MiB ledger cap pending operator-owned rotation.
+
+The ledger file and its parent are root-owned, so the scheduled user agent can
+read the audit while the agent user cannot truncate, replace, or remove prior
+records. AGM also validates the privileged result before permitting the
+requested launch.
 
 The recurring audit ships as `deploy/launchd/com.dear-agent.override-audit.plist`
 and is staged with `make install-override-audit-launchagent`; its `--notify`

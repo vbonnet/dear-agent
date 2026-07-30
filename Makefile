@@ -87,6 +87,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-disk-watchdog   Install disk-watchdog to ~/go/bin
 #   install-disk-watchdog-launchagent   Stage the disk-watchdog launch agent (5-min tick)
 #   uninstall-disk-watchdog-launchagent Remove the disk-watchdog launch agent
+#   build-override-ledger-helper        Build the fixed privileged Unix ledger append helper
+#   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Linux)
 #   install-override-audit-launchagent  Stage the daily dangerous-override audit
 #   uninstall-override-audit-launchagent Remove the dangerous-override audit
 #   install-gobin-guard             Install the ~/go/bin SENSE+ESCALATE guard outside GOBIN (ce-24f1)
@@ -125,6 +127,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: lint-instructions
 .PHONY: lint-adrs
 .PHONY: lint-headers
+.PHONY: build-override-ledger-helper install-override-ledger-helper
 
 include mk/install-go-bin.mk
 
@@ -889,6 +892,43 @@ uninstall-disk-watchdog-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.dear-agent.disk-watchdog 2>/dev/null || true
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist
 	@echo "Removed: com.dear-agent.disk-watchdog launch agent"
+
+# On Unix systems without macOS authopen, authorized uses append through this
+# one-purpose root-owned helper. Installation is an explicit operator action:
+# it requires a fresh interactive sudo challenge and installs a NOPASSWD rule
+# only for the helper's exact path, never for AGM, tee, chmod, or a variable
+# destination.
+build-override-ledger-helper:
+	@test "$$(uname -s)" != Darwin || { echo "macOS uses authopen; no ledger helper is required" >&2; exit 2; }
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
+
+install-override-ledger-helper: build-override-ledger-helper
+	@set -eu; \
+		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
+		operator_user="$$(id -un)"; \
+		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
+		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
+		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
+		rule="$$operator_user ALL=(root) NOPASSWD: $$helper"; \
+		/usr/bin/sudo -k; \
+		if /usr/bin/sudo -n -v 2>/dev/null; then \
+			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
+			exit 2; \
+		fi; \
+		/usr/bin/sudo -v; \
+		/usr/bin/sudo /usr/bin/install -d -o root -g root -m 0755 /usr/local/libexec; \
+		/usr/bin/sudo /usr/bin/install -o root -g root -m 0755 bin/dear-agent-override-ledger-append "$$helper"; \
+		printf '%s\n' "$$rule" | /usr/bin/sudo /usr/bin/tee "$$staging" >/dev/null; \
+		/usr/bin/sudo /bin/chmod 0440 "$$staging"; \
+		if ! /usr/bin/sudo /usr/sbin/visudo -cf "$$staging"; then \
+			/usr/bin/sudo /bin/rm -f "$$staging"; \
+			/usr/bin/sudo -k; \
+			exit 1; \
+		fi; \
+		/usr/bin/sudo /bin/mv -f "$$staging" "$$sudoers"; \
+		/usr/bin/sudo -k; \
+		echo "Installed root-owned ledger helper and exact sudoers rule for $$operator_user"
 
 # Stage the daily dangerous-override audit. Staging does not activate launchd;
 # the operator reviews and bootstraps the scheduled audit separately.
