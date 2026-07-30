@@ -165,7 +165,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-60** When a creation request declares a caller surface, the system shall return that caller as result provenance and persist a matching `source:<caller>` manifest tag.
 
-**OPS-61** If any creation step fails after name reservation, manifest-directory creation, new tmux creation, or registration but before an irreversible current-pane queue submission, the system shall release the reservation or delete the completed session registration, remove the newly-created tmux session, and remove only the manifest directory created by that operation; after an irreversible current-pane queue submission succeeds, the system shall preserve its pre-created durable registration and manifest directory across later errors.
+**OPS-61** If any creation step fails after name reservation, manifest-directory creation, new tmux creation, or registration but before an irreversible current-pane queue submission, the system shall release the reservation or delete the completed session registration, including a registration whose commit may have succeeded but could not be confirmed by a durable re-read, remove the newly-created tmux session, and remove only the manifest directory created by that operation; after an irreversible current-pane queue submission succeeds, the system shall preserve its pre-created durable registration and manifest directory across later errors.
 
 **OPS-62** If creation reuses an existing tmux session or manifest directory, the system shall preserve those pre-existing artifacts during rollback.
 

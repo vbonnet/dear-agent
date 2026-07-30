@@ -835,6 +835,13 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 		if errors.As(err, &conflict) {
 			return false, sessionExistsError(m.Name)
 		}
+		var uncertain *dolt.SessionRegistrationCommitUncertainError
+		if errors.As(err, &uncertain) {
+			// A lost commit acknowledgement can leave the row durable. Mark it
+			// owned so lifecycle rollback explicitly deletes the possible
+			// registration before removing the launched runtime.
+			return true, ErrStorageError("storage.CreateSession", err)
+		}
 		return false, ErrStorageError("storage.CreateSession", err)
 	}
 	return true, nil

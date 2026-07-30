@@ -91,6 +91,21 @@ func addOpenAISessionMetadata(metadata map[string]any, openAI *manifest.OpenAI) 
 	}
 }
 
+// SessionRegistrationCommitUncertainError means the registration commit may
+// have succeeded but a durable re-read could not prove the installed identity.
+// Creation callers must compensate as though the row may exist.
+type SessionRegistrationCommitUncertainError struct {
+	Err error
+}
+
+func (e *SessionRegistrationCommitUncertainError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *SessionRegistrationCommitUncertainError) Unwrap() error {
+	return e.Err
+}
+
 // marshalCreateSessionJSON serializes the JSON-typed fields needed by the
 // agm_sessions INSERT (context tags, engram metadata, monitors).
 func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, any, error) {
@@ -250,7 +265,9 @@ func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservat
 		commitErr := fmt.Errorf("commit session registration: %w", err)
 		committed, inspectErr := a.sessionRegistrationCommitted(session, status, harness)
 		if inspectErr != nil {
-			return errors.Join(commitErr, inspectErr)
+			return &SessionRegistrationCommitUncertainError{
+				Err: errors.Join(commitErr, inspectErr),
+			}
 		}
 		if committed {
 			return nil

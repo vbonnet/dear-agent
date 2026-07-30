@@ -1073,6 +1073,33 @@ func TestCreateSession_DeferredCurrentTmuxRegistrationFailurePreventsLaunch(t *t
 	}
 }
 
+func TestCreateSession_UnknownRegistrationCommitIsExplicitlyCompensated(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	commitErr := errors.New("registration commit acknowledgement lost")
+	store := &createMockStorage{
+		createErr: &dolt.SessionRegistrationCommitUncertainError{Err: commitErr},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "uncertain-registration", Harness: "claude-code", Model: "sonnet",
+		SessionID: "uncertain-registration-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want commit uncertainty", err)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"uncertain-registration-id"}) {
+		t.Fatalf("registration cleanup = %v, want explicit uncertain-row deletion", store.deleted)
+	}
+	if !reflect.DeepEqual(store.released, []string{"uncertain-registration-id"}) {
+		t.Fatalf("reservation cleanup = %v, want uncertain lease release", store.released)
+	}
+	if tmuxMock.Sessions["uncertain-registration"] {
+		t.Fatal("new tmux session survived uncertain registration rollback")
+	}
+}
+
 func TestCreateSession_DeferredCurrentTmuxPreservesRegistrationAfterQueuedLaunch(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	tmuxMock.Sessions["deferred-post-queue-cancel"] = true
