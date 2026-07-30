@@ -480,6 +480,7 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\ncommand /usr/bin/git --config-env=alias.pwn=ALIAS_VALUE pwn\n",
 		"#!/bin/sh\n/usr/bin/git \"$GIT_OPTIONS\" status --porcelain\n",
 		"#!/bin/sh\n/usr/bin/git workspace-helper\n",
+		"#!/bin/sh\n/usr/bin/cmake -P payload.cmake\n",
 		"#!/bin/sh\n/usr/bin/git status --porcelain\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil ||

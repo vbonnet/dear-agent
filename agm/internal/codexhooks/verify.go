@@ -1487,6 +1487,10 @@ func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 		"numactl", "parallel", "rlwrap", "runuser", "script", "setpriv",
 		"setsid", "stdbuf", "su", "sudo", "taskset", "unshare", "watch":
 		return "command-capable process wrapper"
+	case "cmake":
+		// Even configuration mode evaluates CMakeLists.txt, while -P executes
+		// an arbitrary script. Trusted hooks do not need a safe CMake subset.
+		return "command-capable CMake runtime"
 	}
 	if awkUsesCommandExecution(command, args) {
 		return "command-capable AWK runtime"
