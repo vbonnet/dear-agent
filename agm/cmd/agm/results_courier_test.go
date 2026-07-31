@@ -298,6 +298,109 @@ func TestScanClaudeProjectsDoesNotReportMetadataOnlyGenerationChange(t *testing.
 	}
 }
 
+func TestScanClaudeProjectsDetectsGrowingRewriteBeforeBoundaryWindow(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "growing-rewrite.jsonl")
+	oldText := "old completion " + strings.Repeat("x", int(2*courierBoundaryWindow))
+	writeJSONLLine(t, path, "assistant", oldText)
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.Replace(string(data), "old completion", "new completion", 1)
+	if len(rewritten) != len(data) {
+		t.Fatalf("rewrite changed prefix size from %d to %d", len(data), len(rewritten))
+	}
+	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("{\"type\":\"progress\"}\n"); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rewrittenTime := time.Unix(0, prior.ModifiedAt).Add(time.Second)
+	if err := os.Chtimes(path, rewrittenTime, rewrittenTime); err != nil {
+		t.Fatal(err)
+	}
+	boundaryHash, err := courierBoundaryFingerprint(path, prior.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boundaryHash != prior.BoundaryHash {
+		t.Fatal("growing rewrite unexpectedly changed the prior boundary window")
+	}
+
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("growing rewrite scan: %v", err)
+	}
+	if len(events) != 1 || !strings.HasPrefix(events[0].Headline, "new completion ") {
+		t.Fatalf("growing rewrite events = %+v", events)
+	}
+}
+
+func TestScanClaudeTranscriptDefersGenerationChangedAfterRead(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "resumed-during-scan.jsonl")
+	writeJSONLLine(t, path, "user", "")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+	writeJSONLLine(t, path, "assistant", "completion before resume")
+	backdateCourierFile(t, path)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event, baselineFailed := scanClaudeTranscript(
+		home,
+		path,
+		info,
+		time.Now(),
+		45*time.Second,
+		false,
+		&st,
+		func(path string) (os.FileInfo, error) {
+			writeJSONLLine(t, path, "progress", "")
+			return os.Stat(path)
+		},
+	)
+	if event != nil || baselineFailed {
+		t.Fatalf("generation-changing scan = (%+v, %v), want deferred", event, baselineFailed)
+	}
+	if got := st.Files[path]; got != prior {
+		t.Fatalf("generation-changing scan advanced watermark from %+v to %+v", prior, got)
+	}
+}
+
 func TestCourierContentFingerprintExtendsPersistedHashState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeJSONLLine(t, path, "assistant", "first completion")
@@ -726,6 +829,40 @@ func TestCourierRelayPromptNeverContainsTranscriptText(t *testing.T) {
 	if !strings.Contains(prompt, "1 completed session(s)") ||
 		!strings.Contains(prompt, "Do not read or relay transcript content") {
 		t.Fatalf("relay prompt does not retain its fixed content-free contract: %q", prompt)
+	}
+}
+
+func TestLastAssistantTextSuppressesCourierRelayTurn(t *testing.T) {
+	lines := []string{
+		`{"type":"user","message":{"content":"RESULTS COURIER RELAY: push once"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"push delivered"}]}}`,
+	}
+	if got := lastAssistantText(lines); got != "" {
+		t.Fatalf("relay turn produced courier headline %q", got)
+	}
+	lines = append(lines,
+		`{"type":"user","message":{"content":"ordinary follow-up"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"ordinary completion"}]}}`,
+	)
+	if got := lastAssistantText(lines); got != "ordinary completion" {
+		t.Fatalf("ordinary turn after relay = %q", got)
+	}
+}
+
+func TestCourierAssistantTextCarriesRelaySuppressionAcrossScans(t *testing.T) {
+	headline, pending := courierAssistantText(
+		[]string{`{"type":"user","message":{"content":"RESULTS COURIER RELAY: push once"}}`},
+		false,
+	)
+	if headline != "" || !pending {
+		t.Fatalf("relay request = (%q, %v), want empty headline and pending suppression", headline, pending)
+	}
+	headline, pending = courierAssistantText(
+		[]string{`{"type":"assistant","message":{"content":[{"type":"text","text":"push delivered"}]}}`},
+		pending,
+	)
+	if headline != "" || pending {
+		t.Fatalf("relay response = (%q, %v), want suppressed headline and cleared state", headline, pending)
 	}
 }
 

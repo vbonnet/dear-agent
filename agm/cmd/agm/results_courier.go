@@ -58,6 +58,8 @@ type resultsCourierEvent struct {
 	DetectedAt  time.Time `json:"detected_at"`
 }
 
+const resultsCourierRelayMarker = "RESULTS COURIER RELAY:"
+
 // courierFileState is the last-processed watermark for one transcript file.
 type courierFileState struct {
 	Size         int64  `json:"size"`
@@ -67,6 +69,7 @@ type courierFileState struct {
 	BoundaryHash string `json:"boundary_hash,omitempty"`
 	ContentHash  string `json:"content_hash,omitempty"`
 	HashState    string `json:"hash_state,omitempty"`
+	RelayPending bool   `json:"relay_pending,omitempty"`
 }
 
 // courierState is the full on-disk cursor: last-seen watermark per
@@ -130,6 +133,11 @@ func claudeProjectsGlob(home string) string {
 // candidate: file inactivity alone does not prove that an earlier assistant
 // message completed the current turn.
 func lastAssistantText(lines []string) string {
+	headline, _ := courierAssistantText(lines, false)
+	return headline
+}
+
+func courierAssistantText(lines []string, relayPending bool) (string, bool) {
 	headline := ""
 	for _, rawLine := range lines {
 		line := strings.TrimSpace(rawLine)
@@ -153,16 +161,26 @@ func lastAssistantText(lines []string) string {
 				entry.Message.Content,
 				entry.Message.StopReason,
 			)
+			if relayPending {
+				headline = ""
+				if completed {
+					relayPending = false
+				}
+				continue
+			}
 			if !completed {
 				headline = ""
 				continue
 			}
 			headline = text
-		case "user", "tool_use", "tool_result":
+		case "user":
+			relayPending = strings.Contains(rawLine, resultsCourierRelayMarker)
+			headline = ""
+		case "tool_use", "tool_result":
 			headline = ""
 		}
 	}
-	return headline
+	return headline, relayPending
 }
 
 func completedAssistantText(content json.RawMessage, stopReason string) (string, bool) {
@@ -272,6 +290,7 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 			idleGrace,
 			initialBaseline,
 			st,
+			os.Stat,
 		)
 		baselineFailed = baselineFailed || baselineReadFailed
 		if event != nil {
@@ -290,6 +309,7 @@ func scanClaudeTranscript(
 	idleGrace time.Duration,
 	initialBaseline bool,
 	st *courierState,
+	restat func(string) (os.FileInfo, error),
 ) (*resultsCourierEvent, bool) {
 	prev, known := st.Files[path]
 	identity := courierFileIdentity(info)
@@ -325,33 +345,21 @@ func scanClaudeTranscript(
 		return nil, false // still being written; leave watermark untouched
 	}
 
-	lines, lineBase, err := readCourierDelta(path, prev, info, replaced)
-	if err != nil {
-		return nil, false
-	}
-	boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
-	if err != nil {
-		return nil, false
-	}
-	contentHash, hashState, err := courierContentFingerprint(
+	lines, nextState, stable := readStableCourierDelta(
 		path,
-		info.Size(),
 		prev,
+		info,
+		identity,
+		modifiedAt,
 		replaced,
+		restat,
 	)
-	if err != nil {
+	if !stable {
 		return nil, false
 	}
-	st.Files[path] = courierFileState{
-		Size:         info.Size(),
-		Line:         lineBase + len(lines),
-		Identity:     identity,
-		ModifiedAt:   modifiedAt,
-		BoundaryHash: boundaryHash,
-		ContentHash:  contentHash,
-		HashState:    hashState,
-	}
-	headline := lastAssistantText(lines)
+	headline, relayPending := courierAssistantText(lines, prev.RelayPending)
+	nextState.RelayPending = relayPending
+	st.Files[path] = nextState
 	if headline == "" {
 		return nil, false
 	}
@@ -362,6 +370,53 @@ func scanClaudeTranscript(
 		Headline:    truncateHeadline(headline, 220),
 		DetectedAt:  now,
 	}, false
+}
+
+func readStableCourierDelta(
+	path string,
+	previous courierFileState,
+	info os.FileInfo,
+	identity string,
+	modifiedAt int64,
+	replaced bool,
+	restat func(string) (os.FileInfo, error),
+) ([]string, courierFileState, bool) {
+	lines, lineBase, err := readCourierDelta(path, previous, info, replaced)
+	if err != nil {
+		return nil, courierFileState{}, false
+	}
+	boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
+	if err != nil {
+		return nil, courierFileState{}, false
+	}
+	contentHash, hashState, err := courierContentFingerprint(
+		path,
+		info.Size(),
+		previous,
+		replaced,
+	)
+	if err != nil {
+		return nil, courierFileState{}, false
+	}
+	confirmedInfo, err := restat(path)
+	if err != nil || !courierFileGenerationMatches(info, confirmedInfo) {
+		return nil, courierFileState{}, false
+	}
+	return lines, courierFileState{
+		Size:         info.Size(),
+		Line:         lineBase + len(lines),
+		Identity:     identity,
+		ModifiedAt:   modifiedAt,
+		BoundaryHash: boundaryHash,
+		ContentHash:  contentHash,
+		HashState:    hashState,
+	}, true
+}
+
+func courierFileGenerationMatches(before, after os.FileInfo) bool {
+	return before.Size() == after.Size() &&
+		before.ModTime().UnixNano() == after.ModTime().UnixNano() &&
+		courierFileIdentity(before) == courierFileIdentity(after)
 }
 
 func refreshCourierUnchangedState(
@@ -416,19 +471,19 @@ func courierTranscriptReplaced(
 		previous.Identity != currentIdentity {
 		return true
 	}
-	if currentSize == previous.Size &&
+	if currentSize >= previous.Size &&
 		previous.ModifiedAt != 0 &&
-		currentModifiedAt != previous.ModifiedAt {
-		if previous.ContentHash == "" {
-			return false
-		}
-		contentHash, _, err := courierContentFingerprint(
+		currentModifiedAt != previous.ModifiedAt &&
+		previous.ContentHash != "" {
+		prefixHash, _, err := courierContentFingerprint(
 			path,
-			currentSize,
+			previous.Size,
 			courierFileState{},
 			true,
 		)
-		return err != nil || contentHash != previous.ContentHash
+		if err != nil || prefixHash != previous.ContentHash {
+			return true
+		}
 	}
 	if previous.BoundaryHash == "" {
 		return false
@@ -529,11 +584,11 @@ func courierBoundaryFingerprint(path string, end int64) (string, error) {
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
-// courierContentFingerprint extends a persisted SHA-256 state with only the
-// appended suffix during normal growth. A replacement or an equal-size
-// generation change hashes the observed file from byte zero so metadata-only
-// touches can be distinguished from content rewrites without making every
-// append reread the transcript prefix.
+// courierContentFingerprint extends a validated persisted SHA-256 state with
+// the appended suffix. The continuity check separately rehashes the complete
+// prior prefix before treating growth as append-only, and generation changes
+// hash from byte zero so metadata-only touches remain distinguishable from
+// content rewrites.
 func courierContentFingerprint(
 	path string,
 	end int64,
@@ -726,7 +781,7 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 // human-readable transcript content.
 func courierRelayPrompt(eventCount int) string {
 	return fmt.Sprintf(
-		"RESULTS COURIER RELAY: call the PushNotification tool once with status "+
+		resultsCourierRelayMarker+" call the PushNotification tool once with status "+
 			"\"proactive\" and exactly this message, then stop: Results courier "+
 			"detected %d completed session(s). Review the typed desktop notification "+
 			"or the local results-courier receipt trail. Do not read or relay transcript content.",
