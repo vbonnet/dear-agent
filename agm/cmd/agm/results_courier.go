@@ -117,10 +117,8 @@ func decodeCourierState(data []byte) (courierState, error) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return courierState{}, err
 	}
-	for _, required := range []string{"files", "baseline_complete"} {
-		if _, ok := fields[required]; !ok {
-			return courierState{}, fmt.Errorf("cursor schema is missing %q", required)
-		}
+	if err := validateCourierJSONFields(fields); err != nil {
+		return courierState{}, err
 	}
 	var st courierState
 	if err := json.Unmarshal(data, &st); err != nil {
@@ -132,7 +130,87 @@ func decodeCourierState(data []byte) (courierState, error) {
 	if !st.BaselineComplete && st.BaselinePending == nil {
 		return courierState{}, fmt.Errorf("incomplete cursor schema has no baseline snapshot")
 	}
+	for path, pending := range st.BaselinePending {
+		if !pending {
+			return courierState{}, fmt.Errorf("pending baseline %q is false", path)
+		}
+	}
 	return st, nil
+}
+
+func validateCourierJSONFields(fields map[string]json.RawMessage) error {
+	for _, required := range []string{"files", "baseline_complete"} {
+		value, ok := fields[required]
+		if !ok {
+			return fmt.Errorf("cursor schema is missing %q", required)
+		}
+		if rawJSONIsNull(value) {
+			return fmt.Errorf("cursor schema has null %q", required)
+		}
+	}
+	if err := validateCourierFilesJSON(fields["files"]); err != nil {
+		return err
+	}
+	rawPending, ok := fields["baseline_pending"]
+	if !ok || rawJSONIsNull(rawPending) {
+		return nil
+	}
+	return validateCourierPendingJSON(rawPending)
+}
+
+func validateCourierFilesJSON(raw json.RawMessage) error {
+	var rawFiles map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rawFiles); err != nil {
+		return fmt.Errorf("decode cursor files: %w", err)
+	}
+	for path, rawFile := range rawFiles {
+		if err := validateCourierFileJSON(path, rawFile); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateCourierFileJSON(path string, raw json.RawMessage) error {
+	if rawJSONIsNull(raw) {
+		return fmt.Errorf("cursor file %q is null", path)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("decode cursor file %q: %w", path, err)
+	}
+	for _, required := range []string{"size", "line"} {
+		value, ok := fields[required]
+		if !ok {
+			return fmt.Errorf("cursor file %q is missing %q", path, required)
+		}
+		if rawJSONIsNull(value) {
+			return fmt.Errorf("cursor file %q has null %q", path, required)
+		}
+	}
+	for name, value := range fields {
+		if rawJSONIsNull(value) {
+			return fmt.Errorf("cursor file %q has null %q", path, name)
+		}
+	}
+	return nil
+}
+
+func validateCourierPendingJSON(raw json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("decode pending baseline: %w", err)
+	}
+	for path, value := range fields {
+		if rawJSONIsNull(value) {
+			return fmt.Errorf("pending baseline %q is null", path)
+		}
+	}
+	return nil
+}
+
+func rawJSONIsNull(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
 }
 
 func waitForCourierState(

@@ -893,6 +893,40 @@ func TestLoadCourierStateAcceptsLegacyCompleteCursor(t *testing.T) {
 	}
 }
 
+func TestLoadCourierStateRejectsNullCursorValues(t *testing.T) {
+	tests := map[string]string{
+		"null baseline flag": `{
+			"files": {},
+			"baseline_complete": null,
+			"baseline_pending": {}
+		}`,
+		"null file cursor": `{
+			"files": {"/session.jsonl": null},
+			"baseline_complete": true
+		}`,
+		"null file field": `{
+			"files": {"/session.jsonl": {"size": null, "line": 3}},
+			"baseline_complete": true
+		}`,
+		"null pending value": `{
+			"files": {},
+			"baseline_complete": false,
+			"baseline_pending": {"/session.jsonl": null}
+		}`,
+	}
+	for name, cursor := range tests {
+		t.Run(name, func(t *testing.T) {
+			statePath := filepath.Join(t.TempDir(), "state.json")
+			if err := os.WriteFile(statePath, []byte(cursor), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadCourierState(statePath); err == nil {
+				t.Fatal("null cursor value was accepted")
+			}
+		})
+	}
+}
+
 func TestWaitForCourierStatePreservesUnreadableCursorUntilRecovery(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	malformed := []byte(`{"files":`)
