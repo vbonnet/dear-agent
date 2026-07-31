@@ -38,6 +38,7 @@ var declarativeRuntimeDirs = []string{
 	"pkg/codeintel/rules/go",
 	"pkg/codeintel/rules/python",
 	"pkg/codeintel/rules/typescript",
+	"spec-governance/.claude-plugin",
 	"wayfinder/.claude-plugin",
 }
 

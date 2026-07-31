@@ -1346,6 +1346,25 @@ diff-based package guard gives fast changed-package diagnostics, and the
 actual-checkout gate prevents any implementation directory from remaining
 outside strict SPEC and executable BDD enforcement.
 
+### SPEC Governance Tooling Evidence Boundary
+
+**File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)
+
+**Drives:** the canonical SPEC authoring and audit skill metadata, the skill
+projection generator, and the authenticated SPEC inventory and HTML renderer.
+
+**Key scenarios:**
+- Pinned Git-object inventory and strict EARS extraction remain deterministic.
+- Forged findings, incomplete applicability, and one-sided BDD evidence fail.
+- Audit artifacts are offline, escaped, and emitted without opening arbitrary
+  filesystem output paths.
+- Projection discovery is dynamic, drift-checked, repository-contained, and
+  safe around authored files, symlinks, and obsolete generated output.
+
+**Why this matters:** A governance tool cannot credibly prevent duplicated
+contracts if its own discovery projections drift, its evidence can be forged,
+or its write paths bypass repository safety policy.
+
 ### VROOM Runtime Guardrails
 
 **File:** [`vroom_runtime_guardrails.feature`](../test/bdd/features/vroom_runtime_guardrails.feature)

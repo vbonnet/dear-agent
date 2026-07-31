@@ -94,7 +94,7 @@ jobs:
         run: go vet ./...
 
       - name: Validate tracked AI skills
-        run: go run ./tools/skill-lint -repo .
+        run: make lint-skills
 
       - name: Verify generated AGM surfaces and plugin hashes
         run: |
