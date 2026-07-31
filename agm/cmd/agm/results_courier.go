@@ -1243,7 +1243,7 @@ func recoverCourierReceiptTransitions(
 	st courierState,
 ) (courierState, bool, error) {
 	path := filepath.Join(stateDir, "trail.jsonl")
-	f, err := os.Open(path) //#nosec G304 -- fixed path under the courier's own state dir
+	f, err := os.OpenFile(path, os.O_RDWR, 0) //#nosec G304 -- fixed path under the courier's own state dir
 	if os.IsNotExist(err) {
 		return st, false, nil
 	}
@@ -1254,20 +1254,13 @@ func recoverCourierReceiptTransitions(
 
 	recovered := cloneCourierState(st)
 	changed := false
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	line := 0
-	for scanner.Scan() {
-		line++
-		if len(scanner.Bytes()) == 0 {
-			continue
-		}
+	err = readCompleteCourierReceiptLines(f, func(line int, record []byte) error {
 		var receipt courierDeliveryReceipt
-		if err := json.Unmarshal(scanner.Bytes(), &receipt); err != nil {
-			return st, false, fmt.Errorf("decode courier receipt line %d: %w", line, err)
+		if err := json.Unmarshal(record, &receipt); err != nil {
+			return fmt.Errorf("decode courier receipt line %d: %w", line, err)
 		}
 		if !courierDeliverySucceeded(receipt) {
-			continue
+			return nil
 		}
 		for transcriptPath, transition := range receipt.CursorTransitions {
 			applied, err := applyCourierReceiptTransition(
@@ -1277,15 +1270,59 @@ func recoverCourierReceiptTransitions(
 				transition,
 			)
 			if err != nil {
-				return st, false, err
+				return err
 			}
 			changed = applied || changed
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return st, false, fmt.Errorf("read courier receipts: %w", err)
+		return nil
+	})
+	if err != nil {
+		return st, false, err
 	}
 	return recovered, changed, nil
+}
+
+func readCompleteCourierReceiptLines(
+	f *os.File,
+	visit func(int, []byte) error,
+) error {
+	const maxReceiptBytes = 4 * 1024 * 1024
+
+	reader := bufio.NewReaderSize(f, maxReceiptBytes)
+	var completeBytes int64
+	line := 0
+	for {
+		record, err := reader.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			return fmt.Errorf("courier receipt line %d exceeds %d bytes", line+1, maxReceiptBytes)
+		}
+		if len(record) > 0 && record[len(record)-1] == '\n' {
+			completeBytes += int64(len(record))
+			line++
+			record = record[:len(record)-1]
+			if len(strings.TrimSpace(string(record))) > 0 {
+				if visitErr := visit(line, record); visitErr != nil {
+					return visitErr
+				}
+			}
+		}
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, io.EOF) {
+			return fmt.Errorf("read courier receipts: %w", err)
+		}
+		if len(record) == 0 {
+			return nil
+		}
+		if truncateErr := f.Truncate(completeBytes); truncateErr != nil {
+			return fmt.Errorf("truncate torn courier receipt: %w", truncateErr)
+		}
+		if syncErr := f.Sync(); syncErr != nil {
+			return fmt.Errorf("sync truncated courier receipt: %w", syncErr)
+		}
+		return nil
+	}
 }
 
 func applyCourierReceiptTransition(

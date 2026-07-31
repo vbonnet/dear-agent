@@ -1669,6 +1669,18 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 	if got := restarted.Files[sessionPath]; got != seeded {
 		t.Fatalf("durable cursor unexpectedly advanced to %+v", got)
 	}
+	trailPath := filepath.Join(resultsCourierStateDir(home), "trail.jsonl")
+	trail, err := os.OpenFile(trailPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open receipt trail: %v", err)
+	}
+	if _, err := trail.WriteString(`{"timestamp":"torn"`); err != nil {
+		_ = trail.Close()
+		t.Fatalf("append torn receipt: %v", err)
+	}
+	if err := trail.Close(); err != nil {
+		t.Fatalf("close torn receipt: %v", err)
+	}
 	restarted, recovered, err := recoverCourierReceiptTransitions(
 		resultsCourierStateDir(home),
 		restarted,
@@ -1683,6 +1695,15 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 			restarted.Files[sessionPath],
 			st.Files[sessionPath],
 		)
+	}
+	trailData, err := os.ReadFile(trailPath)
+	if err != nil {
+		t.Fatalf("read repaired receipt trail: %v", err)
+	}
+	if strings.Contains(string(trailData), `"timestamp":"torn"`) ||
+		len(trailData) == 0 ||
+		trailData[len(trailData)-1] != '\n' {
+		t.Fatalf("torn receipt was not truncated: %q", trailData)
 	}
 
 	err = processResultsCourierTick(
@@ -1731,6 +1752,26 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 	}
 	if recovered {
 		t.Fatal("receipt recovery regressed an already-persisted delivered cursor")
+	}
+}
+
+func TestRecoverCourierReceiptTransitionsRejectsCorruptCompletedRecord(t *testing.T) {
+	home := t.TempDir()
+	stateDir := resultsCourierStateDir(home)
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trailPath := filepath.Join(stateDir, "trail.jsonl")
+	if err := os.WriteFile(trailPath, []byte("{not-json}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := recoverCourierReceiptTransitions(
+		stateDir,
+		courierState{Files: map[string]courierFileState{}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "decode courier receipt line 1") {
+		t.Fatalf("corrupt completed receipt error = %v", err)
 	}
 }
 
