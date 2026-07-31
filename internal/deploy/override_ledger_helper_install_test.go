@@ -2,9 +2,83 @@ package deploy_test
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestInstallerSystemDirectoryLockSerializes(t *testing.T) {
+	var lockPath, lockTool, holderScript, contenderScript string
+	switch runtime.GOOS {
+	case "darwin":
+		lockPath = "/private/var/run"
+		lockTool = "/usr/bin/lockf"
+		holderScript = `exec 9<"$1"; exec "$2" -k -t 0 /dev/fd/9 "$3" -test.run=TestInstallerLockHolder -- "$4"`
+		contenderScript = `exec 9<"$1"; exec "$2" -k -t 0 /dev/fd/9 /usr/bin/true`
+	case "linux":
+		lockPath = "/run"
+		lockTool = "/usr/bin/flock"
+		holderScript = `exec 9<"$1"; exec "$2" -n 9 "$3" -test.run=TestInstallerLockHolder -- "$4"`
+		contenderScript = `exec 9<"$1"; exec "$2" -n 9 /usr/bin/true`
+	default:
+		t.Skip("installer lock is supported only on Darwin and Linux")
+	}
+
+	ready := filepath.Join(t.TempDir(), "ready")
+	holder := exec.Command("/bin/sh", "-c", holderScript, "sh", lockPath, lockTool, os.Args[0], ready)
+	holder.Env = append(os.Environ(), "DEAR_AGENT_TEST_INSTALL_LOCK_HOLDER=1")
+	if err := holder.Start(); err != nil {
+		t.Fatalf("start lock holder: %v", err)
+	}
+	defer func() {
+		if holder.ProcessState == nil {
+			_ = holder.Process.Kill()
+			_ = holder.Wait()
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("lock holder did not report acquisition")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	contender := exec.Command("/bin/sh", "-c", contenderScript, "sh", lockPath, lockTool)
+	if err := contender.Run(); err == nil {
+		t.Fatal("second installer acquired the protected system-directory inode")
+	}
+	if err := holder.Wait(); err != nil {
+		t.Fatalf("lock holder failed: %v", err)
+	}
+}
+
+func TestInstallerLockHolder(t *testing.T) {
+	if os.Getenv("DEAR_AGENT_TEST_INSTALL_LOCK_HOLDER") != "1" {
+		return
+	}
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	if separator < 0 || separator+1 >= len(os.Args) {
+		t.Fatal("lock-holder helper missing ready path")
+	}
+	if err := os.WriteFile(os.Args[separator+1], []byte("ready\n"), 0o600); err != nil {
+		t.Fatalf("write lock-holder marker: %v", err)
+	}
+	time.Sleep(2 * time.Second)
+}
 
 func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testing.T) {
 	data, err := os.ReadFile("../../Makefile")
@@ -24,12 +98,19 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 
 	requiredInOrder := []string{
 		`Darwin) install_lock_path="/private/var/run"`,
+		`install_lock_tool="/usr/bin/lockf"`,
 		`Linux) install_lock_path="/run"`,
+		`install_lock_tool="/usr/bin/flock"`,
 		`test ! -L "$$install_lock_ancestor"`,
 		`test ! -w "$$install_lock_ancestor"`,
 		`test "$$install_lock_uid" = 0`,
-		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 /usr/bin/lockf -k -t 0`,
-		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 /usr/bin/flock -n`,
+		`test -f "$$install_lock_executable"`,
+		`test ! -L "$$install_lock_executable"`,
+		`test ! -w "$$install_lock_executable"`,
+		`test -x "$$install_lock_executable"`,
+		`exec 9<"$$install_lock_path"`,
+		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -k -t 0 /dev/fd/9 /usr/bin/make`,
+		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -n 9 /usr/bin/make`,
 		`install-override-ledger-helper-locked:`,
 		`test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1`,
 		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
@@ -83,7 +164,7 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	if strings.Contains(target, `install_lock_held`) || strings.Contains(target, `/bin/mkdir "$$install_lock_dir"`) {
 		t.Fatal("installer still uses a crash-persistent directory lock")
 	}
-	if !strings.Contains(target, `exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1`) {
+	if !strings.Contains(target, `DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool"`) {
 		t.Fatal("installer does not hold the automatically released operating-system lock across the recursive transaction")
 	}
 	if got := strings.Count(target, "/usr/bin/sudo"); got != 2 {
