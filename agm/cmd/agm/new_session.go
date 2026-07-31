@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -201,13 +200,20 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		return launchCLICreateSession(launchCtx, spec, exists, trustPreConfigured)
 	}
 	runtime.prepare = func(prepareCtx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+		trustedAddDirs, guardPath, trustErr := trustedAddDirsForSession(sessionName, roleName)
+		if trustErr != nil {
+			return ops.CreateSessionPreparation{}, trustErr
+		}
 		preparedSandbox, preparedWorkDir, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
 		sandboxInfo = preparedSandbox
 		if prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
 		var extraAddDirs []string
-		extraAddDirs, trustPreConfigured = collectExtraAddDirs(preparedSandbox)
+		extraAddDirs, trustPreConfigured = collectExtraAddDirs(preparedSandbox, trustedAddDirs)
+		if prepareErr := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
 		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
 			return ops.CreateSessionPreparation{}, prepareErr
 		}
