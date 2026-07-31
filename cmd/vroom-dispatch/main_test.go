@@ -621,6 +621,59 @@ func TestRestartTracker_ShouldEscalate(t *testing.T) {
 	}
 }
 
+func TestSupervisorHealthStringIncludesAuthFailed(t *testing.T) {
+	if got := healthAuthFailed.String(); got != "auth_failed" {
+		t.Fatalf("healthAuthFailed.String() = %q, want auth_failed", got)
+	}
+}
+
+func TestSupervisorPaneAuthFailed(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		want    bool
+	}{
+		{
+			name:    "Claude login loop",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login",
+			want:    true,
+		},
+		{
+			name:    "Codex login prompt",
+			harness: "codex-cli",
+			content: "No OpenAI credentials found. Run `codex login` to continue.",
+			want:    true,
+		},
+		{
+			name:    "AGY Google application default credentials",
+			harness: "agy",
+			content: "Application Default Credentials unavailable; run gcloud auth application-default login",
+			want:    true,
+		},
+		{
+			name:    "ordinary auth task output",
+			harness: "codex-cli",
+			content: "Please fix the authentication module and update tests.\n›",
+			want:    false,
+		},
+		{
+			name:    "ordinary HTTP discussion",
+			harness: "agy",
+			content: "The API should return 401 Unauthorized for bad user credentials.\n>",
+			want:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := supervisorPaneAuthFailed(tt.content, tt.harness); got != tt.want {
+				t.Fatalf("supervisorPaneAuthFailed() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReadHeartbeatTime(t *testing.T) {
 	dir := t.TempDir()
 	hbDir := filepath.Join(dir, ".agm", "vroom", "heartbeat")

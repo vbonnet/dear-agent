@@ -223,9 +223,10 @@ func (rt *restartTracker) consecutiveRestarts(name string) int {
 type supervisorHealth int
 
 const (
-	healthAlive supervisorHealth = iota
-	healthStale                  // heartbeat old but session exists
-	healthDead                   // no session or session archived
+	healthAlive      supervisorHealth = iota
+	healthStale                       // heartbeat old but session exists
+	healthDead                        // no session or session archived
+	healthAuthFailed                  // session exists but the pane is stuck in provider auth
 )
 
 func (h supervisorHealth) String() string {
@@ -236,6 +237,8 @@ func (h supervisorHealth) String() string {
 		return "stale"
 	case healthDead:
 		return "dead"
+	case healthAuthFailed:
+		return "auth_failed"
 	default:
 		return "unknown"
 	}
@@ -285,6 +288,9 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 	if !sessionUp {
 		return healthDead
 	}
+	if isSupervisorAuthFailed(sup) {
+		return healthAuthFailed
+	}
 
 	heartbeat := readHeartbeatTime(home, heartbeatFileName(sup.Name))
 	if heartbeat.IsZero() {
@@ -300,6 +306,57 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 	}
 
 	return healthAlive
+}
+
+// captureSupervisorPane returns the most recent supervisor pane text. It is a
+// package variable so tests can cover auth classification without shelling out.
+var captureSupervisorPane = func(name string) (string, error) {
+	args := []string{"capture-pane", "-t", name, "-p", "-S", "-80"}
+	if socket := os.Getenv("AGM_TMUX_SOCKET"); socket != "" {
+		args = append([]string{"-S", socket}, args...)
+	}
+	cmd := exec.Command("tmux", args...)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+func isSupervisorAuthFailed(sup supervisor) bool {
+	content, err := captureSupervisorPane(sup.Name)
+	if err != nil {
+		return false
+	}
+	return supervisorPaneAuthFailed(content, sup.Harness)
+}
+
+func supervisorPaneAuthFailed(content, harness string) bool {
+	lower := strings.ToLower(content)
+	generic := []string{
+		"please run /login",
+		"authentication failed",
+		"not authenticated",
+		"session expired",
+		"token expired",
+	}
+	for _, marker := range generic {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	switch harness {
+	case "claude-code":
+		return strings.Contains(lower, "claude") &&
+			(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth"))
+	case "codex-cli":
+		return strings.Contains(lower, "codex login") ||
+			strings.Contains(lower, "run `codex login`") ||
+			(strings.Contains(lower, "openai") && strings.Contains(lower, "api key"))
+	case "agy":
+		return strings.Contains(lower, "gcloud auth application-default login") ||
+			strings.Contains(lower, "google_application_credentials") ||
+			(strings.Contains(lower, "agy") && strings.Contains(lower, "sign in"))
+	default:
+		return false
+	}
 }
 
 // heartbeatFileName maps a supervisor identity to the compact heartbeat file
@@ -587,6 +644,14 @@ var runSpawn = func(sup supervisor, model string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+var runArchiveSupervisor = func(sup supervisor) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), spawnCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "agm", "session", "archive", "--async", "--outcome", "crashed", sup.Name)
+	cmd.Env = scrubAPIKey(os.Environ())
+	return cmd.CombinedOutput()
+}
+
 // sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package
 // var so tests can avoid waiting out the real admission window.
 var sleepFor = time.Sleep
@@ -617,6 +682,21 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 		}
 	}
 	return fmt.Errorf("circuit breaker still refusing after %d attempts: %w", maxSpawnAttempts, lastErr)
+}
+
+func archiveAuthFailedSupervisor(sup supervisor) error {
+	output, err := runArchiveSupervisor(sup)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	deadline := time.Now().Add(spawnCommandTimeout)
+	for time.Now().Before(deadline) {
+		if !isSessionAlive(sup.Name) {
+			return nil
+		}
+		sleepFor(2 * time.Second)
+	}
+	return fmt.Errorf("auth-failed supervisor %s remained active after archive", sup.Name)
 }
 
 // createAndBootSession spawns one supervisor session and walks it through the
@@ -838,6 +918,46 @@ func runHealthMonitor(parent context.Context, home string, state *sessionState, 
 					"supervisor": sup.Name,
 					"heartbeat":  heartbeatFileName(sup.Name),
 				})
+
+			case healthAuthFailed:
+				ok, count := tracker.shouldRestart(sup.Name)
+				if !ok {
+					if tracker.shouldEscalate(sup.Name) {
+						msg := fmt.Sprintf("%s: %d consecutive auth-failed restarts — needs human intervention",
+							sup.Name, count)
+						escalateToHuman(home, "restart_exhausted", msg, map[string]any{
+							"supervisor": sup.Name,
+							"restarts":   count,
+							"reason":     "auth_failed",
+						})
+						fmt.Printf("[%s] ESCALATION: %s\n", sup.Name, msg)
+					}
+					continue
+				}
+
+				fmt.Printf("[%s] auth failed at %s (attempt %d/%d), archiving and restarting...\n",
+					sup.Name, time.Now().Format("15:04:05"), count+1, maxRestarts)
+				writeTrail(home, "dispatch.supervisor_auth_failed", map[string]any{
+					"supervisor": sup.Name,
+					"harness":    sup.Harness,
+					"attempt":    count + 1,
+				})
+
+				tracker.recordAttempt(sup.Name)
+				if err := archiveAuthFailedSupervisor(sup); err != nil {
+					fmt.Fprintf(os.Stderr, "[%s] auth-failed archive failed: %v\n", sup.Name, err)
+					writeTrail(home, "dispatch.supervisor_auth_archive_failed", map[string]any{
+						"supervisor": sup.Name,
+						"error":      err.Error(),
+					})
+					continue
+				}
+				delete(state.Sessions, sup.Name)
+				recreateCtx, recreateSpan := otel.Tracer(tracerName).Start(ctx, "vroom.session.recreate",
+					trace.WithAttributes(attribute.String("supervisor.name", sup.Name), attribute.String("supervisor.restart_reason", "auth_failed")))
+				createAndBootSession(recreateCtx, home, sup, state, model)
+				recreateSpan.End()
+				saveState(home, state)
 
 			case healthDead:
 				ok, count := tracker.shouldRestart(sup.Name)
