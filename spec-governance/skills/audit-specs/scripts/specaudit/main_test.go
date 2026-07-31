@@ -314,6 +314,12 @@ func TestAuthenticatedValidationRejectsForgedEvidenceAndUnsafeVerdicts(t *testin
 			},
 		},
 		{
+			name: "unknown applicability on positive finding",
+			mutate: func(semantic *report, _ *report) {
+				semantic.Candidates[0].Applicability[0].Disposition = "unknown"
+			},
+		},
+		{
 			name: "tentative positive",
 			mutate: func(semantic *report, _ *report) {
 				semantic.Candidates[0].Confidence = "tentative"

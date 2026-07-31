@@ -977,6 +977,11 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 		if strings.TrimSpace(f.ApplicabilityRationale) == "" {
 			return fmt.Errorf("positive finding %q requires applicability rationale", f.ID)
 		}
+		for _, entry := range f.Applicability {
+			if entry.Disposition == "unknown" {
+				return fmt.Errorf("positive finding %q has unresolved applicability for active member %q", f.ID, entry.Member)
+			}
+		}
 		switch f.ApplicabilityBasis {
 		case "active-members":
 			if len(active) == 0 || len(seenMembers) != len(active) {
