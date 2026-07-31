@@ -68,11 +68,14 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
 		`expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"`,
 		`expected_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_artifact")"`,
+		`expected_helper_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_artifact")"`,
 		`expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"`,
 		"IFS= read -r confirmed_audit_hash",
 		"IFS= read -r confirmed_service_hash",
 		"IFS= read -r confirmed_timer_hash",
+		"IFS= read -r confirmed_helper_hash",
 		"IFS= read -r confirmed_installer_hash",
+		`test "$$confirmed_helper_hash" = "$$expected_helper_hash"`,
 		`test "$$confirmed_installer_hash" = "$$expected_installer_hash"`,
 		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer"`,
 		`test "$$probe_status" = 1`,
@@ -109,20 +112,19 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	}
 
 	requiredRootTransaction := []string{
-		`if test "$mode" = "PROBE"; then`,
-		`exit "$probe_exit"`,
-		`trap 'cleanup_systemd_staging "$?"' EXIT`,
-		`trap 'cleanup_systemd_staging 129' HUP`,
-		`trap 'cleanup_systemd_staging 130' INT`,
-		`trap 'cleanup_systemd_staging 143' TERM`,
-		`/usr/bin/install -o root -g "$root_group" -m 0755 "$audit_artifact" "$audit_staging"`,
-		`test "$staged_audit_hash" = "$expected_audit_hash"`,
-		`activation_started=1`,
-		`/bin/mv -f "$audit_staging" "$audit_live"`,
-		`/bin/mv -f "$service_staging" "$service_live"`,
-		`/bin/mv -f "$timer_staging" "$timer_live"`,
-		`/usr/bin/systemctl daemon-reload`,
-		`activation_complete=1`,
+		`test "$mode" != "PROBE" || exit "$probe_exit"`,
+		`trap 'cleanup "$?"' EXIT`,
+		`trap 'cleanup 129' HUP`,
+		`trap 'cleanup 130' INT`,
+		`trap 'cleanup 143' TERM`,
+		`/usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec`,
+		`staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit-systemd-installer.XXXXXX)`,
+		`/usr/bin/install -o root -g "$root_gid" -m 0755 "$helper_artifact" "$staging"`,
+		`test "$staged_hash" = "$expected_helper_hash"`,
+		`"$staging" "$root_gid" "$4" "$5" "$6" "$7" "$8" "$9"`,
+		`/bin/rm -f "$staging"`,
+		`staging=`,
+		`trap - EXIT HUP INT TERM`,
 	}
 	offset := 0
 	for _, required := range requiredRootTransaction {
@@ -135,8 +137,8 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	if strings.Contains(rootInstaller, "sudo") {
 		t.Fatal("fixed root installer recursively invokes sudo")
 	}
-	cleanupStart := strings.Index(rootInstaller, "cleanup_systemd_staging()")
-	signalTraps := strings.Index(rootInstaller, `trap 'cleanup_systemd_staging "$?"' EXIT`)
+	cleanupStart := strings.Index(rootInstaller, "cleanup()")
+	signalTraps := strings.Index(rootInstaller, `trap 'cleanup "$?"' EXIT`)
 	if cleanupStart < 0 || signalTraps <= cleanupStart {
 		t.Fatal("fixed root installer lacks a bounded cleanup function")
 	}
@@ -146,11 +148,22 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	} else if bestEffort := strings.Index(cleanup, "set +e"); bestEffort < clear {
 		t.Fatal("root transaction cleanup does not clear traps before best-effort rollback")
 	}
+	executableLines := 0
+	for line := range strings.SplitSeq(rootInstaller, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			executableLines++
+		}
+	}
+	if executableLines > 20 {
+		t.Fatalf("fixed root bootstrap has %d executable lines, want at most 20", executableLines)
+	}
 
 	cmd := exec.Command(
 		"/bin/sh", "-c", rootInstaller,
 		"dear-agent-override-audit-systemd-installer",
-		"root", "audit", "service", "timer", "audit-hash", "service-hash", "timer-hash",
+		"helper", "helper-hash", "0", "audit", "service", "timer",
+		"audit-hash", "service-hash", "timer-hash",
 	)
 	cmd.Stdin = strings.NewReader("PROBE\n")
 	err := cmd.Run()
