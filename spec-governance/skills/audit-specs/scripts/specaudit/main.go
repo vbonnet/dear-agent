@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -351,6 +352,7 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+//nolint:gocyclo // Linear pinned-object collection keeps inventory and reciprocal-diagnostic construction auditable.
 func inventory(repoPath, repository, revision string) (report, error) {
 	root, err := git(repoPath, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -454,8 +456,8 @@ func parseSpec(path, body string) specFile {
 		if inFence {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "## ") {
-			inBDDTraceability = strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(trimmed, "## ")), "BDD Traceability")
+		if heading, ok := strings.CutPrefix(trimmed, "## "); ok {
+			inBDDTraceability = strings.EqualFold(strings.TrimSpace(heading), "BDD Traceability")
 		}
 		match := requirementPattern.FindStringSubmatch(line)
 		totalRequirements, validRequirements := lintRequirementLine(line)
@@ -494,7 +496,7 @@ func parseFeature(path, body string) featureFile {
 	related := make([]string, 0)
 	seen := map[string]bool{}
 	inFence := false
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
@@ -594,22 +596,6 @@ func activeMembers(root, commit string) ([]string, []string) {
 	return active, nil
 }
 
-func repositoryName(root string) string {
-	remote, err := git(root, "config", "--get", "remote.origin.url")
-	if err == nil {
-		trimmed := strings.TrimSuffix(strings.TrimSpace(remote), ".git")
-		for _, marker := range []string{"github.com/", "gitlab.com/"} {
-			if index := strings.Index(trimmed, marker); index >= 0 {
-				name := trimmed[index+len(marker):]
-				if strings.Count(name, "/") == 1 {
-					return name
-				}
-			}
-		}
-	}
-	return "local/" + filepath.Base(root)
-}
-
 func git(root string, args ...string) (string, error) {
 	command := exec.Command("git", append([]string{"-C", root}, args...)...)
 	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -638,6 +624,7 @@ func readReport(path string) (report, error) {
 	return decoded, nil
 }
 
+//nolint:gocyclo // Exhaustive fail-closed schema validation is intentionally kept as one ordered guard sequence.
 func validateReport(report report) error {
 	if report.SchemaVersion != schemaVersion {
 		return fmt.Errorf("schema_version must be %q", schemaVersion)
@@ -722,6 +709,7 @@ func validateReport(report report) error {
 	return nil
 }
 
+//nolint:gocyclo // Sequential authenticated cross-checks keep every trust transition visible and fail closed.
 func validateAgainstInventory(semantic, inventory report) error {
 	if err := validateReport(inventory); err != nil {
 		return fmt.Errorf("inventory report is invalid: %w", err)
@@ -868,6 +856,7 @@ func allFindings(report report) []finding {
 	return result
 }
 
+//nolint:gocyclo // Exhaustive inventory-shape validation is clearer as one ordered fail-closed pass.
 func validateInventory(files []specFile) error {
 	seen := map[string]bool{}
 	for _, file := range files {
@@ -919,6 +908,7 @@ func validateSeeds(seeds []seed) error {
 	return nil
 }
 
+//nolint:gocyclo // Exhaustive verdict and ownership invariants are intentionally validated in one fail-closed sequence.
 func validateFinding(f finding, nonCandidate bool, active map[string]bool) error {
 	if strings.TrimSpace(f.ID) == "" || strings.TrimSpace(f.Title) == "" || !verdicts[f.Verdict] || !relationships[f.Relationship] || !classifications[f.Classification] || !confidences[f.Confidence] || !strengths[f.Strength] {
 		return fmt.Errorf("finding %q has invalid required enumerations", f.ID)
@@ -1200,12 +1190,7 @@ func sameStringSet(left, right []string) bool {
 }
 
 func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, want)
 }
 
 func stringSet(items []string) map[string]bool {
@@ -1258,7 +1243,7 @@ func isProductSpecPath(path string) bool {
 	if !isSpecPath(path) {
 		return false
 	}
-	for _, segment := range strings.Split(filepath.ToSlash(path), "/") {
+	for segment := range strings.SplitSeq(filepath.ToSlash(path), "/") {
 		switch segment {
 		case "testdata", "migrations", "vendor", "node_modules":
 			return false
@@ -1288,6 +1273,7 @@ func sortedKeys[T any](items map[string]T) []string {
 }
 func normalize(text string) string { return strings.Join(strings.Fields(text), " ") }
 
+//nolint:gocyclo // Linear self-contained report assembly keeps escaping and section order directly auditable.
 func renderHTML(audit report, inventory *report) string {
 	candidates := append([]finding{}, audit.Candidates...)
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Rank < candidates[j].Rank })

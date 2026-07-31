@@ -122,6 +122,9 @@ func requireLinkedWorktreeRoot(root string) error {
 	if !filepath.IsAbs(gitDirectory) {
 		gitDirectory = filepath.Join(root, gitDirectory)
 	}
+	// #nosec G703 -- gitDirectory comes from Git's linked-worktree metadata and
+	// intentionally may live outside the worktree; this read-only stat only
+	// verifies that the declared administrative directory exists.
 	gitInfo, err := os.Stat(gitDirectory)
 	if err != nil || !gitInfo.IsDir() {
 		if err != nil {
@@ -139,56 +142,80 @@ func sync(root string, check bool) error {
 	}
 	defer repository.Close()
 
-	skillNames, err := canonicalSkillNames(repository)
+	plans, obsolete, err := planProjectionSync(repository)
 	if err != nil {
 		return err
 	}
+	if check {
+		return checkProjectionSync(plans, obsolete)
+	}
+	return applyProjectionSync(repository, plans, obsolete)
+}
+
+func planProjectionSync(repository *os.Root) ([]projectionPlan, []projectionPlan, error) {
+	skillNames, err := canonicalSkillNames(repository)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := validatePluginManifest(repository); err != nil {
-		return err
+		return nil, nil, err
 	}
 	plans := make([]projectionPlan, 0, len(skillNames))
 	canonical := map[string]bool{}
 	for _, skillName := range skillNames {
 		canonical[skillName] = true
-		canonicalPath := filepath.Join("spec-governance", "skills", skillName, "SKILL.md")
-		metadata, err := readMetadata(repository, canonicalPath)
+		plan, err := planCanonicalProjection(repository, skillName)
 		if err != nil {
-			return fmt.Errorf("%s: %w", filepath.ToSlash(canonicalPath), err)
-		}
-		if metadata.name != skillName {
-			return fmt.Errorf("%s: frontmatter name %q, want %q", filepath.ToSlash(canonicalPath), metadata.name, skillName)
-		}
-		if err := validateOpenAIMetadata(repository, skillName); err != nil {
-			return err
-		}
-
-		targetPath := filepath.Join(".agents", "skills", skillName, "SKILL.md")
-		reference, err := filepath.Rel(filepath.Dir(targetPath), canonicalPath)
-		if err != nil {
-			return fmt.Errorf("resolve canonical reference for %s: %w", skillName, err)
-		}
-		want := projection(metadata, filepath.ToSlash(reference))
-		plan, err := planProjection(repository, targetPath, want)
-		if err != nil {
-			return fmt.Errorf("%s: %w", filepath.ToSlash(targetPath), err)
+			return nil, nil, err
 		}
 		plans = append(plans, plan)
 	}
 	obsolete, err := obsoleteGeneratedProjections(repository, canonical)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	if check {
-		for _, plan := range plans {
-			if plan.stale {
-				return fmt.Errorf("%s: generated projection is missing or stale; run make sync-spec-skill-projections", filepath.ToSlash(plan.path))
-			}
-		}
-		if len(obsolete) > 0 {
-			return fmt.Errorf("%s: obsolete generated projection; run make sync-spec-skill-projections", filepath.ToSlash(obsolete[0].path))
-		}
-		return nil
+	return plans, obsolete, nil
+}
+
+func planCanonicalProjection(repository *os.Root, skillName string) (projectionPlan, error) {
+	canonicalPath := filepath.Join("spec-governance", "skills", skillName, "SKILL.md")
+	metadata, err := readMetadata(repository, canonicalPath)
+	if err != nil {
+		return projectionPlan{}, fmt.Errorf("%s: %w", filepath.ToSlash(canonicalPath), err)
 	}
+	if metadata.name != skillName {
+		return projectionPlan{}, fmt.Errorf("%s: frontmatter name %q, want %q", filepath.ToSlash(canonicalPath), metadata.name, skillName)
+	}
+	if err := validateOpenAIMetadata(repository, skillName); err != nil {
+		return projectionPlan{}, err
+	}
+
+	targetPath := filepath.Join(".agents", "skills", skillName, "SKILL.md")
+	reference, err := filepath.Rel(filepath.Dir(targetPath), canonicalPath)
+	if err != nil {
+		return projectionPlan{}, fmt.Errorf("resolve canonical reference for %s: %w", skillName, err)
+	}
+	want := projection(metadata, filepath.ToSlash(reference))
+	plan, err := planProjection(repository, targetPath, want)
+	if err != nil {
+		return projectionPlan{}, fmt.Errorf("%s: %w", filepath.ToSlash(targetPath), err)
+	}
+	return plan, nil
+}
+
+func checkProjectionSync(plans, obsolete []projectionPlan) error {
+	for _, plan := range plans {
+		if plan.stale {
+			return fmt.Errorf("%s: generated projection is missing or stale; run make sync-spec-skill-projections", filepath.ToSlash(plan.path))
+		}
+	}
+	if len(obsolete) > 0 {
+		return fmt.Errorf("%s: obsolete generated projection; run make sync-spec-skill-projections", filepath.ToSlash(obsolete[0].path))
+	}
+	return nil
+}
+
+func applyProjectionSync(repository *os.Root, plans, obsolete []projectionPlan) error {
 	for _, plan := range plans {
 		if plan.stale {
 			if err := writeProjectionAtomic(repository, plan); err != nil {
@@ -342,7 +369,7 @@ func parseMetadata(data []byte) (skillMetadata, error) {
 }
 
 func projection(metadata skillMetadata, canonicalReference string) []byte {
-	return []byte(fmt.Sprintf(`---
+	return fmt.Appendf(nil, `---
 name: %s
 description: %s
 ---
@@ -366,7 +393,7 @@ skill. It does not define a second workflow.
 
 Use the canonical skill's verification and completion criteria. Do not report
 completion until its required evidence is satisfied.
-`, metadata.name, yamlQuote(metadata.description), displayName(metadata.name), "the canonical skill", canonicalReference))
+`, metadata.name, yamlQuote(metadata.description), displayName(metadata.name), "the canonical skill", canonicalReference)
 }
 
 func yamlQuote(value string) string {
