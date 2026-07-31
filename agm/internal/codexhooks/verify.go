@@ -1206,12 +1206,18 @@ func awkOptionLoadsExternalCode(value string) bool {
 		return true
 	}
 	longName, _, _ := strings.Cut(value, "=")
-	for _, fullName := range []string{"--exec", "--file", "--include", "--load"} {
+	for _, fullName := range []string{"--exec", "--file", "--include", "--load", "--source"} {
 		if len(longName) > 2 &&
 			len(longName) <= len(fullName) &&
 			fullName[:len(longName)] == longName {
 			return true
 		}
+	}
+	// gawk's -e/--source options embed an additional AWK program in the
+	// command line. Reject joined and separated spellings before treating the
+	// next non-option token as the primary program.
+	if value == "-e" || strings.HasPrefix(value, "-e") {
+		return true
 	}
 	return strings.HasPrefix(value, "-E") ||
 		strings.HasPrefix(value, "-f") ||
