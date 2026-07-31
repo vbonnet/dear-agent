@@ -90,6 +90,26 @@ teardown() {
     rm -rf "$TEST_DIR"
 }
 
+marketplace_plugin_names() {
+    awk '
+        /"plugins"[[:space:]]*:[[:space:]]*\[/ { in_plugins=1; next }
+        in_plugins && /\]/                     { in_plugins=0 }
+        in_plugins && /"name"[[:space:]]*:/ {
+            match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
+            if (RSTART) {
+                s = substr($0, RSTART, RLENGTH)
+                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
+                sub(/".*/, "", s)
+                print s
+            }
+        }
+    ' "$PROJECT_ROOT/.claude-plugin/marketplace.json"
+}
+
+marketplace_plugin_specs() {
+    marketplace_plugin_names | awk '{ print $0 "@dear-agent" }'
+}
+
 # ----- structural ----------------------------------------------------------
 
 @test "install-claude-plugins.sh exists and is executable" {
@@ -143,19 +163,7 @@ teardown() {
     # Pluck the line that lists plugins.
     assert_output --partial "plugins:"
     # Every plugin name from the manifest must appear.
-    for p in $(awk '
-        /"plugins"[[:space:]]*:[[:space:]]*\[/ { in_plugins=1; next }
-        in_plugins && /\]/                     { in_plugins=0 }
-        in_plugins && /"name"[[:space:]]*:/ {
-            match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
-            if (RSTART) {
-                s = substr($0, RSTART, RLENGTH)
-                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-                sub(/".*/, "", s)
-                print s
-            }
-        }
-    ' "$PROJECT_ROOT/.claude-plugin/marketplace.json"); do
+    for p in $(marketplace_plugin_names); do
         assert_output --partial "$p"
     done
 }
@@ -165,6 +173,7 @@ teardown() {
     assert_success
     assert_output --partial "agm"
     assert_output --partial "wayfinder"
+    assert_output --partial "spec-governance"
 }
 
 # ----- marketplace add vs update -------------------------------------------
@@ -210,22 +219,21 @@ teardown() {
     : >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT"
     assert_success
-    assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "3"
-    # We expect at least agm, wayfinder, youtube.
-    run grep -F "plugin install agm@dear-agent" "$CLAUDE_LOG"
-    assert_success
-    run grep -F "plugin install wayfinder@dear-agent" "$CLAUDE_LOG"
-    assert_success
-    run grep -F "plugin install youtube@dear-agent" "$CLAUDE_LOG"
-    assert_success
+    expected_count="$(marketplace_plugin_names | awk 'END { print NR }')"
+    assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "$expected_count"
+    for p in $(marketplace_plugin_names); do
+        run grep -F "plugin install $p@dear-agent" "$CLAUDE_LOG"
+        assert_success
+    done
 }
 
 @test "already-installed plugin uses 'plugin update' instead of install" {
-    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\n' >"$CLAUDE_PLUGINS"
+    marketplace_plugin_specs >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT"
     assert_success
+    expected_count="$(marketplace_plugin_names | awk 'END { print NR }')"
     assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "0"
-    assert_equal "$(grep -c "^plugin update " "$CLAUDE_LOG")" "3"
+    assert_equal "$(grep -c "^plugin update " "$CLAUDE_LOG")" "$expected_count"
 }
 
 @test "--scope user is forwarded to plugin install" {
@@ -237,15 +245,13 @@ teardown() {
 }
 
 @test "--uninstall removes every declared plugin" {
-    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\n' >"$CLAUDE_PLUGINS"
+    marketplace_plugin_specs >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT" --uninstall
     assert_success
-    run grep -F "plugin uninstall agm@dear-agent" "$CLAUDE_LOG"
-    assert_success
-    run grep -F "plugin uninstall wayfinder@dear-agent" "$CLAUDE_LOG"
-    assert_success
-    run grep -F "plugin uninstall youtube@dear-agent" "$CLAUDE_LOG"
-    assert_success
+    for p in $(marketplace_plugin_names); do
+        run grep -F "plugin uninstall $p@dear-agent" "$CLAUDE_LOG"
+        assert_success
+    done
 }
 
 # ----- dry-run -------------------------------------------------------------
