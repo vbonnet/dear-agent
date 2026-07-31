@@ -163,6 +163,54 @@ func TestScanClaudeProjectsFullyRescansReplacedTranscript(t *testing.T) {
 	}
 }
 
+func TestScanClaudeProjectsDetectsSameInodeSameSizeRewrite(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rewritten-session.jsonl")
+	writeJSONLLine(t, path, "assistant", "old completion")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+	if prior.BoundaryHash == "" {
+		t.Fatal("baseline omitted its boundary fingerprint")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.ReplaceAll(string(data), "old completion", "new completion")
+	if len(rewritten) != len(data) {
+		t.Fatalf("rewrite changed size from %d to %d", len(data), len(rewritten))
+	}
+	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backdateCourierFile(t, path)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := courierFileIdentity(info); got != prior.Identity {
+		t.Fatalf("rewrite changed identity from %q to %q", prior.Identity, got)
+	}
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("rewrite scan: %v", err)
+	}
+	if len(events) != 1 || events[0].Headline != "new completion" {
+		t.Fatalf("rewrite events = %+v", events)
+	}
+}
+
 func TestScanClaudeProjects_ReportsNewCompletionAfterSeed(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")

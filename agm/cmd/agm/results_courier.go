@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,9 +57,10 @@ type resultsCourierEvent struct {
 
 // courierFileState is the last-processed watermark for one transcript file.
 type courierFileState struct {
-	Size     int64  `json:"size"`
-	Line     int    `json:"line"`
-	Identity string `json:"identity,omitempty"`
+	Size         int64  `json:"size"`
+	Line         int    `json:"line"`
+	Identity     string `json:"identity,omitempty"`
+	BoundaryHash string `json:"boundary_hash,omitempty"`
 }
 
 // courierState is the full on-disk cursor: last-seen watermark per
@@ -285,11 +287,19 @@ func scanClaudeTranscript(
 ) (*resultsCourierEvent, bool) {
 	prev, known := st.Files[path]
 	identity := courierFileIdentity(info)
-	replaced := courierTranscriptReplaced(known, prev.Identity, identity)
+	replaced := courierTranscriptReplaced(known, prev, identity, info.Size(), path)
 	if known && info.Size() == prev.Size && !replaced {
-		if prev.Identity == "" && identity != "" {
-			prev.Identity = identity
-			st.Files[path] = prev
+		updated := prev
+		updated.Identity = identity
+		if updated.BoundaryHash == "" {
+			boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
+			if err != nil {
+				return nil, false
+			}
+			updated.BoundaryHash = boundaryHash
+		}
+		if updated != prev {
+			st.Files[path] = updated
 		}
 		return nil, false // nothing new, cheap skip (no read)
 	}
@@ -314,10 +324,15 @@ func scanClaudeTranscript(
 	if err != nil {
 		return nil, false
 	}
+	boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
+	if err != nil {
+		return nil, false
+	}
 	st.Files[path] = courierFileState{
-		Size:     info.Size(),
-		Line:     lineBase + len(lines),
-		Identity: identity,
+		Size:         info.Size(),
+		Line:         lineBase + len(lines),
+		Identity:     identity,
+		BoundaryHash: boundaryHash,
 	}
 	headline := lastAssistantText(lines)
 	if headline == "" {
@@ -332,11 +347,26 @@ func scanClaudeTranscript(
 	}, false
 }
 
-func courierTranscriptReplaced(known bool, previousIdentity, currentIdentity string) bool {
-	return known &&
-		previousIdentity != "" &&
+func courierTranscriptReplaced(
+	known bool,
+	previous courierFileState,
+	currentIdentity string,
+	currentSize int64,
+	path string,
+) bool {
+	if !known || currentSize < previous.Size {
+		return known
+	}
+	if previous.Identity != "" &&
 		currentIdentity != "" &&
-		previousIdentity != currentIdentity
+		previous.Identity != currentIdentity {
+		return true
+	}
+	if previous.BoundaryHash == "" {
+		return false
+	}
+	currentBoundaryHash, err := courierBoundaryFingerprint(path, previous.Size)
+	return err != nil || currentBoundaryHash != previous.BoundaryHash
 }
 
 func seedCourierBaseline(
@@ -349,10 +379,15 @@ func seedCourierBaseline(
 	if err != nil {
 		return err
 	}
+	boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
+	if err != nil {
+		return err
+	}
 	st.Files[path] = courierFileState{
-		Size:     info.Size(),
-		Line:     len(lines),
-		Identity: identity,
+		Size:         info.Size(),
+		Line:         len(lines),
+		Identity:     identity,
+		BoundaryHash: boundaryHash,
 	}
 	return nil
 }
@@ -385,6 +420,33 @@ func courierFileIdentity(info os.FileInfo) string {
 		return ""
 	}
 	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino)
+}
+
+const courierBoundaryWindow = int64(4096)
+
+func courierBoundaryFingerprint(path string, end int64) (string, error) {
+	f, err := os.Open(path) //#nosec G304 -- path comes from our own transcript glob
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if end < 0 || end > info.Size() {
+		return "", fmt.Errorf("invalid transcript boundary %d for size %d", end, info.Size())
+	}
+	start := max(int64(0), end-courierBoundaryWindow)
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	if _, err := io.CopyN(hash, f, end-start); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
 // readLinesFrom reads only transcript bytes at or after offset. It returns the
