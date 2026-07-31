@@ -4,15 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestInventoryReadsPinnedRevisionAndProducesSeedsDeterministically(t *testing.T) {
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "-q")
+	gittest.HardenRepo(t, repo)
 	gitTest(t, repo, "config", "user.email", "test@example.com")
 	gitTest(t, repo, "config", "user.name", "Test")
 	writeTestFile(t, repo, "agm/internal/agent/harnesses.go", "package agent\nvar activeHarnesses = []string{\"codex-cli\", \"pi-cli\"}\n")
@@ -417,12 +419,7 @@ func validReport() report {
 
 func gitTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, output)
-	}
-	return string(output)
+	return gittest.Run(t, dir, args...)
 }
 
 func writeTestFile(t *testing.T, root, path, data string) {
