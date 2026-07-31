@@ -275,7 +275,7 @@ func TestValidateAuthenticatesFindingsAgainstPinnedGitInventory(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedValidationRejectsBDDReciprocitySplitAcrossFeatures(t *testing.T) {
+func TestAuthenticatedValidationAcceptsBDDReciprocityAcrossFeatures(t *testing.T) {
 	repo, inventoryReport, semanticReport := auditFixture(t)
 	semanticReport.Candidates[0].BDD.Features = []string{
 		"agm/test/bdd/features/one-only.feature",
@@ -288,9 +288,27 @@ func TestAuthenticatedValidationRejectsBDDReciprocitySplitAcrossFeatures(t *test
 	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
 		t.Fatalf("inventory should authenticate against the pinned repository: %v", err)
 	}
+	if err := validateAgainstInventory(semanticReport, inventoryReport); err != nil {
+		t.Fatalf("owners covered across reciprocal features should pass: %v", err)
+	}
+}
+
+func TestAuthenticatedValidationRejectsBDDFeatureWithoutCurrentOwner(t *testing.T) {
+	repo, inventoryReport, semanticReport := auditFixture(t)
+	semanticReport.Candidates[0].BDD.Features = []string{
+		"agm/test/bdd/features/shared.feature",
+		"agm/test/bdd/features/three-only.feature",
+	}
+
+	if err := validateReport(semanticReport); err != nil {
+		t.Fatalf("semantic report should be structurally valid: %v", err)
+	}
+	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
+		t.Fatalf("inventory should authenticate against the pinned repository: %v", err)
+	}
 	err := validateAgainstInventory(semanticReport, inventoryReport)
-	if err == nil || !strings.Contains(err.Error(), "one-only.feature\" does not reciprocally name current owner \"two/SPEC.md") {
-		t.Fatalf("split BDD reciprocity error=%v, want per-feature owner rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "three-only.feature\" does not reciprocally name any current owner") {
+		t.Fatalf("unrelated BDD feature error=%v, want current-owner rejection", err)
 	}
 }
 
@@ -429,10 +447,11 @@ func auditFixture(t *testing.T) (string, report, report) {
 	writeTestFile(t, repo, "agm/internal/agent/harnesses.go", "package agent\nvar activeHarnesses = []string{\"codex-cli\", \"pi-cli\"}\n")
 	writeTestFile(t, repo, "one/SPEC.md", "# One\n\n**ONE-01** When a request runs, the system shall preserve identity.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/shared.feature`\n- Feature: `agm/test/bdd/features/one-only.feature`\n")
 	writeTestFile(t, repo, "two/SPEC.md", "# Two\n\n**TWO-01** When a request runs, the system shall preserve identity.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/shared.feature`\n- Feature: `agm/test/bdd/features/two-only.feature`\n")
-	writeTestFile(t, repo, "three/SPEC.md", "# Three\n\n**THREE-01** When a separate request runs, the system shall emit an unrelated metric.\n")
+	writeTestFile(t, repo, "three/SPEC.md", "# Three\n\n**THREE-01** When a separate request runs, the system shall emit an unrelated metric.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/three-only.feature`\n")
 	writeTestFile(t, repo, "agm/test/bdd/features/shared.feature", "# SPEC: one/SPEC.md\n# RELATED-SPEC: two/SPEC.md\nFeature: Shared identity\n")
 	writeTestFile(t, repo, "agm/test/bdd/features/one-only.feature", "# SPEC: one/SPEC.md\nFeature: One-only identity\n")
 	writeTestFile(t, repo, "agm/test/bdd/features/two-only.feature", "# SPEC: two/SPEC.md\nFeature: Two-only identity\n")
+	writeTestFile(t, repo, "agm/test/bdd/features/three-only.feature", "# SPEC: three/SPEC.md\nFeature: Three-only metric\n")
 	gitTest(t, repo, "add", ".")
 	gitTest(t, repo, "commit", "-qm", "fixture")
 	revision := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))

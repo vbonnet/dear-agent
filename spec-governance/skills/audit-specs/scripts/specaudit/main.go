@@ -822,6 +822,7 @@ func validateAgainstInventory(semantic, inventory report) error {
 		if finding.ProposedOwner != nil && finding.ProposedOwner.State == "new" && files[finding.ProposedOwner.Path] {
 			return fmt.Errorf("finding %q marks proposed owner %q new, but it already exists in the pinned inventory", finding.ID, finding.ProposedOwner.Path)
 		}
+		coveredOwners := map[string]bool{}
 		for _, featurePath := range finding.BDD.Features {
 			feature, ok := features[featurePath]
 			if !ok {
@@ -831,10 +832,20 @@ func validateAgainstInventory(semantic, inventory report) error {
 			for _, related := range feature.RelatedSpecs {
 				featureOwners[related] = true
 			}
+			coveredFeature := false
 			for _, owner := range finding.CurrentOwners {
-				if !featureOwners[owner.Path] || !specFeatures[owner.Path][featurePath] {
-					return fmt.Errorf("finding %q BDD feature %q does not reciprocally name current owner %q", finding.ID, featurePath, owner.Path)
+				if featureOwners[owner.Path] && specFeatures[owner.Path][featurePath] {
+					coveredOwners[owner.Path] = true
+					coveredFeature = true
 				}
+			}
+			if !coveredFeature {
+				return fmt.Errorf("finding %q BDD feature %q does not reciprocally name any current owner", finding.ID, featurePath)
+			}
+		}
+		for _, owner := range finding.CurrentOwners {
+			if len(finding.BDD.Features) > 0 && !coveredOwners[owner.Path] {
+				return fmt.Errorf("finding %q BDD features do not reciprocally name current owner %q", finding.ID, owner.Path)
 			}
 		}
 	}
