@@ -7,12 +7,13 @@ description: "Write or revise SPEC.md as an observable, implementation- and harn
 
 This skill is the harness-neutral entry point for the repository's canonical
 SPEC authoring workflow. It deliberately does not restate the rules, commands,
-or stop conditions: [`docs/spec-authoring.md`](../../../docs/spec-authoring.md)
-owns them.
+or stop conditions: the
+[`canonical SPEC authoring guide`](../../docs/spec-authoring.md) owns them.
 
 ## Workflow
 
-1. Read [`docs/spec-authoring.md`](../../../docs/spec-authoring.md) completely,
+1. Read the
+   [`canonical SPEC authoring guide`](../../docs/spec-authoring.md) completely,
    including the focused contract-model and EARS/BDD references it links.
 2. Follow its **Before editing a specification** workflow against live source,
    specifications, inventory, and tests.
@@ -28,4 +29,4 @@ boundary** section. Do not treat this skill as an alternative checklist.
 
 ## Canonical owner
 
-- [Repository SPEC authoring guide](../../../docs/spec-authoring.md)
+- [Canonical SPEC authoring guide](../../docs/spec-authoring.md)

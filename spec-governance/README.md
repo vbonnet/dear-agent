@@ -6,6 +6,8 @@ their evidence and discovery surfaces honest:
 - `skills/write-spec` authors one observable contract with explicit
   applicability and BDD consequences;
 - `skills/audit-specs` performs a pinned, read-only ownership audit; and
+- `docs/spec-authoring.md` owns the authoring rules inside the distributable
+  plugin root; and
 - `cmd/sync-skill-projections` derives regular `.agents` entrypoints from the
   canonical skill metadata.
 

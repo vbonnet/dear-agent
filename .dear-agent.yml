@@ -61,6 +61,8 @@ instruction-policy:
       owner: repository-policy
     - match: docs/spec-authoring.md
       owner: spec-governance
+    - match: spec-governance/docs/spec-authoring.md
+      owner: spec-governance
     - match: CLAUDE.md
       owner: harness-shims
     - match: CODEX.md
