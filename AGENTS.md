@@ -149,5 +149,28 @@ This repository contains current, normative documentation only:
 - Prefer stable invariants and verification commands over latency, coverage,
   test-count, or cost claims without dated reproducible evidence.
 
+### SPEC contract governance
+
+- Treat `SPEC.md` as an observable behavior contract, not a harness or
+  implementation manual. Put a shared outcome beside the module that owns its
+  invariant; keep provider, harness, and implementation mechanics in a local
+  adapter contract only when those mechanics are themselves observable.
+- For every affected active harness or implementation, record one disposition:
+  `supported`, `adapted`, `unsupported`, or `not-applicable`, with the observable
+  reason for any divergence. Stop for a product decision when two contracts make
+  contradictory promises.
+- Give requirements stable IDs such as `**DOMAIN-01**`. Retain an ID for a
+  wording-only clarification; add, retire, or supersede IDs when observable
+  behavior changes rather than silently reusing an old promise.
+- Keep BDD traceability reciprocal: a SPEC traceability section links to the
+  feature, and the feature's `# SPEC:` annotation names the canonical `SPEC.md`
+  path. Prefer shared scenario outlines that exercise the stable requirements;
+  use adapter-specific scenarios only for a local observable delta.
+- Follow [`write-spec`](spec-governance/skills/write-spec/SKILL.md) for authoring.
+  Use [`audit-specs`](spec-governance/skills/audit-specs/SKILL.md) only for a
+  read-only duplicate or divergence investigation before consolidation.
+- Run `make lint-specs` and the affected traceability and BDD checks. Passing
+  lint proves syntax and linkage, not correct ownership or semantic consistency.
+
 Harness-specific root files are import shims. Shared policy changes belong here
 or in the seven canonical policy files, not in a harness shim.
