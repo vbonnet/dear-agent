@@ -271,12 +271,38 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	if err != nil {
 		return err
 	}
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("load session policy for resume: %w", err)
+	}
+	trustedAddDirs, guardPath, err := trustedAddDirsForSession(m.Name, manifestRole(m))
+	if err != nil {
+		return err
+	}
+	currentAddDirs := collectExtraAddDirsForHarness(m.Sandbox, m.Harness, manifestRole(m), trustedAddDirs)
+	writeRoots := append([]string{}, currentAddDirs...)
+	if m.Sandbox != nil {
+		for _, dir := range m.Sandbox.ExtraAddDirs {
+			if configuredSourceRepo(dir) {
+				continue
+			}
+			writeRoots = appendUnique(writeRoots, dir)
+		}
+	}
+	if guardPath == "" && m.Harness == "codex-cli" && manifestRole(m) == "worker" {
+		guardPath = defaultWorkerGuardPath
+	}
+	if err := configureWorkerWriteBoundary(m.Harness, manifestRole(m), guardPath, writeRoots); err != nil {
+		return err
+	}
 	tmuxAdapter := session.NewRealTmux()
 	req := &ops.ResumeSessionRequest{
-		SessionID:    sessionID,
-		ManifestPath: manifestPath,
-		Prompt:       prompt,
-		OnEvent:      presentResumeEvent,
+		SessionID:       sessionID,
+		ManifestPath:    manifestPath,
+		Prompt:          prompt,
+		CurrentAddDirs:  currentAddDirs,
+		ExcludedAddDirs: append([]string{}, cfg.Sandbox.Repos...),
+		OnEvent:         presentResumeEvent,
 	}
 	result, err := ops.ResumeSession(&ops.OpContext{
 		Context: ctx,
@@ -307,6 +333,29 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	}
 	ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
 	return nil
+}
+
+func configuredSourceRepo(path string) bool {
+	clean := filepath.Clean(path)
+	for _, repo := range cfg.Sandbox.Repos {
+		rel, err := filepath.Rel(filepath.Clean(repo), clean)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func manifestRole(m *manifest.Manifest) string {
+	if m == nil {
+		return ""
+	}
+	for _, tag := range m.Context.Tags {
+		if role, ok := strings.CutPrefix(tag, "role:"); ok {
+			return role
+		}
+	}
+	return ""
 }
 
 func presentResumeEvent(event ops.ResumeSessionEvent) {

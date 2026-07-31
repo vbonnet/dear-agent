@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"syscall"
 
 	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -166,7 +169,14 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 		return err
 	}
 
-	extraAddDirs, trustPreConfigured := collectExtraAddDirs(sandboxInfo)
+	trustedAddDirs, guardPath, err := trustedAddDirsForSession(sessionName, roleName)
+	if err != nil {
+		return err
+	}
+	extraAddDirs, trustPreConfigured := collectExtraAddDirs(sandboxInfo, trustedAddDirs)
+	if err := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); err != nil {
+		return err
+	}
 	if err := configureProjectPermissions(workDir); err != nil {
 		return err
 	}
@@ -428,25 +438,151 @@ func getWorkDir() (string, error) {
 // collectExtraAddDirs returns the per-session --add-dir entries needed to
 // re-authorize sandbox source-repo paths and a flag indicating whether trust
 // was pre-configured (always true today via --add-dir).
-func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig) ([]string, bool) {
+func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig, requested []string) ([]string, bool) {
+	return collectExtraAddDirsForHarness(sandboxInfo, harnessName, roleName, requested), true
+}
+
+// collectExtraAddDirsForHarness resolves the current configured writable roots
+// for one sandboxed harness. Keeping this independent of the create command's
+// globals lets cold resume reconcile sessions created under an older config.
+func collectExtraAddDirsForHarness(sandboxInfo *manifest.SandboxConfig, harness, role string, requested []string) []string {
 	debug.Phase("Configure Trust")
 	var extraAddDirs []string
+	isCodexWorker := agent.NormalizeHarnessName(harness) == "codex-cli" && role == "worker"
 	if sandboxInfo != nil {
-		for _, repoDir := range cfg.Sandbox.Repos {
-			extraAddDirs = append(extraAddDirs, repoDir)
-			debug.Log("Will pre-authorize source repo via --add-dir: %s", repoDir)
+		if !isCodexWorker {
+			for _, repoDir := range cfg.Sandbox.Repos {
+				extraAddDirs = appendUnique(extraAddDirs, repoDir)
+				debug.Log("Will pre-authorize source repo via --add-dir: %s", repoDir)
+			}
 		}
 		// Sandboxed sessions are otherwise confined to their workspace, so any
 		// real worktree or shared task database is read-only to them. Without
 		// these a worker can do the work but cannot land it.
-		if harnessName == "codex-cli" {
+		if isCodexWorker {
 			for _, dir := range cfg.Sandbox.WritableDirs {
-				extraAddDirs = append(extraAddDirs, dir)
+				extraAddDirs = appendUnique(extraAddDirs, dir)
 				debug.Log("Will pre-authorize writable dir via --add-dir: %s", dir)
 			}
 		}
 	}
-	return extraAddDirs, true
+	for _, dir := range requested {
+		extraAddDirs = appendUnique(extraAddDirs, dir)
+		debug.Log("Will pre-authorize session dir via --add-dir: %s", dir)
+	}
+	return extraAddDirs
+}
+
+func appendUnique(values []string, value string) []string {
+	if slices.Contains(values, value) {
+		return values
+	}
+	return append(values, value)
+}
+
+const (
+	trustedAddDirsEnv        = "AGM_TRUSTED_ADD_DIRS_JSON"
+	trustedAddDirsSessionEnv = "AGM_TRUSTED_ADD_DIRS_SESSION"
+	trustedGuardPathEnv      = "AGM_TRUSTED_GUARD_PATH"
+	workerWriteRootsEnv      = "AGM_WORKER_WRITE_ROOTS_JSON"
+	defaultWorkerGuardPath   = "/etc/codex/hooks/pretool-worker-write-boundary"
+)
+
+// trustedAddDirsForSession consumes the host dispatcher's one-launch handoff.
+// The variables are removed before the harness starts, so a worker cannot copy
+// the trusted parent's authority into later child sessions. A nested AGM call
+// from inside an existing sandbox also cannot loosen its parent OS sandbox.
+func trustedAddDirsForSession(sessionName, role string) ([]string, string, error) {
+	raw := os.Getenv(trustedAddDirsEnv)
+	boundSession := os.Getenv(trustedAddDirsSessionEnv)
+	guardPath := os.Getenv(trustedGuardPathEnv)
+	_ = os.Unsetenv(trustedAddDirsEnv)
+	_ = os.Unsetenv(trustedAddDirsSessionEnv)
+	_ = os.Unsetenv(trustedGuardPathEnv)
+	if raw == "" && boundSession == "" && guardPath == "" {
+		return nil, "", nil
+	}
+	if raw == "" || boundSession != sessionName {
+		return nil, "", fmt.Errorf("trusted worker handoff is incomplete or bound to another session")
+	}
+	if role != "worker" {
+		return nil, "", fmt.Errorf("trusted worker handoff requires worker role")
+	}
+	out, err := validateTrustedAddDirs(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := validateTrustedWorkerGuard(guardPath); err != nil {
+		return nil, "", err
+	}
+	return out, guardPath, nil
+}
+
+func validateTrustedAddDirs(raw string) ([]string, error) {
+	var dirs []string
+	if err := json.Unmarshal([]byte(raw), &dirs); err != nil {
+		return nil, fmt.Errorf("decode trusted add-dir handoff: %w", err)
+	}
+	var out []string
+	for _, dir := range dirs {
+		if !filepath.IsAbs(dir) {
+			return nil, fmt.Errorf("trusted add-dir must be absolute: %q", dir)
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("inspect trusted add-dir %s: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("trusted add-dir is not a directory: %s", dir)
+		}
+		out = appendUnique(out, dir)
+	}
+	return out, nil
+}
+
+func validateTrustedWorkerGuard(guardPath string) error {
+	if guardPath == "" {
+		return nil
+	}
+	if !filepath.IsAbs(guardPath) {
+		return fmt.Errorf("trusted worker guard path must be absolute: %q", guardPath)
+	}
+	info, err := os.Stat(guardPath) // #nosec G703 -- path is an authenticated absolute host handoff, not worker input.
+	if err != nil {
+		return fmt.Errorf("inspect trusted worker guard %s: %w", guardPath, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return fmt.Errorf("trusted worker guard is not an executable file: %s", guardPath)
+	}
+	return nil
+}
+
+func configureWorkerWriteBoundary(harness, role, guardPath string, dirs []string) error {
+	_ = os.Unsetenv(workerWriteRootsEnv)
+	if harness != "codex-cli" || role != "worker" {
+		return nil
+	}
+	if guardPath == "" {
+		return fmt.Errorf("codex worker launch requires the managed write-boundary guard at %s", defaultWorkerGuardPath)
+	}
+	if len(dirs) == 0 {
+		return fmt.Errorf("codex worker launch requires at least one host-authorized write root")
+	}
+	info, err := os.Stat(guardPath) // #nosec G703 -- path was validated from the authenticated host handoff.
+	if err != nil {
+		return fmt.Errorf("inspect Codex worker write-boundary guard: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return fmt.Errorf("codex worker write-boundary guard is not an executable file: %s", guardPath)
+	}
+	payload, err := json.Marshal(dirs)
+	if err != nil {
+		return fmt.Errorf("encode Codex worker write roots: %w", err)
+	}
+	if err := os.Setenv(workerWriteRootsEnv, string(payload)); err != nil {
+		return fmt.Errorf("set Codex worker write roots: %w", err)
+	}
+	return nil
 }
 
 // configureProjectPermissions resolves the shared session policy, persists it
