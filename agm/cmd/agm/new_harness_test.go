@@ -325,6 +325,7 @@ func TestSubmitHarnessLaunchBindingFailureCancelsWithoutSubmission(t *testing.T)
 }
 
 func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	callerCtx := t.Context()
 	var sentCommand string
 	var waitedSession string
@@ -364,8 +365,11 @@ func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
 		t.Fatal("auto permission mode was not reported as applied")
 	}
 	for _, want := range []string{
-		"cd '/tmp/agy work' && agy --model 'Gemini 3.5 Flash (Low)'",
-		"--dangerously-skip-permissions",
+		"__exec-agy",
+		"--session 'agy-production-seam'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/agy work'",
+		"--permission 'auto'",
 		"--add-dir '/tmp/extra dir'",
 		"&& exit",
 	} {
@@ -593,7 +597,11 @@ func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"cd '/tmp/agy work' && agy --model 'Gemini 3.5 Flash (Low)' --dangerously-skip-permissions",
+		"agm __exec-agy",
+		"--session 'agy'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/agy work'",
+		"--permission 'auto'",
 		"--add-dir '/tmp/extra dir'",
 		"&& exit",
 	} {
@@ -612,7 +620,19 @@ func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
 	if strings.Contains(cmd, "--dangerously-skip-permissions") {
 		t.Errorf("default AGY command should not skip permissions: %q", cmd)
 	}
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --model 'Gemini 3.5 Flash (Medium)' && exit") {
+	for _, want := range []string{
+		"agm __exec-agy",
+		"--session 'agy'",
+		"--model 'Gemini 3.5 Flash (Medium)'",
+		"--workdir '/tmp/agy-work'",
+		"--permission 'default'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("default AGY launch command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "cd '/tmp/agy-work' && agy") {
 		t.Errorf("unexpected default AGY launch command: %q", cmd)
 	}
 	if strings.Contains(cmd, "--prompt-interactive") {
@@ -649,7 +669,7 @@ func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
 		want string
 	}{
 		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "--approval 'never'"},
-		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions"},
+		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agm __exec-agy"},
 		{name: "OpenCode", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "opencode-cli", Model: "glm-5.2", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true}), want: "opencode attach"},
 		{name: "Pi", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "pi-cli", Model: "sonnet", SessionName: "worker", SessionID: "native", WorkDir: "/tmp/work", Persistent: true, Pi: &manifest.Pi{SessionID: "native", SessionDir: "/tmp/pi"}}), want: "pi --session-id 'native'"},
 	}
