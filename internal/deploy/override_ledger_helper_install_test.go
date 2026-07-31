@@ -23,8 +23,11 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	target := makefile[start : start+end]
 
 	requiredInOrder := []string{
-		`install_lock_file="/tmp/dear-agent-override-ledger-install.lock"`,
-		`umask 000; : >>"$$install_lock_file"`,
+		`Darwin) install_lock_path="/private/var/run"`,
+		`Linux) install_lock_path="/run"`,
+		`test ! -L "$$install_lock_ancestor"`,
+		`test ! -w "$$install_lock_ancestor"`,
+		`test "$$install_lock_uid" = 0`,
 		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -k -t 0`,
 		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -n`,
 		`install-override-ledger-helper-locked:`,
@@ -65,6 +68,10 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	}
 	if strings.Contains(target, `-m 0755 bin/dear-agent-override-ledger-append "$$helper"`) {
 		t.Fatal("install target still copies mutable same-user bytes directly to the privileged helper")
+	}
+	if strings.Contains(target, "/tmp/dear-agent-override-ledger-install.lock") ||
+		strings.Contains(target, `: >>"$$install_lock`) {
+		t.Fatal("installer still uses a same-user-replaceable regular-file lock")
 	}
 	if !strings.Contains(target, `if test "$$launcher_set_active" = 1 && root_transaction_committed; then launcher_activation_complete=1; fi`) {
 		t.Fatal("signal recovery does not distinguish a complete launcher set from a partial user activation")
