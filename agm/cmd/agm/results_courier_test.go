@@ -864,6 +864,70 @@ func TestLoadCourierState_MissingFileReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestWaitForCourierStatePreservesUnreadableCursorUntilRecovery(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	malformed := []byte(`{"files":`)
+	if err := os.WriteFile(statePath, malformed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type loadResult struct {
+		state courierState
+		err   error
+	}
+	result := make(chan loadResult, 1)
+	go func() {
+		state, err := waitForCourierState(ctx, statePath, 5*time.Millisecond)
+		result <- loadResult{state: state, err: err}
+	}()
+
+	select {
+	case got := <-result:
+		t.Fatalf("malformed cursor unexpectedly loaded: %+v", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(malformed) {
+		t.Fatalf("load retry changed malformed cursor to %q", data)
+	}
+
+	expected := courierState{
+		Files: map[string]courierFileState{
+			"/session.jsonl": {Size: 42, Line: 3},
+		},
+		BaselineComplete: true,
+	}
+	if err := saveCourierState(statePath, expected); err != nil {
+		t.Fatalf("restore valid cursor: %v", err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("load after cursor recovery: %v", got.err)
+		}
+		if got.state.Files["/session.jsonl"] != expected.Files["/session.jsonl"] ||
+			!got.state.BaselineComplete {
+			t.Fatalf("loaded recovered cursor = %+v, want %+v", got.state, expected)
+		}
+	case <-ctx.Done():
+		t.Fatal("state load did not recover after valid cursor was restored")
+	}
+
+	if err := os.WriteFile(statePath, malformed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	canceledCtx, cancelWait := context.WithCancel(context.Background())
+	cancelWait()
+	if _, err := waitForCourierState(canceledCtx, statePath, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled state load = %v, want context canceled", err)
+	}
+}
+
 func TestStartResultsCourierEstablishesBaselineBeforeFirstTick(t *testing.T) {
 	home := t.TempDir()
 	projectDir := filepath.Join(

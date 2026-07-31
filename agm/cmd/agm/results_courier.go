@@ -111,6 +111,34 @@ func loadCourierState(path string) (courierState, error) {
 	return st, nil
 }
 
+func waitForCourierState(
+	ctx context.Context,
+	path string,
+	retryDelay time.Duration,
+) (courierState, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return courierState{}, err
+		}
+		st, err := loadCourierState(path)
+		if err == nil {
+			return st, nil
+		}
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return courierState{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func saveCourierState(path string, st courierState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -1121,7 +1149,14 @@ func startResultsCourier(ctx context.Context, opCtx *ops.OpContext, home, orches
 
 	st, err := loadCourierState(statePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "results-courier: state load error (continuing with fresh state): %v\n", err)
+		fmt.Fprintf(os.Stderr, "results-courier: state load error (retrying without changing cursor): %v\n", err)
+		st, err = waitForCourierState(ctx, statePath, time.Second)
+		if err != nil {
+			if ctx.Err() == nil {
+				fmt.Fprintf(os.Stderr, "results-courier: state load retry stopped: %v\n", err)
+			}
+			return
+		}
 	}
 
 	// Establish the deployment baseline before waiting for the first ticker.
