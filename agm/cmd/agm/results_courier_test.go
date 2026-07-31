@@ -913,6 +913,23 @@ func TestCourierAssistantTextCarriesRelaySuppressionAcrossToolResultScans(t *tes
 	}
 }
 
+func TestCourierAssistantTextDoesNotArmRelaySuppressionFromToolResultMarker(t *testing.T) {
+	headline, pending := courierAssistantText(
+		[]string{`{"type":"user","message":{"content":[{"type":"tool_result","content":"read source containing RESULTS COURIER RELAY:"}]}}`},
+		false,
+	)
+	if headline != "" || pending {
+		t.Fatalf("ordinary tool result = (%q, %v), want empty headline without relay suppression", headline, pending)
+	}
+	headline, pending = courierAssistantText(
+		[]string{`{"type":"assistant","message":{"content":[{"type":"text","text":"ordinary completion"}],"stop_reason":"end_turn"}}`},
+		pending,
+	)
+	if headline != "ordinary completion" || pending {
+		t.Fatalf("completion after ordinary tool result = (%q, %v), want delivered completion", headline, pending)
+	}
+}
+
 func TestProcessResultsCourierTickRetriesAfterTotalDeliveryFailure(t *testing.T) {
 	home := t.TempDir()
 	projectDir := filepath.Join(

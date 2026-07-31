@@ -176,7 +176,7 @@ func courierAssistantText(lines []string, relayPending bool) (string, bool) {
 			}
 			headline = text
 		case "user":
-			if relayPending && courierUserContainsToolResult(entry.Message.Content) {
+			if courierUserContainsToolResult(entry.Message.Content) {
 				headline = ""
 				continue
 			}
