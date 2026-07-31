@@ -21,8 +21,8 @@ func TestInstallerSystemDirectoryLockSerializes(t *testing.T) {
 	case "linux":
 		lockPath = "/run"
 		lockTool = "/usr/bin/flock"
-		holderScript = `exec 9<"$1"; "$2" -n 9; exec "$3" -test.run=TestInstallerLockHolder -- "$4"`
-		contenderScript = `exec 9<"$1"; "$2" -n 9; exec /usr/bin/true`
+		holderScript = `exec 9<"$1"; exec "$2" --no-fork -n /proc/self/fd/9 "$3" -test.run=TestInstallerLockHolder -- "$4"`
+		contenderScript = `exec 9<"$1"; exec "$2" --no-fork -n /proc/self/fd/9 /usr/bin/true`
 	default:
 		t.Skip("installer lock is supported only on Darwin and Linux")
 	}
@@ -120,7 +120,7 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`test -x "$$install_lock_executable"`,
 		`exec 9<"$$install_lock_path"`,
 		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -k -t 0 /dev/fd/9 /usr/bin/make`,
-		`Linux) "$$install_lock_tool" -n 9; DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec /usr/bin/make`,
+		`Linux) DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" --no-fork -n /proc/self/fd/9 /usr/bin/make`,
 		`install-override-ledger-helper-locked:`,
 		`test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1`,
 		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
