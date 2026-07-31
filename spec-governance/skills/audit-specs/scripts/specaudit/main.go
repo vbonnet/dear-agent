@@ -598,12 +598,28 @@ func activeMembers(root, commit string) ([]string, []string) {
 
 func git(root string, args ...string) (string, error) {
 	command := exec.Command("git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
-	command.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0")
+	command.Env = cleanGitEnvironment()
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 	return string(output), nil
+}
+
+func cleanGitEnvironment() []string {
+	environment := make([]string, 0, len(os.Environ())+5)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") {
+			environment = append(environment, entry)
+		}
+	}
+	return append(environment,
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_NO_REPLACE_OBJECTS=1",
+		"GIT_TERMINAL_PROMPT=0",
+	)
 }
 
 func readReport(path string) (report, error) {
@@ -1293,6 +1309,7 @@ func renderHTML(audit report, inventory *report) string {
 	out.WriteString(`<style>
 :root{--ink:#132238;--muted:#56657a;--paper:#f4f1ea;--card:#fffdf8;--line:#d9d2c5;--accent:#b5412b;--teal:#176b67;--gold:#a66b17;--soft:#ece7dc;--code:#f1eee6}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--paper);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--teal)}code{font:0.9em/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:.08rem .3rem;border-radius:4px;overflow-wrap:anywhere}.shell{width:min(1180px,calc(100% - 2rem));margin:auto}.hero{padding:4.5rem 0 2.3rem;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#fffaf0 0%,#e5efec 100%)}.eyebrow{margin:0 0 .5rem;color:var(--accent);font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:.76rem}.hero h1{max-width:850px;margin:.1rem 0 .8rem;font:700 clamp(2.25rem,6vw,4.6rem)/.98 ui-serif,Georgia,serif;letter-spacing:-.04em}.lede{max-width:780px;color:var(--muted);font-size:1.08rem}.snapshot{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin:1.5rem 0}.snapshot div{padding:.8rem 0;border-top:1px solid var(--line)}.snapshot dt{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em}.snapshot dd{margin:.2rem 0 0}.warning{margin:1.2rem 0 0;padding:1rem 1.1rem;border:1px solid #e3b6a5;border-left:5px solid var(--accent);background:#fff5ef}.toc{position:sticky;top:0;z-index:5;background:rgba(244,241,234,.96);border-bottom:1px solid var(--line);backdrop-filter:blur(8px)}.toc .shell{display:flex;gap:1.1rem;overflow-x:auto;padding:.72rem 0}.toc a{white-space:nowrap;text-decoration:none;font-weight:700;font-size:.86rem}main{padding:2.2rem 0 5rem}section{scroll-margin-top:4rem;margin:0 0 3.5rem}h2{font:700 clamp(1.6rem,3vw,2.35rem)/1.05 ui-serif,Georgia,serif;letter-spacing:-.02em;margin:0 0 1rem}h3{font-size:1.25rem;line-height:1.25;margin:.15rem 0}.section-intro{max-width:780px;color:var(--muted)}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.8rem}.metric{padding:1.05rem;border:1px solid var(--line);background:var(--card);box-shadow:0 3px 0 rgba(19,34,56,.04)}.metric strong{display:block;font:700 2rem/1 ui-serif,Georgia,serif}.metric span{color:var(--muted);font-size:.82rem}.scope-grid,.two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.panel{padding:1.15rem;border:1px solid var(--line);background:var(--card)}.pill,.tag{display:inline-flex;align-items:center;margin:.18rem .25rem .18rem 0;padding:.23rem .55rem;border-radius:999px;background:var(--soft);font-size:.78rem;font-weight:800}.tag.verdict{background:#d9ebe8;color:#0d5753}.tag.warn{background:#f6dfd5;color:#7a2716}.top-pick{padding:1.35rem;border:1px solid #b9cfc9;border-left:6px solid var(--teal);background:#f7fcfa}.top-pick .rank{color:var(--teal);font-weight:900}.topology{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:.8rem;margin:1rem 0}.owner-box{height:100%;padding:.8rem;border:1px solid var(--line);background:var(--card)}.arrow{font-size:1.6rem;color:var(--teal)}.toolbar{display:grid;grid-template-columns:2fr 1fr;gap:.7rem;margin:1rem 0}.toolbar input,.toolbar select{width:100%;padding:.75rem;border:1px solid var(--line);border-radius:0;background:#fff;font:inherit}.finding{margin:1rem 0;padding:1.3rem;border:1px solid var(--line);background:var(--card);box-shadow:0 7px 18px rgba(19,34,56,.05)}.finding-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.finding-id{color:var(--muted);font:700 .78rem/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}.outcome{font-size:1.04rem}.label{display:block;margin:1rem 0 .35rem;color:var(--muted);font-size:.73rem;font-weight:900;letter-spacing:.09em;text-transform:uppercase}.compact{margin:.35rem 0;padding-left:1.2rem}.compact li{margin:.25rem 0}.matrix{width:100%;border-collapse:collapse;font-size:.88rem}.matrix th,.matrix td{text-align:left;vertical-align:top;padding:.45rem;border-bottom:1px solid var(--line)}.matrix th{color:var(--muted)}.evidence{list-style:none;padding:0}.evidence li{margin:.45rem 0;padding:.7rem;border-left:3px solid #aebdb8;background:#f4f7f4}.decision{padding:.85rem;border-left:4px solid var(--gold);background:#fff8e8}.risk{padding:.8rem;background:#fff3ee}.empty{color:var(--muted);font-style:italic}.seed-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.7rem}.seed{padding:.85rem;border:1px solid var(--line);background:var(--card)}details{margin-top:.8rem}summary{cursor:pointer;font-weight:800}.source-note{padding:1rem;border:1px dashed var(--teal);background:#f4fbf9}.footer{padding:1.2rem 0 3rem;color:var(--muted);border-top:1px solid var(--line)}[hidden]{display:none!important}
+html,body,.toc{overflow-x:hidden}
 @media(max-width:720px){.hero{padding-top:3rem}.scope-grid,.two-col,.topology,.toolbar{grid-template-columns:1fr}.arrow{transform:rotate(90deg);justify-self:center}.finding-head{display:block}.shell{width:min(100% - 1rem,1180px)}.matrix{display:block;overflow-x:auto}}
 @media print{body{background:#fff}.toc,.toolbar{display:none}.shell{width:100%}.hero{padding:1rem 0;background:#fff}.finding,.panel,.metric{box-shadow:none;break-inside:avoid}details>summary{display:none}details>*{display:block!important}}
 </style></head><body>`)
