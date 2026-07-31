@@ -19,8 +19,7 @@ owns them.
 3. Apply its ownership, capability, adapter, traceability, stop, and maintainer
    boundaries without adding harness-local variants of this skill.
 4. Run the exact checks in its **Review and maintainer boundary** section.
-5. Report the outcome and the separate source, local-test, CI, review, merge,
-   installation, and runtime states required by that guide.
+5. Report the outcome and delivery states required by that guide.
 
 ## Verify
 

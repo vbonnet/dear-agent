@@ -47,7 +47,7 @@ does not repeat the shared workflow or completion contract.
 ## Capability variation is part of the contract
 
 When a shared outcome varies, give every member of the active inventory one of
-the canonical dispositions: `shared`, `adapted`, `unsupported`, or
+the canonical dispositions: `supported`, `adapted`, `unsupported`, or
 `not-applicable`, with evidence. `unknown` is research state, not a final
 normative disposition. Do not promise false parity to make the prose uniform.
 
@@ -121,3 +121,7 @@ Run affected `internal/speccoverage` and BDD tests for changed links or
 behavior. Passing syntax and traceability gates does not prove semantic
 ownership; review must still establish that the selected module owns the
 observable invariant.
+
+Report the proposed outcome together with source, local-test, CI, review,
+merge, installation, and runtime state as separate facts. Do not use success in
+one delivery state as proof of another.
