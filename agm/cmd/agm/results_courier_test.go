@@ -245,7 +245,7 @@ func TestScanClaudeProjectsDetectsRewriteBeforeUnchangedBoundaryWindow(t *testin
 	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rewrittenTime := time.Unix(0, prior.ModifiedAt).Add(time.Second)
+	rewrittenTime := time.Unix(0, prior.ModifiedAt)
 	if err := os.Chtimes(path, rewrittenTime, rewrittenTime); err != nil {
 		t.Fatal(err)
 	}
@@ -462,6 +462,22 @@ func TestCourierContentFingerprintExtendsPersistedHashState(t *testing.T) {
 	}
 	if fallbackHash != fullHash || fallbackState != fullState {
 		t.Fatalf("invalid persisted state did not fall back to full fingerprint: %q/%q", fallbackHash, fullHash)
+	}
+	mismatchedHash, mismatchedState, err := courierContentFingerprint(
+		path,
+		appendedInfo.Size(),
+		courierFileState{
+			Size:        initialInfo.Size() - 1,
+			ContentHash: initialHash,
+			HashState:   initialState,
+		},
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mismatchedHash != fullHash || mismatchedState != fullState {
+		t.Fatalf("wrong-length persisted state did not fall back to full fingerprint: %q/%q", mismatchedHash, fullHash)
 	}
 }
 
@@ -863,6 +879,37 @@ func TestCourierAssistantTextCarriesRelaySuppressionAcrossScans(t *testing.T) {
 	)
 	if headline != "" || pending {
 		t.Fatalf("relay response = (%q, %v), want suppressed headline and cleared state", headline, pending)
+	}
+}
+
+func TestCourierAssistantTextCarriesRelaySuppressionAcrossToolResultScans(t *testing.T) {
+	headline, pending := courierAssistantText(
+		[]string{`{"type":"user","message":{"content":"RESULTS COURIER RELAY: push once"}}`},
+		false,
+	)
+	if headline != "" || !pending {
+		t.Fatalf("relay request = (%q, %v), want empty headline and pending suppression", headline, pending)
+	}
+	headline, pending = courierAssistantText(
+		[]string{`{"type":"assistant","message":{"content":[{"type":"text","text":"I will push."},{"type":"tool_use","name":"PushNotification"}],"stop_reason":"tool_use"}}`},
+		pending,
+	)
+	if headline != "" || !pending {
+		t.Fatalf("relay tool use = (%q, %v), want empty headline and pending suppression", headline, pending)
+	}
+	headline, pending = courierAssistantText(
+		[]string{`{"type":"user","message":{"content":[{"type":"tool_result","content":"delivered"}]}}`},
+		pending,
+	)
+	if headline != "" || !pending {
+		t.Fatalf("relay tool result = (%q, %v), want empty headline and pending suppression", headline, pending)
+	}
+	headline, pending = courierAssistantText(
+		[]string{`{"type":"assistant","message":{"content":[{"type":"text","text":"push delivered"}],"stop_reason":"end_turn"}}`},
+		pending,
+	)
+	if headline != "" || pending {
+		t.Fatalf("relay final response = (%q, %v), want suppressed headline and cleared state", headline, pending)
 	}
 }
 

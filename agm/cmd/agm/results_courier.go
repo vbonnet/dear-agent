@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,6 +67,7 @@ type courierFileState struct {
 	Line         int    `json:"line"`
 	Identity     string `json:"identity,omitempty"`
 	ModifiedAt   int64  `json:"modified_at_unix_nano,omitempty"`
+	ChangedAt    int64  `json:"changed_at_unix_nano,omitempty"`
 	BoundaryHash string `json:"boundary_hash,omitempty"`
 	ContentHash  string `json:"content_hash,omitempty"`
 	HashState    string `json:"hash_state,omitempty"`
@@ -174,6 +176,10 @@ func courierAssistantText(lines []string, relayPending bool) (string, bool) {
 			}
 			headline = text
 		case "user":
+			if relayPending && courierUserContainsToolResult(entry.Message.Content) {
+				headline = ""
+				continue
+			}
 			relayPending = strings.Contains(rawLine, resultsCourierRelayMarker)
 			headline = ""
 		case "tool_use", "tool_result":
@@ -181,6 +187,21 @@ func courierAssistantText(lines []string, relayPending bool) (string, bool) {
 		}
 	}
 	return headline, relayPending
+}
+
+func courierUserContainsToolResult(content json.RawMessage) bool {
+	var blocks []struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(content, &blocks) != nil {
+		return false
+	}
+	for _, block := range blocks {
+		if block.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
 }
 
 func completedAssistantText(content json.RawMessage, stopReason string) (string, bool) {
@@ -314,12 +335,14 @@ func scanClaudeTranscript(
 	prev, known := st.Files[path]
 	identity := courierFileIdentity(info)
 	modifiedAt := info.ModTime().UnixNano()
+	changedAt := courierFileChangeTime(info)
 	replaced := courierTranscriptReplaced(
 		known,
 		prev,
 		identity,
 		info.Size(),
 		modifiedAt,
+		changedAt,
 		path,
 	)
 	if known && info.Size() == prev.Size && !replaced {
@@ -351,6 +374,7 @@ func scanClaudeTranscript(
 		info,
 		identity,
 		modifiedAt,
+		changedAt,
 		replaced,
 		restat,
 	)
@@ -378,6 +402,7 @@ func readStableCourierDelta(
 	info os.FileInfo,
 	identity string,
 	modifiedAt int64,
+	changedAt int64,
 	replaced bool,
 	restat func(string) (os.FileInfo, error),
 ) ([]string, courierFileState, bool) {
@@ -407,6 +432,7 @@ func readStableCourierDelta(
 		Line:         lineBase + len(lines),
 		Identity:     identity,
 		ModifiedAt:   modifiedAt,
+		ChangedAt:    changedAt,
 		BoundaryHash: boundaryHash,
 		ContentHash:  contentHash,
 		HashState:    hashState,
@@ -416,6 +442,7 @@ func readStableCourierDelta(
 func courierFileGenerationMatches(before, after os.FileInfo) bool {
 	return before.Size() == after.Size() &&
 		before.ModTime().UnixNano() == after.ModTime().UnixNano() &&
+		courierFileChangeTime(before) == courierFileChangeTime(after) &&
 		courierFileIdentity(before) == courierFileIdentity(after)
 }
 
@@ -429,6 +456,7 @@ func refreshCourierUnchangedState(
 	updated := previous
 	updated.Identity = identity
 	updated.ModifiedAt = info.ModTime().UnixNano()
+	updated.ChangedAt = courierFileChangeTime(info)
 	if updated.BoundaryHash == "" {
 		boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
 		if err != nil {
@@ -461,6 +489,7 @@ func courierTranscriptReplaced(
 	currentIdentity string,
 	currentSize int64,
 	currentModifiedAt int64,
+	currentChangedAt int64,
 	path string,
 ) bool {
 	if !known || currentSize < previous.Size {
@@ -471,25 +500,48 @@ func courierTranscriptReplaced(
 		previous.Identity != currentIdentity {
 		return true
 	}
-	if currentSize >= previous.Size &&
-		previous.ModifiedAt != 0 &&
-		currentModifiedAt != previous.ModifiedAt &&
-		previous.ContentHash != "" {
-		prefixHash, _, err := courierContentFingerprint(
-			path,
-			previous.Size,
-			courierFileState{},
-			true,
-		)
-		if err != nil || prefixHash != previous.ContentHash {
-			return true
-		}
+	if courierTranscriptPrefixChanged(
+		previous,
+		currentSize,
+		currentModifiedAt,
+		currentChangedAt,
+		path,
+	) {
+		return true
 	}
 	if previous.BoundaryHash == "" {
 		return false
 	}
 	currentBoundaryHash, err := courierBoundaryFingerprint(path, previous.Size)
 	return err != nil || currentBoundaryHash != previous.BoundaryHash
+}
+
+func courierTranscriptPrefixChanged(
+	previous courierFileState,
+	currentSize int64,
+	currentModifiedAt int64,
+	currentChangedAt int64,
+	path string,
+) bool {
+	if currentSize < previous.Size || previous.ContentHash == "" {
+		return false
+	}
+	generationChanged := previous.ModifiedAt != 0 &&
+		currentModifiedAt != previous.ModifiedAt
+	if previous.ChangedAt == 0 ||
+		(currentChangedAt != 0 && currentChangedAt != previous.ChangedAt) {
+		generationChanged = true
+	}
+	if !generationChanged {
+		return false
+	}
+	prefixHash, _, err := courierContentFingerprint(
+		path,
+		previous.Size,
+		courierFileState{},
+		true,
+	)
+	return err != nil || prefixHash != previous.ContentHash
 }
 
 func seedCourierBaseline(
@@ -520,6 +572,7 @@ func seedCourierBaseline(
 		Line:         len(lines),
 		Identity:     identity,
 		ModifiedAt:   info.ModTime().UnixNano(),
+		ChangedAt:    courierFileChangeTime(info),
 		BoundaryHash: boundaryHash,
 		ContentHash:  contentHash,
 		HashState:    hashState,
@@ -644,6 +697,11 @@ func restoreCourierContentHash(
 	}
 	candidate := sha256.New()
 	if err := candidate.(encoding.BinaryUnmarshaler).UnmarshalBinary(encodedState); err != nil {
+		return fresh, 0
+	}
+	if previous.Size < 0 ||
+		len(encodedState) < 8 ||
+		binary.BigEndian.Uint64(encodedState[len(encodedState)-8:]) != uint64(previous.Size) {
 		return fresh, 0
 	}
 	if fmt.Sprintf("%x", candidate.Sum(nil)) != previous.ContentHash {
