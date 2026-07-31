@@ -84,7 +84,7 @@ type courierFileState struct {
 type courierState struct {
 	Files            map[string]courierFileState `json:"files"`
 	BaselineComplete bool                        `json:"baseline_complete"`
-	BaselinePending  map[string]bool             `json:"baseline_pending,omitempty"`
+	BaselinePending  map[string]bool             `json:"baseline_pending"`
 }
 
 // resultsCourierStateDir is a writable, VROOM-runtime-appropriate home for
@@ -304,6 +304,22 @@ func projectLabel(home, dir string) string {
 	return rest
 }
 
+func prepareCourierBaselineSnapshot(home string, st *courierState) error {
+	if st.BaselineComplete || st.BaselinePending != nil {
+		return nil
+	}
+	matches, err := filepath.Glob(claudeProjectsGlob(home))
+	if err != nil {
+		return err
+	}
+	sort.Strings(matches)
+	st.BaselinePending = make(map[string]bool, len(matches))
+	for _, path := range matches {
+		st.BaselinePending[path] = true
+	}
+	return nil
+}
+
 // scanClaudeProjects looks for transcript files that have grown since the
 // last recorded watermark, extracts a headline from any newly-idle
 // completion, and advances the watermark for files it processed. A file
@@ -324,13 +340,11 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 
 	var events []resultsCourierEvent
 	now := time.Now()
+	if err := prepareCourierBaselineSnapshot(home, st); err != nil {
+		return nil, err
+	}
 	if st.BaselineComplete {
 		st.BaselinePending = nil
-	} else if st.BaselinePending == nil {
-		st.BaselinePending = make(map[string]bool, len(matches))
-		for _, path := range matches {
-			st.BaselinePending[path] = true
-		}
 	}
 	matched := make(map[string]bool, len(matches))
 	for _, path := range matches {
@@ -856,22 +870,24 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 		Digest:    title + " — " + body,
 	}
 
-	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	desktopCtx, cancelDesktop := context.WithTimeout(ctx, 10*time.Second)
 	desktop := notify.NewDesktopDispatcher()
-	if err := desktop.Dispatch(dctx, &notify.Notification{Title: title, Body: body}); err != nil {
+	if err := desktop.Dispatch(desktopCtx, &notify.Notification{Title: title, Body: body}); err != nil {
 		receipt.DesktopError = err.Error()
 	} else {
 		receipt.DesktopSent = true
 	}
+	cancelDesktop()
 
 	if orchestratorName != "" {
 		receipt.RelayTarget = orchestratorName
-		result, err := ops.SendMessage(courierRelayOpContext(dctx, opCtx), &ops.SendMessageRequest{
+		relayCtx, cancelRelay := context.WithTimeout(ctx, 10*time.Second)
+		result, err := ops.SendMessage(courierRelayOpContext(relayCtx, opCtx), &ops.SendMessageRequest{
 			Recipient:  orchestratorName,
 			Message:    courierRelayPrompt(len(events)),
 			Autonomous: true,
 		})
+		cancelRelay()
 		switch {
 		case err != nil:
 			receipt.RelayError = err.Error() // expected fallback when no supervisor is alive
@@ -989,6 +1005,15 @@ func processResultsCourierTick(
 	statePath := filepath.Join(stateDir, "state.json")
 	candidate := cloneCourierState(*st)
 
+	if !candidate.BaselineComplete {
+		if err := prepareCourierBaselineSnapshot(home, &candidate); err != nil {
+			return fmt.Errorf("prepare baseline snapshot: %w", err)
+		}
+		*st = candidate
+		if err := saveCourierState(statePath, candidate); err != nil {
+			return fmt.Errorf("save baseline snapshot: %w", err)
+		}
+	}
 	events, err := scanClaudeProjects(home, idleGrace, &candidate)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)

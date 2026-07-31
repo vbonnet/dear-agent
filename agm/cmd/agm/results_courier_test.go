@@ -152,6 +152,46 @@ func TestScanClaudeProjectsBoundsBaselineRetriesToOriginalPaths(t *testing.T) {
 	}
 }
 
+func TestCourierBaselineSnapshotSurvivesRestartBeforeFirstScan(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if err := prepareCourierBaselineSnapshot(home, &st); err != nil {
+		t.Fatalf("prepare empty baseline snapshot: %v", err)
+	}
+	if st.BaselinePending == nil || len(st.BaselinePending) != 0 {
+		t.Fatalf("empty baseline snapshot = %#v, want a persisted empty set", st.BaselinePending)
+	}
+	statePath := filepath.Join(resultsCourierStateDir(home), "state.json")
+	if err := saveCourierState(statePath, st); err != nil {
+		t.Fatalf("persist empty baseline snapshot: %v", err)
+	}
+
+	restarted, err := loadCourierState(statePath)
+	if err != nil {
+		t.Fatalf("load baseline snapshot after restart: %v", err)
+	}
+	if restarted.BaselinePending == nil {
+		t.Fatal("persisted empty baseline snapshot became uninitialized after restart")
+	}
+
+	newPath := filepath.Join(dir, "created-after-snapshot.jsonl")
+	writeJSONLLine(t, newPath, "user", "")
+	writeJSONLLine(t, newPath, "assistant", "completion created after baseline snapshot")
+	backdateCourierFile(t, newPath)
+	events, err := scanClaudeProjects(home, 45*time.Second, &restarted)
+	if err != nil {
+		t.Fatalf("scan after restart: %v", err)
+	}
+	if len(events) != 1 || events[0].Headline != "completion created after baseline snapshot" {
+		t.Fatalf("post-snapshot session events = %+v, want its first completion", events)
+	}
+}
+
 func TestScanClaudeProjects_TracksNewStreamingSessionFromLineZero(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
