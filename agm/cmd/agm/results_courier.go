@@ -7,6 +7,7 @@ import (
 	"encoding"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -215,6 +216,55 @@ func validateCourierFileJSON(path string, raw json.RawMessage) error {
 	}
 	if fileState.Line < 0 {
 		return fmt.Errorf("cursor file %q has negative line", path)
+	}
+	if err := validateCourierFingerprints(fileState); err != nil {
+		return fmt.Errorf("cursor file %q: %w", path, err)
+	}
+	return nil
+}
+
+func validateCourierFingerprints(st courierFileState) error {
+	if err := validateCourierDigest("boundary_hash", st.BoundaryHash); err != nil {
+		return err
+	}
+	hasContentHash := st.ContentHash != ""
+	hasHashState := st.HashState != ""
+	if !hasContentHash && !hasHashState {
+		return nil
+	}
+	if hasContentHash != hasHashState {
+		return fmt.Errorf("content_hash and hash_state must both be present")
+	}
+	if err := validateCourierDigest("content_hash", st.ContentHash); err != nil {
+		return err
+	}
+	encodedState, err := base64.StdEncoding.DecodeString(st.HashState)
+	if err != nil {
+		return fmt.Errorf("decode hash_state: %w", err)
+	}
+	candidate := sha256.New()
+	if err := candidate.(encoding.BinaryUnmarshaler).UnmarshalBinary(encodedState); err != nil {
+		return fmt.Errorf("restore hash_state: %w", err)
+	}
+	if st.Size < 0 ||
+		len(encodedState) < 8 ||
+		binary.BigEndian.Uint64(encodedState[len(encodedState)-8:]) != uint64(st.Size) {
+		return fmt.Errorf("hash_state byte count does not match size")
+	}
+	if hex.EncodeToString(candidate.Sum(nil)) != st.ContentHash {
+		return fmt.Errorf("hash_state digest does not match content_hash")
+	}
+	return nil
+}
+
+func validateCourierDigest(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	decoded, err := hex.DecodeString(value)
+	if err != nil || len(decoded) != sha256.Size ||
+		hex.EncodeToString(decoded) != value {
+		return fmt.Errorf("%s is not a canonical SHA-256 digest", name)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"os"
@@ -966,6 +967,88 @@ func TestLoadCourierStateRejectsInvalidCursorValues(t *testing.T) {
 			}
 			if _, err := loadCourierState(statePath); err == nil {
 				t.Fatal("invalid cursor value was accepted")
+			}
+		})
+	}
+}
+
+func TestLoadCourierStateRejectsInvalidFingerprints(t *testing.T) {
+	transcriptPath := filepath.Join(t.TempDir(), "session.jsonl")
+	writeJSONLLine(t, transcriptPath, "assistant", "completed")
+	info, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundaryHash, err := courierBoundaryFingerprint(transcriptPath, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentHash, hashState, err := courierContentFingerprint(
+		transcriptPath,
+		info.Size(),
+		courierFileState{},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := courierFileState{
+		Size:         info.Size(),
+		Line:         1,
+		BoundaryHash: boundaryHash,
+		ContentHash:  contentHash,
+		HashState:    hashState,
+	}
+	validPath := filepath.Join(t.TempDir(), "state.json")
+	if err := saveCourierState(validPath, courierState{
+		Files:            map[string]courierFileState{transcriptPath: base},
+		BaselineComplete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCourierState(validPath); err != nil {
+		t.Fatalf("valid fingerprint cursor was rejected: %v", err)
+	}
+
+	tests := map[string]func(*courierFileState){
+		"malformed boundary hash": func(st *courierFileState) {
+			st.BoundaryHash = "bad"
+		},
+		"noncanonical boundary hash": func(st *courierFileState) {
+			st.BoundaryHash = strings.ToUpper(st.BoundaryHash)
+		},
+		"content hash without state": func(st *courierFileState) {
+			st.HashState = ""
+		},
+		"state without content hash": func(st *courierFileState) {
+			st.ContentHash = ""
+		},
+		"malformed content hash": func(st *courierFileState) {
+			st.ContentHash = "bad"
+		},
+		"malformed hash state": func(st *courierFileState) {
+			st.HashState = "not-base64"
+		},
+		"digest mismatch": func(st *courierFileState) {
+			st.ContentHash = strings.Repeat("0", sha256.Size*2)
+		},
+		"size mismatch": func(st *courierFileState) {
+			st.Size++
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			invalid := base
+			mutate(&invalid)
+			statePath := filepath.Join(t.TempDir(), "state.json")
+			if err := saveCourierState(statePath, courierState{
+				Files:            map[string]courierFileState{transcriptPath: invalid},
+				BaselineComplete: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadCourierState(statePath); err == nil {
+				t.Fatal("invalid fingerprint cursor was accepted")
 			}
 		})
 	}
