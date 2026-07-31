@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -16,6 +17,11 @@ import (
 // requires fresh authentication and, when used with a command, deliberately
 // does not create or refresh a timestamp another same-user process could reuse.
 func installOperatorGrant(data []byte, path string) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing symlinked operator grant target %q", path)
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("inspect operator grant target %q: %w", path, err)
+	}
 	passwordless, err := sudoInstallerIsPasswordless(path)
 	if err != nil {
 		return err

@@ -96,3 +96,33 @@ func TestOperatorGrantInstallerWritesOnlyInstallPayload(t *testing.T) {
 		t.Fatalf("installed grant = %q, want %q", got, payload)
 	}
 }
+
+func TestOperatorGrantInstallerRefusesSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	path := filepath.Join(dir, "grant.json")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(
+		unixOperatorGrantInstaller,
+		"-c",
+		unixOperatorGrantInstallScript,
+		"dear-agent-override-grant-installer",
+		path,
+	)
+	cmd.Stdin = strings.NewReader(unixOperatorGrantInstallInput + "{\"approved\":true}\n")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("installer accepted a symlinked grant target")
+	}
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "keep" {
+		t.Fatalf("symlink target changed to %q", got)
+	}
+}

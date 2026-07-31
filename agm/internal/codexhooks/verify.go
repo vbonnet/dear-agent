@@ -2174,7 +2174,7 @@ func trustedHookCommandAllowed(command string) bool {
 		"local", "printf", "readonly", "return", "set", "shift", "test",
 		"true", "typeset", "unset",
 		// Data and filesystem utilities used by the committed hook assets.
-		"basename", "cat", "chmod", "cp", "curl", "cut", "date", "dirname", "grep",
+		"basename", "cat", "chmod", "cp", "cut", "date", "dirname", "grep",
 		"egrep", "fgrep", "head", "jq", "mkdir", "mktemp", "mv", "rm",
 		"sleep", "tail", "tee", "touch", "tr", "wc",
 		// Tools whose command-capable modes are rejected before this boundary.

