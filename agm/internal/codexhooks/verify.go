@@ -472,6 +472,138 @@ func validateScriptAsset(content []byte) error {
 	return nil
 }
 
+// validateTrustedHookDependencies resolves every literal external command
+// immediately before launch. Directory ownership alone is insufficient: a
+// same-user executable leaf can be placed in an otherwise trusted PATH
+// directory and would then run after the directory attestation succeeds.
+func validateTrustedHookDependencies(hooks map[string]any, assets map[string]asset) error {
+	commands, err := collectCommands(hooks)
+	if err != nil {
+		return fmt.Errorf("collect trusted hook commands: %w", err)
+	}
+	for _, command := range commands {
+		if err := validateTrustedShellDependencies(command); err != nil {
+			return fmt.Errorf("validate trusted hook command %q: %w", command, err)
+		}
+	}
+	for path, item := range assets {
+		if !item.executable {
+			continue
+		}
+		if err := validateTrustedShellDependencies(string(item.content)); err != nil {
+			return fmt.Errorf("validate trusted hook asset %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func validateTrustedShellDependencies(script string) error {
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).
+		Parse(strings.NewReader(script), "trusted-hook")
+	if err != nil {
+		return fmt.Errorf("parse trusted hook shell: %w", err)
+	}
+	functions := declaredShellFunctions(file)
+	var rejected string
+	var rejectedErr error
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if rejectedErr != nil {
+			return false
+		}
+		call, ok := node.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		for _, command := range trustedShellCommandWords(call.Args, functions) {
+			if isTrustedShellBuiltin(command) {
+				continue
+			}
+			if err := validateTrustedHookDependency(command); err != nil {
+				rejected = command
+				rejectedErr = err
+				return false
+			}
+		}
+		return true
+	})
+	if rejectedErr != nil {
+		return fmt.Errorf("executable %q: %w", rejected, rejectedErr)
+	}
+	return nil
+}
+
+func trustedShellCommandWords(args []*syntax.Word, functions map[string]struct{}) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	command, static := staticShellWord(args[0])
+	if !static || command == "" {
+		return nil
+	}
+	if _, declared := functions[command]; declared {
+		return nil
+	}
+	switch filepath.Base(command) {
+	case "command", "builtin", "exec":
+		return trustedShellCommandWords(trustedShellWrapperTargetArgs(filepath.Base(command), args[1:]), functions)
+	case "env":
+		return append([]string{command}, trustedShellCommandWords(trustedShellWrapperTargetArgs("env", args[1:]), functions)...)
+	case "nohup":
+		return append([]string{command}, trustedShellCommandWords(args[1:], functions)...)
+	case "timeout", "nice":
+		return append([]string{command}, trustedShellCommandWords(trustedShellWrapperTargetArgs(filepath.Base(command), args[1:]), functions)...)
+	case "time":
+		return trustedShellCommandWords(trustedShellWrapperTargetArgs("time", args[1:]), functions)
+	default:
+		return []string{command}
+	}
+}
+
+func trustedShellWrapperTargetArgs(wrapper string, args []*syntax.Word) []*syntax.Word {
+	options := true
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			return nil
+		}
+		if options && value == "--" {
+			return args[index+1:]
+		}
+		if options && dynamicWrapperOptionConsumesNext(wrapper, value) {
+			index++
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			continue
+		}
+		if wrapper == "env" && strings.Contains(value, "=") {
+			continue
+		}
+		if wrapper == "timeout" {
+			// The first non-option operand is timeout's duration; the command
+			// starts immediately after it.
+			return args[index+1:]
+		}
+		return args[index:]
+	}
+	return nil
+}
+
+func isTrustedShellBuiltin(command string) bool {
+	switch filepath.Base(command) {
+	case ":", "[", ".", "alias", "break", "case", "command", "continue",
+		"do", "done", "echo", "elif", "else", "esac", "eval", "exec", "exit",
+		"export", "false", "fi", "for", "function", "getopts", "hash", "if",
+		"in", "local", "mapfile", "nameref", "printf", "read", "readarray",
+		"readonly", "return", "select", "set", "shift", "shopt", "source",
+		"test", "then", "time", "trap", "true", "type", "typeset", "ulimit",
+		"umask", "unalias", "unset", "until", "wait", "while", "builtin":
+		return true
+	default:
+		return false
+	}
+}
+
 func rejectExecutionInfluencingEnvironment(script string) error {
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).
 		Parse(strings.NewReader(script), "trusted-hook")

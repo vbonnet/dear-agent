@@ -11,3 +11,7 @@ func validateTrustedExecutableSearchPath(string) error {
 func validateTrustedHookExecutable(string) error {
 	return fmt.Errorf("attested Codex command hooks require a POSIX runtime")
 }
+
+func validateTrustedExecutableCommand(string) error {
+	return fmt.Errorf("attested Codex command hooks require a POSIX runtime")
+}

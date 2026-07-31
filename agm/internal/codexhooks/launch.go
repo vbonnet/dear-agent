@@ -34,9 +34,12 @@ const (
 
 var (
 	trustedHookJSONPath               = "/usr/local/libexec/dear-agent-codex-hook-json"
+	trustedExecutableSearchPath       = attestedHookPath
 	validateAttestedExecutablePath    = validateTrustedExecutableSearchPath
 	validateTrustedHookJSONExecutable = validateTrustedHookExecutable
 	validateTrustedSystemExecutable   = validateTrustedHookExecutable
+	validateTrustedHookDependency     = validateTrustedExecutableCommand
+	validateTrustedExecutableLeaf     = validateTrustedHookExecutable
 )
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
@@ -122,6 +125,9 @@ func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any,
 		return nil, err
 	}
 	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
+		return nil, err
+	}
+	if err := validateTrustedHookDependencies(hooks, assets); err != nil {
 		return nil, err
 	}
 	if err := hardenHookCommands(hooks, assets); err != nil {

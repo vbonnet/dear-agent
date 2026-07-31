@@ -74,6 +74,31 @@ func TestTrustedExecutableSearchPathRejectsWritableDirectory(t *testing.T) {
 	}
 }
 
+func TestValidateTrustedExecutableCommandValidatesResolvedLeaf(t *testing.T) {
+	directory := t.TempDir()
+	commandPath := filepath.Join(directory, "cat")
+	writeFile(t, commandPath, "#!/bin/sh\n", 0o755)
+
+	previousPath := trustedExecutableSearchPath
+	previousValidator := validateTrustedExecutableLeaf
+	trustedExecutableSearchPath = directory
+	validateTrustedExecutableLeaf = func(path string) error {
+		if path != commandPath {
+			t.Fatalf("validated executable path = %q, want %q", path, commandPath)
+		}
+		return os.ErrPermission
+	}
+	t.Cleanup(func() {
+		trustedExecutableSearchPath = previousPath
+		validateTrustedExecutableLeaf = previousValidator
+	})
+
+	if err := validateTrustedExecutableCommand("cat"); err == nil ||
+		!strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("validateTrustedExecutableCommand() error = %v, want resolved-leaf rejection", err)
+	}
+}
+
 func TestValidateMaterializedSystemExecutablesChecksExactAllowlistedFiles(t *testing.T) {
 	previous := validateTrustedSystemExecutable
 	var got []string
@@ -494,6 +519,7 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	previousPathValidator := validateAttestedExecutablePath
 	previousJSONValidator := validateTrustedHookJSONExecutable
 	previousSystemValidator := validateTrustedSystemExecutable
+	previousDependencyValidator := validateTrustedHookDependency
 	trustedHookJSONPath = "/bin/sh"
 	validateAttestedExecutablePath = func(got string) error {
 		if got != attestedHookPath {
@@ -508,10 +534,12 @@ func useTrustedHookJSONFixture(t *testing.T) {
 		return nil
 	}
 	validateTrustedSystemExecutable = func(string) error { return nil }
+	validateTrustedHookDependency = func(string) error { return nil }
 	t.Cleanup(func() {
 		trustedHookJSONPath = previousJSONPath
 		validateAttestedExecutablePath = previousPathValidator
 		validateTrustedHookJSONExecutable = previousJSONValidator
 		validateTrustedSystemExecutable = previousSystemValidator
+		validateTrustedHookDependency = previousDependencyValidator
 	})
 }

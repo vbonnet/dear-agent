@@ -45,6 +45,29 @@ func validateTrustedHookExecutable(path string) error {
 	return validateOperatorOwnedPathAncestors(filepath.Dir(resolved))
 }
 
+func validateTrustedExecutableCommand(command string) error {
+	if command == "" {
+		return fmt.Errorf("trusted hook executable command is empty")
+	}
+	if filepath.IsAbs(command) {
+		return validateTrustedHookExecutable(command)
+	}
+	if strings.ContainsRune(command, '/') {
+		return fmt.Errorf("trusted hook executable command %q must be absolute or a bare PATH command", command)
+	}
+	for _, directory := range filepath.SplitList(trustedExecutableSearchPath) {
+		candidate := filepath.Join(directory, command)
+		if _, err := os.Lstat(candidate); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("inspect trusted hook executable %q: %w", candidate, err)
+		}
+		return validateTrustedExecutableLeaf(candidate)
+	}
+	return fmt.Errorf("trusted hook executable %q was not found on the attested PATH", command)
+}
+
 func validateTrustedExecutablePathEntry(candidate string) error {
 	if candidate == "" || !filepath.IsAbs(candidate) || filepath.Clean(candidate) != candidate {
 		return fmt.Errorf("attested hook PATH entry %q must be a clean absolute path", candidate)
