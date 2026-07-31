@@ -262,6 +262,17 @@ func TestValidateScriptAssetRejectsInterpreterInlineCode(t *testing.T) {
 	}
 }
 
+func TestValidateScriptAssetRejectsPerlUppercaseInlineCode(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\n/usr/bin/perl -E'system chr(46).chr(47).q(helper)'\n",
+		"#!/bin/sh\n/usr/bin/perl -wE'system chr(46).chr(47).q(helper)'\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil {
+			t.Fatalf("validateScriptAsset(%q) accepted Perl uppercase inline code", script)
+		}
+	}
+}
+
 func TestValidateScriptAssetRejectsMutableInputRedirection(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/bash\n< helper /bin/bash\n",

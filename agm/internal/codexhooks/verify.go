@@ -2137,7 +2137,7 @@ func interpreterInlineCodeOption(command, value string) bool {
 	case "sh", "bash", "dash", "zsh", "ksh":
 		return strings.ContainsRune(bundle, 'c')
 	case "perl", "ruby":
-		return strings.ContainsRune(bundle, 'e')
+		return strings.ContainsAny(bundle, "eE")
 	case "node":
 		return strings.ContainsAny(bundle, "ep")
 	default:
