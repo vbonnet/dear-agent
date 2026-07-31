@@ -385,6 +385,51 @@ func TestLoadCourierState_MissingFileReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestStartResultsCourierEstablishesBaselineBeforeFirstTick(t *testing.T) {
+	home := t.TempDir()
+	projectDir := filepath.Join(
+		home,
+		".claude",
+		"projects",
+		strings.ReplaceAll(home, "/", "-")+"-src-dear-agent",
+	)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(projectDir, "already-running.jsonl")
+	writeJSONLLine(t, sessionPath, "assistant", "existing completion")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		startResultsCourier(ctx, nil, home, "", time.Hour, 45*time.Second)
+	}()
+
+	statePath := filepath.Join(resultsCourierStateDir(home), "state.json")
+	deadline := time.Now().Add(2 * time.Second)
+	var st courierState
+	for {
+		var err error
+		st, err = loadCourierState(statePath)
+		if err == nil && st.BaselineComplete {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("startup baseline was not persisted before first tick: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	if got := st.Files[sessionPath]; got.Line != 1 {
+		t.Fatalf("startup baseline watermark = %+v, want one seeded line", got)
+	}
+}
+
 func TestTruncateHeadline(t *testing.T) {
 	if got := truncateHeadline("hello   world\nfoo", 100); got != "hello world foo" {
 		t.Errorf("got %q", got)

@@ -550,6 +550,21 @@ func startResultsCourier(ctx context.Context, opCtx *ops.OpContext, home, orches
 		fmt.Fprintf(os.Stderr, "results-courier: state load error (continuing with fresh state): %v\n", err)
 	}
 
+	// Establish the deployment baseline before waiting for the first ticker.
+	// Otherwise a short-lived session created during that wait would look like
+	// pre-existing history and have its first completion seeded away.
+	if err := processResultsCourierTick(
+		ctx,
+		opCtx,
+		home,
+		orchestratorName,
+		idleGrace,
+		&st,
+		deliverCourierResults,
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "results-courier: %v\n", err)
+	}
+
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
