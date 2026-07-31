@@ -6,15 +6,16 @@ one promise into every harness, provider, transport, or storage adapter. State
 a shared outcome once so one BDD rule can hold every applicable implementation
 to the same promise.
 
-The normative governance requirements live in
-[`spec-governance/SPEC.md`](../spec-governance/SPEC.md). Use the canonical
-[`write-spec`](../spec-governance/skills/write-spec/SKILL.md) workflow for any
-proposed or changed normative behavior. Its
+This guide owns the repository's SPEC authoring rules. The normative product
+governance requirements live in
+[`spec-governance/SPEC.md`](../spec-governance/SPEC.md), and the canonical
+[`write-spec`](../spec-governance/skills/write-spec/SKILL.md) skill is a thin
+workflow entry point that delegates here. The guide's
 [contract model](../spec-governance/skills/write-spec/references/contract-model.md)
 owns the classification vocabulary and its
 [EARS and BDD guide](../spec-governance/skills/write-spec/references/ears-and-bdd.md)
 owns the detailed authoring forms. This living guide is the repository review
-router; do not copy those references into another harness-specific guide.
+router; do not copy its rules into a skill or harness-specific guide.
 
 ## Before editing a specification
 
@@ -31,7 +32,8 @@ router; do not copy those references into another harness-specific guide.
 
 A co-located file or traceability rule does not confer semantic ownership. If
 a coverage gate cannot represent an implementation that has no local
-observable delta, stop and repair the tooling contract; do not invent a local
+observable delta, stop, report, and track the tooling limitation separately.
+Do not expand a SPEC-only change into enforcement work or invent a local
 product promise merely to satisfy the gate.
 
 Shared requirements describe stable outcomes and normally omit private code
