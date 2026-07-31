@@ -11,6 +11,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
@@ -633,7 +634,7 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 		},
 	}
 	opCtx := &ops.OpContext{
-		Tmux: session.NewMockTmux(), CreationRuntime: runtime,
+		Tmux: session.NewMockTmux(), Storage: dolt.NewMockAdapter(), CreationRuntime: runtime,
 	}
 	if agent.NormalizeHarnessName(harness) == "agy" {
 		opCtx.AgyCreateIdentityTracker = permissionManifestAgyIdentityTracker{}

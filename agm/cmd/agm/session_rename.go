@@ -77,7 +77,7 @@ Examples:
 		}
 		stableSessionID := m.SessionID
 		var updated []string
-		if err := runSessionRenameTransactionWithLock(stableSessionID, ops.WithSessionLock, func() error {
+		if err := runSessionRenameTransactionWithLock(stableSessionID, ops.WithSessionLock, func() (retErr error) {
 			// Resolution by user-visible name happens before the lock only to find
 			// the stable identity. Reload that identity while holding the same lock
 			// used by resume so every tmux and storage decision is current.
@@ -87,22 +87,27 @@ Examples:
 			}
 			oldName = m.Name
 
-			// Check new name doesn't already exist
-			existingByName, _ := adapter.GetSessionByName(newName)
-			if existingByName != nil && existingByName.SessionID != m.SessionID {
-				ui.PrintError(fmt.Errorf("session '%s' already exists", newName),
-					"Cannot rename: target name is already in use",
-					fmt.Sprintf("  • Existing session ID: %s", existingByName.SessionID))
-				return fmt.Errorf("session name already exists: %s", newName)
-			}
-
-			// Also check by tmux name resolution
-			existingByTmux, _, _ := session.ResolveIdentifier(newName, sessionsDir, adapter)
-			if existingByTmux != nil && existingByTmux.SessionID != m.SessionID {
-				ui.PrintError(fmt.Errorf("session '%s' already exists", newName),
-					"Cannot rename: target name resolves to a different session",
-					fmt.Sprintf("  • Existing session ID: %s", existingByTmux.SessionID))
-				return fmt.Errorf("session name already exists: %s", newName)
+			releaseRenameReservation := false
+			if newName != oldName {
+				if err := adapter.ReserveSessionName(stableSessionID, newName); err != nil {
+					var uncertain *dolt.SessionNameReservationCommitUncertainError
+					if errors.As(err, &uncertain) {
+						err = errors.Join(err, adapter.ReleaseSessionNameReservation(stableSessionID))
+					}
+					ui.PrintError(err,
+						"Cannot rename: target name could not be reserved",
+						"  • Another create or rename may already own this name")
+					return err
+				}
+				releaseRenameReservation = true
+				defer func() {
+					if !releaseRenameReservation {
+						return
+					}
+					if err := adapter.ReleaseSessionNameReservation(stableSessionID); err != nil {
+						retErr = errors.Join(retErr, fmt.Errorf("release rename target-name reservation: %w", err))
+					}
+				}()
 			}
 
 			fmt.Printf("Renaming session: %s → %s\n", oldName, newName)
@@ -134,6 +139,10 @@ Examples:
 				return restoreTmuxSessionNameAfterRename(ctx, tmuxRename.Identity, currentName, previousName)
 			}
 			if err := persistRenamedSessionIdentity(cmd.Context(), adapter, m, newName, tmuxRename.Moved, restoreTmux); err != nil {
+				var uncertain *dolt.SessionIdentityMutationCommitUncertainError
+				if errors.As(err, &uncertain) {
+					releaseRenameReservation = false
+				}
 				ui.PrintError(err, "Failed to update Dolt record", "")
 				return err
 			}
@@ -232,6 +241,12 @@ func persistRenamedSessionIdentity(ctx context.Context, store sessionIdentityRen
 	previousTmuxName := m.Tmux.SessionName
 	result, err := store.RenameSessionIdentity(ctx, m.SessionID, previousName, previousTmuxName, m.Tmux.SessionRevision, newName)
 	if err != nil {
+		if result.StorageCommitted {
+			m.Name = newName
+			m.Tmux.SessionName = newName
+			m.UpdatedAt = time.Now()
+			return err
+		}
 		if tmuxRenamed && result.TmuxRollbackSafe {
 			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
