@@ -1263,3 +1263,18 @@ func TestWaitForResultsCourierLockStopsOnCancellation(t *testing.T) {
 		t.Fatalf("cancelled contender error = %v, want context.Canceled", err)
 	}
 }
+
+func TestWaitForResultsCourierLockDoesNotAcquireAfterCancellation(t *testing.T) {
+	stateDir := resultsCourierStateDir(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	lock, err := waitForResultsCourierLock(ctx, stateDir, time.Hour)
+	if lock != nil {
+		_ = lock.Unlock()
+		t.Fatal("cancelled courier acquired unowned shared state")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled courier error = %v, want context.Canceled", err)
+	}
+}

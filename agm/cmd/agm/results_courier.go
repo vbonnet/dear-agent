@@ -1012,6 +1012,9 @@ func waitForResultsCourierLock(
 	retryDelay time.Duration,
 ) (*agmlock.FileLock, error) {
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		instanceLock, err := acquireResultsCourierLock(stateDir)
 		if err == nil {
 			return instanceLock, nil
