@@ -114,10 +114,16 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	// and notify Valentin directly, since nothing else does. See
 	// results_courier.go for why this lives here rather than as its own
 	// launchd job.
+	var resultsCourierDone <-chan struct{}
 	if !stalledDryRun {
 		if home, herr := os.UserHomeDir(); herr == nil {
-			go startResultsCourier(ctx, opCtx, home, stalledOrchestratorName,
-				resultsCourierCheckInterval, resultsCourierIdleGrace)
+			done := make(chan struct{})
+			resultsCourierDone = done
+			go func() {
+				defer close(done)
+				startResultsCourier(ctx, opCtx, home, stalledOrchestratorName,
+					resultsCourierCheckInterval, resultsCourierIdleGrace)
+			}()
 		} else {
 			fmt.Fprintf(os.Stderr, "results-courier: could not resolve home dir, courier disabled: %v\n", herr)
 		}
@@ -131,6 +137,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 		select {
 		case <-ctx.Done():
 			fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
+			waitForResultsCourierShutdown(resultsCourierDone)
 			return nil
 		case <-ticker.C:
 			events, err := detector.DetectStalls(ctx)
@@ -173,6 +180,12 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	}
+}
+
+func waitForResultsCourierShutdown(done <-chan struct{}) {
+	if done != nil {
+		<-done
 	}
 }
 

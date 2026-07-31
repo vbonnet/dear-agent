@@ -87,6 +87,17 @@ type courierState struct {
 	Files            map[string]courierFileState `json:"files"`
 	BaselineComplete bool                        `json:"baseline_complete"`
 	BaselinePending  map[string]bool             `json:"baseline_pending"`
+	prefixChecks     map[string]courierPrefixCheck
+}
+
+type courierPrefixCheck struct {
+	TargetSize int64
+	FileSize   int64
+	Identity   string
+	ModifiedAt int64
+	ChangedAt  int64
+	Offset     int64
+	HashState  string
 }
 
 // resultsCourierStateDir is a writable, VROOM-runtime-appropriate home for
@@ -691,6 +702,22 @@ func scanClaudeTranscript(
 	if now.Sub(info.ModTime()) < idleGrace {
 		return nil, false, nil // still being written; leave watermark untouched
 	}
+	replaced, prefixPending, err := verifyCourierGrowingPrefix(
+		path,
+		known,
+		replaced,
+		prev,
+		info,
+		identity,
+		st,
+		restat,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	if prefixPending {
+		return nil, false, nil
+	}
 
 	lines, nextState, stable, err := readStableCourierDelta(
 		path,
@@ -708,6 +735,7 @@ func scanClaudeTranscript(
 	if !stable {
 		return nil, false, nil
 	}
+	delete(st.prefixChecks, path)
 	relayPending := prev.RelayPending
 	if replaced {
 		relayPending = false
@@ -895,6 +923,144 @@ func courierTranscriptPrefixChanged(
 		true,
 	)
 	return err != nil || prefixHash != previous.ContentHash
+}
+
+const courierPrefixVerifyChunk = int64(1024 * 1024)
+
+func verifyCourierGrowingPrefix(
+	path string,
+	known, replaced bool,
+	previous courierFileState,
+	info os.FileInfo,
+	identity string,
+	st *courierState,
+	restat func(string) (os.FileInfo, error),
+) (bool, bool, error) {
+	if !known || replaced || info.Size() <= previous.Size {
+		return replaced, false, nil
+	}
+	verified, prefixChanged, err := verifyCourierPrefixChunk(
+		path,
+		previous,
+		info,
+		identity,
+		st,
+		restat,
+	)
+	if err != nil {
+		return false, false, err
+	}
+	if !verified {
+		return false, true, nil
+	}
+	return prefixChanged, false, nil
+}
+
+func verifyCourierPrefixChunk(
+	path string,
+	previous courierFileState,
+	info os.FileInfo,
+	identity string,
+	st *courierState,
+	restat func(string) (os.FileInfo, error),
+) (bool, bool, error) {
+	if st.prefixChecks == nil {
+		st.prefixChecks = make(map[string]courierPrefixCheck)
+	}
+	check, ok := st.prefixChecks[path]
+	modifiedAt := info.ModTime().UnixNano()
+	changedAt := courierFileChangeTime(info)
+	if !ok ||
+		check.TargetSize != previous.Size ||
+		check.FileSize != info.Size() ||
+		check.Identity != identity ||
+		check.ModifiedAt != modifiedAt ||
+		check.ChangedAt != changedAt {
+		check = courierPrefixCheck{
+			TargetSize: previous.Size,
+			FileSize:   info.Size(),
+			Identity:   identity,
+			ModifiedAt: modifiedAt,
+			ChangedAt:  changedAt,
+		}
+	}
+
+	contentHash, err := restoreCourierPrefixCheckHash(check)
+	if err != nil {
+		delete(st.prefixChecks, path)
+		return false, false, err
+	}
+	nextOffset := check.Offset + courierPrefixVerifyChunk
+	if nextOffset > check.TargetSize {
+		nextOffset = check.TargetSize
+	}
+	if err := hashCourierPrefixRange(
+		path,
+		contentHash,
+		check.Offset,
+		nextOffset-check.Offset,
+	); err != nil {
+		delete(st.prefixChecks, path)
+		return false, false, err
+	}
+	confirmedInfo, err := restat(path)
+	if err != nil {
+		delete(st.prefixChecks, path)
+		return false, false, fmt.Errorf("restat transcript during prefix verification: %w", err)
+	}
+	if !courierFileGenerationMatches(info, confirmedInfo) {
+		delete(st.prefixChecks, path)
+		return false, false, nil
+	}
+	check.Offset = nextOffset
+	hashState, err := contentHash.(encoding.BinaryMarshaler).MarshalBinary()
+	if err != nil {
+		delete(st.prefixChecks, path)
+		return false, false, err
+	}
+	check.HashState = base64.StdEncoding.EncodeToString(hashState)
+	if check.Offset < check.TargetSize {
+		st.prefixChecks[path] = check
+		return false, false, nil
+	}
+	delete(st.prefixChecks, path)
+	return true,
+		hex.EncodeToString(contentHash.Sum(nil)) != previous.ContentHash,
+		nil
+}
+
+func restoreCourierPrefixCheckHash(check courierPrefixCheck) (hash.Hash, error) {
+	contentHash := sha256.New()
+	if check.Offset == 0 {
+		return contentHash, nil
+	}
+	encodedState, err := base64.StdEncoding.DecodeString(check.HashState)
+	if err != nil {
+		return nil, fmt.Errorf("decode prefix verification state: %w", err)
+	}
+	if err := contentHash.(encoding.BinaryUnmarshaler).UnmarshalBinary(encodedState); err != nil {
+		return nil, fmt.Errorf("restore prefix verification state: %w", err)
+	}
+	return contentHash, nil
+}
+
+func hashCourierPrefixRange(
+	path string,
+	contentHash hash.Hash,
+	offset, length int64,
+) error {
+	f, err := os.Open(path) //#nosec G304 -- path comes from our own transcript glob
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := io.CopyN(contentHash, f, length); err != nil {
+		return err
+	}
+	return nil
 }
 
 func seedCourierBaseline(
@@ -1466,6 +1632,10 @@ func cloneCourierState(st courierState) courierState {
 	if st.BaselinePending != nil {
 		clone.BaselinePending = make(map[string]bool, len(st.BaselinePending))
 		maps.Copy(clone.BaselinePending, st.BaselinePending)
+	}
+	if st.prefixChecks != nil {
+		clone.prefixChecks = make(map[string]courierPrefixCheck, len(st.prefixChecks))
+		maps.Copy(clone.prefixChecks, st.prefixChecks)
 	}
 	return clone
 }

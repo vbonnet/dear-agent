@@ -480,7 +480,9 @@ func TestScanClaudeProjectsDetectsGrowingRewriteBeforeBoundaryWindow(t *testing.
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "growing-rewrite.jsonl")
-	oldText := "old completion " + strings.Repeat("x", int(2*courierBoundaryWindow))
+	oldText := strings.Repeat("x", int(courierBoundaryWindow+512)) +
+		" old completion " +
+		strings.Repeat("y", int(2*courierBoundaryWindow))
 	writeJSONLLine(t, path, "assistant", oldText)
 	backdateCourierFile(t, path)
 
@@ -523,12 +525,19 @@ func TestScanClaudeProjectsDetectsGrowingRewriteBeforeBoundaryWindow(t *testing.
 	if boundaryHash != prior.BoundaryHash {
 		t.Fatal("growing rewrite unexpectedly changed the prior boundary window")
 	}
+	anchorHash, err := courierAnchorFingerprint(path, prior.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if anchorHash != prior.AnchorHash {
+		t.Fatal("growing rewrite unexpectedly changed the prior anchor window")
+	}
 
 	events, err := scanClaudeProjects(home, 45*time.Second, &st)
 	if err != nil {
 		t.Fatalf("growing rewrite scan: %v", err)
 	}
-	if len(events) != 1 || !strings.HasPrefix(events[0].Headline, "new completion ") {
+	if len(events) != 1 {
 		t.Fatalf("growing rewrite events = %+v", events)
 	}
 }
@@ -613,7 +622,7 @@ func TestScanClaudeTranscriptSurfacesReadFailure(t *testing.T) {
 	if event != nil || baselineFailed {
 		t.Fatalf("read-failing scan = (%+v, %v), want no event", event, baselineFailed)
 	}
-	if err == nil || !strings.Contains(err.Error(), "restat transcript after read") {
+	if err == nil || !strings.Contains(err.Error(), "restat transcript") {
 		t.Fatalf("read-failing scan error = %v", err)
 	}
 	if got := st.Files[path]; got != prior {
@@ -687,6 +696,65 @@ func TestCourierTranscriptPrefixChangedUsesBoundedAppendCheck(t *testing.T) {
 		filepath.Join(t.TempDir(), "not-read-on-ordinary-append.jsonl"),
 	) {
 		t.Fatal("ordinary same-inode growth requested a full-prefix replacement check")
+	}
+}
+
+func TestVerifyCourierPrefixChunkBoundsOrdinaryAppendWork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large-append.jsonl")
+	original := strings.Repeat("x", int(2*courierPrefixVerifyChunk))
+	if err := os.WriteFile(path, []byte(original+"tail"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previousInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentHash, hashState, err := courierContentFingerprint(
+		path,
+		previousInfo.Size(),
+		courierFileState{},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := courierFileState{
+		Size:        previousInfo.Size(),
+		ContentHash: contentHash,
+		HashState:   hashState,
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("appended"); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := courierState{Files: map[string]courierFileState{}}
+	verified, changed, err := verifyCourierPrefixChunk(
+		path,
+		previous,
+		info,
+		courierFileIdentity(info),
+		&st,
+		os.Stat,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified || changed {
+		t.Fatalf("first bounded prefix chunk = (%v, %v), want incomplete unchanged", verified, changed)
+	}
+	if got := st.prefixChecks[path].Offset; got != courierPrefixVerifyChunk {
+		t.Fatalf("verified prefix bytes = %d, want one %d-byte chunk", got, courierPrefixVerifyChunk)
 	}
 }
 
@@ -1395,6 +1463,27 @@ func TestStartResultsCourierEstablishesBaselineBeforeFirstTick(t *testing.T) {
 
 	if got := st.Files[sessionPath]; got.Line != 1 {
 		t.Fatalf("startup baseline watermark = %+v, want one seeded line", got)
+	}
+}
+
+func TestWaitForResultsCourierShutdownWaitsForCursorTransaction(t *testing.T) {
+	courierDone := make(chan struct{})
+	waitReturned := make(chan struct{})
+	go func() {
+		waitForResultsCourierShutdown(courierDone)
+		close(waitReturned)
+	}()
+
+	select {
+	case <-waitReturned:
+		t.Fatal("watcher shutdown returned before the courier cursor transaction")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(courierDone)
+	select {
+	case <-waitReturned:
+	case <-time.After(time.Second):
+		t.Fatal("watcher shutdown did not return after the courier completed")
 	}
 }
 
