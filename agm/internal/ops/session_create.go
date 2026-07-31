@@ -423,6 +423,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 		req = prepared
 	}
+	if err := renewCreateSessionNameReservation(state.store, sessionID, params.name); err != nil {
+		return nil, err
+	}
 
 	if agyIdentityTracker != nil {
 		previousAgyConversationID, err = agyIdentityTracker.Snapshot(callCtx, req.Cwd)
@@ -875,6 +878,24 @@ func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool,
 		return false, ErrStorageError("storage.ReserveSessionName", err)
 	}
 	return true, nil
+}
+
+func renewCreateSessionNameReservation(store dolt.Storage, sessionID, name string) error {
+	if name == "" {
+		return nil
+	}
+	reservations, ok := store.(dolt.SessionNameReservationStore)
+	if !ok {
+		return ErrStorageError("storage.RenewSessionNameReservation", fmt.Errorf("session storage does not support atomic name reservations"))
+	}
+	if err := reservations.RenewSessionNameReservation(sessionID, name); err != nil {
+		var conflict *dolt.SessionNameConflictError
+		if errors.As(err, &conflict) {
+			return sessionExistsError(name)
+		}
+		return ErrStorageError("storage.RenewSessionNameReservation", err)
+	}
+	return nil
 }
 
 func releaseCreateSessionNameReservation(store dolt.Storage, sessionID string) error {

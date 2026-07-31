@@ -112,6 +112,19 @@ func (m *MockAdapter) ReleaseSessionNameReservation(sessionID string) error {
 	return nil
 }
 
+// RenewSessionNameReservation verifies ownership of a mock operation lease.
+func (m *MockAdapter) RenewSessionNameReservation(sessionID, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return fmt.Errorf("adapter is closed")
+	}
+	if owner, reserved := m.nameReservations[name]; !reserved || owner != sessionID {
+		return &SessionNameConflictError{Name: name}
+	}
+	return nil
+}
+
 // GetSession retrieves a session by ID from memory
 func (m *MockAdapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 	m.mu.RLock()

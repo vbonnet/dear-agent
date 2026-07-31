@@ -191,6 +191,72 @@ func TestSQLiteSessionNameReservationPrecedesAndIsConsumedByRegistration(t *test
 	}
 }
 
+func TestSQLiteSessionNameReservationCanBeRenewedByOwner(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	if err := adapter.ReserveSessionName("owner", "renewable-name"); err != nil {
+		t.Fatalf("ReserveSessionName() error: %v", err)
+	}
+	if err := adapter.RenewSessionNameReservation("owner", "renewable-name"); err != nil {
+		t.Fatalf("RenewSessionNameReservation(owner) error: %v", err)
+	}
+	var conflict *SessionNameConflictError
+	if err := adapter.RenewSessionNameReservation("other", "renewable-name"); !errors.As(err, &conflict) {
+		t.Fatalf("RenewSessionNameReservation(other) error = %v, want SessionNameConflictError", err)
+	}
+}
+
+func TestSQLiteUpdateSessionCannotReactivateArchivedRowFromStaleManifest(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	original := &manifest.Manifest{
+		SessionID: "stale-archived-session",
+		Name:      "reused-after-archive",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := adapter.CreateSession(original); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	stale, err := adapter.GetSession(original.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(stale) error: %v", err)
+	}
+	current, err := adapter.GetSession(original.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(current) error: %v", err)
+	}
+	current.Lifecycle = manifest.LifecycleArchived
+	if err := adapter.UpdateSession(current); err != nil {
+		t.Fatalf("archive current session: %v", err)
+	}
+	if err := adapter.ReserveSessionName("replacement-owner", original.Name); err != nil {
+		t.Fatalf("ReserveSessionName(replacement-owner) error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.ReleaseSessionNameReservation("replacement-owner") })
+
+	stale.Context.Notes = "stale writer"
+	if err := adapter.UpdateSession(stale); err != nil {
+		t.Fatalf("UpdateSession(stale) error: %v", err)
+	}
+	stored, err := adapter.GetSession(original.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession(stored) error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("stale UpdateSession lifecycle = %q, want archived", stored.Lifecycle)
+	}
+}
+
 func TestSQLiteCreateSessionCleansOnlyItsOwnReservationAfterRegistrationFailure(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

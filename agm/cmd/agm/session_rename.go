@@ -87,24 +87,6 @@ Examples:
 			}
 			oldName = m.Name
 
-			// Check new name doesn't already exist
-			existingByName, _ := adapter.GetSessionByName(newName)
-			if existingByName != nil && existingByName.SessionID != m.SessionID {
-				ui.PrintError(fmt.Errorf("session '%s' already exists", newName),
-					"Cannot rename: target name is already in use",
-					fmt.Sprintf("  • Existing session ID: %s", existingByName.SessionID))
-				return fmt.Errorf("session name already exists: %s", newName)
-			}
-
-			// Also check by tmux name resolution
-			existingByTmux, _, _ := session.ResolveIdentifier(newName, sessionsDir, adapter)
-			if existingByTmux != nil && existingByTmux.SessionID != m.SessionID {
-				ui.PrintError(fmt.Errorf("session '%s' already exists", newName),
-					"Cannot rename: target name resolves to a different session",
-					fmt.Sprintf("  • Existing session ID: %s", existingByTmux.SessionID))
-				return fmt.Errorf("session name already exists: %s", newName)
-			}
-
 			releaseRenameReservation := false
 			if newName != oldName {
 				if err := adapter.ReserveSessionName(stableSessionID, newName); err != nil {

@@ -45,6 +45,7 @@ type Storage interface {
 // processes before any harness launch side effect occurs.
 type SessionNameReservationStore interface {
 	ReserveSessionName(sessionID, name string) error
+	RenewSessionNameReservation(sessionID, name string) error
 	ReleaseSessionNameReservation(sessionID string) error
 }
 

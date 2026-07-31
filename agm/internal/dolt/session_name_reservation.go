@@ -177,6 +177,35 @@ func (a *Adapter) ReleaseSessionNameReservation(sessionID string) error {
 	return nil
 }
 
+// RenewSessionNameReservation verifies ownership and extends the lease before
+// a long preparation interval can hand the name to another creator.
+func (a *Adapter) RenewSessionNameReservation(sessionID, name string) error {
+	if sessionID == "" || name == "" {
+		return nil
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	now := time.Now()
+	result, err := a.conn.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`UPDATE agm_session_name_reservations
+		 SET expires_at = ?
+		 WHERE workspace = ? AND name = ? AND session_id = ? AND expires_at > ?`,
+		now.Add(sessionNameReservationTTL), a.workspace, name, sessionID, now,
+	)
+	if err != nil {
+		return fmt.Errorf("renew session-name reservation: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get renewed session-name reservation rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return &SessionNameConflictError{Name: name}
+	}
+	return nil
+}
+
 // ReactivateSessionResult distinguishes a failed lifecycle mutation from a
 // committed reactivation whose reservation cleanup still needs attention.
 type ReactivateSessionResult struct {

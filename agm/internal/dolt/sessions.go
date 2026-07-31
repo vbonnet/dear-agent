@@ -407,7 +407,8 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	// comparison, so any other stale snapshot remains unable to reopen the CAS.
 	query := `
 		UPDATE agm_sessions
-		SET updated_at = ?, status = ?,
+		SET updated_at = ?, status = CASE
+			WHEN status = 'archived' AND ? <> 'archived' THEN status ELSE ? END,
 			name = CASE
 				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
 				THEN ? ELSE name END,
@@ -428,6 +429,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 
 	result, err := a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.UpdatedAt,
+		status,
 		status,
 		observedTmuxRevision,
 		observedTmuxRevision,

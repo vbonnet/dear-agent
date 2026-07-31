@@ -31,11 +31,14 @@ type createMockStorage struct {
 	listErr     error
 	createErr   error
 	reserveErr  error
+	renewErr    error
 	releaseErr  error
 	deleteErr   error
 	createOrder *[]string
 	onCreate    func()
 	onReserve   func()
+	onRenew     func()
+	renewed     bool
 	reserved    []string
 	released    []string
 }
@@ -235,6 +238,14 @@ func (s *createMockStorage) ReserveSessionName(sessionID, name string) error {
 		s.onReserve()
 	}
 	return s.reserveErr
+}
+
+func (s *createMockStorage) RenewSessionNameReservation(string, string) error {
+	s.renewed = true
+	if s.onRenew != nil {
+		s.onRenew()
+	}
+	return s.renewErr
 }
 
 func (s *createMockStorage) ReleaseSessionNameReservation(sessionID string) error {
@@ -1272,6 +1283,9 @@ func TestCreateSession_PreparesSurfaceAfterReservationBeforeLaunch(t *testing.T)
 	}
 	if launchedSpec.WorkDir != preparedDir || !reflect.DeepEqual(launchedSpec.ExtraAddDirs, []string{"/prepared/source"}) {
 		t.Fatalf("launch spec did not receive prepared workspace: %+v", launchedSpec)
+	}
+	if !store.renewed {
+		t.Fatal("creation did not renew the reserved name after preparation")
 	}
 	if len(store.created) != 1 ||
 		store.created[0].Context.Project != preparedDir ||
