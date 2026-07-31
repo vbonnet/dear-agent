@@ -119,13 +119,47 @@ func TestScanClaudeProjects_TracksNewStreamingSessionFromLineZero(t *testing.T) 
 	if events, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil || len(events) != 0 {
 		t.Fatalf("streaming scan = (%+v, %v), want no events", events, err)
 	}
-	if got := st.Files[path]; got != (courierFileState{}) {
-		t.Fatalf("new streaming file watermark = %+v, want line-zero tracking", got)
+	if got := st.Files[path]; got.Size != 0 || got.Line != 0 || got.Identity == "" {
+		t.Fatalf("new streaming file watermark = %+v, want identified line-zero tracking", got)
 	}
 	backdateCourierFile(t, path)
 	events, err := scanClaudeProjects(home, 45*time.Second, &st)
 	if err != nil || len(events) != 1 || events[0].Headline != "first completion" {
 		t.Fatalf("idle scan = (%+v, %v), want first completion", events, err)
+	}
+}
+
+func TestScanClaudeProjectsFullyRescansReplacedTranscript(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "replaced-session.jsonl")
+	writeJSONLLine(t, path, "user", "")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONLLine(t, path, "assistant", "completion from replacement")
+	backdateCourierFile(t, path)
+
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("replacement scan: %v", err)
+	}
+	if len(events) != 1 || events[0].Headline != "completion from replacement" {
+		t.Fatalf("replacement events = %+v", events)
+	}
+	if st.Files[path].Identity == prior.Identity {
+		t.Fatal("replacement retained the prior filesystem identity")
 	}
 }
 
@@ -212,7 +246,7 @@ func TestLastAssistantText_IgnoresToolOnlyTurns(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"final answer"}]}}`,
 	}
-	got := lastAssistantText(lines, 0)
+	got := lastAssistantText(lines)
 	if got != "final answer" {
 		t.Errorf("got %q, want %q", got, "final answer")
 	}
@@ -286,7 +320,7 @@ func TestLastAssistantText_RequiresTerminalCompletedTurn(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := lastAssistantText(test.lines, 0); got != test.want {
+			if got := lastAssistantText(test.lines); got != test.want {
 				t.Fatalf("lastAssistantText() = %q, want %q", got, test.want)
 			}
 		})
@@ -298,15 +332,53 @@ func TestReadLinesAcceptsTranscriptLineLargerThanEightMiB(t *testing.T) {
 	largeText := strings.Repeat("x", 9*1024*1024)
 	writeJSONLLine(t, path, "assistant", largeText)
 
-	lines, err := readLines(path)
+	lines, offset, err := readLinesFrom(path, 0)
 	if err != nil {
-		t.Fatalf("readLines: %v", err)
+		t.Fatalf("readLinesFrom: %v", err)
+	}
+	if offset != 0 {
+		t.Fatalf("offset = %d, want 0", offset)
 	}
 	if len(lines) != 1 {
 		t.Fatalf("lines = %d, want 1", len(lines))
 	}
-	if got := lastAssistantText(lines, 0); got != largeText {
+	if got := lastAssistantText(lines); got != largeText {
 		t.Fatalf("large assistant content length = %d, want %d", len(got), len(largeText))
+	}
+}
+
+func TestReadLinesFromReadsOnlyAppendedSuffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "suffix.jsonl")
+	if err := os.WriteFile(path, []byte("old one\nold two\nnew one\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offset := int64(len("old one\nold two\n"))
+	lines, actualOffset, err := readLinesFrom(path, offset)
+	if err != nil {
+		t.Fatalf("readLinesFrom: %v", err)
+	}
+	if actualOffset != offset {
+		t.Fatalf("actual offset = %d, want %d", actualOffset, offset)
+	}
+	if len(lines) != 1 || lines[0] != "new one" {
+		t.Fatalf("suffix lines = %#v, want only new line", lines)
+	}
+}
+
+func TestReadLinesFromRescansWhenWatermarkIsNotAtLineBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "replaced.jsonl")
+	if err := os.WriteFile(path, []byte("replacement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, actualOffset, err := readLinesFrom(path, 4)
+	if err != nil {
+		t.Fatalf("readLinesFrom: %v", err)
+	}
+	if actualOffset != 0 {
+		t.Fatalf("actual offset = %d, want defensive full rescan", actualOffset)
+	}
+	if len(lines) != 1 || lines[0] != "replacement" {
+		t.Fatalf("rescanned lines = %#v", lines)
 	}
 }
 
@@ -314,7 +386,7 @@ func TestLastAssistantText_NoQualifyingLinesReturnsEmpty(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`,
 	}
-	if got := lastAssistantText(lines, 0); got != "" {
+	if got := lastAssistantText(lines); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }

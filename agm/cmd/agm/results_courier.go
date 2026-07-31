@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -55,8 +56,9 @@ type resultsCourierEvent struct {
 
 // courierFileState is the last-processed watermark for one transcript file.
 type courierFileState struct {
-	Size int64 `json:"size"`
-	Line int   `json:"line"`
+	Size     int64  `json:"size"`
+	Line     int    `json:"line"`
+	Identity string `json:"identity,omitempty"`
 }
 
 // courierState is the full on-disk cursor: last-seen watermark per
@@ -115,14 +117,14 @@ func claudeProjectsGlob(home string) string {
 }
 
 // lastAssistantText returns text only when the terminal conversational entry
-// in lines[from:] is an assistant turn with non-empty text and no tool use.
+// in lines is an assistant turn with non-empty text and no tool use.
 // A later tool invocation, tool result, or user turn clears an earlier
 // candidate: file inactivity alone does not prove that an earlier assistant
 // message completed the current turn.
-func lastAssistantText(lines []string, from int) string {
+func lastAssistantText(lines []string) string {
 	headline := ""
-	for i := from; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			continue
 		}
@@ -254,63 +256,165 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 		if err != nil {
 			continue // raced with deletion/rotation; skip this tick
 		}
-		prev, known := st.Files[path]
-		if known && info.Size() == prev.Size {
-			continue // nothing new, cheap skip (no read)
+		event, baselineReadFailed := scanClaudeTranscript(
+			home,
+			path,
+			info,
+			now,
+			idleGrace,
+			initialBaseline,
+			st,
+		)
+		baselineFailed = baselineFailed || baselineReadFailed
+		if event != nil {
+			events = append(events, *event)
 		}
-		if initialBaseline && !known {
-			lines, readErr := readLines(path)
-			if readErr != nil {
-				baselineFailed = true
-				continue
-			}
-			st.Files[path] = courierFileState{Size: info.Size(), Line: len(lines)}
-			continue
-		}
-		if !known {
-			// This path appeared after the initial deployment baseline. Mark it
-			// known at line zero before the idle check so its first completed
-			// turn remains eligible once writing settles.
-			prev = courierFileState{}
-			st.Files[path] = prev
-		}
-		if now.Sub(info.ModTime()) < idleGrace {
-			continue // still being written; re-check next tick, watermark untouched
-		}
-
-		lines, err := readLines(path)
-		if err != nil {
-			continue
-		}
-
-		fromLine := prev.Line
-		if fromLine > len(lines) {
-			fromLine = 0 // file was truncated/rotated; re-scan from the top
-		}
-
-		if headline := lastAssistantText(lines, fromLine); headline != "" {
-			projectDir := filepath.Base(filepath.Dir(path))
-			events = append(events, resultsCourierEvent{
-				SessionFile: path,
-				Project:     projectLabel(home, projectDir),
-				Headline:    truncateHeadline(headline, 220),
-				DetectedAt:  now,
-			})
-		}
-
-		st.Files[path] = courierFileState{Size: info.Size(), Line: len(lines)}
 	}
 	st.BaselineComplete = !baselineFailed
 
 	return events, nil
 }
 
-func readLines(path string) ([]string, error) {
+func scanClaudeTranscript(
+	home, path string,
+	info os.FileInfo,
+	now time.Time,
+	idleGrace time.Duration,
+	initialBaseline bool,
+	st *courierState,
+) (*resultsCourierEvent, bool) {
+	prev, known := st.Files[path]
+	identity := courierFileIdentity(info)
+	replaced := courierTranscriptReplaced(known, prev.Identity, identity)
+	if known && info.Size() == prev.Size && !replaced {
+		if prev.Identity == "" && identity != "" {
+			prev.Identity = identity
+			st.Files[path] = prev
+		}
+		return nil, false // nothing new, cheap skip (no read)
+	}
+	if initialBaseline && !known {
+		if err := seedCourierBaseline(path, info, identity, st); err != nil {
+			return nil, true
+		}
+		return nil, false
+	}
+	if !known {
+		// This path appeared after the initial deployment baseline. Mark it
+		// known at line zero before the idle check so its first completed
+		// turn remains eligible once writing settles.
+		prev = courierFileState{Identity: identity}
+		st.Files[path] = prev
+	}
+	if now.Sub(info.ModTime()) < idleGrace {
+		return nil, false // still being written; leave watermark untouched
+	}
+
+	lines, lineBase, err := readCourierDelta(path, prev, info, replaced)
+	if err != nil {
+		return nil, false
+	}
+	st.Files[path] = courierFileState{
+		Size:     info.Size(),
+		Line:     lineBase + len(lines),
+		Identity: identity,
+	}
+	headline := lastAssistantText(lines)
+	if headline == "" {
+		return nil, false
+	}
+	projectDir := filepath.Base(filepath.Dir(path))
+	return &resultsCourierEvent{
+		SessionFile: path,
+		Project:     projectLabel(home, projectDir),
+		Headline:    truncateHeadline(headline, 220),
+		DetectedAt:  now,
+	}, false
+}
+
+func courierTranscriptReplaced(known bool, previousIdentity, currentIdentity string) bool {
+	return known &&
+		previousIdentity != "" &&
+		currentIdentity != "" &&
+		previousIdentity != currentIdentity
+}
+
+func seedCourierBaseline(
+	path string,
+	info os.FileInfo,
+	identity string,
+	st *courierState,
+) error {
+	lines, _, err := readLinesFrom(path, 0)
+	if err != nil {
+		return err
+	}
+	st.Files[path] = courierFileState{
+		Size:     info.Size(),
+		Line:     len(lines),
+		Identity: identity,
+	}
+	return nil
+}
+
+func readCourierDelta(
+	path string,
+	prev courierFileState,
+	info os.FileInfo,
+	replaced bool,
+) ([]string, int, error) {
+	offset := int64(0)
+	lineBase := 0
+	if !replaced && prev.Size > 0 && prev.Size < info.Size() {
+		offset = prev.Size
+		lineBase = prev.Line
+	}
+	lines, actualOffset, err := readLinesFrom(path, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if actualOffset == 0 {
+		lineBase = 0
+	}
+	return lines, lineBase, nil
+}
+
+func courierFileIdentity(info os.FileInfo) string {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino)
+}
+
+// readLinesFrom reads only transcript bytes at or after offset. It returns the
+// actual offset used so callers can distinguish an appended suffix from a
+// defensive full rescan. A watermark that is no longer on a JSONL record
+// boundary indicates truncation, replacement, or an incomplete prior line and
+// therefore falls back to offset zero.
+func readLinesFrom(path string, offset int64) ([]string, int64, error) {
 	f, err := os.Open(path) //#nosec G304 -- path comes from our own glob under ~/.claude/projects
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer f.Close()
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > 0 {
+		if _, err := f.Seek(offset-1, io.SeekStart); err != nil {
+			offset = 0
+		} else {
+			var boundary [1]byte
+			if _, err := io.ReadFull(f, boundary[:]); err != nil || boundary[0] != '\n' {
+				offset = 0
+			}
+		}
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, 0, err
+	}
 
 	var lines []string
 	reader := bufio.NewReader(f)
@@ -322,10 +426,10 @@ func readLines(path string) ([]string, error) {
 			lines = append(lines, line)
 		}
 		if errors.Is(readErr, io.EOF) {
-			return lines, nil
+			return lines, offset, nil
 		}
 		if readErr != nil {
-			return nil, readErr
+			return nil, 0, readErr
 		}
 	}
 }
