@@ -955,8 +955,16 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 	if !sameStringSet(ownerPaths(f.CurrentOwners), evidencePaths(f.Evidence)) {
 		return fmt.Errorf("finding %q current owners must exactly match its source-evidence paths", f.ID)
 	}
+	positive := f.Verdict == "merge-now" || f.Verdict == "extract-neutral-contract"
 	if !bddConsequences[f.BDD.Consequence] || !uniqueRelativeFeaturePaths(f.BDD.Features) {
 		return fmt.Errorf("finding %q has invalid BDD impact", f.ID)
+	}
+	if len(f.BDD.Features) == 0 {
+		if positive || f.BDD.Consequence != "none" {
+			return fmt.Errorf("finding %q without BDD features must be non-positive with consequence none", f.ID)
+		}
+	} else if f.BDD.Consequence == "none" {
+		return fmt.Errorf("finding %q with BDD features cannot use consequence none", f.ID)
 	}
 	seenMembers := map[string]bool{}
 	for _, entry := range f.Applicability {
@@ -971,7 +979,6 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 		}
 		seenMembers[entry.Member] = true
 	}
-	positive := f.Verdict == "merge-now" || f.Verdict == "extract-neutral-contract"
 	if positive {
 		if len(f.CurrentOwners) < 2 || distinctProductSpecPaths(f.Evidence) < 2 || f.ProposedOwner == nil || !isSpecPath(f.ProposedOwner.Path) || !ownerStates[f.ProposedOwner.State] || len(f.BDD.Features) == 0 {
 			return fmt.Errorf("positive finding %q requires two SPEC owners, proposed owner state, and BDD features", f.ID)

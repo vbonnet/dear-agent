@@ -192,10 +192,12 @@ non-candidates; `candidate_count` counts only `candidates`.
   owner set, which gives it exact pinned requirement evidence. A `new` proposed
   owner must not exist at the pinned revision or appear in the current-owner
   set. Both states require a selection rationale.
-- Every selected BDD feature exists in the pinned tree and reciprocally links
-  at least one current owner in both directions. Every current owner is covered
-  by at least one selected feature; the selected features need not form a false
-  Cartesian product with every owner.
+- When a finding selects BDD features, every selected feature exists in the
+  pinned tree and reciprocally links at least one current owner in both
+  directions, and every current owner is covered by at least one selected
+  feature. The selected features need not form a false Cartesian product with
+  every owner. A finding with no selected feature must be non-positive and use
+  BDD consequence `none`.
 - `active-members` findings cover every pinned member with exact evidence.
   `implementation-only` findings state a rationale and cannot hide a harness
   configuration owner.
