@@ -40,7 +40,8 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`forward_privileged() { signal=$$1; status=$$2;`,
 		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer"`,
 		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
-		`/bin/rm -f "$$agm_staging" "$$companion_staging"`,
+		`/bin/mv -f "$$agm_staging" "$$agm_executable"`,
+		`/bin/mv -f "$$companion_staging" "$$companion_executable"`,
 	}
 	offset := 0
 	for _, want := range requiredInOrder {
@@ -91,8 +92,21 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	if strings.Contains(rootInstaller, "/usr/bin/sudo ") {
 		t.Fatal("fixed root installer recursively invokes sudo")
 	}
+	for _, forbidden := range []string{
+		"agm_executable",
+		"companion_executable",
+		"agm_stage=",
+		"agm_mcp_stage=",
+		"operator_uid",
+		"operator_gid",
+		`mktemp "$agm`,
+	} {
+		if strings.Contains(rootInstaller, forbidden) {
+			t.Errorf("fixed root installer must not resolve a replaceable user path: found %q", forbidden)
+		}
+	}
 	if !strings.Contains(rootInstaller, `test "$activation_started" = 1 && test "$activation_complete" != 1`) {
-		t.Fatal("fixed root installer lacks rollback for a partially activated artifact set")
+		t.Fatal("fixed root installer lacks rollback for a partially activated root-owned artifact set")
 	}
 	executableLines := 0
 	for line := range strings.SplitSeq(rootInstaller, "\n") {

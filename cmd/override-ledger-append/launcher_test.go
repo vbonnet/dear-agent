@@ -107,6 +107,8 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 		"linux-sha256:",
 		"confirmed_installer_hash",
 		"dear-agent-override-ledger-installer",
+		`/bin/mv -f "$$agm_staging" "$$agm_executable"`,
+		`/bin/mv -f "$$companion_staging" "$$companion_executable"`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("helper installer is missing %q", required)
@@ -124,6 +126,19 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	} {
 		if !strings.Contains(string(rootInstaller), required) {
 			t.Errorf("fixed root installer is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"agm_executable",
+		"companion_executable",
+		"agm_stage=",
+		"agm_mcp_stage=",
+		"operator_uid",
+		"operator_gid",
+		`mktemp "$agm`,
+	} {
+		if strings.Contains(string(rootInstaller), forbidden) {
+			t.Errorf("fixed root installer must not resolve a replaceable user path: found %q", forbidden)
 		}
 	}
 	start := strings.Index(text, "install-override-ledger-helper:")

@@ -983,7 +983,7 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
-		operator_uid="$$(/usr/bin/id -u)"; operator_gid="$$(/usr/bin/id -g)"; root_gid="$$(/usr/bin/id -g 0)"; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
 		repo_root="$$(pwd -P)"; \
 		artifact="$$repo_root/bin/dear-agent-override-ledger-append"; \
 		agm_artifact="$$repo_root/bin/agm"; \
@@ -1052,12 +1052,14 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		privileged_child=""; \
 		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; /bin/rm -f "$$agm_staging" "$$companion_staging"; exit "$$status"; }; \
 		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
-		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$operator_uid" "$$operator_gid" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_staging" "$$companion_staging" >/dev/null 2>&1 & privileged_child=$$!; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_staging" "$$companion_staging" >/dev/null 2>&1 & privileged_child=$$!; \
 		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
 		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
 		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
-		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$operator_uid" "$$operator_gid" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_staging" "$$companion_staging" & privileged_child=$$!; \
-		wait "$$privileged_child"; privileged_child=""; /bin/rm -f "$$agm_staging" "$$companion_staging"; agm_staging=""; companion_staging=""; trap - EXIT HUP INT TERM; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_staging" "$$companion_staging" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; \
+		/bin/mv -f "$$agm_staging" "$$agm_executable"; agm_staging=""; \
+		/bin/mv -f "$$companion_staging" "$$companion_executable"; companion_staging=""; trap - EXIT HUP INT TERM; \
 		echo "Installed digest-bound root-owned ledger helper, AGM and MCP companion caller identities, and exact sudoers rule for $$operator_user"
 
 # Install the macOS audit under launchd's system domain without activating it.
