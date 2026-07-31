@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -322,6 +325,8 @@ func TestRenderPrompt(t *testing.T) {
 		"assigned to bead ce-test (P1): Make it work.",
 		"Wayfinder V2 lifecycle",
 		"~/worktrees/dear-agent/ce-test/",
+		"~/worktrees/engram-research/ce-test/",
+		"do not run `git worktree add`",
 		"PR creation is not done",
 		"MERGED",
 		"DEPLOYED",
@@ -390,6 +395,136 @@ func TestSessionNewArgsSupportsNonClaudeHarness(t *testing.T) {
 	}
 }
 
+func TestTrustedAddDirsEnvironmentBindsPayloadToSession(t *testing.T) {
+	got, err := trustedAddDirsEnvironment("worker-ce-test", []string{"/worktree/one", "/beads"}, "/etc/codex/hooks/worker-guard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`AGM_TRUSTED_ADD_DIRS_JSON=["/worktree/one","/beads"]`,
+		"AGM_TRUSTED_ADD_DIRS_SESSION=worker-ce-test",
+		"AGM_TRUSTED_GUARD_PATH=/etc/codex/hooks/worker-guard",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("trustedAddDirsEnvironment() = %v, want %v", got, want)
+	}
+}
+
+func TestPrepareWorkerWorkspacePrecreatesTaskOwnedGitState(t *testing.T) {
+	root := t.TempDir()
+	dearRepo := filepath.Join(root, "dear-agent")
+	engramRepo := filepath.Join(root, "engram-research")
+	initGitRepo(t, dearRepo)
+	initGitRepo(t, engramRepo)
+	beadsDir := filepath.Join(root, "beads", ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testWorkerLaunchConfig()
+	cfg.BeadsDir = beadsDir
+	cfg.Worktrees = filepath.Join(root, "worktrees")
+	cfg.GitState = filepath.Join(root, "worker-git")
+	cfg.EngramRepo = engramRepo
+
+	addDirs, err := prepareWorkerWorkspace(t.Context(), "ce-test.1", cfg, dearRepo)
+	if err != nil {
+		t.Fatalf("prepareWorkerWorkspace() error: %v", err)
+	}
+	if _, err := prepareWorkerWorkspace(t.Context(), "ce-test.1", cfg, dearRepo); err != nil {
+		t.Fatalf("prepareWorkerWorkspace() idempotent call: %v", err)
+	}
+	dearCommon, err := gitOutput(t.Context(), dearRepo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engramCommon, err := gitOutput(t.Context(), engramRepo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []string{
+		filepath.Join(cfg.Worktrees, "dear-agent", "ce-test.1"),
+		filepath.Join(cfg.Worktrees, "engram-research", "ce-test.1"),
+	}
+	for _, target := range targets {
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("prepared worktree %s: %v", target, err)
+		}
+	}
+	for _, forbidden := range []string{
+		dearCommon,
+		filepath.Join(dearCommon, "config"),
+		filepath.Join(dearCommon, "hooks"),
+		engramCommon,
+	} {
+		if slices.Contains(addDirs, forbidden) {
+			t.Fatalf("prepared grants include forbidden Git control path %s: %v", forbidden, addDirs)
+		}
+	}
+	for _, want := range []string{
+		beadsDir,
+		targets[0],
+		targets[1],
+		filepath.Join(cfg.GitState, "dear-agent", "ce-test.1.git"),
+		filepath.Join(cfg.GitState, "engram-research", "ce-test.1.git"),
+	} {
+		if !slices.Contains(addDirs, want) {
+			t.Fatalf("prepared grants missing %s: %v", want, addDirs)
+		}
+	}
+	for _, target := range targets {
+		if err := os.WriteFile(filepath.Join(target, "worker.txt"), []byte("worker\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"add", "worker.txt"}, {"commit", "-m", "worker commit"}} {
+			if _, err := gitOutput(t.Context(), target, args...); err != nil {
+				t.Fatalf("git %v in prepared worktree: %v", args, err)
+			}
+		}
+		common, err := gitOutput(t.Context(), target, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolvedBase, err := filepath.EvalSymlinks(cfg.GitState)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(common, resolvedBase+string(os.PathSeparator)) {
+			t.Fatalf("prepared worktree common Git dir = %s, want under %s", common, cfg.GitState)
+		}
+	}
+}
+
+func initGitRepo(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commands := [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test User"},
+	}
+	for _, args := range commands {
+		cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "README.md"}, {"commit", "-m", "initial"}} {
+		cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	cmd := exec.Command("git", "-C", path, "remote", "add", "origin", "https://example.invalid/"+filepath.Base(path)+".git")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add origin: %v: %s", err, out)
+	}
+}
+
 func testWorkerLaunchConfig() workerLaunchConfig {
 	return workerLaunchConfig{
 		Harness:   defaultHarness,
@@ -438,6 +573,38 @@ func TestDispatch(t *testing.T) {
 	}
 	if sent != "worker-ce-test" {
 		t.Errorf("sent = %q, want worker-ce-test", sent)
+	}
+}
+
+func TestDispatchPreparedWorkspaceBecomesSessionDirectory(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "dear-agent")
+	initGitRepo(t, repo)
+	beadsDir := filepath.Join(root, "beads", ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testWorkerLaunchConfig()
+	cfg.BeadsDir = beadsDir
+	cfg.Worktrees = filepath.Join(root, "worktrees")
+	cfg.GitState = filepath.Join(root, "worker-git")
+
+	var spawnedDir string
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawnedDir = repoDir
+		return nil
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	if err := dispatch(context.Background(), bead{ID: "ce-test", Title: "T"}, cfg, repo); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(cfg.Worktrees, "dear-agent", "ce-test")
+	if spawnedDir != want {
+		t.Fatalf("spawned directory = %q, want prepared worktree %q", spawnedDir, want)
 	}
 }
 

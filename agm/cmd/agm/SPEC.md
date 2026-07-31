@@ -129,6 +129,12 @@ Provide a production-ready CLI that:
 
 **CLI-49** When any production CLI entry resumes a session, the CLI shall resolve human-facing identifiers and prompt-file input, invoke `internal/ops.ResumeSession` exactly once with the stable session ID, render only returned lifecycle facts, and perform optional interactive attachment only after the operation returns; it shall not own health, tmux creation, harness dispatch, readiness, rollback, canonical-name persistence, permission restoration, prompt submission, or activity ordering.
 
+**CLI-50** When a trusted host launches or resumes a Codex worker with a session-bound add-directory and managed-guard handoff, AGM shall validate every path, consume and unset the authority-bearing handoff before harness startup, reject incomplete, cross-session, or non-worker use, and pass only the derived worker write roots to Codex.
+
+**CLI-51** When a cold Codex resume becomes ready with newly trusted add directories, the shared resume operation shall persist the deduplicated union with the prior sandbox policy so later resumes retain the repaired grants; a failed launch shall not rewrite the policy.
+
+**CLI-52** When AGM launches a Codex worker, it shall fail closed before harness startup unless the host-authenticated system-managed worker write-boundary guard is an executable regular file, while non-worker and non-Codex sessions shall remain unaffected.
+
 ## Requirements
 
 ### Functional Requirements

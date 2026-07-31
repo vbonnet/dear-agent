@@ -61,3 +61,11 @@ dotted bead id can never brick a dispatch run (ce-b1zw).
 **VDD-22** When worker-name deduplication reads session state, the system shall treat active, running, zombie, and stopped worker sessions as occupied because AGM rejects duplicate non-archived names; archived sessions shall not suppress dispatch.
 
 **VDD-23** When session inventory exceeds one AGM list page, the system shall retrieve every page before candidate selection so an older occupied worker name cannot fall outside deduplication.
+
+**VDD-24** Before dispatching a worker, the trusted host shall create task-owned bare Git state and linked dear-agent and engram-research worktrees, borrow only immutable base objects from the read-only source repositories, and grant the worker only those task-owned paths plus the canonical Beads database.
+
+**VDD-25** When the host creates task-owned Git state, it shall retain the source repository's origin URL and commit identity, seed the source origin/main commit as the worker base, and keep source repository Git control files outside the worker grant.
+
+**VDD-26** When VROOM launches AGM for a prepared worker, it shall bind the exact add-directory payload and, for Codex, the system-managed worker guard path to that session name through a one-launch trusted handoff.
+
+**VDD-27** When an operator supplies `-prepare-worker`, the system shall prepare that bead's same production workspace without dispatching and print the session name, add directories, and applicable managed guard path as JSON for recovery of an existing session.
