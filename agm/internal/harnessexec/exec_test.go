@@ -366,12 +366,14 @@ func TestEnvironmentContracts(t *testing.T) {
 		"CLAUDE_CODE_OAUTH_TOKEN=old-claude", "ANTHROPIC_API_KEY=old-anthropic",
 		"CLAUDECODE=nested", "OTEL_EXPORTER_OTLP_ENDPOINT=collector:4317",
 		"OTEL_EXPORTER_OTLP_HEADERS=authorization=old", "OTEL_TRACES_EXPORTER=old", "ENGRAM_SESSION_ID=old-session",
+		CodexWorkerWriteRootsEnv + `=["/worker/worktree","/worker/satellite.git"]`,
 		"ARBITRARY_VALUE=preserved-for-claude",
 	}
 	codex := environmentMap(CodexEnvironment(parent, "codex-session"))
 	for name, want := range map[string]string{
 		"PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "OPENAI_API_KEY": "openai-allowed",
 		"CODEX_ACCESS_TOKEN": "codex-allowed", "AGM_SESSION_NAME": "codex-session",
+		CodexWorkerWriteRootsEnv: `["/worker/worktree","/worker/satellite.git"]`,
 	} {
 		if got := codex[name]; got != want {
 			t.Errorf("Codex environment %s = %q, want %q", name, got, want)

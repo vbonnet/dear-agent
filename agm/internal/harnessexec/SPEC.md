@@ -61,6 +61,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-19** When a private Codex, Claude, or generic harness handoff carries any override proof, the authenticated parent AGM process, or the separately attested co-installed AGM MCP companion that prepares MCP launches directly, shall obtain a root-owned capability for the exact protocol, path, handoff digest, proofs, and accompanying successful-spawn obligation before submission; the AGM executor shall require the matching capability and atomically consume it under the AGM-only caller policy before accepting those claims, rejecting self-generated, mutated, and replayed same-user handoffs.
 
+**HEXEC-20** When a trusted AGM launch prepares a Codex worker with host-authorized write roots, the system shall carry the derived `AGM_WORKER_WRITE_ROOTS_JSON` value through the owner-only private handoff into the Codex child environment, independent of long-lived tmux server state; when the caller omits the value, stale pane or tmux state shall not recreate it.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
