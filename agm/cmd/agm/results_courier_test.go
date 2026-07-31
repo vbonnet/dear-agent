@@ -198,8 +198,11 @@ func TestScanClaudeProjects_SkipsStillStreamingFile(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("expected no events for an actively-streaming file, got %d", len(events))
 	}
-	if _, known := st.Files[path]; known {
-		t.Fatal("a file within idle grace should not get a watermark yet")
+	if got, known := st.Files[path]; !known || got.Line != 1 {
+		t.Fatalf("initially streaming file watermark = (%+v, %v), want seeded baseline", got, known)
+	}
+	if !st.BaselineComplete {
+		t.Fatal("initial scan did not complete its deployment baseline")
 	}
 }
 
