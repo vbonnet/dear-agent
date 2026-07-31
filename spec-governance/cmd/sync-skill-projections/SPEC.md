@@ -20,7 +20,7 @@
 
 **SPEC-PROJECTION-09** When repository skill lint runs, the system shall check every committed SPEC governance projection for canonical drift.
 
-**SPEC-PROJECTION-10** When the projection generator runs in write mode, the system shall reject explicit root selection and shall require the current repository root to be a linked Git worktree.
+**SPEC-PROJECTION-10** When the projection generator runs in write mode, the system shall reject explicit root selection and shall require the current repository root and exact administrative directory to be registered as a linked Git worktree.
 
 **SPEC-PROJECTION-11** When repository skill validation runs, the system shall strictly parse the SPEC governance plugin manifest and shall require its canonical identity, metadata, author, and exact `./skills/` export before accepting projections.
 

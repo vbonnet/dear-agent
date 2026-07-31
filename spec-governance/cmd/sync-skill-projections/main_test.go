@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 var testSkillNames = []string{"write-spec", "audit-specs"}
@@ -106,7 +108,7 @@ func TestRequireLinkedWorktreeRootRejectsOrdinaryCheckout(t *testing.T) {
 	}
 }
 
-func TestRequireLinkedWorktreeRootAcceptsValidMetadata(t *testing.T) {
+func TestRequireLinkedWorktreeRootRejectsFabricatedMetadata(t *testing.T) {
 	root := t.TempDir()
 	gitDirectory := filepath.Join(t.TempDir(), "worktree-metadata")
 	if err := os.Mkdir(gitDirectory, 0o755); err != nil {
@@ -115,8 +117,36 @@ func TestRequireLinkedWorktreeRootAcceptsValidMetadata(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: "+gitDirectory+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := requireLinkedWorktreeRoot(root); err == nil {
+		t.Fatal("requireLinkedWorktreeRoot() accepted fabricated Git metadata")
+	}
+}
+
+func TestRequireLinkedWorktreeRootAcceptsRegisteredLinkedWorktree(t *testing.T) {
+	repository := gittest.NewRepo(t)
+	root := filepath.Join(t.TempDir(), "linked")
+	gittest.Run(t, repository, "worktree", "add", "-b", "projection-test", root)
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "hostile.git"))
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
 	if err := requireLinkedWorktreeRoot(root); err != nil {
 		t.Fatalf("requireLinkedWorktreeRoot() error = %v", err)
+	}
+}
+
+func TestRequireLinkedWorktreeRootRejectsCopiedWorktreePointer(t *testing.T) {
+	repository := gittest.NewRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	gittest.Run(t, repository, "worktree", "add", "-b", "projection-copy-test", linked)
+	metadata, err := os.ReadFile(filepath.Join(linked, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fake, ".git"), metadata, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireLinkedWorktreeRoot(fake); err == nil {
+		t.Fatal("requireLinkedWorktreeRoot() accepted a copied pointer to another worktree")
 	}
 }
 
