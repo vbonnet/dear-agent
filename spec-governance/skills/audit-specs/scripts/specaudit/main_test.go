@@ -104,7 +104,7 @@ func TestValidateRejectsInvalidPositiveFinding(t *testing.T) {
 	report.Candidates = []finding{{
 		ID: "SPEC-CLUSTER-001", Rank: 1, Title: "bad", Verdict: "merge-now", Relationship: "same-observable", Classification: "shared-contract", Confidence: "confirmed", Strength: "strong",
 		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the behavior"}}, ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "already owns the neutral behavior"}, SharedOutcome: "same", MaterialDifferences: []string{"none observed"}, Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}},
-		ApplicabilityBasis: "active-members", ApplicabilityRationale: "shared by the active member", Applicability: []applicability{{Member: "codex-cli", Disposition: "shared", Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}}}},
+		ApplicabilityBasis: "active-members", ApplicabilityRationale: "supported by the active member", Applicability: []applicability{{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}}}},
 		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "merge"}, Recommendation: []string{"merge"}, Risk: "bounded", Decision: "approve",
 	}}
 	report.Summary.CandidateCount = 1
@@ -277,6 +277,12 @@ func TestAuthenticatedValidationRejectsForgedEvidenceAndUnsafeVerdicts(t *testin
 			},
 		},
 		{
+			name: "legacy shared disposition",
+			mutate: func(semantic *report, _ *report) {
+				semantic.Candidates[0].Applicability[0].Disposition = "shared"
+			},
+		},
+		{
 			name: "tentative positive",
 			mutate: func(semantic *report, _ *report) {
 				semantic.Candidates[0].Confidence = "tentative"
@@ -360,8 +366,8 @@ func auditFixture(t *testing.T) (string, report, report) {
 			SharedOutcome: "Requests preserve identity.", MaterialDifferences: []string{"Only the owner path differs."}, Evidence: []evidence{{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, {Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}},
 			ApplicabilityBasis: "active-members", ApplicabilityRationale: "The shared contract applies to both pinned active members.",
 			Applicability: []applicability{
-				{Member: "codex-cli", Disposition: "shared", Evidence: []evidence{{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}}},
-				{Member: "pi-cli", Disposition: "shared", Evidence: []evidence{{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}}},
+				{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}}},
+				{Member: "pi-cli", Disposition: "supported", Evidence: []evidence{{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}}},
 			},
 			BDD: bddImpact{Features: []string{"agm/test/bdd/features/shared.feature"}, Consequence: "merge"}, Recommendation: []string{"Keep ONE-01 as canonical."}, Risk: "Traceability could be lost.", Decision: "Approve one owner.",
 		}},

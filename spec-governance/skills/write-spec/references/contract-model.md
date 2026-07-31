@@ -58,7 +58,7 @@ Do not flatten a missing capability into false parity. Record a disposition:
 
 | Member | Disposition | Evidence |
 | --- | --- | --- |
-| A | shared | Native behavior directly satisfies the contract |
+| A | supported | Native behavior directly satisfies the contract |
 | B | adapted | Adapter supplies the observable outcome |
 | C | unsupported | Provider cannot represent the capability |
 | D | not-applicable | Contract is outside this member's declared role |

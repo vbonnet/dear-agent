@@ -24,7 +24,7 @@ themselves observable.
 4. For a shared contract, identify exactly one canonical owner before drafting.
    Search existing requirements and BDD scenarios for that outcome. Amend the
    owner; do not create a second owner beside each harness or implementation.
-5. For a capability variation, give every active member a `shared`, `adapted`,
+5. For a capability variation, give every active member a `supported`, `adapted`,
    `unsupported`, or `not-applicable` disposition. Never promise false parity
    merely to make the requirement uniform.
 6. For an adapter or projection, describe only the local observable delta and
