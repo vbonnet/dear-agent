@@ -21,14 +21,17 @@ func TestInstallerSystemDirectoryLockSerializes(t *testing.T) {
 	case "linux":
 		lockPath = "/run"
 		lockTool = "/usr/bin/flock"
-		holderScript = `exec 9<"$1"; exec "$2" -n 9 "$3" -test.run=TestInstallerLockHolder -- "$4"`
-		contenderScript = `exec 9<"$1"; exec "$2" -n 9 /usr/bin/true`
+		holderScript = `exec 9<"$1"; "$2" -n 9; exec "$3" -test.run=TestInstallerLockHolder -- "$4"`
+		contenderScript = `exec 9<"$1"; "$2" -n 9; exec /usr/bin/true`
 	default:
 		t.Skip("installer lock is supported only on Darwin and Linux")
 	}
 
 	ready := filepath.Join(t.TempDir(), "ready")
+	holderDir := t.TempDir()
+	contenderDir := t.TempDir()
 	holder := exec.Command("/bin/sh", "-c", holderScript, "sh", lockPath, lockTool, os.Args[0], ready)
+	holder.Dir = holderDir
 	holder.Env = append(os.Environ(), "DEAR_AGENT_TEST_INSTALL_LOCK_HOLDER=1")
 	if err := holder.Start(); err != nil {
 		t.Fatalf("start lock holder: %v", err)
@@ -52,11 +55,18 @@ func TestInstallerSystemDirectoryLockSerializes(t *testing.T) {
 	}
 
 	contender := exec.Command("/bin/sh", "-c", contenderScript, "sh", lockPath, lockTool)
+	contender.Dir = contenderDir
 	if err := contender.Run(); err == nil {
 		t.Fatal("second installer acquired the protected system-directory inode")
 	}
 	if err := holder.Wait(); err != nil {
 		t.Fatalf("lock holder failed: %v", err)
+	}
+	for _, dir := range []string{holderDir, contenderDir} {
+		localPath := filepath.Join(dir, "9")
+		if _, err := os.Stat(localPath); !os.IsNotExist(err) {
+			t.Fatalf("descriptor lock created or accessed checkout-local path %q: %v", localPath, err)
+		}
 	}
 }
 
@@ -110,7 +120,7 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`test -x "$$install_lock_executable"`,
 		`exec 9<"$$install_lock_path"`,
 		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -k -t 0 /dev/fd/9 /usr/bin/make`,
-		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -n 9 /usr/bin/make`,
+		`Linux) "$$install_lock_tool" -n 9; DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec /usr/bin/make`,
 		`install-override-ledger-helper-locked:`,
 		`test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1`,
 		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,

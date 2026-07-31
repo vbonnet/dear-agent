@@ -992,7 +992,7 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		exec 9<"$$install_lock_path"; \
 		case "$$install_lock_platform" in \
 			Darwin) DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -k -t 0 /dev/fd/9 /usr/bin/make --no-print-directory install-override-ledger-helper-locked ;; \
-			Linux) DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -n 9 /usr/bin/make --no-print-directory install-override-ledger-helper-locked ;; \
+			Linux) "$$install_lock_tool" -n 9; DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec /usr/bin/make --no-print-directory install-override-ledger-helper-locked ;; \
 		esac
 
 install-override-ledger-helper-locked:
