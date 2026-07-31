@@ -53,6 +53,37 @@ func TestInventoryReadsPinnedRevisionAndProducesSeedsDeterministically(t *testin
 	}
 }
 
+func TestInventoryIgnoresGitReplacementObjects(t *testing.T) {
+	repo := t.TempDir()
+	gitTest(t, repo, "init", "-q")
+	gittest.HardenRepo(t, repo)
+	gitTest(t, repo, "config", "user.email", "test@example.com")
+	gitTest(t, repo, "config", "user.name", "Test")
+	writeTestFile(t, repo, "agm/internal/agent/harnesses.go", "package agent\nvar activeHarnesses = []string{\"codex-cli\"}\n")
+	writeTestFile(t, repo, "one/SPEC.md", "# Original\n\n**ORIGINAL-01** When an audit reads a pinned revision, the system shall use the original object.\n")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-qm", "original")
+	original := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
+
+	writeTestFile(t, repo, "one/SPEC.md", "# Forged\n\n**FORGED-01** When an audit reads a pinned revision, the system shall accept substituted content.\n")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-qm", "replacement")
+	replacement := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
+	gitTest(t, repo, "replace", original, replacement)
+	if substituted := gitTest(t, repo, "show", original+":one/SPEC.md"); !strings.Contains(substituted, "FORGED-01") {
+		t.Fatalf("test replacement was not active: %q", substituted)
+	}
+
+	got, err := inventory(repo, "owner/repo", original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirement := inventoryRequirement(t, got, "one/SPEC.md")
+	if requirement.ID != "ORIGINAL-01" || strings.Contains(requirement.Excerpt, "FORGED-01") {
+		t.Fatalf("replacement object changed pinned evidence: %#v", requirement)
+	}
+}
+
 func TestParseSpecCountsOnlyCanonicalRequirementIDs(t *testing.T) {
 	parsed := parseSpec("example/SPEC.md", strings.Join([]string{
 		"# Example",
