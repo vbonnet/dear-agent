@@ -1068,14 +1068,15 @@ func staticAWKProgram(args []*syntax.Word) (string, bool) {
 
 func awkOptionLoadsExternalCode(value string) bool {
 	longName, _, _ := strings.Cut(value, "=")
-	for _, fullName := range []string{"--file", "--include", "--load"} {
+	for _, fullName := range []string{"--exec", "--file", "--include", "--load"} {
 		if len(longName) > 2 &&
 			len(longName) <= len(fullName) &&
 			fullName[:len(longName)] == longName {
 			return true
 		}
 	}
-	return strings.HasPrefix(value, "-f") ||
+	return strings.HasPrefix(value, "-E") ||
+		strings.HasPrefix(value, "-f") ||
 		(strings.HasPrefix(value, "-i") && !strings.HasPrefix(value, "--")) ||
 		(strings.HasPrefix(value, "-l") && !strings.HasPrefix(value, "--"))
 }

@@ -130,6 +130,44 @@ func TestOverrideAuditInstallUsesOneNonCachingPrivilegedTransaction(t *testing.T
 	}
 }
 
+func TestOverrideAuditUninstallUsesOneNonCachingPrivilegedTransaction(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+	makefile := readFile(t, filepath.Join(root, "Makefile"))
+	start := strings.Index(makefile, "uninstall-override-audit-launchdaemon:")
+	end := strings.Index(makefile[start:], "\n# Install the Linux audit under the system manager")
+	if start < 0 || end < 0 {
+		t.Fatal("Makefile does not retain bounded LaunchDaemon uninstall target")
+	}
+	uninstall := makefile[start : start+end]
+	for _, required := range []string{
+		`root_uninstaller="$$(/bin/cat "$$root_uninstaller_path")"`,
+		"IFS= read -r confirmed_uninstaller_hash",
+		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_uninstaller"`,
+		`printf 'UNINSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_uninstaller"`,
+	} {
+		if !strings.Contains(uninstall, required) {
+			t.Errorf("LaunchDaemon uninstaller lacks %q", required)
+		}
+	}
+	if got := strings.Count(uninstall, "/usr/bin/sudo"); got != 2 {
+		t.Fatalf("LaunchDaemon uninstaller uses %d sudo calls, want one probe and one transaction", got)
+	}
+
+	rootUninstaller := readFile(
+		t,
+		filepath.Join(root, "scripts", "uninstall-override-audit-launchdaemon-root.sh"),
+	)
+	if strings.Contains(rootUninstaller, "/usr/bin/sudo ") ||
+		!strings.Contains(rootUninstaller, `/bin/launchctl bootout`) ||
+		!strings.Contains(rootUninstaller, `/bin/rm -f /Library/LaunchDaemons/`) {
+		t.Fatal("fixed LaunchDaemon root uninstaller does not own the complete removal transaction")
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

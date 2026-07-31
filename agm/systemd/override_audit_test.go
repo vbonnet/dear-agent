@@ -190,6 +190,44 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	}
 }
 
+func TestOverrideAuditUninstallUsesOneNonCachingPrivilegedTransaction(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+	makefile := readUnit(t, filepath.Join(root, "Makefile"))
+	start := strings.Index(makefile, "uninstall-override-audit-systemd:")
+	end := strings.Index(makefile[start:], "\n# gobin-guard")
+	if start < 0 || end < 0 {
+		t.Fatal("Makefile does not retain bounded systemd uninstall target")
+	}
+	uninstall := makefile[start : start+end]
+	for _, required := range []string{
+		`root_uninstaller="$$(/bin/cat "$$root_uninstaller_path")"`,
+		"IFS= read -r confirmed_uninstaller_hash",
+		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_uninstaller"`,
+		`printf 'UNINSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_uninstaller"`,
+	} {
+		if !strings.Contains(uninstall, required) {
+			t.Errorf("systemd uninstaller lacks %q", required)
+		}
+	}
+	if got := strings.Count(uninstall, "/usr/bin/sudo"); got != 2 {
+		t.Fatalf("systemd uninstaller uses %d sudo calls, want one probe and one transaction", got)
+	}
+
+	rootUninstaller := readUnit(
+		t,
+		filepath.Join(root, "scripts", "uninstall-override-audit-systemd-root.sh"),
+	)
+	if strings.Contains(rootUninstaller, "/usr/bin/sudo ") ||
+		!strings.Contains(rootUninstaller, `/usr/bin/systemctl disable --now`) ||
+		!strings.Contains(rootUninstaller, `/usr/bin/systemctl daemon-reload`) {
+		t.Fatal("fixed systemd root uninstaller does not own the complete removal transaction")
+	}
+}
+
 func readUnit(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

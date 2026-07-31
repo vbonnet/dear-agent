@@ -482,6 +482,8 @@ func TestTrustedHookAssetsRejectDynamicCommandResolution(t *testing.T) {
 		"#!/bin/sh\n/usr/bin/gawk --include=helper.awk 'BEGIN { print \"main\" }'\n",
 		"#!/bin/sh\nAWKPATH=. /usr/bin/gawk --inc=helper.awk 'BEGIN { print \"main\" }'\n",
 		"#!/bin/sh\nAWKPATH=. /usr/bin/gawk --incl helper.awk 'BEGIN { print \"main\" }'\n",
+		"#!/bin/sh\n/usr/bin/gawk -E helper.awk\n",
+		"#!/bin/sh\n/usr/bin/gawk --exe=helper.awk\n",
 		"#!/bin/sh\nAWKLIBPATH=. /usr/bin/gawk -l helper 'BEGIN { print \"main\" }'\n",
 		"#!/bin/sh\n/usr/bin/gawk --load=helper 'BEGIN { print \"main\" }'\n",
 		"#!/bin/sh\nAWKLIBPATH=. /usr/bin/gawk --loa=helper 'BEGIN { print \"main\" }'\n",

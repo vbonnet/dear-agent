@@ -567,38 +567,34 @@ build-codex-hook-json:
 install-codex-hook-json: build-codex-hook-json
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged Codex hook JSON helper installation" >&2; exit 2; }; \
-		root_group="$$(id -gn 0)"; \
-		artifact="bin/codex-hook-json"; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$$repo_root/bin/codex-hook-json"; \
 		helper="/usr/local/libexec/dear-agent-codex-hook-json"; \
-		helper_staging=""; \
+		root_installer_path="$$repo_root/scripts/install-root-artifact.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
 		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
 		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
 		printf 'Reviewed Codex hook JSON helper SHA-256: %s\n' "$$expected_hash"; \
 		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
 		IFS= read -r confirmed_hash; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
 		test "$$confirmed_hash" = "$$expected_hash" || { echo "Codex hook JSON helper digest confirmation did not match" >&2; exit 2; }; \
-		cleanup_helper_staging() { \
-			if test -n "$$helper_staging"; then \
-				/usr/bin/sudo /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
-			fi; \
-		}; \
-		trap cleanup_helper_staging EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
-			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
-			exit 2; \
-		fi; \
-		/usr/bin/sudo /usr/bin/true; \
-		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-codex-hook-json.XXXXXX)"; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
-		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"; \
-		staged_hash="$${staged_hash%% *}"; \
-		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged Codex hook JSON helper differs from the approved bytes" >&2; exit 1; }; \
-		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
-		helper_staging=""; \
-		trap - EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
 		echo "Installed digest-bound operator-owned Codex hook JSON helper: $$helper"
 
 # Enforces Definition of Done before bead closure: blocks `bd close` when
@@ -613,38 +609,34 @@ build-bead-close-guard:
 install-bead-close-guard: build-bead-close-guard
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged bead-close guard installation" >&2; exit 2; }; \
-		root_group="$$(id -gn 0)"; \
-		artifact="bin/bead-close-guard"; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$$repo_root/bin/bead-close-guard"; \
 		guard="/usr/local/libexec/dear-agent-bead-close-guard"; \
-		guard_staging=""; \
+		root_installer_path="$$repo_root/scripts/install-root-artifact.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
 		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
 		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
 		printf 'Reviewed bead-close guard SHA-256: %s\n' "$$expected_hash"; \
 		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
 		IFS= read -r confirmed_hash; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
 		test "$$confirmed_hash" = "$$expected_hash" || { echo "bead-close guard digest confirmation did not match" >&2; exit 2; }; \
-		cleanup_guard_staging() { \
-			if test -n "$$guard_staging"; then \
-				/usr/bin/sudo /bin/rm -f "$$guard_staging" >/dev/null 2>&1 || true; \
-			fi; \
-		}; \
-		trap cleanup_guard_staging EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
-			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
-			exit 2; \
-		fi; \
-		/usr/bin/sudo /usr/bin/true; \
-		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		guard_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-bead-close-guard.XXXXXX)"; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$guard_staging"; \
-		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$guard_staging")"; \
-		staged_hash="$${staged_hash%% *}"; \
-		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged bead-close guard differs from the approved bytes" >&2; exit 1; }; \
-		/usr/bin/sudo /bin/mv -f "$$guard_staging" "$$guard"; \
-		guard_staging=""; \
-		trap - EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$guard" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$guard" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
 		echo "Installed digest-bound operator-owned Codex hook guard: $$guard"
 	$(call install-go-bin,bin/bead-close-guard)
 
@@ -991,36 +983,18 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
-		root_group="$$(id -gn 0)"; \
-		artifact="bin/dear-agent-override-ledger-append"; \
-		agm_artifact="bin/agm"; \
-		companion_artifact="bin/agm-mcp-server"; \
+		operator_uid="$$(/usr/bin/id -u)"; operator_gid="$$(/usr/bin/id -g)"; root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$$repo_root/bin/dear-agent-override-ledger-append"; \
+		agm_artifact="$$repo_root/bin/agm"; \
+		companion_artifact="$$repo_root/bin/agm-mcp-server"; \
 		agm_executable="$(HOME)/go/bin/agm"; \
 		companion_executable="$(HOME)/go/bin/agm-mcp-server"; \
 		agm_staging=""; \
 		companion_staging=""; \
-		agm_backup=""; \
-		companion_backup=""; \
-		agm_existed=0; \
-		companion_existed=0; \
-		helper="/usr/local/libexec/dear-agent-override-ledger-append"; \
-		helper_staging=""; \
-		helper_backup=""; \
-		helper_existed=0; \
-		identity="/usr/local/libexec/dear-agent-override-ledger-agm.identity"; \
-		identity_staging=""; \
-		identity_backup=""; \
-		identity_existed=0; \
-		companion_policy="/usr/local/libexec/dear-agent-override-ledger-agm-mcp-server.identity"; \
-		companion_identity_staging=""; \
-		companion_identity_backup=""; \
-		companion_identity_existed=0; \
-		sudoers="/etc/sudoers.d/dear-agent-override-ledger"; \
-		staging="/etc/sudoers.d/.dear-agent-override-ledger.$$$$"; \
-		sudoers_backup=""; \
-		sudoers_existed=0; \
-		activation_started=0; \
-		activation_complete=0; \
+		root_installer_path="$$repo_root/scripts/install-override-ledger-root.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
 		/bin/mkdir -p "$(HOME)/go/bin"; \
 		agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"; \
 		companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"; \
@@ -1038,6 +1012,8 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		trap '/bin/rm -f "$$agm_staging" "$$companion_staging"' EXIT HUP INT TERM; \
 		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
 		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
 		case "$$(uname -s)" in \
 			Darwin) \
 				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_staging" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
@@ -1057,7 +1033,6 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 				;; \
 			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
 		esac; \
-		rule="$$operator_user ALL=(root) NOPASSWD: sha256:$$expected_hash $$helper"; \
 		printf 'Reviewed helper SHA-256: %s\n' "$$expected_hash"; \
 		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
 		IFS= read -r confirmed_hash; \
@@ -1070,110 +1045,19 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		printf 'Type that complete identity to permit launch-capability issuance from these exact companion bytes: '; \
 		IFS= read -r confirmed_companion_identity; \
 		test "$$confirmed_companion_identity" = "$$companion_caller_identity" || { echo "AGM MCP companion identity confirmation did not match" >&2; exit 2; }; \
-		cleanup_helper_staging() { \
-			status=$$?; \
-			trap - EXIT HUP INT TERM; \
-			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
-				if test "$$agm_existed" = 1 && test -n "$$agm_backup"; then /bin/mv -f "$$agm_backup" "$$agm_executable" || true; else /bin/rm -f "$$agm_executable" || true; fi; \
-				if test "$$companion_existed" = 1 && test -n "$$companion_backup"; then /bin/mv -f "$$companion_backup" "$$companion_executable" || true; else /bin/rm -f "$$companion_executable" || true; fi; \
-				if test "$$sudoers_existed" = 1 && test -n "$$sudoers_backup"; then /usr/bin/sudo -n /bin/mv -f "$$sudoers_backup" "$$sudoers" || true; else /usr/bin/sudo -n /bin/rm -f "$$sudoers" || true; fi; \
-				if test "$$identity_existed" = 1 && test -n "$$identity_backup"; then /usr/bin/sudo -n /bin/mv -f "$$identity_backup" "$$identity" || true; else /usr/bin/sudo -n /bin/rm -f "$$identity" || true; fi; \
-				if test "$$companion_identity_existed" = 1 && test -n "$$companion_identity_backup"; then /usr/bin/sudo -n /bin/mv -f "$$companion_identity_backup" "$$companion_policy" || true; else /usr/bin/sudo -n /bin/rm -f "$$companion_policy" || true; fi; \
-				if test "$$helper_existed" = 1 && test -n "$$helper_backup"; then /usr/bin/sudo -n /bin/mv -f "$$helper_backup" "$$helper" || true; else /usr/bin/sudo -n /bin/rm -f "$$helper" || true; fi; \
-			fi; \
-			/bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_backup" "$$companion_backup" >/dev/null 2>&1 || true; \
-			if test -n "$$helper_staging"; then \
-				/usr/bin/sudo -n /bin/rm -f "$$helper_staging" >/dev/null 2>&1 || true; \
-			fi; \
-			if test -n "$$identity_staging"; then \
-				/usr/bin/sudo -n /bin/rm -f "$$identity_staging" >/dev/null 2>&1 || true; \
-			fi; \
-			if test -n "$$companion_identity_staging"; then \
-				/usr/bin/sudo -n /bin/rm -f "$$companion_identity_staging" >/dev/null 2>&1 || true; \
-			fi; \
-			if test -n "$$staging"; then \
-				/usr/bin/sudo -n /bin/rm -f "$$staging" >/dev/null 2>&1 || true; \
-			fi; \
-			/usr/bin/sudo -n /bin/rm -f "$$helper_backup" "$$identity_backup" "$$companion_identity_backup" "$$sudoers_backup" >/dev/null 2>&1 || true; \
-			/usr/bin/sudo -k >/dev/null 2>&1 || true; \
-			exit "$$status"; \
-		}; \
-		trap cleanup_helper_staging EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
-			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
-			exit 2; \
-		fi; \
-		/usr/bin/sudo /usr/bin/true; \
-		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		identity_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm.identity.XXXXXX)"; \
-		printf '%s\n' "$$caller_identity" | /usr/bin/sudo /usr/bin/tee "$$identity_staging" >/dev/null; \
-		/usr/bin/sudo /bin/chmod 0444 "$$identity_staging"; \
-		staged_identity="$$(/usr/bin/sudo /bin/cat "$$identity_staging")"; \
-		test "$$staged_identity" = "$$caller_identity" || { echo "root-owned staged AGM caller identity differs from the approved identity" >&2; exit 1; }; \
-		companion_identity_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm-mcp-server.identity.XXXXXX)"; \
-		printf '%s\n' "$$companion_caller_identity" | /usr/bin/sudo /usr/bin/tee "$$companion_identity_staging" >/dev/null; \
-		/usr/bin/sudo /bin/chmod 0444 "$$companion_identity_staging"; \
-		staged_companion_identity="$$(/usr/bin/sudo /bin/cat "$$companion_identity_staging")"; \
-		test "$$staged_companion_identity" = "$$companion_caller_identity" || { echo "root-owned staged AGM MCP companion identity differs from the approved identity" >&2; exit 1; }; \
-		helper_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.XXXXXX)"; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$artifact" "$$helper_staging"; \
-		staged_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_staging")"; \
-		staged_hash="$${staged_hash%% *}"; \
-		test "$$staged_hash" = "$$expected_hash" || { echo "root-owned staged helper differs from the approved bytes" >&2; exit 1; }; \
-		printf '%s\n' "$$rule" | /usr/bin/sudo /usr/bin/tee "$$staging" >/dev/null; \
-		/usr/bin/sudo /bin/chmod 0440 "$$staging"; \
-		if ! /usr/bin/sudo /usr/sbin/visudo -cf "$$staging"; then \
-			exit 1; \
-		fi; \
-		if test -e "$$agm_executable"; then \
-			agm_existed=1; \
-			agm_backup="$$(/usr/bin/mktemp "$$agm_executable.backup.XXXXXX")"; \
-			/bin/cp -p "$$agm_executable" "$$agm_backup"; \
-		fi; \
-		if test -e "$$companion_executable"; then \
-			companion_existed=1; \
-			companion_backup="$$(/usr/bin/mktemp "$$companion_executable.backup.XXXXXX")"; \
-			/bin/cp -p "$$companion_executable" "$$companion_backup"; \
-		fi; \
-		if /usr/bin/sudo /usr/bin/test -e "$$sudoers"; then \
-			sudoers_existed=1; \
-			sudoers_backup="$$(/usr/bin/sudo /usr/bin/mktemp /etc/sudoers.d/.dear-agent-override-ledger.backup.XXXXXX)"; \
-			/usr/bin/sudo /bin/cp -p "$$sudoers" "$$sudoers_backup"; \
-		fi; \
-		if /usr/bin/sudo /usr/bin/test -e "$$identity"; then \
-			identity_existed=1; \
-			identity_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm.identity.backup.XXXXXX)"; \
-			/usr/bin/sudo /bin/cp -p "$$identity" "$$identity_backup"; \
-		fi; \
-		if /usr/bin/sudo /usr/bin/test -e "$$companion_policy"; then \
-			companion_identity_existed=1; \
-			companion_identity_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-agm-mcp-server.identity.backup.XXXXXX)"; \
-			/usr/bin/sudo /bin/cp -p "$$companion_policy" "$$companion_identity_backup"; \
-		fi; \
-		if /usr/bin/sudo /usr/bin/test -e "$$helper"; then \
-			helper_existed=1; \
-			helper_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-ledger-append.backup.XXXXXX)"; \
-			/usr/bin/sudo /bin/cp -p "$$helper" "$$helper_backup"; \
-		fi; \
-		activation_started=1; \
-		/usr/bin/sudo /bin/mv -f "$$staging" "$$sudoers"; \
-		staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$identity_staging" "$$identity"; \
-		identity_staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$companion_identity_staging" "$$companion_policy"; \
-		companion_identity_staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"; \
-		helper_staging=""; \
-		/bin/mv -f "$$agm_staging" "$$agm_executable"; \
-		agm_staging=""; \
-		/bin/mv -f "$$companion_staging" "$$companion_executable"; \
-		companion_staging=""; \
-		activation_complete=1; \
-		/bin/rm -f "$$agm_backup" "$$companion_backup" >/dev/null 2>&1 || true; \
-		/usr/bin/sudo /bin/rm -f "$$helper_backup" "$$identity_backup" "$$companion_identity_backup" "$$sudoers_backup" >/dev/null 2>&1 || true; \
-		trap - EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
+		printf 'Reviewed fixed privileged installer SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged installer digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; /bin/rm -f "$$agm_staging" "$$companion_staging"; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$operator_uid" "$$operator_gid" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_staging" "$$companion_staging" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$operator_uid" "$$operator_gid" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_staging" "$$companion_staging" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; /bin/rm -f "$$agm_staging" "$$companion_staging"; agm_staging=""; companion_staging=""; trap - EXIT HUP INT TERM; \
 		echo "Installed digest-bound root-owned ledger helper, AGM and MCP companion caller identities, and exact sudoers rule for $$operator_user"
 
 # Install the macOS audit under launchd's system domain without activating it.
@@ -1244,15 +1128,16 @@ uninstall-override-audit-launchdaemon:
 	@set -eu; \
 		test "$$(uname -s)" = "Darwin" || { echo "launchd audit removal is macOS-only" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
-		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
-			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
-			exit 2; \
-		fi; \
-		/usr/bin/sudo /usr/bin/true; \
-		/usr/bin/sudo /bin/launchctl bootout system/com.dear-agent.override-audit 2>/dev/null || true; \
-		/usr/bin/sudo /bin/rm -f /Library/LaunchDaemons/com.dear-agent.override-audit.plist /usr/local/libexec/dear-agent-override-audit; \
-		/usr/bin/sudo -k; \
+		repo_root="$$(pwd -P)"; root_uninstaller_path="$$repo_root/scripts/uninstall-override-audit-launchdaemon-root.sh"; \
+		root_uninstaller="$$(/bin/cat "$$root_uninstaller_path")"; test -n "$$root_uninstaller" || exit 2; \
+		expected_uninstaller_hash="$$(printf '%s' "$$root_uninstaller" | /usr/bin/openssl dgst -sha256 -r)"; expected_uninstaller_hash="$${expected_uninstaller_hash%% *}"; \
+		printf 'Reviewed fixed privileged uninstaller SHA-256: %s\n' "$$expected_uninstaller_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; IFS= read -r confirmed_uninstaller_hash; \
+		test "$$confirmed_uninstaller_hash" = "$$expected_uninstaller_hash" || { echo "privileged uninstaller digest confirmation did not match" >&2; exit 2; }; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-launchdaemon-uninstaller >/dev/null 2>&1; probe_status=$$?; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo uninstaller; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged uninstaller probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'UNINSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-launchdaemon-uninstaller; \
 		echo "Removed the root-owned dangerous-override audit LaunchDaemon and executable"
 
 # Install the Linux audit under the system manager without activating it. The
@@ -1343,17 +1228,17 @@ uninstall-override-audit-systemd:
 	@set -eu; \
 		test "$$(uname -s)" = "Linux" || { echo "systemd audit removal is Linux-only" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
-		operator_user="$$(id -un)"; \
-		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
-			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
-			exit 2; \
-		fi; \
-		/usr/bin/sudo /usr/bin/true; \
-		/usr/bin/sudo /usr/bin/systemctl disable --now "dear-agent-override-audit@$$operator_user.timer" 2>/dev/null || true; \
-		/usr/bin/sudo /bin/rm -f /etc/systemd/system/dear-agent-override-audit@.service /etc/systemd/system/dear-agent-override-audit@.timer /usr/local/libexec/dear-agent-override-audit; \
-		/usr/bin/sudo /usr/bin/systemctl daemon-reload; \
-		/usr/bin/sudo -k; \
+		operator_user="$$(/usr/bin/id -un)"; case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
+		repo_root="$$(pwd -P)"; root_uninstaller_path="$$repo_root/scripts/uninstall-override-audit-systemd-root.sh"; \
+		root_uninstaller="$$(/bin/cat "$$root_uninstaller_path")"; test -n "$$root_uninstaller" || exit 2; \
+		expected_uninstaller_hash="$$(printf '%s' "$$root_uninstaller" | /usr/bin/openssl dgst -sha256 -r)"; expected_uninstaller_hash="$${expected_uninstaller_hash%% *}"; \
+		printf 'Reviewed fixed privileged uninstaller SHA-256: %s\n' "$$expected_uninstaller_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; IFS= read -r confirmed_uninstaller_hash; \
+		test "$$confirmed_uninstaller_hash" = "$$expected_uninstaller_hash" || { echo "privileged uninstaller digest confirmation did not match" >&2; exit 2; }; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-systemd-uninstaller "$$operator_user" >/dev/null 2>&1; probe_status=$$?; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo uninstaller; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged uninstaller probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'UNINSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-systemd-uninstaller "$$operator_user"; \
 		echo "Removed the root-owned dangerous-override audit units and executable"
 
 # gobin-guard (ce-24f1): SENSE + ESCALATE guard for ~/go/bin. Installed OUTSIDE

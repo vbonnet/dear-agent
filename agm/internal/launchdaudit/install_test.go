@@ -164,6 +164,29 @@ func TestVerifyTrustedAncestryRejectsWritableAndSymlinkedDirectories(t *testing.
 	}
 }
 
+func TestEnsureTrustedDirectoryRejectsSymlinkBeforeMutation(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureTrustedDirectory(link, root, os.Getuid(), os.Getgid()); err == nil {
+		t.Fatal("symlinked destination accepted")
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("symlink target mode changed to %04o", got)
+	}
+}
+
 func writePriorSet(t *testing.T, config Config) {
 	t.Helper()
 	for _, path := range []string{config.auditLive, config.plistLive} {

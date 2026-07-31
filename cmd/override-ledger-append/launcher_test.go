@@ -95,24 +95,35 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	text := string(makefile)
 	for _, required := range []string{
 		"install-override-ledger-helper: build-override-ledger-helper build-agm build-agm-mcp-server",
-		"dear-agent-override-ledger-agm.identity",
-		"dear-agent-override-ledger-agm-mcp-server.identity",
 		"companion_caller_identity",
-		"staged_companion_identity",
 		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
 		`companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"`,
 		`/usr/bin/codesign -f -s - --options runtime "$$agm_staging"`,
-		`activation_started=1`,
-		`activation_complete=1`,
+		`root_installer_path="$$repo_root/scripts/install-override-ledger-root.sh"`,
+		`test "$$confirmed_installer_hash" = "$$expected_installer_hash"`,
 		"CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm ",
 		"CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-mcp-server ",
 		"darwin-cdhash:",
 		"linux-sha256:",
-		"staged_identity",
-		"NOPASSWD: sha256:$$expected_hash $$helper",
+		"confirmed_installer_hash",
+		"dear-agent-override-ledger-installer",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("helper installer is missing %q", required)
+		}
+	}
+	rootInstaller, err := os.ReadFile("../../scripts/install-override-ledger-root.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"dear-agent-override-ledger-agm.identity",
+		"dear-agent-override-ledger-agm-mcp-server.identity",
+		`"$txdir/agm-mcp-server"`,
+		`test "darwin-cdhash:$companion_digest" = "$companion_identity"`,
+	} {
+		if !strings.Contains(string(rootInstaller), required) {
+			t.Errorf("fixed root installer is missing %q", required)
 		}
 	}
 	start := strings.Index(text, "install-override-ledger-helper:")
@@ -125,16 +136,21 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	}
 	installer := text[start : start+end]
 	for _, required := range []string{
-		"/usr/bin/sudo -n /usr/bin/true",
-		"/usr/bin/sudo /usr/bin/true",
+		`root_installer="$$(/bin/cat "$$root_installer_path")"`,
+		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer"`,
+		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
 	} {
 		if !strings.Contains(installer, required) {
-			t.Errorf("helper installer is missing command-specific authentication %q", required)
+			t.Errorf("helper installer is missing one-shot privileged boundary %q", required)
 		}
 	}
 	if strings.Contains(installer, "/usr/bin/sudo -n -v") ||
-		strings.Contains(installer, "/usr/bin/sudo -v") {
-		t.Fatal("helper installer still uses sudo's generic validation pseudocommand")
+		strings.Contains(installer, "/usr/bin/sudo -v") ||
+		strings.Contains(installer, "/usr/bin/sudo /usr/bin/true") {
+		t.Fatal("helper installer still uses reusable sudo validation")
+	}
+	if got := strings.Count(installer, "/usr/bin/sudo"); got != 2 {
+		t.Fatalf("helper installer uses %d sudo invocations, want one probe and one transaction", got)
 	}
 }
 

@@ -169,23 +169,10 @@ func (tx *transaction) run(ctx context.Context) error {
 
 func (tx *transaction) prepareDestination() error {
 	directory := filepath.Dir(tx.config.auditLive)
-	if err := verifyTrustedAncestry(
-		filepath.Dir(directory), tx.config.trustRoot, tx.config.rootUID,
+	if err := ensureTrustedDirectory(
+		directory, tx.config.trustRoot, tx.config.rootUID, tx.config.rootGID,
 	); err != nil {
-		return fmt.Errorf("verify audit executable parent ancestry: %w", err)
-	}
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return fmt.Errorf("create audit executable directory: %w", err)
-	}
-	// This root-owned executable directory is intentionally searchable by unprivileged services.
-	if err := os.Chmod(directory, 0o755); err != nil { //nolint:gosec // system executable directory
-		return fmt.Errorf("set audit executable directory mode: %w", err)
-	}
-	if err := os.Chown(directory, tx.config.rootUID, tx.config.rootGID); err != nil {
-		return fmt.Errorf("set audit executable directory owner: %w", err)
-	}
-	if err := verifyTrustedAncestry(directory, tx.config.trustRoot, tx.config.rootUID); err != nil {
-		return fmt.Errorf("verify audit executable ancestry: %w", err)
+		return fmt.Errorf("prepare audit executable directory: %w", err)
 	}
 	if err := verifyTrustedAncestry(
 		filepath.Dir(tx.config.serviceLive), tx.config.trustRoot, tx.config.rootUID,
@@ -193,6 +180,32 @@ func (tx *transaction) prepareDestination() error {
 		return fmt.Errorf("verify systemd unit ancestry: %w", err)
 	}
 	return nil
+}
+
+func ensureTrustedDirectory(path, boundary string, ownerUID, ownerGID int) error {
+	if err := verifyTrustedAncestry(filepath.Dir(path), boundary, ownerUID); err != nil {
+		return fmt.Errorf("verify parent ancestry: %w", err)
+	}
+	info, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("%s must be a real directory", path)
+		}
+	case os.IsNotExist(err):
+		if err := os.Mkdir(path, 0o755); err != nil {
+			return fmt.Errorf("create directory: %w", err)
+		}
+		if err := os.Chmod(path, 0o755); err != nil { //nolint:gosec // system executable directory
+			return fmt.Errorf("set directory mode: %w", err)
+		}
+		if err := os.Chown(path, ownerUID, ownerGID); err != nil {
+			return fmt.Errorf("set directory owner: %w", err)
+		}
+	default:
+		return fmt.Errorf("inspect directory: %w", err)
+	}
+	return verifyTrustedAncestry(path, boundary, ownerUID)
 }
 
 func (tx *transaction) stageAndVerify() error {

@@ -23,13 +23,12 @@ func TestCodexHookJSONHelperUsesDigestBoundOperatorInstall(t *testing.T) {
 	for _, required := range []string{
 		"test -t 0",
 		`expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"`,
+		`root_installer="$$(/bin/cat "$$root_installer_path")"`,
+		`expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"`,
 		"IFS= read -r confirmed_hash",
-		"/usr/bin/sudo -k",
-		"/usr/bin/sudo -n /usr/bin/true",
-		"/usr/bin/sudo /usr/bin/true",
-		"/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-codex-hook-json.XXXXXX",
-		`test "$$staged_hash" = "$$expected_hash"`,
-		`/usr/bin/sudo /bin/mv -f "$$helper_staging" "$$helper"`,
+		"IFS= read -r confirmed_installer_hash",
+		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer"`,
+		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
 		"/usr/local/libexec/dear-agent-codex-hook-json",
 	} {
 		if !strings.Contains(install, required) {
@@ -38,6 +37,36 @@ func TestCodexHookJSONHelperUsesDigestBoundOperatorInstall(t *testing.T) {
 	}
 	if strings.Contains(install, "bin/codex-hook-json /usr/local/libexec/dear-agent-codex-hook-json") {
 		t.Fatal("Codex hook JSON helper installer copies mutable build output directly to the privileged path")
+	}
+	if got := strings.Count(install, "/usr/bin/sudo"); got != 2 {
+		t.Fatalf("Codex hook JSON helper installer uses %d sudo calls, want one probe and one transaction", got)
+	}
+	for _, forbidden := range []string{
+		"/usr/bin/sudo /usr/bin/true",
+		"/usr/bin/sudo -n /usr/bin/true",
+		"/usr/bin/sudo /usr/bin/install",
+		"/usr/bin/sudo /bin/mv",
+	} {
+		if strings.Contains(install, forbidden) {
+			t.Errorf("Codex hook JSON helper installer retains reusable sudo flow %q", forbidden)
+		}
+	}
+
+	rootInstallerBytes, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "install-root-artifact.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootInstaller := string(rootInstallerBytes)
+	for _, required := range []string{
+		`test "$mode" != PROBE || exit 42`,
+		`trusted_parent=/private/var/root`,
+		`trusted "$dir"`,
+		`test "$staged_hash" = "$expected_hash"`,
+		`/bin/mv -f "$staging" "$destination"`,
+	} {
+		if !strings.Contains(rootInstaller, required) {
+			t.Errorf("fixed root artifact installer lacks %q", required)
+		}
 	}
 
 	for _, name := range []string{
