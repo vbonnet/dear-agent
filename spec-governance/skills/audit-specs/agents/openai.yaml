@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit SPECs"
+  short_description: "Find safe SPEC consolidation candidates"
+  default_prompt: "Use $audit-specs to create a read-only HTML audit of this repository's SPEC.md corpus."

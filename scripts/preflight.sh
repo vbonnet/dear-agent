@@ -74,7 +74,7 @@ go build ./...
 ok "build clean"
 
 step "validate tracked AI skills"
-go run ./tools/skill-lint -repo . || fail "AI skill validation failed"
+make lint-skills || fail "AI skill validation failed"
 ok "AI skills valid"
 
 step "make lint-instructions"

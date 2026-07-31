@@ -17,6 +17,9 @@
 # RELATED-SPEC: tools/schema-registry/internal/query/SPEC.md
 # RELATED-SPEC: tools/schema-registry/internal/registry/SPEC.md
 # RELATED-SPEC: tools/schema-registry/internal/schema/SPEC.md
+# RELATED-SPEC: spec-governance/SPEC.md
+# RELATED-SPEC: spec-governance/cmd/sync-skill-projections/SPEC.md
+# RELATED-SPEC: spec-governance/skills/audit-specs/scripts/specaudit/SPEC.md
 Feature: Developer tool package guardrails
   Repository support tools must keep executable specifications, and their
   shared contracts must remain available to every supported harness and model
@@ -48,6 +51,8 @@ Feature: Developer tool package guardrails
       | tools/schema-registry/internal/query               |
       | tools/schema-registry/internal/registry            |
       | tools/schema-registry/internal/schema              |
+      | spec-governance/cmd/sync-skill-projections         |
+      | spec-governance/skills/audit-specs/scripts/specaudit |
 
   Scenario Outline: Shared developer tooling is provider neutral
     Given developer tooling is invoked by harness "<harness>" with model family "<family>"

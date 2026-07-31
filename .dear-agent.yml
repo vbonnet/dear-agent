@@ -117,6 +117,10 @@ instruction-policy:
       owner: wayfinder
     - match: wayfinder/skills/wayfinder/SKILL.md
       owner: wayfinder-plugin
+    - match: spec-governance/skills/**/SKILL.md
+      owner: spec-governance
+    - match: spec-governance/skills/**/agents/*.yaml
+      owner: spec-governance-agents
     - match: wayfinder/PHASES.md
       owner: wayfinder
     - match: wayfinder/SPEC.md

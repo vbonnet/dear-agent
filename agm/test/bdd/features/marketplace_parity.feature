@@ -2,6 +2,8 @@
 # RELATED-SPEC: agm/internal/plugin/SPEC.md
 # RELATED-SPEC: .claude-plugin/SPEC.md
 # RELATED-SPEC: .dear-agent/SPEC.md
+# RELATED-SPEC: spec-governance/.claude-plugin/SPEC.md
+# RELATED-SPEC: spec-governance/SPEC.md
 Feature: SKILL and plugin marketplace parity
   AGM should publish one marketplace contract that every active harness can
   consume. Claude Code uses the native plugin marketplace, while Codex CLI, AGY,
@@ -31,7 +33,8 @@ Feature: SKILL and plugin marketplace parity
     Then marketplace plugin "<plugin>" should publish its declared assets
 
     Examples:
-      | plugin    |
-      | agm       |
-      | wayfinder |
-      | youtube   |
+      | plugin          |
+      | agm             |
+      | spec-governance |
+      | wayfinder       |
+      | youtube         |

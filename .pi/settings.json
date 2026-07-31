@@ -1,6 +1,7 @@
 {
   "skills": [
     "../agm/plugins",
+    "../spec-governance/skills",
     "../wayfinder/skills"
   ]
 }

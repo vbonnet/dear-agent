@@ -1,0 +1,9 @@
+{
+  "name": "spec-governance",
+  "version": "0.1.0",
+  "description": "Author and audit harness-neutral observable specifications with canonical ownership and BDD traceability",
+  "author": {
+    "name": "dear-agent"
+  },
+  "skills": ["./skills/"]
+}

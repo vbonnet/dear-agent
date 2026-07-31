@@ -22,6 +22,8 @@
 # RELATED-SPEC: pkg/codeintel/rules/go/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/typescript/SPEC.md
+# RELATED-SPEC: spec-governance/.claude-plugin/SPEC.md
+# RELATED-SPEC: spec-governance/SPEC.md
 # RELATED-SPEC: wayfinder/.claude-plugin/SPEC.md
 Feature: Declarative runtime guardrails
   Runtime configuration is executable product behavior. Plugin manifests,
@@ -58,6 +60,7 @@ Feature: Declarative runtime guardrails
       | pkg/codeintel/rules/go                                                       |
       | pkg/codeintel/rules/python                                                   |
       | pkg/codeintel/rules/typescript                                               |
+      | spec-governance/.claude-plugin                                               |
       | wayfinder/.claude-plugin                                                     |
 
   Scenario Outline: Declarative contracts are invariant across active routes

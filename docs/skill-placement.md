@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-07-28 -->
+<!-- Last audited at: 2026-07-31 -->
 
 # Skill Placement — which repo owns a skill, and how it reaches a session
 
@@ -79,8 +79,9 @@ skill actually discovers and triggers.
 | Surface | Reaches | Mechanism |
 |---|---|---|
 | `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
+| `spec-governance/skills/` | Claude Code and Pi | canonical authored skills exported by `spec-governance/.claude-plugin/plugin.json` and loaded from `.pi/settings.json` |
 | `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
-| `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
+| `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback`; authored skills remain canonical where they live, while `make lint-skills` checks any deterministic regular-file projections |
 | `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
@@ -92,11 +93,24 @@ for Codex, AGY, and OpenCode. Pi instead loads only the paths declared in
 
 ### The canonical packaging pattern
 
-`wayfinder` is the worked example of one source with several load paths:
+Use one authored workflow body with the narrowest projection that every target
+loader actually discovers. `wayfinder` is the worked symlink example:
 `wayfinder/SKILL.md` is canonical, `wayfinder/skills/wayfinder/SKILL.md` is a
-tracked **symlink** to it, the Claude plugin manifest exports the directory, and
-both marketplace catalogs register the plugin. Copy this pattern. Do not ship
-two divergent copies of a skill.
+tracked symlink, the Claude plugin manifest exports the directory, and both
+marketplace catalogs register the plugin.
+
+`spec-governance` is the worked regular-projection example. Claude and Pi load
+`spec-governance/skills/` directly. Codex, AGY, and OpenCode load generated
+regular `.agents/skills/{write-spec,audit-specs}/SKILL.md` delegators because
+the active runtimes did not all discover symlinks consistently. Those files
+contain no second workflow; `cmd/sync-skill-projections` derives them from
+canonical metadata, refuses authored targets, and `make lint-skills` blocks
+drift in preflight and CI.
+
+Do not blindly copy either filesystem mechanism. Verify each claimed loader,
+prefer a symlink when all consumers support it, and otherwise generate a
+minimal delegator with deterministic equality checks. Never maintain two
+handwritten workflow copies.
 
 ### Version skew is real
 

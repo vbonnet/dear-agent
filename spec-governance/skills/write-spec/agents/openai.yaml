@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write SPEC"
+  short_description: "Write harness-neutral observable requirements"
+  default_prompt: "Use $write-spec to turn this behavior change into one canonical EARS contract with BDD traceability."
