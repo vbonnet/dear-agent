@@ -62,15 +62,17 @@ func TestOverrideAuditInstallUsesOneNonCachingPrivilegedTransaction(t *testing.T
 	rootInstaller := readFile(t, rootInstallerPath)
 	requiredRootTransaction := []string{
 		`test "$mode" != "PROBE" || exit "$probe_exit"`,
+		`forward() { signal=$1; status=$2;`,
 		`trap 'cleanup "$?"' EXIT`,
-		`trap 'cleanup 129' HUP`,
-		`trap 'cleanup 130' INT`,
-		`trap 'cleanup 143' TERM`,
+		`trap 'forward HUP 129' HUP`,
+		`trap 'forward INT 130' INT`,
+		`trap 'forward TERM 143' TERM`,
 		`/usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec`,
 		`staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit-launchdaemon-installer.XXXXXX)`,
 		`/usr/bin/install -o root -g "$root_gid" -m 0755 "$helper_artifact" "$staging"`,
 		`test "$staged_hash" = "$expected_helper_hash"`,
-		`"$staging" "$root_gid" "$4" "$5" "$6" "$7"`,
+		`"$staging" "$root_gid" "$4" "$5" "$6" "$7" & child=$!`,
+		`wait "$child"`,
 		`/bin/rm -f "$staging"`,
 		`staging=`,
 		`trap - EXIT HUP INT TERM`,
@@ -85,6 +87,9 @@ func TestOverrideAuditInstallUsesOneNonCachingPrivilegedTransaction(t *testing.T
 	}
 	if strings.Contains(rootInstaller, "sudo") {
 		t.Fatal("fixed LaunchDaemon root bootstrap recursively invokes sudo")
+	}
+	if !strings.Contains(rootInstaller, `/bin/kill "-$signal" "$child"`) {
+		t.Fatal("fixed LaunchDaemon root bootstrap does not forward termination signals to the transaction helper")
 	}
 	executableLines := 0
 	for line := range strings.SplitSeq(rootInstaller, "\n") {
