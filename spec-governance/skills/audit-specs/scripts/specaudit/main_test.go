@@ -293,6 +293,47 @@ func TestAuthenticatedValidationAcceptsBDDReciprocityAcrossFeatures(t *testing.T
 	}
 }
 
+func TestAuthenticatedValidationAcceptsNonCandidateWithoutBDDFeatures(t *testing.T) {
+	repo, inventoryReport, semanticReport := auditFixture(t)
+	nonCandidate := semanticReport.Candidates[0]
+	nonCandidate.Rank = 0
+	nonCandidate.Verdict = "keep-separate"
+	nonCandidate.ProposedOwner = nil
+	nonCandidate.BDD.Features = nil
+	nonCandidate.BDD.Consequence = "none"
+	nonCandidate.Boundary = "The observables remain separately owned."
+	semanticReport.Candidates = nil
+	semanticReport.NonCandidates = []finding{nonCandidate}
+	semanticReport.Summary.CandidateCount = 0
+	semanticReport.Summary.ByVerdict = map[string]int{"keep-separate": 1}
+
+	if err := validateReport(semanticReport); err != nil {
+		t.Fatalf("no-feature non-candidate should be structurally valid: %v", err)
+	}
+	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
+		t.Fatalf("inventory should authenticate against the pinned repository: %v", err)
+	}
+	if err := validateAgainstInventory(semanticReport, inventoryReport); err != nil {
+		t.Fatalf("no-feature non-candidate should authenticate: %v", err)
+	}
+}
+
+func TestAuthenticatedValidationRejectsCurrentOwnerWithoutSelectedFeature(t *testing.T) {
+	repo, inventoryReport, semanticReport := auditFixture(t)
+	semanticReport.Candidates[0].BDD.Features = []string{"agm/test/bdd/features/one-only.feature"}
+
+	if err := validateReport(semanticReport); err != nil {
+		t.Fatalf("semantic report should be structurally valid: %v", err)
+	}
+	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
+		t.Fatalf("inventory should authenticate against the pinned repository: %v", err)
+	}
+	err := validateAgainstInventory(semanticReport, inventoryReport)
+	if err == nil || !strings.Contains(err.Error(), "do not reciprocally name current owner \"two/SPEC.md") {
+		t.Fatalf("uncovered current-owner error=%v, want authenticated owner-degree rejection", err)
+	}
+}
+
 func TestAuthenticatedValidationRejectsBDDFeatureWithoutCurrentOwner(t *testing.T) {
 	repo, inventoryReport, semanticReport := auditFixture(t)
 	semanticReport.Candidates[0].BDD.Features = []string{
