@@ -139,32 +139,28 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 }
 
 func TestLaunchDaemonInstallerRollsBackPartialActivation(t *testing.T) {
-	rootInstallerBytes, err := os.ReadFile("../../scripts/install-override-audit-launchdaemon-root.sh")
+	transactionBytes, err := os.ReadFile("../../agm/internal/launchdaudit/install.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	installer := string(rootInstallerBytes)
+	transaction := string(transactionBytes)
 	for _, required := range []string{
-		`audit_live=/usr/local/libexec/dear-agent-override-audit`,
-		`plist_live=/Library/LaunchDaemons/com.dear-agent.override-audit.plist`,
-		`audit_backup=`,
-		`plist_backup=`,
-		`status=$1`,
-		`trap - EXIT HUP INT TERM`,
-		`activation_started=1`,
-		`activation_complete=1`,
-		`/bin/mv -f "$audit_backup" "$audit_live"`,
-		`/bin/mv -f "$plist_backup" "$plist_live"`,
-		`/bin/rm -f "$audit_live"`,
-		`/bin/rm -f "$plist_live"`,
-		`exit "$status"`,
+		`auditLive = "/usr/local/libexec/dear-agent-override-audit"`,
+		`plistLive = "/Library/LaunchDaemons/com.dear-agent.override-audit.plist"`,
+		`auditBackup string`,
+		`plistBackup string`,
+		`tx.activationStarted = true`,
+		`tx.activationComplete = true`,
+		`restoreArtifact(tx.config.auditLive, &tx.auditBackup, tx.auditExisted)`,
+		`restoreArtifact(tx.config.plistLive, &tx.plistBackup, tx.plistExisted)`,
+		`rollbackErrors = append(rollbackErrors, tx.cleanup(!tx.activationStarted))`,
 	} {
-		if !strings.Contains(installer, required) {
+		if !strings.Contains(transaction, required) {
 			t.Errorf("LaunchDaemon installer is missing transactional activation fragment %q", required)
 		}
 	}
-	backup := strings.Index(installer, `audit_backup=$(/usr/bin/mktemp`)
-	activate := strings.Index(installer, "activation_started=1")
+	backup := strings.Index(transaction, "tx.backupLiveSet()")
+	activate := strings.Index(transaction, "tx.activateSet(ctx)")
 	if backup < 0 || activate < 0 || backup > activate {
 		t.Fatal("LaunchDaemon installer does not back up live artifacts before activation")
 	}

@@ -125,7 +125,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
@@ -1180,7 +1180,11 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 # Both scheduler and executable are root-owned, so an unattended same-user
 # agent cannot replace them or disable the job through its GUI launchd domain.
 # Installation is an explicit, freshly authenticated operator action.
-install-override-audit-launchdaemon: build-agm
+build-override-audit-launchdaemon-installer:
+	@mkdir -p bin
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/dear-agent-override-audit-launchdaemon-installer ./agm/cmd/override-audit-launchdaemon-installer/
+
+install-override-audit-launchdaemon: build-agm build-override-audit-launchdaemon-installer
 	@set -eu; \
 		test "$$(uname -s)" = "Darwin" || { echo "launchd audit installation is macOS-only" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
@@ -1189,59 +1193,46 @@ install-override-audit-launchdaemon: build-agm
 		root_gid="$$(/usr/bin/id -g 0)"; \
 		repo_root="$$(pwd -P)"; \
 		audit_artifact="$$repo_root/bin/agm"; \
+		helper_artifact="$$repo_root/bin/dear-agent-override-audit-launchdaemon-installer"; \
 		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
-		cleanup_plist_candidate() { \
-			status=$$1; \
-			trap - EXIT HUP INT TERM; \
-			/bin/rm -f "$$plist_candidate"; \
-			exit "$$status"; \
-		}; \
+		cleanup_plist_candidate() { status=$$1; trap - EXIT HUP INT TERM; /bin/rm -f "$$plist_candidate"; exit "$$status"; }; \
 		trap 'cleanup_plist_candidate $$?' EXIT; \
 		trap 'cleanup_plist_candidate 129' HUP; \
 		trap 'cleanup_plist_candidate 130' INT; \
 		trap 'cleanup_plist_candidate 143' TERM; \
 		root_installer_path="$$repo_root/scripts/install-override-audit-launchdaemon-root.sh"; \
-		test -f "$$root_installer_path" || { echo "missing fixed privileged installer: $$root_installer_path" >&2; exit 2; }; \
+		test -f "$$root_installer_path" || { echo "missing fixed privileged bootstrap: $$root_installer_path" >&2; exit 2; }; \
 		root_installer="$$(/bin/cat "$$root_installer_path")"; \
-		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		test -n "$$root_installer" || { echo "fixed privileged bootstrap is empty" >&2; exit 2; }; \
 		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" "$$repo_root/deploy/launchd/com.dear-agent.override-audit.plist" >"$$plist_candidate"; \
 		/usr/bin/plutil -lint "$$plist_candidate" >/dev/null; \
-		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
-		expected_audit_hash="$${expected_audit_hash%% *}"; \
-		expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"; \
-		expected_plist_hash="$${expected_plist_hash%% *}"; \
-		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
-		expected_installer_hash="$${expected_installer_hash%% *}"; \
+		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; expected_audit_hash="$${expected_audit_hash%% *}"; \
+		expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"; expected_plist_hash="$${expected_plist_hash%% *}"; \
+		expected_helper_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_artifact")"; expected_helper_hash="$${expected_helper_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; expected_installer_hash="$${expected_installer_hash%% *}"; \
 		printf 'Reviewed audit executable SHA-256: %s\n' "$$expected_audit_hash"; \
 		printf 'Reviewed rendered LaunchDaemon SHA-256: %s\n' "$$expected_plist_hash"; \
-		printf 'Reviewed fixed privileged installer SHA-256: %s\n' "$$expected_installer_hash"; \
-		printf 'Type the executable SHA-256 to approve these exact bytes: '; \
-		IFS= read -r confirmed_audit_hash; \
-		printf 'Type the LaunchDaemon SHA-256 to approve these exact bytes: '; \
-		IFS= read -r confirmed_plist_hash; \
-		printf 'Type the installer SHA-256 to approve the exact privileged transaction: '; \
-		IFS= read -r confirmed_installer_hash; \
+		printf 'Reviewed transaction helper SHA-256: %s\n' "$$expected_helper_hash"; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type the executable SHA-256 to approve these exact bytes: '; IFS= read -r confirmed_audit_hash; \
+		printf 'Type the LaunchDaemon SHA-256 to approve these exact bytes: '; IFS= read -r confirmed_plist_hash; \
+		printf 'Type the transaction helper SHA-256 to approve these exact bytes: '; IFS= read -r confirmed_helper_hash; \
+		printf 'Type the bootstrap SHA-256 to approve the exact privileged command: '; IFS= read -r confirmed_installer_hash; \
 		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
 		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
-		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged installer digest confirmation did not match" >&2; exit 2; }; \
-		installer_marker="dear-agent-override-audit-launchdaemon-installer"; \
-		set +e; \
+		test "$$confirmed_helper_hash" = "$$expected_helper_hash" || { echo "transaction helper digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		installer_marker="dear-agent-override-audit-launchdaemon-installer"; set +e; \
 		printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" \
-			"$$installer_marker" "$$root_gid" "$$audit_artifact" "$$plist_candidate" \
-			"$$expected_audit_hash" "$$expected_plist_hash" >/dev/null 2>&1; \
-		probe_status=$$?; \
-		set -e; \
-		if test "$$probe_status" = 42; then \
-			echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; \
-			exit 2; \
-		fi; \
+			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
+			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash" >/dev/null 2>&1; \
+		probe_status=$$?; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
 		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
 		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" \
-			"$$installer_marker" "$$root_gid" "$$audit_artifact" "$$plist_candidate" \
-			"$$expected_audit_hash" "$$expected_plist_hash"; \
-		/bin/rm -f "$$plist_candidate"; \
-		plist_candidate=""; \
-		trap - EXIT HUP INT TERM; \
+			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
+			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash"; \
+		/bin/rm -f "$$plist_candidate"; plist_candidate=""; trap - EXIT HUP INT TERM; \
 		echo "Installed digest-bound root-owned audit executable and system LaunchDaemon"; \
 		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \
 		echo "  sudo launchctl bootstrap system /Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \
