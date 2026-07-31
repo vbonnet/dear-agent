@@ -131,7 +131,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: lint-instructions
 .PHONY: lint-adrs
 .PHONY: lint-headers
-.PHONY: build-override-ledger-helper install-override-ledger-helper
+.PHONY: build-override-ledger-helper install-override-ledger-helper install-override-ledger-helper-locked
 
 include mk/install-go-bin.mk
 
@@ -981,6 +981,17 @@ build-override-ledger-helper:
 
 install-override-ledger-helper: build-override-ledger-helper build-agm build-agm-mcp-server
 	@set -eu; \
+		install_lock_file="/tmp/dear-agent-override-ledger-install.lock"; \
+		install_lock_umask="$$(umask)"; umask 000; : >>"$$install_lock_file"; umask "$$install_lock_umask"; \
+		case "$$(uname -s)" in \
+			Darwin) install_lock_tool="$$(command -v lockf)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -t 0 "$$install_lock_file" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
+			Linux) install_lock_tool="$$(command -v flock)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -n "$$install_lock_file" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
+			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
+		esac
+
+install-override-ledger-helper-locked:
+	@set -eu; \
+		test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1 || { echo "refusing privileged ledger installation without the host transaction lock" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
 		operator_user="$$(id -un)"; \
 		root_gid="$$(/usr/bin/id -g 0)"; \
@@ -996,15 +1007,13 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		companion_policy_artifact=""; \
 		transaction_nonce=""; \
 		launcher_txdir=""; \
-		install_lock_dir="/tmp/dear-agent-override-ledger-install.lock"; install_lock_held=0; \
 		agm_existed=0; companion_existed=0; launcher_activation_started=0; launcher_set_active=0; launcher_activation_complete=0; \
 		root_installer_path="$$repo_root/scripts/install-override-ledger-root.sh"; \
 		root_installer="$$(/bin/cat "$$root_installer_path")"; \
 		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
 		/bin/mkdir -p "$(HOME)/go/bin"; \
-		cleanup_staging() { status=$$1; trap - EXIT HUP INT TERM; set +e; cleanup_failed=0; /bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_policy_artifact" "$$companion_policy_artifact"; if test "$$install_lock_held" = 1; then /bin/rmdir "$$install_lock_dir" || cleanup_failed=1; install_lock_held=0; fi; test "$$cleanup_failed" = 0 || status=1; exit "$$status"; }; \
+		cleanup_staging() { status=$$1; trap - EXIT HUP INT TERM; set +e; /bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_policy_artifact" "$$companion_policy_artifact"; exit "$$status"; }; \
 		trap 'cleanup_staging $$?' EXIT; trap 'cleanup_staging 129' HUP; trap 'cleanup_staging 130' INT; trap 'cleanup_staging 143' TERM; \
-		install_lock_held=1; (umask 077; /bin/mkdir "$$install_lock_dir") || { install_lock_held=0; echo "another privileged ledger installation is active (or left a stale lock): $$install_lock_dir" >&2; exit 2; }; \
 		agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"; \
 		companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"; \
 		/bin/cp "$$agm_artifact" "$$agm_staging"; \
@@ -1065,7 +1074,7 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged installer digest confirmation did not match" >&2; exit 2; }; \
 		privileged_child=""; \
 		restore_launcher() { restore_live=$$1; restore_backup=$$2; restore_existed=$$3; if test "$$restore_existed" = 1; then if test -e "$$restore_backup" || test -L "$$restore_backup"; then /bin/mv -f "$$restore_backup" "$$restore_live"; else test -e "$$restore_live" || test -L "$$restore_live"; fi; else /bin/rm -f "$$restore_live"; fi; }; \
-		cleanup_launchers() { status=$$1; trap - EXIT HUP INT TERM; set +e; cleanup_failed=0; if test "$$launcher_activation_started" = 1 && test "$$launcher_activation_complete" != 1; then restore_launcher "$$agm_executable" "$$launcher_txdir/agm" "$$agm_existed" || cleanup_failed=1; restore_launcher "$$companion_executable" "$$launcher_txdir/agm-mcp-server" "$$companion_existed" || cleanup_failed=1; fi; /bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_policy_artifact" "$$companion_policy_artifact"; test -z "$$launcher_txdir" || /bin/rm -rf "$$launcher_txdir"; if test "$$install_lock_held" = 1; then /bin/rmdir "$$install_lock_dir" || cleanup_failed=1; install_lock_held=0; fi; test "$$cleanup_failed" = 0 || { echo "failed to restore the prior authenticated launcher set or release its installation lock" >&2; status=1; }; exit "$$status"; }; \
+		cleanup_launchers() { status=$$1; trap - EXIT HUP INT TERM; set +e; cleanup_failed=0; if test "$$launcher_activation_started" = 1 && test "$$launcher_activation_complete" != 1; then restore_launcher "$$agm_executable" "$$launcher_txdir/agm" "$$agm_existed" || cleanup_failed=1; restore_launcher "$$companion_executable" "$$launcher_txdir/agm-mcp-server" "$$companion_existed" || cleanup_failed=1; fi; /bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_policy_artifact" "$$companion_policy_artifact"; test -z "$$launcher_txdir" || /bin/rm -rf "$$launcher_txdir"; test "$$cleanup_failed" = 0 || { echo "failed to restore the prior authenticated launcher set" >&2; status=1; }; exit "$$status"; }; \
 		root_transaction_committed() { test "$$(/bin/cat /usr/local/libexec/dear-agent-override-ledger-install.receipt 2>/dev/null)" = "$$transaction_nonce"; }; \
 		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; set +e; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; privileged_child=""; }; if test "$$launcher_set_active" = 1 && root_transaction_committed; then launcher_activation_complete=1; fi; cleanup_launchers "$$status"; }; \
 		trap 'cleanup_launchers $$?' EXIT; \
@@ -1085,7 +1094,7 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		test "$$install_status" = 0 && test "$$launcher_activation_complete" = 1; \
 		/bin/rm -f "$$agm_policy_artifact" "$$companion_policy_artifact"; agm_policy_artifact=""; companion_policy_artifact=""; \
 		/bin/rm -rf "$$launcher_txdir"; launcher_txdir=""; \
-		/bin/rmdir "$$install_lock_dir"; install_lock_held=0; trap - EXIT HUP INT TERM; \
+		trap - EXIT HUP INT TERM; \
 		echo "Installed digest-bound root-owned ledger helper, AGM and MCP companion caller identities, and exact sudoers rule for $$operator_user"
 
 # Install the macOS audit under launchd's system domain without activating it.

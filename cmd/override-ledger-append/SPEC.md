@@ -29,7 +29,7 @@ nor an operator-selected destination.
 
 **OLA-09** When launch capabilities are issued, the command shall serialize directory mutation through a root-only lock, remove expired canonical sidecars, reject unexpected directory entries, and refuse issuance beyond a fixed outstanding-capability limit so aborted launches cannot grow privileged runtime state without bound.
 
-**OLA-10** When the privileged helper and its authenticated launchers are upgraded, installation shall hold one exclusive lock across the complete user/root transaction, stage and validate the complete helper, sudoers, identity-policy, AGM, and MCP-companion artifact set before replacing any live path; if any activation step fails, it shall restore every prior artifact or remove every newly created artifact before returning failure, and an interrupted caller shall recognize completion only from the current transaction's root-owned commit receipt.
+**OLA-10** When the privileged helper and its authenticated launchers are upgraded, installation shall hold one automatically released operating-system lock across the complete user/root transaction, stage and validate the complete helper, sudoers, identity-policy, AGM, and MCP-companion artifact set before replacing any live path; if any activation step fails, it shall restore every prior artifact or remove every newly created artifact before returning failure, and an interrupted caller shall recognize completion only from the current transaction's root-owned commit receipt.
 
 ## BDD Traceability
 
