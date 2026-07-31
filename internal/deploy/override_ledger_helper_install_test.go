@@ -27,6 +27,9 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"`,
 		`/bin/cp "$$agm_artifact" "$$agm_staging"`,
 		`/bin/cp "$$companion_artifact" "$$companion_staging"`,
+		`agm_policy_artifact="$$(/usr/bin/mktemp "$$agm_executable.policy.XXXXXX")"`,
+		`/bin/cp "$$agm_staging" "$$agm_policy_artifact"`,
+		`transaction_nonce="$$(/usr/bin/openssl rand -hex 32)"`,
 		`expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"`,
 		`expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"`,
 		`IFS= read -r confirmed_hash`,
@@ -39,9 +42,12 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`test "$$confirmed_installer_hash" = "$$expected_installer_hash"`,
 		`forward_privileged() { signal=$$1; status=$$2;`,
 		`printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer"`,
-		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
+		`launcher_txdir="$$(/usr/bin/mktemp -d "$(HOME)/go/bin/.dear-agent-launchers.XXXXXX")"`,
 		`/bin/mv -f "$$agm_staging" "$$agm_executable"`,
 		`/bin/mv -f "$$companion_staging" "$$companion_executable"`,
+		`launcher_set_active=1`,
+		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
+		`root_transaction_committed && launcher_activation_complete=1`,
 	}
 	offset := 0
 	for _, want := range requiredInOrder {
@@ -53,6 +59,9 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	}
 	if strings.Contains(target, `-m 0755 bin/dear-agent-override-ledger-append "$$helper"`) {
 		t.Fatal("install target still copies mutable same-user bytes directly to the privileged helper")
+	}
+	if !strings.Contains(target, `if test "$$launcher_set_active" = 1 && root_transaction_committed; then launcher_activation_complete=1; fi`) {
+		t.Fatal("signal recovery does not distinguish a complete launcher set from a partial user activation")
 	}
 	if got := strings.Count(target, "/usr/bin/sudo"); got != 2 {
 		t.Fatalf("install target uses %d sudo calls, want one probe and one transaction", got)
@@ -75,10 +84,13 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`"$helper_artifact" "$txdir/helper"`,
 		`test "$staged_hash" = "$expected_hash"`,
 		`test "darwin-cdhash:$agm_digest" = "$caller_identity"`,
+		`printf '%s\n' "$receipt_nonce" >"$txdir/receipt"`,
 		`/usr/sbin/visudo -cf "$txdir/sudoers"`,
 		`helper_existed=0`,
 		`helper_stage=$(/usr/bin/mktemp`,
+		`receipt_stage=$(/usr/bin/mktemp`,
 		`activation_started=1`,
+		`/bin/mv -f "$receipt_stage" "$receipt"`,
 		`activation_complete=1`,
 	}
 	offset = 0
@@ -107,6 +119,9 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	}
 	if !strings.Contains(rootInstaller, `test "$activation_started" = 1 && test "$activation_complete" != 1`) {
 		t.Fatal("fixed root installer lacks rollback for a partially activated root-owned artifact set")
+	}
+	if !strings.Contains(rootInstaller, `restore "$receipt" "$txdir/receipt.backup" "$receipt_existed"`) {
+		t.Fatal("fixed root installer does not roll back its transaction-specific commit receipt")
 	}
 	executableLines := 0
 	for line := range strings.SplitSeq(rootInstaller, "\n") {

@@ -107,6 +107,15 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 		"linux-sha256:",
 		"confirmed_installer_hash",
 		"dear-agent-override-ledger-installer",
+		`agm_policy_artifact="$$(/usr/bin/mktemp "$$agm_executable.policy.XXXXXX")"`,
+		`transaction_nonce="$$(/usr/bin/openssl rand -hex 32)"`,
+		`launcher_txdir="$$(/usr/bin/mktemp -d "$(HOME)/go/bin/.dear-agent-launchers.XXXXXX")"`,
+		`restore_launcher()`,
+		`cleanup_launchers()`,
+		`root_transaction_committed()`,
+		`dear-agent-override-ledger-install.receipt`,
+		`launcher_set_active=1`,
+		`launcher_activation_complete=1`,
 		`/bin/mv -f "$$agm_staging" "$$agm_executable"`,
 		`/bin/mv -f "$$companion_staging" "$$companion_executable"`,
 	} {
@@ -122,6 +131,7 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 		"dear-agent-override-ledger-agm.identity",
 		"dear-agent-override-ledger-agm-mcp-server.identity",
 		`"$txdir/agm-mcp-server"`,
+		"dear-agent-override-ledger-install.receipt",
 		`test "darwin-cdhash:$companion_digest" = "$companion_identity"`,
 	} {
 		if !strings.Contains(string(rootInstaller), required) {
@@ -166,6 +176,13 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 	}
 	if got := strings.Count(installer, "/usr/bin/sudo"); got != 2 {
 		t.Fatalf("helper installer uses %d sudo invocations, want one probe and one transaction", got)
+	}
+	backup := strings.Index(installer, `launcher_txdir="$$(/usr/bin/mktemp -d`)
+	activateLauncher := strings.Index(installer, `/bin/mv -f "$$agm_staging" "$$agm_executable"`)
+	activateRootSet := strings.Index(installer, `printf 'INSTALL\n' | /usr/bin/sudo`)
+	if backup < 0 || activateLauncher < 0 || activateRootSet < 0 ||
+		backup > activateLauncher || activateLauncher > activateRootSet {
+		t.Fatal("helper installer does not back up and activate the caller launchers before the rollback-protected root transaction")
 	}
 }
 
