@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"maps"
 	"os"
@@ -553,37 +554,47 @@ func courierContentFingerprint(
 		return "", "", fmt.Errorf("invalid transcript content boundary %d for size %d", end, info.Size())
 	}
 
-	hash := sha256.New()
-	start := int64(0)
-	if !replaced &&
-		previous.Size > 0 &&
-		previous.Size < end &&
-		previous.ContentHash != "" &&
-		previous.HashState != "" {
-		encodedState, decodeErr := base64.StdEncoding.DecodeString(previous.HashState)
-		candidate := sha256.New()
-		if decodeErr == nil {
-			decodeErr = candidate.(encoding.BinaryUnmarshaler).UnmarshalBinary(encodedState)
-		}
-		if decodeErr == nil &&
-			fmt.Sprintf("%x", candidate.Sum(nil)) == previous.ContentHash {
-			hash = candidate
-			start = previous.Size
-		}
-	}
+	contentHash, start := restoreCourierContentHash(previous, end, replaced)
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		return "", "", err
 	}
-	if _, err := io.CopyN(hash, f, end-start); err != nil {
+	if _, err := io.CopyN(contentHash, f, end-start); err != nil {
 		return "", "", err
 	}
-	hashState, err := hash.(encoding.BinaryMarshaler).MarshalBinary()
+	hashState, err := contentHash.(encoding.BinaryMarshaler).MarshalBinary()
 	if err != nil {
 		return "", "", err
 	}
-	return fmt.Sprintf("%x", hash.Sum(nil)),
+	return fmt.Sprintf("%x", contentHash.Sum(nil)),
 		base64.StdEncoding.EncodeToString(hashState),
 		nil
+}
+
+func restoreCourierContentHash(
+	previous courierFileState,
+	end int64,
+	replaced bool,
+) (hash.Hash, int64) {
+	fresh := sha256.New()
+	if replaced ||
+		previous.Size <= 0 ||
+		previous.Size >= end ||
+		previous.ContentHash == "" ||
+		previous.HashState == "" {
+		return fresh, 0
+	}
+	encodedState, err := base64.StdEncoding.DecodeString(previous.HashState)
+	if err != nil {
+		return fresh, 0
+	}
+	candidate := sha256.New()
+	if err := candidate.(encoding.BinaryUnmarshaler).UnmarshalBinary(encodedState); err != nil {
+		return fresh, 0
+	}
+	if fmt.Sprintf("%x", candidate.Sum(nil)) != previous.ContentHash {
+		return fresh, 0
+	}
+	return candidate, previous.Size
 }
 
 // readLinesFrom reads only transcript bytes at or after offset. It returns the
