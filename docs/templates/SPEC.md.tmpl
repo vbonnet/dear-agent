@@ -1,19 +1,44 @@
-# {Package Path} — Specification
+# {Behavior or module} — Specification
 
 <!-- Last audited at: YYYY-MM-DD -->
 
-**Version:** X.Y.Z
 **Status:** Draft | Proposed | Production-ready | Deprecated
-**Pattern:** Library | Service | CLI | Tool | Internal
+**Scope:** {Observable behavior owned here}
 
-## Purpose
-{1-2 sentences}
+Before filling this template, follow repository `docs/spec-authoring.md` and
+the canonical `write-spec` workflow. Search for an existing owner before
+creating another specification.
 
-## Public API
-{Exported types, functions, interfaces}
+## Contract classification
 
-## Invariants
-{What is always true about this package's behavior}
+- **Canonical owner:** {Module that owns the observable invariant}
+- **Class:** Shared contract | Capability variation | Native adapter or projection
+- **Related shared requirements:** {Stable IDs or `none`}
+- **Observable delta owned here:** {Required for adapter-local specifications}
 
-## Dependencies
-{Notable dependencies and why}
+## Applicability
+
+| Member or capability | Disposition | Evidence |
+| --- | --- | --- |
+| {Active member} | shared / adapted / unsupported / not-applicable | {Source or test anchor} |
+
+Remove this section only when the contract is unconditionally ubiquitous and
+does not claim parity across a finite implementation or harness inventory.
+
+## EARS Requirements
+
+**EXAMPLE-01** When {observable trigger}, the system shall {observable result}.
+
+**EXAMPLE-02** If {failure condition}, then the system shall {observable failure result}.
+
+## BDD Traceability
+
+- Feature: `{path to canonical feature}`
+- Rule or scenario: `{observable behavior}`
+- Test consequence: Existing scenario | Extend outline | New scenario | Adapter-specific scenario | No BDD change with reason
+
+## Boundaries
+
+- {Implementation details deliberately excluded from this contract}
+- {Native adapter specifications that reference this contract}
+- {Open product decisions; do not choose an implementation implicitly}

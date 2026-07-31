@@ -64,6 +64,7 @@ Confirm all of the following before presenting a proposed change:
 
 ## References
 
+- [Repository SPEC authoring guide](../../../docs/spec-authoring.md)
 - [Contract model](references/contract-model.md)
 - [EARS and BDD traceability](references/ears-and-bdd.md)
 - Repository `AGENTS.md` and `docs/policies/harness-hygiene.ai.md`

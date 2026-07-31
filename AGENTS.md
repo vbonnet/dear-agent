@@ -25,6 +25,11 @@ older subsystem documentation:
   merge after all gates pass; security, product-behavior, and money changes
   require a human merge.
 
+When work adds or changes observable behavior, follow
+[SPEC authoring](docs/spec-authoring.md) before creating or editing a
+`SPEC.md`. Shared behavior has one harness-neutral owner; harness and provider
+specifications describe only observable adapter deltas.
+
 Repository policy never overrides system, user, or orchestrator instructions.
 When two repository documents disagree, stop relying on the example, verify the
 current code, and repair or quarantine the stale living document in scope.
@@ -100,7 +105,7 @@ before publication:
 ```bash
 make preflight          # module download, vet, build, lint
 make test-affected      # tests selected from the diff
-make lint-specs         # strict EARS validation
+make lint-specs STRICT=1 # strict EARS validation
 make preflight-full     # full local publication gate
 ```
 

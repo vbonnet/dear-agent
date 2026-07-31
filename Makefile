@@ -133,8 +133,11 @@ include mk/install-go-bin.mk
 # valid requirements). Examples:
 #   make lint-specs
 #   make lint-specs PATHS=internal/sandbox/SPEC.md STRICT=1
+# Templates are outside recursive SPEC.md discovery, so validate the copy path
+# explicitly after the requested corpus.
 lint-specs:
 	@go run ./cmd/ears-lint $(if $(STRICT),--strict) $(if $(PATHS),$(PATHS),.)
+	@go run ./cmd/ears-lint --strict docs/templates/SPEC.md.tmpl
 
 # Validate the Git-tracked AI skill inventory through the same repository
 # interface required CI uses. Hidden and nonstandard skill roots are included.
