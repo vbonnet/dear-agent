@@ -1070,3 +1070,129 @@ func TestProcessResultsCourierTickRetriesAfterTotalDeliveryFailure(t *testing.T)
 		t.Fatalf("persisted cursor = %+v, in-memory = %+v", persisted.Files[sessionPath], st.Files[sessionPath])
 	}
 }
+
+func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing.T) {
+	home := t.TempDir()
+	projectDir := filepath.Join(
+		home,
+		".claude",
+		"projects",
+		strings.ReplaceAll(home, "/", "-")+"-src-dear-agent",
+	)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(projectDir, "session1.jsonl")
+	writeJSONLLine(t, sessionPath, "user", "")
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(sessionPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seeded := st.Files[sessionPath]
+	writeJSONLLine(t, sessionPath, "assistant", "delivered once")
+	if err := os.Chtimes(sessionPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	statePath := filepath.Join(resultsCourierStateDir(home), "state.json")
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(statePath+".tmp", 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	deliveries := 0
+	succeedDelivery := func(
+		context.Context,
+		*ops.OpContext,
+		string,
+		[]resultsCourierEvent,
+	) courierDeliveryReceipt {
+		deliveries++
+		return courierDeliveryReceipt{DesktopSent: true}
+	}
+	err := processResultsCourierTick(
+		context.Background(),
+		nil,
+		home,
+		"",
+		45*time.Second,
+		&st,
+		succeedDelivery,
+	)
+	if err == nil || !strings.Contains(err.Error(), "notification delivered but save state") {
+		t.Fatalf("save failure after delivery = %v", err)
+	}
+	if got := st.Files[sessionPath]; got == seeded {
+		t.Fatalf("delivered cursor did not advance beyond %+v after save failure", seeded)
+	}
+
+	err = processResultsCourierTick(
+		context.Background(),
+		nil,
+		home,
+		"",
+		45*time.Second,
+		&st,
+		succeedDelivery,
+	)
+	if err == nil || !strings.Contains(err.Error(), "save state") {
+		t.Fatalf("retrying durable state after delivery = %v", err)
+	}
+	if deliveries != 1 {
+		t.Fatalf("successful delivery repeated %d times after save failure, want 1", deliveries)
+	}
+
+	if err := os.Remove(statePath + ".tmp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := processResultsCourierTick(
+		context.Background(),
+		nil,
+		home,
+		"",
+		45*time.Second,
+		&st,
+		succeedDelivery,
+	); err != nil {
+		t.Fatalf("persist retained cursor: %v", err)
+	}
+	if deliveries != 1 {
+		t.Fatalf("delivery repeated %d times while persisting retained cursor, want 1", deliveries)
+	}
+}
+
+func TestAcquireResultsCourierLockSerializesSharedState(t *testing.T) {
+	stateDir := resultsCourierStateDir(t.TempDir())
+	first, err := acquireResultsCourierLock(stateDir)
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	defer func() { _ = first.Unlock() }()
+
+	second, err := acquireResultsCourierLock(stateDir)
+	if err == nil {
+		_ = second.Unlock()
+		t.Fatal("second courier acquired shared state while first lock was held")
+	}
+	if !strings.Contains(err.Error(), "acquire instance lock") {
+		t.Fatalf("second lock error = %v", err)
+	}
+
+	if err := first.Unlock(); err != nil {
+		t.Fatalf("release first lock: %v", err)
+	}
+	third, err := acquireResultsCourierLock(stateDir)
+	if err != nil {
+		t.Fatalf("lock after release: %v", err)
+	}
+	if err := third.Unlock(); err != nil {
+		t.Fatalf("release third lock: %v", err)
+	}
+}

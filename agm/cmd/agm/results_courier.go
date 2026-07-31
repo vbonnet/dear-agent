@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	agmlock "github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/pkg/notify"
 )
@@ -983,14 +984,26 @@ func processResultsCourierTick(
 		}
 		return fmt.Errorf("all notification channels failed; cursor retained for retry")
 	}
+	*st = candidate
 	if err := saveCourierState(statePath, candidate); err != nil {
 		return fmt.Errorf("notification delivered but save state: %w", err)
 	}
-	*st = candidate
 	if receiptErr != nil {
 		return fmt.Errorf("notification delivered but append receipt: %w", receiptErr)
 	}
 	return nil
+}
+
+func acquireResultsCourierLock(stateDir string) (*agmlock.FileLock, error) {
+	instanceLock, err := agmlock.New(filepath.Join(stateDir, "courier.lock"))
+	if err != nil {
+		return nil, fmt.Errorf("open instance lock: %w", err)
+	}
+	if err := instanceLock.TryLock(); err != nil {
+		_ = instanceLock.Unlock()
+		return nil, fmt.Errorf("acquire instance lock: %w", err)
+	}
+	return instanceLock, nil
 }
 
 // startResultsCourier runs the poll-detect-notify loop on its own ticker
@@ -1000,6 +1013,17 @@ func processResultsCourierTick(
 func startResultsCourier(ctx context.Context, opCtx *ops.OpContext, home, orchestratorName string, checkInterval, idleGrace time.Duration) {
 	stateDir := resultsCourierStateDir(home)
 	statePath := filepath.Join(stateDir, "state.json")
+
+	instanceLock, err := acquireResultsCourierLock(stateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "results-courier: disabled because another instance owns the shared state: %v\n", err)
+		return
+	}
+	defer func() {
+		if err := instanceLock.Unlock(); err != nil {
+			fmt.Fprintf(os.Stderr, "results-courier: release instance lock: %v\n", err)
+		}
+	}()
 
 	st, err := loadCourierState(statePath)
 	if err != nil {
