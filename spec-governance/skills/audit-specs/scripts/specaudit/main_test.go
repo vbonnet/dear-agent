@@ -84,6 +84,40 @@ func TestInventoryIgnoresGitReplacementObjects(t *testing.T) {
 	}
 }
 
+func TestInventoryIgnoresAmbientGitRepositoryContext(t *testing.T) {
+	repo := t.TempDir()
+	gitTest(t, repo, "init", "-q")
+	gittest.HardenRepo(t, repo)
+	gitTest(t, repo, "config", "user.email", "test@example.com")
+	gitTest(t, repo, "config", "user.name", "Test")
+	writeTestFile(t, repo, "agm/internal/agent/harnesses.go", "package agent\nvar activeHarnesses = []string{\"codex-cli\"}\n")
+	writeTestFile(t, repo, "one/SPEC.md", "# Expected\n\n**EXPECTED-01** When an audit pins a repository, the system shall ignore ambient Git repository context.\n")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-qm", "expected repository")
+	revision := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
+
+	other := t.TempDir()
+	gitTest(t, other, "init", "-q")
+	gittest.HardenRepo(t, other)
+	gitTest(t, other, "config", "user.email", "test@example.com")
+	gitTest(t, other, "config", "user.name", "Test")
+	writeTestFile(t, other, "other/SPEC.md", "# Wrong\n\n**WRONG-01** When ambient Git variables are inherited, the system shall read the wrong repository.\n")
+	gitTest(t, other, "add", ".")
+	gitTest(t, other, "commit", "-qm", "ambient repository")
+
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, ".git", "index"))
+	got, err := inventory(repo, "owner/expected", revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirement := inventoryRequirement(t, got, "one/SPEC.md")
+	if requirement.ID != "EXPECTED-01" || got.Snapshot.Repository != "owner/expected" {
+		t.Fatalf("ambient Git context changed pinned evidence: snapshot=%#v requirement=%#v", got.Snapshot, requirement)
+	}
+}
+
 func TestParseSpecCountsOnlyCanonicalRequirementIDs(t *testing.T) {
 	parsed := parseSpec("example/SPEC.md", strings.Join([]string{
 		"# Example",
