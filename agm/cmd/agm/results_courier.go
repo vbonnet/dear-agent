@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,9 +33,11 @@ import (
 // documented in cmd/vroom-dispatch/escalation.go:
 //
 //   - a native macOS desktop notification (pkg/notify.DesktopDispatcher) —
-//     always available, no VROOM mesh required (AC-parity with escalation.go).
+//     the typed channel that carries transcript-derived display text, with no
+//     model interpretation (AC-parity with escalation.go).
 //   - an ops.SendMessage relay into the orchestrator supervisor session,
-//     asking it to call PushNotification, when that session is alive.
+//     asking it to emit only a fixed content-free mobile nudge when that
+//     session is alive. Transcript content never crosses this model boundary.
 //
 // Every scan + delivery attempt is appended to a JSONL receipt so "did a
 // completion actually get surfaced" is verifiable after the fact, not just
@@ -111,9 +115,11 @@ func claudeProjectsGlob(home string) string {
 	return filepath.Join(home, ".claude", "projects", "*", "*.jsonl")
 }
 
-// lastAssistantText walks lines[from:] looking for the LAST line that is an
-// assistant turn carrying non-empty text content (as opposed to a bare
-// tool_use turn). Returns "" if none of the new lines qualify.
+// lastAssistantText returns text only when the terminal conversational entry
+// in lines[from:] is an assistant turn with non-empty text and no tool use.
+// A later tool invocation, tool result, or user turn clears an earlier
+// candidate: file inactivity alone does not prove that an earlier assistant
+// message completed the current turn.
 func lastAssistantText(lines []string, from int) string {
 	headline := ""
 	for i := from; i < len(lines); i++ {
@@ -128,18 +134,33 @@ func lastAssistantText(lines []string, from int) string {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"content"`
+				StopReason string `json:"stop_reason"`
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		if entry.Type != "assistant" {
-			continue
-		}
-		for _, block := range entry.Message.Content {
-			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
-				headline = strings.TrimSpace(block.Text)
+		switch entry.Type {
+		case "assistant":
+			var texts []string
+			usesTool := entry.Message.StopReason == "tool_use"
+			for _, block := range entry.Message.Content {
+				switch block.Type {
+				case "text":
+					if text := strings.TrimSpace(block.Text); text != "" {
+						texts = append(texts, text)
+					}
+				case "tool_use":
+					usesTool = true
+				}
 			}
+			if usesTool || len(texts) == 0 {
+				headline = ""
+				continue
+			}
+			headline = strings.Join(texts, "\n")
+		case "user", "tool_use", "tool_result":
+			headline = ""
 		}
 	}
 	return headline
@@ -330,11 +351,9 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 
 	if orchestratorName != "" {
 		receipt.RelayTarget = orchestratorName
-		prompt := "RESULTS COURIER RELAY: call the PushNotification tool once with " +
-			"status \"proactive\" and exactly this message, then stop: " + title + " — " + body
 		result, err := ops.SendMessage(opCtx, &ops.SendMessageRequest{
 			Recipient:  orchestratorName,
-			Message:    prompt,
+			Message:    courierRelayPrompt(len(events)),
 			Autonomous: true,
 		})
 		switch {
@@ -348,6 +367,24 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 	return receipt
 }
 
+// courierRelayPrompt intentionally accepts only a count, never an event or
+// transcript-derived string. The orchestrator receives a fixed instruction
+// and fixed mobile message; the typed desktop dispatcher above owns the
+// human-readable transcript content.
+func courierRelayPrompt(eventCount int) string {
+	return fmt.Sprintf(
+		"RESULTS COURIER RELAY: call the PushNotification tool once with status "+
+			"\"proactive\" and exactly this message, then stop: Results courier "+
+			"detected %d completed session(s). Review the typed desktop notification "+
+			"or the local results-courier receipt trail. Do not read or relay transcript content.",
+		eventCount,
+	)
+}
+
+func courierDeliverySucceeded(receipt courierDeliveryReceipt) bool {
+	return receipt.DesktopSent || receipt.RelaySent
+}
+
 // appendCourierReceipt appends one JSON line to the courier's own trail file
 // — the audit log a human (or a future debugging session) can point at to
 // answer "did the courier actually try to tell me about X".
@@ -355,17 +392,107 @@ func appendCourierReceipt(stateDir string, receipt courierDeliveryReceipt) error
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(stateDir, "trail.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //#nosec G304 -- fixed path under the courier's own state dir
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	data, err := json.Marshal(receipt)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(data, '\n'))
-	return err
+	f, err := os.OpenFile(filepath.Join(stateDir, "trail.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //#nosec G304 -- fixed path under the courier's own state dir
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		closeErr := f.Close()
+		if closeErr != nil {
+			return errors.Join(
+				fmt.Errorf("append courier receipt: %w", err),
+				fmt.Errorf("close courier receipt: %w", closeErr),
+			)
+		}
+		return fmt.Errorf("append courier receipt: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		closeErr := f.Close()
+		if closeErr != nil {
+			return errors.Join(
+				fmt.Errorf("sync courier receipt: %w", err),
+				fmt.Errorf("close courier receipt: %w", closeErr),
+			)
+		}
+		return fmt.Errorf("sync courier receipt: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close courier receipt: %w", err)
+	}
+	return nil
+}
+
+func cloneCourierState(st courierState) courierState {
+	clone := courierState{Files: make(map[string]courierFileState, len(st.Files))}
+	maps.Copy(clone.Files, st.Files)
+	return clone
+}
+
+type courierDeliverFunc func(
+	context.Context,
+	*ops.OpContext,
+	string,
+	[]resultsCourierEvent,
+) courierDeliveryReceipt
+
+// processResultsCourierTick computes the next cursor on a copy and publishes
+// it only after at least one notification channel accepts the entire batch.
+// A total delivery failure therefore leaves both durable and in-memory state
+// unchanged, so the same completions are retried on the next tick.
+func processResultsCourierTick(
+	ctx context.Context,
+	opCtx *ops.OpContext,
+	home, orchestratorName string,
+	idleGrace time.Duration,
+	st *courierState,
+	deliver courierDeliverFunc,
+) error {
+	stateDir := resultsCourierStateDir(home)
+	statePath := filepath.Join(stateDir, "state.json")
+	candidate := cloneCourierState(*st)
+
+	events, err := scanClaudeProjects(home, idleGrace, &candidate)
+	if err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+	if len(events) == 0 {
+		if err := saveCourierState(statePath, candidate); err != nil {
+			return fmt.Errorf("save state: %w", err)
+		}
+		*st = candidate
+		return nil
+	}
+
+	out, _ := json.Marshal(struct {
+		Timestamp string                `json:"timestamp"`
+		Kind      string                `json:"kind"`
+		Events    []resultsCourierEvent `json:"events"`
+	}{time.Now().Format(time.RFC3339), "results_courier.detected", events})
+	fmt.Println(string(out))
+
+	receipt := deliver(ctx, opCtx, orchestratorName, events)
+	receiptErr := appendCourierReceipt(stateDir, receipt)
+	receiptOut, _ := json.Marshal(receipt)
+	fmt.Println(string(receiptOut))
+
+	if !courierDeliverySucceeded(receipt) {
+		if receiptErr != nil {
+			return fmt.Errorf("all notification channels failed; append receipt: %w", receiptErr)
+		}
+		return fmt.Errorf("all notification channels failed; cursor retained for retry")
+	}
+	if err := saveCourierState(statePath, candidate); err != nil {
+		return fmt.Errorf("notification delivered but save state: %w", err)
+	}
+	*st = candidate
+	if receiptErr != nil {
+		return fmt.Errorf("notification delivered but append receipt: %w", receiptErr)
+	}
+	return nil
 }
 
 // startResultsCourier runs the poll-detect-notify loop on its own ticker
@@ -389,31 +516,17 @@ func startResultsCourier(ctx context.Context, opCtx *ops.OpContext, home, orches
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			events, err := scanClaudeProjects(home, idleGrace, &st)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "results-courier: scan error: %v\n", err)
-				continue
+			if err := processResultsCourierTick(
+				ctx,
+				opCtx,
+				home,
+				orchestratorName,
+				idleGrace,
+				&st,
+				deliverCourierResults,
+			); err != nil {
+				fmt.Fprintf(os.Stderr, "results-courier: %v\n", err)
 			}
-			if saveErr := saveCourierState(statePath, st); saveErr != nil {
-				fmt.Fprintf(os.Stderr, "results-courier: state save error: %v\n", saveErr)
-			}
-			if len(events) == 0 {
-				continue
-			}
-
-			out, _ := json.Marshal(struct {
-				Timestamp string                `json:"timestamp"`
-				Kind      string                `json:"kind"`
-				Events    []resultsCourierEvent `json:"events"`
-			}{time.Now().Format(time.RFC3339), "results_courier.detected", events})
-			fmt.Println(string(out))
-
-			receipt := deliverCourierResults(ctx, opCtx, orchestratorName, events)
-			if recErr := appendCourierReceipt(stateDir, receipt); recErr != nil {
-				fmt.Fprintf(os.Stderr, "results-courier: receipt write error: %v\n", recErr)
-			}
-			receiptOut, _ := json.Marshal(receipt)
-			fmt.Println(string(receiptOut))
 		}
 	}
 }

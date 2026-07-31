@@ -114,11 +114,13 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	// and notify Valentin directly, since nothing else does. See
 	// results_courier.go for why this lives here rather than as its own
 	// launchd job.
-	if home, herr := os.UserHomeDir(); herr == nil {
-		go startResultsCourier(ctx, opCtx, home, stalledOrchestratorName,
-			resultsCourierCheckInterval, resultsCourierIdleGrace)
-	} else {
-		fmt.Fprintf(os.Stderr, "results-courier: could not resolve home dir, courier disabled: %v\n", herr)
+	if !stalledDryRun {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			go startResultsCourier(ctx, opCtx, home, stalledOrchestratorName,
+				resultsCourierCheckInterval, resultsCourierIdleGrace)
+		} else {
+			fmt.Fprintf(os.Stderr, "results-courier: could not resolve home dir, courier disabled: %v\n", herr)
+		}
 	}
 
 	// Main watch loop
