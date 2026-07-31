@@ -51,6 +51,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-15** When AGM resolves an executable or stages a private handoff path that will be interpolated into a pasted pane command, the system shall reject invalid UTF-8 and terminal control characters in that generated value before building or delivering the command.
 
+**HEXEC-16** When a trusted AGM launch prepares a Codex worker with host-authorized write roots, the system shall carry the derived `AGM_WORKER_WRITE_ROOTS_JSON` value through the owner-only private handoff into the Codex child environment, independent of long-lived tmux server state; when the caller omits the value, stale pane or tmux state shall not recreate it.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
