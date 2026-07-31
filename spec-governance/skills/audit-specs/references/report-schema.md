@@ -193,7 +193,9 @@ non-candidates; `candidate_count` counts only `candidates`.
   owner must not exist at the pinned revision or appear in the current-owner
   set. Both states require a selection rationale.
 - Every selected BDD feature exists in the pinned tree and reciprocally links
-  every current owner in both directions.
+  at least one current owner in both directions. Every current owner is covered
+  by at least one selected feature; the selected features need not form a false
+  Cartesian product with every owner.
 - `active-members` findings cover every pinned member with exact evidence.
   `implementation-only` findings state a rationale and cannot hide a harness
   configuration owner.

@@ -10,7 +10,7 @@
 
 **SPECAUDIT-04** When report validation checks a finding, the system shall require the current-owner set to equal the exact pinned requirement-evidence paths, require authenticated evidence for an existing proposed owner, and reject incomplete ownership rationale, ranks, applicability, or unsafe positive verdicts.
 
-**SPECAUDIT-05** When report validation checks BDD impact, the system shall require every selected feature to exist at the pinned revision and to reciprocally reference every current owner in both the specification and feature metadata.
+**SPECAUDIT-05** When report validation checks BDD impact, the system shall require every selected feature to exist at the pinned revision and reciprocally reference at least one current owner in both directions, and shall require every current owner to be reciprocally represented by at least one selected feature.
 
 **SPECAUDIT-06** When rendering an authenticated audit artifact, the system shall emit self-contained offline HTML that escapes evidence and retains every decision field, owner topology, applicability row, BDD path, exclusion, methodology fact, and limitation.
 
