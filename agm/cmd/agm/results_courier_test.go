@@ -850,7 +850,7 @@ func TestCourierRelayPromptNeverContainsTranscriptText(t *testing.T) {
 
 func TestLastAssistantTextSuppressesCourierRelayTurn(t *testing.T) {
 	lines := []string{
-		`{"type":"user","message":{"content":"RESULTS COURIER RELAY: push once"}}`,
+		courierRelayUserLine(t, 1),
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"push delivered"}]}}`,
 	}
 	if got := lastAssistantText(lines); got != "" {
@@ -867,7 +867,7 @@ func TestLastAssistantTextSuppressesCourierRelayTurn(t *testing.T) {
 
 func TestCourierAssistantTextCarriesRelaySuppressionAcrossScans(t *testing.T) {
 	headline, pending := courierAssistantText(
-		[]string{`{"type":"user","message":{"content":"RESULTS COURIER RELAY: push once"}}`},
+		[]string{courierRelayUserLine(t, 1)},
 		false,
 	)
 	if headline != "" || !pending {
@@ -884,7 +884,7 @@ func TestCourierAssistantTextCarriesRelaySuppressionAcrossScans(t *testing.T) {
 
 func TestCourierAssistantTextCarriesRelaySuppressionAcrossToolResultScans(t *testing.T) {
 	headline, pending := courierAssistantText(
-		[]string{`{"type":"user","message":{"content":"RESULTS COURIER RELAY: push once"}}`},
+		[]string{courierRelayUserLine(t, 1)},
 		false,
 	)
 	if headline != "" || !pending {
@@ -928,6 +928,50 @@ func TestCourierAssistantTextDoesNotArmRelaySuppressionFromToolResultMarker(t *t
 	if headline != "ordinary completion" || pending {
 		t.Fatalf("completion after ordinary tool result = (%q, %v), want delivered completion", headline, pending)
 	}
+}
+
+func TestCourierAssistantTextDoesNotArmRelaySuppressionFromOrdinaryMarkerMention(t *testing.T) {
+	headline, pending := courierAssistantText(
+		[]string{`{"type":"user","message":{"content":"Please inspect the RESULTS COURIER RELAY: source code."}}`},
+		false,
+	)
+	if headline != "" || pending {
+		t.Fatalf("ordinary marker mention = (%q, %v), want empty headline without relay suppression", headline, pending)
+	}
+	headline, pending = courierAssistantText(
+		[]string{`{"type":"assistant","message":{"content":[{"type":"text","text":"ordinary completion"}],"stop_reason":"end_turn"}}`},
+		pending,
+	)
+	if headline != "ordinary completion" || pending {
+		t.Fatalf("completion after ordinary marker mention = (%q, %v), want delivered completion", headline, pending)
+	}
+}
+
+func TestCourierAssistantTextRecognizesStructuredRelayPrompt(t *testing.T) {
+	content := []map[string]any{{"type": "text", "text": courierRelayPrompt(2)}}
+	data, err := json.Marshal(map[string]any{
+		"type":    "user",
+		"message": map[string]any{"content": content},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headline, pending := courierAssistantText([]string{string(data)}, false)
+	if headline != "" || !pending {
+		t.Fatalf("structured relay prompt = (%q, %v), want empty headline and pending suppression", headline, pending)
+	}
+}
+
+func courierRelayUserLine(t *testing.T, eventCount int) string {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{
+		"type":    "user",
+		"message": map[string]any{"content": courierRelayPrompt(eventCount)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestProcessResultsCourierTickRetriesAfterTotalDeliveryFailure(t *testing.T) {

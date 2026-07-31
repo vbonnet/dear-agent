@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -180,7 +181,7 @@ func courierAssistantText(lines []string, relayPending bool) (string, bool) {
 				headline = ""
 				continue
 			}
-			relayPending = strings.Contains(rawLine, resultsCourierRelayMarker)
+			relayPending = courierUserIsRelayPrompt(entry.Message.Content)
 			headline = ""
 		case "tool_use", "tool_result":
 			headline = ""
@@ -202,6 +203,32 @@ func courierUserContainsToolResult(content json.RawMessage) bool {
 		}
 	}
 	return false
+}
+
+func courierUserIsRelayPrompt(content json.RawMessage) bool {
+	var text string
+	if json.Unmarshal(content, &text) != nil {
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(content, &blocks) != nil ||
+			len(blocks) != 1 ||
+			blocks[0].Type != "text" {
+			return false
+		}
+		text = blocks[0].Text
+	}
+	if !strings.HasPrefix(text, resultsCourierRelayPromptPrefix) ||
+		!strings.HasSuffix(text, resultsCourierRelayPromptSuffix) {
+		return false
+	}
+	countText := strings.TrimSuffix(
+		strings.TrimPrefix(text, resultsCourierRelayPromptPrefix),
+		resultsCourierRelayPromptSuffix,
+	)
+	eventCount, err := strconv.Atoi(countText)
+	return err == nil && eventCount > 0 && text == courierRelayPrompt(eventCount)
 }
 
 func completedAssistantText(content json.RawMessage, stopReason string) (string, bool) {
@@ -838,14 +865,16 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 // and fixed mobile message; the typed desktop dispatcher above owns the
 // human-readable transcript content.
 func courierRelayPrompt(eventCount int) string {
-	return fmt.Sprintf(
-		resultsCourierRelayMarker+" call the PushNotification tool once with status "+
-			"\"proactive\" and exactly this message, then stop: Results courier "+
-			"detected %d completed session(s). Review the typed desktop notification "+
-			"or the local results-courier receipt trail. Do not read or relay transcript content.",
-		eventCount,
-	)
+	return fmt.Sprintf("%s%d%s", resultsCourierRelayPromptPrefix, eventCount, resultsCourierRelayPromptSuffix)
 }
+
+const (
+	resultsCourierRelayPromptPrefix = resultsCourierRelayMarker +
+		" call the PushNotification tool once with status \"proactive\" and exactly this message, " +
+		"then stop: Results courier detected "
+	resultsCourierRelayPromptSuffix = " completed session(s). Review the typed desktop notification " +
+		"or the local results-courier receipt trail. Do not read or relay transcript content."
+)
 
 func courierDeliverySucceeded(receipt courierDeliveryReceipt) bool {
 	return receipt.DesktopSent || receipt.RelaySent
