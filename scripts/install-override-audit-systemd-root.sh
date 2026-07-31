@@ -11,8 +11,8 @@ trap 'cleanup "$?"' EXIT
 trap 'forward HUP 129' HUP
 trap 'forward INT 130' INT
 trap 'forward TERM 143' TERM
-/usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec
-staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit-systemd-installer.XXXXXX)
+trusted_parent=/root; for dir in / "$trusted_parent"; do test -d "$dir" && test ! -L "$dir" && test "$(/usr/bin/stat -c '%u' "$dir")" = 0 && mode_bits=$(/usr/bin/stat -c '%a' "$dir") && test "$((0$mode_bits & 0022))" -eq 0 || exit 2; done; trusted_dir=$trusted_parent/.dear-agent-override-audit; /usr/bin/install -d -o root -g "$root_gid" -m 0700 "$trusted_dir"
+staging=$(/usr/bin/mktemp "$trusted_dir/.systemd-installer.XXXXXX")
 /usr/bin/install -o root -g "$root_gid" -m 0755 "$helper_artifact" "$staging"
 staged_hash=$(/usr/bin/openssl dgst -sha256 -r "$staging"); staged_hash=${staged_hash%% *}; test "$staged_hash" = "$expected_helper_hash"
 "$staging" "$root_gid" "$4" "$5" "$6" "$7" "$8" "$9" & child=$!

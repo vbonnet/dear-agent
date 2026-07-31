@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -38,6 +40,7 @@ type Config struct {
 	auditLive   string
 	serviceLive string
 	timerLive   string
+	trustRoot   string
 
 	reload func(context.Context) error
 }
@@ -61,6 +64,7 @@ func NewConfig(
 		auditLive:           auditLive,
 		serviceLive:         serviceLive,
 		timerLive:           timerLive,
+		trustRoot:           "/",
 		reload: func(ctx context.Context) error {
 			output, err := exec.CommandContext(ctx, "/usr/bin/systemctl", "daemon-reload").CombinedOutput()
 			if err != nil {
@@ -81,7 +85,7 @@ func (config Config) validate() error {
 	}
 	for name, path := range map[string]string{
 		"audit artifact": config.auditArtifact, "service artifact": config.serviceArtifact,
-		"timer artifact": config.timerArtifact,
+		"timer artifact": config.timerArtifact, "trust root": config.trustRoot,
 	} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return fmt.Errorf("%s must be a clean absolute path", name)
@@ -164,15 +168,29 @@ func (tx *transaction) run(ctx context.Context) error {
 }
 
 func (tx *transaction) prepareDestination() error {
-	if err := os.MkdirAll(filepath.Dir(tx.config.auditLive), 0o755); err != nil {
+	directory := filepath.Dir(tx.config.auditLive)
+	if err := verifyTrustedAncestry(
+		filepath.Dir(directory), tx.config.trustRoot, tx.config.rootUID,
+	); err != nil {
+		return fmt.Errorf("verify audit executable parent ancestry: %w", err)
+	}
+	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return fmt.Errorf("create audit executable directory: %w", err)
 	}
 	// This root-owned executable directory is intentionally searchable by unprivileged services.
-	if err := os.Chmod(filepath.Dir(tx.config.auditLive), 0o755); err != nil { //nolint:gosec // system executable directory
+	if err := os.Chmod(directory, 0o755); err != nil { //nolint:gosec // system executable directory
 		return fmt.Errorf("set audit executable directory mode: %w", err)
 	}
-	if err := os.Chown(filepath.Dir(tx.config.auditLive), tx.config.rootUID, tx.config.rootGID); err != nil {
+	if err := os.Chown(directory, tx.config.rootUID, tx.config.rootGID); err != nil {
 		return fmt.Errorf("set audit executable directory owner: %w", err)
+	}
+	if err := verifyTrustedAncestry(directory, tx.config.trustRoot, tx.config.rootUID); err != nil {
+		return fmt.Errorf("verify audit executable ancestry: %w", err)
+	}
+	if err := verifyTrustedAncestry(
+		filepath.Dir(tx.config.serviceLive), tx.config.trustRoot, tx.config.rootUID,
+	); err != nil {
+		return fmt.Errorf("verify systemd unit ancestry: %w", err)
 	}
 	return nil
 }
@@ -400,6 +418,40 @@ func removeIfPresent(path string) error {
 func checkContext(ctx context.Context) error {
 	if err := context.Cause(ctx); err != nil {
 		return fmt.Errorf("installation interrupted: %w", err)
+	}
+	return nil
+}
+
+func verifyTrustedAncestry(path, boundary string, ownerUID int) error {
+	path = filepath.Clean(path)
+	boundary = filepath.Clean(boundary)
+	relative, err := filepath.Rel(boundary, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s is outside trusted boundary %s", path, boundary)
+	}
+	current := boundary
+	components := []string{boundary}
+	if relative != "." {
+		for part := range strings.SplitSeq(relative, string(filepath.Separator)) {
+			current = filepath.Join(current, part)
+			components = append(components, current)
+		}
+	}
+	for _, component := range components {
+		info, err := os.Lstat(component)
+		if err != nil {
+			return fmt.Errorf("inspect %s: %w", component, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("%s must be a real directory", component)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || int(stat.Uid) != ownerUID {
+			return fmt.Errorf("%s must be owned by uid %d", component, ownerUID)
+		}
+		if info.Mode().Perm()&0o022 != 0 {
+			return fmt.Errorf("%s must not be group- or world-writable", component)
+		}
 	}
 	return nil
 }

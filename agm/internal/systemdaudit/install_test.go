@@ -178,7 +178,36 @@ func testConfig(t *testing.T, audit, service, timer []byte) Config {
 	config.auditLive = filepath.Join(liveDir, "audit-live")
 	config.serviceLive = filepath.Join(liveDir, "service-live")
 	config.timerLive = filepath.Join(liveDir, "timer-live")
+	config.trustRoot = root
 	return config
+}
+
+func TestVerifyTrustedAncestryRejectsWritableAndSymlinkedDirectories(t *testing.T) {
+	root := t.TempDir()
+	safe := filepath.Join(root, "safe")
+	writable := filepath.Join(root, "writable")
+	if err := os.Mkdir(safe, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(writable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(writable, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyTrustedAncestry(safe, root, os.Getuid()); err != nil {
+		t.Fatalf("safe ancestry rejected: %v", err)
+	}
+	if err := verifyTrustedAncestry(writable, root, os.Getuid()); err == nil {
+		t.Fatal("world-writable ancestry accepted")
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(safe, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyTrustedAncestry(link, root, os.Getuid()); err == nil {
+		t.Fatal("symlinked ancestry accepted")
+	}
 }
 
 func digest(content []byte) string {

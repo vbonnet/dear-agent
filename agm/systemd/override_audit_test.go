@@ -64,6 +64,12 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	install := makefile[start:end]
 	rootInstaller := readUnit(t, filepath.Join(root, "scripts", "install-override-audit-systemd-root.sh"))
 	for _, required := range []string{
+		`privileged_child=""`,
+		`forward_privileged() { signal=$$1; status=$$2;`,
+		`trap 'forward_privileged TERM 143' TERM`,
+		`/bin/kill "-$$signal" "$$privileged_child"`,
+		`& privileged_child=$$!`,
+		`wait "$$privileged_child"`,
 		`root_installer="$$(/bin/cat "$$root_installer_path")"`,
 		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
 		`expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"`,
@@ -118,8 +124,11 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 		`trap 'forward HUP 129' HUP`,
 		`trap 'forward INT 130' INT`,
 		`trap 'forward TERM 143' TERM`,
-		`/usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec`,
-		`staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit-systemd-installer.XXXXXX)`,
+		`trusted_parent=/root; for dir in / "$trusted_parent"; do`,
+		`test ! -L "$dir"`,
+		`test "$((0$mode_bits & 0022))" -eq 0`,
+		`/usr/bin/install -d -o root -g "$root_gid" -m 0700 "$trusted_dir"`,
+		`staging=$(/usr/bin/mktemp "$trusted_dir/.systemd-installer.XXXXXX")`,
 		`/usr/bin/install -o root -g "$root_gid" -m 0755 "$helper_artifact" "$staging"`,
 		`test "$staged_hash" = "$expected_helper_hash"`,
 		`"$staging" "$root_gid" "$4" "$5" "$6" "$7" "$8" "$9" & child=$!`,
@@ -138,6 +147,9 @@ func TestOverrideAuditInstallTargetsSystemManager(t *testing.T) {
 	}
 	if strings.Contains(rootInstaller, "sudo") {
 		t.Fatal("fixed root installer recursively invokes sudo")
+	}
+	if strings.Contains(rootInstaller, "/usr/local/libexec/.dear-agent-override-audit-systemd-installer") {
+		t.Fatal("fixed root bootstrap stages its executable beneath mutable /usr/local ancestry")
 	}
 	if !strings.Contains(rootInstaller, `/bin/kill "-$signal" "$child"`) {
 		t.Fatal("fixed root bootstrap does not forward termination signals to the transaction helper")

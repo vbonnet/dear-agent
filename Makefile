@@ -1194,12 +1194,13 @@ install-override-audit-launchdaemon: build-agm build-override-audit-launchdaemon
 		repo_root="$$(pwd -P)"; \
 		audit_artifact="$$repo_root/bin/agm"; \
 		helper_artifact="$$repo_root/bin/dear-agent-override-audit-launchdaemon-installer"; \
-		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
+		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; privileged_child=""; \
 		cleanup_plist_candidate() { status=$$1; trap - EXIT HUP INT TERM; /bin/rm -f "$$plist_candidate"; exit "$$status"; }; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; privileged_child=""; }; cleanup_plist_candidate "$$status"; }; \
 		trap 'cleanup_plist_candidate $$?' EXIT; \
-		trap 'cleanup_plist_candidate 129' HUP; \
-		trap 'cleanup_plist_candidate 130' INT; \
-		trap 'cleanup_plist_candidate 143' TERM; \
+		trap 'forward_privileged HUP 129' HUP; \
+		trap 'forward_privileged INT 130' INT; \
+		trap 'forward_privileged TERM 143' TERM; \
 		root_installer_path="$$repo_root/scripts/install-override-audit-launchdaemon-root.sh"; \
 		test -f "$$root_installer_path" || { echo "missing fixed privileged bootstrap: $$root_installer_path" >&2; exit 2; }; \
 		root_installer="$$(/bin/cat "$$root_installer_path")"; \
@@ -1225,13 +1226,14 @@ install-override-audit-launchdaemon: build-agm build-override-audit-launchdaemon
 		installer_marker="dear-agent-override-audit-launchdaemon-installer"; set +e; \
 		printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" \
 			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
-			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash" >/dev/null 2>&1; \
-		probe_status=$$?; set -e; \
+			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
 		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
 		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
 		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" \
 			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
-			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash"; \
+			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; \
 		/bin/rm -f "$$plist_candidate"; plist_candidate=""; trap - EXIT HUP INT TERM; \
 		echo "Installed digest-bound root-owned audit executable and system LaunchDaemon"; \
 		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \
@@ -1275,6 +1277,11 @@ install-override-audit-systemd: build-agm build-override-audit-systemd-installer
 		service_artifact="$$repo_root/agm/systemd/dear-agent-override-audit@.service"; \
 		timer_artifact="$$repo_root/agm/systemd/dear-agent-override-audit@.timer"; \
 		helper_artifact="$$repo_root/bin/dear-agent-override-audit-systemd-installer"; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; \
+		trap 'forward_privileged INT 130' INT; \
+		trap 'forward_privileged TERM 143' TERM; \
 		root_installer_path="$$repo_root/scripts/install-override-audit-systemd-root.sh"; \
 		test -f "$$root_installer_path" || { echo "missing fixed privileged installer: $$root_installer_path" >&2; exit 2; }; \
 		root_installer="$$(/bin/cat "$$root_installer_path")"; \
@@ -1314,8 +1321,8 @@ install-override-audit-systemd: build-agm build-override-audit-systemd-installer
 		printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" \
 			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
 			"$$audit_artifact" "$$service_artifact" "$$timer_artifact" \
-			"$$expected_audit_hash" "$$expected_service_hash" "$$expected_timer_hash" >/dev/null 2>&1; \
-		probe_status=$$?; \
+			"$$expected_audit_hash" "$$expected_service_hash" "$$expected_timer_hash" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; \
 		set -e; \
 		if test "$$probe_status" = 42; then \
 			echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; \
@@ -1325,7 +1332,8 @@ install-override-audit-systemd: build-agm build-override-audit-systemd-installer
 		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" \
 			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
 			"$$audit_artifact" "$$service_artifact" "$$timer_artifact" \
-			"$$expected_audit_hash" "$$expected_service_hash" "$$expected_timer_hash"; \
+			"$$expected_audit_hash" "$$expected_service_hash" "$$expected_timer_hash" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
 		echo "Installed digest-bound root-owned audit executable and system unit templates"; \
 		echo "Review, activate, and monitor them yourself (ask-gated host actions):"; \
 		echo "  sudo systemctl enable --now dear-agent-override-audit@$$operator_user.timer"; \

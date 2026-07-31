@@ -24,6 +24,12 @@ func TestOverrideAuditInstallUsesOneNonCachingPrivilegedTransaction(t *testing.T
 	}
 	install := makefile[start:end]
 	for _, required := range []string{
+		`privileged_child=""`,
+		`forward_privileged() { signal=$$1; status=$$2;`,
+		`trap 'forward_privileged TERM 143' TERM`,
+		`/bin/kill "-$$signal" "$$privileged_child"`,
+		`& privileged_child=$$!`,
+		`wait "$$privileged_child"`,
 		`root_installer="$$(/bin/cat "$$root_installer_path")"`,
 		`expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"`,
 		`expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"`,
@@ -67,8 +73,11 @@ func TestOverrideAuditInstallUsesOneNonCachingPrivilegedTransaction(t *testing.T
 		`trap 'forward HUP 129' HUP`,
 		`trap 'forward INT 130' INT`,
 		`trap 'forward TERM 143' TERM`,
-		`/usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec`,
-		`staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit-launchdaemon-installer.XXXXXX)`,
+		`trusted_parent=/private/var/root; for dir in /private /private/var "$trusted_parent"; do`,
+		`test ! -L "$dir"`,
+		`test "$((0$mode_bits & 0022))" -eq 0`,
+		`/usr/bin/install -d -o root -g "$root_gid" -m 0700 "$trusted_dir"`,
+		`staging=$(/usr/bin/mktemp "$trusted_dir/.launchdaemon-installer.XXXXXX")`,
 		`/usr/bin/install -o root -g "$root_gid" -m 0755 "$helper_artifact" "$staging"`,
 		`test "$staged_hash" = "$expected_helper_hash"`,
 		`"$staging" "$root_gid" "$4" "$5" "$6" "$7" & child=$!`,
@@ -87,6 +96,9 @@ func TestOverrideAuditInstallUsesOneNonCachingPrivilegedTransaction(t *testing.T
 	}
 	if strings.Contains(rootInstaller, "sudo") {
 		t.Fatal("fixed LaunchDaemon root bootstrap recursively invokes sudo")
+	}
+	if strings.Contains(rootInstaller, "/usr/local/libexec/.dear-agent-override-audit-launchdaemon-installer") {
+		t.Fatal("fixed LaunchDaemon root bootstrap stages its executable beneath mutable /usr/local ancestry")
 	}
 	if !strings.Contains(rootInstaller, `/bin/kill "-$signal" "$child"`) {
 		t.Fatal("fixed LaunchDaemon root bootstrap does not forward termination signals to the transaction helper")
