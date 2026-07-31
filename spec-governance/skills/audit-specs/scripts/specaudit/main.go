@@ -597,8 +597,8 @@ func activeMembers(root, commit string) ([]string, []string) {
 }
 
 func git(root string, args ...string) (string, error) {
-	command := exec.Command("git", append([]string{"-C", root}, args...)...)
-	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	command := exec.Command("git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
+	command.Env = append(os.Environ(), "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
