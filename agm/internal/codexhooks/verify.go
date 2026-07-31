@@ -1199,6 +1199,12 @@ func staticAWKProgram(args []*syntax.Word) (string, bool) {
 }
 
 func awkOptionLoadsExternalCode(value string) bool {
+	// gawk accepts -W exec=file and -Wexec=file as compatibility aliases for
+	// file-loading options. Treat every -W form as unsafe because the
+	// implementation-specific operand set can grow across awk variants.
+	if value == "-W" || strings.HasPrefix(value, "-W") {
+		return true
+	}
 	longName, _, _ := strings.Cut(value, "=")
 	for _, fullName := range []string{"--exec", "--file", "--include", "--load"} {
 		if len(longName) > 2 &&
@@ -1227,12 +1233,6 @@ func sedUsesCommandExecution(command string, args []*syntax.Word) bool {
 		return false
 	}
 
-	if len(args) > 0 {
-		first, static := staticShellWord(args[0])
-		if static && first == "--sandbox" {
-			return false
-		}
-	}
 	programs, static := staticSedPrograms(args)
 	if !static {
 		return true
@@ -1519,7 +1519,7 @@ func safeSedOption(value string) bool {
 	switch value {
 	case "-n", "-E", "-r", "-u", "-z", "-s",
 		"--quiet", "--silent", "--regexp-extended", "--posix",
-		"--separate", "--unbuffered", "--null-data":
+		"--separate", "--unbuffered", "--null-data", "--sandbox":
 		return true
 	default:
 		return false

@@ -776,8 +776,8 @@ func recordLocalUses(path string, data []byte) error {
 	return nil
 }
 
-// LoadUses reads recorded uses at or after since. A malformed line is skipped
-// rather than fatal so one bad record cannot blind the whole audit.
+// LoadUses reads recorded uses at or after since. A malformed line fails the
+// audit rather than silently undercounting uses and hiding a breach.
 func LoadUses(since time.Time) ([]Use, error) {
 	if err := validateLedgerPath(LedgerPath()); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -793,13 +793,15 @@ func LoadUses(since time.Time) ([]Use, error) {
 		return nil, fmt.Errorf("read override ledger: %w", err)
 	}
 	var uses []Use
+	lineNumber := 0
 	for line := range strings.SplitSeq(string(data), "\n") {
+		lineNumber++
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		recorded, err := DecodeLedgerUses([]byte(line + "\n"))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("decode override ledger record at line %d: %w", lineNumber, err)
 		}
 		for _, use := range recorded {
 			if use.AtUTC.Before(since) {

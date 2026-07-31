@@ -219,6 +219,20 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 	}
 }
 
+func TestLoadUsesRejectsMalformedLedgerRecord(t *testing.T) {
+	configureTestStore(t)
+	if err := os.MkdirAll(filepath.Dir(LedgerPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LedgerPath(), []byte("{\"kind\":\"admission-brake\",\"reason\":\"disk watchdog clobbered the SRE hold, verifying the fix once\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadUses(time.Time{}); !errors.Is(err, ErrLedgerRecord) ||
+		!strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("LoadUses error = %v, want malformed line 1 rejection", err)
+	}
+}
+
 func TestCodexHookGrantIsBoundToReviewedBytes(t *testing.T) {
 	configureTestStore(t)
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
