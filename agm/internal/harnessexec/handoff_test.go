@@ -166,6 +166,7 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *te
 		"TERM=dumb", "COLORTERM=stale-caller-color",
 		"TERM_PROGRAM=CodexDesktop", "TERM_PROGRAM_VERSION=0.0",
 		"OPENAI_API_KEY=caller-openai", "CODEX_ACCESS_TOKEN=caller-codex",
+		CodexWorkerWriteRootsEnv + `=["/caller/worktree","/caller/satellite.git"]`,
 		"ANTHROPIC_API_KEY=rejected-anthropic",
 	})
 	if err != nil {
@@ -193,15 +194,16 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *te
 	}
 	values := environmentMap(childEnvironment)
 	for name, want := range map[string]string{
-		"OPENAI_API_KEY":       "caller-openai",
-		"CODEX_ACCESS_TOKEN":   "caller-codex",
-		"TMUX":                 "live-pane-tmux",
-		"TMUX_PANE":            "%9",
-		"TERM":                 "tmux-256color",
-		"COLORTERM":            "truecolor",
-		"TERM_PROGRAM":         "tmux",
-		"TERM_PROGRAM_VERSION": "3.6a",
-		"PWD":                  "/tmp/work",
+		"OPENAI_API_KEY":         "caller-openai",
+		"CODEX_ACCESS_TOKEN":     "caller-codex",
+		"TMUX":                   "live-pane-tmux",
+		"TMUX_PANE":              "%9",
+		"TERM":                   "tmux-256color",
+		"COLORTERM":              "truecolor",
+		"TERM_PROGRAM":           "tmux",
+		"TERM_PROGRAM_VERSION":   "3.6a",
+		"PWD":                    "/tmp/work",
+		CodexWorkerWriteRootsEnv: `["/caller/worktree","/caller/satellite.git"]`,
 	} {
 		if got := values[name]; got != want {
 			t.Errorf("Codex child %s = %q, want %q", name, got, want)
@@ -321,6 +323,7 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "stale-pane-openai")
 	t.Setenv("CODEX_ACCESS_TOKEN", "stale-pane-codex")
+	t.Setenv(CodexWorkerWriteRootsEnv, `["/stale/pane"]`)
 
 	originalExecutablePath := executablePath
 	originalLookPathInEnvironment := lookPathInEnvironment
@@ -351,7 +354,7 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 		t.Fatalf("run prepared Codex command: %v", err)
 	}
 	values := environmentMap(childEnvironment)
-	for _, name := range []string{"OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"} {
+	for _, name := range []string{"OPENAI_API_KEY", "CODEX_ACCESS_TOKEN", CodexWorkerWriteRootsEnv} {
 		if value, ok := values[name]; ok {
 			t.Errorf("Codex child retained caller-absent %s=%q from stale pane", name, value)
 		}
