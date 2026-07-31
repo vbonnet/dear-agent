@@ -181,6 +181,9 @@ func TestScanClaudeProjectsDetectsSameInodeSameSizeRewrite(t *testing.T) {
 	if prior.BoundaryHash == "" {
 		t.Fatal("baseline omitted its boundary fingerprint")
 	}
+	if prior.ContentHash == "" || prior.HashState == "" {
+		t.Fatal("baseline omitted its full-content fingerprint state")
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -227,6 +230,9 @@ func TestScanClaudeProjectsDetectsRewriteBeforeUnchangedBoundaryWindow(t *testin
 		t.Fatalf("baseline: %v", err)
 	}
 	prior := st.Files[path]
+	if prior.ContentHash == "" || prior.HashState == "" {
+		t.Fatal("baseline omitted its full-content fingerprint state")
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -257,6 +263,102 @@ func TestScanClaudeProjectsDetectsRewriteBeforeUnchangedBoundaryWindow(t *testin
 	}
 	if len(events) != 1 || !strings.HasPrefix(events[0].Headline, "new completion ") {
 		t.Fatalf("rewrite events = %+v", events)
+	}
+}
+
+func TestScanClaudeProjectsDoesNotReportMetadataOnlyGenerationChange(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "touched-session.jsonl")
+	writeJSONLLine(t, path, "assistant", "already reported completion")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+	touchedTime := time.Unix(0, prior.ModifiedAt).Add(time.Second)
+	if err := os.Chtimes(path, touchedTime, touchedTime); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("touch scan: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("metadata-only generation change produced events: %+v", events)
+	}
+	if updated := st.Files[path]; updated.ModifiedAt != touchedTime.UnixNano() {
+		t.Fatalf("modified generation = %d, want %d", updated.ModifiedAt, touchedTime.UnixNano())
+	}
+}
+
+func TestCourierContentFingerprintExtendsPersistedHashState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeJSONLLine(t, path, "assistant", "first completion")
+	initialInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialHash, initialState, err := courierContentFingerprint(
+		path,
+		initialInfo.Size(),
+		courierFileState{},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeJSONLLine(t, path, "assistant", "second completion")
+	appendedInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incrementalHash, incrementalState, err := courierContentFingerprint(
+		path,
+		appendedInfo.Size(),
+		courierFileState{
+			Size:        initialInfo.Size(),
+			ContentHash: initialHash,
+			HashState:   initialState,
+		},
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullHash, fullState, err := courierContentFingerprint(
+		path,
+		appendedInfo.Size(),
+		courierFileState{},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incrementalHash != fullHash || incrementalState != fullState {
+		t.Fatalf("incremental fingerprint differs from full fingerprint: %q/%q", incrementalHash, fullHash)
+	}
+	fallbackHash, fallbackState, err := courierContentFingerprint(
+		path,
+		appendedInfo.Size(),
+		courierFileState{
+			Size:        initialInfo.Size(),
+			ContentHash: initialHash,
+			HashState:   "not-base64",
+		},
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallbackHash != fullHash || fallbackState != fullState {
+		t.Fatalf("invalid persisted state did not fall back to full fingerprint: %q/%q", fallbackHash, fullHash)
 	}
 }
 

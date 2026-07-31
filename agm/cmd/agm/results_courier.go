@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,6 +64,8 @@ type courierFileState struct {
 	Identity     string `json:"identity,omitempty"`
 	ModifiedAt   int64  `json:"modified_at_unix_nano,omitempty"`
 	BoundaryHash string `json:"boundary_hash,omitempty"`
+	ContentHash  string `json:"content_hash,omitempty"`
+	HashState    string `json:"hash_state,omitempty"`
 }
 
 // courierState is the full on-disk cursor: last-seen watermark per
@@ -298,20 +302,10 @@ func scanClaudeTranscript(
 		path,
 	)
 	if known && info.Size() == prev.Size && !replaced {
-		updated := prev
-		updated.Identity = identity
-		updated.ModifiedAt = modifiedAt
-		if updated.BoundaryHash == "" {
-			boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
-			if err != nil {
-				return nil, false
-			}
-			updated.BoundaryHash = boundaryHash
+		if err := refreshCourierUnchangedState(path, info, identity, prev, st); err != nil {
+			return nil, false
 		}
-		if updated != prev {
-			st.Files[path] = updated
-		}
-		return nil, false // nothing new, cheap skip (no read)
+		return nil, false // nothing new
 	}
 	if initialBaseline && !known {
 		if err := seedCourierBaseline(path, info, identity, st); err != nil {
@@ -338,12 +332,23 @@ func scanClaudeTranscript(
 	if err != nil {
 		return nil, false
 	}
+	contentHash, hashState, err := courierContentFingerprint(
+		path,
+		info.Size(),
+		prev,
+		replaced,
+	)
+	if err != nil {
+		return nil, false
+	}
 	st.Files[path] = courierFileState{
 		Size:         info.Size(),
 		Line:         lineBase + len(lines),
 		Identity:     identity,
 		ModifiedAt:   modifiedAt,
 		BoundaryHash: boundaryHash,
+		ContentHash:  contentHash,
+		HashState:    hashState,
 	}
 	headline := lastAssistantText(lines)
 	if headline == "" {
@@ -356,6 +361,42 @@ func scanClaudeTranscript(
 		Headline:    truncateHeadline(headline, 220),
 		DetectedAt:  now,
 	}, false
+}
+
+func refreshCourierUnchangedState(
+	path string,
+	info os.FileInfo,
+	identity string,
+	previous courierFileState,
+	st *courierState,
+) error {
+	updated := previous
+	updated.Identity = identity
+	updated.ModifiedAt = info.ModTime().UnixNano()
+	if updated.BoundaryHash == "" {
+		boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
+		if err != nil {
+			return err
+		}
+		updated.BoundaryHash = boundaryHash
+	}
+	if updated.ContentHash == "" || updated.HashState == "" {
+		contentHash, hashState, err := courierContentFingerprint(
+			path,
+			info.Size(),
+			courierFileState{},
+			true,
+		)
+		if err != nil {
+			return err
+		}
+		updated.ContentHash = contentHash
+		updated.HashState = hashState
+	}
+	if updated != previous {
+		st.Files[path] = updated
+	}
+	return nil
 }
 
 func courierTranscriptReplaced(
@@ -377,7 +418,16 @@ func courierTranscriptReplaced(
 	if currentSize == previous.Size &&
 		previous.ModifiedAt != 0 &&
 		currentModifiedAt != previous.ModifiedAt {
-		return true
+		if previous.ContentHash == "" {
+			return false
+		}
+		contentHash, _, err := courierContentFingerprint(
+			path,
+			currentSize,
+			courierFileState{},
+			true,
+		)
+		return err != nil || contentHash != previous.ContentHash
 	}
 	if previous.BoundaryHash == "" {
 		return false
@@ -400,12 +450,23 @@ func seedCourierBaseline(
 	if err != nil {
 		return err
 	}
+	contentHash, hashState, err := courierContentFingerprint(
+		path,
+		info.Size(),
+		courierFileState{},
+		true,
+	)
+	if err != nil {
+		return err
+	}
 	st.Files[path] = courierFileState{
 		Size:         info.Size(),
 		Line:         len(lines),
 		Identity:     identity,
 		ModifiedAt:   info.ModTime().UnixNano(),
 		BoundaryHash: boundaryHash,
+		ContentHash:  contentHash,
+		HashState:    hashState,
 	}
 	return nil
 }
@@ -465,6 +526,64 @@ func courierBoundaryFingerprint(path string, end int64) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+// courierContentFingerprint extends a persisted SHA-256 state with only the
+// appended suffix during normal growth. A replacement or an equal-size
+// generation change hashes the observed file from byte zero so metadata-only
+// touches can be distinguished from content rewrites without making every
+// append reread the transcript prefix.
+func courierContentFingerprint(
+	path string,
+	end int64,
+	previous courierFileState,
+	replaced bool,
+) (string, string, error) {
+	f, err := os.Open(path) //#nosec G304 -- path comes from our own transcript glob
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", "", err
+	}
+	if end < 0 || end > info.Size() {
+		return "", "", fmt.Errorf("invalid transcript content boundary %d for size %d", end, info.Size())
+	}
+
+	hash := sha256.New()
+	start := int64(0)
+	if !replaced &&
+		previous.Size > 0 &&
+		previous.Size < end &&
+		previous.ContentHash != "" &&
+		previous.HashState != "" {
+		encodedState, decodeErr := base64.StdEncoding.DecodeString(previous.HashState)
+		candidate := sha256.New()
+		if decodeErr == nil {
+			decodeErr = candidate.(encoding.BinaryUnmarshaler).UnmarshalBinary(encodedState)
+		}
+		if decodeErr == nil &&
+			fmt.Sprintf("%x", candidate.Sum(nil)) == previous.ContentHash {
+			hash = candidate
+			start = previous.Size
+		}
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", "", err
+	}
+	if _, err := io.CopyN(hash, f, end-start); err != nil {
+		return "", "", err
+	}
+	hashState, err := hash.(encoding.BinaryMarshaler).MarshalBinary()
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)),
+		base64.StdEncoding.EncodeToString(hashState),
+		nil
 }
 
 // readLinesFrom reads only transcript bytes at or after offset. It returns the
