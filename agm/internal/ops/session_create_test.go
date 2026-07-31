@@ -969,7 +969,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
+	want := []string{"storage", "launch", "ready", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
@@ -1442,7 +1442,7 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	manifestPath, registrationAllowed, created, err := prepareCreateManifestDir(&CreateSessionRequest{
+	manifestPath, created, err := prepareCreateManifestDir(&CreateSessionRequest{
 		ManifestDir:         filepath.Join(blocker, "session"),
 		ManifestDirOptional: true,
 	})
@@ -1452,8 +1452,8 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 	if manifestPath != "" {
 		t.Fatalf("manifest path = %q, want empty path after optional mkdir failure", manifestPath)
 	}
-	if registrationAllowed || created {
-		t.Fatalf("registrationAllowed = %v, created = %v; want both false", registrationAllowed, created)
+	if created {
+		t.Fatalf("created = %v; want false", created)
 	}
 }
 

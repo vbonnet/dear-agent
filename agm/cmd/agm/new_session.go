@@ -37,9 +37,17 @@ var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
 var checkExpectedHarnessInputAndSend = tmux.CheckExpectedHarnessInputAndSend
 
 type cliCreateSessionRuntime struct {
+	prepare              func(context.Context, ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error)
 	launch               func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
 	bootstrapAgyIdentity func(context.Context, ops.AgyCreateIdentityBootstrap) error
 	complete             func(context.Context, ops.CreateSessionCompletion) error
+}
+
+func (r *cliCreateSessionRuntime) Prepare(ctx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+	if r.prepare == nil {
+		return input, nil
+	}
+	return r.prepare(ctx, input)
 }
 
 type cliCreateFinalizationRuntime struct {
@@ -167,31 +175,7 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 	announceFrameworkGuardrails(workDir)
 	announceAcceptanceCriteria(workDir)
 
-	sessionID := uuid.New().String() // Generate session ID early for sandbox
-	var sandboxInfo *manifest.SandboxConfig
-	defer func() {
-		if retErr != nil && sandboxInfo != nil {
-			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
-		}
-	}()
-
-	sandboxInfo, workDir, err = maybeProvisionSandbox(ctx, sessionID, workDir)
-	if err != nil {
-		return err
-	}
-
-	trustedAddDirs, guardPath, err := trustedAddDirsForSession(sessionName, roleName)
-	if err != nil {
-		return err
-	}
-	extraAddDirs, trustPreConfigured := collectExtraAddDirs(sandboxInfo, trustedAddDirs)
-	if err := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); err != nil {
-		return err
-	}
-	if err := configureProjectPermissions(workDir); err != nil {
-		return err
-	}
-
+	sessionID := uuid.New().String()
 	exists, retry, err := resolveTmuxSession(sessionName)
 	if err != nil {
 		return err
@@ -200,7 +184,7 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 		return createTmuxSessionAndStartClaude(ctx, retry)
 	}
 
-	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo, admission)
+	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, admission)
 }
 
 // runCreateSessionLifecycle adapts CLI presentation and readiness behavior to
@@ -209,11 +193,8 @@ func runCreateSessionLifecycle(
 	ctx context.Context,
 	sessionName, sessionID, workDir string,
 	exists bool,
-	extraAddDirs []string,
-	trustPreConfigured bool,
-	sandboxInfo *manifest.SandboxConfig,
 	admission *circuitBreakerAdmission,
-) error {
+) (retErr error) {
 	if harnessName == "codex-cli" {
 		if err := validateCodexCredentials(); err != nil {
 			return err
@@ -224,11 +205,47 @@ func runCreateSessionLifecycle(
 	if err != nil {
 		return err
 	}
-	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured, admission)
-	bypassCodexHookTrust, err := prepareCodexHookTrustBypass(ctx, sandboxInfo)
-	if err != nil {
-		return err
+	var sandboxInfo *manifest.SandboxConfig
+	var extraAddDirs []string
+	var trustPreConfigured bool
+	var bypassCodexHookTrust bool
+	runtime := newCLICreateSessionRuntime(sessionName, exists, false, admission)
+	runtime.launch = func(launchCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+		return launchCLICreateSession(launchCtx, spec, exists, trustPreConfigured)
 	}
+	runtime.prepare = func(prepareCtx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+		trustedAddDirs, guardPath, prepareErr := trustedAddDirsForSession(sessionName, roleName)
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		preparedSandbox, preparedWorkDir, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
+		sandboxInfo = preparedSandbox
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		extraAddDirs, trustPreConfigured = collectExtraAddDirs(preparedSandbox, trustedAddDirs)
+		if prepareErr := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		bypassCodexHookTrust, prepareErr = prepareCodexHookTrustBypass(prepareCtx, preparedSandbox)
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		return ops.CreateSessionPreparation{
+			SessionID: input.SessionID, SessionName: input.SessionName,
+			Cwd: preparedWorkDir, ExtraAddDirs: extraAddDirs,
+			PermissionPolicy: resolvedSessionPermissionPolicy, Sandbox: preparedSandbox,
+			BypassCodexHookTrust: bypassCodexHookTrust,
+		}, nil
+	}
+	defer func() {
+		if retErr != nil && sandboxInfo != nil {
+			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
+		}
+	}()
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
 		CreationRuntime: runtime,

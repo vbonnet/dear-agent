@@ -76,8 +76,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		OpenSessionStorage: func(context.Context) (dolt.Storage, func(), error) {
 			adapter, err := getStorage()
 			if err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to connect to session storage: %v", err))
-				return nil, nil, nil
+				return nil, nil, err
 			}
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
@@ -97,7 +96,8 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		AllowEmptyPrompt:       true,
 		AllowUnsafeTitle:       true,
 		ReuseExistingTmux:      true,
-		RegistrationOptional:   true,
+		RequireStorage:         true,
+		RegisterBeforeLaunch:   true,
 		ManifestDir:            manifestDir,
 		ManifestDirOptional:    true,
 		SkipCodexRemoteControl: true,
