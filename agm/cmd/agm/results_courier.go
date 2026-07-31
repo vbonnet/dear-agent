@@ -101,12 +101,36 @@ func loadCourierState(path string) (courierState, error) {
 	if err != nil {
 		return courierState{Files: map[string]courierFileState{}}, err
 	}
+	return decodeCourierState(data)
+}
+
+func loadExistingCourierState(path string) (courierState, error) {
+	data, err := os.ReadFile(path) //#nosec G304 -- fixed path under the courier's own state dir
+	if err != nil {
+		return courierState{}, err
+	}
+	return decodeCourierState(data)
+}
+
+func decodeCourierState(data []byte) (courierState, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return courierState{}, err
+	}
+	for _, required := range []string{"files", "baseline_complete"} {
+		if _, ok := fields[required]; !ok {
+			return courierState{}, fmt.Errorf("cursor schema is missing %q", required)
+		}
+	}
 	var st courierState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return courierState{Files: map[string]courierFileState{}}, err
+		return courierState{}, err
 	}
 	if st.Files == nil {
-		st.Files = map[string]courierFileState{}
+		return courierState{}, fmt.Errorf("cursor schema has null files")
+	}
+	if !st.BaselineComplete && st.BaselinePending == nil {
+		return courierState{}, fmt.Errorf("incomplete cursor schema has no baseline snapshot")
 	}
 	return st, nil
 }
@@ -120,7 +144,7 @@ func waitForCourierState(
 		if err := ctx.Err(); err != nil {
 			return courierState{}, err
 		}
-		st, err := loadCourierState(path)
+		st, err := loadExistingCourierState(path)
 		if err == nil {
 			return st, nil
 		}

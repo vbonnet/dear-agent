@@ -840,7 +840,7 @@ func TestCourierStateRoundTrip(t *testing.T) {
 
 	st := courierState{Files: map[string]courierFileState{
 		"/a/b.jsonl": {Size: 123, Line: 7},
-	}}
+	}, BaselineComplete: true}
 	if err := saveCourierState(path, st); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -861,6 +861,35 @@ func TestLoadCourierState_MissingFileReturnsEmpty(t *testing.T) {
 	}
 	if len(st.Files) != 0 {
 		t.Errorf("expected zero-value state, got %+v", st)
+	}
+}
+
+func TestLoadCourierStateRejectsSchemaLessExistingFile(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(statePath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCourierState(statePath); err == nil ||
+		!strings.Contains(err.Error(), "cursor schema is missing") {
+		t.Fatalf("schema-less cursor error = %v", err)
+	}
+}
+
+func TestLoadCourierStateAcceptsLegacyCompleteCursor(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(
+		statePath,
+		[]byte(`{"files":{},"baseline_complete":true}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadCourierState(statePath)
+	if err != nil {
+		t.Fatalf("load complete cursor without pending snapshot: %v", err)
+	}
+	if !st.BaselineComplete || st.Files == nil {
+		t.Fatalf("legacy complete cursor = %+v", st)
 	}
 }
 
@@ -894,6 +923,23 @@ func TestWaitForCourierStatePreservesUnreadableCursorUntilRecovery(t *testing.T)
 	}
 	if string(data) != string(malformed) {
 		t.Fatalf("load retry changed malformed cursor to %q", data)
+	}
+
+	if err := os.Remove(statePath); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("missing cursor during repair was accepted as fresh state: %+v", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := os.WriteFile(statePath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("schema-less cursor during repair was accepted: %+v", got)
+	case <-time.After(25 * time.Millisecond):
 	}
 
 	expected := courierState{
