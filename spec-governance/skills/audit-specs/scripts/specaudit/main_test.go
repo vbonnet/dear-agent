@@ -53,7 +53,7 @@ func TestInventoryReadsPinnedRevisionAndProducesSeedsDeterministically(t *testin
 	}
 }
 
-func TestInventoryIgnoresGitReplacementObjects(t *testing.T) {
+func TestInventoryIgnoresGitReplacementObjectsAndInheritedRepositoryOverrides(t *testing.T) {
 	repo := t.TempDir()
 	gitTest(t, repo, "init", "-q")
 	gittest.HardenRepo(t, repo)
@@ -73,6 +73,8 @@ func TestInventoryIgnoresGitReplacementObjects(t *testing.T) {
 	if substituted := gitTest(t, repo, "show", original+":one/SPEC.md"); !strings.Contains(substituted, "FORGED-01") {
 		t.Fatalf("test replacement was not active: %q", substituted)
 	}
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "attacker.git"))
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
 
 	got, err := inventory(repo, "owner/repo", original)
 	if err != nil {
