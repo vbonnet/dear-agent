@@ -143,6 +143,21 @@ func requireLinkedWorktreeRoot(root string) error {
 		}
 		return errors.New("linked-worktree Git directory is not a directory")
 	}
+	backpointerData, err := os.ReadFile(filepath.Join(gitDirectory, "gitdir"))
+	if err != nil {
+		return fmt.Errorf("read linked-worktree Git directory backpointer: %w", err)
+	}
+	backpointer := strings.TrimSpace(string(backpointerData))
+	if backpointer == "" {
+		return errors.New("linked-worktree Git directory has an empty backpointer")
+	}
+	if !filepath.IsAbs(backpointer) {
+		backpointer = filepath.Join(gitDirectory, backpointer)
+	}
+	authenticatedGitFile, err := canonicalFilesystemPath(backpointer)
+	if err != nil || authenticatedGitFile != gitFile {
+		return errors.New("linked-worktree Git directory does not point back to this worktree's .git file")
+	}
 	topLevel, err := projectionGit(rootPath, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("authenticate linked-worktree top level: %w", err)

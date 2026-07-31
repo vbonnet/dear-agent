@@ -150,6 +150,52 @@ func TestRequireLinkedWorktreeRootRejectsCopiedWorktreePointer(t *testing.T) {
 	}
 }
 
+func TestRequireLinkedWorktreeRootRejectsOtherRegisteredWorktreePointer(t *testing.T) {
+	repository := gittest.NewRepo(t)
+	worktrees := t.TempDir()
+	source := filepath.Join(worktrees, "source")
+	target := filepath.Join(worktrees, "target")
+	gittest.Run(t, repository, "worktree", "add", "-b", "projection-source-test", source)
+	gittest.Run(t, repository, "worktree", "add", "-b", "projection-target-test", target)
+
+	metadata, err := os.ReadFile(filepath.Join(source, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, ".git"), metadata, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireLinkedWorktreeRoot(target); err == nil || !strings.Contains(err.Error(), "does not point back") {
+		t.Fatalf("requireLinkedWorktreeRoot() error = %v, want mismatched registered-worktree rejection", err)
+	}
+}
+
+func TestRequireLinkedWorktreeRootRejectsOtherPointerAtRecreatedRegisteredPath(t *testing.T) {
+	repository := gittest.NewRepo(t)
+	worktrees := t.TempDir()
+	source := filepath.Join(worktrees, "source")
+	target := filepath.Join(worktrees, "target")
+	gittest.Run(t, repository, "worktree", "add", "-b", "projection-recreate-source-test", source)
+	gittest.Run(t, repository, "worktree", "add", "-b", "projection-recreate-target-test", target)
+
+	metadata, err := os.ReadFile(filepath.Join(source, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, ".git"), metadata, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireLinkedWorktreeRoot(target); err == nil || !strings.Contains(err.Error(), "does not point back") {
+		t.Fatalf("requireLinkedWorktreeRoot() error = %v, want recreated registered-path rejection", err)
+	}
+}
+
 func TestSyncRefusesSymlinkTarget(t *testing.T) {
 	root := t.TempDir()
 	writeCanonicalSkills(t, root)
