@@ -253,6 +253,91 @@ func TestScanClaudeProjectsFullyRescansReplacedTranscript(t *testing.T) {
 	}
 }
 
+func TestScanClaudeProjectsPreservesCursorForIdenticalInodeReplacement(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "restored-session.jsonl")
+	writeJSONLLine(t, path, "assistant", "already delivered")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backdateCourierFile(t, path)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if courierFileIdentity(info) == prior.Identity {
+		t.Fatal("test replacement retained the prior filesystem identity")
+	}
+
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("identical replacement scan: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("identical replacement replayed events: %+v", events)
+	}
+	if got := st.Files[path]; got.Identity == prior.Identity ||
+		got.Size != prior.Size ||
+		got.Line != prior.Line {
+		t.Fatalf("identical replacement cursor = %+v, prior = %+v", got, prior)
+	}
+}
+
+func TestScanClaudeProjectsClearsRelaySuppressionForReplacement(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "relay-replaced-session.jsonl")
+	writeJSONLLine(t, path, "user", "")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+	prior.RelayPending = true
+	st.Files[path] = prior
+
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONLLine(t, path, "assistant", "completion from unrelated replacement")
+	backdateCourierFile(t, path)
+
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("replacement scan: %v", err)
+	}
+	if len(events) != 1 ||
+		events[0].Headline != "completion from unrelated replacement" {
+		t.Fatalf("replacement events with stale relay suppression = %+v", events)
+	}
+	if st.Files[path].RelayPending {
+		t.Fatal("replacement retained stale relay suppression")
+	}
+}
+
 func TestScanClaudeProjectsDetectsSameInodeSameSizeRewrite(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")

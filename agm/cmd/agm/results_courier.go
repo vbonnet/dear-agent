@@ -661,7 +661,11 @@ func scanClaudeTranscript(
 	if !stable {
 		return nil, false
 	}
-	headline, relayPending := courierAssistantText(lines, prev.RelayPending)
+	relayPending := prev.RelayPending
+	if replaced {
+		relayPending = false
+	}
+	headline, relayPending := courierAssistantText(lines, relayPending)
 	nextState.RelayPending = relayPending
 	st.Files[path] = nextState
 	if headline == "" {
@@ -775,22 +779,21 @@ func courierTranscriptReplaced(
 	if !known || currentSize < previous.Size {
 		return known
 	}
-	if previous.Identity != "" &&
+	identityChanged := previous.Identity != "" &&
 		currentIdentity != "" &&
-		previous.Identity != currentIdentity {
-		return true
-	}
+		previous.Identity != currentIdentity
 	if courierTranscriptPrefixChanged(
 		previous,
 		currentSize,
 		currentModifiedAt,
 		currentChangedAt,
+		identityChanged,
 		path,
 	) {
 		return true
 	}
 	if previous.BoundaryHash == "" {
-		return false
+		return identityChanged
 	}
 	currentBoundaryHash, err := courierBoundaryFingerprint(path, previous.Size)
 	return err != nil || currentBoundaryHash != previous.BoundaryHash
@@ -801,13 +804,15 @@ func courierTranscriptPrefixChanged(
 	currentSize int64,
 	currentModifiedAt int64,
 	currentChangedAt int64,
+	identityChanged bool,
 	path string,
 ) bool {
 	if currentSize < previous.Size || previous.ContentHash == "" {
 		return false
 	}
-	generationChanged := previous.ModifiedAt != 0 &&
-		currentModifiedAt != previous.ModifiedAt
+	generationChanged := identityChanged ||
+		(previous.ModifiedAt != 0 &&
+			currentModifiedAt != previous.ModifiedAt)
 	if previous.ChangedAt == 0 ||
 		(currentChangedAt != 0 && currentChangedAt != previous.ChangedAt) {
 		generationChanged = true
