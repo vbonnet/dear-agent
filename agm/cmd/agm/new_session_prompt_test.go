@@ -17,30 +17,127 @@ import (
 func TestCollectExtraAddDirsScopesWritableDirsToCodex(t *testing.T) {
 	originalCfg := cfg
 	originalHarness := harnessName
+	originalRole := roleName
 	t.Cleanup(func() {
 		cfg = originalCfg
 		harnessName = originalHarness
+		roleName = originalRole
 	})
 	cfg = &config.Config{Sandbox: config.SandboxConfig{
 		Repos:        []string{"/source"},
 		WritableDirs: []string{"/worktrees", "/beads"},
 	}}
+	roleName = "worker"
 
 	for _, test := range []struct {
 		harness string
 		want    []string
 	}{
-		{harness: "codex-cli", want: []string{"/source", "/worktrees", "/beads"}},
+		{harness: "codex-cli", want: []string{"/worktrees", "/beads"}},
 		{harness: "claude-code", want: []string{"/source"}},
 		{harness: "agy", want: []string{"/source"}},
 	} {
 		t.Run(test.harness, func(t *testing.T) {
 			harnessName = test.harness
-			got, _ := collectExtraAddDirs(&manifest.SandboxConfig{Enabled: true})
+			got, _ := collectExtraAddDirs(&manifest.SandboxConfig{Enabled: true}, nil)
 			if !slices.Equal(got, test.want) {
 				t.Fatalf("collectExtraAddDirs() = %v, want %v", got, test.want)
 			}
 		})
+	}
+
+	got := collectExtraAddDirsForHarness(&manifest.SandboxConfig{Enabled: true}, "codex-cli", "worker", []string{"/worktrees"})
+	if !slices.Equal(got, []string{"/worktrees", "/beads"}) {
+		t.Fatalf("collectExtraAddDirsForHarness() = %v", got)
+	}
+
+	if got := collectExtraAddDirsForHarness(&manifest.SandboxConfig{Enabled: true}, "codex-cli", "reviewer", nil); !slices.Equal(got, []string{"/source"}) {
+		t.Fatalf("non-worker writable dirs = %v", got)
+	}
+
+	if got := collectExtraAddDirsForHarness(nil, "codex-cli", "worker", []string{"/prepared/worktree"}); !slices.Equal(got, []string{"/prepared/worktree"}) {
+		t.Fatalf("trusted dirs without AGM sandbox = %v", got)
+	}
+}
+
+func TestTrustedAddDirsForSessionConsumesWorkerBoundHandoff(t *testing.T) {
+	dir := t.TempDir()
+	guard := filepath.Join(t.TempDir(), "pretool-worker-write-boundary")
+	if err := os.WriteFile(guard, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(trustedAddDirsEnv, `["`+dir+`","`+dir+`"]`)
+	t.Setenv(trustedAddDirsSessionEnv, "worker-ce-test")
+	t.Setenv(trustedGuardPathEnv, guard)
+
+	got, gotGuard, err := trustedAddDirsForSession("worker-ce-test", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{dir}) {
+		t.Fatalf("trustedAddDirsForSession() = %v", got)
+	}
+	if gotGuard != guard {
+		t.Fatalf("trusted guard path = %q, want %q", gotGuard, guard)
+	}
+	if os.Getenv(trustedAddDirsEnv) != "" || os.Getenv(trustedAddDirsSessionEnv) != "" || os.Getenv(trustedGuardPathEnv) != "" {
+		t.Fatal("trusted worker handoff leaked into the future harness environment")
+	}
+}
+
+func TestTrustedAddDirsForSessionRejectsWrongRoleOrSession(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		bound   string
+		session string
+		role    string
+	}{
+		{name: "wrong role", bound: "worker-ce-test", session: "worker-ce-test", role: "reviewer"},
+		{name: "wrong session", bound: "worker-other", session: "worker-ce-test", role: "worker"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(trustedAddDirsEnv, `["`+t.TempDir()+`"]`)
+			t.Setenv(trustedAddDirsSessionEnv, test.bound)
+			t.Setenv(trustedGuardPathEnv, filepath.Join(t.TempDir(), "missing-guard"))
+			if _, _, err := trustedAddDirsForSession(test.session, test.role); err == nil {
+				t.Fatal("trustedAddDirsForSession() unexpectedly accepted untrusted handoff")
+			}
+		})
+	}
+}
+
+func TestConfigureWorkerWriteBoundaryExportsValidatedCodexPolicy(t *testing.T) {
+	guard := filepath.Join(t.TempDir(), "pretool-worker-write-boundary")
+	if err := os.WriteFile(guard, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	t.Setenv(workerWriteRootsEnv, "stale")
+	if err := configureWorkerWriteBoundary("codex-cli", "worker", guard, []string{dir}); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(workerWriteRootsEnv); got != `["`+dir+`"]` {
+		t.Fatalf("worker write roots = %q", got)
+	}
+}
+
+func TestConfigureWorkerWriteBoundaryIsInactiveForNonWorkers(t *testing.T) {
+	t.Setenv(workerWriteRootsEnv, "stale")
+	if err := configureWorkerWriteBoundary("codex-cli", "reviewer", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv(workerWriteRootsEnv) != "" {
+		t.Fatal("non-worker retained worker write-boundary environment")
+	}
+}
+
+func TestConfigureWorkerWriteBoundaryRejectsEmptyWorkerRoots(t *testing.T) {
+	guard := filepath.Join(t.TempDir(), "pretool-worker-write-boundary")
+	if err := os.WriteFile(guard, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := configureWorkerWriteBoundary("codex-cli", "worker", guard, nil); err == nil {
+		t.Fatal("Codex worker launch accepted no authorized write roots")
 	}
 }
 

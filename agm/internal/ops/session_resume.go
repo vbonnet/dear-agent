@@ -65,10 +65,12 @@ type ResumeSessionHealth struct {
 // already validated surface input; prompt-file IO remains outside the
 // operation.
 type ResumeSessionRequest struct {
-	SessionID    string                   `json:"session_id"`
-	ManifestPath string                   `json:"manifest_path,omitempty"`
-	Prompt       string                   `json:"prompt,omitempty"`
-	OnEvent      func(ResumeSessionEvent) `json:"-"`
+	SessionID       string                   `json:"session_id"`
+	ManifestPath    string                   `json:"manifest_path,omitempty"`
+	Prompt          string                   `json:"prompt,omitempty"`
+	CurrentAddDirs  []string                 `json:"-"`
+	ExcludedAddDirs []string                 `json:"-"`
+	OnEvent         func(ResumeSessionEvent) `json:"-"`
 }
 
 // ResumeSessionResult is both the lifecycle result and the post-lock
@@ -211,7 +213,8 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 
 	piLaunchID := ""
 	if sendCommand {
-		launch, launchID, warnings, prepareErr := prepareResumeLaunch(store, m, harnessName, health)
+		launchManifest := resumeLaunchManifest(m, harnessName, req.CurrentAddDirs, req.ExcludedAddDirs)
+		launch, launchID, warnings, prepareErr := prepareResumeLaunch(store, launchManifest, harnessName, health)
 		for _, warning := range warnings {
 			addResumeWarning(result, req, warning)
 		}
@@ -227,6 +230,13 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 				return result, rollbackResumeTmux(ctx, tmuxAdapter, store, m, created, resumeTmuxNameChange{}, err)
 			}
 			return result, err
+		}
+		if err := persistResumeSandboxPolicy(store, m, launchManifest); err != nil {
+			persistErr := ErrStorageError("session/resume.persist-sandbox-policy", err)
+			if created.owned() {
+				return result, rollbackResumeTmux(ctx, tmuxAdapter, store, m, created, resumeTmuxNameChange{}, persistErr)
+			}
+			return result, persistErr
 		}
 	}
 
@@ -304,6 +314,64 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 	}
 	result.PromptMayHaveStarted = promptMayHaveStarted
 	return result, nil
+}
+
+// resumeLaunchManifest returns a launch copy whose Codex grants are the stable
+// union of the session's persisted policy and the current trusted host handoff.
+// The caller persists that union only after the harness is confirmed ready, so
+// failed resumes cannot partially rewrite policy while repaired sessions remain
+// durable across later cold resumes.
+func resumeLaunchManifest(m *manifest.Manifest, harnessName string, currentAddDirs, excludedAddDirs []string) *manifest.Manifest {
+	if m == nil || harnessName != "codex-cli" || m.Sandbox == nil || !m.Sandbox.Enabled || (len(currentAddDirs) == 0 && len(excludedAddDirs) == 0) {
+		return m
+	}
+	launchManifest := *m
+	sandbox := *m.Sandbox
+	sandbox.ExtraAddDirs = nil
+	for _, dir := range m.Sandbox.ExtraAddDirs {
+		if !pathWithinAny(dir, excludedAddDirs) {
+			sandbox.ExtraAddDirs = append(sandbox.ExtraAddDirs, dir)
+		}
+	}
+	seen := make(map[string]struct{}, len(sandbox.ExtraAddDirs)+len(currentAddDirs))
+	for _, dir := range sandbox.ExtraAddDirs {
+		seen[dir] = struct{}{}
+	}
+	for _, dir := range currentAddDirs {
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		sandbox.ExtraAddDirs = append(sandbox.ExtraAddDirs, dir)
+		seen[dir] = struct{}{}
+	}
+	launchManifest.Sandbox = &sandbox
+	return &launchManifest
+}
+
+func pathWithinAny(path string, roots []string) bool {
+	clean := filepath.Clean(path)
+	for _, root := range roots {
+		rel, err := filepath.Rel(filepath.Clean(root), clean)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func persistResumeSandboxPolicy(store dolt.Storage, persisted, launch *manifest.Manifest) error {
+	if store == nil || persisted == nil || launch == nil || launch == persisted || launch.Sandbox == nil {
+		return nil
+	}
+	original := persisted.Sandbox
+	sandbox := *launch.Sandbox
+	sandbox.ExtraAddDirs = append([]string{}, launch.Sandbox.ExtraAddDirs...)
+	persisted.Sandbox = &sandbox
+	if err := store.UpdateSession(persisted); err != nil {
+		persisted.Sandbox = original
+		return err
+	}
+	return nil
 }
 
 func classifyResumeHealth(ctx context.Context, tmuxAdapter session.TmuxInterface, m *manifest.Manifest, manifestPath string) ResumeSessionHealth {

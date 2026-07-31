@@ -525,6 +525,82 @@ func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *te
 	}
 }
 
+func TestResumeLaunchManifestReconcilesCurrentCodexPolicy(t *testing.T) {
+	persisted := "/persisted"
+	current := "/current"
+	m := &manifest.Manifest{
+		Harness: "codex-cli",
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:      true,
+			ExtraAddDirs: []string{persisted},
+		},
+	}
+
+	got := resumeLaunchManifest(m, "codex-cli", []string{persisted, current, current}, nil)
+	if !slices.Equal(got.Sandbox.ExtraAddDirs, []string{persisted, current}) {
+		t.Fatalf("resumeLaunchManifest() dirs = %v", got.Sandbox.ExtraAddDirs)
+	}
+	if !slices.Equal(m.Sandbox.ExtraAddDirs, []string{persisted}) {
+		t.Fatalf("resumeLaunchManifest() mutated persisted policy: %v", m.Sandbox.ExtraAddDirs)
+	}
+}
+
+func TestPersistResumeSandboxPolicyMakesTrustedUnionDurable(t *testing.T) {
+	adapter, persisted, _ := setupResumeOperation(t, "codex-cli", false)
+	merged := filepath.Join(t.TempDir(), persisted.SessionID, "merged")
+	persisted.Sandbox = &manifest.SandboxConfig{
+		Enabled: true, ID: persisted.SessionID, Provider: "test", CreatedAt: time.Now(),
+		MergedPath: merged, WorkingDir: merged, ExtraAddDirs: []string{"/persisted"},
+	}
+	if err := adapter.UpdateSession(persisted); err != nil {
+		t.Fatal(err)
+	}
+	launch := resumeLaunchManifest(persisted, "codex-cli", []string{"/persisted", "/current"}, nil)
+	if err := persistResumeSandboxPolicy(adapter, persisted, launch); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := adapter.GetSession(persisted.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(stored.Sandbox.ExtraAddDirs, []string{"/persisted", "/current"}) {
+		t.Fatalf("persisted sandbox dirs = %v", stored.Sandbox.ExtraAddDirs)
+	}
+}
+
+func TestResumeLaunchManifestIgnoresCurrentPolicyOutsideEnabledCodexSandbox(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		harness string
+		sandbox *manifest.SandboxConfig
+	}{
+		{name: "other harness", harness: "claude-code", sandbox: &manifest.SandboxConfig{Enabled: true}},
+		{name: "disabled", harness: "codex-cli", sandbox: &manifest.SandboxConfig{}},
+		{name: "missing sandbox", harness: "codex-cli"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := &manifest.Manifest{Harness: test.harness, Sandbox: test.sandbox}
+			if got := resumeLaunchManifest(m, test.harness, []string{"/current"}, nil); got != m {
+				t.Fatalf("resumeLaunchManifest() returned a policy copy outside enabled Codex sandbox")
+			}
+		})
+	}
+}
+
+func TestResumeLaunchManifestDropsExcludedSourceGrants(t *testing.T) {
+	m := &manifest.Manifest{
+		Harness: "codex-cli",
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:      true,
+			ExtraAddDirs: []string{"/source/repo", "/source/repo/.git", "/task/worktree"},
+		},
+	}
+	got := resumeLaunchManifest(m, "codex-cli", nil, []string{"/source/repo"})
+	if !slices.Equal(got.Sandbox.ExtraAddDirs, []string{"/task/worktree"}) {
+		t.Fatalf("sanitized sandbox dirs = %v", got.Sandbox.ExtraAddDirs)
+	}
+}
+
 func TestPrepareResumeLaunchAuthorizesAgyWorktree(t *testing.T) {
 	worktreePath := filepath.Join(t.TempDir(), "agy worktree")
 	m := &manifest.Manifest{
