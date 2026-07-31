@@ -88,6 +88,7 @@ statement. Every changed requirement must identify one test consequence:
 - an existing scenario already proves it;
 - one scenario outline gains applicable members;
 - a new observable or failure mode needs a rule or scenario;
+- copied scenarios consolidate around one shared rule;
 - a native translation needs an adapter-specific scenario; or
 - a deterministic schema, unit, or integration test is the correct proof, with
   the reason no BDD change is warranted.
