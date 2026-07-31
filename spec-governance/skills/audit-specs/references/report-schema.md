@@ -143,7 +143,7 @@ lexical leads only; they never constitute a consolidation verdict.
   "applicability_rationale": "why this basis is correct",
   "applicability": [{
     "member": "codex-cli",
-    "disposition": "shared|adapted|unsupported|not-applicable|unknown",
+    "disposition": "supported|adapted|unsupported|not-applicable|unknown",
     "evidence": [{"path": "path/SPEC.md", "line": 12, "requirement_id": "REQ-01", "excerpt": "exact line"}]
   }],
   "bdd": {
@@ -174,7 +174,7 @@ non-candidates; `candidate_count` counts only `candidates`.
 - confidence: `confirmed`, `likely`, `tentative`
 - strength: `strong`, `moderate`, `exploratory`
 - applicability basis: `active-members`, `implementation-only`
-- disposition: `shared`, `adapted`, `unsupported`, `not-applicable`, `unknown`
+- disposition: `supported`, `adapted`, `unsupported`, `not-applicable`, `unknown`
 
 ## Fail-closed validation
 

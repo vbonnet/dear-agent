@@ -1082,7 +1082,7 @@ var (
 	strengths          = map[string]bool{"strong": true, "moderate": true, "exploratory": true}
 	ownerStates        = map[string]bool{"existing": true, "new": true}
 	applicabilityBases = map[string]bool{"active-members": true, "implementation-only": true}
-	dispositions       = map[string]bool{"shared": true, "adapted": true, "unsupported": true, "not-applicable": true, "unknown": true}
+	dispositions       = map[string]bool{"supported": true, "adapted": true, "unsupported": true, "not-applicable": true, "unknown": true}
 	bddConsequences    = map[string]bool{"merge": true, "add-matrix": true, "adapter-only": true, "none": true, "resolve": true}
 	seedKinds          = map[string]bool{"exact-body": true, "duplicate-id": true, "shared-bdd": true, "identical-file": true}
 	diagnosticKinds    = map[string]bool{"anonymous-requirement": true, "nonconforming-requirement": true, "missing-bdd-feature": true, "nonreciprocal-bdd-feature": true}
