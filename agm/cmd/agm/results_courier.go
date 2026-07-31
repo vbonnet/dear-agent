@@ -60,6 +60,7 @@ type courierFileState struct {
 	Size         int64  `json:"size"`
 	Line         int    `json:"line"`
 	Identity     string `json:"identity,omitempty"`
+	ModifiedAt   int64  `json:"modified_at_unix_nano,omitempty"`
 	BoundaryHash string `json:"boundary_hash,omitempty"`
 }
 
@@ -287,10 +288,19 @@ func scanClaudeTranscript(
 ) (*resultsCourierEvent, bool) {
 	prev, known := st.Files[path]
 	identity := courierFileIdentity(info)
-	replaced := courierTranscriptReplaced(known, prev, identity, info.Size(), path)
+	modifiedAt := info.ModTime().UnixNano()
+	replaced := courierTranscriptReplaced(
+		known,
+		prev,
+		identity,
+		info.Size(),
+		modifiedAt,
+		path,
+	)
 	if known && info.Size() == prev.Size && !replaced {
 		updated := prev
 		updated.Identity = identity
+		updated.ModifiedAt = modifiedAt
 		if updated.BoundaryHash == "" {
 			boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
 			if err != nil {
@@ -332,6 +342,7 @@ func scanClaudeTranscript(
 		Size:         info.Size(),
 		Line:         lineBase + len(lines),
 		Identity:     identity,
+		ModifiedAt:   modifiedAt,
 		BoundaryHash: boundaryHash,
 	}
 	headline := lastAssistantText(lines)
@@ -352,6 +363,7 @@ func courierTranscriptReplaced(
 	previous courierFileState,
 	currentIdentity string,
 	currentSize int64,
+	currentModifiedAt int64,
 	path string,
 ) bool {
 	if !known || currentSize < previous.Size {
@@ -360,6 +372,11 @@ func courierTranscriptReplaced(
 	if previous.Identity != "" &&
 		currentIdentity != "" &&
 		previous.Identity != currentIdentity {
+		return true
+	}
+	if currentSize == previous.Size &&
+		previous.ModifiedAt != 0 &&
+		currentModifiedAt != previous.ModifiedAt {
 		return true
 	}
 	if previous.BoundaryHash == "" {
@@ -387,6 +404,7 @@ func seedCourierBaseline(
 		Size:         info.Size(),
 		Line:         len(lines),
 		Identity:     identity,
+		ModifiedAt:   info.ModTime().UnixNano(),
 		BoundaryHash: boundaryHash,
 	}
 	return nil
