@@ -122,7 +122,7 @@ func TestInstallerStagesApprovedAGMIdentity(t *testing.T) {
 		`test -x "$$install_lock_executable"`,
 		`exec 9<"$$install_lock_path"`,
 		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -k -t 0 /dev/fd/9 /usr/bin/make`,
-		`Linux) "$$install_lock_tool" -n 9; DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec /usr/bin/make`,
+		`Linux) DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" --no-fork -n /proc/self/fd/9 /usr/bin/make`,
 		`install-override-ledger-helper-locked`,
 		`test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1`,
 		`launcher_txdir="$$(/usr/bin/mktemp -d "$(HOME)/go/bin/.dear-agent-launchers.XXXXXX")"`,
