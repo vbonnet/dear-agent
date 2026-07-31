@@ -1184,93 +1184,64 @@ install-override-audit-launchdaemon: build-agm
 	@set -eu; \
 		test "$$(uname -s)" = "Darwin" || { echo "launchd audit installation is macOS-only" >&2; exit 2; }; \
 		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
-		operator_user="$$(id -un)"; \
+		operator_user="$$(/usr/bin/id -un)"; \
 		case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
-		root_group="$$(id -gn 0)"; \
-		audit_artifact="bin/agm"; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		audit_artifact="$$repo_root/bin/agm"; \
 		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; \
-		audit_staging=""; \
-		plist_staging=""; \
-		audit_live="/usr/local/libexec/dear-agent-override-audit"; \
-		plist_live="/Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \
-		audit_backup=""; \
-		plist_backup=""; \
-		audit_existed=0; \
-		plist_existed=0; \
-		activation_started=0; \
-		activation_complete=0; \
-		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" deploy/launchd/com.dear-agent.override-audit.plist >"$$plist_candidate"; \
+		cleanup_plist_candidate() { \
+			status=$$1; \
+			trap - EXIT HUP INT TERM; \
+			/bin/rm -f "$$plist_candidate"; \
+			exit "$$status"; \
+		}; \
+		trap 'cleanup_plist_candidate $$?' EXIT; \
+		trap 'cleanup_plist_candidate 129' HUP; \
+		trap 'cleanup_plist_candidate 130' INT; \
+		trap 'cleanup_plist_candidate 143' TERM; \
+		root_installer_path="$$repo_root/scripts/install-override-audit-launchdaemon-root.sh"; \
+		test -f "$$root_installer_path" || { echo "missing fixed privileged installer: $$root_installer_path" >&2; exit 2; }; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" "$$repo_root/deploy/launchd/com.dear-agent.override-audit.plist" >"$$plist_candidate"; \
 		/usr/bin/plutil -lint "$$plist_candidate" >/dev/null; \
 		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
 		expected_audit_hash="$${expected_audit_hash%% *}"; \
 		expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"; \
 		expected_plist_hash="$${expected_plist_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
 		printf 'Reviewed audit executable SHA-256: %s\n' "$$expected_audit_hash"; \
 		printf 'Reviewed rendered LaunchDaemon SHA-256: %s\n' "$$expected_plist_hash"; \
+		printf 'Reviewed fixed privileged installer SHA-256: %s\n' "$$expected_installer_hash"; \
 		printf 'Type the executable SHA-256 to approve these exact bytes: '; \
 		IFS= read -r confirmed_audit_hash; \
 		printf 'Type the LaunchDaemon SHA-256 to approve these exact bytes: '; \
 		IFS= read -r confirmed_plist_hash; \
+		printf 'Type the installer SHA-256 to approve the exact privileged transaction: '; \
+		IFS= read -r confirmed_installer_hash; \
 		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
 		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
-		cleanup_audit_staging() { \
-			status=$$1; \
-			trap - EXIT HUP INT TERM; \
-			if test "$$activation_started" = 1 && test "$$activation_complete" != 1; then \
-				if test "$$audit_existed" = 1; then if test -n "$$audit_backup" && /usr/bin/sudo -n /bin/mv -f "$$audit_backup" "$$audit_live"; then audit_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$audit_live" >/dev/null 2>&1 || true; fi; \
-				if test "$$plist_existed" = 1; then if test -n "$$plist_backup" && /usr/bin/sudo -n /bin/mv -f "$$plist_backup" "$$plist_live"; then plist_backup=""; fi; else /usr/bin/sudo -n /bin/rm -f "$$plist_live" >/dev/null 2>&1 || true; fi; \
-			fi; \
-			/bin/rm -f "$$plist_candidate"; \
-			if test -n "$$audit_staging"; then /usr/bin/sudo /bin/rm -f "$$audit_staging" >/dev/null 2>&1 || true; fi; \
-			if test -n "$$plist_staging"; then /usr/bin/sudo /bin/rm -f "$$plist_staging" >/dev/null 2>&1 || true; fi; \
-			if test "$$activation_started" != 1 || test "$$activation_complete" = 1; then /usr/bin/sudo -n /bin/rm -f "$$audit_backup" "$$plist_backup" >/dev/null 2>&1 || true; fi; \
-			exit "$$status"; \
-		}; \
-		trap 'cleanup_audit_staging $$?' EXIT; \
-		trap 'cleanup_audit_staging 129' HUP; \
-		trap 'cleanup_audit_staging 130' INT; \
-		trap 'cleanup_audit_staging 143' TERM; \
-		/usr/bin/sudo -k; \
-		if /usr/bin/sudo -n /usr/bin/true 2>/dev/null; then \
-			echo "refusing passwordless sudo validation; fresh human authentication is required" >&2; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged installer digest confirmation did not match" >&2; exit 2; }; \
+		installer_marker="dear-agent-override-audit-launchdaemon-installer"; \
+		set +e; \
+		printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" \
+			"$$installer_marker" "$$root_gid" "$$audit_artifact" "$$plist_candidate" \
+			"$$expected_audit_hash" "$$expected_plist_hash" >/dev/null 2>&1; \
+		probe_status=$$?; \
+		set -e; \
+		if test "$$probe_status" = 42; then \
+			echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; \
 			exit 2; \
 		fi; \
-		/usr/bin/sudo /usr/bin/true; \
-		/usr/bin/sudo /usr/bin/install -d -o root -g "$$root_group" -m 0755 /usr/local/libexec; \
-		audit_staging="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.XXXXXX)"; \
-		plist_staging="$$(/usr/bin/sudo /usr/bin/mktemp /Library/LaunchDaemons/.com.dear-agent.override-audit.XXXXXX)"; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0755 "$$audit_artifact" "$$audit_staging"; \
-		/usr/bin/sudo /usr/bin/install -o root -g "$$root_group" -m 0644 "$$plist_candidate" "$$plist_staging"; \
-		staged_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_staging")"; \
-		staged_audit_hash="$${staged_audit_hash%% *}"; \
-		staged_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_staging")"; \
-		staged_plist_hash="$${staged_plist_hash%% *}"; \
-		test "$$staged_audit_hash" = "$$expected_audit_hash" || { echo "root-owned staged audit executable differs from the approved bytes" >&2; exit 1; }; \
-		test "$$staged_plist_hash" = "$$expected_plist_hash" || { echo "root-owned staged LaunchDaemon differs from the approved bytes" >&2; exit 1; }; \
-		/usr/bin/sudo /usr/bin/plutil -lint "$$plist_staging" >/dev/null; \
-		if /usr/bin/sudo /usr/bin/test -e "$$audit_live"; then \
-			audit_existed=1; \
-			audit_backup="$$(/usr/bin/sudo /usr/bin/mktemp /usr/local/libexec/.dear-agent-override-audit.backup.XXXXXX)"; \
-			/usr/bin/sudo /bin/cp -p "$$audit_live" "$$audit_backup"; \
-		fi; \
-		if /usr/bin/sudo /usr/bin/test -e "$$plist_live"; then \
-			plist_existed=1; \
-			plist_backup="$$(/usr/bin/sudo /usr/bin/mktemp /Library/LaunchDaemons/.com.dear-agent.override-audit.backup.XXXXXX)"; \
-			/usr/bin/sudo /bin/cp -p "$$plist_live" "$$plist_backup"; \
-		fi; \
-		activation_started=1; \
-		/usr/bin/sudo /bin/mv -f "$$audit_staging" "$$audit_live"; \
-		audit_staging=""; \
-		/usr/bin/sudo /bin/mv -f "$$plist_staging" "$$plist_live"; \
-		plist_staging=""; \
-		activation_complete=1; \
-		/usr/bin/sudo /bin/rm -f "$$audit_backup" "$$plist_backup"; \
-		audit_backup=""; \
-		plist_backup=""; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" \
+			"$$installer_marker" "$$root_gid" "$$audit_artifact" "$$plist_candidate" \
+			"$$expected_audit_hash" "$$expected_plist_hash"; \
 		/bin/rm -f "$$plist_candidate"; \
 		plist_candidate=""; \
 		trap - EXIT HUP INT TERM; \
-		/usr/bin/sudo -k; \
 		echo "Installed digest-bound root-owned audit executable and system LaunchDaemon"; \
 		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \
 		echo "  sudo launchctl bootstrap system /Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \

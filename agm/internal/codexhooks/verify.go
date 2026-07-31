@@ -40,6 +40,7 @@ var (
 	awkSystemCall        = regexp.MustCompile(`\bsystem[[:space:]]*\(`)
 	awkGetline           = regexp.MustCompile(`\bgetline\b`)
 	awkOutputPipe        = regexp.MustCompile(`\b(?:print|printf)\b[^;\n]*\|`)
+	awkFileDirective     = regexp.MustCompile(`(?:^|[;{}[:space:]])@(?:include|load)[[:space:]]+`)
 	jqModuleDirective    = regexp.MustCompile(`(?:^|[;[:space:]])(?:import|include)[[:space:]]+"`)
 )
 
@@ -1047,9 +1048,7 @@ func staticAWKProgram(args []*syntax.Word) (string, bool) {
 			}
 			return staticShellWord(args[index+1])
 		}
-		if value == "-f" || value == "--file" ||
-			strings.HasPrefix(value, "-f") ||
-			strings.HasPrefix(value, "--file=") {
+		if awkOptionLoadsExternalCode(value) {
 			return "", false
 		}
 		if value == "-F" || value == "-v" || value == "--assign" {
@@ -1067,10 +1066,23 @@ func staticAWKProgram(args []*syntax.Word) (string, bool) {
 	return "", false
 }
 
+func awkOptionLoadsExternalCode(value string) bool {
+	return value == "-f" || value == "--file" ||
+		value == "-i" || value == "--include" ||
+		value == "-l" || value == "--load" ||
+		strings.HasPrefix(value, "-f") ||
+		strings.HasPrefix(value, "--file=") ||
+		(strings.HasPrefix(value, "-i") && !strings.HasPrefix(value, "--")) ||
+		(strings.HasPrefix(value, "-l") && !strings.HasPrefix(value, "--")) ||
+		strings.HasPrefix(value, "--include=") ||
+		strings.HasPrefix(value, "--load=")
+}
+
 func awkProgramExecutesCommand(program string) bool {
 	return awkSystemCall.MatchString(program) ||
 		awkGetline.MatchString(program) ||
-		awkOutputPipe.MatchString(program)
+		awkOutputPipe.MatchString(program) ||
+		awkFileDirective.MatchString(program)
 }
 
 func sedUsesCommandExecution(command string, args []*syntax.Word) bool {
