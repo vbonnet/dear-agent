@@ -893,8 +893,12 @@ func TestLoadCourierStateAcceptsLegacyCompleteCursor(t *testing.T) {
 	}
 }
 
-func TestLoadCourierStateRejectsNullCursorValues(t *testing.T) {
+func TestLoadCourierStateRejectsInvalidCursorValues(t *testing.T) {
 	tests := map[string]string{
+		"null files": `{
+			"files": null,
+			"baseline_complete": true
+		}`,
 		"null baseline flag": `{
 			"files": {},
 			"baseline_complete": null,
@@ -908,10 +912,50 @@ func TestLoadCourierStateRejectsNullCursorValues(t *testing.T) {
 			"files": {"/session.jsonl": {"size": null, "line": 3}},
 			"baseline_complete": true
 		}`,
+		"missing file field": `{
+			"files": {"/session.jsonl": {"size": 10}},
+			"baseline_complete": true
+		}`,
+		"negative file size": `{
+			"files": {"/session.jsonl": {"size": -1, "line": 3}},
+			"baseline_complete": true
+		}`,
+		"negative file line": `{
+			"files": {"/session.jsonl": {"size": 10, "line": -1}},
+			"baseline_complete": true
+		}`,
+		"empty file path": `{
+			"files": {"": {"size": 10, "line": 3}},
+			"baseline_complete": true
+		}`,
+		"missing pending snapshot": `{
+			"files": {},
+			"baseline_complete": false
+		}`,
+		"null pending snapshot": `{
+			"files": {},
+			"baseline_complete": false,
+			"baseline_pending": null
+		}`,
 		"null pending value": `{
 			"files": {},
 			"baseline_complete": false,
 			"baseline_pending": {"/session.jsonl": null}
+		}`,
+		"false pending value": `{
+			"files": {},
+			"baseline_complete": false,
+			"baseline_pending": {"/session.jsonl": false}
+		}`,
+		"empty pending path": `{
+			"files": {},
+			"baseline_complete": false,
+			"baseline_pending": {"": true}
+		}`,
+		"pending baseline after completion": `{
+			"files": {},
+			"baseline_complete": true,
+			"baseline_pending": {"/session.jsonl": true}
 		}`,
 	}
 	for name, cursor := range tests {
@@ -921,7 +965,7 @@ func TestLoadCourierStateRejectsNullCursorValues(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := loadCourierState(statePath); err == nil {
-				t.Fatal("null cursor value was accepted")
+				t.Fatal("invalid cursor value was accepted")
 			}
 		})
 	}
@@ -974,6 +1018,25 @@ func TestWaitForCourierStatePreservesUnreadableCursorUntilRecovery(t *testing.T)
 	case got := <-result:
 		t.Fatalf("schema-less cursor during repair was accepted: %+v", got)
 	case <-time.After(25 * time.Millisecond):
+	}
+	nullFile := []byte(`{
+		"files": {"/session.jsonl": null},
+		"baseline_complete": true
+	}`)
+	if err := os.WriteFile(statePath, nullFile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("null file cursor during repair was accepted: %+v", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+	data, err = os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(nullFile) {
+		t.Fatalf("load retry changed null file cursor to %q", data)
 	}
 
 	expected := courierState{
