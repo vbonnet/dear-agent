@@ -621,6 +621,75 @@ func TestScanClaudeTranscriptSurfacesReadFailure(t *testing.T) {
 	}
 }
 
+func TestScanClaudeProjectsContinuesAfterKnownTranscriptReadFailure(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	badPath := filepath.Join(dir, "a-unreadable.jsonl")
+	goodPath := filepath.Join(dir, "z-healthy.jsonl")
+	writeJSONLLine(t, badPath, "user", "")
+	writeJSONLLine(t, goodPath, "user", "")
+	backdateCourierFile(t, badPath)
+	backdateCourierFile(t, goodPath)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	badCursor := st.Files[badPath]
+	if err := os.Remove(badPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(badPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	backdateCourierFile(t, badPath)
+	writeJSONLLine(t, goodPath, "assistant", "healthy completion")
+	backdateCourierFile(t, goodPath)
+
+	var reported []error
+	events, err := scanClaudeProjects(
+		home,
+		45*time.Second,
+		&st,
+		func(err error) {
+			reported = append(reported, err)
+		},
+	)
+	if err != nil {
+		t.Fatalf("scan healthy sessions around bad transcript: %v", err)
+	}
+	if len(reported) != 1 ||
+		!strings.Contains(reported[0].Error(), badPath) {
+		t.Fatalf("reported transcript errors = %v, want %q", reported, badPath)
+	}
+	if len(events) != 1 || events[0].SessionFile != goodPath ||
+		events[0].Headline != "healthy completion" {
+		t.Fatalf("events after independent transcript error = %+v", events)
+	}
+	if got := st.Files[badPath]; got != badCursor {
+		t.Fatalf("bad transcript cursor advanced from %+v to %+v", badCursor, got)
+	}
+}
+
+func TestCourierTranscriptPrefixChangedUsesBoundedAppendCheck(t *testing.T) {
+	previous := courierFileState{
+		Size:        1024,
+		AnchorHash:  strings.Repeat("b", sha256.Size*2),
+		ContentHash: strings.Repeat("a", sha256.Size*2),
+	}
+	if courierTranscriptPrefixChanged(
+		previous,
+		2048,
+		false,
+		filepath.Join(t.TempDir(), "not-read-on-ordinary-append.jsonl"),
+	) {
+		t.Fatal("ordinary same-inode growth requested a full-prefix replacement check")
+	}
+}
+
 func TestCourierContentFingerprintExtendsPersistedHashState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeJSONLLine(t, path, "assistant", "first completion")

@@ -71,6 +71,7 @@ type courierFileState struct {
 	Identity     string `json:"identity,omitempty"`
 	ModifiedAt   int64  `json:"modified_at_unix_nano,omitempty"`
 	ChangedAt    int64  `json:"changed_at_unix_nano,omitempty"`
+	AnchorHash   string `json:"anchor_hash,omitempty"`
 	BoundaryHash string `json:"boundary_hash,omitempty"`
 	ContentHash  string `json:"content_hash,omitempty"`
 	HashState    string `json:"hash_state,omitempty"`
@@ -224,6 +225,9 @@ func validateCourierFileJSON(path string, raw json.RawMessage) error {
 }
 
 func validateCourierFingerprints(st courierFileState) error {
+	if err := validateCourierDigest("anchor_hash", st.AnchorHash); err != nil {
+		return err
+	}
 	if err := validateCourierDigest("boundary_hash", st.BoundaryHash); err != nil {
 		return err
 	}
@@ -547,7 +551,15 @@ func prepareCourierBaselineSnapshot(home string, st *courierState) error {
 // anything, including actively-written files. Once that baseline completes,
 // an unknown path represents a newly-created session and starts at line zero
 // so its first terminal completion is not discarded.
-func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) ([]resultsCourierEvent, error) {
+type courierScanErrorReporter func(error)
+
+func scanClaudeProjects(
+	home string,
+	idleGrace time.Duration,
+	st *courierState,
+	reporters ...courierScanErrorReporter,
+) ([]resultsCourierEvent, error) {
+	report := firstCourierScanErrorReporter(reporters)
 	matches, err := filepath.Glob(claudeProjectsGlob(home))
 	if err != nil {
 		return nil, err
@@ -576,7 +588,10 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 		info, err := os.Stat(path)
 		if err != nil {
 			if _, known := st.Files[path]; known && !os.IsNotExist(err) {
-				return nil, fmt.Errorf("stat known transcript %q: %w", path, err)
+				reportCourierScanError(
+					report,
+					fmt.Errorf("stat known transcript %q: %w", path, err),
+				)
 			}
 			continue // raced with deletion/rotation; skip this tick
 		}
@@ -592,7 +607,11 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 			os.Stat,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("scan transcript %q: %w", path, err)
+			reportCourierScanError(
+				report,
+				fmt.Errorf("scan transcript %q: %w", path, err),
+			)
+			continue
 		}
 		completeCourierBaselinePath(st, path, initialBaseline, baselineReadFailed)
 		if event != nil {
@@ -605,6 +624,21 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 	}
 
 	return events, nil
+}
+
+func firstCourierScanErrorReporter(
+	reporters []courierScanErrorReporter,
+) courierScanErrorReporter {
+	if len(reporters) == 0 {
+		return nil
+	}
+	return reporters[0]
+}
+
+func reportCourierScanError(report courierScanErrorReporter, err error) {
+	if report != nil {
+		report(err)
+	}
 }
 
 func completeCourierBaselinePath(
@@ -635,8 +669,6 @@ func scanClaudeTranscript(
 		prev,
 		identity,
 		info.Size(),
-		modifiedAt,
-		changedAt,
 		path,
 	)
 	if known && info.Size() == prev.Size && !replaced {
@@ -709,6 +741,10 @@ func readStableCourierDelta(
 	if err != nil {
 		return nil, courierFileState{}, false, fmt.Errorf("read transcript delta: %w", err)
 	}
+	anchorHash, err := courierAnchorFingerprint(path, info.Size())
+	if err != nil {
+		return nil, courierFileState{}, false, fmt.Errorf("fingerprint transcript anchor: %w", err)
+	}
 	boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
 	if err != nil {
 		return nil, courierFileState{}, false, fmt.Errorf("fingerprint transcript boundary: %w", err)
@@ -735,6 +771,7 @@ func readStableCourierDelta(
 		Identity:     identity,
 		ModifiedAt:   modifiedAt,
 		ChangedAt:    changedAt,
+		AnchorHash:   anchorHash,
 		BoundaryHash: boundaryHash,
 		ContentHash:  contentHash,
 		HashState:    hashState,
@@ -759,6 +796,13 @@ func refreshCourierUnchangedState(
 	updated.Identity = identity
 	updated.ModifiedAt = info.ModTime().UnixNano()
 	updated.ChangedAt = courierFileChangeTime(info)
+	if updated.AnchorHash == "" {
+		anchorHash, err := courierAnchorFingerprint(path, info.Size())
+		if err != nil {
+			return err
+		}
+		updated.AnchorHash = anchorHash
+	}
 	if updated.BoundaryHash == "" {
 		boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
 		if err != nil {
@@ -790,8 +834,6 @@ func courierTranscriptReplaced(
 	previous courierFileState,
 	currentIdentity string,
 	currentSize int64,
-	currentModifiedAt int64,
-	currentChangedAt int64,
 	path string,
 ) bool {
 	if !known || currentSize < previous.Size {
@@ -800,11 +842,12 @@ func courierTranscriptReplaced(
 	identityChanged := previous.Identity != "" &&
 		currentIdentity != "" &&
 		previous.Identity != currentIdentity
+	if courierTranscriptAnchorChanged(previous, path) {
+		return true
+	}
 	if courierTranscriptPrefixChanged(
 		previous,
 		currentSize,
-		currentModifiedAt,
-		currentChangedAt,
 		identityChanged,
 		path,
 	) {
@@ -817,25 +860,32 @@ func courierTranscriptReplaced(
 	return err != nil || currentBoundaryHash != previous.BoundaryHash
 }
 
+func courierTranscriptAnchorChanged(
+	previous courierFileState,
+	path string,
+) bool {
+	if previous.AnchorHash == "" {
+		return false
+	}
+	currentAnchorHash, err := courierAnchorFingerprint(path, previous.Size)
+	return err != nil || currentAnchorHash != previous.AnchorHash
+}
+
 func courierTranscriptPrefixChanged(
 	previous courierFileState,
 	currentSize int64,
-	currentModifiedAt int64,
-	currentChangedAt int64,
 	identityChanged bool,
 	path string,
 ) bool {
 	if currentSize < previous.Size || previous.ContentHash == "" {
 		return false
 	}
-	generationChanged := identityChanged ||
-		(previous.ModifiedAt != 0 &&
-			currentModifiedAt != previous.ModifiedAt)
-	if previous.ChangedAt == 0 ||
-		(currentChangedAt != 0 && currentChangedAt != previous.ChangedAt) {
-		generationChanged = true
-	}
-	if !generationChanged {
+	// Ordinary same-inode growth changes mtime and ctime on every append. The
+	// persisted boundary fingerprint below is the bounded continuity check for
+	// that hot path, paired with a bounded first-window anchor check above.
+	// Rehash the complete prefix only for rare replacement, same-size rewrite,
+	// or one-time legacy cursor migration candidates.
+	if previous.AnchorHash != "" && !identityChanged && currentSize > previous.Size {
 		return false
 	}
 	prefixHash, _, err := courierContentFingerprint(
@@ -854,6 +904,10 @@ func seedCourierBaseline(
 	st *courierState,
 ) error {
 	lines, _, err := readLinesFrom(path, 0)
+	if err != nil {
+		return err
+	}
+	anchorHash, err := courierAnchorFingerprint(path, info.Size())
 	if err != nil {
 		return err
 	}
@@ -876,6 +930,7 @@ func seedCourierBaseline(
 		Identity:     identity,
 		ModifiedAt:   info.ModTime().UnixNano(),
 		ChangedAt:    courierFileChangeTime(info),
+		AnchorHash:   anchorHash,
 		BoundaryHash: boundaryHash,
 		ContentHash:  contentHash,
 		HashState:    hashState,
@@ -914,6 +969,14 @@ func courierFileIdentity(info os.FileInfo) string {
 }
 
 const courierBoundaryWindow = int64(4096)
+
+func courierAnchorFingerprint(path string, size int64) (string, error) {
+	end := size
+	if end > courierBoundaryWindow {
+		end = courierBoundaryWindow
+	}
+	return courierBoundaryFingerprint(path, end)
+}
 
 func courierBoundaryFingerprint(path string, end int64) (string, error) {
 	f, err := os.Open(path) //#nosec G304 -- path comes from our own transcript glob
@@ -1250,11 +1313,31 @@ func recoverCourierReceiptTransitions(
 	if err != nil {
 		return st, false, err
 	}
-	defer f.Close()
 
+	recovered, changed, recoverErr := recoverCourierReceiptTransitionsFromFile(f, st)
+	closeErr := f.Close()
+	if recoverErr != nil {
+		if closeErr != nil {
+			return st, false, errors.Join(
+				recoverErr,
+				fmt.Errorf("close courier receipt trail: %w", closeErr),
+			)
+		}
+		return st, false, recoverErr
+	}
+	if closeErr != nil {
+		return st, false, fmt.Errorf("close courier receipt trail: %w", closeErr)
+	}
+	return recovered, changed, nil
+}
+
+func recoverCourierReceiptTransitionsFromFile(
+	f *os.File,
+	st courierState,
+) (courierState, bool, error) {
 	recovered := cloneCourierState(st)
 	changed := false
-	err = readCompleteCourierReceiptLines(f, func(line int, record []byte) error {
+	err := readCompleteCourierReceiptLines(f, func(line int, record []byte) error {
 		var receipt courierDeliveryReceipt
 		if err := json.Unmarshal(record, &receipt); err != nil {
 			return fmt.Errorf("decode courier receipt line %d: %w", line, err)
@@ -1419,7 +1502,14 @@ func processResultsCourierTick(
 			return fmt.Errorf("save baseline snapshot: %w", err)
 		}
 	}
-	events, err := scanClaudeProjects(home, idleGrace, &candidate)
+	events, err := scanClaudeProjects(
+		home,
+		idleGrace,
+		&candidate,
+		func(err error) {
+			fmt.Fprintf(os.Stderr, "results-courier: %v\n", err)
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
