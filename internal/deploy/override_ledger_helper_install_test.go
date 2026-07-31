@@ -23,6 +23,8 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	target := makefile[start : start+end]
 
 	requiredInOrder := []string{
+		`install_lock_dir="/tmp/dear-agent-override-ledger-install.lock"`,
+		`/bin/mkdir "$$install_lock_dir"`,
 		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
 		`companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"`,
 		`/bin/cp "$$agm_artifact" "$$agm_staging"`,
@@ -48,6 +50,7 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`launcher_set_active=1`,
 		`printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer"`,
 		`root_transaction_committed && launcher_activation_complete=1`,
+		`/bin/rmdir "$$install_lock_dir"`,
 	}
 	offset := 0
 	for _, want := range requiredInOrder {
@@ -62,6 +65,9 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	}
 	if !strings.Contains(target, `if test "$$launcher_set_active" = 1 && root_transaction_committed; then launcher_activation_complete=1; fi`) {
 		t.Fatal("signal recovery does not distinguish a complete launcher set from a partial user activation")
+	}
+	if !strings.Contains(target, `if test "$$install_lock_held" = 1; then /bin/rmdir "$$install_lock_dir"`) {
+		t.Fatal("installer cleanup does not release the whole-transaction lock")
 	}
 	if got := strings.Count(target, "/usr/bin/sudo"); got != 2 {
 		t.Fatalf("install target uses %d sudo calls, want one probe and one transaction", got)
