@@ -758,6 +758,67 @@ func TestVerifyCourierPrefixChunkBoundsOrdinaryAppendWork(t *testing.T) {
 	}
 }
 
+func TestVerifyCourierGrowingPrefixCompletesOrdinaryMultiChunkWorkInOneTick(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large-append.jsonl")
+	original := strings.Repeat("x", int(2*courierPrefixVerifyChunk))
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previousInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentHash, hashState, err := courierContentFingerprint(
+		path,
+		previousInfo.Size(),
+		courierFileState{},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := courierFileState{
+		Size:        previousInfo.Size(),
+		ContentHash: contentHash,
+		HashState:   hashState,
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("appended"); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := courierState{Files: map[string]courierFileState{}}
+	replaced, pending, err := verifyCourierGrowingPrefix(
+		path,
+		true,
+		false,
+		previous,
+		info,
+		courierFileIdentity(info),
+		&st,
+		os.Stat,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced || pending {
+		t.Fatalf("multi-chunk prefix result = (%v, %v), want stable and complete", replaced, pending)
+	}
+	if _, ok := st.prefixChecks[path]; ok {
+		t.Fatal("completed same-tick prefix verification retained incremental state")
+	}
+}
+
 func TestCourierContentFingerprintExtendsPersistedHashState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeJSONLLine(t, path, "assistant", "first completion")
@@ -1512,6 +1573,36 @@ func TestCourierRelayPromptNeverContainsTranscriptText(t *testing.T) {
 	if !strings.Contains(prompt, "1 completed session(s)") ||
 		!strings.Contains(prompt, "Do not read or relay transcript content") {
 		t.Fatalf("relay prompt does not retain its fixed content-free contract: %q", prompt)
+	}
+}
+
+func TestCourierOperationalLogsExcludeTranscriptAndDeliveryDetails(t *testing.T) {
+	const secret = "secret transcript headline and /private/session/path"
+	detected := courierDetectedOperationalLog(2)
+	delivered := courierDeliveryOperationalLog(
+		2,
+		courierDeliveryReceipt{
+			Sessions:     []string{secret},
+			Digest:       secret,
+			DesktopSent:  true,
+			DesktopError: secret,
+			RelayTarget:  secret,
+			RelayError:   secret,
+		},
+		true,
+	)
+	for name, output := range map[string]string{
+		"detected":  detected,
+		"delivered": delivered,
+	} {
+		if strings.Contains(output, secret) ||
+			strings.Contains(output, "/private/session/path") {
+			t.Fatalf("%s operational log exposed transcript or delivery detail: %q", name, output)
+		}
+	}
+	if !strings.Contains(delivered, `"delivered":true`) ||
+		!strings.Contains(delivered, `"receipt_persisted":true`) {
+		t.Fatalf("delivery operational log omitted content-free outcome: %q", delivered)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -925,7 +926,10 @@ func courierTranscriptPrefixChanged(
 	return err != nil || prefixHash != previous.ContentHash
 }
 
-const courierPrefixVerifyChunk = int64(1024 * 1024)
+const (
+	courierPrefixVerifyChunk  = int64(1024 * 1024)
+	courierPrefixVerifyBudget = 10 * time.Second
+)
 
 func verifyCourierGrowingPrefix(
 	path string,
@@ -939,21 +943,37 @@ func verifyCourierGrowingPrefix(
 	if !known || replaced || info.Size() <= previous.Size {
 		return replaced, false, nil
 	}
-	verified, prefixChanged, err := verifyCourierPrefixChunk(
-		path,
-		previous,
-		info,
-		identity,
-		st,
-		restat,
-	)
-	if err != nil {
-		return false, false, err
+	deadline := time.Now().Add(courierPrefixVerifyBudget)
+	for {
+		verified, prefixChanged, err := verifyCourierPrefixChunk(
+			path,
+			previous,
+			info,
+			identity,
+			st,
+			restat,
+		)
+		if err != nil {
+			return false, false, err
+		}
+		if verified {
+			return prefixChanged, false, nil
+		}
+		if _, incomplete := st.prefixChecks[path]; !incomplete {
+			// The generation changed during verification. Wait for the next
+			// idle scan instead of repeatedly restarting against stale info.
+			return false, true, nil
+		}
+		if time.Now().After(deadline) {
+			// Retain the incremental hash state for an exceptionally large or
+			// slow transcript, but never monopolize the always-on watcher.
+			return false, true, nil
+		}
+		// Finish ordinary stable prefixes in this courier tick so the fixed
+		// three-minute interval cannot multiply delivery latency by transcript
+		// size. Each step remains bounded and yields to the watcher.
+		runtime.Gosched()
 	}
-	if !verified {
-		return false, true, nil
-	}
-	return prefixChanged, false, nil
 }
 
 func verifyCourierPrefixChunk(
@@ -1676,8 +1696,11 @@ func processResultsCourierTick(
 		home,
 		idleGrace,
 		&candidate,
-		func(err error) {
-			fmt.Fprintf(os.Stderr, "results-courier: %v\n", err)
+		func(error) {
+			fmt.Fprintln(
+				os.Stderr,
+				"results-courier: transcript scan failed; continuing",
+			)
 		},
 	)
 	if err != nil {
@@ -1691,18 +1714,16 @@ func processResultsCourierTick(
 		return nil
 	}
 
-	out, _ := json.Marshal(struct {
-		Timestamp string                `json:"timestamp"`
-		Kind      string                `json:"kind"`
-		Events    []resultsCourierEvent `json:"events"`
-	}{time.Now().Format(time.RFC3339), "results_courier.detected", events})
-	fmt.Println(string(out))
+	fmt.Println(courierDetectedOperationalLog(len(events)))
 
 	receipt := deliver(ctx, opCtx, orchestratorName, events)
 	receipt.CursorTransitions = courierReceiptTransitions(*st, candidate, events)
 	receiptErr := appendCourierReceipt(stateDir, receipt)
-	receiptOut, _ := json.Marshal(receipt)
-	fmt.Println(string(receiptOut))
+	fmt.Println(courierDeliveryOperationalLog(
+		len(events),
+		receipt,
+		receiptErr == nil,
+	))
 
 	if !courierDeliverySucceeded(receipt) {
 		if receiptErr != nil {
@@ -1727,6 +1748,44 @@ func processResultsCourierTick(
 		return fmt.Errorf("notification delivered but append receipt: %w", receiptErr)
 	}
 	return nil
+}
+
+func courierDetectedOperationalLog(events int) string {
+	out, _ := json.Marshal(struct {
+		Timestamp string `json:"timestamp"`
+		Kind      string `json:"kind"`
+		Events    int    `json:"events"`
+	}{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Kind:      "results_courier.detected",
+		Events:    events,
+	})
+	return string(out)
+}
+
+func courierDeliveryOperationalLog(
+	events int,
+	receipt courierDeliveryReceipt,
+	receiptPersisted bool,
+) string {
+	out, _ := json.Marshal(struct {
+		Timestamp        string `json:"timestamp"`
+		Kind             string `json:"kind"`
+		Events           int    `json:"events"`
+		DesktopSent      bool   `json:"desktop_sent"`
+		RelaySent        bool   `json:"relay_sent"`
+		Delivered        bool   `json:"delivered"`
+		ReceiptPersisted bool   `json:"receipt_persisted"`
+	}{
+		Timestamp:        time.Now().Format(time.RFC3339),
+		Kind:             "results_courier.delivery",
+		Events:           events,
+		DesktopSent:      receipt.DesktopSent,
+		RelaySent:        receipt.RelaySent,
+		Delivered:        courierDeliverySucceeded(receipt),
+		ReceiptPersisted: receiptPersisted,
+	})
+	return string(out)
 }
 
 func acquireResultsCourierLock(stateDir string) (*agmlock.FileLock, error) {
