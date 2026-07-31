@@ -575,10 +575,13 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 	for _, path := range matches {
 		info, err := os.Stat(path)
 		if err != nil {
+			if _, known := st.Files[path]; known && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("stat known transcript %q: %w", path, err)
+			}
 			continue // raced with deletion/rotation; skip this tick
 		}
 		initialBaseline := st.BaselinePending[path]
-		event, baselineReadFailed := scanClaudeTranscript(
+		event, baselineReadFailed, err := scanClaudeTranscript(
 			home,
 			path,
 			info,
@@ -588,9 +591,10 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 			st,
 			os.Stat,
 		)
-		if initialBaseline && !baselineReadFailed {
-			delete(st.BaselinePending, path)
+		if err != nil {
+			return nil, fmt.Errorf("scan transcript %q: %w", path, err)
 		}
+		completeCourierBaselinePath(st, path, initialBaseline, baselineReadFailed)
 		if event != nil {
 			events = append(events, *event)
 		}
@@ -603,6 +607,16 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 	return events, nil
 }
 
+func completeCourierBaselinePath(
+	st *courierState,
+	path string,
+	initialBaseline, baselineReadFailed bool,
+) {
+	if initialBaseline && !baselineReadFailed {
+		delete(st.BaselinePending, path)
+	}
+}
+
 func scanClaudeTranscript(
 	home, path string,
 	info os.FileInfo,
@@ -611,7 +625,7 @@ func scanClaudeTranscript(
 	initialBaseline bool,
 	st *courierState,
 	restat func(string) (os.FileInfo, error),
-) (*resultsCourierEvent, bool) {
+) (*resultsCourierEvent, bool, error) {
 	prev, known := st.Files[path]
 	identity := courierFileIdentity(info)
 	modifiedAt := info.ModTime().UnixNano()
@@ -627,15 +641,13 @@ func scanClaudeTranscript(
 	)
 	if known && info.Size() == prev.Size && !replaced {
 		if err := refreshCourierUnchangedState(path, info, identity, prev, st); err != nil {
-			return nil, false
+			return nil, false, err
 		}
-		return nil, false // nothing new
+		return nil, false, nil // nothing new
 	}
 	if initialBaseline && !known {
-		if err := seedCourierBaseline(path, info, identity, st); err != nil {
-			return nil, true
-		}
-		return nil, false
+		baselineReadFailed := seedCourierBaseline(path, info, identity, st) != nil
+		return nil, baselineReadFailed, nil
 	}
 	if !known {
 		// This path appeared after the initial deployment baseline. Mark it
@@ -645,10 +657,10 @@ func scanClaudeTranscript(
 		st.Files[path] = prev
 	}
 	if now.Sub(info.ModTime()) < idleGrace {
-		return nil, false // still being written; leave watermark untouched
+		return nil, false, nil // still being written; leave watermark untouched
 	}
 
-	lines, nextState, stable := readStableCourierDelta(
+	lines, nextState, stable, err := readStableCourierDelta(
 		path,
 		prev,
 		info,
@@ -658,8 +670,11 @@ func scanClaudeTranscript(
 		replaced,
 		restat,
 	)
+	if err != nil {
+		return nil, false, err
+	}
 	if !stable {
-		return nil, false
+		return nil, false, nil
 	}
 	relayPending := prev.RelayPending
 	if replaced {
@@ -669,7 +684,7 @@ func scanClaudeTranscript(
 	nextState.RelayPending = relayPending
 	st.Files[path] = nextState
 	if headline == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	projectDir := filepath.Base(filepath.Dir(path))
 	return &resultsCourierEvent{
@@ -677,7 +692,7 @@ func scanClaudeTranscript(
 		Project:     projectLabel(home, projectDir),
 		Headline:    truncateHeadline(headline, 220),
 		DetectedAt:  now,
-	}, false
+	}, false, nil
 }
 
 func readStableCourierDelta(
@@ -689,14 +704,14 @@ func readStableCourierDelta(
 	changedAt int64,
 	replaced bool,
 	restat func(string) (os.FileInfo, error),
-) ([]string, courierFileState, bool) {
+) ([]string, courierFileState, bool, error) {
 	lines, lineBase, err := readCourierDelta(path, previous, info, replaced)
 	if err != nil {
-		return nil, courierFileState{}, false
+		return nil, courierFileState{}, false, fmt.Errorf("read transcript delta: %w", err)
 	}
 	boundaryHash, err := courierBoundaryFingerprint(path, info.Size())
 	if err != nil {
-		return nil, courierFileState{}, false
+		return nil, courierFileState{}, false, fmt.Errorf("fingerprint transcript boundary: %w", err)
 	}
 	contentHash, hashState, err := courierContentFingerprint(
 		path,
@@ -705,11 +720,14 @@ func readStableCourierDelta(
 		replaced,
 	)
 	if err != nil {
-		return nil, courierFileState{}, false
+		return nil, courierFileState{}, false, fmt.Errorf("fingerprint transcript content: %w", err)
 	}
 	confirmedInfo, err := restat(path)
-	if err != nil || !courierFileGenerationMatches(info, confirmedInfo) {
-		return nil, courierFileState{}, false
+	if err != nil {
+		return nil, courierFileState{}, false, fmt.Errorf("restat transcript after read: %w", err)
+	}
+	if !courierFileGenerationMatches(info, confirmedInfo) {
+		return nil, courierFileState{}, false, nil
 	}
 	return lines, courierFileState{
 		Size:         info.Size(),
@@ -720,7 +738,7 @@ func readStableCourierDelta(
 		BoundaryHash: boundaryHash,
 		ContentHash:  contentHash,
 		HashState:    hashState,
-	}, true
+	}, true, nil
 }
 
 func courierFileGenerationMatches(before, after os.FileInfo) bool {
@@ -1062,15 +1080,25 @@ func formatDigest(events []resultsCourierEvent) (title, body string) {
 // tried to reach Valentin, so a run can be verified after the fact instead
 // of trusted on faith.
 type courierDeliveryReceipt struct {
-	Timestamp    string   `json:"timestamp"`
-	Events       int      `json:"events"`
-	Sessions     []string `json:"sessions"`
-	Digest       string   `json:"digest"`
-	DesktopSent  bool     `json:"desktop_sent"`
-	DesktopError string   `json:"desktop_error,omitempty"`
-	RelayTarget  string   `json:"relay_target,omitempty"`
-	RelaySent    bool     `json:"relay_sent"`
-	RelayError   string   `json:"relay_error,omitempty"`
+	Timestamp         string                             `json:"timestamp"`
+	Events            int                                `json:"events"`
+	Sessions          []string                           `json:"sessions"`
+	Digest            string                             `json:"digest"`
+	DesktopSent       bool                               `json:"desktop_sent"`
+	DesktopError      string                             `json:"desktop_error,omitempty"`
+	RelayTarget       string                             `json:"relay_target,omitempty"`
+	RelaySent         bool                               `json:"relay_sent"`
+	RelayError        string                             `json:"relay_error,omitempty"`
+	CursorTransitions map[string]courierCursorTransition `json:"cursor_transitions,omitempty"`
+}
+
+// courierCursorTransition makes an accepted notification a recoverable
+// cursor transaction. The receipt trail is fsynced before state.json is
+// replaced, so a restart can replay the cursor transition rather than the
+// already-delivered human notification when that replacement fails.
+type courierCursorTransition struct {
+	Before *courierFileState `json:"before,omitempty"`
+	After  courierFileState  `json:"after"`
 }
 
 // deliverCourierResults fires both notification channels for a batch of
@@ -1190,6 +1218,125 @@ func appendCourierReceipt(stateDir string, receipt courierDeliveryReceipt) error
 	return nil
 }
 
+func courierReceiptTransitions(
+	before, after courierState,
+	events []resultsCourierEvent,
+) map[string]courierCursorTransition {
+	transitions := make(map[string]courierCursorTransition, len(events))
+	for _, event := range events {
+		afterCursor, ok := after.Files[event.SessionFile]
+		if !ok {
+			continue
+		}
+		transition := courierCursorTransition{After: afterCursor}
+		if beforeCursor, known := before.Files[event.SessionFile]; known {
+			copied := beforeCursor
+			transition.Before = &copied
+		}
+		transitions[event.SessionFile] = transition
+	}
+	return transitions
+}
+
+func recoverCourierReceiptTransitions(
+	stateDir string,
+	st courierState,
+) (courierState, bool, error) {
+	path := filepath.Join(stateDir, "trail.jsonl")
+	f, err := os.Open(path) //#nosec G304 -- fixed path under the courier's own state dir
+	if os.IsNotExist(err) {
+		return st, false, nil
+	}
+	if err != nil {
+		return st, false, err
+	}
+	defer f.Close()
+
+	recovered := cloneCourierState(st)
+	changed := false
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	line := 0
+	for scanner.Scan() {
+		line++
+		if len(scanner.Bytes()) == 0 {
+			continue
+		}
+		var receipt courierDeliveryReceipt
+		if err := json.Unmarshal(scanner.Bytes(), &receipt); err != nil {
+			return st, false, fmt.Errorf("decode courier receipt line %d: %w", line, err)
+		}
+		if !courierDeliverySucceeded(receipt) {
+			continue
+		}
+		for transcriptPath, transition := range receipt.CursorTransitions {
+			applied, err := applyCourierReceiptTransition(
+				&recovered,
+				line,
+				transcriptPath,
+				transition,
+			)
+			if err != nil {
+				return st, false, err
+			}
+			changed = applied || changed
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return st, false, fmt.Errorf("read courier receipts: %w", err)
+	}
+	return recovered, changed, nil
+}
+
+func applyCourierReceiptTransition(
+	st *courierState,
+	line int,
+	transcriptPath string,
+	transition courierCursorTransition,
+) (bool, error) {
+	if transcriptPath == "" {
+		return false, fmt.Errorf("courier receipt line %d has empty cursor path", line)
+	}
+	if err := validateCourierFileState(transition.After); err != nil {
+		return false, fmt.Errorf(
+			"courier receipt line %d cursor %q after state: %w",
+			line,
+			transcriptPath,
+			err,
+		)
+	}
+	current, known := st.Files[transcriptPath]
+	if transition.Before == nil {
+		if known {
+			return false, nil
+		}
+	} else {
+		if err := validateCourierFileState(*transition.Before); err != nil {
+			return false, fmt.Errorf(
+				"courier receipt line %d cursor %q before state: %w",
+				line,
+				transcriptPath,
+				err,
+			)
+		}
+		if !known || current != *transition.Before {
+			return false, nil
+		}
+	}
+	st.Files[transcriptPath] = transition.After
+	return true, nil
+}
+
+func validateCourierFileState(st courierFileState) error {
+	if st.Size < 0 {
+		return fmt.Errorf("negative size")
+	}
+	if st.Line < 0 {
+		return fmt.Errorf("negative line")
+	}
+	return validateCourierFingerprints(st)
+}
+
 func cloneCourierState(st courierState) courierState {
 	clone := courierState{
 		Files:            make(map[string]courierFileState, len(st.Files)),
@@ -1255,6 +1402,7 @@ func processResultsCourierTick(
 	fmt.Println(string(out))
 
 	receipt := deliver(ctx, opCtx, orchestratorName, events)
+	receipt.CursorTransitions = courierReceiptTransitions(*st, candidate, events)
 	receiptErr := appendCourierReceipt(stateDir, receipt)
 	receiptOut, _ := json.Marshal(receipt)
 	fmt.Println(string(receiptOut))
@@ -1266,8 +1414,17 @@ func processResultsCourierTick(
 		return fmt.Errorf("all notification channels failed; cursor retained for retry")
 	}
 	*st = candidate
-	if err := saveCourierState(statePath, candidate); err != nil {
-		return fmt.Errorf("notification delivered but save state: %w", err)
+	if saveErr := saveCourierState(statePath, candidate); saveErr != nil {
+		if receiptErr != nil {
+			return errors.Join(
+				fmt.Errorf("notification delivered but save state: %w", saveErr),
+				fmt.Errorf("append recoverable delivery cursor: %w", receiptErr),
+			)
+		}
+		return fmt.Errorf(
+			"notification delivered; recoverable receipt persisted but save state: %w",
+			saveErr,
+		)
 	}
 	if receiptErr != nil {
 		return fmt.Errorf("notification delivered but append receipt: %w", receiptErr)
@@ -1349,6 +1506,20 @@ func startResultsCourier(ctx context.Context, opCtx *ops.OpContext, home, orches
 				fmt.Fprintf(os.Stderr, "results-courier: state load retry stopped: %v\n", err)
 			}
 			return
+		}
+	}
+	st, recovered, err := recoverCourierReceiptTransitions(stateDir, st)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "results-courier: recover delivered cursors: %v\n", err)
+		return
+	}
+	if recovered {
+		if err := saveCourierState(statePath, st); err != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"results-courier: recovered delivered cursors in memory; save state: %v\n",
+				err,
+			)
 		}
 	}
 

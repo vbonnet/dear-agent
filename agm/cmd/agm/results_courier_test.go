@@ -555,7 +555,7 @@ func TestScanClaudeTranscriptDefersGenerationChangedAfterRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	event, baselineFailed := scanClaudeTranscript(
+	event, baselineFailed, err := scanClaudeTranscript(
 		home,
 		path,
 		info,
@@ -568,11 +568,56 @@ func TestScanClaudeTranscriptDefersGenerationChangedAfterRead(t *testing.T) {
 			return os.Stat(path)
 		},
 	)
-	if event != nil || baselineFailed {
-		t.Fatalf("generation-changing scan = (%+v, %v), want deferred", event, baselineFailed)
+	if event != nil || baselineFailed || err != nil {
+		t.Fatalf("generation-changing scan = (%+v, %v, %v), want deferred", event, baselineFailed, err)
 	}
 	if got := st.Files[path]; got != prior {
 		t.Fatalf("generation-changing scan advanced watermark from %+v to %+v", prior, got)
+	}
+}
+
+func TestScanClaudeTranscriptSurfacesReadFailure(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "unreadable-after-scan.jsonl")
+	writeJSONLLine(t, path, "user", "")
+	backdateCourierFile(t, path)
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	prior := st.Files[path]
+	writeJSONLLine(t, path, "assistant", "completion before read failure")
+	backdateCourierFile(t, path)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event, baselineFailed, err := scanClaudeTranscript(
+		home,
+		path,
+		info,
+		time.Now(),
+		45*time.Second,
+		false,
+		&st,
+		func(string) (os.FileInfo, error) {
+			return nil, errors.New("persistent read failure")
+		},
+	)
+	if event != nil || baselineFailed {
+		t.Fatalf("read-failing scan = (%+v, %v), want no event", event, baselineFailed)
+	}
+	if err == nil || !strings.Contains(err.Error(), "restat transcript after read") {
+		t.Fatalf("read-failing scan error = %v", err)
+	}
+	if got := st.Files[path]; got != prior {
+		t.Fatalf("read-failing scan advanced watermark from %+v to %+v", prior, got)
 	}
 }
 
@@ -1584,8 +1629,8 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 	}
 
 	statePath := filepath.Join(resultsCourierStateDir(home), "state.json")
-	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
-		t.Fatal(err)
+	if err := saveCourierState(statePath, st); err != nil {
+		t.Fatalf("persist seeded cursor: %v", err)
 	}
 	if err := os.Mkdir(statePath+".tmp", 0o700); err != nil {
 		t.Fatal(err)
@@ -1610,11 +1655,34 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 		&st,
 		succeedDelivery,
 	)
-	if err == nil || !strings.Contains(err.Error(), "notification delivered but save state") {
+	if err == nil || !strings.Contains(err.Error(), "recoverable receipt persisted") {
 		t.Fatalf("save failure after delivery = %v", err)
 	}
 	if got := st.Files[sessionPath]; got == seeded {
 		t.Fatalf("delivered cursor did not advance beyond %+v after save failure", seeded)
+	}
+
+	restarted, err := loadCourierState(statePath)
+	if err != nil {
+		t.Fatalf("load stale durable cursor: %v", err)
+	}
+	if got := restarted.Files[sessionPath]; got != seeded {
+		t.Fatalf("durable cursor unexpectedly advanced to %+v", got)
+	}
+	restarted, recovered, err := recoverCourierReceiptTransitions(
+		resultsCourierStateDir(home),
+		restarted,
+	)
+	if err != nil {
+		t.Fatalf("recover delivered cursor from receipt: %v", err)
+	}
+	if !recovered || restarted.Files[sessionPath] != st.Files[sessionPath] {
+		t.Fatalf(
+			"receipt recovery = (%v, %+v), want delivered cursor %+v",
+			recovered,
+			restarted.Files[sessionPath],
+			st.Files[sessionPath],
+		)
 	}
 
 	err = processResultsCourierTick(
@@ -1623,14 +1691,14 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 		home,
 		"",
 		45*time.Second,
-		&st,
+		&restarted,
 		succeedDelivery,
 	)
 	if err == nil || !strings.Contains(err.Error(), "save state") {
-		t.Fatalf("retrying durable state after delivery = %v", err)
+		t.Fatalf("restart retrying durable state after delivery = %v", err)
 	}
 	if deliveries != 1 {
-		t.Fatalf("successful delivery repeated %d times after save failure, want 1", deliveries)
+		t.Fatalf("successful delivery repeated %d times after restart, want 1", deliveries)
 	}
 
 	if err := os.Remove(statePath + ".tmp"); err != nil {
@@ -1642,13 +1710,27 @@ func TestProcessResultsCourierTickRetainsDeliveredCursorWhenSaveFails(t *testing
 		home,
 		"",
 		45*time.Second,
-		&st,
+		&restarted,
 		succeedDelivery,
 	); err != nil {
 		t.Fatalf("persist retained cursor: %v", err)
 	}
 	if deliveries != 1 {
 		t.Fatalf("delivery repeated %d times while persisting retained cursor, want 1", deliveries)
+	}
+	persisted, err := loadCourierState(statePath)
+	if err != nil {
+		t.Fatalf("load recovered cursor: %v", err)
+	}
+	_, recovered, err = recoverCourierReceiptTransitions(
+		resultsCourierStateDir(home),
+		persisted,
+	)
+	if err != nil {
+		t.Fatalf("recheck receipt transitions: %v", err)
+	}
+	if recovered {
+		t.Fatal("receipt recovery regressed an already-persisted delivered cursor")
 	}
 }
 
