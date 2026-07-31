@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	agmlock "github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
@@ -1194,5 +1196,70 @@ func TestAcquireResultsCourierLockSerializesSharedState(t *testing.T) {
 	}
 	if err := third.Unlock(); err != nil {
 		t.Fatalf("release third lock: %v", err)
+	}
+}
+
+func TestWaitForResultsCourierLockTakesOverAfterOwnerExits(t *testing.T) {
+	stateDir := resultsCourierStateDir(t.TempDir())
+	first, err := acquireResultsCourierLock(stateDir)
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	defer func() { _ = first.Unlock() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	acquired := make(chan *agmlock.FileLock, 1)
+	failed := make(chan error, 1)
+	go func() {
+		instanceLock, err := waitForResultsCourierLock(ctx, stateDir, time.Millisecond)
+		if err != nil {
+			failed <- err
+			return
+		}
+		acquired <- instanceLock
+	}()
+
+	select {
+	case lock := <-acquired:
+		_ = lock.Unlock()
+		t.Fatal("contender acquired shared state before the owner exited")
+	case err := <-failed:
+		t.Fatalf("contender stopped while owner was active: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if err := first.Unlock(); err != nil {
+		t.Fatalf("release first lock: %v", err)
+	}
+	select {
+	case lock := <-acquired:
+		if err := lock.Unlock(); err != nil {
+			t.Fatalf("release takeover lock: %v", err)
+		}
+	case err := <-failed:
+		t.Fatalf("contender failed after owner exited: %v", err)
+	case <-ctx.Done():
+		t.Fatal("contender did not acquire shared state after owner exited")
+	}
+}
+
+func TestWaitForResultsCourierLockStopsOnCancellation(t *testing.T) {
+	stateDir := resultsCourierStateDir(t.TempDir())
+	first, err := acquireResultsCourierLock(stateDir)
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	defer func() { _ = first.Unlock() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lock, err := waitForResultsCourierLock(ctx, stateDir, time.Hour)
+	if lock != nil {
+		_ = lock.Unlock()
+		t.Fatal("cancelled contender acquired shared state")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled contender error = %v, want context.Canceled", err)
 	}
 }

@@ -1006,6 +1006,35 @@ func acquireResultsCourierLock(stateDir string) (*agmlock.FileLock, error) {
 	return instanceLock, nil
 }
 
+func waitForResultsCourierLock(
+	ctx context.Context,
+	stateDir string,
+	retryDelay time.Duration,
+) (*agmlock.FileLock, error) {
+	for {
+		instanceLock, err := acquireResultsCourierLock(stateDir)
+		if err == nil {
+			return instanceLock, nil
+		}
+		var contention *agmlock.LockError
+		if !errors.As(err, &contention) {
+			return nil, err
+		}
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 // startResultsCourier runs the poll-detect-notify loop on its own ticker
 // until ctx is done. It is started as a second goroutine from
 // runWatchStalled so no new launchd job is needed: the courier rides the
@@ -1014,9 +1043,11 @@ func startResultsCourier(ctx context.Context, opCtx *ops.OpContext, home, orches
 	stateDir := resultsCourierStateDir(home)
 	statePath := filepath.Join(stateDir, "state.json")
 
-	instanceLock, err := acquireResultsCourierLock(stateDir)
+	instanceLock, err := waitForResultsCourierLock(ctx, stateDir, 250*time.Millisecond)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "results-courier: disabled because another instance owns the shared state: %v\n", err)
+		if ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "results-courier: acquire shared-state ownership: %v\n", err)
+		}
 		return
 	}
 	defer func() {
