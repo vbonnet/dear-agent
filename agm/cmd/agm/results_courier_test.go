@@ -37,6 +37,14 @@ func writeJSONLLine(t *testing.T, path string, typ, text string) {
 	}
 }
 
+func backdateCourierFile(t *testing.T, path string) {
+	t.Helper()
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestScanClaudeProjects_FirstRunSeedsWithoutReporting(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
@@ -63,6 +71,61 @@ func TestScanClaudeProjects_FirstRunSeedsWithoutReporting(t *testing.T) {
 	}
 	if _, ok := st.Files[path]; !ok {
 		t.Fatal("expected watermark recorded for the seeded file")
+	}
+}
+
+func TestScanClaudeProjects_ReportsFirstCompletionForNewSession(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	st := courierState{Files: map[string]courierFileState{}}
+	if events, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil || len(events) != 0 {
+		t.Fatalf("initial baseline = (%+v, %v), want no events", events, err)
+	}
+	if !st.BaselineComplete {
+		t.Fatal("initial scan did not mark the deployment baseline complete")
+	}
+
+	path := filepath.Join(dir, "new-session.jsonl")
+	writeJSONLLine(t, path, "user", "")
+	writeJSONLLine(t, path, "assistant", "first and only completion")
+	backdateCourierFile(t, path)
+
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("new session scan: %v", err)
+	}
+	if len(events) != 1 || events[0].Headline != "first and only completion" {
+		t.Fatalf("new session events = %+v, want its first completion", events)
+	}
+}
+
+func TestScanClaudeProjects_TracksNewStreamingSessionFromLineZero(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st := courierState{Files: map[string]courierFileState{}}
+	if _, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "streaming-session.jsonl")
+	writeJSONLLine(t, path, "assistant", "first completion")
+	if events, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil || len(events) != 0 {
+		t.Fatalf("streaming scan = (%+v, %v), want no events", events, err)
+	}
+	if got := st.Files[path]; got != (courierFileState{}) {
+		t.Fatalf("new streaming file watermark = %+v, want line-zero tracking", got)
+	}
+	backdateCourierFile(t, path)
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil || len(events) != 1 || events[0].Headline != "first completion" {
+		t.Fatalf("idle scan = (%+v, %v), want first completion", events, err)
 	}
 }
 
@@ -202,6 +265,20 @@ func TestLastAssistantText_RequiresTerminalCompletedTurn(t *testing.T) {
 			},
 			want: "All done.",
 		},
+		{
+			name: "sidechain assistant is ignored",
+			lines: []string{
+				`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`,
+				`{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagent answer"}]}}`,
+			},
+		},
+		{
+			name: "string-form terminal assistant content is accepted",
+			lines: []string{
+				`{"type":"assistant","message":{"content":"string-form final answer","stop_reason":"end_turn"}}`,
+			},
+			want: "string-form final answer",
+		},
 	}
 
 	for _, test := range tests {
@@ -210,6 +287,23 @@ func TestLastAssistantText_RequiresTerminalCompletedTurn(t *testing.T) {
 				t.Fatalf("lastAssistantText() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestReadLinesAcceptsTranscriptLineLargerThanEightMiB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.jsonl")
+	largeText := strings.Repeat("x", 9*1024*1024)
+	writeJSONLLine(t, path, "assistant", largeText)
+
+	lines, err := readLines(path)
+	if err != nil {
+		t.Fatalf("readLines: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("lines = %d, want 1", len(lines))
+	}
+	if got := lastAssistantText(lines, 0); got != largeText {
+		t.Fatalf("large assistant content length = %d, want %d", len(got), len(largeText))
 	}
 }
 

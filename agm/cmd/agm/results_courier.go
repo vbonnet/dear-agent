@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -60,14 +61,12 @@ type courierFileState struct {
 
 // courierState is the full on-disk cursor: last-seen watermark per
 // transcript file path, so restarts and repeat ticks never re-report the
-// same completion twice. There is deliberately no global "have we ever run
-// before" flag: seeding is decided per file (see scanClaudeProjects), so a
-// file that's still mid-stream on the courier's first tick gets seeded
-// (not reported-from-scratch) whenever it's next observed, rather than
-// silently skipping straight to "known" with no watermark and dumping its
-// entire history as a false completion.
+// same completion twice. BaselineComplete distinguishes files that existed
+// when the courier was first deployed (seed silently) from sessions created
+// later (track from line zero so their first completion is deliverable).
 type courierState struct {
-	Files map[string]courierFileState `json:"files"`
+	Files            map[string]courierFileState `json:"files"`
+	BaselineComplete bool                        `json:"baseline_complete"`
 }
 
 // resultsCourierStateDir is a writable, VROOM-runtime-appropriate home for
@@ -128,42 +127,61 @@ func lastAssistantText(lines []string, from int) string {
 			continue
 		}
 		var entry struct {
-			Type    string `json:"type"`
-			Message struct {
-				Content []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"content"`
-				StopReason string `json:"stop_reason"`
+			Type        string `json:"type"`
+			IsSidechain bool   `json:"isSidechain"`
+			Message     struct {
+				Content    json.RawMessage `json:"content"`
+				StopReason string          `json:"stop_reason"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		if err := json.Unmarshal([]byte(line), &entry); err != nil || entry.IsSidechain {
 			continue
 		}
 		switch entry.Type {
 		case "assistant":
-			var texts []string
-			usesTool := entry.Message.StopReason == "tool_use"
-			for _, block := range entry.Message.Content {
-				switch block.Type {
-				case "text":
-					if text := strings.TrimSpace(block.Text); text != "" {
-						texts = append(texts, text)
-					}
-				case "tool_use":
-					usesTool = true
-				}
-			}
-			if usesTool || len(texts) == 0 {
+			text, completed := completedAssistantText(
+				entry.Message.Content,
+				entry.Message.StopReason,
+			)
+			if !completed {
 				headline = ""
 				continue
 			}
-			headline = strings.Join(texts, "\n")
+			headline = text
 		case "user", "tool_use", "tool_result":
 			headline = ""
 		}
 	}
 	return headline
+}
+
+func completedAssistantText(content json.RawMessage, stopReason string) (string, bool) {
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		var text string
+		if json.Unmarshal(content, &text) != nil {
+			return "", false
+		}
+		text = strings.TrimSpace(text)
+		return text, text != "" && stopReason != "tool_use"
+	}
+
+	var texts []string
+	usesTool := stopReason == "tool_use"
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				texts = append(texts, text)
+			}
+		case "tool_use":
+			usesTool = true
+		}
+	}
+	return strings.Join(texts, "\n"), !usesTool && len(texts) > 0
 }
 
 // truncateHeadline caps s to n runes, appending an ellipsis when it had to
@@ -215,12 +233,10 @@ func projectLabel(home, dir string) string {
 // it gets a clean, complete look on a later tick — its watermark is not
 // touched, so it is neither seeded nor reported this round.
 //
-// Seeding is per file, not a one-time global event: the first time a given
-// file is observed (no prior watermark), its current watermark is recorded
-// without reporting anything, so deploying the courier does not dump the
-// day's entire backlog as a notification storm, and a file that happened to
-// be mid-stream on an early tick still gets seeded (not falsely treated as
-// "known from line 0") once it finally goes idle.
+// The first scan seeds every file that already exists without reporting
+// anything, including actively-written files. Once that baseline completes,
+// an unknown path represents a newly-created session and starts at line zero
+// so its first terminal completion is not discarded.
 func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) ([]resultsCourierEvent, error) {
 	matches, err := filepath.Glob(claudeProjectsGlob(home))
 	if err != nil {
@@ -230,6 +246,8 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 
 	var events []resultsCourierEvent
 	now := time.Now()
+	initialBaseline := !st.BaselineComplete
+	baselineFailed := false
 
 	for _, path := range matches {
 		info, err := os.Stat(path)
@@ -240,6 +258,22 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 		if known && info.Size() == prev.Size {
 			continue // nothing new, cheap skip (no read)
 		}
+		if initialBaseline && !known {
+			lines, readErr := readLines(path)
+			if readErr != nil {
+				baselineFailed = true
+				continue
+			}
+			st.Files[path] = courierFileState{Size: info.Size(), Line: len(lines)}
+			continue
+		}
+		if !known {
+			// This path appeared after the initial deployment baseline. Mark it
+			// known at line zero before the idle check so its first completed
+			// turn remains eligible once writing settles.
+			prev = courierFileState{}
+			st.Files[path] = prev
+		}
 		if now.Sub(info.ModTime()) < idleGrace {
 			continue // still being written; re-check next tick, watermark untouched
 		}
@@ -247,11 +281,6 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 		lines, err := readLines(path)
 		if err != nil {
 			continue
-		}
-
-		if !known {
-			st.Files[path] = courierFileState{Size: info.Size(), Line: len(lines)}
-			continue // first sight of this file: seed silently, don't report
 		}
 
 		fromLine := prev.Line
@@ -271,6 +300,7 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 
 		st.Files[path] = courierFileState{Size: info.Size(), Line: len(lines)}
 	}
+	st.BaselineComplete = !baselineFailed
 
 	return events, nil
 }
@@ -283,12 +313,21 @@ func readLines(path string) ([]string, error) {
 	defer f.Close()
 
 	var lines []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // transcripts can have long lines
-	for sc.Scan() {
-		lines = append(lines, sc.Text())
+	reader := bufio.NewReader(f)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimSuffix(line, "\n")
+			line = strings.TrimSuffix(line, "\r")
+			lines = append(lines, line)
+		}
+		if errors.Is(readErr, io.EOF) {
+			return lines, nil
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
 	}
-	return lines, sc.Err()
 }
 
 // formatDigest renders events as a single push-friendly message: a short
@@ -427,7 +466,10 @@ func appendCourierReceipt(stateDir string, receipt courierDeliveryReceipt) error
 }
 
 func cloneCourierState(st courierState) courierState {
-	clone := courierState{Files: make(map[string]courierFileState, len(st.Files))}
+	clone := courierState{
+		Files:            make(map[string]courierFileState, len(st.Files)),
+		BaselineComplete: st.BaselineComplete,
+	}
 	maps.Copy(clone.Files, st.Files)
 	return clone
 }
