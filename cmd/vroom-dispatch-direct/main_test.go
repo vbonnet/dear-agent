@@ -5,12 +5,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestMentionsID(t *testing.T) {
@@ -496,33 +497,9 @@ func TestPrepareWorkerWorkspacePrecreatesTaskOwnedGitState(t *testing.T) {
 
 func initGitRepo(t *testing.T, path string) {
 	t.Helper()
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	commands := [][]string{
-		{"init", "-b", "main"},
-		{"config", "user.email", "test@example.com"},
-		{"config", "user.name", "Test User"},
-	}
-	for _, args := range commands {
-		cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("fixture\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "README.md"}, {"commit", "-m", "initial"}} {
-		cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	cmd := exec.Command("git", "-C", path, "remote", "add", "origin", "https://example.invalid/"+filepath.Base(path)+".git")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git remote add origin: %v: %s", err, out)
-	}
+	sandbox := gittest.New(t)
+	sandbox.InitRepo(t, path)
+	sandbox.Run(t, path, "remote", "add", "origin", "https://example.invalid/"+filepath.Base(path)+".git")
 }
 
 func testWorkerLaunchConfig() workerLaunchConfig {
