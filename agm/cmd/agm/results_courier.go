@@ -84,6 +84,7 @@ type courierFileState struct {
 type courierState struct {
 	Files            map[string]courierFileState `json:"files"`
 	BaselineComplete bool                        `json:"baseline_complete"`
+	BaselinePending  map[string]bool             `json:"baseline_pending,omitempty"`
 }
 
 // resultsCourierStateDir is a writable, VROOM-runtime-appropriate home for
@@ -323,14 +324,30 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 
 	var events []resultsCourierEvent
 	now := time.Now()
-	initialBaseline := !st.BaselineComplete
-	baselineFailed := false
+	if st.BaselineComplete {
+		st.BaselinePending = nil
+	} else if st.BaselinePending == nil {
+		st.BaselinePending = make(map[string]bool, len(matches))
+		for _, path := range matches {
+			st.BaselinePending[path] = true
+		}
+	}
+	matched := make(map[string]bool, len(matches))
+	for _, path := range matches {
+		matched[path] = true
+	}
+	for path := range st.BaselinePending {
+		if !matched[path] {
+			delete(st.BaselinePending, path)
+		}
+	}
 
 	for _, path := range matches {
 		info, err := os.Stat(path)
 		if err != nil {
 			continue // raced with deletion/rotation; skip this tick
 		}
+		initialBaseline := st.BaselinePending[path]
 		event, baselineReadFailed := scanClaudeTranscript(
 			home,
 			path,
@@ -341,12 +358,17 @@ func scanClaudeProjects(home string, idleGrace time.Duration, st *courierState) 
 			st,
 			os.Stat,
 		)
-		baselineFailed = baselineFailed || baselineReadFailed
+		if initialBaseline && !baselineReadFailed {
+			delete(st.BaselinePending, path)
+		}
 		if event != nil {
 			events = append(events, *event)
 		}
 	}
-	st.BaselineComplete = !baselineFailed
+	st.BaselineComplete = len(st.BaselinePending) == 0
+	if st.BaselineComplete {
+		st.BaselinePending = nil
+	}
 
 	return events, nil
 }
@@ -845,7 +867,7 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 
 	if orchestratorName != "" {
 		receipt.RelayTarget = orchestratorName
-		result, err := ops.SendMessage(opCtx, &ops.SendMessageRequest{
+		result, err := ops.SendMessage(courierRelayOpContext(dctx, opCtx), &ops.SendMessageRequest{
 			Recipient:  orchestratorName,
 			Message:    courierRelayPrompt(len(events)),
 			Autonomous: true,
@@ -859,6 +881,15 @@ func deliverCourierResults(ctx context.Context, opCtx *ops.OpContext, orchestrat
 	}
 
 	return receipt
+}
+
+func courierRelayOpContext(ctx context.Context, opCtx *ops.OpContext) *ops.OpContext {
+	if opCtx == nil {
+		return nil
+	}
+	bounded := *opCtx
+	bounded.Context = ctx
+	return &bounded
 }
 
 // courierRelayPrompt intentionally accepts only a count, never an event or
@@ -928,6 +959,10 @@ func cloneCourierState(st courierState) courierState {
 		BaselineComplete: st.BaselineComplete,
 	}
 	maps.Copy(clone.Files, st.Files)
+	if st.BaselinePending != nil {
+		clone.BaselinePending = make(map[string]bool, len(st.BaselinePending))
+		maps.Copy(clone.BaselinePending, st.BaselinePending)
+	}
 	return clone
 }
 
@@ -959,10 +994,10 @@ func processResultsCourierTick(
 		return fmt.Errorf("scan: %w", err)
 	}
 	if len(events) == 0 {
+		*st = candidate
 		if err := saveCourierState(statePath, candidate); err != nil {
 			return fmt.Errorf("save state: %w", err)
 		}
-		*st = candidate
 		return nil
 	}
 

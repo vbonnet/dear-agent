@@ -105,6 +105,53 @@ func TestScanClaudeProjects_ReportsFirstCompletionForNewSession(t *testing.T) {
 	}
 }
 
+func TestScanClaudeProjectsBoundsBaselineRetriesToOriginalPaths(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unreadableBaseline := filepath.Join(dir, "unreadable-history.jsonl")
+	if err := os.Mkdir(unreadableBaseline, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	st := courierState{Files: map[string]courierFileState{}}
+	events, err := scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("initial partial baseline = (%+v, %v), want no events", events, err)
+	}
+	if st.BaselineComplete || !st.BaselinePending[unreadableBaseline] {
+		t.Fatalf("partial baseline state = %+v, want only unreadable original path pending", st)
+	}
+
+	newPath := filepath.Join(dir, "new-session.jsonl")
+	writeJSONLLine(t, newPath, "user", "")
+	writeJSONLLine(t, newPath, "assistant", "new completion while old baseline retries")
+	backdateCourierFile(t, newPath)
+
+	events, err = scanClaudeProjects(home, 45*time.Second, &st)
+	if err != nil {
+		t.Fatalf("scan new session during partial baseline: %v", err)
+	}
+	if len(events) != 1 || events[0].Headline != "new completion while old baseline retries" {
+		t.Fatalf("new session during partial baseline = %+v, want its first completion", events)
+	}
+	if st.BaselineComplete {
+		t.Fatal("unreadable original baseline path stopped retrying prematurely")
+	}
+
+	if err := os.Remove(unreadableBaseline); err != nil {
+		t.Fatal(err)
+	}
+	if events, err := scanClaudeProjects(home, 45*time.Second, &st); err != nil || len(events) != 0 {
+		t.Fatalf("scan after original baseline path vanished = (%+v, %v)", events, err)
+	}
+	if !st.BaselineComplete || st.BaselinePending != nil {
+		t.Fatalf("baseline did not complete after pending path vanished: %+v", st)
+	}
+}
+
 func TestScanClaudeProjects_TracksNewStreamingSessionFromLineZero(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-")+"-src-dear-agent")
@@ -847,6 +894,26 @@ func TestCourierRelayPromptNeverContainsTranscriptText(t *testing.T) {
 	if !strings.Contains(prompt, "1 completed session(s)") ||
 		!strings.Contains(prompt, "Do not read or relay transcript content") {
 		t.Fatalf("relay prompt does not retain its fixed content-free contract: %q", prompt)
+	}
+}
+
+func TestCourierRelayOpContextCarriesCancellationWithoutMutatingSharedContext(t *testing.T) {
+	shared := &ops.OpContext{DryRun: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	bounded := courierRelayOpContext(ctx, shared)
+	cancel()
+
+	if bounded == shared {
+		t.Fatal("relay reused and mutated the shared operation context")
+	}
+	if shared.Context != nil {
+		t.Fatalf("shared operation context was mutated: %+v", shared)
+	}
+	if bounded.Context != ctx || !bounded.DryRun {
+		t.Fatalf("bounded relay context = %+v, want copied dependencies and courier context", bounded)
+	}
+	if !errors.Is(bounded.Context.Err(), context.Canceled) {
+		t.Fatalf("bounded relay context error = %v, want context canceled", bounded.Context.Err())
 	}
 }
 
