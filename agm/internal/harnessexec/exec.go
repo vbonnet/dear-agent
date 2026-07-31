@@ -32,6 +32,10 @@ const (
 	// ExpiryProtocol is the private cleanup protocol used by a detached,
 	// credential-free helper to expire an unconsumed launch handoff.
 	ExpiryProtocol = "__expire-harness-handoff"
+	// CodexWorkerWriteRootsEnv carries the host-authorized write roots consumed
+	// by Codex's system-managed worker boundary hook. It is transported through
+	// the private handoff so a long-lived tmux server cannot drop or stale it.
+	CodexWorkerWriteRootsEnv = "AGM_WORKER_WRITE_ROOTS_JSON"
 )
 
 var (
@@ -54,6 +58,7 @@ var codexAllowedEnvironment = []string{
 	"OPENAI_API_KEY",
 	"AGM_HOME", "AGM_CONFIG_DIR", "AGM_DB_PATH", "AGM_SESSIONS_DIR",
 	"AGM_STATE_DIR", "AGM_TMUX_SOCKET", "AGM_BUS_SOCKET", "AGM_TEAM",
+	CodexWorkerWriteRootsEnv,
 	"WORKSPACE",
 }
 

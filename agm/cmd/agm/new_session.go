@@ -17,6 +17,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -494,7 +495,7 @@ const (
 	trustedAddDirsEnv        = "AGM_TRUSTED_ADD_DIRS_JSON"
 	trustedAddDirsSessionEnv = "AGM_TRUSTED_ADD_DIRS_SESSION"
 	trustedGuardPathEnv      = "AGM_TRUSTED_GUARD_PATH"
-	workerWriteRootsEnv      = "AGM_WORKER_WRITE_ROOTS_JSON"
+	workerWriteRootsEnv      = harnessexec.CodexWorkerWriteRootsEnv
 	defaultWorkerGuardPath   = "/etc/codex/hooks/pretool-worker-write-boundary"
 )
 
