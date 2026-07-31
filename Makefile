@@ -983,14 +983,14 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 	@set -eu; \
 		install_lock_platform="$$(uname -s)"; \
 		case "$$install_lock_platform" in \
-			Darwin) install_lock_path="/private/var/run"; install_lock_ancestry="/private /private/var $$install_lock_path" ;; \
-			Linux) install_lock_path="/run"; install_lock_ancestry="/ $$install_lock_path" ;; \
+			Darwin) install_lock_path="/private/var/run"; install_lock_ancestry="/ /usr /usr/bin /private /private/var $$install_lock_path" ;; \
+			Linux) install_lock_path="/run"; install_lock_ancestry="/ /usr /usr/bin $$install_lock_path" ;; \
 			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
 		esac; \
 		for install_lock_ancestor in $$install_lock_ancestry; do test -d "$$install_lock_ancestor" && test ! -L "$$install_lock_ancestor" && test ! -w "$$install_lock_ancestor"; case "$$install_lock_platform" in Darwin) install_lock_uid="$$(/usr/bin/stat -f '%u' "$$install_lock_ancestor")" ;; Linux) install_lock_uid="$$(/usr/bin/stat -c '%u' "$$install_lock_ancestor")" ;; esac; test "$$install_lock_uid" = 0; done; \
 		case "$$install_lock_platform" in \
-			Darwin) install_lock_tool="$$(command -v lockf)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -k -t 0 "$$install_lock_path" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
-			Linux) install_lock_tool="$$(command -v flock)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -n "$$install_lock_path" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
+			Darwin) test -x /usr/bin/lockf; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 /usr/bin/lockf -k -t 0 "$$install_lock_path" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
+			Linux) test -x /usr/bin/flock; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 /usr/bin/flock -n "$$install_lock_path" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
 		esac
 
 install-override-ledger-helper-locked:

@@ -28,8 +28,8 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 		`test ! -L "$$install_lock_ancestor"`,
 		`test ! -w "$$install_lock_ancestor"`,
 		`test "$$install_lock_uid" = 0`,
-		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -k -t 0`,
-		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -n`,
+		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 /usr/bin/lockf -k -t 0`,
+		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 /usr/bin/flock -n`,
 		`install-override-ledger-helper-locked:`,
 		`test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1`,
 		`agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"`,
@@ -72,6 +72,10 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	if strings.Contains(target, "/tmp/dear-agent-override-ledger-install.lock") ||
 		strings.Contains(target, `: >>"$$install_lock`) {
 		t.Fatal("installer still uses a same-user-replaceable regular-file lock")
+	}
+	if strings.Contains(target, "command -v lockf") ||
+		strings.Contains(target, "command -v flock") {
+		t.Fatal("installer still resolves a same-user-selectable lock utility from PATH")
 	}
 	if !strings.Contains(target, `if test "$$launcher_set_active" = 1 && root_transaction_committed; then launcher_activation_complete=1; fi`) {
 		t.Fatal("signal recovery does not distinguish a complete launcher set from a partial user activation")
