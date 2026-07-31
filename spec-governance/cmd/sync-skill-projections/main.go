@@ -110,40 +110,57 @@ func requireLinkedWorktreeRoot(root string) error {
 	if err != nil {
 		return fmt.Errorf("resolve linked Git worktree root: %w", err)
 	}
+	gitDirectory, err := linkedWorktreeGitDirectory(rootPath)
+	if err != nil {
+		return err
+	}
+	if err := authenticateLinkedWorktree(rootPath, gitDirectory); err != nil {
+		return err
+	}
+	return nil
+}
+
+func linkedWorktreeGitDirectory(rootPath string) (string, error) {
 	gitFile := filepath.Join(rootPath, ".git")
 	info, err := os.Lstat(gitFile)
 	if err != nil {
-		return fmt.Errorf("write mode requires a linked Git worktree root: %w", err)
+		return "", fmt.Errorf("write mode requires a linked Git worktree root: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return errors.New("write mode requires a linked Git worktree root with a regular .git file")
+		return "", errors.New("write mode requires a linked Git worktree root with a regular .git file")
 	}
 	data, err := os.ReadFile(gitFile)
 	if err != nil {
-		return fmt.Errorf("read linked-worktree metadata: %w", err)
+		return "", fmt.Errorf("read linked-worktree metadata: %w", err)
 	}
-	gitDirectory := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(data)), "gitdir:"))
-	if !strings.HasPrefix(strings.TrimSpace(string(data)), "gitdir:") || gitDirectory == "" {
-		return errors.New("write mode requires valid linked-worktree .git metadata")
+	gitDirectory, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	gitDirectory = strings.TrimSpace(gitDirectory)
+	if !ok || gitDirectory == "" {
+		return "", errors.New("write mode requires valid linked-worktree .git metadata")
 	}
 	if !filepath.IsAbs(gitDirectory) {
 		gitDirectory = filepath.Join(rootPath, gitDirectory)
 	}
-	// #nosec G703 -- gitDirectory comes from Git's linked-worktree metadata and
-	// intentionally may live outside the worktree; this read-only stat only
-	// verifies that the declared administrative directory exists.
 	gitDirectory, err = canonicalFilesystemPath(gitDirectory)
 	if err != nil {
-		return fmt.Errorf("resolve linked-worktree Git directory: %w", err)
+		return "", fmt.Errorf("resolve linked-worktree Git directory: %w", err)
 	}
-	gitInfo, err := os.Stat(gitDirectory)
+	gitInfo, err := os.Stat(gitDirectory) //nolint:gosec // G703: canonical Git metadata path; read-only existence check.
 	if err != nil || !gitInfo.IsDir() {
 		if err != nil {
-			return fmt.Errorf("resolve linked-worktree Git directory: %w", err)
+			return "", fmt.Errorf("resolve linked-worktree Git directory: %w", err)
 		}
-		return errors.New("linked-worktree Git directory is not a directory")
+		return "", errors.New("linked-worktree Git directory is not a directory")
 	}
-	backpointerData, err := os.ReadFile(filepath.Join(gitDirectory, "gitdir"))
+	if err := authenticateGitDirectoryBackpointer(gitDirectory, gitFile); err != nil {
+		return "", err
+	}
+	return gitDirectory, nil
+}
+
+func authenticateGitDirectoryBackpointer(gitDirectory, gitFile string) error {
+	backpointerPath := filepath.Join(gitDirectory, "gitdir")
+	backpointerData, err := os.ReadFile(backpointerPath) //nolint:gosec // G703: authenticated canonical Git admin path; read-only metadata.
 	if err != nil {
 		return fmt.Errorf("read linked-worktree Git directory backpointer: %w", err)
 	}
@@ -158,6 +175,10 @@ func requireLinkedWorktreeRoot(root string) error {
 	if err != nil || authenticatedGitFile != gitFile {
 		return errors.New("linked-worktree Git directory does not point back to this worktree's .git file")
 	}
+	return nil
+}
+
+func authenticateLinkedWorktree(rootPath, gitDirectory string) error {
 	topLevel, err := projectionGit(rootPath, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("authenticate linked-worktree top level: %w", err)
@@ -187,11 +208,15 @@ func requireLinkedWorktreeRoot(root string) error {
 	if err != nil || relativeMetadata == "." || relativeMetadata == ".." || strings.Contains(relativeMetadata, string(filepath.Separator)) {
 		return errors.New("linked-worktree Git directory is outside the common worktree registry")
 	}
+	return requireRegisteredWorktree(rootPath)
+}
+
+func requireRegisteredWorktree(rootPath string) error {
 	worktreeList, err := projectionGit(rootPath, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return fmt.Errorf("read linked-worktree registry: %w", err)
 	}
-	for _, field := range strings.Split(worktreeList, "\x00") {
+	for field := range strings.SplitSeq(worktreeList, "\x00") {
 		registered, ok := strings.CutPrefix(field, "worktree ")
 		if !ok {
 			continue
@@ -233,7 +258,7 @@ func projectionGit(root string, args ...string) (string, error) {
 	if len(output) > maxGitMetadataBytes {
 		_ = command.Process.Kill()
 		_ = command.Wait()
-		return "", errors.New("Git metadata output exceeds the safety limit")
+		return "", errors.New("git metadata output exceeds the safety limit")
 	}
 	waitErr := command.Wait()
 	if waitErr != nil {
