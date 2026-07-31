@@ -984,7 +984,7 @@ install-override-ledger-helper: build-override-ledger-helper build-agm build-agm
 		install_lock_file="/tmp/dear-agent-override-ledger-install.lock"; \
 		install_lock_umask="$$(umask)"; umask 000; : >>"$$install_lock_file"; umask "$$install_lock_umask"; \
 		case "$$(uname -s)" in \
-			Darwin) install_lock_tool="$$(command -v lockf)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -t 0 "$$install_lock_file" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
+			Darwin) install_lock_tool="$$(command -v lockf)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -k -t 0 "$$install_lock_file" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
 			Linux) install_lock_tool="$$(command -v flock)"; test -n "$$install_lock_tool"; exec /usr/bin/env DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -n "$$install_lock_file" "$(MAKE)" --no-print-directory install-override-ledger-helper-locked ;; \
 			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
 		esac

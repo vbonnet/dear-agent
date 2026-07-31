@@ -25,7 +25,7 @@ func TestOverrideLedgerHelperInstallBindsApprovedBytesBeforeActivation(t *testin
 	requiredInOrder := []string{
 		`install_lock_file="/tmp/dear-agent-override-ledger-install.lock"`,
 		`umask 000; : >>"$$install_lock_file"`,
-		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -t 0`,
+		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -k -t 0`,
 		`DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 "$$install_lock_tool" -n`,
 		`install-override-ledger-helper-locked:`,
 		`test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1`,
