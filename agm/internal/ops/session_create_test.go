@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +26,21 @@ import (
 type createMockStorage struct {
 	created     []*manifest.Manifest
 	deleted     []string
+	sessions    []*manifest.Manifest
+	listFilter  *dolt.SessionFilter
+	listErr     error
 	createErr   error
+	reserveErr  error
+	renewErr    error
+	releaseErr  error
 	deleteErr   error
 	createOrder *[]string
 	onCreate    func()
+	onReserve   func()
+	onRenew     func()
+	renewed     bool
+	reserved    []string
+	released    []string
 }
 
 type createOnlyTmux struct {
@@ -111,6 +123,15 @@ type createTestRuntime struct {
 	complete func(context.Context, CreateSessionCompletion) error
 }
 
+type createTestPreparingRuntime struct {
+	*createTestRuntime
+	prepare func(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error)
+}
+
+func (r *createTestPreparingRuntime) Prepare(ctx context.Context, input CreateSessionPreparation) (CreateSessionPreparation, error) {
+	return r.prepare(ctx, input)
+}
+
 type createTestAgyBootstrapRuntime struct {
 	*createTestRuntime
 	bootstrap func(context.Context, AgyCreateIdentityBootstrap) error
@@ -173,8 +194,19 @@ func (s *createMockStorage) DeleteSession(id string) error {
 	return s.deleteErr
 }
 
-func (s *createMockStorage) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) {
-	return nil, nil
+func (s *createMockStorage) ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error) {
+	s.listFilter = filter
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	results := make([]*manifest.Manifest, 0, len(s.sessions))
+	for _, m := range s.sessions {
+		if filter != nil && filter.ExcludeArchived && m.Lifecycle == manifest.LifecycleArchived {
+			continue
+		}
+		results = append(results, m)
+	}
+	return results, nil
 }
 
 func (s *createMockStorage) GetSessionByUUID(string) (*manifest.Manifest, error) {
@@ -196,6 +228,30 @@ func (s *createMockStorage) Delete(string) error                                
 func (s *createMockStorage) List(*manifest.Filter) ([]*manifest.Manifest, error) { return nil, nil }
 func (s *createMockStorage) Close() error                                        { return nil }
 func (s *createMockStorage) ApplyMigrations() error                              { return nil }
+
+func (s *createMockStorage) ReserveSessionName(sessionID, name string) error {
+	if s.createOrder != nil {
+		*s.createOrder = append(*s.createOrder, "reserve")
+	}
+	s.reserved = append(s.reserved, sessionID+":"+name)
+	if s.onReserve != nil {
+		s.onReserve()
+	}
+	return s.reserveErr
+}
+
+func (s *createMockStorage) RenewSessionNameReservation(string, string) error {
+	s.renewed = true
+	if s.onRenew != nil {
+		s.onRenew()
+	}
+	return s.renewErr
+}
+
+func (s *createMockStorage) ReleaseSessionNameReservation(sessionID string) error {
+	s.released = append(s.released, sessionID)
+	return s.releaseErr
+}
 
 func testHarnessCommand(harness, model, sessionName, workDir string, persistent bool) string {
 	return BuildHarnessLaunchCommand(HarnessLaunchSpec{
@@ -376,6 +432,12 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
 		},
 	}
+	store.onReserve = func() {
+		if !locked || promptDeliveries != 0 {
+			t.Fatalf("reservation state = locked:%t prompt deliveries:%d", locked, promptDeliveries)
+		}
+		order = append(order, "reserve")
+	}
 	store.onCreate = func() {
 		if !locked || promptDeliveries != 1 || store.created[0].Agy == nil || store.created[0].Agy.ConversationID != "new-native-id" {
 			t.Fatalf("registration state = locked:%t prompt deliveries:%d manifest:%+v", locked, promptDeliveries, store.created[0])
@@ -405,7 +467,7 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 	if result.SessionID != "agy-lazy-id" || promptDeliveries != 1 {
 		t.Fatalf("result/prompt deliveries = %+v/%d", result, promptDeliveries)
 	}
-	wantOrder := []string{"lock", "snapshot", "launch", "prompt", "discover", "register", "unlock", "complete"}
+	wantOrder := []string{"lock", "reserve", "snapshot", "launch", "prompt", "discover", "register", "unlock", "complete"}
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Fatalf("AGY lazy identity lifecycle = %v, want %v", order, wantOrder)
 	}
@@ -455,8 +517,8 @@ func TestCreateSession_AgyBootstrapFailureRollsBackBeforeDiscoveryAndRegistratio
 	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
 		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
 	}
-	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-failure"] {
-		t.Fatalf("post-failure state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-failure"])
+	if discovered || completed || len(store.created) != 0 || len(store.released) != 1 || tmuxMock.Sessions["agy-bootstrap-failure"] {
+		t.Fatalf("post-failure state = discovered:%t completed:%t registrations:%d released:%v tmux:%t", discovered, completed, len(store.created), store.released, tmuxMock.Sessions["agy-bootstrap-failure"])
 	}
 }
 
@@ -490,8 +552,8 @@ func TestCreateSession_AgyCancellationDuringIdentityBootstrapRollsBackWithCaller
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
 	}
-	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-cancel"] {
-		t.Fatalf("post-cancel state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-cancel"])
+	if discovered || completed || len(store.created) != 0 || len(store.released) != 1 || tmuxMock.Sessions["agy-bootstrap-cancel"] {
+		t.Fatalf("post-cancel state = discovered:%t completed:%t registrations:%d released:%v tmux:%t", discovered, completed, len(store.created), store.released, tmuxMock.Sessions["agy-bootstrap-cancel"])
 	}
 }
 
@@ -562,7 +624,7 @@ func TestCreateSessionPiRejectsInvalidCodingAgentDirectoryBeforeTmux(t *testing.
 	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(t.TempDir(), "missing"))
 	tmuxMock := session.NewMockTmux()
-	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Prompt: "fixture", Title: "pi-invalid-config", Harness: "pi", SessionID: "pi-invalid-config",
 	})
 	if err == nil || !strings.Contains(err.Error(), "coding agent directory") {
@@ -597,6 +659,7 @@ func TestCreateSession_DefaultsModelAndHarness(t *testing.T) {
 
 	ctx := &OpContext{
 		Tmux:       tmuxMock,
+		Storage:    &createMockStorage{},
 		OutputMode: "json",
 	}
 
@@ -628,7 +691,7 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		t.Run(tt.harness, func(t *testing.T) {
 			// Isolate the codex trust pre-write from the developer's real ~/.codex.
 			t.Setenv("CODEX_HOME", t.TempDir())
-			opCtx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+			opCtx := &OpContext{Tmux: session.NewMockTmux(), Storage: &createMockStorage{}, OutputMode: "json"}
 			if tt.harness == "agy" {
 				opCtx.AgyCreateIdentityTracker = successfulCreateTestAgyIdentityTracker()
 			}
@@ -653,7 +716,7 @@ func TestCreateSession_DerivesNameFromCwd(t *testing.T) {
 	dirName := filepath.Base(dir)
 	tmuxMock := session.NewMockTmux()
 
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
@@ -708,7 +771,7 @@ func TestCreateSession_GeminiAllowsControlWorkdirWhenNoRepairIsNeeded(t *testing
 	}
 	tmuxMock := session.NewMockTmux()
 
-	result, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd:     workdir,
 		Prompt:  "test",
 		Title:   "safe-title",
@@ -822,7 +885,7 @@ func TestCreateSession_RejectsInvalidTitleChars(t *testing.T) {
 func TestCreateSession_AcceptsValidModel(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
@@ -840,7 +903,7 @@ func TestCreateSession_AcceptsValidModel(t *testing.T) {
 func TestCreateSession_AcceptsRegistryModelIdentifier(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:     dir,
@@ -861,7 +924,7 @@ func TestCreateSession_RejectsDuplicateTmuxSession(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	tmuxMock.Sessions["existing"] = true
 
-	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+	ctx := &OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}, OutputMode: "json"}
 	_, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
 		Prompt: "test",
@@ -876,6 +939,444 @@ func TestCreateSession_RejectsDuplicateTmuxSession(t *testing.T) {
 	}
 	if opErr.Code != ErrCodeSessionExists {
 		t.Errorf("code = %q, want %q", opErr.Code, ErrCodeSessionExists)
+	}
+}
+
+func TestCreateSession_RejectsReservedSessionNameBeforeTmuxCreate(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{
+		reserveErr: &dolt.SessionNameConflictError{Name: "existing"},
+	}
+
+	ctx := &OpContext{Tmux: tmuxMock, Storage: store, OutputMode: "json"}
+	_, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:    dir,
+		Prompt: "test",
+		Title:  "existing",
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate stored session name")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("expected *OpError, got %T", err)
+	}
+	if opErr.Code != ErrCodeSessionExists {
+		t.Errorf("code = %q, want %q", opErr.Code, ErrCodeSessionExists)
+	}
+	if opErr.Detail != sessionNameExistsMessage("existing") {
+		t.Errorf("detail = %q, want %q", opErr.Detail, sessionNameExistsMessage("existing"))
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux sessions created before duplicate rejection: %v", tmuxMock.CreatedSessions)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("stored sessions created after duplicate rejection: %d", len(store.created))
+	}
+}
+
+func TestCreateSession_AtomicNameConflictPreventsQueuedCurrentTmuxLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["concurrent-name"] = true
+	store := &createMockStorage{
+		reserveErr: &dolt.SessionNameConflictError{Name: "concurrent-name"},
+	}
+	prepared := false
+	launched := false
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{
+			launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+				launched = true
+				return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+			},
+		},
+		prepare: func(_ context.Context, input CreateSessionPreparation) (CreateSessionPreparation, error) {
+			prepared = true
+			return input, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "concurrent-name", Harness: "claude-code", Model: "sonnet",
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, AllowEmptyPrompt: true,
+		ReuseExistingTmux: true, RequireStorage: true, RegisterBeforeLaunch: true,
+	})
+	var opErr *OpError
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionExists {
+		t.Fatalf("CreateSessionWithContext() error = %v, want %s", err, ErrCodeSessionExists)
+	}
+	if prepared || launched || len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("losing creator mutated preparation or launched harness: prepared=%t runtime=%t commands=%v", prepared, launched, tmuxMock.SentCommands)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("losing creator reached registration: %d writes", len(store.created))
+	}
+	if !tmuxMock.Sessions["concurrent-name"] {
+		t.Fatal("name-conflict rollback removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_DeferredCurrentTmuxRegistersBeforeIrreversibleLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["deferred-current"] = true
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			order = append(order, "launch")
+			if len(store.created) != 1 {
+				t.Fatal("deferred current-tmux launch ran before durable registration")
+			}
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "deferred-current", Harness: "claude-code", Model: "sonnet",
+		SessionID: "deferred-current-id", Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+		RegisterBeforeLaunch: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if want := []string{"reserve", "register", "launch"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("deferred creation order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_DeferredCurrentTmuxRegistrationFailurePreventsLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["deferred-registration-failure"] = true
+	store := &createMockStorage{createErr: errors.New("registration failed")}
+	launched := false
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launched = true
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "deferred-registration-failure", Harness: "claude-code", Model: "sonnet",
+		SessionID: "deferred-registration-failure-id", Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+		RegisterBeforeLaunch: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "registration failed") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want registration failure", err)
+	}
+	if launched {
+		t.Fatal("deferred current-tmux launch ran after registration failure")
+	}
+	if got, want := store.released, []string{"deferred-registration-failure-id"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("released reservations = %v, want %v", got, want)
+	}
+	if !tmuxMock.Sessions["deferred-registration-failure"] {
+		t.Fatal("registration rollback removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_UnknownRegistrationCommitIsExplicitlyCompensated(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	commitErr := errors.New("registration commit acknowledgement lost")
+	store := &createMockStorage{
+		createErr: &dolt.SessionRegistrationCommitUncertainError{Err: commitErr},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "uncertain-registration", Harness: "claude-code", Model: "sonnet",
+		SessionID: "uncertain-registration-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want commit uncertainty", err)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"uncertain-registration-id"}) {
+		t.Fatalf("registration cleanup = %v, want explicit uncertain-row deletion", store.deleted)
+	}
+	if !reflect.DeepEqual(store.released, []string{"uncertain-registration-id"}) {
+		t.Fatalf("reservation cleanup = %v, want uncertain lease release", store.released)
+	}
+	if tmuxMock.Sessions["uncertain-registration"] {
+		t.Fatal("new tmux session survived uncertain registration rollback")
+	}
+}
+
+func TestCreateSession_UnknownRegistrationCleanupFailureIsReturned(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	commitErr := errors.New("registration commit acknowledgement lost")
+	cleanupErr := errors.New("registration compensation failed")
+	store := &createMockStorage{
+		createErr: &dolt.SessionRegistrationCommitUncertainError{Err: commitErr},
+		deleteErr: cleanupErr,
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "uncertain-registration-cleanup", Harness: "claude-code", Model: "sonnet",
+		SessionID: "uncertain-registration-cleanup-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want commit uncertainty", err)
+	}
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want cleanup failure", err)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"uncertain-registration-cleanup-id"}) {
+		t.Fatalf("registration cleanup = %v, want explicit uncertain-row deletion", store.deleted)
+	}
+	if tmuxMock.Sessions["uncertain-registration-cleanup"] {
+		t.Fatal("new tmux session survived uncertain registration rollback")
+	}
+}
+
+func TestCreateSession_UnknownReservationCommitIsExplicitlyReleased(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	commitErr := errors.New("reservation commit acknowledgement lost")
+	store := &createMockStorage{
+		reserveErr: &dolt.SessionNameReservationCommitUncertainError{Err: commitErr},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "uncertain-reservation", Harness: "claude-code", Model: "sonnet",
+		SessionID: "uncertain-reservation-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want reservation uncertainty", err)
+	}
+	if !reflect.DeepEqual(store.released, []string{"uncertain-reservation-id"}) {
+		t.Fatalf("reservation cleanup = %v, want uncertain lease release", store.released)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux was mutated after uncertain reservation: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_HandledLifecycleIsExplicitlyNonPersistent(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	completed := false
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if len(store.reserved) != 1 || len(store.released) != 0 {
+				t.Fatalf("reservation during handled lifecycle = reserved:%v released:%v", store.reserved, store.released)
+			}
+			return CreateSessionLaunchResult{HandledLifecycle: true}, nil
+		},
+		complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		},
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "handled-gemini", Harness: "gemini-cli", Model: "gemini",
+		SessionID: "handled-gemini-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if result == nil || result.SessionID != "handled-gemini-id" {
+		t.Fatalf("CreateSessionWithContext() result = %#v", result)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("handled lifecycle durable registrations = %#v, want none", store.created)
+	}
+	if !reflect.DeepEqual(store.released, []string{"handled-gemini-id"}) {
+		t.Fatalf("handled lifecycle reservation cleanup = %v", store.released)
+	}
+	if completed {
+		t.Fatal("handled lifecycle ran shared runtime completion")
+	}
+}
+
+func TestCreateSession_DeferredCurrentTmuxPreservesRegistrationAfterQueuedLaunch(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["deferred-post-queue-cancel"] = true
+	store := &createMockStorage{}
+	ctx, cancel := context.WithCancel(t.Context())
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			cancel()
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "deferred-post-queue-cancel", Harness: "claude-code", Model: "sonnet",
+		SessionID: "deferred-post-queue-cancel-id", Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+		RegisterBeforeLaunch: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want context.Canceled", err)
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("durable registrations = %d, want 1", len(store.created))
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("queued launch registration was rolled back: %v", store.deleted)
+	}
+	if !tmuxMock.Sessions["deferred-post-queue-cancel"] {
+		t.Fatal("post-queue cancellation removed the reused tmux session")
+	}
+}
+
+func TestCreateSession_PreparesSurfaceAfterReservationBeforeLaunch(t *testing.T) {
+	initialDir := t.TempDir()
+	preparedDir := t.TempDir()
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	var launchedSpec HarnessLaunchSpec
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{
+			launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+				order = append(order, "launch")
+				launchedSpec = spec
+				return CreateSessionLaunchResult{Readiness: CreateSessionReadinessVerified}, nil
+			},
+			complete: func(context.Context, CreateSessionCompletion) error {
+				order = append(order, "complete")
+				return nil
+			},
+		},
+		prepare: func(_ context.Context, input CreateSessionPreparation) (CreateSessionPreparation, error) {
+			if len(store.reserved) != 1 {
+				t.Fatalf("preparation ran before durable reservation: %v", store.reserved)
+			}
+			order = append(order, "prepare")
+			input.Cwd = preparedDir
+			input.ExtraAddDirs = []string{"/prepared/source"}
+			input.PermissionPolicy = &manifest.PermissionPolicy{Profile: "worker"}
+			input.Sandbox = &manifest.SandboxConfig{Enabled: true, ID: "prepared-sandbox"}
+			return input, nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: initialDir, Title: "prepared-session", Harness: "claude-code", Model: "sonnet",
+		SessionID: "prepared-id", Prompt: "test", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error = %v", err)
+	}
+	if got, want := order, []string{"reserve", "prepare", "launch", "register", "complete"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("creation order = %v, want %v", got, want)
+	}
+	if launchedSpec.WorkDir != preparedDir || !reflect.DeepEqual(launchedSpec.ExtraAddDirs, []string{"/prepared/source"}) {
+		t.Fatalf("launch spec did not receive prepared workspace: %+v", launchedSpec)
+	}
+	if !store.renewed {
+		t.Fatal("creation did not renew the reserved name after preparation")
+	}
+	if len(store.created) != 1 ||
+		store.created[0].Context.Project != preparedDir ||
+		store.created[0].PermissionPolicy == nil ||
+		store.created[0].PermissionPolicy.Profile != "worker" ||
+		store.created[0].Sandbox == nil ||
+		store.created[0].Sandbox.ID != "prepared-sandbox" {
+		t.Fatalf("registered manifest did not receive preparation: %+v", store.created)
+	}
+}
+
+func TestCreateSession_PreparationFailureReleasesReservationBeforeTmux(t *testing.T) {
+	prepareErr := errors.New("permission preparation failed")
+	store := &createMockStorage{}
+	tmuxMock := session.NewMockTmux()
+	runtime := &createTestPreparingRuntime{
+		createTestRuntime: &createTestRuntime{},
+		prepare: func(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error) {
+			return CreateSessionPreparation{}, prepareErr
+		},
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "prepare-failure", Harness: "claude-code", Model: "sonnet",
+		SessionID: "prepare-failure-id", Prompt: "test", RequireStorage: true,
+	})
+	if !errors.Is(err, prepareErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want preparation failure", err)
+	}
+	if got, want := store.released, []string{"prepare-failure-id"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("released reservations = %v, want %v", got, want)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux mutated after preparation failure: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_ConcurrentCurrentTmuxCreatorsLaunchExactlyOnce(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["concurrent-name"] = true
+	store := dolt.NewMockAdapter()
+	workDir := t.TempDir()
+	var launches atomic.Int32
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launches.Add(1)
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, sessionID := range []string{"creator-a", "creator-b"} {
+		go func(id string) {
+			<-start
+			_, err := CreateSessionWithContext(t.Context(), &OpContext{
+				Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+			}, &CreateSessionRequest{
+				Cwd: workDir, Title: "concurrent-name", Harness: "claude-code", Model: "sonnet",
+				SessionID: id, Caller: CreateSessionCaller{Surface: CreateSurfaceCLI},
+				AllowEmptyPrompt: true, ReuseExistingTmux: true, RequireStorage: true,
+				RegisterBeforeLaunch: true,
+			})
+			results <- err
+		}(sessionID)
+	}
+	close(start)
+
+	var successes, conflicts int
+	for range 2 {
+		err := <-results
+		if err == nil {
+			successes++
+			continue
+		}
+		var opErr *OpError
+		if errors.As(err, &opErr) && opErr.Code == ErrCodeSessionExists {
+			conflicts++
+			continue
+		}
+		t.Fatalf("concurrent creator error = %v", err)
+	}
+	if successes != 1 || conflicts != 1 || launches.Load() != 1 {
+		t.Fatalf(
+			"concurrent creators = %d success, %d conflict, %d launch; want 1, 1, 1",
+			successes,
+			conflicts,
+			launches.Load(),
+		)
 	}
 }
 
@@ -899,7 +1400,7 @@ func TestCreateSession_NilRequest(t *testing.T) {
 	}
 }
 
-func TestCreateSession_WorksWithoutStorage(t *testing.T) {
+func TestCreateSession_RejectsNamedSessionWithoutStorageBeforeTmuxCreate(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
 
@@ -908,22 +1409,22 @@ func TestCreateSession_WorksWithoutStorage(t *testing.T) {
 		OutputMode: "json",
 	}
 
-	result, err := CreateSession(ctx, &CreateSessionRequest{
+	_, err := CreateSession(ctx, &CreateSessionRequest{
 		Cwd:    dir,
 		Prompt: "test",
 		Title:  "no-storage",
 	})
-	if err != nil {
-		t.Fatalf("CreateSession without storage: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "session storage is required for named sessions") {
+		t.Fatalf("CreateSession without storage error = %v, want named-session reservation failure", err)
 	}
-	if !result.Created {
-		t.Error("created = false, want true")
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux sessions created without name reservation: %v", tmuxMock.CreatedSessions)
 	}
 }
 
 func TestCreateSession_RequiresRollbackCapableTmuxBeforeCreate(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
-	_, err := CreateSession(&OpContext{Tmux: &createOnlyTmux{TmuxInterface: tmuxMock}}, &CreateSessionRequest{
+	_, err := CreateSession(&OpContext{Tmux: &createOnlyTmux{TmuxInterface: tmuxMock}, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Prompt: "test", Title: "no-rollback",
 	})
 	if err == nil || !strings.Contains(err.Error(), "KillSession") {
@@ -969,7 +1470,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
+	want := []string{"storage", "reserve", "launch", "ready", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
@@ -1050,6 +1551,7 @@ func TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral(t *
 
 	validRequest := &CreateSessionRequest{
 		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true,
+		RegisterBeforeLaunch: true,
 	}
 	validParams := &createSessionParams{name: "current", harness: "codex-cli"}
 	launch := CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}
@@ -1092,6 +1594,12 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	var order []string
 	locked := false
 	store := &createMockStorage{}
+	store.onReserve = func() {
+		if !locked {
+			t.Fatal("AGY workspace lock was not held during reservation")
+		}
+		order = append(order, "reserve")
+	}
 	store.onCreate = func() {
 		if !locked {
 			t.Fatal("AGY workspace lock was released before registration")
@@ -1172,7 +1680,7 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	if result.Cwd != dir {
 		t.Fatalf("result cwd = %q, want canonical workspace %q", result.Cwd, dir)
 	}
-	want := []string{"lock", "snapshot", "launch", "discover", "unlock", "complete"}
+	want := []string{"lock", "reserve", "snapshot", "launch", "discover", "unlock", "complete"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
 	}
@@ -1186,7 +1694,7 @@ func TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation(t *testing.T) 
 	tracker.snapshot = func(context.Context, string) (string, error) { return "", wantErr }
 
 	_, err := CreateSessionWithContext(t.Context(), &OpContext{
-		Tmux: tmuxMock, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+		Tmux: tmuxMock, Storage: &createMockStorage{}, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
 	}, &CreateSessionRequest{
 		Cwd: dir, Title: "agy-snapshot-failure", Harness: "agy", Model: "3.5-flash-low",
 		Prompt: "fixture",
@@ -1221,8 +1729,8 @@ func TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration(t 
 	if tmuxMock.Sessions["agy-discovery-failure"] {
 		t.Fatal("tmux survived failed identity discovery")
 	}
-	if len(store.created) != 0 {
-		t.Fatalf("registered manifests after failed identity discovery = %d, want 0", len(store.created))
+	if len(store.created) != 0 || !slices.Contains(store.released, "agy-discovery-failure-id") {
+		t.Fatalf("reservation rollback after failed identity discovery = created:%d released:%v", len(store.created), store.released)
 	}
 }
 
@@ -1276,7 +1784,7 @@ func TestCreateSession_NoRuntimeWaitsBeforeRegistrationAndPrompt(t *testing.T) {
 	if !result.Created {
 		t.Fatal("CreateSession() did not report creation")
 	}
-	want := []string{"launch", "ready", "register", "prompt"}
+	want := []string{"reserve", "launch", "ready", "register", "prompt"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("creation order = %v, want %v", order, want)
 	}
@@ -1301,13 +1809,13 @@ func TestCreateSession_ReadinessFailureRollsBackBeforeRegistrationOrPrompt(t *te
 	if tmuxMock.Sessions["readiness-failure"] {
 		t.Fatal("new tmux session survived readiness failure")
 	}
-	if len(store.created) != 0 {
-		t.Fatalf("readiness failure registered sessions: %d", len(store.created))
+	if len(store.created) != 0 || len(store.released) != 1 {
+		t.Fatalf("readiness failure reservation rollback = created:%d released:%v", len(store.created), store.released)
 	}
 	if len(tmuxMock.SentCommands) != 1 {
 		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
 	}
-	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+	if want := []string{"reserve", "launch", "ready"}; !reflect.DeepEqual(order, want) {
 		t.Fatalf("creation order = %v, want %v", order, want)
 	}
 }
@@ -1331,13 +1839,13 @@ func TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt(t *te
 	if tmuxMock.Sessions["hook-review"] {
 		t.Fatal("new tmux session survived Codex hook review failure")
 	}
-	if len(store.created) != 0 {
-		t.Fatalf("Codex hook review registered sessions: %d", len(store.created))
+	if len(store.created) != 0 || len(store.released) != 1 {
+		t.Fatalf("Codex hook review reservation rollback = created:%d released:%v", len(store.created), store.released)
 	}
 	if len(tmuxMock.SentCommands) != 1 {
 		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
 	}
-	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+	if want := []string{"reserve", "launch", "ready"}; !reflect.DeepEqual(order, want) {
 		t.Fatalf("creation order = %v, want %v", order, want)
 	}
 }
@@ -1349,7 +1857,7 @@ func TestCreateSession_ReadinessFailurePreservesReusedTmux(t *testing.T) {
 	}
 	tmuxMock.Sessions["reused-readiness"] = true
 
-	_, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Title: "reused-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
 		ReuseExistingTmux: true,
 	})
@@ -1371,7 +1879,7 @@ func TestCreateSession_NoRuntimeRequiresReadinessCapability(t *testing.T) {
 		kill:          base.KillSession,
 	}
 
-	_, err := CreateSession(&OpContext{Tmux: tmuxWithoutReadiness}, &CreateSessionRequest{
+	_, err := CreateSession(&OpContext{Tmux: tmuxWithoutReadiness, Storage: &createMockStorage{}}, &CreateSessionRequest{
 		Cwd: t.TempDir(), Title: "no-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not expose harness readiness") {
@@ -1387,9 +1895,10 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 		name             string
 		stage            string
 		wantRegistration bool
+		wantRelease      bool
 	}{
-		{name: "launch", stage: "launch"},
-		{name: "registration", stage: "registration"},
+		{name: "launch", stage: "launch", wantRelease: true},
+		{name: "registration", stage: "registration", wantRelease: true},
 		{name: "completion", stage: "completion", wantRegistration: true},
 	}
 	for _, tt := range tests {
@@ -1432,7 +1941,30 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 			if got := len(store.deleted); got != boolInt(tt.wantRegistration) {
 				t.Fatalf("storage deletes = %d, want %d", got, boolInt(tt.wantRegistration))
 			}
+			if got := len(store.released); got != boolInt(tt.wantRelease) {
+				t.Fatalf("reservation releases = %d, want %d", got, boolInt(tt.wantRelease))
+			}
 		})
+	}
+}
+
+func TestCreateSession_ReportsReservationReleaseFailure(t *testing.T) {
+	launchErr := errors.New("launch failed")
+	releaseErr := errors.New("reservation release failed")
+	store := &createMockStorage{releaseErr: releaseErr}
+
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux:    session.NewMockTmux(),
+		Storage: store,
+		CreationRuntime: &createTestRuntime{launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			return CreateSessionLaunchResult{}, launchErr
+		}},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "release-failure", Model: "sonnet", Harness: "claude-code",
+		SessionID: "release-failure-id", AllowEmptyPrompt: true, RequireStorage: true,
+	})
+	if !errors.Is(err, launchErr) || !errors.Is(err, releaseErr) {
+		t.Fatalf("CreateSessionWithContext() error = %v, want joined launch and reservation-release failures", err)
 	}
 }
 
@@ -1442,7 +1974,7 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	manifestPath, registrationAllowed, created, err := prepareCreateManifestDir(&CreateSessionRequest{
+	manifestPath, created, err := prepareCreateManifestDir(&CreateSessionRequest{
 		ManifestDir:         filepath.Join(blocker, "session"),
 		ManifestDirOptional: true,
 	})
@@ -1452,16 +1984,116 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 	if manifestPath != "" {
 		t.Fatalf("manifest path = %q, want empty path after optional mkdir failure", manifestPath)
 	}
-	if registrationAllowed || created {
-		t.Fatalf("registrationAllowed = %v, created = %v; want both false", registrationAllowed, created)
+	if created {
+		t.Fatal("optional manifest directory reported as created after mkdir failure")
+	}
+}
+
+func TestCreateSessionOptionalManifestFailureStillRegistersDurably(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["optional-manifest"] = true
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			order = append(order, "launch")
+			if len(store.created) != 1 {
+				t.Fatalf("durable registrations at launch = %d, want 1", len(store.created))
+			}
+			return CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}, nil
+		},
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux:            tmuxMock,
+		Storage:         store,
+		CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd:                  t.TempDir(),
+		Title:                "optional-manifest",
+		SessionID:            "optional-manifest-id",
+		Model:                "sonnet",
+		Harness:              "claude-code",
+		Caller:               CreateSessionCaller{Surface: CreateSurfaceCLI},
+		AllowEmptyPrompt:     true,
+		ReuseExistingTmux:    true,
+		RequireStorage:       true,
+		RegisterBeforeLaunch: true,
+		ManifestDir:          filepath.Join(blocker, "session"),
+		ManifestDirOptional:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if result.SessionID != "optional-manifest-id" {
+		t.Fatalf("result session ID = %q", result.SessionID)
+	}
+	if len(store.created) != 1 || store.created[0].SessionID != result.SessionID {
+		t.Fatalf("durable registrations = %#v, want session %q", store.created, result.SessionID)
+	}
+	if len(store.released) != 0 {
+		t.Fatalf("consumed reservation releases = %v, want none", store.released)
+	}
+	if !reflect.DeepEqual(order, []string{"reserve", "register", "launch"}) {
+		t.Fatalf("lifecycle order = %v", order)
+	}
+}
+
+func TestCreateSessionOptionalManifestFailureRegistersAfterReadiness(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			order = append(order, "launch")
+			return CreateSessionLaunchResult{}, nil
+		},
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux:            tmuxMock,
+		Storage:         store,
+		CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd:                 t.TempDir(),
+		Title:               "optional-manifest-ready",
+		SessionID:           "optional-manifest-ready-id",
+		Model:               "sonnet",
+		Harness:             "claude-code",
+		AllowEmptyPrompt:    true,
+		RequireStorage:      true,
+		ManifestDir:         filepath.Join(blocker, "session"),
+		ManifestDirOptional: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error: %v", err)
+	}
+	if len(store.created) != 1 || store.created[0].SessionID != result.SessionID {
+		t.Fatalf("durable registrations = %#v, want session %q", store.created, result.SessionID)
+	}
+	if len(store.released) != 0 {
+		t.Fatalf("consumed reservation releases = %v, want none", store.released)
+	}
+	if !reflect.DeepEqual(order, []string{"reserve", "launch", "ready", "register"}) {
+		t.Fatalf("lifecycle order = %v", order)
 	}
 }
 
 func TestRollbackCreateSessionReportsCleanupFailures(t *testing.T) {
-	store := &createMockStorage{deleteErr: errors.New("delete failed")}
+	deleteErr := errors.New("delete failed")
+	killErr := errors.New("kill failed")
+	store := &createMockStorage{deleteErr: deleteErr}
 	tmuxMock := &createFailingKillTmux{
 		TmuxInterface: session.NewMockTmux(),
-		err:           errors.New("kill failed"),
+		err:           killErr,
 	}
 
 	stderrPath := filepath.Join(t.TempDir(), "stderr")
@@ -1473,10 +2105,13 @@ func TestRollbackCreateSessionReportsCleanupFailures(t *testing.T) {
 	os.Stderr = stderrFile
 	t.Cleanup(func() { os.Stderr = oldStderr })
 
-	rollbackCreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{}, store, "rollback", "rollback-id", true, false, true)
+	rollbackErr := rollbackCreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{}, store, "rollback", "rollback-id", true, false, true)
 	os.Stderr = oldStderr
 	if err := stderrFile.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if !errors.Is(rollbackErr, deleteErr) || !errors.Is(rollbackErr, killErr) {
+		t.Fatalf("rollback error = %v, want joined delete and kill failures", rollbackErr)
 	}
 	output, err := os.ReadFile(stderrPath)
 	if err != nil {
@@ -1528,7 +2163,8 @@ func TestCreateSession_CodexRemoteBootIsBounded(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	started := time.Now()
 	_, err := CreateSessionWithContext(context.Background(), &OpContext{
-		Tmux: tmuxMock,
+		Tmux:    tmuxMock,
+		Storage: &createMockStorage{},
 		CodexThreadCreator: func(ctx context.Context, _, _, _ string) (*manifest.Codex, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()

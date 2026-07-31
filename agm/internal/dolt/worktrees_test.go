@@ -252,6 +252,29 @@ func TestMigration018AddsTmuxSessionRevision(t *testing.T) {
 	t.Fatal("migration 018 not found")
 }
 
+func TestMigration019AddsSessionNameReservations(t *testing.T) {
+	var found Migration
+	for _, migration := range AllMigrations() {
+		if migration.Version == 19 {
+			found = migration
+			break
+		}
+	}
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS agm_session_name_reservations",
+		"PRIMARY KEY (workspace, name)",
+		"UNIQUE KEY uq_agm_session_name_reservation_owner",
+		"expires_at",
+	} {
+		if !strings.Contains(found.SQL, required) {
+			t.Fatalf("migration 019 lacks %q", required)
+		}
+	}
+	if !strings.Contains(found.PreConditionSQL, "TABLE_NAME = 'agm_session_name_reservations'") {
+		t.Fatalf("migration 019 precondition does not guard the reservation table: %q", found.PreConditionSQL)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests (require DOLT_TEST_INTEGRATION=1)
 // ---------------------------------------------------------------------------

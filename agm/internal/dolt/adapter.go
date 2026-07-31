@@ -65,6 +65,11 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite session store: %w", err)
 	}
+	// The SQLite adapter is a test-environment stand-in for Dolt. Keep its
+	// writes on one connection so concurrent callers queue in database/sql
+	// instead of racing separate SQLite writers into SQLITE_BUSY. The durable
+	// name reservation still arbitrates interleaved create lifecycles.
+	conn.SetMaxOpenConns(1)
 	if err := conn.Ping(); err != nil { //nolint:noctx // connection validation
 		_ = conn.Close()
 		return nil, fmt.Errorf("ping SQLite session store: %w", err)
@@ -171,6 +176,17 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_agm_sessions_workspace_updated
   ON agm_sessions(workspace, updated_at DESC);
+CREATE TABLE IF NOT EXISTS agm_session_name_reservations (
+  workspace TEXT NOT NULL,
+  name TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (workspace, name),
+  UNIQUE (workspace, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agm_session_name_reservation_expiry
+  ON agm_session_name_reservations(expires_at);
 CREATE TABLE IF NOT EXISTS agm_harness_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,

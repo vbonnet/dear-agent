@@ -65,6 +65,9 @@ var migration017 string
 //go:embed migrations/018_add_tmux_session_revision.sql
 var migration018 string
 
+//go:embed migrations/019_session_name_reservations.sql
+var migration019 string
+
 // Migration represents a single database migration
 type Migration struct {
 	Version       int
@@ -267,6 +270,20 @@ func AllMigrations() []Migration {
 					WHERE TABLE_SCHEMA = DATABASE()
 					  AND TABLE_NAME = 'agm_sessions'
 					  AND COLUMN_NAME = 'tmux_session_revision'
+				)
+			`,
+		},
+		{
+			Version:       19,
+			Name:          "session_name_reservations",
+			SQL:           migration019,
+			Checksum:      computeChecksum(migration019),
+			TablesCreated: []string{"agm_session_name_reservations"},
+			PreConditionSQL: `
+				SELECT 1 WHERE NOT EXISTS (
+					SELECT 1 FROM information_schema.TABLES
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'agm_session_name_reservations'
 				)
 			`,
 		},
