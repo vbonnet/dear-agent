@@ -94,7 +94,7 @@ func TestPlanBaselineUpdatePreservesTransitionHistory(t *testing.T) {
 		"dead-package": {"pkg/a"},
 	})
 
-	plan, err := planBaselineUpdate(prior, current, strings.Repeat("d", 64), updateRequest{})
+	plan, err := planBaselineUpdate(prior, current, mustBaselineSHA256(t, prior), updateRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,14 +234,43 @@ func TestCheckedInBaselineV2Transition(t *testing.T) {
 	}
 
 	replayed := cloneKeyMap(prior.Findings)
-	for _, transition := range checkedIn.Transitions {
+	replayedScannerVersion := effectiveScannerVersion(prior)
+	replayedBytes := priorBytes
+	for i, transition := range checkedIn.Transitions {
+		stepDigest := fmt.Sprintf("%x", sha256.Sum256(replayedBytes))
+		if transition.PreviousBaselineSHA256 != stepDigest {
+			t.Fatalf(
+				"transition %d prior digest = %s, want %s",
+				i,
+				transition.PreviousBaselineSHA256,
+				stepDigest,
+			)
+		}
+		if transition.PreviousScannerVersion != replayedScannerVersion {
+			t.Fatalf(
+				"transition %d previous scanner version = %d, want %d",
+				i,
+				transition.PreviousScannerVersion,
+				replayedScannerVersion,
+			)
+		}
 		replayed = applyKeyChange(t, replayed, baselineChange{
 			Added:   transition.Added,
 			Removed: transition.Removed,
 		})
+		replayedScannerVersion = transition.ScannerVersion
+		replayedBytes = mustMarshalBaseline(t, baseline{
+			Version:        baselineSchemaV2,
+			ScannerVersion: replayedScannerVersion,
+			Findings:       replayed,
+			Transitions:    cloneTransitions(checkedIn.Transitions[:i+1]),
+		})
 	}
 	if !reflect.DeepEqual(replayed, checkedIn.Findings) {
 		t.Fatal("transition history does not reconstruct checked-in findings")
+	}
+	if replayedScannerVersion != checkedIn.ScannerVersion {
+		t.Fatalf("replayed scanner version = %d, want %d", replayedScannerVersion, checkedIn.ScannerVersion)
 	}
 }
 
@@ -322,6 +351,129 @@ func TestReadBaselineValidation(t *testing.T) {
 			}
 			if _, err := readBaseline(path); err == nil {
 				t.Fatal("readBaseline accepted invalid manifest")
+			}
+		})
+	}
+}
+
+func TestReadBaselineRejectsDuplicateJSONMembers(t *testing.T) {
+	validV1 := string(mustMarshalBaseline(t, baseline{
+		Version:  baselineSchemaV1,
+		Findings: keySet(nil),
+	}))
+	validV2 := string(mustMarshalBaseline(t, validV2Baseline(keySet(nil))))
+	tests := []struct {
+		name       string
+		data       string
+		memberName string
+	}{
+		{
+			name:       "root escaped equivalent",
+			data:       strings.Replace(validV1, "{\n", "{\n  \"\\u0066indings\": {},\n", 1),
+			memberName: "findings",
+		},
+		{
+			name: "nested escaped equivalent",
+			data: strings.Replace(
+				validV1,
+				"  \"findings\": {\n",
+				"  \"findings\": {\n    \"\\u0064ead-package\": [],\n",
+				1,
+			),
+			memberName: "dead-package",
+		},
+		{
+			name: "transition object inside array",
+			data: strings.Replace(
+				validV2,
+				"    {\n      \"previous_baseline_sha256\":",
+				"    {\n      \"\\u0070revious_baseline_sha256\": \""+strings.Repeat("0", 64)+"\",\n      \"previous_baseline_sha256\":",
+				1,
+			),
+			memberName: "previous_baseline_sha256",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "baseline.json")
+			if err := os.WriteFile(path, []byte(tt.data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readBaseline(path)
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("duplicate JSON object member %q", tt.memberName)) {
+				t.Fatalf("readBaseline error = %v, want duplicate member %q", err, tt.memberName)
+			}
+		})
+	}
+}
+
+func TestReadBaselineValidatesEveryReconstructableTransitionDigest(t *testing.T) {
+	initial := baseline{
+		Version: baselineSchemaV1,
+		Findings: keySet(map[string][]string{
+			"dead-package": {"pkg/a"},
+		}),
+	}
+	initialBytes := mustMarshalBaseline(t, initial)
+	first, err := planBaselineUpdate(
+		initial,
+		findingSet(map[string][]string{"dead-package": {"pkg/a", "pkg/b"}}),
+		fmt.Sprintf("%x", sha256.Sum256(initialBytes)),
+		updateRequest{
+			AcceptNew: true,
+			Reason:    "admit audited test finding",
+			Reference: "ce-test",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := planBaselineUpdate(
+		first.Baseline,
+		findingSet(map[string][]string{"dead-package": {"pkg/a"}}),
+		mustBaselineSHA256(t, first.Baseline),
+		updateRequest{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	if err := os.WriteFile(path, mustMarshalBaseline(t, second.Baseline), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readBaseline(path); err != nil {
+		t.Fatalf("read valid digest chain: %v", err)
+	}
+
+	tamperedCases := []struct {
+		name   string
+		mutate func(*baseline)
+	}{
+		{
+			name: "later digest",
+			mutate: func(bl *baseline) {
+				bl.Transitions[1].PreviousBaselineSHA256 = strings.Repeat("f", 64)
+			},
+		},
+		{
+			name: "predecessor history metadata",
+			mutate: func(bl *baseline) {
+				bl.Transitions[0].Reason = "different but otherwise valid provenance"
+			},
+		},
+	}
+	for _, tt := range tamperedCases {
+		t.Run(tt.name, func(t *testing.T) {
+			tampered := cloneBaseline(second.Baseline)
+			tt.mutate(&tampered)
+			if err := os.WriteFile(path, mustMarshalBaseline(t, tampered), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readBaseline(path)
+			if err == nil || !strings.Contains(err.Error(), "transition 1 previous_baseline_sha256") {
+				t.Fatalf("readBaseline error = %v, want transition digest mismatch", err)
 			}
 		})
 	}
@@ -428,6 +580,57 @@ func TestUpdateBaselineFileMigratesV1NoopAndThenPreservesBytes(t *testing.T) {
 	}
 }
 
+func TestUpdateBaselineFileCanonicalizesV2PredecessorDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	prior := baseline{Version: baselineSchemaV1, Findings: keySet(map[string][]string{
+		"dead-package": {"pkg/a", "pkg/b"},
+	})}
+	if err := os.WriteFile(path, mustMarshalBaseline(t, prior), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := updateBaselineFile(
+		path,
+		findingSet(map[string][]string{"dead-package": {"pkg/a", "pkg/b"}}),
+		updateRequest{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reformatted := bytes.Replace(canonicalBytes, []byte("{\n"), []byte("{  \n"), 1)
+	if bytes.Equal(reformatted, canonicalBytes) {
+		t.Fatal("test did not reformat the v2 baseline")
+	}
+	if err := os.WriteFile(path, reformatted, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := updateBaselineFile(
+		path,
+		findingSet(map[string][]string{"dead-package": {"pkg/a"}}),
+		updateRequest{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := updated.Baseline.Transitions[len(updated.Baseline.Transitions)-1]
+	wantDigest := mustBaselineSHA256(t, migrated.Baseline)
+	if last.PreviousBaselineSHA256 != wantDigest {
+		t.Fatalf("v2 predecessor digest = %s, want canonical %s", last.PreviousBaselineSHA256, wantDigest)
+	}
+	literalDigest := fmt.Sprintf("%x", sha256.Sum256(reformatted))
+	if last.PreviousBaselineSHA256 == literalDigest {
+		t.Fatal("v2 predecessor digest unexpectedly used reformatted literal bytes")
+	}
+	if _, err := readBaseline(path); err != nil {
+		t.Fatalf("read updated baseline: %v", err)
+	}
+}
+
 func TestUpdateBaselineFileBootstrapRequiresAdmission(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 	current := findingSet(map[string][]string{"zero-test": {"pkg/new"}})
@@ -525,6 +728,15 @@ func mustMarshalBaseline(t *testing.T, bl baseline) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func mustBaselineSHA256(t *testing.T, bl baseline) string {
+	t.Helper()
+	digest, err := canonicalBaselineSHA256(bl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
 }
 
 func baselineJSONWithExtraScan(t *testing.T) string {
