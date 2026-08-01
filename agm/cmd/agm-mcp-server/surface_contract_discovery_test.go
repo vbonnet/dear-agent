@@ -229,6 +229,17 @@ func reconcileNextCursor(client, wire string) (string, error) {
 	return wire, nil
 }
 
+func rejectRepeatedCursor(seen map[string]struct{}, cursor string) error {
+	if cursor == "" {
+		return nil
+	}
+	if _, duplicate := seen[cursor]; duplicate {
+		return fmt.Errorf("DAH-002/discovery-cursor-cycle: repeated cursor %q", cursor)
+	}
+	seen[cursor] = struct{}{}
+	return nil
+}
+
 func TestSchemaAfterGenericDecodePreservesDiscoveryComparison(t *testing.T) {
 	raw := json.RawMessage(
 		`{"type":"object","properties":{"value":{"const":9007199254740993,"description":"same"}}}`,
@@ -271,6 +282,22 @@ func TestReconcileNextCursorRejectsDiscoveryDrift(t *testing.T) {
 	if _, err := reconcileNextCursor("client", "wire"); err == nil ||
 		!strings.Contains(err.Error(), "DAH-002/discovery-cursor-drift") {
 		t.Fatalf("reconcileNextCursor(drift) error = %v, want stable drift key", err)
+	}
+}
+
+func TestRejectRepeatedCursorRejectsPaginationCycles(t *testing.T) {
+	seen := make(map[string]struct{})
+	for _, cursor := range []string{"cursor-a", "cursor-b"} {
+		if err := rejectRepeatedCursor(seen, cursor); err != nil {
+			t.Fatalf("rejectRepeatedCursor(%q) unexpected error: %v", cursor, err)
+		}
+	}
+	if err := rejectRepeatedCursor(seen, "cursor-a"); err == nil ||
+		!strings.Contains(err.Error(), "DAH-002/discovery-cursor-cycle") {
+		t.Fatalf("rejectRepeatedCursor(cycle) error = %v, want stable cycle key", err)
+	}
+	if err := rejectRepeatedCursor(seen, ""); err != nil {
+		t.Fatalf("rejectRepeatedCursor(terminal) error = %v", err)
 	}
 }
 

@@ -142,6 +142,7 @@ func registeredMCPToolsWithOptions(
 	var tools []*mcp.Tool
 	var params *mcp.ListToolsParams
 	pages := 0
+	seenCursors := make(map[string]struct{})
 	for {
 		result, err := clientSession.ListTools(t.Context(), params)
 		if err != nil {
@@ -159,6 +160,9 @@ func registeredMCPToolsWithOptions(
 		}
 		if nextCursor == "" {
 			return tools, pages
+		}
+		if err := rejectRepeatedCursor(seenCursors, nextCursor); err != nil {
+			t.Fatal(err)
 		}
 		params = &mcp.ListToolsParams{Cursor: nextCursor}
 	}
