@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func logicalItemSchema(t *testing.T, itemType string) string {
@@ -406,5 +408,28 @@ func TestSchemaCanonicalizationPreservesLargeIntegerPrecision(t *testing.T) {
 	right := canonicalSchemaFixture(t, `{"const":9007199254740993}`)
 	if left == right {
 		t.Fatalf("distinct exact integer constraints collapsed to %s", left)
+	}
+}
+
+func TestCompiledContractPreservesLargeIntegerPrecision(t *testing.T) {
+	tools := []*mcp.Tool{
+		{
+			Name: "large-integer-left",
+			InputSchema: json.RawMessage(
+				`{"type":"object","properties":{"value":{"const":9007199254740992}}}`,
+			),
+		},
+		{
+			Name: "large-integer-right",
+			InputSchema: json.RawMessage(
+				`{"type":"object","properties":{"value":{"const":9007199254740993}}}`,
+			),
+		},
+	}
+	contract := compiledContract(t, tools)
+	left := constraintValue(contract["large-integer-left"].Nodes["/value"].Constraints)
+	right := constraintValue(contract["large-integer-right"].Nodes["/value"].Constraints)
+	if left == right {
+		t.Fatalf("compiled contract collapsed distinct exact integer constraints to %s", left)
 	}
 }
