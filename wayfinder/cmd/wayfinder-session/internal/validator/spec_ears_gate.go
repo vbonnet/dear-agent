@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 // earsConfigFile is the optional per-project override for EARS patterns. When

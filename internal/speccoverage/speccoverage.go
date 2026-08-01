@@ -12,8 +12,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
 	"github.com/vbonnet/dear-agent/internal/repoinventory"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 // Surface maps one parity-critical implementation area to its executable BDD

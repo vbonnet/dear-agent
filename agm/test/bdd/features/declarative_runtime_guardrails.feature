@@ -5,6 +5,7 @@
 # RELATED-SPEC: .github/act/SPEC.md
 # RELATED-SPEC: .github/rulesets/SPEC.md
 # RELATED-SPEC: agm/.claude-plugin/SPEC.md
+# RELATED-SPEC: spec-governance/.claude-plugin/SPEC.md
 # RELATED-SPEC: agm/.github/workflows/SPEC.md
 # RELATED-SPEC: agm/agm-plugin/.claude-plugin/SPEC.md
 # RELATED-SPEC: agm/agm-plugin/channels/agm-bus/SPEC.md
@@ -22,7 +23,6 @@
 # RELATED-SPEC: pkg/codeintel/rules/go/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/typescript/SPEC.md
-# RELATED-SPEC: spec-governance/.claude-plugin/SPEC.md
 # RELATED-SPEC: spec-governance/SPEC.md
 # RELATED-SPEC: wayfinder/.claude-plugin/SPEC.md
 Feature: Declarative runtime guardrails
@@ -60,7 +60,6 @@ Feature: Declarative runtime guardrails
       | pkg/codeintel/rules/go                                                       |
       | pkg/codeintel/rules/python                                                   |
       | pkg/codeintel/rules/typescript                                               |
-      | spec-governance/.claude-plugin                                               |
       | wayfinder/.claude-plugin                                                     |
 
   Scenario Outline: Declarative contracts are invariant across active routes

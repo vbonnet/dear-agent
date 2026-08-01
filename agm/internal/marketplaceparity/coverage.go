@@ -3,13 +3,19 @@
 package marketplaceparity
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/spec-governance/skillset"
 )
 
 const (
@@ -52,10 +58,29 @@ type Catalog struct {
 }
 
 type claudeCatalog struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Owner       Owner         `json:"owner"`
-	Plugins     []PluginEntry `json:"plugins"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Owner       Owner               `json:"owner"`
+	Plugins     []claudePluginEntry `json:"plugins"`
+}
+
+type claudePluginEntry struct {
+	Name        string   `json:"name"`
+	Source      string   `json:"source"`
+	Description string   `json:"description"`
+	Version     string   `json:"version"`
+	Strict      *bool    `json:"strict,omitempty"`
+	Skills      []string `json:"skills,omitempty"`
+}
+
+type nativeSpecGovernanceManifest struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Author      struct {
+		Name string `json:"name"`
+	} `json:"author"`
+	Skills []string `json:"skills"`
 }
 
 // LoadCatalog reads the harness-neutral marketplace catalog from root.
@@ -144,8 +169,11 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 	if neutral.Name != claude.Name {
 		return fmt.Errorf("claude marketplace name = %q, want %q", claude.Name, neutral.Name)
 	}
-	byName := make(map[string]PluginEntry, len(claude.Plugins))
+	byName := make(map[string]claudePluginEntry, len(claude.Plugins))
 	for _, plugin := range claude.Plugins {
+		if _, exists := byName[plugin.Name]; exists {
+			return fmt.Errorf("claude marketplace has duplicate plugin %q", plugin.Name)
+		}
 		byName[plugin.Name] = plugin
 	}
 	for _, plugin := range neutral.Plugins {
@@ -154,10 +182,162 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 			return fmt.Errorf("claude marketplace missing plugin %q", plugin.Name)
 		}
 		if claudePlugin.Source != plugin.Source {
-			return fmt.Errorf("claude marketplace plugin %q source = %q, want %q", plugin.Name, claudePlugin.Source, plugin.Source)
+			if err := validateClaudeSkillBundleAdapter(root, plugin, claudePlugin); err != nil {
+				return fmt.Errorf("claude marketplace plugin %q source = %q, want %q or a valid native skill-bundle adapter: %w", plugin.Name, claudePlugin.Source, plugin.Source, err)
+			}
 		}
 		if claudePlugin.Version != plugin.Version {
 			return fmt.Errorf("claude marketplace plugin %q version = %q, want %q", plugin.Name, claudePlugin.Version, plugin.Version)
+		}
+		if plugin.Name == "spec-governance" {
+			if err := validateNativeSpecGovernanceSurface(root, plugin, claudePlugin); err != nil {
+				return fmt.Errorf("claude marketplace SPEC governance plugin: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateNativeSpecGovernanceSurface(root string, neutral PluginEntry, claude claudePluginEntry) error {
+	if claude.Source != "./spec-governance" || neutral.Source != "./spec-governance" {
+		return errors.New("must use the isolated spec-governance plugin root")
+	}
+	pluginRoot := filepath.Join(root, "spec-governance")
+	if err := requireRealDirectoryTree(root, "spec-governance"); err != nil {
+		return fmt.Errorf("isolated plugin root: %w", err)
+	}
+	want, err := nativeSkillExports(pluginRoot)
+	if err != nil {
+		return err
+	}
+	if claude.Strict != nil || len(claude.Skills) != 0 {
+		return errors.New("must delegate its native surface to the isolated plugin manifest")
+	}
+	var manifest nativeSpecGovernanceManifest
+	if err := readStrictJSON(filepath.Join(pluginRoot, ".claude-plugin", "plugin.json"), &manifest); err != nil {
+		return err
+	}
+	if manifest.Name != "spec-governance" || manifest.Version != neutral.Version || manifest.Description == "" || manifest.Author.Name == "" {
+		return errors.New("isolated plugin manifest has incomplete identity")
+	}
+	if !slices.Equal(manifest.Skills, want) {
+		return fmt.Errorf("isolated plugin skills = %v, want exact canonical set %v", manifest.Skills, want)
+	}
+	for _, forbidden := range []string{".mcp.json", "mcp.json", ".lsp.json", "lsp.json", "hooks", "agents", "commands"} {
+		if _, err := os.Lstat(filepath.Join(pluginRoot, forbidden)); err == nil {
+			return fmt.Errorf("isolated plugin must not expose %s", forbidden)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect isolated plugin %s: %w", forbidden, err)
+		}
+	}
+	return nil
+}
+
+func nativeSkillExports(pluginRoot string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(pluginRoot, "skills"))
+	if err != nil {
+		return nil, fmt.Errorf("read isolated plugin skills: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	wantNames := skillset.Names()
+	if !slices.Equal(names, wantNames) {
+		return nil, fmt.Errorf("isolated plugin canonical skill directories = %v, want fixed set %v", names, wantNames)
+	}
+	for _, name := range wantNames {
+		path := filepath.Join(pluginRoot, "skills", name, "SKILL.md")
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			if err != nil {
+				return nil, fmt.Errorf("isolated plugin skill %q: %w", name, err)
+			}
+			return nil, fmt.Errorf("isolated plugin skill %q has no regular SKILL.md", name)
+		}
+	}
+	return skillset.NativeExports(), nil
+}
+
+func validateClaudeSkillBundleAdapter(root string, neutral PluginEntry, claude claudePluginEntry) error {
+	if claude.Source != "." {
+		return fmt.Errorf("expanded source must be the authenticated marketplace root")
+	}
+	if claude.Strict == nil || *claude.Strict {
+		return fmt.Errorf("expanded source must explicitly set strict to false")
+	}
+	if len(neutral.Capabilities) != 1 || neutral.Capabilities[0] != "skills" {
+		return fmt.Errorf("expanded source is permitted only for an exact skills capability")
+	}
+	want, err := canonicalSkillExports(root, neutral.Source)
+	if err != nil {
+		return err
+	}
+	got := append([]string(nil), claude.Skills...)
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("skill exports = %v, want exact canonical set %v", claude.Skills, want)
+	}
+	return nil
+}
+
+func canonicalSkillExports(root, source string) ([]string, error) {
+	canonicalSource, err := catalogSubtree(source)
+	if err != nil {
+		return nil, err
+	}
+	skillsRoot := filepath.Join(root, canonicalSource, "skills")
+	if err := requireRealDirectoryTree(root, filepath.Join(canonicalSource, "skills")); err != nil {
+		return nil, fmt.Errorf("canonical skill directory: %w", err)
+	}
+	entries, err := os.ReadDir(skillsRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read canonical skill directory: %w", err)
+	}
+	want := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		skillFile := filepath.Join(skillsRoot, entry.Name(), "SKILL.md")
+		info, statErr := os.Lstat(skillFile)
+		if statErr != nil || !info.Mode().IsRegular() {
+			if statErr != nil {
+				return nil, fmt.Errorf("canonical skill %q: %w", entry.Name(), statErr)
+			}
+			return nil, fmt.Errorf("canonical skill %q has no regular SKILL.md", entry.Name())
+		}
+		want = append(want, "./"+canonicalSource+"/skills/"+entry.Name())
+	}
+	sort.Strings(want)
+	return want, nil
+}
+
+func catalogSubtree(source string) (string, error) {
+	if filepath.IsAbs(source) {
+		return "", fmt.Errorf("neutral plugin source must be repository-relative")
+	}
+	cleaned := filepath.Clean(source)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("neutral plugin source must name a repository subtree")
+	}
+	return filepath.ToSlash(cleaned), nil
+}
+
+func requireRealDirectoryTree(root, relative string) error {
+	current := root
+	for part := range strings.SplitSeq(filepath.Clean(relative), string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("%s must be a real directory", filepath.ToSlash(relative))
 		}
 	}
 	return nil
@@ -213,6 +393,26 @@ func readJSON(path string, dst any) error {
 	}
 	if err := json.Unmarshal(data, dst); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	return nil
+}
+
+func readStrictJSON(path string, dst any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("parse %s: contains multiple JSON values", path)
+		}
+		return fmt.Errorf("parse trailing %s: %w", path, err)
 	}
 	return nil
 }

@@ -2,16 +2,19 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
-	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/spec-governance/internal/gittest"
+	"github.com/vbonnet/dear-agent/spec-governance/skillset"
 )
 
-var testSkillNames = []string{"write-spec", "audit-specs"}
+var testSkillNames = skillset.Names()
 
 func TestSyncWritesAndChecksProjections(t *testing.T) {
 	root := t.TempDir()
@@ -310,20 +313,29 @@ func TestSyncValidatesAllMetadataBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestSyncDiscoversNewAndObsoleteGeneratedSkills(t *testing.T) {
+func TestSyncRejectsFullyDeclaredAdditionalCanonicalSkill(t *testing.T) {
 	root := t.TempDir()
 	writeCanonicalSkills(t, root)
 	writeSkill(t, root, "review-spec", "---\nname: review-spec\ndescription: Review a specification.\n---\n")
+	fullyDeclared := append(testSkillNames, "review-spec")
+	writeExpandedClaudeMarketplace(t, root, fullyDeclared)
+	writeNativePluginManifest(t, root, fullyDeclared)
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "want fixed set [audit-specs write-spec]") {
+		t.Fatalf("sync() error = %v, want fixed-set rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agents")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("additional canonical skill was projected before rejection: %v", err)
+	}
+}
+
+func TestSyncFindsObsoleteGeneratedProjection(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
 	if err := sync(root, false); err != nil {
 		t.Fatal(err)
 	}
-	newProjection := filepath.Join(root, ".agents", "skills", "review-spec", "SKILL.md")
-	if _, err := os.Stat(newProjection); err != nil {
-		t.Fatalf("new canonical skill was not projected: %v", err)
-	}
-	if err := os.RemoveAll(filepath.Join(root, "spec-governance", "skills", "review-spec")); err != nil {
-		t.Fatal(err)
-	}
+	targetPath := writeObsoleteProjection(t, root, "review-spec")
+	newProjection := filepath.Join(root, targetPath)
 	if err := sync(root, true); err == nil || !strings.Contains(err.Error(), "obsolete") {
 		t.Fatalf("sync(check) error = %v, want obsolete projection", err)
 	}
@@ -483,15 +495,8 @@ func TestSyncFailsClosedWhenExistingTargetIsSwapped(t *testing.T) {
 					wantedMutation = projectionReplacement
 					writeSkill(t, root, "write-spec", "---\nname: write-spec\ndescription: Updated canonical description.\n---\n")
 				} else {
-					writeSkill(t, root, "review-spec", "---\nname: review-spec\ndescription: Review a specification.\n---\n")
-					if err := sync(root, false); err != nil {
-						t.Fatal(err)
-					}
-					targetPath = filepath.Join(".agents", "skills", "review-spec", "SKILL.md")
+					targetPath = writeObsoleteProjection(t, root, "review-spec")
 					wantedMutation = projectionDeletion
-					if err := os.RemoveAll(filepath.Join(root, "spec-governance", "skills", "review-spec")); err != nil {
-						t.Fatal(err)
-					}
 				}
 
 				target := filepath.Join(root, targetPath)
@@ -544,15 +549,8 @@ func TestSyncFailsClosedWhenExistingTargetBytesChange(t *testing.T) {
 				wantedMutation = projectionReplacement
 				writeSkill(t, root, "write-spec", "---\nname: write-spec\ndescription: Updated canonical description.\n---\n")
 			} else {
-				writeSkill(t, root, "review-spec", "---\nname: review-spec\ndescription: Review a specification.\n---\n")
-				if err := sync(root, false); err != nil {
-					t.Fatal(err)
-				}
-				targetPath = filepath.Join(".agents", "skills", "review-spec", "SKILL.md")
+				targetPath = writeObsoleteProjection(t, root, "review-spec")
 				wantedMutation = projectionDeletion
-				if err := os.RemoveAll(filepath.Join(root, "spec-governance", "skills", "review-spec")); err != nil {
-					t.Fatal(err)
-				}
 			}
 
 			authored := []byte("in-place authored bytes\n")
@@ -672,25 +670,53 @@ func TestSyncRejectsInvalidPackageMetadataBeforeWriting(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "plugin skill export",
+			name: "marketplace bypasses native manifest",
 			mutate: func(t *testing.T, root string) {
-				writeFile(t, root, "spec-governance/.claude-plugin/plugin.json", `{"name":"spec-governance","version":"0.1.0","description":"test","author":{"name":"test"},"skills":["./other/"]}`)
+				writeFile(t, root, ".claude-plugin/marketplace.json", `{"name":"dear-agent","description":"test","owner":{"name":"test","email":"test@example.com"},"plugins":[{"name":"spec-governance","source":"./spec-governance","version":"0.1.0","description":"test","skills":["./other/"]}]}`)
 			},
-			wantErr: "skills must be exactly",
+			wantErr: "delegate its complete native surface",
 		},
 		{
-			name: "plugin unknown field",
+			name: "marketplace unknown field",
 			mutate: func(t *testing.T, root string) {
-				writeFile(t, root, "spec-governance/.claude-plugin/plugin.json", `{"name":"spec-governance","version":"0.1.0","description":"test","author":{"name":"test"},"skills":["./skills/"],"unexpected":true}`)
+				writeFile(t, root, ".claude-plugin/marketplace.json", `{"name":"dear-agent","description":"test","owner":{"name":"test","email":"test@example.com"},"plugins":[{"name":"spec-governance","source":"./spec-governance","version":"0.1.0","description":"test","unexpected":true}]}`)
 			},
 			wantErr: "unknown field",
 		},
 		{
-			name: "plugin invalid version",
+			name: "marketplace invalid version",
 			mutate: func(t *testing.T, root string) {
-				writeFile(t, root, "spec-governance/.claude-plugin/plugin.json", `{"name":"spec-governance","version":"latest","description":"test","author":{"name":"test"},"skills":["./skills/"]}`)
+				writeFile(t, root, ".claude-plugin/marketplace.json", `{"name":"dear-agent","description":"test","owner":{"name":"test","email":"test@example.com"},"plugins":[{"name":"spec-governance","source":"./spec-governance","version":"latest","description":"test"}]}`)
 			},
-			wantErr: "identity, version, description, and author",
+			wantErr: "identity, version, and description",
+		},
+		{
+			name: "marketplace root source",
+			mutate: func(t *testing.T, root string) {
+				writeFile(t, root, ".claude-plugin/marketplace.json", `{"name":"dear-agent","description":"test","owner":{"name":"test","email":"test@example.com"},"plugins":[{"name":"spec-governance","source":".","version":"0.1.0","description":"test"}]}`)
+			},
+			wantErr: "isolated native plugin root",
+		},
+		{
+			name: "marketplace strict mode",
+			mutate: func(t *testing.T, root string) {
+				writeFile(t, root, ".claude-plugin/marketplace.json", `{"name":"dear-agent","description":"test","owner":{"name":"test","email":"test@example.com"},"plugins":[{"name":"spec-governance","source":"./spec-governance","version":"0.1.0","description":"test","strict":true}]}`)
+			},
+			wantErr: "delegate its complete native surface",
+		},
+		{
+			name: "native manifest exposes extra surface",
+			mutate: func(t *testing.T, root string) {
+				writeFile(t, root, "spec-governance/.claude-plugin/plugin.json", `{"name":"spec-governance","version":"0.1.0","description":"test","author":{"name":"test"},"skills":["./skills/audit-specs","./skills/write-spec"],"hooks":{}}`)
+			},
+			wantErr: "unknown field",
+		},
+		{
+			name: "native plugin root exposes MCP",
+			mutate: func(t *testing.T, root string) {
+				writeFile(t, root, "spec-governance/.mcp.json", `{}`)
+			},
+			wantErr: "must not expose",
 		},
 		{
 			name: "OpenAI prompt delegates to another skill",
@@ -732,16 +758,88 @@ func TestSyncRejectsInvalidPackageMetadataBeforeWriting(t *testing.T) {
 
 func writeCanonicalSkills(t *testing.T, root string) {
 	t.Helper()
-	writeFile(t, root, "spec-governance/.claude-plugin/plugin.json", `{"name":"spec-governance","version":"0.1.0","description":"Test SPEC governance plugin","author":{"name":"test"},"skills":["./skills/"]}`)
 	for _, name := range testSkillNames {
 		writeSkill(t, root, name, "---\nname: "+name+"\ndescription: \"Use "+name+" for canonical SPEC governance.\"\n---\n")
 	}
+	writeClaudeMarketplace(t, root)
+	writeNativePluginManifest(t, root, testSkillNames)
+}
+
+func writeClaudeMarketplace(t *testing.T, root string) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{
+		"name":        "dear-agent",
+		"description": "test",
+		"owner":       map[string]string{"name": "test", "email": "test@example.com"},
+		"plugins": []any{map[string]any{
+			"name": "spec-governance", "source": "./spec-governance", "version": "0.1.0",
+			"description": "Test SPEC governance plugin",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, ".claude-plugin/marketplace.json", string(data))
+}
+
+func writeExpandedClaudeMarketplace(t *testing.T, root string, names []string) {
+	t.Helper()
+	names = append([]string(nil), names...)
+	sort.Strings(names)
+	skills := make([]string, len(names))
+	for index, name := range names {
+		skills[index] = "./skills/" + name
+	}
+	data, err := json.Marshal(map[string]any{
+		"name":        "dear-agent",
+		"description": "test",
+		"owner":       map[string]string{"name": "test", "email": "test@example.com"},
+		"plugins": []any{map[string]any{
+			"name": "spec-governance", "source": "./spec-governance", "version": "0.1.0",
+			"description": "Test expanded SPEC governance plugin", "strict": false, "skills": skills,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, ".claude-plugin/marketplace.json", string(data))
+}
+
+func writeNativePluginManifest(t *testing.T, root string, names []string) {
+	t.Helper()
+	names = append([]string(nil), names...)
+	sort.Strings(names)
+	skills := make([]string, len(names))
+	for index, name := range names {
+		skills[index] = "./skills/" + name
+	}
+	data, err := json.Marshal(map[string]any{
+		"name": "spec-governance", "version": "0.1.0", "description": "Test SPEC governance plugin",
+		"author": map[string]string{"name": "test"}, "skills": skills,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "spec-governance/.claude-plugin/plugin.json", string(data))
 }
 
 func writeSkill(t *testing.T, root, name, content string) {
 	t.Helper()
 	writeFile(t, root, filepath.Join("spec-governance", "skills", name, "SKILL.md"), content)
 	writeFile(t, root, filepath.Join("spec-governance", "skills", name, "agents", "openai.yaml"), "interface:\n  display_name: Test skill\n  short_description: Test canonical skill\n  default_prompt: Use $"+name+" for this request.\n")
+}
+
+func writeObsoleteProjection(t *testing.T, root, name string) string {
+	t.Helper()
+	targetPath := filepath.Join(".agents", "skills", name, "SKILL.md")
+	canonicalPath := filepath.Join("spec-governance", "skills", name, "SKILL.md")
+	reference, err := filepath.Rel(filepath.Dir(targetPath), canonicalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := projection(skillMetadata{name: name, description: "Obsolete generated skill."}, filepath.ToSlash(reference))
+	writeFile(t, root, targetPath, string(content))
+	return targetPath
 }
 
 func writeFile(t *testing.T, root, relative, content string) {

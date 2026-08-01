@@ -9,7 +9,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 const declarativeFixtureFeaturePath = "agm/test/bdd/features/declarative_fixture_guardrails.feature"

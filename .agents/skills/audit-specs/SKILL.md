@@ -13,8 +13,9 @@ skill. It does not define a second workflow.
 ## Workflow
 
 1. Resolve and read [the canonical skill](../../../spec-governance/skills/audit-specs/SKILL.md) completely before taking action.
-2. Resolve and read the canonical skill's linked relative references when they
-   are needed for the requested work.
+2. Use the authenticated canonical skill location as the base for linked
+   references and executable resources. Never resolve them from the active
+   working directory or a similarly named project path.
 3. Follow the canonical workflow, stop conditions, and evidence requirements
    without substituting this projection for them.
 

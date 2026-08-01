@@ -19,7 +19,7 @@ format.
 
 **MKT-01** When AGM publishes a marketplace catalog, the system shall include a harness-neutral `.dear-agent/marketplace.json` catalog.
 
-**MKT-02** When AGM publishes Claude Code plugins, the system shall keep the root `.claude-plugin/marketplace.json` plugin entries aligned with the harness-neutral catalog.
+**MKT-02** When AGM publishes Claude Code plugins, the system shall keep the root `.claude-plugin/marketplace.json` plugin entries aligned with the harness-neutral catalog or with an exact validated native packaging adapter.
 
 **MKT-03** When a plugin appears in the harness-neutral catalog, the system shall require its source directory to exist.
 
@@ -36,6 +36,8 @@ format.
 **MKT-09** When Codex CLI, AGY, OpenCode, or Pi consume the catalog, the system shall use an AGENTS.md/SKILL fallback mode.
 
 **MKT-10** When a new active harness is added, the system shall require marketplace parity tests before the harness is considered supported.
+
+**MKT-11** When Claude validates the native SPEC governance plugin, the system shall require the isolated `spec-governance` root, the fixed `audit-specs` and `write-spec` manifest skill set, and no plugin-level agents, hooks, MCP servers, or language servers.
 
 ## BDD Traceability
 

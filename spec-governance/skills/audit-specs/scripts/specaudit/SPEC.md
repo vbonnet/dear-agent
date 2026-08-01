@@ -18,6 +18,12 @@
 
 **SPECAUDIT-08** When an audit names a comparison revision, the system shall label it as comparison-only unless a separate inventory authenticates that revision.
 
+**SPECAUDIT-09** When a supported harness invokes the collector from an unrelated working directory, the system shall execute the `specaudit` package and EARS library inside the authenticated skill distribution and shall produce the same command behavior without consulting a working-directory-relative executable path.
+
+**SPECAUDIT-10** When the collector invokes Git for pinned evidence, the system shall strip inherited Git repository and configuration overrides, disable replacement objects and prompts, and terminate the subprocess if its combined output exceeds the configured byte ceiling.
+
+**SPECAUDIT-11** When an installed audit launcher executes the collector, the system shall ignore inherited Go workspace, flag, environment-file, and toolchain settings and shall retain the authenticated distribution's command behavior.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`

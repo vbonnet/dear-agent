@@ -9,7 +9,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 const declarativeRuntimeFeaturePath = "agm/test/bdd/features/declarative_runtime_guardrails.feature"
@@ -38,7 +38,6 @@ var declarativeRuntimeDirs = []string{
 	"pkg/codeintel/rules/go",
 	"pkg/codeintel/rules/python",
 	"pkg/codeintel/rules/typescript",
-	"spec-governance/.claude-plugin",
 	"wayfinder/.claude-plugin",
 }
 

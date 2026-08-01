@@ -12,18 +12,21 @@ active-member dispositions.
 
 ## Required commands
 
+Resolve `<distribution-root>` through the canonical skill's trusted execution
+seam before substituting it below; never substitute the active project root.
+
 ```sh
-go run ./spec-governance/skills/audit-specs/scripts/specaudit inventory \
+"<distribution-root>/scripts/specaudit" inventory \
   -repo <repository-path> \
   -repository <owner/name> \
   -revision <40-hex-sha> > inventory.json
 
-go run ./spec-governance/skills/audit-specs/scripts/specaudit validate \
+"<distribution-root>/scripts/specaudit" validate \
   -input findings.json \
   -inventory inventory.json \
   -repo <repository-path>
 
-go run ./spec-governance/skills/audit-specs/scripts/specaudit render \
+"<distribution-root>/scripts/specaudit" render \
   -input findings.json \
   -inventory inventory.json \
   -repo <repository-path> > report.html

@@ -79,7 +79,7 @@ skill actually discovers and triggers.
 | Surface | Reaches | Mechanism |
 |---|---|---|
 | `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
-| `spec-governance/skills/` | Claude Code and Pi | canonical authored skills exported by `spec-governance/.claude-plugin/plugin.json` and loaded from `.pi/settings.json` |
+| `spec-governance/skills/` | Claude Code and Pi | canonical authored skills exported by the isolated `spec-governance` Claude plugin and loaded from `.pi/settings.json` |
 | `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
 | `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback`; authored skills remain canonical where they live, while `make lint-skills` checks any deterministic regular-file projections |
 | `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
@@ -101,15 +101,19 @@ loader actually discovers. `wayfinder` is the worked symlink example:
 tracked symlink, the Claude plugin manifest exports the directory, and both
 marketplace catalogs register the plugin.
 
-`spec-governance` is the worked regular-projection example. Claude and Pi load
-`spec-governance/skills/` directly. Codex, AGY, and OpenCode load generated
-regular `.agents/skills/{write-spec,audit-specs}/SKILL.md` delegators because
-the active runtimes did not all discover symlinks consistently. Those files
-contain no second workflow; `cmd/sync-skill-projections` derives them from
-canonical metadata, creates only missing targets without clobbering, and never
-replaces or deletes an existing entry automatically. Stale and obsolete paths
-must be inspected and explicitly removed by a human; `make lint-skills` blocks
-drift in preflight and CI.
+`spec-governance` is the worked regular-projection example. Claude's isolated
+plugin root authenticates only `spec-governance` and its manifest exports only
+the two canonical skill directories; this keeps the collector, module metadata,
+and canonical EARS library in one installed boundary without exposing the root
+repository's agents, hooks, MCP servers, or language servers. Pi loads the
+canonical tree directly. Codex, AGY, and OpenCode load generated regular
+`.agents/skills/{write-spec,audit-specs}/SKILL.md` delegators because the active
+runtimes did not all discover symlinks consistently. Those files contain no
+second workflow; `cmd/sync-skill-projections` derives them from canonical
+metadata, creates only missing targets without clobbering, and never replaces
+or deletes an existing entry automatically. Stale and obsolete paths must be
+inspected and explicitly removed by a human; `make lint-skills` blocks drift in
+preflight and CI.
 
 Do not blindly copy either filesystem mechanism. Verify each claimed loader,
 prefer a symlink when all consumers support it, and otherwise generate a

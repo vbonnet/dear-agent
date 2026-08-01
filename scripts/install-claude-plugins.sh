@@ -75,14 +75,24 @@ require_marketplace_manifest() {
   [[ -f "$manifest" ]] || die "marketplace manifest not found at: $manifest"
 }
 
-# Parse plugin names from .claude-plugin/marketplace.json without jq.
-# Looks for `"name": "<name>"` lines inside the plugins[] block.
+# Parse top-level plugin names from .claude-plugin/marketplace.json without jq.
+# Object depth keeps nested component arrays and metadata from terminating or
+# contributing names to the plugins[] scan.
 list_plugin_names() {
   local manifest="$REPO_ROOT/.claude-plugin/marketplace.json"
   awk '
-    /"plugins"[[:space:]]*:[[:space:]]*\[/ { in_plugins=1; next }
-    in_plugins && /\]/                     { in_plugins=0 }
-    in_plugins && /"name"[[:space:]]*:/ {
+    /"plugins"[[:space:]]*:[[:space:]]*\[/ {
+      in_plugins = 1
+      object_depth = 0
+      next
+    }
+    in_plugins {
+      structural = $0
+      opens = gsub(/\{/, "", structural)
+      closes = gsub(/\}/, "", structural)
+      object_depth += opens - closes
+    }
+    in_plugins && object_depth == 1 && /"name"[[:space:]]*:/ {
       match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
       if (RSTART) {
         s = substr($0, RSTART, RLENGTH)
@@ -91,6 +101,7 @@ list_plugin_names() {
         print s
       }
     }
+    in_plugins && object_depth == 0 && /\]/ { exit }
   ' "$manifest"
 }
 

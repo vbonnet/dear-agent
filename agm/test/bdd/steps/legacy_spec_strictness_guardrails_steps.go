@@ -10,7 +10,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 const legacySpecStrictnessFeature = "agm/test/bdd/features/legacy_spec_strictness_guardrails.feature"

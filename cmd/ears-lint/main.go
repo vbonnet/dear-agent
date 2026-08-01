@@ -23,8 +23,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
 	"github.com/vbonnet/dear-agent/internal/repoinventory"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 func main() {

@@ -14,11 +14,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 
+	"github.com/vbonnet/dear-agent/spec-governance/skillset"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,7 +30,6 @@ const maxGitMetadataBytes = 1024 * 1024
 const maxProjectionBytes = 256 * 1024
 
 var (
-	skillNamePattern       = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 	semanticVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$`)
 )
 
@@ -37,7 +38,30 @@ type skillMetadata struct {
 	description string
 }
 
-type pluginManifest struct {
+type claudeMarketplace struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Owner       struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"owner"`
+	Plugins []claudeMarketplacePlugin `json:"plugins"`
+}
+
+type claudeMarketplacePlugin struct {
+	Name        string   `json:"name"`
+	Source      string   `json:"source"`
+	Description string   `json:"description"`
+	Version     string   `json:"version"`
+	Strict      *bool    `json:"strict,omitempty"`
+	Skills      []string `json:"skills,omitempty"`
+}
+
+// claudePluginManifest is the complete native surface permitted for the
+// distributable SPEC-governance plugin. Keep this deliberately narrow: native
+// plugin discovery must expose only the two canonical skills, never ambient
+// repository agents, hooks, MCP servers, or language servers.
+type claudePluginManifest struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	Description string `json:"description"`
@@ -104,6 +128,12 @@ func run(args []string, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "sync-skill-projections: -root is accepted only with -check")
 			return 2
 		}
+		var rootErr error
+		root, rootErr = repositoryRootFromCurrentDirectory()
+		if rootErr != nil {
+			fmt.Fprintln(stderr, "sync-skill-projections:", rootErr)
+			return 1
+		}
 		if err := requireLinkedWorktreeRoot(root); err != nil {
 			fmt.Fprintln(stderr, "sync-skill-projections:", err)
 			return 1
@@ -114,6 +144,22 @@ func run(args []string, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func repositoryRootFromCurrentDirectory() (string, error) {
+	directory, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+	topLevel, err := projectionGit(directory, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("resolve current repository root: %w", err)
+	}
+	root, err := canonicalFilesystemPath(strings.TrimSpace(topLevel))
+	if err != nil {
+		return "", fmt.Errorf("resolve current repository root: %w", err)
+	}
+	return root, nil
 }
 
 func requireLinkedWorktreeRoot(root string) error {
@@ -320,7 +366,7 @@ func planProjectionSync(repository *os.Root) ([]projectionPlan, []projectionPlan
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := validatePluginManifest(repository); err != nil {
+	if err := validateClaudeMarketplaceProjection(repository); err != nil {
 		return nil, nil, err
 	}
 	plans := make([]projectionPlan, 0, len(skillNames))
@@ -410,28 +456,99 @@ func applyProjectionSync(repository *os.Root, plans, obsolete []projectionPlan, 
 	return nil
 }
 
-func validatePluginManifest(repository *os.Root) error {
-	const path = "spec-governance/.claude-plugin/plugin.json"
-	data, err := repository.ReadFile(path)
+func validateClaudeMarketplaceProjection(repository *os.Root) error {
+	const path = ".claude-plugin/marketplace.json"
+	marketplace, err := readClaudeMarketplace(repository, path)
+	if err != nil {
+		return err
+	}
+	specPlugin, err := findSpecGovernancePlugin(marketplace.Plugins)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	var manifest pluginManifest
+	if !semanticVersionPattern.MatchString(specPlugin.Version) || strings.TrimSpace(specPlugin.Description) == "" {
+		return fmt.Errorf("%s: spec-governance identity, version, and description are required", path)
+	}
+	if specPlugin.Source != "./spec-governance" {
+		return fmt.Errorf("%s: spec-governance source must be the isolated native plugin root \"./spec-governance\"", path)
+	}
+	if specPlugin.Strict != nil || len(specPlugin.Skills) != 0 {
+		return fmt.Errorf("%s: spec-governance must delegate its complete native surface to spec-governance/.claude-plugin/plugin.json", path)
+	}
+	return validateNativePluginSurface(repository)
+}
+
+func validateNativePluginSurface(repository *os.Root) error {
+	const manifestPath = "spec-governance/.claude-plugin/plugin.json"
+	data, err := repository.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("%s: %w", manifestPath, err)
+	}
+	var manifest claudePluginManifest
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&manifest); err != nil {
-		return fmt.Errorf("%s: parse strict JSON: %w", path, err)
+		return fmt.Errorf("%s: parse strict JSON: %w", manifestPath, err)
 	}
 	if err := requireDecoderEOF(decoder); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return fmt.Errorf("%s: %w", manifestPath, err)
 	}
 	if manifest.Name != "spec-governance" || !semanticVersionPattern.MatchString(manifest.Version) || strings.TrimSpace(manifest.Description) == "" || strings.TrimSpace(manifest.Author.Name) == "" {
-		return fmt.Errorf("%s: manifest identity, version, description, and author are required", path)
+		return fmt.Errorf("%s: name, version, description, and author name are required", manifestPath)
 	}
-	if len(manifest.Skills) != 1 || manifest.Skills[0] != "./skills/" {
-		return fmt.Errorf("%s: skills must be exactly [\"./skills/\"]", path)
+	wantSkills := skillset.NativeExports()
+	if !slices.Equal(manifest.Skills, wantSkills) {
+		return fmt.Errorf("%s: skills must exactly expose every canonical skill", manifestPath)
+	}
+	for _, forbidden := range []string{
+		".mcp.json", "mcp.json", ".lsp.json", "lsp.json", "hooks", "agents", "commands",
+	} {
+		path := filepath.Join("spec-governance", forbidden)
+		if _, err := repository.Lstat(path); err == nil {
+			return fmt.Errorf("%s: isolated native plugin must not expose %s", manifestPath, filepath.ToSlash(path))
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%s: inspect isolated native plugin surface: %w", manifestPath, err)
+		}
 	}
 	return nil
+}
+
+func readClaudeMarketplace(repository *os.Root, path string) (claudeMarketplace, error) {
+	data, err := repository.ReadFile(path)
+	if err != nil {
+		return claudeMarketplace{}, fmt.Errorf("%s: %w", path, err)
+	}
+	var marketplace claudeMarketplace
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&marketplace); err != nil {
+		return claudeMarketplace{}, fmt.Errorf("%s: parse strict JSON: %w", path, err)
+	}
+	if err := requireDecoderEOF(decoder); err != nil {
+		return claudeMarketplace{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if strings.TrimSpace(marketplace.Name) == "" || strings.TrimSpace(marketplace.Description) == "" || strings.TrimSpace(marketplace.Owner.Name) == "" {
+		return claudeMarketplace{}, fmt.Errorf("%s: marketplace identity, description, and owner are required", path)
+	}
+	return marketplace, nil
+}
+
+func findSpecGovernancePlugin(plugins []claudeMarketplacePlugin) (claudeMarketplacePlugin, error) {
+	var specPlugin *claudeMarketplacePlugin
+	for index := range plugins {
+		plugin := &plugins[index]
+		if plugin.Name != "spec-governance" {
+			continue
+		}
+		if specPlugin != nil {
+			return claudeMarketplacePlugin{}, errors.New("duplicate spec-governance plugin")
+		}
+		specPlugin = plugin
+	}
+	if specPlugin == nil {
+		return claudeMarketplacePlugin{}, errors.New("spec-governance plugin is required")
+	}
+	return *specPlugin, nil
 }
 
 func requireDecoderEOF(decoder *json.Decoder) error {
@@ -484,27 +601,27 @@ func canonicalSkillNames(repository *os.Root) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read canonical skills: %w", err)
 	}
-	names := make([]string, 0)
+	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		if !skillNamePattern.MatchString(entry.Name()) {
-			return nil, fmt.Errorf("canonical skill directory %q has an invalid name", entry.Name())
-		}
-		if info, statErr := repository.Stat(filepath.Join(directory, entry.Name(), "SKILL.md")); statErr != nil || !info.Mode().IsRegular() {
-			if statErr != nil {
-				return nil, fmt.Errorf("canonical skill %q: %w", entry.Name(), statErr)
-			}
-			return nil, fmt.Errorf("canonical skill %q has no regular SKILL.md", entry.Name())
-		}
 		names = append(names, entry.Name())
 	}
-	if len(names) == 0 {
-		return nil, errors.New("no canonical SPEC governance skills found")
-	}
 	sort.Strings(names)
-	return names, nil
+	want := skillset.Names()
+	if !slices.Equal(names, want) {
+		return nil, fmt.Errorf("canonical skill directories = %v, want fixed set %v", names, want)
+	}
+	for _, name := range want {
+		if info, statErr := repository.Stat(filepath.Join(directory, name, "SKILL.md")); statErr != nil || !info.Mode().IsRegular() {
+			if statErr != nil {
+				return nil, fmt.Errorf("canonical skill %q: %w", name, statErr)
+			}
+			return nil, fmt.Errorf("canonical skill %q has no regular SKILL.md", name)
+		}
+	}
+	return want, nil
 }
 
 func readMetadata(repository *os.Root, path string) (skillMetadata, error) {
@@ -563,8 +680,9 @@ skill. It does not define a second workflow.
 ## Workflow
 
 1. Resolve and read [%s](%s) completely before taking action.
-2. Resolve and read the canonical skill's linked relative references when they
-   are needed for the requested work.
+2. Use the authenticated canonical skill location as the base for linked
+   references and executable resources. Never resolve them from the active
+   working directory or a similarly named project path.
 3. Follow the canonical workflow, stop conditions, and evidence requirements
    without substituting this projection for them.
 

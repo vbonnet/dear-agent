@@ -9,6 +9,39 @@ Treat similarity as a search lead, never as proof that requirements should
 merge. This workflow is read-only until a maintainer selects a candidate and
 its canonical owner.
 
+## Trusted execution seam
+
+Before invoking `specaudit`, resolve `<distribution-root>` from this loaded,
+authenticated skill resource:
+
+- in a native plugin, use the harness's authenticated plugin-root token (for
+  Claude Code, expand `${CLAUDE_PLUGIN_ROOT}`);
+- in a direct canonical skill loader, resolve the absolute path of this
+  `SKILL.md` and ascend from `skills/audit-specs` to the distribution root; and
+- from a generated projection, first resolve its canonical-skill link, then
+  apply the direct-loader rule to that authenticated target.
+
+Resolve this value once, require it to be absolute, and reuse it for every
+collector command. If the loader does not expose an authenticated plugin root
+or canonical skill resource path, stop and report the missing execution trust
+root. Do not recover with `pwd`, a Git top level, a filesystem search, or the
+repository under audit.
+
+Require regular files at `<distribution-root>/go.mod`,
+`<distribution-root>/earslint/earslint.go`,
+`<distribution-root>/scripts/specaudit`, and
+`<distribution-root>/skills/audit-specs/scripts/specaudit/main.go`.
+Never derive `<distribution-root>` from the active working directory, the
+repository being audited, or a similarly named path inside that repository.
+Every collector command below uses this single execution prefix:
+
+`"<distribution-root>/scripts/specaudit"`
+
+The launcher sets `GOWORK=off`, clears `GOFLAGS`, disables `GOENV`, and uses
+the locally installed Go toolchain before selecting the collector package. Do
+not replace it with `go run`, even for a direct loader: inherited Go settings
+must not change which module or build flags execute an authenticated skill.
+
 ## Workflow
 
 1. Read repository instructions and artifact-routing policy. Put temporal
@@ -18,7 +51,7 @@ its canonical owner.
    inventory, not as main-snapshot proof. Inventory tracked files from Git
    objects so a dirty checkout cannot silently alter the corpus.
 3. Run the deterministic collector with
-   `go run ./spec-governance/skills/audit-specs/scripts/specaudit inventory -repo <repository-path> -repository <owner/name> -revision <40-hex-sha> > inventory.json`.
+   `"<distribution-root>/scripts/specaudit" inventory -repo <repository-path> -repository <owner/name> -revision <40-hex-sha> > inventory.json`.
    The tool emits bytes only to standard output so the shell's normal path and
    write guards remain authoritative for artifact storage.
    Account for every tracked `SPEC.md` once and
@@ -36,9 +69,9 @@ its canonical owner.
    differences, current and proposed owner, applicability, BDD consequence,
    confidence, limitations, and the maintainer decision required.
 7. Validate and render the structured findings with
-   `go run ./spec-governance/skills/audit-specs/scripts/specaudit validate -input findings.json -inventory inventory.json -repo <repository-path>`
+   `"<distribution-root>/scripts/specaudit" validate -input findings.json -inventory inventory.json -repo <repository-path>`
    and
-   `go run ./spec-governance/skills/audit-specs/scripts/specaudit render -input findings.json -inventory inventory.json -repo <repository-path> > report.html`.
+   `"<distribution-root>/scripts/specaudit" render -input findings.json -inventory inventory.json -repo <repository-path> > report.html`.
    The HTML must
    be self-contained and work offline. Verify the structured artifact first;
    rendering must not invent, discard, or reclassify findings.

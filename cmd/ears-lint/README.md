@@ -74,7 +74,7 @@ patterns:
 ## Library
 
 ```go
-import "github.com/vbonnet/dear-agent/internal/earslint"
+import "github.com/vbonnet/dear-agent/spec-governance/earslint"
 
 linter, _ := earslint.New(earslint.Config{}) // empty == defaults
 res, _ := linter.LintFile("SPEC.md")

@@ -101,8 +101,8 @@ func TestLint_OptionWithoutThen(t *testing.T) {
 func TestLint_NonConforming(t *testing.T) {
 	l := newDefault(t)
 	doc := strings.Join([]string{
-		"The system shall log requests.",            // valid ubiquitous
-		"Eventually the thing shall work somehow.",  // non-conforming (no "the X shall")
+		"The system shall log requests.",           // valid ubiquitous
+		"Eventually the thing shall work somehow.", // non-conforming (no "the X shall")
 	}, "\n")
 	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
 	if err != nil {

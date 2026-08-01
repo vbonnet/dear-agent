@@ -5,5 +5,8 @@
   "author": {
     "name": "dear-agent"
   },
-  "skills": ["./skills/"]
+  "skills": [
+    "./skills/audit-specs",
+    "./skills/write-spec"
+  ]
 }

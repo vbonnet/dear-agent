@@ -51,10 +51,10 @@ func (f Finding) String() string {
 
 // Result is the outcome of linting a single file.
 type Result struct {
-	File             string    `json:"file"`
-	TotalRequirements int      `json:"total_requirements"` // candidate requirements detected
-	ValidRequirements int      `json:"valid_requirements"`
-	Findings         []Finding `json:"findings"`
+	File              string    `json:"file"`
+	TotalRequirements int       `json:"total_requirements"` // candidate requirements detected
+	ValidRequirements int       `json:"valid_requirements"`
+	Findings          []Finding `json:"findings"`
 }
 
 // NonConforming returns the number of candidate requirements that matched no

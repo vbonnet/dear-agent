@@ -4,7 +4,6 @@
 # RELATED-SPEC: internal/ci/act/SPEC.md
 # RELATED-SPEC: internal/common/SPEC.md
 # RELATED-SPEC: internal/drift/SPEC.md
-# RELATED-SPEC: internal/earslint/SPEC.md
 # RELATED-SPEC: internal/fileutil/SPEC.md
 # RELATED-SPEC: internal/gittest/SPEC.md
 # RELATED-SPEC: internal/logrotate/SPEC.md
@@ -27,7 +26,6 @@ Feature: Internal foundation guardrails
       | internal/ci/act    |
       | internal/common    |
       | internal/drift     |
-      | internal/earslint  |
       | internal/fileutil  |
       | internal/gittest   |
       | internal/logrotate |

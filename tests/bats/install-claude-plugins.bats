@@ -92,9 +92,18 @@ teardown() {
 
 marketplace_plugin_names() {
     awk '
-        /"plugins"[[:space:]]*:[[:space:]]*\[/ { in_plugins=1; next }
-        in_plugins && /\]/                     { in_plugins=0 }
-        in_plugins && /"name"[[:space:]]*:/ {
+        /"plugins"[[:space:]]*:[[:space:]]*\[/ {
+            in_plugins = 1
+            object_depth = 0
+            next
+        }
+        in_plugins {
+            structural = $0
+            opens = gsub(/\{/, "", structural)
+            closes = gsub(/\}/, "", structural)
+            object_depth += opens - closes
+        }
+        in_plugins && object_depth == 1 && /"name"[[:space:]]*:/ {
             match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
             if (RSTART) {
                 s = substr($0, RSTART, RLENGTH)
@@ -103,6 +112,7 @@ marketplace_plugin_names() {
                 print s
             }
         }
+        in_plugins && object_depth == 0 && /\]/ { exit }
     ' "$PROJECT_ROOT/.claude-plugin/marketplace.json"
 }
 
@@ -168,12 +178,13 @@ marketplace_plugin_specs() {
     done
 }
 
-@test "lists agm and wayfinder plugins specifically" {
+@test "lists every current plugin across nested component arrays" {
     run "$INSTALL_SCRIPT" --dry-run
     assert_success
     assert_output --partial "agm"
-    assert_output --partial "wayfinder"
     assert_output --partial "spec-governance"
+    assert_output --partial "wayfinder"
+    assert_output --partial "youtube"
 }
 
 # ----- marketplace add vs update -------------------------------------------

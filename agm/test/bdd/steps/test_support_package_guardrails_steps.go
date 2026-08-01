@@ -14,7 +14,7 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
-	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 const testSupportFeaturePath = "agm/test/bdd/features/test_support_package_guardrails.feature"

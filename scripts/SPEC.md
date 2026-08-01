@@ -14,7 +14,13 @@
 
 **REPO-SCRIPT-05** When the GOBIN guard runs and the Go toolchain bin directory or its sentinel binary is absent, the system shall append an escalation record to the decision trail and exit non-zero.
 
+**REPO-SCRIPT-06** When the Claude plugin installer enumerates the native marketplace, the system shall retain every top-level plugin after a plugin that declares a nested component array and shall not treat that nested array as the end of the plugin catalog.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
+
+## Test Traceability
+
+- `tests/bats/install-claude-plugins.bats` verifies complete installer enumeration across nested component arrays.

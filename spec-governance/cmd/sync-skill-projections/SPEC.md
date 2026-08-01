@@ -4,9 +4,9 @@
 
 **SPEC-PROJECTION-01** When the projection generator runs in write mode, the system shall derive every AGENTS-compatible skill projection from the canonical skill frontmatter.
 
-**SPEC-PROJECTION-02** When the projection generator writes a projection, the system shall include a generated marker, canonical name and description, an actionable canonical workflow handoff, and canonical verification instructions.
+**SPEC-PROJECTION-02** When the projection generator writes a projection, the system shall include a generated marker, canonical name and description, an actionable canonical workflow handoff, an authenticated canonical-resource base, and canonical verification instructions.
 
-**SPEC-PROJECTION-03** When the projection generator runs, the system shall discover every immediate canonical skill directory and shall not rely on a second hard-coded skill inventory.
+**SPEC-PROJECTION-03** When the projection generator runs, the system shall require the immediate canonical skill directories to equal the single fixed `audit-specs` and `write-spec` skill set before planning any projection.
 
 **SPEC-PROJECTION-04** When the projection generator runs with `--check`, the system shall fail if any required projection is missing, differs from deterministic output, or remains after its canonical generated skill is removed; for a stale or obsolete existing entry, the failure shall require human inspection of the path and bytes before explicit removal.
 
@@ -22,7 +22,7 @@
 
 **SPEC-PROJECTION-10** When the projection generator runs in write mode, the system shall reject explicit root selection and shall require the current repository root, `.git` pointer, and administrative-directory backpointer to identify the same registered linked Git worktree.
 
-**SPEC-PROJECTION-11** When repository skill validation runs, the system shall strictly parse the SPEC governance plugin manifest and shall require its canonical identity, metadata, author, and exact `./skills/` export before accepting projections.
+**SPEC-PROJECTION-11** When repository skill validation runs, the system shall strictly parse the native Claude marketplace and isolated plugin manifest, shall require the SPEC governance adapter to use the `spec-governance` plugin root, and shall allow only the fixed `audit-specs` and `write-spec` exports with no plugin-level agents, hooks, MCP servers, or language servers before accepting projections.
 
 **SPEC-PROJECTION-12** When repository skill validation runs, the system shall strictly parse each canonical `agents/openai.yaml` interface and shall require a display name, short description, and default prompt that delegates through that exact canonical skill name.
 

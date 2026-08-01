@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run the installed SPEC-audit collector from this authenticated distribution.
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+distribution_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
+
+exec env \
+  GOWORK=off \
+  GOFLAGS= \
+  GOENV=off \
+  GOTOOLCHAIN=local \
+  go -C "$distribution_root" run ./skills/audit-specs/scripts/specaudit "$@"

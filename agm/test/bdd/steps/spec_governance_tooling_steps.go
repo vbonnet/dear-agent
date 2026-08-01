@@ -26,9 +26,11 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM exercises pinned SPEC inventory and strict extraction$`, exercisePinnedSPECInventory)
 	ctx.Step(`^AGM exercises forged SPEC finding rejection$`, exerciseForgedSPECFindingRejection)
 	ctx.Step(`^AGM exercises complete offline SPEC audit rendering$`, exerciseOfflineSPECAuditRendering)
-	ctx.Step(`^AGM exercises dynamic SPEC skill projection discovery$`, exerciseDynamicSPECProjectionDiscovery)
+	ctx.Step(`^AGM exercises the fixed SPEC skill export boundary$`, exerciseFixedSPECSkillExportBoundary)
 	ctx.Step(`^AGM exercises fail-closed SPEC skill projection mutation$`, exerciseFailClosedSPECProjectionMutation)
 	ctx.Step(`^AGM exercises strict SPEC governance package metadata$`, exerciseStrictSPECMetadata)
+	ctx.Step(`^AGM exercises the installed SPEC audit execution seam$`, exerciseInstalledSPECAuditExecution)
+	ctx.Step(`^AGM exercises bounded SPEC audit Git collection$`, exerciseBoundedSPECAuditGitCollection)
 	ctx.Step(`^AGM runs the repository SPEC skill drift gate$`, runRepositorySPECDriftGate)
 	ctx.Step(`^the SPEC governance behavioral contract should pass$`, specGovernanceBehaviorShouldPass)
 }
@@ -45,8 +47,8 @@ func exerciseOfflineSPECAuditRendering(ctx context.Context) error {
 	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestRenderIsOfflineAndEscapesEvidence|TestCommandsRejectFilesystemOutputFlags")
 }
 
-func exerciseDynamicSPECProjectionDiscovery(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncWritesAndChecksProjections|TestSyncDiscoversNewAndObsoleteGeneratedSkills")
+func exerciseFixedSPECSkillExportBoundary(ctx context.Context) error {
+	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncWritesAndChecksProjections|TestSyncRejectsFullyDeclaredAdditionalCanonicalSkill|TestSyncFindsObsoleteGeneratedProjection")
 }
 
 func exerciseFailClosedSPECProjectionMutation(ctx context.Context) error {
@@ -55,6 +57,14 @@ func exerciseFailClosedSPECProjectionMutation(ctx context.Context) error {
 
 func exerciseStrictSPECMetadata(ctx context.Context) error {
 	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncRejectsInvalidPackageMetadataBeforeWriting")
+}
+
+func exerciseInstalledSPECAuditExecution(ctx context.Context) error {
+	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestInstalledPluginRunsFromUnrelatedWorkingDirectory")
+}
+
+func exerciseBoundedSPECAuditGitCollection(ctx context.Context) error {
+	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestGitOutputIsBounded")
 }
 
 func runRepositorySPECDriftGate(ctx context.Context) error {
@@ -76,8 +86,14 @@ func runSpecGovernanceGoTests(ctx context.Context, packagePath, pattern string) 
 	if err != nil {
 		return err
 	}
-	state.command = strings.Join([]string{"go", "test", packagePath, "-run", pattern, "-count=1"}, " ")
-	command := exec.Command("go", "test", packagePath, "-run", pattern, "-count=1")
+	const modulePrefix = "./spec-governance/"
+	if !strings.HasPrefix(packagePath, modulePrefix) {
+		return fmt.Errorf("SPEC governance package %q is outside its isolated module", packagePath)
+	}
+	relativePackage := "./" + strings.TrimPrefix(packagePath, modulePrefix)
+	arguments := []string{"-C", "spec-governance", "test", relativePackage, "-run", pattern, "-count=1"}
+	state.command = "go " + strings.Join(arguments, " ")
+	command := exec.Command("go", arguments...)
 	command.Dir = state.repoRoot
 	output, commandErr := command.CombinedOutput()
 	state.output = string(output)

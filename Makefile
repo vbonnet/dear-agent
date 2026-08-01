@@ -149,15 +149,15 @@ lint-specs:
 # interface required CI uses. Hidden and nonstandard skill roots are included.
 lint-skills:
 	@go run ./tools/skill-lint -repo .
-	@go run ./spec-governance/cmd/sync-skill-projections --check
+	@go -C spec-governance run ./cmd/sync-skill-projections --check --root ..
 
 # Generate the regular AGENTS-compatible projections for canonical SPEC
 # governance skills. The corresponding check target is suitable for CI.
 sync-spec-skill-projections:
-	@go run ./spec-governance/cmd/sync-skill-projections
+	@go -C spec-governance run ./cmd/sync-skill-projections
 
 check-spec-skill-projections:
-	@go run ./spec-governance/cmd/sync-skill-projections --check
+	@go -C spec-governance run ./cmd/sync-skill-projections --check --root ..
 
 # Validate retired vocabulary and prohibited command guidance across declared
 # active instruction surfaces.

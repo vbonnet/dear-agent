@@ -3,6 +3,7 @@ module github.com/vbonnet/dear-agent
 go 1.26.5
 
 require (
+	github.com/vbonnet/dear-agent/spec-governance v0.0.0
 	cloud.google.com/go/aiplatform v1.126.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2
@@ -67,6 +68,8 @@ require (
 	mvdan.cc/sh/v3 v3.13.1
 	tailscale.com v1.102.0
 )
+
+replace github.com/vbonnet/dear-agent/spec-governance => ./spec-governance
 
 require (
 	cloud.google.com/go v0.123.0 // indirect

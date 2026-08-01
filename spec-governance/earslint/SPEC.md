@@ -4,13 +4,14 @@
 
 **Version:** 1.0
 **Status:** Baseline
-**Scope:** `internal/earslint`.
+**Scope:** `spec-governance/earslint`.
 
 ## Overview
 
-`internal/earslint` validates requirement statements against the repository's
-EARS grammar. It is the deterministic SPEC gate used by local development and
-CI regardless of the authoring harness or model family.
+`spec-governance/earslint` owns the repository's single EARS grammar
+implementation. The public package is shared by the repository gates and the
+distributable SPEC audit command so plugin execution does not depend on a
+root-only internal package.
 
 ## EARS Requirements
 
@@ -30,8 +31,8 @@ CI regardless of the authoring harness or model family.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/internal_foundation_guardrails.feature`
+- Feature: `agm/test/bdd/features/spec_governance_tooling.feature`
 
 ## Test Traceability
 
-- Unit package: `internal/earslint`
+- Unit package: `spec-governance/earslint`

@@ -4,12 +4,172 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/spec-governance/internal/gittest"
 )
+
+func TestInstalledPluginRunsFromUnrelatedWorkingDirectory(t *testing.T) {
+	distributionRoot := specauditDistributionRoot(t)
+	installedRoot := t.TempDir()
+	for _, relative := range []string{
+		"go.mod",
+		"go.sum",
+		".claude-plugin/plugin.json",
+		"scripts/specaudit",
+		"earslint/config.go",
+		"earslint/earslint.go",
+		"skills/audit-specs/scripts/specaudit/main.go",
+		"skills/audit-specs/SKILL.md",
+		"skills/write-spec/SKILL.md",
+	} {
+		copyInstalledPluginFile(t, distributionRoot, installedRoot, relative)
+	}
+	assertInstalledPluginSurface(t, installedRoot)
+
+	unrelated := t.TempDir()
+	writeTestFile(t, unrelated, "go.mod", "module attacker.example/lookalike\n\ngo 1.26.5\n")
+	writeTestFile(t, unrelated, "skills/audit-specs/scripts/specaudit/main.go", "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"UNTRUSTED-CWD-SPECAUDIT\") }\n")
+	auditedRepository := t.TempDir()
+	gitTest(t, auditedRepository, "init", "-q")
+	gittest.HardenRepo(t, auditedRepository)
+	gitTest(t, auditedRepository, "config", "user.email", "test@example.com")
+	gitTest(t, auditedRepository, "config", "user.name", "Test")
+	writeTestFile(t, auditedRepository, "agm/internal/agent/harnesses.go", "package agent\nvar activeHarnesses = []string{\"codex-cli\"}\n")
+	writeTestFile(t, auditedRepository, "trusted/SPEC.md", "# Trusted\n\n**TRUSTED-01** When an installed audit runs, the system shall read the requested repository.\n")
+	gitTest(t, auditedRepository, "add", ".")
+	gitTest(t, auditedRepository, "commit", "-qm", "trusted inventory")
+	revision := strings.TrimSpace(gitTest(t, auditedRepository, "rev-parse", "HEAD"))
+
+	ambientRepository := t.TempDir()
+	gitTest(t, ambientRepository, "init", "-q")
+	gittest.HardenRepo(t, ambientRepository)
+	gitTest(t, ambientRepository, "config", "user.email", "test@example.com")
+	gitTest(t, ambientRepository, "config", "user.name", "Test")
+	writeTestFile(t, ambientRepository, "wrong/SPEC.md", "# Wrong\n\n**WRONG-01** When ambient Git state leaks, the system shall read an unrelated repository.\n")
+	gitTest(t, ambientRepository, "add", ".")
+	gitTest(t, ambientRepository, "commit", "-qm", "ambient inventory")
+
+	maliciousGoEnv := filepath.Join(t.TempDir(), "go.env")
+	if err := os.WriteFile(maliciousGoEnv, []byte("GOFLAGS=-mod=vendor\nGOTOOLCHAIN=go1.1\n"), 0o600); err != nil {
+		t.Fatalf("write hostile Go environment: %v", err)
+	}
+	command := exec.Command(
+		filepath.Join(installedRoot, "scripts", "specaudit"),
+		"inventory", "-repo", auditedRepository, "-repository", "owner/trusted", "-revision", revision,
+	)
+	command.Dir = unrelated
+	command.Env = append(os.Environ(),
+		"GOWORK="+filepath.Join(unrelated, "go.work"),
+		"GOFLAGS=-mod=vendor",
+		"GOENV="+maliciousGoEnv,
+		"GOTOOLCHAIN=go1.1",
+		"GIT_DIR="+filepath.Join(ambientRepository, ".git"),
+		"GIT_WORK_TREE="+ambientRepository,
+		"GIT_INDEX_FILE="+filepath.Join(ambientRepository, ".git", "index"),
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run installed specaudit from unrelated working directory: %v\n%s", err, output)
+	}
+	var inventoryReport report
+	if err := json.Unmarshal(output, &inventoryReport); err != nil {
+		t.Fatalf("decode installed specaudit inventory: %v\n%s", err, output)
+	}
+	if inventoryReport.Snapshot.Repository != "owner/trusted" || len(inventoryReport.Inventory) != 1 {
+		t.Fatalf("installed specaudit selected the wrong repository: %#v", inventoryReport.Snapshot)
+	}
+	if got := inventoryReport.Inventory[0].Requirements; len(got) != 1 || got[0].ID != "TRUSTED-01" {
+		t.Fatalf("installed specaudit omitted trusted EARS evidence: %#v", got)
+	}
+	if strings.Contains(string(output), "UNTRUSTED-CWD-SPECAUDIT") {
+		t.Fatalf("installed execution selected the active-working-directory lookalike: %s", output)
+	}
+}
+
+func TestGitOutputIsBounded(t *testing.T) {
+	repository := t.TempDir()
+	gitTest(t, repository, "init", "-q")
+	gittest.HardenRepo(t, repository)
+	gitTest(t, repository, "config", "user.email", "test@example.com")
+	gitTest(t, repository, "config", "user.name", "Test")
+	writeTestFile(t, repository, "large.txt", strings.Repeat("x", 256))
+	gitTest(t, repository, "add", ".")
+	gitTest(t, repository, "commit", "-qm", "large output")
+
+	if _, err := gitWithOutputLimit(repository, 64, "show", "HEAD:large.txt"); err == nil || !strings.Contains(err.Error(), "output exceeds 64 bytes") {
+		t.Fatalf("gitWithOutputLimit() error = %v, want bounded-output rejection", err)
+	}
+}
+
+func specauditDistributionRoot(t *testing.T) string {
+	t.Helper()
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve specaudit test source")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(source), "..", "..", "..", ".."))
+}
+
+func assertInstalledPluginSurface(t *testing.T, root string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatalf("read installed native manifest: %v", err)
+	}
+	var manifest struct {
+		Skills []string `json:"skills"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("decode installed native manifest: %v", err)
+	}
+	if got, want := strings.Join(manifest.Skills, ","), "./skills/audit-specs,./skills/write-spec"; got != want {
+		t.Fatalf("installed native manifest skills = %q, want %q", got, want)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "skills"))
+	if err != nil {
+		t.Fatalf("read installed skills: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("installed skill surface = %#v, want audit-specs and write-spec only", entries)
+	}
+	got := []string{entries[0].Name(), entries[1].Name()}
+	if !slices.Equal(got, []string{"audit-specs", "write-spec"}) {
+		t.Fatalf("installed skill surface = %#v, want audit-specs and write-spec only", entries)
+	}
+	for _, forbidden := range []string{".mcp.json", "mcp.json", ".lsp.json", "lsp.json", "hooks", "agents", "commands"} {
+		if _, err := os.Lstat(filepath.Join(root, forbidden)); err == nil {
+			t.Fatalf("installed plugin unexpectedly exposes %s", forbidden)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("inspect installed plugin %s: %v", forbidden, err)
+		}
+	}
+}
+
+func copyInstalledPluginFile(t *testing.T, sourceRoot, destinationRoot, relative string) {
+	t.Helper()
+	source := filepath.Join(sourceRoot, relative)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatalf("read installed plugin source %s: %v", relative, err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatalf("stat installed plugin source %s: %v", relative, err)
+	}
+	destination := filepath.Join(destinationRoot, relative)
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatalf("create installed plugin directory for %s: %v", relative, err)
+	}
+	if err := os.WriteFile(destination, data, info.Mode().Perm()); err != nil {
+		t.Fatalf("write installed plugin file %s: %v", relative, err)
+	}
+}
 
 func TestInventoryReadsPinnedRevisionAndProducesSeedsDeterministically(t *testing.T) {
 	repo := t.TempDir()

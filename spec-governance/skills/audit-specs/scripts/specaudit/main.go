@@ -20,10 +20,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 const schemaVersion = "spec-audit/v1"
+
+const maxGitOutputBytes = 16 * 1024 * 1024
 
 var (
 	requirementPattern  = regexp.MustCompile(`^\s*\*\*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[A-Z0-9]*\d+)\*\*\s+(.+?)\s*$`)
@@ -597,11 +599,50 @@ func activeMembers(root, commit string) ([]string, []string) {
 }
 
 func git(root string, args ...string) (string, error) {
+	return gitWithOutputLimit(root, maxGitOutputBytes, args...)
+}
+
+func gitWithOutputLimit(root string, limit int64, args ...string) (string, error) {
+	if limit <= 0 {
+		return "", errors.New("git output limit must be positive")
+	}
 	command := exec.Command("git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
 	command.Env = cleanGitEnvironment()
-	output, err := command.CombinedOutput()
+	reader, writer, err := os.Pipe()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("create bounded Git output pipe: %w", err)
+	}
+	command.Stdout = writer
+	command.Stderr = writer
+	if err := command.Start(); err != nil {
+		_ = reader.Close()
+		_ = writer.Close()
+		return "", fmt.Errorf("start git %s: %w", strings.Join(args, " "), err)
+	}
+	if err := writer.Close(); err != nil {
+		_ = command.Process.Kill()
+		_ = reader.Close()
+		_ = command.Wait()
+		return "", fmt.Errorf("close parent Git output writer: %w", err)
+	}
+	output, readErr := io.ReadAll(io.LimitReader(reader, limit+1))
+	exceeded := int64(len(output)) > limit
+	if readErr != nil || exceeded {
+		_ = command.Process.Kill()
+	}
+	closeErr := reader.Close()
+	waitErr := command.Wait()
+	if readErr != nil {
+		return "", fmt.Errorf("read git %s output: %w", strings.Join(args, " "), readErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close git %s output: %w", strings.Join(args, " "), closeErr)
+	}
+	if exceeded {
+		return "", fmt.Errorf("git %s output exceeds %d bytes", strings.Join(args, " "), limit)
+	}
+	if waitErr != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), waitErr, strings.TrimSpace(string(output)))
 	}
 	return string(output), nil
 }
