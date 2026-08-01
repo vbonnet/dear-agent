@@ -61,7 +61,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-23** When a schema-v2 baseline with transition history is read, the system shall reject it if any reconstructable transition's `previous_baseline_sha256` differs from the SHA-256 of the predecessor baseline's deterministic canonical serialization.
 
-**STRUCT-HEALTH-24** When ordinary scan mode cannot read an absent first-run baseline, the system shall print a guarded bootstrap command that preserves the requested root and baseline path and includes expansion authorization, reason, and durable-reference flags.
+**STRUCT-HEALTH-24** When ordinary scan mode cannot read an absent first-run baseline, the system shall print a bootstrap command that preserves the requested root and baseline path; when the current scan has findings the command shall include expansion authorization, reason, and durable-reference flags, and when the scan is empty it shall omit those otherwise-invalid admission flags.
 
 **STRUCT-HEALTH-25** When schema-v2 transition history is reverse-reconstructed, the system shall reject the history unless its initial scanner version equals the legacy scanner-key version.
 

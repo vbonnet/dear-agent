@@ -784,6 +784,20 @@ func TestUpdateBaselineFileBootstrapRequiresAdmission(t *testing.T) {
 	}
 }
 
+func TestUpdateBaselineFileEmptyBootstrapNeedsNoAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	plan, err := updateBaselineFile(path, findingSet(nil), updateRequest{})
+	if err != nil {
+		t.Fatalf("empty bootstrap: %v", err)
+	}
+	if !plan.Write || keyMapCount(plan.Baseline.Findings) != 0 {
+		t.Fatalf("empty bootstrap plan = %+v, want written zero-finding baseline", plan)
+	}
+	if _, err := readBaseline(path); err != nil {
+		t.Fatalf("read empty bootstrap: %v", err)
+	}
+}
+
 func TestWriteBaselineAtomicRenameFailurePreservesOriginal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "baseline.json")
 	original := []byte("original bytes\n")

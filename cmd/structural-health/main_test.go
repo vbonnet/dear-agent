@@ -65,7 +65,7 @@ func TestScanDocPaths(t *testing.T) {
 }
 
 func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
-	got := bootstrapCommand("repo root/$USER's", "custom/baseline.json")
+	got := bootstrapCommand("repo root/$USER's", "custom/baseline.json", true)
 	for _, want := range []string{
 		`--root 'repo root/$USER'"'"'s'`,
 		`--baseline 'custom/baseline.json'`,
@@ -77,6 +77,18 @@ func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("bootstrap command %q does not contain %q", got, want)
 		}
+	}
+}
+
+func TestBootstrapCommandOmitsAdmissionForEmptyScan(t *testing.T) {
+	got := bootstrapCommand("repo", "empty.json", false)
+	for _, unwanted := range []string{"--accept-new", "--reason", "--reference"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("empty-scan bootstrap command %q unexpectedly contains %q", got, unwanted)
+		}
+	}
+	if err := validateAddedKeyAuthorization(0, strings.Contains(got, "--accept-new")); err != nil {
+		t.Fatalf("empty-scan bootstrap command is rejected: %v", err)
 	}
 }
 

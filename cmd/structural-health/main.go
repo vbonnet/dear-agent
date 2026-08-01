@@ -169,7 +169,7 @@ func main() {
 			"read baseline %s: %v\n\nIf this is the first run, generate it with:\n  %s",
 			blPath,
 			err,
-			bootstrapCommand(*root, *baselinePath),
+			bootstrapCommand(*root, *baselinePath, findingCount(current) > 0),
 		)
 	}
 
@@ -187,16 +187,28 @@ func main() {
 	}
 }
 
-func bootstrapCommand(root, baselinePath string) string {
-	return fmt.Sprintf(
-		"structural-health --root %s --baseline %s --update-baseline --accept-new \\\n    --reason '<why>' --reference '<bead-or-pr>'",
+func bootstrapCommand(root, baselinePath string, acceptNew bool) string {
+	command := fmt.Sprintf(
+		"structural-health --root %s --baseline %s --update-baseline",
 		quoteShellWord(root),
 		quoteShellWord(baselinePath),
 	)
+	if !acceptNew {
+		return command
+	}
+	return command + " --accept-new \\\n    --reason '<why>' --reference '<bead-or-pr>'"
 }
 
 func quoteShellWord(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func findingCount(findings map[string][]finding) int {
+	count := 0
+	for _, scanFindings := range findings {
+		count += len(scanFindings)
+	}
+	return count
 }
 
 func validateModeFlags(updateBaseline, jsonOut bool, request updateRequest) error {
