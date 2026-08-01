@@ -46,6 +46,9 @@ func (m *MockAdapter) CreateSession(session *manifest.Manifest) error {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Check for duplicate
 	if _, exists := m.sessions[session.SessionID]; exists {
@@ -154,6 +157,9 @@ func (m *MockAdapter) UpdateSession(session *manifest.Manifest) error {
 
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id is required")
+	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
 	}
 
 	// Check session exists
