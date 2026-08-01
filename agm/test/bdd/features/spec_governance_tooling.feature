@@ -24,7 +24,7 @@ Feature: SPEC governance tooling evidence boundary
     Then the SPEC governance behavioral contract should pass
 
   Scenario: Projection writes fail closed around authored state
-    When AGM exercises safe SPEC skill projection replacement
+    When AGM exercises fail-closed SPEC skill projection mutation
     Then the SPEC governance behavioral contract should pass
 
   Scenario: Native plugin and OpenAI skill metadata fail closed

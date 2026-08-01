@@ -104,7 +104,9 @@ marketplace catalogs register the plugin.
 regular `.agents/skills/{write-spec,audit-specs}/SKILL.md` delegators because
 the active runtimes did not all discover symlinks consistently. Those files
 contain no second workflow; `cmd/sync-skill-projections` derives them from
-canonical metadata, refuses authored targets, and `make lint-skills` blocks
+canonical metadata, creates only missing targets without clobbering, and never
+replaces or deletes an existing entry automatically. Stale and obsolete paths
+must be inspected and explicitly removed by a human; `make lint-skills` blocks
 drift in preflight and CI.
 
 Do not blindly copy either filesystem mechanism. Verify each claimed loader,

@@ -27,7 +27,7 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM exercises forged SPEC finding rejection$`, exerciseForgedSPECFindingRejection)
 	ctx.Step(`^AGM exercises complete offline SPEC audit rendering$`, exerciseOfflineSPECAuditRendering)
 	ctx.Step(`^AGM exercises dynamic SPEC skill projection discovery$`, exerciseDynamicSPECProjectionDiscovery)
-	ctx.Step(`^AGM exercises safe SPEC skill projection replacement$`, exerciseSafeSPECProjectionReplacement)
+	ctx.Step(`^AGM exercises fail-closed SPEC skill projection mutation$`, exerciseFailClosedSPECProjectionMutation)
 	ctx.Step(`^AGM exercises strict SPEC governance package metadata$`, exerciseStrictSPECMetadata)
 	ctx.Step(`^AGM runs the repository SPEC skill drift gate$`, runRepositorySPECDriftGate)
 	ctx.Step(`^the SPEC governance behavioral contract should pass$`, specGovernanceBehaviorShouldPass)
@@ -49,8 +49,8 @@ func exerciseDynamicSPECProjectionDiscovery(ctx context.Context) error {
 	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncWritesAndChecksProjections|TestSyncDiscoversNewAndObsoleteGeneratedSkills")
 }
 
-func exerciseSafeSPECProjectionReplacement(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncRefuses|TestSyncValidatesAllMetadataBeforeWriting|TestReadMetadataUsesStrictYAMLFrontmatter|TestRunWriteRejectsExplicitRoot|TestRequireLinkedWorktreeRoot")
+func exerciseFailClosedSPECProjectionMutation(ctx context.Context) error {
+	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncRefuses|TestSyncNoClobber|TestSyncFailsClosed|TestSyncRequiresExplicitRemoval|TestSyncRejectsHardLinkedProjection|TestSyncRejectsUnexpectedProjectionPermissions|TestSyncRejectsOversizedProjectionTarget|TestSyncValidatesAllMetadataBeforeWriting|TestReadMetadataUsesStrictYAMLFrontmatter|TestRunWriteRejectsExplicitRoot|TestRequireLinkedWorktreeRoot")
 }
 
 func exerciseStrictSPECMetadata(ctx context.Context) error {

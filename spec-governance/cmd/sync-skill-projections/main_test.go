@@ -52,16 +52,40 @@ func TestSyncCheckReportsStaleProjection(t *testing.T) {
 	if err := sync(root, false); err != nil {
 		t.Fatalf("sync() error = %v", err)
 	}
+	writeSkill(t, root, "write-spec", "---\nname: write-spec\ndescription: Updated canonical description.\n---\n")
+	if err := sync(root, true); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("sync(check) error = %v, want stale projection error", err)
+	}
+}
+
+func TestSyncRequiresExplicitRemovalForStaleProjection(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	if err := sync(root, false); err != nil {
+		t.Fatalf("sync() error = %v", err)
+	}
 	target := filepath.Join(root, ".agents", "skills", "write-spec", "SKILL.md")
-	current, err := os.ReadFile(target)
+	before, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(target, append(current, []byte("stale\n")...), 0o644); err != nil {
+	writeSkill(t, root, "write-spec", "---\nname: write-spec\ndescription: Updated canonical description.\n---\n")
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "human inspection") {
+		t.Fatalf("sync() error = %v, want explicit-removal refusal", err)
+	}
+	unchanged, err := os.ReadFile(target)
+	if err != nil || !bytes.Equal(unchanged, before) {
+		t.Fatalf("stale generated target changed: data=%q err=%v", unchanged, err)
+	}
+	if err := os.Remove(target); err != nil {
 		t.Fatal(err)
 	}
-	if err := sync(root, true); err == nil || !strings.Contains(err.Error(), "stale") {
-		t.Fatalf("sync(check) error = %v, want stale projection error", err)
+	if err := sync(root, false); err != nil {
+		t.Fatalf("sync() after explicit removal error = %v", err)
+	}
+	after, err := os.ReadFile(target)
+	if err != nil || bytes.Equal(after, before) {
+		t.Fatalf("projection was not regenerated after explicit removal: data=%q err=%v", after, err)
 	}
 }
 
@@ -77,14 +101,7 @@ func TestRunCheckMode(t *testing.T) {
 		t.Fatalf("run(--check) = %d, stderr = %s", code, stderr.String())
 	}
 
-	target := filepath.Join(root, ".agents", "skills", "audit-specs", "SKILL.md")
-	current, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, append(current, []byte("stale\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSkill(t, root, "audit-specs", "---\nname: audit-specs\ndescription: Updated canonical description.\n---\n")
 	stderr.Reset()
 	if code := run([]string{"--root", root, "--check"}, &stderr); code != 1 || !strings.Contains(stderr.String(), "stale") {
 		t.Fatalf("run(stale --check) = %d, stderr = %q", code, stderr.String())
@@ -239,12 +256,32 @@ func TestSyncRefusesAuthoredRegularTarget(t *testing.T) {
 	if err := os.WriteFile(target, []byte("# authored\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "without the generated marker") {
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "not exact generated output") {
 		t.Fatalf("sync() error = %v, want authored-file refusal", err)
 	}
 	data, err := os.ReadFile(target)
 	if err != nil || string(data) != "# authored\n" {
 		t.Fatalf("authored target changed: data=%q err=%v", data, err)
+	}
+}
+
+func TestSyncRefusesMarkerBearingAuthoredCanonicalTarget(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	target := filepath.Join(root, ".agents", "skills", "write-spec", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	authored := []byte("---\nname: write-spec\ndescription: Authored local workflow.\n---\n\n" + generatedMarker + "\n\n# Authored local instructions\n")
+	if err := os.WriteFile(target, authored, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "not exact generated output") {
+		t.Fatalf("sync() error = %v, want marker-bearing authored-file refusal", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || !bytes.Equal(got, authored) {
+		t.Fatalf("marker-bearing authored target changed: data=%q err=%v", got, err)
 	}
 }
 
@@ -290,11 +327,25 @@ func TestSyncDiscoversNewAndObsoleteGeneratedSkills(t *testing.T) {
 	if err := sync(root, true); err == nil || !strings.Contains(err.Error(), "obsolete") {
 		t.Fatalf("sync(check) error = %v, want obsolete projection", err)
 	}
-	if err := sync(root, false); err != nil {
+	before, err := os.ReadFile(newProjection)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(newProjection); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("obsolete generated projection still exists: %v", err)
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "explicit removal") {
+		t.Fatalf("sync() error = %v, want explicit-removal refusal", err)
+	}
+	after, err := os.ReadFile(newProjection)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("obsolete generated projection changed: data=%q err=%v", after, err)
+	}
+	if err := os.Remove(newProjection); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Dir(newProjection)); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync(root, false); err != nil {
+		t.Fatalf("sync() after explicit removal error = %v", err)
 	}
 }
 
@@ -315,6 +366,274 @@ func TestSyncRetainsMarkerOnlyObsoleteProjection(t *testing.T) {
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != content {
 		t.Fatalf("marker-only authored projection changed: data=%q err=%v", got, err)
+	}
+}
+
+func TestSyncNoClobberWhenTargetAppearsBeforeCreate(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	targetPath := filepath.Join(".agents", "skills", "audit-specs", "SKILL.md")
+	authored := []byte("# arrived after validation\n")
+	invoked := false
+	hook := func(mutation projectionMutation, path string) error {
+		if mutation != projectionInstallCreate || path != targetPath {
+			return nil
+		}
+		invoked = true
+		return os.WriteFile(filepath.Join(root, path), authored, 0o644)
+	}
+	if err := syncWithMutationHook(root, false, hook); err == nil || !strings.Contains(err.Error(), "appeared before no-clobber creation") {
+		t.Fatalf("sync() error = %v, want no-clobber refusal", err)
+	}
+	if !invoked {
+		t.Fatal("install-create hook was not invoked")
+	}
+	got, err := os.ReadFile(filepath.Join(root, targetPath))
+	if err != nil || !bytes.Equal(got, authored) {
+		t.Fatalf("late-created authored target changed: data=%q err=%v", got, err)
+	}
+}
+
+func TestSyncFailsClosedWhenNewTargetIsSwapped(t *testing.T) {
+	for _, swapKind := range projectionSwapKinds {
+		t.Run(swapKind, func(t *testing.T) {
+			root := t.TempDir()
+			writeCanonicalSkills(t, root)
+			targetPath := filepath.Join(".agents", "skills", "audit-specs", "SKILL.md")
+			target := filepath.Join(root, targetPath)
+			backup := target + ".generated"
+			source := filepath.Join(root, "authored-source")
+			authored := []byte("authored swap content\n")
+			if err := os.WriteFile(source, authored, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			invoked := false
+			hook := func(mutation projectionMutation, path string) error {
+				if mutation != projectionInstallVerify || path != targetPath {
+					return nil
+				}
+				invoked = true
+				return swapProjectionTarget(swapKind, target, backup, source)
+			}
+			if err := syncWithMutationHook(root, false, hook); err == nil || !strings.Contains(err.Error(), "changed before final verification") {
+				t.Fatalf("sync() error = %v, want changed-target refusal", err)
+			}
+			if !invoked {
+				t.Fatal("install-verify hook was not invoked")
+			}
+			assertProjectionSwap(t, swapKind, target, source, authored)
+			generated, err := os.ReadFile(backup)
+			if err != nil || !bytes.Contains(generated, []byte(generatedMarker)) {
+				t.Fatalf("descriptor-bound generated file changed: data=%q err=%v", generated, err)
+			}
+		})
+	}
+}
+
+func TestSyncFailsClosedWhenNewTargetParentIsSwapped(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	targetPath := filepath.Join(".agents", "skills", "audit-specs", "SKILL.md")
+	targetDirectory := filepath.Dir(filepath.Join(root, targetPath))
+	backupDirectory := targetDirectory + ".generated"
+	authored := []byte("authored parent-swap content\n")
+	invoked := false
+	hook := func(mutation projectionMutation, path string) error {
+		if mutation != projectionInstallVerify || path != targetPath {
+			return nil
+		}
+		invoked = true
+		if err := os.Rename(targetDirectory, backupDirectory); err != nil {
+			return err
+		}
+		if err := os.Mkdir(targetDirectory, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(root, targetPath), authored, 0o644)
+	}
+	if err := syncWithMutationHook(root, false, hook); err == nil || !strings.Contains(err.Error(), "changed before final verification") {
+		t.Fatalf("sync() error = %v, want parent-swap refusal", err)
+	}
+	if !invoked {
+		t.Fatal("install-verify hook was not invoked")
+	}
+	got, err := os.ReadFile(filepath.Join(root, targetPath))
+	if err != nil || !bytes.Equal(got, authored) {
+		t.Fatalf("parent-swapped authored target changed: data=%q err=%v", got, err)
+	}
+	generated, err := os.ReadFile(filepath.Join(backupDirectory, "SKILL.md"))
+	if err != nil || !bytes.Contains(generated, []byte(generatedMarker)) {
+		t.Fatalf("descriptor-bound generated target changed: data=%q err=%v", generated, err)
+	}
+}
+
+func TestSyncFailsClosedWhenExistingTargetIsSwapped(t *testing.T) {
+	for _, operation := range []string{"replacement", "deletion"} {
+		for _, swapKind := range projectionSwapKinds {
+			t.Run(operation+"/"+swapKind, func(t *testing.T) {
+				root := t.TempDir()
+				writeCanonicalSkills(t, root)
+				var targetPath string
+				var wantedMutation projectionMutation
+				if operation == "replacement" {
+					if err := sync(root, false); err != nil {
+						t.Fatal(err)
+					}
+					targetPath = filepath.Join(".agents", "skills", "write-spec", "SKILL.md")
+					wantedMutation = projectionReplacement
+					writeSkill(t, root, "write-spec", "---\nname: write-spec\ndescription: Updated canonical description.\n---\n")
+				} else {
+					writeSkill(t, root, "review-spec", "---\nname: review-spec\ndescription: Review a specification.\n---\n")
+					if err := sync(root, false); err != nil {
+						t.Fatal(err)
+					}
+					targetPath = filepath.Join(".agents", "skills", "review-spec", "SKILL.md")
+					wantedMutation = projectionDeletion
+					if err := os.RemoveAll(filepath.Join(root, "spec-governance", "skills", "review-spec")); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				target := filepath.Join(root, targetPath)
+				backup := target + ".generated"
+				original, err := os.ReadFile(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source := filepath.Join(root, "authored-source")
+				authored := []byte("authored swap content\n")
+				if err := os.WriteFile(source, authored, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				invoked := false
+				hook := func(mutation projectionMutation, path string) error {
+					if mutation != wantedMutation || path != targetPath {
+						return nil
+					}
+					invoked = true
+					return swapProjectionTarget(swapKind, target, backup, source)
+				}
+				if err := syncWithMutationHook(root, false, hook); err == nil || !strings.Contains(err.Error(), "changed after validation") {
+					t.Fatalf("sync() error = %v, want changed-target refusal", err)
+				}
+				if !invoked {
+					t.Fatalf("%s hook was not invoked", operation)
+				}
+				assertProjectionSwap(t, swapKind, target, source, authored)
+				generated, err := os.ReadFile(backup)
+				if err != nil || !bytes.Equal(generated, original) {
+					t.Fatalf("validated generated target changed: data=%q err=%v", generated, err)
+				}
+			})
+		}
+	}
+}
+
+func TestSyncFailsClosedWhenExistingTargetBytesChange(t *testing.T) {
+	for _, operation := range []string{"replacement", "deletion"} {
+		t.Run(operation, func(t *testing.T) {
+			root := t.TempDir()
+			writeCanonicalSkills(t, root)
+			var targetPath string
+			var wantedMutation projectionMutation
+			if operation == "replacement" {
+				if err := sync(root, false); err != nil {
+					t.Fatal(err)
+				}
+				targetPath = filepath.Join(".agents", "skills", "write-spec", "SKILL.md")
+				wantedMutation = projectionReplacement
+				writeSkill(t, root, "write-spec", "---\nname: write-spec\ndescription: Updated canonical description.\n---\n")
+			} else {
+				writeSkill(t, root, "review-spec", "---\nname: review-spec\ndescription: Review a specification.\n---\n")
+				if err := sync(root, false); err != nil {
+					t.Fatal(err)
+				}
+				targetPath = filepath.Join(".agents", "skills", "review-spec", "SKILL.md")
+				wantedMutation = projectionDeletion
+				if err := os.RemoveAll(filepath.Join(root, "spec-governance", "skills", "review-spec")); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			authored := []byte("in-place authored bytes\n")
+			invoked := false
+			hook := func(mutation projectionMutation, path string) error {
+				if mutation != wantedMutation || path != targetPath {
+					return nil
+				}
+				invoked = true
+				return os.WriteFile(filepath.Join(root, path), authored, 0o644)
+			}
+			if err := syncWithMutationHook(root, false, hook); err == nil || !strings.Contains(err.Error(), "changed after validation") {
+				t.Fatalf("sync() error = %v, want changed-bytes refusal", err)
+			}
+			if !invoked {
+				t.Fatalf("%s hook was not invoked", operation)
+			}
+			got, err := os.ReadFile(filepath.Join(root, targetPath))
+			if err != nil || !bytes.Equal(got, authored) {
+				t.Fatalf("in-place authored bytes changed: data=%q err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestSyncRejectsHardLinkedProjection(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	if err := sync(root, false); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, ".agents", "skills", "write-spec", "SKILL.md")
+	alias := filepath.Join(root, "projection-alias")
+	if err := os.Link(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "exactly one hard link") {
+		t.Fatalf("sync() error = %v, want hard-link refusal", err)
+	}
+	targetInfo, targetErr := os.Stat(target)
+	aliasInfo, aliasErr := os.Stat(alias)
+	if targetErr != nil || aliasErr != nil || !os.SameFile(targetInfo, aliasInfo) {
+		t.Fatalf("hard-linked target changed: targetErr=%v aliasErr=%v", targetErr, aliasErr)
+	}
+}
+
+func TestSyncRejectsUnexpectedProjectionPermissions(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	if err := sync(root, false); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, ".agents", "skills", "write-spec", "SKILL.md")
+	if err := os.Chmod(target, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync(root, true); err == nil || !strings.Contains(err.Error(), "permissions must be 0644") {
+		t.Fatalf("sync(check) error = %v, want permission refusal", err)
+	}
+}
+
+func TestSyncRejectsOversizedProjectionTarget(t *testing.T) {
+	root := t.TempDir()
+	writeCanonicalSkills(t, root)
+	target := filepath.Join(root, ".agents", "skills", "write-spec", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oversized := bytes.Repeat([]byte("x"), maxProjectionBytes+1)
+	if err := os.WriteFile(target, oversized, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync(root, false); err == nil || !strings.Contains(err.Error(), "exceeds 262144 bytes") {
+		t.Fatalf("sync() error = %v, want bounded-read refusal", err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("inspect oversized target: %v", err)
+	}
+	if info.Size() != int64(len(oversized)) {
+		t.Fatalf("oversized target changed: size=%d", info.Size())
 	}
 }
 
@@ -433,5 +752,60 @@ func writeFile(t *testing.T, root, relative, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+var projectionSwapKinds = []string{"regular", "symlink", "directory", "hardlink"}
+
+func swapProjectionTarget(kind, target, backup, source string) error {
+	if err := os.Rename(target, backup); err != nil {
+		return err
+	}
+	switch kind {
+	case "regular":
+		return os.WriteFile(target, []byte("authored swap content\n"), 0o644)
+	case "symlink":
+		return os.Symlink(source, target)
+	case "directory":
+		return os.Mkdir(target, 0o755)
+	case "hardlink":
+		return os.Link(source, target)
+	default:
+		return errors.New("unknown projection swap kind")
+	}
+}
+
+func assertProjectionSwap(t *testing.T, kind, target, source string, authored []byte) {
+	t.Helper()
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("inspect swapped target: %v", err)
+	}
+	switch kind {
+	case "regular":
+		got, readErr := os.ReadFile(target)
+		if readErr != nil || !bytes.Equal(got, authored) {
+			t.Fatalf("regular swap changed: data=%q err=%v", got, readErr)
+		}
+	case "symlink":
+		got, readErr := os.Readlink(target)
+		if info.Mode()&os.ModeSymlink == 0 || readErr != nil || got != source {
+			t.Fatalf("symlink swap changed: mode=%v target=%q err=%v", info.Mode(), got, readErr)
+		}
+	case "directory":
+		if !info.IsDir() {
+			t.Fatalf("directory swap changed: mode=%v", info.Mode())
+		}
+	case "hardlink":
+		sourceInfo, statErr := os.Stat(source)
+		if statErr != nil || !os.SameFile(info, sourceInfo) {
+			t.Fatalf("hard-link swap changed: sourceErr=%v", statErr)
+		}
+		got, readErr := os.ReadFile(target)
+		if readErr != nil || !bytes.Equal(got, authored) {
+			t.Fatalf("hard-link swap bytes changed: data=%q err=%v", got, readErr)
+		}
+	default:
+		t.Fatalf("unknown projection swap kind %q", kind)
 	}
 }
