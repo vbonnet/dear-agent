@@ -411,21 +411,21 @@ func TestSchemaCanonicalizationPreservesLargeIntegerPrecision(t *testing.T) {
 	}
 }
 
-func TestCompiledContractPreservesLargeIntegerPrecision(t *testing.T) {
-	tools := []*mcp.Tool{
-		{
+func TestDiscoveredCompiledContractPreservesLargeIntegerPrecision(t *testing.T) {
+	tools := registeredMCPTools(t, func(server *mcp.Server, _ *Config) {
+		server.AddTool(&mcp.Tool{
 			Name: "large-integer-left",
 			InputSchema: json.RawMessage(
 				`{"type":"object","properties":{"value":{"const":9007199254740992}}}`,
 			),
-		},
-		{
+		}, nil)
+		server.AddTool(&mcp.Tool{
 			Name: "large-integer-right",
 			InputSchema: json.RawMessage(
 				`{"type":"object","properties":{"value":{"const":9007199254740993}}}`,
 			),
-		},
-	}
+		}, nil)
+	})
 	contract := compiledContract(t, tools)
 	left := constraintValue(contract["large-integer-left"].Nodes["/value"].Constraints)
 	right := constraintValue(contract["large-integer-right"].Nodes["/value"].Constraints)
