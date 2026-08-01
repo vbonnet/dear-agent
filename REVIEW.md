@@ -91,16 +91,16 @@ runs: the command maps the §1 outcome to a process exit code, and only
 `approved` — or the audited human override below — lets the check pass.
 `needs-work`, `rejected`, and `needs-human-review`, as well as a fork PR, a
 per-dimension API failure, synthesis failure, an unparseable outcome, or an
-oversize diff, all **block the merge**.
+oversize diff, all fail the workflow check. They block a merge only when the
+provider has separately made that exact check required.
 
 > [!NOTE]
-> **Paused 2026-07-27**: `ANTHROPIC_API_KEY` is unset (no funded API quota),
-> so `review.yml` now skips invoking `cmd/ai-review` entirely rather than
-> failing closed on a missing key — see the PAUSED comment at the top of that
-> file. It is also no longer registered in `.github/rulesets/main.json`, i.e.
-> it is **not currently a required check**. `cmd/ai-review`'s own fail-closed
-> behavior on a missing key (SPEC R4) is unchanged; it's just not invoked in
-> that case anymore. Re-enable by setting the secret.
+> **Provider state verified 2026-07-31**: `ANTHROPIC_API_KEY` is unset and the
+> active GitHub ruleset has no AI-review required context. The workflow source
+> therefore does not prove provider-required enforcement or that an LLM ran.
+> `cmd/ai-review` remains fail-closed whenever it is invoked; a credential,
+> unique authoritative check name, and exact-head canary are prerequisites for
+> a later reviewed Terraform/ruleset enforcement rollout.
 
 ### Known residual risk: workflow-definition trust
 
@@ -109,6 +109,24 @@ revision; the PR revision is only ever diffed, never executed.
 
 Changes to either `.github/workflows/` or `cmd/ai-review/` are deterministic
 §3 escalation triggers, so they require human review before becoming trusted.
+
+Changed `SPEC.md` files have an additional authenticated contract review. The
+trusted base supplies both the canonical authoring policy and the exact
+package-level `activeHarnesses` registry. Additions or modifications under a
+registered dotted root, plugin root, or explicit harness grouping are rejected
+as local normative owners, including when nested beneath `internal/` or `cmd/`.
+Those package seams remain valid locations when they own a logical product or
+domain contract without an intrinsic registration root. Every current promise
+in an added or modified SPEC must receive a
+final `supported`, `adapted`, `unsupported`, or `not-applicable` disposition
+for every active member. Native differences belong in applicability-scoped
+requirements under the shared owner, not in a peer harness SPEC. An owner
+search that would be truncated escalates to a maintainer instead of presenting
+partial evidence as complete.
+
+The semantic reviewer must keep uncertain ownership separate from confirmed
+defects: incomplete or low-confidence semantic evidence is
+`needs-human-review`, not an invented canonical owner or a blocking conclusion.
 
 An organization-level required workflow remains defence in depth against a
 malicious maintainer with push access.
@@ -147,12 +165,11 @@ a follow-up bead. Every pushed revision is re-reviewed, so the check that
 reports on the current head SHA reflects that SHA — not an earlier draft.
 
 > [!WARNING]
-> As of 2026-07-27 this is **policy, not machine enforcement**. The
-> `5-Dimension AI Review` check is paused and is not a required status check
-> (see the note in §4), so nothing mechanically blocks a merge on a
-> non-`approved` outcome. When the gate is running it still fails closed on
-> every non-`approved` outcome; restoring it as a *required* check is the
-> separate step described in §4.
+> This is **policy, not currently provider-required machine enforcement**.
+> The active ruleset has no AI-review context, so no source workflow result is
+> proof that a merge was blocked or that an LLM reviewed the revision. A future
+> reviewed infrastructure rollout must use a unique authoritative check and an
+> exact-head canary before changing that state.
 
 ---
 
@@ -217,10 +234,10 @@ them here so they version-control alongside the protocol.
 
 - [Autonomous merge policy](docs/policies/autonomous-merge.ai.md) — merge boundaries after review.
 - `vbonnet/engram-research` `retrospectives/` — past incidents that shaped this protocol.
-- `.github/workflows/review.yml` + `cmd/ai-review/` — the fail-closed CI gate
-  (paused 2026-07-27; see §4).
-- `.github/rulesets/main.json` — the required-check list. It no longer
-  registers `5-Dimension AI Review`.
+- `.github/workflows/review.yml` + `cmd/ai-review/` — trusted workflow source;
+  provider-required status must be verified separately.
+- Live GitHub ruleset and its Terraform owner — provider-required check truth;
+  do not infer it from `.github/rulesets/main.json`.
 - Chezmoi `docs/REVIEW.md` — the *dotfiles* review protocol (different bar,
   same philosophy).
 

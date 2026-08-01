@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
@@ -23,6 +25,8 @@ func initRepo(t *testing.T, secondFileContent string) (dir, base, head string) {
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
 	run("add", "-A")
 	run("commit", "-q", "-m", "base")
 	base = trim(run("rev-parse", "HEAD"))
@@ -53,14 +57,14 @@ func baseConfig() config {
 }
 
 func TestRun_MissingKeyFailsClosed(t *testing.T) {
-	c := baseConfig()
+	c := noSpecConfig(t)
 	if got := run(c); got != 1 {
 		t.Fatalf("missing key: run() = %d, want 1 (fail closed)", got)
 	}
 }
 
 func TestRun_MissingKeyWithOverridePasses(t *testing.T) {
-	c := baseConfig()
+	c := noSpecConfig(t)
 	c.override = true
 	if got := run(c); got != 0 {
 		t.Fatalf("missing key + override: run() = %d, want 0", got)
@@ -68,7 +72,7 @@ func TestRun_MissingKeyWithOverridePasses(t *testing.T) {
 }
 
 func TestRun_ForkFailsClosed(t *testing.T) {
-	c := baseConfig()
+	c := noSpecConfig(t)
 	c.isFork = true
 	c.apiKey = "sk-does-not-matter" // fork check precedes key check
 	if got := run(c); got != 1 {
@@ -81,12 +85,21 @@ func TestRun_ForkWithOverridePassesKeyCheck(t *testing.T) {
 	// it would proceed to the (network) review, so we only assert it does NOT
 	// short-circuit to the fork failure. Give it no key so it stops at the
 	// key gate, which the override also passes — net result 0 without network.
-	c := baseConfig()
+	c := noSpecConfig(t)
 	c.isFork = true
 	c.override = true
 	if got := run(c); got != 0 {
 		t.Fatalf("fork + override (no key): run() = %d, want 0", got)
 	}
+}
+
+func noSpecConfig(t *testing.T) config {
+	t.Helper()
+	dir, base, head := initRepo(t, "changed\n")
+	chdir(t, dir)
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	return c
 }
 
 func TestRun_EmptyDiffApproves(t *testing.T) {
@@ -133,6 +146,150 @@ func TestRun_OversizeDiffWithOverridePasses(t *testing.T) {
 	c.override = true
 	if got := run(c); got != 0 {
 		t.Fatalf("oversize diff + override: run() = %d, want 0", got)
+	}
+}
+
+func TestBuildReviewPlan_SelectsOnlyExactSpecBasenamesAndRenameSides(t *testing.T) {
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	valid := "# Contract\n\n**OWN-01** When changed, the system shall prove it.\n\n## BDD Traceability\n\n- Feature: `test.feature`\n"
+	write("old/SPEC.md", valid)
+	write("docs/NOT-SPEC.md", valid)
+	write(specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	write(activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	if err := os.MkdirAll(filepath.Join(dir, "new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git("mv", "old/SPEC.md", "new/SPEC.md")
+	write("notes/NOT-SPEC.md", "ordinary\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "rename")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []specChange{{Path: "new/SPEC.md", Status: "added"}, {Path: "old/SPEC.md", Status: "deleted"}}
+	if !sameSpecChanges(plan.Changes, want) {
+		t.Fatalf("plan changes = %#v, want %#v", plan.Changes, want)
+	}
+	if plan.Diff != "" {
+		t.Fatalf("renamed deleted SPEC must not produce reviewable diff: %q", plan.Diff)
+	}
+	if !plan.needsHuman() {
+		t.Fatal("renamed SPEC deletion must require a human ownership decision")
+	}
+}
+
+func TestBuildReviewPlan_SPECOwnerChangesRequireMaintainerReview(t *testing.T) {
+	repo := newReviewRepo(t)
+	writeReviewFile(t, repo, "old/SPEC.owner", "domains/old/SPEC.md\n")
+	writeReviewFile(t, repo, "modified/SPEC.owner", "domains/old/SPEC.md\n")
+	writeReviewFile(t, repo, "notes/NOT-SPEC.owner", "ordinary\n")
+	gittest.Run(t, repo, "add", "old/SPEC.owner", "modified/SPEC.owner", "notes/NOT-SPEC.owner")
+	gittest.Run(t, repo, "commit", "-m", "add ownership fixtures")
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+
+	if err := os.MkdirAll(filepath.Join(repo, "new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, repo, "mv", "old/SPEC.owner", "new/SPEC.owner")
+	writeReviewFile(t, repo, "modified/SPEC.owner", "domains/new/SPEC.md\n")
+	writeReviewFile(t, repo, "added/SPEC.owner", "domains/new/SPEC.md\n")
+	writeReviewFile(t, repo, "notes/NOT-SPEC.owner", "still ordinary\n")
+	gittest.Run(t, repo, "add", "-A")
+	gittest.Run(t, repo, "commit", "-m", "rewire ownership")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.ReviewNeeded || !plan.ReviewRelevant || len(plan.Changes) != 0 {
+		t.Fatalf("SPEC.owner plan classification = %#v", plan)
+	}
+	reasons := strings.Join(plan.HumanReasons, "\n")
+	for _, expected := range []string{
+		"SPEC ownership edge addition requires maintainer review (added/SPEC.owner)",
+		"SPEC ownership edge modification requires maintainer review (modified/SPEC.owner)",
+		"SPEC ownership edge addition requires maintainer review (new/SPEC.owner)",
+		"SPEC ownership edge deletion requires maintainer review (old/SPEC.owner)",
+	} {
+		if !strings.Contains(reasons, expected) {
+			t.Errorf("ownership-edge reasons %q lack %q", reasons, expected)
+		}
+	}
+	if strings.Contains(reasons, "NOT-SPEC.owner") {
+		t.Fatalf("non-contract suffix entered ownership review: %q", reasons)
+	}
+}
+
+func TestBuildReviewPlan_BoundsSemanticInputToChangedSpecDiff(t *testing.T) {
+	dir, base, _ := initRepo(t, "ordinary\n")
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# Contract\n\n**OWN-01** When changed, the system shall prove it.\n\n## BDD Traceability\n\n- Feature: `test.feature`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "test.feature"), []byte(featureDocument("# SPEC: SPEC.md\n", "proof")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "SPEC.md", "test.feature")
+	git("commit", "-q", "-m", "spec")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.ReviewNeeded || plan.needsHuman() || !strings.Contains(plan.Diff, "SPEC.md") || strings.Contains(plan.Diff, "ordinary") {
+		t.Fatalf("unexpected bounded SPEC plan: %#v", plan)
+	}
+}
+
+func TestRun_RelevantSpecWithoutCredentialRequiresHumanReview(t *testing.T) {
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", specAuthoringPolicyPath, activeHarnessRegistryPath)
+	git("commit", "--allow-empty", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# Contract\n\n**OWN-01** When changed, the system shall prove it.\n\n## BDD Traceability\n\n- Feature: `test.feature`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "test.feature"), []byte(featureDocument("# SPEC: SPEC.md\n", "proof")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "SPEC.md", "test.feature")
+	git("commit", "-q", "-m", "spec")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	if got := run(c); got != 1 {
+		t.Fatalf("relevant SPEC without credential: run() = %d, want human-review block", got)
 	}
 }
 

@@ -6,7 +6,8 @@
 
 `cmd/ai-review` runs the REVIEW.md §2 five-dimension review against a pull
 request diff and turns the synthesized outcome into a process exit code, so the
-CI check is a real merge gate rather than an advisory comment.
+CI result can become a merge gate rather than an advisory comment after the
+separate provider-enforcement rollout is verified.
 
 ## EARS Requirements
 
@@ -28,20 +29,45 @@ CI check is a real merge gate rather than an advisory comment.
 
 **AIREV-09** When the synthesis output does not contain an exact canonical outcome token, or the approval token is negated, the command shall treat the outcome as needs-human-review.
 
+**AIREV-10** When a pull request changes a file whose exact basename is `SPEC.md`, including an addition, deletion, or either side of a rename, the command shall build an authenticated versioned review plan before accessing a reviewer credential or model.
+
+**AIREV-11** When a changed SPEC lacks either exact reciprocal BDD feature evidence or an explicit deterministic/no-BDD test consequence in its canonical traceability section, links a feature that is not valid scenario-bearing Gherkin with runnable steps, fails strict EARS validation, reuses a changed requirement identifier or normalized promise elsewhere in the HEAD SPEC corpus, claims normative ownership under a registered harness root, deletes the whole SPEC, requires a truncated or incomplete owner search, exceeds an input bound, or the SPEC reviewer is unavailable, ambiguous, or cannot authenticate its evidence to the reviewed revisions and paths, the command shall report needs-human-review and shall not approve the change.
+
+**AIREV-12** When a changed SPEC plan is reviewable, the command shall make one conditional SPEC contract review call with a strict versioned JSON contract that rejects unknown fields; its blocking verdict shall not be upgraded by five-dimension synthesis.
+
+**AIREV-13** When a changed SPEC plan is reviewable, the command shall use `docs/spec-authoring.md` from the authenticated current protected-base revision as its sole substantive prompt policy and shall supply complete bounded current changed-SPEC contracts, applicable parsed and bounded authenticated Gherkin evidence or declared deterministic/no-BDD consequence evidence, a complete bounded semantic owner-candidate search over unchanged HEAD SPECs, and the complete active-member applicability grid for every current promise in each added or modified SPEC; the review contract shall require `needs-human-review` rather than an invented owner or confirmed defect when the semantic evidence is low-confidence or incomplete.
+
+**AIREV-14** When a modified SPEC deletes a stable requirement, the command shall include the deleted identifier and prior promise in authenticated review evidence and shall require one strict structured reviewer disposition for that deletion or report needs-human-review.
+
+**AIREV-15** When the command invokes Git to inspect a pull request revision, the command shall enforce time and output limits, shall expose only an allowlisted non-credential environment to the subprocess, and shall read exact committed object bytes without applying revision-controlled export transformations.
+
+**AIREV-16** When a pull request changes the canonical SPEC authoring policy, active harness registry, trusted review workflow or ruleset, review implementation, deterministic Markdown or EARS parsers, Go build manifests, workspace manifests, or vendored dependencies used by that implementation, the command shall require maintainer review rather than allow the revision to approve its own enforcement change.
+
+**AIREV-17** When a changed SPEC or protected enforcement owner is reviewed from a head that does not contain the current protected base, the command shall require the branch to be updated and shall not bind policy or corpus evidence to the stale merge base.
+
+**AIREV-18** When the trusted source workflow runs, it shall attempt to publish a uniquely named `SPEC Contract Review` semantic verdict for the reviewed pull-request head and shall fail its distinct native `AI review orchestration` job when creation or publication is unavailable; without a reviewer credential, only plans with no changed SPEC, protected owner, binary or gitlink evidence, or deterministic AIREV-07 or AIREV-08 escalation may publish neutral, while every other relevant plan shall remain fail closed pending a revision-bound maintainer override. Neither source result is yet a provider-required merge gate.
+
+**AIREV-19** When a changed SPEC plan is reviewable, the command shall parse the exact package-level `activeHarnesses` string-slice literal from `agm/internal/agent/harnesses.go` at the authenticated protected-base revision and shall require one final `supported`, `adapted`, `unsupported`, or `not-applicable` reviewer disposition for every active member and every current promise in each added or modified SPEC.
+
+**AIREV-20** When a pull request adds or modifies a normative `SPEC.md` beneath a registered dotted configuration root, a plugin registration root, an explicit `harness/` or `harnesses/` grouping, or a top-level authenticated active-harness alias, the command shall reject the local owner without relying on peer similarity. An `internal/` or `cmd/` ancestor shall not conceal an intrinsic registration root; native variation shall remain an applicability-scoped requirement in one shared product or domain owner, while legitimate logical owners under `internal/` and `cmd/` without such a registration root shall remain eligible for semantic review.
+
+**AIREV-21** When a pull request adds, modifies, deletes, or renames a file whose exact basename is `SPEC.owner`, the command shall record the authenticated changed path and status as a normative ownership-edge change and require a revision-bound maintainer review rather than allow the pointer to approve its own reassignment.
+
 ## Enforcement wiring
 
 - `.github/workflows/review.yml` invokes this command from trusted
-  `pull_request_target` PR revisions, publishing its result on the reviewed
-  head under the check context `5-Dimension AI Review`.
-- **Paused 2026-07-27**: that context is **not** currently listed under
-  `required_status_checks` in `.github/rulesets/main.json`, so it does not
-  block merges. The workflow also no longer invokes this command at all when
-  `ANTHROPIC_API_KEY` is unset and no `ai-review:override` label is active — it
-  publishes a `neutral` check instead. Every requirement above still holds
-  whenever the command *is* invoked; AIREV-04's fail-closed-on-missing-key
-  behavior is unchanged and still applies on the override path. Re-enable by
-  setting the secret, and re-add the context to `main.json` per
-  `docs/branch-protection.md` to make it required again.
+  `pull_request_target` revisions and publishes its result on the reviewed
+  head under the unique `SPEC Contract Review` check context. The workflow's
+  native `AI review orchestration` job has a distinct name and fails if
+  creation or publication of that semantic check fails.
+- This source workflow is not evidence that either context is provider-required
+  or that an LLM reviewed a pull request. Provider enforcement, credentials,
+  and an exact-head canary belong to a separate reviewed infrastructure
+  rollout. `pull_request_target` attaches its native job to the protected-base
+  revision, so that job cannot be required on the pull-request head. The
+  semantic context must not be made provider-required until that later rollout
+  supplies and canaries a trusted head-attached transport mechanism, or removes
+  mutable same-head inputs so an earlier verdict remains valid.
 
 ## BDD Traceability
 

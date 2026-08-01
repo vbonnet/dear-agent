@@ -6,44 +6,24 @@ name: AI Code Review (5-dimension)
 #
 # Fail-closed contract (see cmd/ai-review), in force whenever the gate runs:
 #   - only an "approved" outcome (or the audited 'ai-review:override' label)
-#     exits 0; needs-work / rejected / needs-human-review block the merge.
+#     exits 0; needs-work / rejected / needs-human-review fail this workflow.
 #   - fork PRs, per-dimension API failure, synthesis failure, unparseable
 #     outcome, and oversize diffs all fail closed. (A missing secret also fails
-#     closed inside cmd/ai-review, but see PAUSED below — the gate is no longer
-#     invoked at all in that case.)
+#     closed inside cmd/ai-review. While no reviewer credential is configured,
+#     an authenticated plan with neither SPEC-governance work nor a deterministic
+#     REVIEW.md §3 escalation may take this workflow's explicit neutral path
+#     before command invocation.)
 #
 # Runs on every PR revision (opened/synchronize/reopened/ready_for_review), not
 # just the draft->ready edge, so the check that gates the current head SHA
 # actually reflects the current head SHA.
 #
-# PAUSED 2026-07-27 — "5-Dimension AI Review" is NOT currently a required
-# status check. ANTHROPIC_API_KEY is intentionally unset (no API quota outside
-# the Max plan subscription, which this workflow cannot use — it would bill
-# pay-per-token, not the subscription). SPEC R4 in cmd/ai-review says a missing
-# secret fails closed with no silent skip, because a secret vanishing is
-# normally a sign of tampering. But an owner who has never funded this gate and
-# isn't about to isn't "tampering" — so the "Run AI review gate" step below is
-# skipped outright (steps.gate.outcome=skipped) when the key is absent and no
-# 'ai-review:override' label is active. The published check gets an honest
-# `neutral` conclusion (never a fabricated `success`) explaining why, and the
-# job does not fail. That neutral is narrowly scoped: it requires the key
-# preflight to have RUN and affirmatively reported no key. A skip caused by an
-# earlier step failing still publishes `failure`, because GitHub counts
-# `neutral` as satisfying a required check — so a broad "skip => neutral" would
-# let an infra failure pass the gate unreviewed once it is required again.
-# cmd/ai-review's Go fail-closed logic is untouched — it
-# still fails closed if actually invoked with no key, which still happens on
-# the override path (AIREV-03's audited pass-through still applies there).
-# "5-Dimension AI Review" was also dropped from the required-checks list in
-# .github/rulesets/main.json so a future ruleset sync can't start blocking
-# merges on a check nobody is funding (live GitHub does not require it either
-# — see docs/branch-protection.md).
-#
-# Re-enable: set the ANTHROPIC_API_KEY repo secret. That alone flips the
-# "Detect review key" preflight below and re-arms the gate — no other change
-# needed. To make it a required merge gate again too, re-add "5-Dimension AI
-# Review" to .github/rulesets/main.json and re-apply per
-# docs/branch-protection.md.
+# SPEC CONTRACT ROLLOUT — this workflow emits a uniquely named trusted check on
+# pull-request heads. It does not make that context provider-required and does
+# not claim that an LLM ran when ANTHROPIC_API_KEY is absent. A later reviewed
+# Terraform/ruleset rollout must establish any provider enforcement and prove
+# it with an exact-head canary. A relevant plan remains fail-closed here until a
+# revision-bound maintainer override is recorded.
 
 on:
   # pull_request_target is deliberate: this workflow checks out and executes
@@ -70,23 +50,28 @@ concurrency:
 
 jobs:
   review:
-    name: 5-Dimension AI Review
+    name: AI review orchestration
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     steps:
-      # This is intentionally first. Native pull_request_target checks attach
-      # to the protected base, so a previous head success must be superseded
-      # before any fallible checkout, fetch, or override preparation runs.
+      # This is intentionally first so a previous head success is normally
+      # superseded before any fallible checkout, fetch, or override preparation
+      # runs. An API outage here cannot replace an older same-head custom
+      # success. The native job will fail, but pull_request_target attaches it
+      # to the protected base rather than the reviewed head. Therefore neither
+      # result is ready to become a provider-required check until the separate
+      # rollout proves a trusted head-attached transport mechanism or removes
+      # mutable same-head inputs.
       - name: Mark reviewed head pending
         id: pending
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='5-Dimension AI Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='5-Dimension AI Review' -f output[summary]='Trusted review gate is running.' --jq .id)"
+          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='SPEC Contract Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='SPEC Contract Review' -f output[summary]='Trusted SPEC contract review is running.' --jq .id)"
           echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
 
       # SECURITY: check out the *base* (protected) revision, not the PR merge
@@ -98,7 +83,7 @@ jobs:
       - name: Checkout trusted base revision
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -109,12 +94,12 @@ jobs:
           cache: true
 
       # Fetch the untrusted head as data. refs/pull/<n>/head works for both
-      # fork and same-repo PRs; merge-group heads live on origin already.
+      # fork and same-repo pull requests.
       - name: Fetch PR head for diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -125,6 +110,31 @@ jobs:
             git fetch --no-tags "$origin" "+${HEAD_SHA}:refs/ai-review/head"
           fi
           git cat-file -e "${HEAD_SHA}^{commit}"
+
+      # This deterministic plan is built from authenticated Git objects before
+      # reading ANTHROPIC_API_KEY or making any model call. The protected-base
+      # authoring policy and exact activeHarnesses registry, never PR-controlled
+      # replacements, own its policy and applicability inventory. The same plan
+      # also authenticates every deterministic REVIEW.md §3 escalation input,
+      # including PR-body and commit markers, so neutral cannot hide one.
+      - name: Build authenticated SPEC governance review plan
+        id: plan
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -uo pipefail
+          set +e
+          go run ./cmd/ai-review --review-plan > "$RUNNER_TEMP/ai-review-plan.json"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] || ! jq -e '(.version == "spec-contract/v3") and (.review_relevant | type == "boolean")' "$RUNNER_TEMP/ai-review-plan.json" >/dev/null 2>&1; then
+            echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "review_relevant=$(jq -r '.review_relevant' "$RUNNER_TEMP/ai-review-plan.json")" >> "$GITHUB_OUTPUT"
 
       # A human override approves one reviewed revision, not a mutable branch.
       # Remove it as soon as a contributor pushes a new head; the resulting
@@ -159,40 +169,27 @@ jobs:
             -f body="<!-- ai-review-override-sha:$HEAD_SHA -->
           Human override attested by the trusted review workflow for `$HEAD_SHA`."
 
-      # The override must survive the merge queue: a merge_group run cannot see
-      # the originating PR's labels, so without this a human-overridden PR would
-      # pass its PR check and then fail again on the synthetic merge-group SHA,
-      # making the documented fallback unable to merge through the queue.
+      # The override is revision-bound: a new pull-request head must never
+      # inherit an approval for an earlier revision.
       - name: Detect override label
         id: override
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          HEAD_REF: ${{ github.event.merge_group.head_ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
           PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           labels="${LABELS:-}"
           # A new head must never inherit an override, even if a prior runner
           # was interrupted before it could remove the label.
-          if [ "$EVENT" = "pull_request_target" ] && [ "$ACTION" = "synchronize" ]; then
+          if [ "$ACTION" = "synchronize" ]; then
             echo "active=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           reviewed_head="$HEAD_SHA"
-          if [ "$EVENT" = "merge_group" ]; then
-            # gh-readonly-queue/<base>/pr-<number>-<sha>
-            pr="$(printf '%s' "$HEAD_REF" | sed -n 's|.*/pr-\([0-9]\{1,\}\)-[0-9a-f]\{1,\}$|\1|p')"
-            if [ -n "$pr" ]; then
-              PR="$pr"
-              labels="$(gh api "repos/$REPO/pulls/$pr" --jq '[.labels[].name]' 2>/dev/null || echo '[]')"
-              reviewed_head="$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha' 2>/dev/null || true)"
-            fi
-          fi
           attested_head="$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
             --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null | \
             sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
@@ -232,19 +229,18 @@ jobs:
       - name: Run AI review gate
         id: gate
         continue-on-error: true
-        # Skip entirely (not fail-closed) when the key is unset and no human
-        # has overridden — see the PAUSED note at the top of this file. The
-        # override path still runs so its audited pass-through keeps working
-        # even with no key.
-        if: steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true'
+        # Relevant SPEC governance changes and every deterministic escalation
+        # run even without a credential, so an absent credential is human review
+        # instead of a neutral result.
+        if: steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           IS_FORK: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository }}
           OVERRIDE: ${{ steps.override.outputs.active }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -277,45 +273,50 @@ jobs:
 
       # pull_request_target is pinned to trusted base code, but GitHub attaches
       # its job check suite to that base revision. Publish the authoritative
-      # result explicitly on the reviewed PR (or merge-group) head so the
-      # context is both trusted and satisfiable — a prerequisite for it being
-      # usable as a required check again once the gate is un-paused.
+      # result explicitly on the reviewed PR head. The unique custom context is
+      # the semantic-review verdict; the native job remains orchestration only.
       - name: Publish check on reviewed head
         id: publish
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
           OUTCOME: ${{ steps.gate.outcome }}
           KEY_OUTCOME: ${{ steps.key.outcome }}
           KEY_PRESENT: ${{ steps.key.outputs.present }}
           OVERRIDE: ${{ steps.override.outputs.active }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          REVIEW_RELEVANT: ${{ steps.plan.outputs.review_relevant }}
         run: |
           set -euo pipefail
           conclusion=failure
           summary="Trusted review gate completed with outcome: $OUTCOME."
           if [ "$OUTCOME" = success ]; then
             conclusion=success
-          elif [ "$OUTCOME" = skipped ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "$OVERRIDE" != true ]; then
+          elif [ "$OUTCOME" = skipped ] && [ "$PLAN_OUTCOME" = success ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "$OVERRIDE" != true ] && [ "$REVIEW_RELEVANT" = false ]; then
             # The ONLY non-failure skip: key detection ran, succeeded, and
             # affirmatively reported no key, with no override in play. Any
             # other skip means an earlier step (checkout / setup-go / fetch /
             # override or key detection) failed and GitHub's implicit
             # success() guard skipped the gate — that must stay `failure`.
-            # GitHub counts `neutral` as satisfying a required check, so
-            # treating every skip as neutral would let an infrastructure
-            # failure pass the gate unreviewed once it is required again.
             # Honest `neutral`, never a fabricated `success` (SPEC R4).
             conclusion=neutral
-            summary='Paused: ANTHROPIC_API_KEY is not configured (cost/quota decision, 2026-07-27). Re-enable by setting the secret, or run a single PR under human authority with the ai-review:override label.'
+            summary='Neutral: ANTHROPIC_API_KEY is not configured and the authenticated plan has no changed SPEC.md, protected SPEC-review owner, or deterministic REVIEW.md escalation. No model approval is claimed.'
           fi
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
             -f conclusion="$conclusion" \
-            -f output[title]='5-Dimension AI Review' \
+            -f output[title]='SPEC Contract Review' \
             -f output[summary]="$summary"
+
+      # The custom check is the semantic verdict. The distinct native job is a
+      # source-level transport failure signal, not a satisfiable PR-head
+      # required check. Do not let a failed check-runs API call leave it green.
+      - name: Fail if SPEC Contract Review publication failed
+        if: always() && steps.publish.outcome == 'failure'
+        run: exit 1
 
       # An earlier revision may have left a sticky review comment — including a
       # "passed by human override" one, since applying the label makes the gate
@@ -325,8 +326,8 @@ jobs:
       # a stale comment still claiming a human override passed it. Retire the
       # marked comment here so the PR-facing audit trail matches the check.
       # Best-effort by design: the check conclusion already carries the verdict,
-      # so a comment outage must not turn a paused revision into a red job.
-      - name: Replace stale sticky comment when paused
+      # so a comment outage must not change the check conclusion.
+      - name: Explain neutral review result
         if: always() && steps.publish.outputs.conclusion == 'neutral' && github.event.pull_request.number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -336,12 +337,12 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' '<!-- ai-review-5d -->' \
-            '## ⏸️ AI Code Review — paused (no automated review ran)' '' \
-            "> \`ANTHROPIC_API_KEY\` is not configured, so no automated review ran for \`$HEAD_SHA\`." '' \
+            '## AI Code Review — neutral (no automated review ran)' '' \
+            "> \`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed." '' \
             'Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.' '' \
-            '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-paused.md
-          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-paused.md \
-            || echo "::warning::could not post the paused review comment; the neutral check still carries the verdict."
+            '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-neutral.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-neutral.md \
+            || echo "::warning::could not post the neutral review comment; the check still carries the verdict."
           # Prune older marked comments, keeping the one just posted. Cosmetic.
           ( gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
               --jq '.[] | select(.body | startswith("<!-- ai-review-5d -->")) | .id' \
@@ -349,5 +350,5 @@ jobs:
             | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null || true; done ) || true
 
       - name: Fail if review gate failed
-        if: steps.gate.outcome == 'failure'
+        if: always() && steps.gate.outcome == 'failure'
         run: exit 1

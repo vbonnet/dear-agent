@@ -32,10 +32,9 @@ func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, 
 	var b strings.Builder
 	fmt.Fprintln(&b, commentMarker)
 	fmt.Fprintf(&b, "## %s AI Code Review — %s\n\n", emojiFor(outcome), outcome)
-	// Deliberately says nothing about whether this context is a *required*
-	// status check: that lives in .github/rulesets/main.json and changes
-	// independently of this binary. Wording that hard-codes either state
-	// would make the PR-facing audit record false the moment it flips.
+	// Deliberately says nothing about whether this context is provider-required:
+	// live ruleset/IaC state changes independently of this binary. Wording that
+	// hard-codes either state would make the PR-facing audit record false.
 	fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This check is **fail-closed**: any non-approved outcome fails it.\n\n")
 	if len(triggers) > 0 {
 		fmt.Fprintf(&b, "### 🔴 Mandatory escalation (REVIEW.md §3)\n\nThis diff trips escalation triggers, so the outcome is forced to `needs-human-review` regardless of the dimension findings:\n\n")
@@ -90,7 +89,7 @@ func oversizeComment(size, limit int) string {
 // must not — see requireComment.
 func postComment(c config, body string) error {
 	if c.pr == "" || c.repo == "" {
-		// No PR context (e.g. merge_group): nothing to post to.
+		// No PR context: nothing to post to.
 		return nil
 	}
 	if _, err := exec.LookPath("gh"); err != nil {
