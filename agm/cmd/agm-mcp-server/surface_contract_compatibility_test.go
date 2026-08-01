@@ -151,8 +151,8 @@ func TestMCPCompatibilityComparatorRejectsDriftAndStaleExceptions(t *testing.T) 
 			name:    "item schema added to shared path",
 			wantKey: "DAH-002/unaccounted-item-schema",
 			mutate: func(got map[string]contractTool) {
-				tool := got["agm_create_session"]
-				node := tool.Nodes["/name"]
+				tool := got["agm_get_session_metadata"]
+				node := tool.Nodes["/identifier"]
 				node.ItemSchema = `{"type":"string"}`
 				tool.Nodes[node.Path] = node
 				got[tool.Name] = tool
