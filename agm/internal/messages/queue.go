@@ -114,8 +114,11 @@ func (q *MessageQueue) Close() error {
 
 // Enqueue adds a message to the queue
 func (q *MessageQueue) Enqueue(entry *QueueEntry) error {
-	if _, err := ParsePriority(string(entry.Priority)); err != nil {
-		return fmt.Errorf("failed to enqueue message: %w", err)
+	if entry == nil {
+		return fmt.Errorf("failed to enqueue message: entry is nil")
+	}
+	if !entry.Priority.IsValid() {
+		return fmt.Errorf("failed to enqueue message: invalid message priority %q (valid: CRITICAL, HIGH, MEDIUM, LOW)", entry.Priority)
 	}
 
 	//nolint:noctx // TODO(context): plumb ctx through this layer

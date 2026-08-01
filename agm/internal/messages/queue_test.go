@@ -76,6 +76,14 @@ func TestEnqueueRejectsInvalidPriorityBeforeSQLite(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestEnqueueRejectsNilEntryBeforeSQLite(t *testing.T) {
+	t.Parallel()
+
+	var queue MessageQueue
+	err := queue.Enqueue(nil)
+	require.EqualError(t, err, "failed to enqueue message: entry is nil")
+}
+
 // TestEnqueueDuplicate tests duplicate message handling
 func TestEnqueueDuplicate(t *testing.T) {
 	queue := setupTestQueue(t)
