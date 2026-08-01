@@ -45,6 +45,9 @@ const (
 	// by Codex's system-managed worker boundary hook. It is transported through
 	// the private handoff so a long-lived tmux server cannot drop or stale it.
 	CodexWorkerWriteRootsEnv = "AGM_WORKER_WRITE_ROOTS_JSON"
+	// remoteCodexReasoningEffort prevents a restored remote thread from
+	// reusing a persisted effort value unsupported by the current Codex runtime.
+	remoteCodexReasoningEffort = `model_reasoning_effort="xhigh"`
 )
 
 var (
@@ -236,6 +239,7 @@ type CodexLaunch struct {
 	AddDirs                []string
 	ResumeID               string
 	Remote                 bool
+	RemoteResume           bool
 	BypassHookTrust        bool
 	HookRoot               string
 	HookTrustReason        string
@@ -299,6 +303,9 @@ func BuildCodexCommand(launch CodexLaunch) string {
 	}
 	if launch.Remote {
 		b.WriteString(" --remote")
+	}
+	if launch.RemoteResume {
+		b.WriteString(" --remote-resume")
 	}
 	if launch.BypassHookTrust {
 		b.WriteString(" --bypass-hook-trust")
@@ -710,6 +717,7 @@ type codexRequest struct {
 	AddDirs               stringList
 	ResumeID              string
 	Remote                bool
+	RemoteResume          bool
 	BypassHooks           bool
 	HookRoot              string
 	HookTrustReason       string
@@ -736,6 +744,7 @@ func parseCodex(args []string) (codexRequest, error) {
 	set.Var(&request.AddDirs, "add-dir", "")
 	set.StringVar(&request.ResumeID, "resume-id", "", "")
 	set.BoolVar(&request.Remote, "remote", false, "")
+	set.BoolVar(&request.RemoteResume, "remote-resume", false, "")
 	set.BoolVar(&request.BypassHooks, "bypass-hook-trust", false, "")
 	set.StringVar(&request.HookRoot, "hook-root", "", "")
 	if err := set.Parse(args); err != nil {
@@ -770,6 +779,9 @@ func validateCodexRequest(request codexRequest) error {
 	if request.Remote && request.ResumeID == "" {
 		return errors.New("invalid Codex launch request: remote resume requires a session id")
 	}
+	if request.RemoteResume && !request.Remote {
+		return errors.New("invalid Codex launch request: remote resume marker requires remote launch")
+	}
 	for _, field := range []struct{ name, value string }{
 		{"resume-id", request.ResumeID}, {"handoff", request.HandoffPath}, {"hook-root", request.HookRoot},
 	} {
@@ -788,9 +800,12 @@ func validateCodexRequest(request codexRequest) error {
 }
 
 func (r codexRequest) argv() []string {
-	args := make([]string, 0, 12)
+	args := make([]string, 0, 14)
 	if r.Remote {
 		args = append(args, "resume", "--remote", "unix://")
+		if r.RemoteResume {
+			args = append(args, "-c", remoteCodexReasoningEffort)
+		}
 	}
 	args = append(args, "-m", r.Model, "-C", r.WorkDir, "-s", r.Sandbox)
 	for _, dir := range r.AddDirs {
@@ -822,6 +837,7 @@ func (r codexRequest) launch() CodexLaunch {
 		AddDirs:         append([]string(nil), r.AddDirs...),
 		ResumeID:        r.ResumeID,
 		Remote:          r.Remote,
+		RemoteResume:    r.RemoteResume,
 		BypassHookTrust: r.BypassHooks,
 		HookRoot:        r.HookRoot,
 	}

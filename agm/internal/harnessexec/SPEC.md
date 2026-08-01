@@ -63,6 +63,8 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-20** When a trusted AGM launch prepares a Codex worker with host-authorized write roots, the system shall carry the derived `AGM_WORKER_WRITE_ROOTS_JSON` value through the owner-only private handoff into the Codex child environment, independent of long-lived tmux server state; when the caller omits the value, stale pane or tmux state shall not recreate it.
 
+**HEXEC-21** When the private executor receives the cold-remote-resume marker from AGM's Codex resume lifecycle, the system shall pass the documented `model_reasoning_effort="xhigh"` configuration override so a persisted unsupported effort value cannot prevent the resumed worker from receiving its first provider turn; fresh remote controller attachments and local Codex launches shall not receive that override.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
