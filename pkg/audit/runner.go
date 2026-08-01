@@ -635,7 +635,7 @@ func (r *Runner) persistFinding(
 		return Finding{}, false
 	}
 	if !plan.DryRun && stored.Suggested.Strategy == StrategyAuto && r.Remediator != nil {
-		r.applyInlineRemediation(ctx, stored, env, logger)
+		stored = r.applyInlineRemediation(ctx, stored, env, logger)
 	}
 	return stored, true
 }
@@ -646,20 +646,28 @@ func (r *Runner) persistFinding(
 // state. The outcome is therefore not durable evidence. Errors are logged;
 // nothing here is allowed to fail the audit run because the finding is already
 // persisted.
-func (r *Runner) applyInlineRemediation(ctx context.Context, stored Finding, env Env, logger *slog.Logger) {
+func (r *Runner) applyInlineRemediation(
+	ctx context.Context,
+	stored Finding,
+	env Env,
+	logger *slog.Logger,
+) Finding {
 	if remErr := stored.Suggested.Validate(); remErr != nil {
 		logger.Warn("audit: remediation invalid; skipping", "err", remErr)
-		return
+		return stored
 	}
 	out, applyErr := r.Remediator.Apply(ctx, stored, env)
 	if applyErr != nil {
 		logger.Warn("audit: remediation failed", "err", applyErr)
-		return
+		return stored
 	}
 	if !out.State.IsValid() || out.State == stored.State {
-		return
+		return stored
 	}
-	if _, err := r.Store.SetFindingState(ctx, stored.FindingID, out.State, out.Note); err != nil {
+	updated, err := r.Store.SetFindingState(ctx, stored.FindingID, out.State, out.Note)
+	if err != nil {
 		logger.Warn("audit: SetFindingState failed", "err", err)
+		return stored
 	}
+	return updated
 }

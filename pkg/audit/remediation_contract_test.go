@@ -18,6 +18,20 @@ func (r contractRemediator) Apply(context.Context, Finding, Env) (ApplyOutcome, 
 	return r.outcome, nil
 }
 
+type recordingContractRefiner struct {
+	findings []Finding
+}
+
+func (*recordingContractRefiner) Name() string { return "contract-recorder" }
+
+func (r *recordingContractRefiner) Propose(
+	_ context.Context,
+	findings []Finding,
+) ([]Proposal, error) {
+	r.findings = append([]Finding(nil), findings...)
+	return nil, nil
+}
+
 type recordingStateStore struct {
 	Store
 	calls int
@@ -153,7 +167,7 @@ func TestRunnerCustomRemediatorRemainsCallableForCompatibility(t *testing.T) {
 			},
 		}},
 	}
-	runner, store, _ := newTestRunner(t, check)
+	runner, store, registry := newTestRunner(t, check)
 	calls := 0
 	runner.Remediator = contractRemediator{
 		calls: &calls,
@@ -161,6 +175,10 @@ func TestRunnerCustomRemediatorRemainsCallableForCompatibility(t *testing.T) {
 			State: FindingResolved,
 			Note:  "compatibility outcome",
 		},
+	}
+	refiner := &recordingContractRefiner{}
+	if err := registry.RegisterRefiner(refiner); err != nil {
+		t.Fatalf("RegisterRefiner: %v", err)
 	}
 	plan := Plan{
 		Repo: "demo", RepoRoot: "/tmp/demo", Cadence: CadenceDaily,
@@ -174,7 +192,14 @@ func TestRunnerCustomRemediatorRemainsCallableForCompatibility(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("custom Remediator.Apply calls = %d, want 1", calls)
 	}
-	got, err := store.GetFinding(context.Background(), report.CheckOutcomes[0].Findings[0].FindingID)
+	reported := report.CheckOutcomes[0].Findings[0]
+	if reported.State != FindingResolved {
+		t.Fatalf("reported finding state = %q, want %q", reported.State, FindingResolved)
+	}
+	if len(refiner.findings) != 1 || refiner.findings[0].State != FindingResolved {
+		t.Fatalf("refiner findings = %+v, want one resolved finding", refiner.findings)
+	}
+	got, err := store.GetFinding(context.Background(), reported.FindingID)
 	if err != nil {
 		t.Fatalf("GetFinding: %v", err)
 	}

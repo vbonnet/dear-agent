@@ -41,3 +41,5 @@ an in-repository side-effecting adapter may be activated.
 **AUDIT-08** When a remediator returns an invalid or unchanged finding state, the system shall discard the returned note without updating the finding state.
 
 **AUDIT-09** When the default no-op remediator processes a finding, the system shall preserve the finding state.
+
+**AUDIT-10** When a remediator persists a valid finding-state change, the system shall expose the updated finding state to the run report and refiners.
