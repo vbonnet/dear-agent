@@ -175,8 +175,9 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 		t.Fatalf("parse Codex request: %v", err)
 	}
 	want := []string{
-		"resume", "--remote", "unix://", "-m", "gpt-test", "-C", "/tmp/work",
-		"-s", "workspace-write", "--add-dir", "/tmp/one", "--add-dir", "/tmp/two",
+		"resume", "--remote", "unix://", "-c", `model_reasoning_effort="xhigh"`,
+		"-m", "gpt-test", "-C", "/tmp/work", "-s", "workspace-write",
+		"--add-dir", "/tmp/one", "--add-dir", "/tmp/two",
 		"-a", "never", "thread-123",
 	}
 	if got := request.argv(); !reflect.DeepEqual(got, want) {

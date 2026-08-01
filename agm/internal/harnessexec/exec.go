@@ -45,6 +45,9 @@ const (
 	// by Codex's system-managed worker boundary hook. It is transported through
 	// the private handoff so a long-lived tmux server cannot drop or stale it.
 	CodexWorkerWriteRootsEnv = "AGM_WORKER_WRITE_ROOTS_JSON"
+	// remoteCodexReasoningEffort prevents a restored remote thread from
+	// reusing a persisted effort value unsupported by the current Codex runtime.
+	remoteCodexReasoningEffort = `model_reasoning_effort="xhigh"`
 )
 
 var (
@@ -788,9 +791,9 @@ func validateCodexRequest(request codexRequest) error {
 }
 
 func (r codexRequest) argv() []string {
-	args := make([]string, 0, 12)
+	args := make([]string, 0, 14)
 	if r.Remote {
-		args = append(args, "resume", "--remote", "unix://")
+		args = append(args, "resume", "--remote", "unix://", "-c", remoteCodexReasoningEffort)
 	}
 	args = append(args, "-m", r.Model, "-C", r.WorkDir, "-s", r.Sandbox)
 	for _, dir := range r.AddDirs {
