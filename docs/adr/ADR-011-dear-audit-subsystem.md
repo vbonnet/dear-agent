@@ -16,8 +16,9 @@ history. Checks declare stable IDs and recommended cadence but own no clock.
 Operators schedule `workflow-audit run` through cron, CI, or workflow wrappers.
 Finding and remediation-suggestion generation remain separate stages, and finding
 fingerprints prevent the same unresolved problem from inflating counts across
-runs. Until remediation outcomes have an idempotent persisted event contract,
-the runner accepts only its side-effect-free no-op remediator.
+runs. The default runner uses a side-effect-free no-op remediator. The exported
+remediator seam remains available for compatibility, but its outcomes are not
+durable remediation evidence; `ce-1hu9.13` owns its replacement or migration.
 
 The v1 storage schema is additive and owns exactly `audit_findings`,
 `audit_runs`, and `audit_proposals`. It does not modify workflow tables,

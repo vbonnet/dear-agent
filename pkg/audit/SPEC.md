@@ -16,9 +16,11 @@ CLI, and workflow-triggered audits share the same lifecycle semantics.
 The exported `Remediator`, `ApplyOutcome`, and `Runner.Remediator` shapes are a
 dormant compatibility seam. `Runner` ignores outcome status and reference,
 passes a note to the store only with a valid finding-state change, and therefore
-does not treat the outcome as durable remediation evidence. `Runner` rejects
-every adapter except the side-effect-free no-op until a separate idempotent
-remediation-event persistence and legacy-migration contract exists.
+does not treat the outcome as durable remediation evidence. `NewRunner` installs
+a side-effect-free no-op that preserves the stored finding state. Custom
+remediators remain callable for compatibility but are deprecated; `ce-1hu9.13`
+owns an idempotent remediation-event persistence and migration contract before
+an in-repository side-effecting adapter may be activated.
 
 ## EARS Requirements
 
@@ -38,4 +40,4 @@ remediation-event persistence and legacy-migration contract exists.
 
 **AUDIT-08** When a remediator returns an invalid or unchanged finding state, the system shall discard the returned note without updating the finding state.
 
-**AUDIT-09** While no idempotent remediation-event persistence and legacy-migration contract exists, the system shall reject any runner configured with a Remediator other than the side-effect-free no-op before writing audit state.
+**AUDIT-09** When the default no-op remediator processes a finding, the system shall preserve the finding state.

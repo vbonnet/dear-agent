@@ -101,12 +101,10 @@ func (r Remediation) Validate() error {
 // The current runner cannot treat Apply's result as durable evidence: it
 // ignores ApplyOutcome.Status and ApplyOutcome.Reference, and passes Note to
 // the store only when State is valid and differs from the stored state.
-// Preflight rejects any implementation other than NewNoopRemediator before
-// writing audit state.
 //
 // Deprecated: Do not add or configure side-effecting implementations. This
 // interface remains exported for compatibility until an idempotent remediation
-// event, persistence, and legacy-migration contract replaces it.
+// event, persistence, and legacy-migration contract replaces it in ce-1hu9.13.
 type Remediator interface {
 	Apply(ctx context.Context, finding Finding, env Env) (ApplyOutcome, error)
 }
@@ -131,10 +129,10 @@ type ApplyOutcome struct {
 type noopRemediator struct{}
 
 // NewNoopRemediator returns a Remediator that performs no side effects. Its
-// unchanged FindingOpen outcome causes Runner to discard all descriptive
-// fields, so the outcome is not evidence that remediation occurred.
+// outcome preserves the input finding state, causing Runner to discard all
+// descriptive fields, so the outcome is not evidence that remediation occurred.
 func NewNoopRemediator() Remediator { return noopRemediator{} }
 
-func (noopRemediator) Apply(_ context.Context, _ Finding, _ Env) (ApplyOutcome, error) {
-	return ApplyOutcome{Status: "no-op", State: FindingOpen, Note: "noop remediator"}, nil
+func (noopRemediator) Apply(_ context.Context, finding Finding, _ Env) (ApplyOutcome, error) {
+	return ApplyOutcome{Status: "no-op", State: finding.State, Note: "noop remediator"}, nil
 }

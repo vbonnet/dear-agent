@@ -109,7 +109,7 @@ func runAudit(args []string, stdout, stderr *os.File) int {
 	var common commonStoreFlags
 	common.bind(fs)
 	cadence := fs.String("cadence", "daily", "cadence to run: daily|weekly|monthly|on-demand")
-	dryRun := fs.Bool("dry-run", false, "compatibility flag; remediation is currently side-effect-free in all modes")
+	dryRun := fs.Bool("dry-run", false, "execute checks but skip remediation side effects")
 	repoRoot := fs.String("repo", ".", "repository root (defaults to cwd)")
 	verbose := fs.Bool("verbose", false, "debug logging")
 	if err := fs.Parse(args); err != nil {

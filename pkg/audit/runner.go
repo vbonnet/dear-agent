@@ -26,8 +26,8 @@ type Runner struct {
 	// Remediator is the dormant StrategyAuto compatibility seam. Runner drops
 	// Status and Reference, and drops Note unless State changes.
 	//
-	// Deprecated: Preflight accepts only NewNoopRemediator until an idempotent
-	// remediation-event persistence and legacy-migration contract exists.
+	// Deprecated: Do not configure an in-repository side-effecting adapter before
+	// ce-1hu9.13 supplies an idempotent remediation-event persistence contract.
 	Remediator Remediator
 
 	// Now is overridable in tests. Production callers leave it nil
@@ -77,9 +77,8 @@ type Plan struct {
 	// SeverityPolicy maps each Severity to a per-severity policy.
 	// nil falls back to the package default in DefaultSeverityPolicy.
 	SeverityPolicy map[Severity]SeverityRule
-	// DryRun is retained for workflow-audit CLI compatibility. The only accepted
-	// Remediator is side-effect-free, so both modes currently record findings
-	// without remediation side effects.
+	// DryRun, when true, records findings but does not invoke the
+	// Remediator. Used by workflow-audit run --dry-run.
 	DryRun bool
 }
 
@@ -507,9 +506,6 @@ func (r *Runner) preflightRunner() error {
 	}
 	if r.Remediator == nil {
 		r.Remediator = NewNoopRemediator()
-	}
-	if _, ok := r.Remediator.(noopRemediator); !ok {
-		return errors.New("audit: Runner.Remediator must be NewNoopRemediator until remediation outcomes are durably persisted")
 	}
 	if r.Logger == nil {
 		r.Logger = slog.Default()

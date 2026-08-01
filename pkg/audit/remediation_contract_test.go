@@ -8,9 +8,13 @@ import (
 
 type contractRemediator struct {
 	outcome ApplyOutcome
+	calls   *int
 }
 
 func (r contractRemediator) Apply(context.Context, Finding, Env) (ApplyOutcome, error) {
+	if r.calls != nil {
+		(*r.calls)++
+	}
 	return r.outcome, nil
 }
 
@@ -96,21 +100,85 @@ func TestRunnerRemediatorOutcomePersistenceBoundary(t *testing.T) {
 	}
 }
 
-func TestRunnerRejectsCustomRemediatorBeforeStoreMutation(t *testing.T) {
-	check := fakeCheck{id: "demo"}
+func TestRunnerNoopRemediatorPreservesAcknowledgedAutoFinding(t *testing.T) {
+	check := fakeCheck{
+		id: "demo",
+		findings: []Finding{{
+			Fingerprint: "auto-finding",
+			Severity:    SeverityP0,
+			Title:       "requires attention",
+			Suggested: Remediation{
+				Strategy: StrategyAuto,
+				Command:  "unused",
+			},
+		}},
+	}
 	runner, store, _ := newTestRunner(t, check)
-	runner.Remediator = contractRemediator{}
-
+	runner.IDGen = sequenceIDs("run-1", "run-2")
 	plan := Plan{
 		Repo: "demo", RepoRoot: "/tmp/demo", Cadence: CadenceDaily,
 		Trees: []TreePlan{{WorkingDir: "/tmp/demo", Checks: []ScheduledCheck{{CheckID: "demo"}}}},
 	}
-	_, err := runner.Run(context.Background(), plan)
-	const want = "audit: Runner.Remediator must be NewNoopRemediator until remediation outcomes are durably persisted"
-	if err == nil || err.Error() != want {
-		t.Fatalf("Run error = %v, want %q", err, want)
+	first, err := runner.Run(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
 	}
-	if len(store.runs) != 0 || len(store.findings) != 0 {
-		t.Fatalf("preflight mutated store: runs=%d findings=%d", len(store.runs), len(store.findings))
+	findingID := first.CheckOutcomes[0].Findings[0].FindingID
+	if _, err := store.SetFindingState(context.Background(), findingID, FindingAcknowledged, "triaged"); err != nil {
+		t.Fatalf("acknowledge finding: %v", err)
+	}
+
+	if _, err := runner.Run(context.Background(), plan); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	got, err := store.GetFinding(context.Background(), findingID)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got.State != FindingAcknowledged {
+		t.Fatalf("finding state = %q, want %q", got.State, FindingAcknowledged)
+	}
+}
+
+func TestRunnerCustomRemediatorRemainsCallableForCompatibility(t *testing.T) {
+	check := fakeCheck{
+		id: "demo",
+		findings: []Finding{{
+			Fingerprint: "auto-finding",
+			Severity:    SeverityP0,
+			Title:       "requires attention",
+			Suggested: Remediation{
+				Strategy: StrategyAuto,
+				Command:  "unused",
+			},
+		}},
+	}
+	runner, store, _ := newTestRunner(t, check)
+	calls := 0
+	runner.Remediator = contractRemediator{
+		calls: &calls,
+		outcome: ApplyOutcome{
+			State: FindingResolved,
+			Note:  "compatibility outcome",
+		},
+	}
+	plan := Plan{
+		Repo: "demo", RepoRoot: "/tmp/demo", Cadence: CadenceDaily,
+		Trees: []TreePlan{{WorkingDir: "/tmp/demo", Checks: []ScheduledCheck{{CheckID: "demo"}}}},
+	}
+
+	report, err := runner.Run(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("custom Remediator.Apply calls = %d, want 1", calls)
+	}
+	got, err := store.GetFinding(context.Background(), report.CheckOutcomes[0].Findings[0].FindingID)
+	if err != nil {
+		t.Fatalf("GetFinding: %v", err)
+	}
+	if got.State != FindingResolved {
+		t.Fatalf("finding state = %q, want %q", got.State, FindingResolved)
 	}
 }
