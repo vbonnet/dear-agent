@@ -9,12 +9,12 @@ Framework for implementing CLI health check (doctor) commands with auto-fix capa
 - 📊 **Summary Generation** - Aggregate statistics and exit codes
 - ⚡ **Parallel Execution** - Optional parallel check execution
 - 🎯 **Categorization** - Group checks by category (core, dependency, etc.)
-- ✅ **Well tested** - 92.3% test coverage
+- ✅ **Well tested** - Focused unit and command-level behavioral tests
 
 ## Installation
 
 ```bash
-go get github.com/vbonnet/engram/libs/health-checker
+go get github.com/vbonnet/dear-agent/pkg/health-checker
 ```
 
 ## Quick Start
@@ -22,7 +22,7 @@ go get github.com/vbonnet/engram/libs/health-checker
 ### 1. Implement a Check
 
 ```go
-import "github.com/vbonnet/engram/libs/health-checker"
+import "github.com/vbonnet/dear-agent/pkg/health-checker"
 
 type WorkspaceCheck struct {
     path string
@@ -153,7 +153,7 @@ fixer := healthchecker.NewFixer().WithDryRun(true)
 
 ## Requirements
 
-- Go 1.21 or later
+- The Go version declared in the repository's `go.mod`
 - No external dependencies
 
 ## Testing
@@ -164,4 +164,4 @@ go test -v -cover
 
 ## License
 
-Same as parent engram project.
+Apache License 2.0. See the repository [LICENSE](../../LICENSE).
