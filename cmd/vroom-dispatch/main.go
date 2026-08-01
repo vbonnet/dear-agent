@@ -336,23 +336,35 @@ func supervisorPaneAuthFailed(content, harness string) bool {
 	lower := strings.Join(lines, "\n")
 	switch harness {
 	case "claude-code":
-		return hasExactLine(lines, "please run /login") ||
-			(strings.Contains(lower, "claude") &&
-				(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth")) &&
-				hasAny(lower, "401", "unauthorized", "authentication", "session expired", "token expired", "not authenticated"))
+		return claudePaneAuthFailed(lines, lower)
 	case "codex-cli":
-		return strings.Contains(lower, "codex login") ||
-			strings.Contains(lower, "run `codex login`") ||
-			(strings.Contains(lower, "openai") && strings.Contains(lower, "api key") &&
-				hasAny(lower, "missing", "not found", "unauthorized", "authentication", "not authenticated"))
+		return codexPaneAuthFailed(lower)
 	case "agy":
-		return strings.Contains(lower, "gcloud auth application-default login") ||
-			strings.Contains(lower, "google_application_credentials") ||
-			(strings.Contains(lower, "agy") && strings.Contains(lower, "sign in") &&
-				hasAny(lower, "authentication", "not authenticated", "session expired", "token expired"))
+		return agyPaneAuthFailed(lower)
 	default:
 		return false
 	}
+}
+
+func claudePaneAuthFailed(lines []string, lower string) bool {
+	return hasExactLine(lines, "please run /login") ||
+		(strings.Contains(lower, "claude") &&
+			(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth")) &&
+			hasAny(lower, "401", "unauthorized", "authentication", "session expired", "token expired", "not authenticated"))
+}
+
+func codexPaneAuthFailed(lower string) bool {
+	return strings.Contains(lower, "codex login") ||
+		strings.Contains(lower, "run `codex login`") ||
+		(strings.Contains(lower, "openai") && strings.Contains(lower, "api key") &&
+			hasAny(lower, "missing", "not found", "unauthorized", "authentication", "not authenticated"))
+}
+
+func agyPaneAuthFailed(lower string) bool {
+	return strings.Contains(lower, "gcloud auth application-default login") ||
+		strings.Contains(lower, "google_application_credentials") ||
+		(strings.Contains(lower, "agy") && strings.Contains(lower, "sign in") &&
+			hasAny(lower, "authentication", "not authenticated", "session expired", "token expired"))
 }
 
 func recentSupervisorPaneLines(content string) []string {
@@ -386,12 +398,7 @@ func hasAny(content string, markers ...string) bool {
 }
 
 func hasExactLine(lines []string, want string) bool {
-	for _, line := range lines {
-		if line == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lines, want)
 }
 
 // heartbeatFileName maps a supervisor identity to the compact heartbeat file
