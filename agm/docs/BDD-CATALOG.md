@@ -1346,6 +1346,35 @@ diff-based package guard gives fast changed-package diagnostics, and the
 actual-checkout gate prevents any implementation directory from remaining
 outside strict SPEC and executable BDD enforcement.
 
+### SPEC Audit Tooling Evidence Boundary
+
+**File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)
+
+**Drives:** focused `tools/specaudit` unit tests for the root-module command's
+pinned inventory, validation, and offline HTML rendering behavior. It does not
+exercise skill discovery, skill invocation, provider behavior, or maintainer
+decisions.
+
+**Key scenarios:**
+- Exact pinned Git-object inventory ignores dirty worktree content.
+- Duplicate IDs, exact bodies, shared BDD paths, identical files, and harness
+  terminology remain deterministic review leads rather than semantic verdicts.
+- Missing and nonreciprocal SPEC/BDD links remain visible diagnostics.
+- Positive findings must match pinned Git-resolved evidence, identify one
+  shared reciprocal feature across current owners, and carry a structurally
+  complete ownership-preservation proposal that remains pending maintainer
+  approval; forged evidence and unsafe positive verdicts fail validation.
+- Offline HTML remains escaped, self-contained, and bounded.
+- Successful inventory, validation, and rendering emit their expected stdout
+  while preserving tracked bytes and status, index identity and content,
+  `HEAD`, refs, and relevant SPEC and feature bytes in the target repository.
+
+**Why this matters:** The audit command cannot credibly supply review evidence
+if dirty bytes can alter pinned evidence, lexical similarity becomes a merge
+verdict, reciprocal BDD drift is hidden, or a report mutates product state
+before maintainer review. The focused checks are not evidence that a skill is
+discoverable or that a maintainer accepted a recommendation.
+
 ### VROOM Runtime Guardrails
 
 **File:** [`vroom_runtime_guardrails.feature`](../test/bdd/features/vroom_runtime_guardrails.feature)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -1700,6 +1699,68 @@ func TestCheckRepositoryRejectsSurfaceWithNoTrackedMatches(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryRejectsCanonicalSPECGovernanceFileRemovalOrRelocation(t *testing.T) {
+	canonicalFiles := []string{
+		"spec-governance/skills/write-spec/SKILL.md",
+		"spec-governance/skills/write-spec/references/contract-model.md",
+		"spec-governance/skills/write-spec/references/ears-and-bdd.md",
+		"spec-governance/skills/audit-specs/SKILL.md",
+		"spec-governance/skills/audit-specs/references/audit-verdicts.md",
+		"spec-governance/skills/audit-specs/references/report-schema.md",
+	}
+	for _, canonicalFile := range canonicalFiles {
+		for _, mutation := range []string{"removed", "relocated"} {
+			t.Run(canonicalFile+"/"+mutation, func(t *testing.T) {
+				repo := t.TempDir()
+				runGit(t, repo, "init", "-q")
+				writeTestFile(t, repo, ".dear-agent.yml", "instruction-policy:\n  surfaces:\n    - match: "+canonicalFile+"\n      owner: spec-governance\n")
+				writeTestFile(t, repo, canonicalFile, "# Canonical SPEC governance file\n")
+				runGit(t, repo, "add", ".dear-agent.yml", canonicalFile)
+				if _, violations, err := CheckRepository(context.Background(), repo); err != nil || len(violations) != 0 {
+					t.Fatalf("initial exact-file policy failed: err=%v violations=%v", err, violations)
+				}
+
+				switch mutation {
+				case "removed":
+					if err := os.Remove(filepath.Join(repo, filepath.FromSlash(canonicalFile))); err != nil {
+						t.Fatal(err)
+					}
+				case "relocated":
+					relocated := filepath.ToSlash(filepath.Join(filepath.Dir(canonicalFile), "relocated-"+filepath.Base(canonicalFile)))
+					runGit(t, repo, "mv", canonicalFile, relocated)
+				}
+				if _, _, err := CheckRepository(context.Background(), repo); err == nil {
+					t.Fatal("exact-file policy accepted a removed or relocated canonical file")
+				}
+			})
+		}
+	}
+}
+
+func TestRepositoryHasExactlyTwoCanonicalSPECGovernanceSkills(t *testing.T) {
+	root := repositoryRoot(t)
+	matches, err := filepath.Glob(filepath.Join(root, "spec-governance", "skills", "*", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(matches))
+	for _, match := range matches {
+		relative, err := filepath.Rel(root, match)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, filepath.ToSlash(relative))
+	}
+	slices.Sort(got)
+	want := []string{
+		"spec-governance/skills/audit-specs/SKILL.md",
+		"spec-governance/skills/write-spec/SKILL.md",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("canonical SPEC governance skills = %v, want %v", got, want)
+	}
+}
+
 func TestRepositoryInstructionPolicyIsConformant(t *testing.T) {
 	root := repositoryRoot(t)
 	result, violations, err := CheckRepository(context.Background(), root)
@@ -1747,7 +1808,7 @@ func runGitOutput(t *testing.T, root string, args ...string) string {
 
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd := gittest.Command(t, ".", "rev-parse", "--show-toplevel")
 	output, err := cmd.Output()
 	if err != nil {
 		t.Skipf("not in a Git worktree: %v", err)
