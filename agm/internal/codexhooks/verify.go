@@ -1246,6 +1246,58 @@ func sedUsesCommandExecution(command string, args []*syntax.Word) bool {
 	return slices.ContainsFunc(programs, sedProgramExecutesCommand)
 }
 
+func sedUsesMutableInput(command string, args []*syntax.Word) bool {
+	base := filepath.Base(command)
+	if base != "sed" && base != "gsed" {
+		return false
+	}
+	return !sedInputOperandsAreSafe(args)
+}
+
+func sedInputOperandsAreSafe(args []*syntax.Word) bool {
+	programs := 0
+	options := true
+	for index := 0; index < len(args); index++ {
+		value, static := staticShellWord(args[index])
+		if !static {
+			return false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options {
+			program, nextIndex, expression, valid := staticSedExpression(args, index, value)
+			if expression {
+				if !valid || program == "" {
+					return false
+				}
+				programs++
+				index = nextIndex
+				continue
+			}
+			if sedProgramFileOption(value) {
+				return false
+			}
+			if safeSedOption(value) || strings.HasPrefix(value, "-") {
+				continue
+			}
+		}
+		if programs == 0 {
+			programs++
+			continue
+		}
+		if !sedInputPathIsSafe(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func sedInputPathIsSafe(value string) bool {
+	return value == "-" || filepath.IsAbs(value) && trustedHookSystemInputPath(value)
+}
+
 func findUsesCommandExecution(command string, args []*syntax.Word) bool {
 	if filepath.Base(command) != "find" {
 		return false
@@ -1737,6 +1789,9 @@ func commandCapableRuntimeReason(command string, args []*syntax.Word) string {
 	}
 	if awkUsesCommandExecution(command, args) {
 		return "command-capable AWK runtime"
+	}
+	if sedUsesMutableInput(command, args) {
+		return "mutable sed input operand"
 	}
 	if sedUsesCommandExecution(command, args) {
 		return "command-capable sed runtime"

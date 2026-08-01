@@ -11,7 +11,7 @@ import (
 var runOverrideAuditLogger = func(message string) ([]byte, error) {
 	// #nosec G204 -- executable and options are fixed; message is one argv value.
 	return exec.Command(
-		"logger", "-t", "dear-agent-override-audit", "--", message,
+		"/usr/bin/logger", "-t", "dear-agent-override-audit", "--", message,
 	).CombinedOutput()
 }
 

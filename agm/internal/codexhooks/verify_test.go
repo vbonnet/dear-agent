@@ -358,6 +358,7 @@ func TestValidateScriptAssetRejectsMutableFileOperands(t *testing.T) {
 		"#!/bin/sh\ngrep pattern decision.json\n",
 		"#!/bin/sh\nhead -1 decision.json\n",
 		"#!/bin/sh\ntail -1 decision.json\n",
+		"#!/bin/sh\nsed -n p decision.json\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil {
 			t.Fatalf("validateScriptAsset(%q) accepted mutable file operand", script)
@@ -372,6 +373,7 @@ func TestValidateScriptAssetAllowsSafeFileUtilityModes(t *testing.T) {
 		"#!/bin/sh\nprintf pattern | head -1\n",
 		"#!/bin/sh\nprintf pattern | tail -1\n",
 		"#!/bin/sh\ncat /dev/null\n",
+		"#!/bin/sh\nsed -n p /dev/null\n",
 		"#!/bin/sh\ncmd=value\nprintf '%s' \"$cmd\" | grep -q -- '--emergency'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err != nil {
