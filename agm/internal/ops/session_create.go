@@ -14,6 +14,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -132,12 +133,13 @@ type CreateSessionRuntime interface {
 // after the shared lifecycle has reserved the session name but before any
 // workspace, permission, provider, tmux, or harness mutation.
 type CreateSessionPreparation struct {
-	SessionID        string
-	SessionName      string
-	Cwd              string
-	ExtraAddDirs     []string
-	PermissionPolicy *manifest.PermissionPolicy
-	Sandbox          *manifest.SandboxConfig
+	SessionID            string
+	SessionName          string
+	Cwd                  string
+	ExtraAddDirs         []string
+	PermissionPolicy     *manifest.PermissionPolicy
+	Sandbox              *manifest.SandboxConfig
+	BypassCodexHookTrust bool
 }
 
 // CreateSessionPreparer is an optional runtime capability for surface-specific
@@ -174,6 +176,7 @@ type CreateSessionRequest struct {
 	DisableAutoMode        bool                  `json:"-"`
 	MaxBudgetUSD           float64               `json:"-"`
 	ExtraAddDirs           []string              `json:"-"`
+	BypassCodexHookTrust   bool                  `json:"-"`
 	ForwardTelemetry       bool                  `json:"-"`
 	ForwardClaudeOAuth     bool                  `json:"-"`
 	AllowEmptyPrompt       bool                  `json:"-"`
@@ -407,7 +410,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err := prepareCreateStorage(callCtx, opCtx, req, state); err != nil {
 		return nil, err
 	}
-	state.nameReserved, err = reserveCreateSessionName(state.store, sessionID, params.name)
+	state.nameReserved, err = reserveCreateSessionName(state.store, sessionID, params.name, req.RegisterBeforeLaunch)
 	if err != nil {
 		return nil, err
 	}
@@ -423,8 +426,10 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 		req = prepared
 	}
-	if err := renewCreateSessionNameReservation(state.store, sessionID, params.name); err != nil {
-		return nil, err
+	if state.nameReserved {
+		if err := renewCreateSessionNameReservation(state.store, sessionID, params.name); err != nil {
+			return nil, err
+		}
 	}
 
 	if agyIdentityTracker != nil {
@@ -446,19 +451,14 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	if err := verifyCreateCodexHookTrust(callCtx, req, params); err != nil {
+		return nil, err
+	}
 	var manifestPath string
 	var m *manifest.Manifest
 	if req.RegisterBeforeLaunch {
 		manifestPath, m, err = prepareAndRegisterCreatedSession(
-			callCtx,
-			req,
-			state,
-			params,
-			sessionID,
-			codexMeta,
-			nil,
-			"",
-			true,
+			callCtx, req, state, params, sessionID, codexMeta, nil, "", true,
 		)
 		if err != nil {
 			return nil, err
@@ -470,9 +470,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	}
 	if req.RegisterBeforeLaunch {
 		// Queue submission into the current pane is irreversible once accepted:
-		// the shell will consume it after AGM exits. Preserve the already-durable
-		// registration and its manifest directory across every later error so a
-		// queued harness can never outlive its unique active-name owner.
+		// preserve the durable registration across later caller-side errors.
 		state.registered = false
 		state.createdManifestDir = false
 	}
@@ -488,17 +486,11 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 		launchResult.PromptDelivered = true
 	}
+
 	if !req.RegisterBeforeLaunch {
 		manifestPath, m, err = prepareAndRegisterCreatedSession(
-			callCtx,
-			req,
-			state,
-			params,
-			sessionID,
-			codexMeta,
-			agyIdentityTracker,
-			previousAgyConversationID,
-			false,
+			callCtx, req, state, params, sessionID, codexMeta,
+			agyIdentityTracker, previousAgyConversationID, false,
 		)
 		if err != nil {
 			return nil, err
@@ -552,6 +544,7 @@ func prepareCreateSessionAfterReservation(
 	preparedRequest.ExtraAddDirs = append([]string{}, prepared.ExtraAddDirs...)
 	preparedRequest.Metadata.PermissionPolicy = cloneCreatePermissionPolicy(prepared.PermissionPolicy)
 	preparedRequest.Metadata.Sandbox = cloneCreateSandboxConfig(prepared.Sandbox)
+	preparedRequest.BypassCodexHookTrust = prepared.BypassCodexHookTrust
 
 	preparedParams, err := validateCreateRequest(opCtx, &preparedRequest)
 	if err != nil {
@@ -574,6 +567,26 @@ func prepareCreateSessionAfterReservation(
 		return nil, nil, ErrStorageError("prepare harness launch", err)
 	}
 	return &preparedRequest, preparedParams, nil
+}
+
+func verifyCreateCodexHookTrust(ctx context.Context, req *CreateSessionRequest, params *createSessionParams) error {
+	if params.harness != "codex-cli" || !req.BypassCodexHookTrust {
+		return nil
+	}
+	sandbox := req.Metadata.Sandbox
+	if sandbox == nil || !sandbox.Enabled {
+		return ErrInvalidInput("bypass_codex_hook_trust", "An enabled sandbox with verified hook evidence is required.")
+	}
+	err := codexhooks.Verify(ctx, codexhooks.Attestation{
+		SourceRepo:   sandbox.CodexHookSourceRepo,
+		SourceCommit: sandbox.CodexHookSourceCommit,
+		Digest:       sandbox.CodexHookDigest,
+		HookRoot:     sandbox.CodexHookRoot,
+	}, req.Cwd)
+	if err != nil {
+		return ErrInvalidInput("bypass_codex_hook_trust", fmt.Sprintf("Hook evidence failed revalidation immediately before launch: %v", err))
+	}
+	return nil
 }
 
 func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {
@@ -650,11 +663,7 @@ func establishCreatedHarnessReadiness(ctx context.Context, opCtx *OpContext, req
 	case CreateSessionReadinessVerified:
 		return nil
 	case CreateSessionReadinessDeferredUntilCallerExit:
-		if req.Caller.Surface != CreateSurfaceCLI ||
-			!supportsDeferredCurrentTmuxReadiness(params.harness) ||
-			!req.ReuseExistingTmux ||
-			!req.RegisterBeforeLaunch ||
-			req.Prompt != "" {
+		if req.Caller.Surface != CreateSurfaceCLI || !supportsDeferredCurrentTmuxReadiness(params.harness) || !req.ReuseExistingTmux || req.Prompt != "" {
 			return ErrStorageError("create.readiness", fmt.Errorf("deferred readiness is valid only for supported current-tmux harness creation without an initial prompt"))
 		}
 		return nil
@@ -696,11 +705,8 @@ func prepareCreateStorage(callCtx context.Context, opCtx *OpContext, req *Create
 	if err != nil {
 		return ErrStorageError("storage.open", err)
 	}
-	if store == nil {
-		if req.RequireStorage {
-			return ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
-		}
-		return nil
+	if store == nil && req.RequireStorage {
+		return ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
 	}
 	return nil
 }
@@ -735,6 +741,17 @@ func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *Creat
 }
 
 func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
+	bypassCodexHookTrust := req.BypassCodexHookTrust &&
+		req.Metadata.Sandbox != nil &&
+		req.Metadata.Sandbox.Enabled
+	codexHookRoot := ""
+	codexHookTrustReason := ""
+	codexHookTrustActor := ""
+	if bypassCodexHookTrust {
+		codexHookRoot = req.Metadata.Sandbox.CodexHookRoot
+		codexHookTrustReason = req.Metadata.Sandbox.BypassCodexHookTrustReason
+		codexHookTrustActor = OverrideActor()
+	}
 	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
@@ -748,11 +765,21 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		MaxBudgetUSD:     req.MaxBudgetUSD,
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
-		Codex:            codexMeta,
-		Pi:               req.Metadata.Pi,
-		PiExtension:      req.Metadata.PiExtension,
-		PiPolicyJSON:     req.Metadata.PiPolicyJSON,
-		PiPolicyFile:     req.Metadata.PiPolicyFile,
+
+		BypassCodexHookTrust: bypassCodexHookTrust,
+		CodexHookRoot:        codexHookRoot,
+		CodexHookTrustReason: codexHookTrustReason,
+		CodexHookTrustActor:  codexHookTrustActor,
+		Codex:                codexMeta,
+		Pi:                   req.Metadata.Pi,
+		PiExtension:          req.Metadata.PiExtension,
+		PiPolicyJSON:         req.Metadata.PiPolicyJSON,
+		PiPolicyFile:         req.Metadata.PiPolicyFile,
+	}
+	if bypassCodexHookTrust {
+		spec.CodexHookSourceRepo = req.Metadata.Sandbox.CodexHookSourceRepo
+		spec.CodexHookSourceCommit = req.Metadata.Sandbox.CodexHookSourceCommit
+		spec.CodexHookDigest = req.Metadata.Sandbox.CodexHookDigest
 	}
 	if params.harness == "pi-cli" {
 		spec.PiLaunchID = launchparity.NewPiLaunchID()
@@ -766,8 +793,10 @@ func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
 	}
 	sandbox := *req.Metadata.Sandbox
 	sandbox.ExtraAddDirs = nil
+	sandbox.BypassCodexHookTrust = false
 	if sandbox.Enabled {
 		sandbox.ExtraAddDirs = append([]string{}, req.ExtraAddDirs...)
+		sandbox.BypassCodexHookTrust = req.BypassCodexHookTrust
 	}
 	return &sandbox
 }
@@ -821,10 +850,7 @@ func prepareAndRegisterCreatedSession(
 		state.nameReserved = false
 	}
 	if requireRegistration && !state.registered {
-		return "", nil, ErrStorageError(
-			"storage.CreateSession",
-			fmt.Errorf("durable session registration is required before launch"),
-		)
+		return "", nil, ErrStorageError("storage.CreateSession", fmt.Errorf("durable session registration is required before launch"))
 	}
 	return manifestPath, m, nil
 }
@@ -843,9 +869,6 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 		}
 		var uncertain *dolt.SessionRegistrationCommitUncertainError
 		if errors.As(err, &uncertain) {
-			// A lost commit acknowledgement can leave the row durable. Mark it
-			// owned so lifecycle rollback explicitly deletes the possible
-			// registration before removing the launched runtime.
 			return true, ErrStorageError("storage.CreateSession", err)
 		}
 		return false, ErrStorageError("storage.CreateSession", err)
@@ -853,15 +876,21 @@ func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *ma
 	return true, nil
 }
 
-func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool, error) {
+func reserveCreateSessionName(store dolt.Storage, sessionID, name string, required bool) (bool, error) {
 	if name == "" {
 		return false, nil
 	}
 	if store == nil {
+		if !required {
+			return false, nil
+		}
 		return false, ErrStorageError("storage.ReserveSessionName", fmt.Errorf("session storage is required for named sessions"))
 	}
 	reservations, ok := store.(dolt.SessionNameReservationStore)
 	if !ok {
+		if !required {
+			return false, nil
+		}
 		return false, ErrStorageError("storage.ReserveSessionName", fmt.Errorf("session storage does not support atomic name reservations"))
 	}
 	if err := reservations.ReserveSessionName(sessionID, name); err != nil {
@@ -871,8 +900,6 @@ func reserveCreateSessionName(store dolt.Storage, sessionID, name string) (bool,
 		}
 		var uncertain *dolt.SessionNameReservationCommitUncertainError
 		if errors.As(err, &uncertain) {
-			// A lost commit acknowledgement can leave the lease durable. Mark
-			// it owned so finish retries explicit release before returning.
 			return true, ErrStorageError("storage.ReserveSessionName", err)
 		}
 		return false, ErrStorageError("storage.ReserveSessionName", err)
@@ -965,7 +992,7 @@ func sessionExistsError(name string) error {
 		Type:   "session/exists",
 		Code:   ErrCodeSessionExists,
 		Title:  "Session already exists",
-		Detail: sessionNameExistsMessage(name),
+		Detail: fmt.Sprintf("A tmux session named %q already exists.", name),
 		Suggestions: []string{
 			"Use a different title.",
 			fmt.Sprintf("Archive the existing session: agm session archive %s", name),

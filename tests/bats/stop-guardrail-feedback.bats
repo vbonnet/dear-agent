@@ -143,6 +143,20 @@ hook() { run bash -c 'printf "%s" "$1" | "$2"' _ "$1" "$HOOK"; }
     [ -z "$output" ]
 }
 
+@test "Codex hook-trust bypass never executes mutable project guardrails" {
+    HOOK="$REPO_ROOT/.codex/hooks/stop-guardrail-feedback"
+    printf '#!/bin/bash\ntouch %q\nexit 1\n' "$TEST_TMPDIR/mutable-ran" > "$REPO/scripts/guardrail-bundle.sh"
+    chmod +x "$REPO/scripts/guardrail-bundle.sh"
+    echo dirty > "$REPO/dirty.txt"
+
+    run env AGM_CODEX_HOOK_ROOT="$TEST_TMPDIR/immutable-hooks" \
+        bash -c "printf '%s' '$STOP_INPUT' | '$HOOK'"
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$TEST_TMPDIR/mutable-ran" ]
+}
+
 @test "untrackable counter + stop_hook_active yields (secondary brake)" {
     dirty
     # Point the state dir at a regular file so mkdir/write fail.

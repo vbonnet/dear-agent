@@ -139,12 +139,13 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 	}
 
 	return &manifest.SandboxConfig{
-		Enabled:    true,
-		ID:         sb.ID,
-		Provider:   provider.Name(),
-		MergedPath: sb.MergedPath,
-		WorkingDir: sb.WorkingDir,
-		CreatedAt:  sb.CreatedAt,
+		Enabled:             true,
+		ID:                  sb.ID,
+		Provider:            provider.Name(),
+		MergedPath:          sb.MergedPath,
+		WorkingDir:          sb.WorkingDir,
+		CodexHookSourceRepo: targetRepo,
+		CreatedAt:           sb.CreatedAt,
 	}, nil
 }
 

@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 type resumeTestTmux struct {
@@ -470,14 +473,37 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 
 func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalReserveCodexHookTrust := reserveCodexHookTrust
+	t.Cleanup(func() { reserveCodexHookTrust = originalReserveCodexHookTrust })
+	reserveCodexHookTrust = func(reason, actor, session, subject string) (
+		*override.Reservation, override.AuthorizationProof, error,
+	) {
+		return nil, override.AuthorizationProof{
+			Kind:            override.KindCodexHookTrust,
+			Reason:          reason,
+			Actor:           actor,
+			Session:         session,
+			Subject:         subject,
+			AuthorizationID: "0123456789abcdef0123456789abcdef",
+		}, nil
+	}
+	configDir := t.TempDir()
+	t.Setenv("AGM_CONFIG_DIR", configDir)
+	worktreePath, hookTrust := resumeCodexHookFixture(t)
 	extraAddDir := filepath.Join(t.TempDir(), "real worktree")
 	m := &manifest.Manifest{
 		SessionID: "sandbox-codex-session",
 		Harness:   "codex-cli",
 		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
 		Sandbox: &manifest.SandboxConfig{
-			Enabled:      true,
-			ExtraAddDirs: []string{extraAddDir},
+			Enabled:                    true,
+			ExtraAddDirs:               []string{extraAddDir},
+			BypassCodexHookTrust:       true,
+			BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+			CodexHookSourceRepo:        hookTrust.SourceRepo,
+			CodexHookSourceCommit:      hookTrust.SourceCommit,
+			CodexHookDigest:            hookTrust.Digest,
+			CodexHookRoot:              hookTrust.HookRoot,
 		},
 	}
 	launch, _, _, err := prepareResumeLaunch(
@@ -486,16 +512,125 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 		"codex-cli",
 		ResumeSessionHealth{
 			TmuxSessionName: "sandbox-codex",
-			WorktreePath:    t.TempDir(),
+			WorktreePath:    worktreePath,
 		},
 	)
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
 	}
-	want := "--add-dir " + shellquote.Quote(extraAddDir)
-	if !strings.Contains(launch.Command, want) {
-		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
+	for _, want := range []string{
+		"--add-dir " + shellquote.Quote(extraAddDir),
+		"--bypass-hook-trust",
+		"--hook-root " + shellquote.Quote(hookTrust.HookRoot),
+	} {
+		if !strings.Contains(launch.Command, want) {
+			t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
+		}
 	}
+}
+
+func TestPrepareResumeLaunchRejectsInvalidCodexHookTrustReason(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	configDir := t.TempDir()
+	t.Setenv("AGM_CONFIG_DIR", configDir)
+	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	m := &manifest.Manifest{
+		SessionID: "sandbox-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:               true,
+			BypassCodexHookTrust:  true,
+			CodexHookSourceRepo:   hookTrust.SourceRepo,
+			CodexHookSourceCommit: hookTrust.SourceCommit,
+			CodexHookDigest:       hookTrust.Digest,
+			CodexHookRoot:         hookTrust.HookRoot,
+		},
+	}
+	_, _, _, err := prepareResumeLaunch(
+		nil, m, "codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "sandbox-codex",
+			WorktreePath:    worktreePath,
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "revalidate Codex hook-trust reason before resume") {
+		t.Fatalf("prepareResumeLaunch() error = %v, want invalid reason refusal", err)
+	}
+}
+
+func TestPrepareResumeLaunchRejectsChangedSandboxCodexHooks(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	if err := os.WriteFile(filepath.Join(worktreePath, ".codex", "hooks", "guard"), []byte("#!/bin/sh\nexit 99\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{
+		SessionID: "sandbox-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:                    true,
+			BypassCodexHookTrust:       true,
+			BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+			CodexHookSourceRepo:        hookTrust.SourceRepo,
+			CodexHookSourceCommit:      hookTrust.SourceCommit,
+			CodexHookDigest:            hookTrust.Digest,
+			CodexHookRoot:              hookTrust.HookRoot,
+		},
+	}
+	_, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "sandbox-codex",
+			WorktreePath:    worktreePath,
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "revalidate Codex hook trust before resume") {
+		t.Fatalf("prepareResumeLaunch() error = %v, want hook revalidation failure", err)
+	}
+}
+
+func resumeCodexHookFixture(t *testing.T) (string, codexhooks.Attestation) {
+	t.Helper()
+	source := gittest.NewRepo(t)
+	hooksDir := filepath.Join(source, ".codex", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifestBody := `{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-.}/.codex/hooks/guard"}]}]}}`
+	if err := os.WriteFile(filepath.Join(source, ".codex", "hooks.json"), []byte(manifestBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, "guard"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, source, "add", ".codex")
+	gittest.Run(t, source, "commit", "-m", "add reviewed hooks")
+
+	sandbox := filepath.Join(t.TempDir(), "sandbox")
+	gittest.Run(t, filepath.Dir(sandbox), "clone", "--no-hardlinks", source, sandbox)
+	gittest.HardenRepo(t, sandbox)
+	attestation, err := codexhooks.Attest(
+		context.Background(), source, sandbox, filepath.Join(t.TempDir(), "store"), []string{sandbox},
+	)
+	if err != nil {
+		t.Fatalf("Attest() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(attestation.HookRoot, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
+	return sandbox, attestation
 }
 
 func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *testing.T) {
@@ -505,7 +640,8 @@ func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *te
 		Harness:   "codex-cli",
 		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
 		Sandbox: &manifest.SandboxConfig{
-			ExtraAddDirs: []string{"/tmp/untrusted"},
+			ExtraAddDirs:         []string{"/tmp/untrusted"},
+			BypassCodexHookTrust: true,
 		},
 	}
 	launch, _, _, err := prepareResumeLaunch(
@@ -520,8 +656,10 @@ func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *te
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
 	}
-	if strings.Contains(launch.Command, "--add-dir") {
-		t.Fatalf("prepareResumeLaunch() command = %q, unexpectedly contains --add-dir", launch.Command)
+	for _, unexpected := range []string{"--add-dir", "--bypass-hook-trust"} {
+		if strings.Contains(launch.Command, unexpected) {
+			t.Fatalf("prepareResumeLaunch() command = %q, unexpectedly contains %q", launch.Command, unexpected)
+		}
 	}
 }
 
@@ -891,6 +1029,47 @@ func TestSubmitAndAwaitResumeCancellationDoesNotLaunchPreparedCommand(t *testing
 	}
 	if cancelCalls != 1 {
 		t.Fatalf("prepared launch cancellation calls = %d, want 1", cancelCalls)
+	}
+}
+
+func TestSubmitAndAwaitResumeBindsDeferredOverrideTransactionBeforeSubmission(t *testing.T) {
+	fakeTmux := &resumeTestTmux{}
+	reservation := &override.Reservation{}
+	bound := false
+	fakeTmux.sendHook = func() {
+		if !bound {
+			t.Fatal("resume command submitted before deferred overrides were bound")
+		}
+	}
+	err := submitAndAwaitResume(
+		t.Context(),
+		fakeTmux,
+		nil,
+		&ResumeSessionRequest{},
+		&ResumeSessionResult{},
+		"codex-cli",
+		ResumeSessionHealth{TmuxSessionName: "codex-session", WorktreePath: t.TempDir()},
+		"",
+		HarnessLaunchCommand{
+			Command:      "agm __exec-codex --handoff fixture",
+			Reservations: []*override.Reservation{reservation},
+			BindOverrideReservations: func(recordSpawn bool, got ...*override.Reservation) error {
+				if recordSpawn {
+					t.Fatal("cold resume was recorded as a new spawn")
+				}
+				if len(got) != 1 || got[0] != reservation {
+					t.Fatalf("bound resume reservations = %v, want exact reservation", got)
+				}
+				bound = true
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("submitAndAwaitResume() error = %v", err)
+	}
+	if !bound || len(fakeTmux.commands) != 1 {
+		t.Fatalf("resume boundary = bound %v, commands %v", bound, fakeTmux.commands)
 	}
 }
 

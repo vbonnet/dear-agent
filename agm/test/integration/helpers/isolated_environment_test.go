@@ -141,3 +141,17 @@ func TestUnavailableTmuxPrerequisiteCleansWithoutFailure(t *testing.T) {
 		t.Fatalf("isolated root survived unavailable-prerequisite cleanup: %v", err)
 	}
 }
+
+func TestMissingTmuxTargetRecognizesExitedServer(t *testing.T) {
+	for _, output := range [][]byte{
+		[]byte("no server running on /tmp/agm.sock"),
+		[]byte("server exited unexpectedly"),
+	} {
+		if !missingTmuxTarget(output) {
+			t.Fatalf("missingTmuxTarget(%q) = false, want true", output)
+		}
+	}
+	if missingTmuxTarget([]byte("permission denied")) {
+		t.Fatal("missingTmuxTarget classified an unrelated failure as benign")
+	}
+}

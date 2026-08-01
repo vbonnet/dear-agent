@@ -16,10 +16,12 @@ import (
 // home directory.
 func TestDeployLaunchdPlistsSetWorkingDirectory(t *testing.T) {
 	// Root LaunchDaemons that deliberately do not run in a user home.
-	// fd-limit only runs sysctl as root and is installed by plain cp with no
+	// fd-limit only runs sysctl as root, while override-audit runs a root-owned
+	// fixed command. Both are installed into the system domain without home
 	// placeholder substitution, so a __HOME__ WorkingDirectory would be wrong.
 	exempt := map[string]bool{
-		"com.dear-agent.fd-limit.plist": true,
+		"com.dear-agent.fd-limit.plist":       true,
+		"com.dear-agent.override-audit.plist": true,
 	}
 
 	dir := filepath.Join("..", "..", "deploy", "launchd")

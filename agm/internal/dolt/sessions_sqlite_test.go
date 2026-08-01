@@ -1726,13 +1726,18 @@ func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
 	sandboxBase := filepath.Join(t.TempDir(), ".agm", "sandboxes")
 	wantSandbox := &manifest.SandboxConfig{
-		Enabled:      true,
-		ID:           "sandbox-roundtrip-session",
-		Provider:     "apfs-reflink",
-		MergedPath:   filepath.Join(sandboxBase, "sandbox-roundtrip-session", "merged"),
-		WorkingDir:   filepath.Join(sandboxBase, "sandbox-roundtrip-session", "merged", "repo0"),
-		CreatedAt:    createdAt,
-		ExtraAddDirs: []string{"/real/worktree"},
+		Enabled:               true,
+		ID:                    "sandbox-roundtrip-session",
+		Provider:              "apfs-reflink",
+		MergedPath:            filepath.Join(sandboxBase, "sandbox-roundtrip-session", "merged"),
+		WorkingDir:            filepath.Join(sandboxBase, "sandbox-roundtrip-session", "merged", "repo0"),
+		CreatedAt:             createdAt,
+		ExtraAddDirs:          []string{"/real/worktree"},
+		BypassCodexHookTrust:  true,
+		CodexHookSourceRepo:   "/reviewed/source",
+		CodexHookSourceCommit: strings.Repeat("a", 40),
+		CodexHookDigest:       strings.Repeat("b", 64),
+		CodexHookRoot:         filepath.Join(sandboxBase, "trusted-hooks", strings.Repeat("b", 64)),
 	}
 	m := &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
@@ -1760,6 +1765,11 @@ func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
 			got.MergedPath != want.MergedPath ||
 			got.WorkingDir != want.WorkingDir ||
 			strings.Join(got.ExtraAddDirs, "\x00") != strings.Join(want.ExtraAddDirs, "\x00") ||
+			got.BypassCodexHookTrust != want.BypassCodexHookTrust ||
+			got.CodexHookSourceRepo != want.CodexHookSourceRepo ||
+			got.CodexHookSourceCommit != want.CodexHookSourceCommit ||
+			got.CodexHookDigest != want.CodexHookDigest ||
+			got.CodexHookRoot != want.CodexHookRoot ||
 			!got.CreatedAt.Equal(want.CreatedAt) {
 			t.Fatalf("Sandbox = %#v, want %#v", got, want)
 		}

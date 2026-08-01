@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/claude"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitmanifest "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
@@ -22,6 +23,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	uuidpkg "github.com/vbonnet/dear-agent/agm/internal/uuid"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 const resumeReadinessTimeout = 60 * time.Second
@@ -486,6 +488,12 @@ func submitAndAwaitResume(
 			}
 			return err
 		}
+		if err := launch.FinalizeOverrideReservations(launch.Reservations...); err != nil {
+			return errors.Join(
+				fmt.Errorf("finalize %s resume override transaction: %w", harnessName, err),
+				launch.CancelUndelivered(),
+			)
+		}
 		uncertain, err := ResolveHarnessLaunchSubmission(launch, tmuxAdapter.SendKeys(health.TmuxSessionName, launch.Command))
 		if uncertain {
 			addResumeWarning(result, req, fmt.Sprintf("%s launch submission acknowledgement was lost; preserving the launch because the command may already be queued", harnessName))
@@ -786,6 +794,33 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		warnings := []string{}
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
+			// Attestation re-runs here and fails closed. Command preparation
+			// reserves authorization bound to the exact source identity and
+			// seals the prepared claim into the private handoff. The executor
+			// revalidates and commits it only after every other fallible launch
+			// check. A persisted launch policy therefore cannot become
+			// "approve once, resume forever".
+			if m.Sandbox.BypassCodexHookTrust {
+				reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
+				if reasonErr != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook-trust reason before resume: %w", reasonErr)
+				}
+				if err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
+					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
+					SourceCommit: m.Sandbox.CodexHookSourceCommit,
+					Digest:       m.Sandbox.CodexHookDigest,
+					HookRoot:     m.Sandbox.CodexHookRoot,
+				}, health.WorktreePath); err != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
+				}
+				spec.BypassCodexHookTrust = true
+				spec.CodexHookRoot = m.Sandbox.CodexHookRoot
+				spec.CodexHookTrustReason = reason
+				spec.CodexHookTrustActor = OverrideActor()
+				spec.CodexHookSourceRepo = m.Sandbox.CodexHookSourceRepo
+				spec.CodexHookSourceCommit = m.Sandbox.CodexHookSourceCommit
+				spec.CodexHookDigest = m.Sandbox.CodexHookDigest
+			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
