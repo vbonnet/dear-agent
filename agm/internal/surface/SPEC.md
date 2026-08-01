@@ -90,7 +90,7 @@ reconciliation and the compile-generated-versus-retire-reference-output choice.
 
 **AGM-SURFACE-10** When provider-visible MCP tools are registered, the system shall route production and contract tests through one private registration seam containing the exact compiled tool set; SDK discovery order shall not be treated as a wire contract.
 
-**AGM-SURFACE-11** When registry and compiled MCP schemas are compared, the system shall preserve exact server-side numeric values across discovery, semantic property paths, scalar number versus integer types, complete property constraints and nested array-item schemas, requiredness, enum keyword presence and lossless member values, descriptions, and closed-object behavior while ignoring serialization order and set-like keyword order.
+**AGM-SURFACE-11** When registry and compiled MCP schemas are compared, the system shall preserve exact wire numeric values and reconcile client-visible pagination cursors across discovery, semantic property paths, scalar number versus integer types, complete property constraints and nested array-item schemas, requiredness, enum keyword presence and lossless member values, descriptions, and closed-object behavior while ignoring serialization order and set-like keyword order.
 
 **AGM-SURFACE-12** When a compiled MCP contract differs from registry intent, the system shall require one dimension-specific compatibility record with an exact operation, tool, old value, and new value; matching shall treat schema metacharacters as literal data and reject every unconsumed, blanket, or multiply consumed record.
 

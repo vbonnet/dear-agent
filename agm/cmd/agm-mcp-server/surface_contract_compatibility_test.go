@@ -114,24 +114,34 @@ func TestSchemaRequiredMembersMustBeDeclaredAndUnique(t *testing.T) {
 
 func registeredMCPTools(t *testing.T, register func(*mcp.Server, *Config)) []*mcp.Tool {
 	t.Helper()
-	server := mcp.NewServer(&mcp.Implementation{Name: "surface-contract-test", Version: "test"}, nil)
+	tools, _ := registeredMCPToolsWithOptions(t, nil, register)
+	return tools
+}
+
+func registeredMCPToolsWithOptions(
+	t *testing.T,
+	serverOptions *mcp.ServerOptions,
+	register func(*mcp.Server, *Config),
+) ([]*mcp.Tool, int) {
+	t.Helper()
+	server := mcp.NewServer(&mcp.Implementation{Name: "surface-contract-test", Version: "test"}, serverOptions)
 	register(server, &Config{})
-	captureMiddleware, snapshots := captureListedTools()
-	server.AddReceivingMiddleware(captureMiddleware)
 	client := mcp.NewClient(&mcp.Implementation{Name: "surface-contract-client", Version: "test"}, nil)
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	capturedClientTransport, snapshots := captureListedTools(clientTransport)
 	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatalf("server.Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = serverSession.Close() })
-	clientSession, err := client.Connect(t.Context(), clientTransport, nil)
+	clientSession, err := client.Connect(t.Context(), capturedClientTransport, nil)
 	if err != nil {
 		t.Fatalf("client.Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
 	var tools []*mcp.Tool
 	var params *mcp.ListToolsParams
+	pages := 0
 	for {
 		result, err := clientSession.ListTools(t.Context(), params)
 		if err != nil {
@@ -140,12 +150,17 @@ func registeredMCPTools(t *testing.T, register func(*mcp.Server, *Config)) []*mc
 		if result == nil {
 			t.Fatal("ListTools returned a nil result")
 		}
-		rawSchemaTools := takeListedToolsSnapshot(t, snapshots)
-		tools = append(tools, reconcileListedTools(t, result.Tools, rawSchemaTools)...)
-		if result.NextCursor == "" {
-			return tools
+		wireResult := takeListedToolsSnapshot(t, snapshots)
+		tools = append(tools, reconcileListedTools(t, result.Tools, wireResult.Tools)...)
+		pages++
+		nextCursor, err := reconcileNextCursor(result.NextCursor, wireResult.NextCursor)
+		if err != nil {
+			t.Fatal(err)
 		}
-		params = &mcp.ListToolsParams{Cursor: result.NextCursor}
+		if nextCursor == "" {
+			return tools, pages
+		}
+		params = &mcp.ListToolsParams{Cursor: nextCursor}
 	}
 }
 

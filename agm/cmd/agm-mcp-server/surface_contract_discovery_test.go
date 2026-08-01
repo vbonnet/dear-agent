@@ -5,40 +5,119 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type listToolsSnapshot struct {
-	tools []*mcp.Tool
-	err   error
+	result *mcp.ListToolsResult
+	err    error
 }
 
-func captureListedTools() (mcp.Middleware, <-chan listToolsSnapshot) {
+type listToolsCaptureTransport struct {
+	inner     mcp.Transport
+	snapshots chan<- listToolsSnapshot
+}
+
+func captureListedTools(inner mcp.Transport) (mcp.Transport, <-chan listToolsSnapshot) {
 	snapshots := make(chan listToolsSnapshot, 1)
-	middleware := func(next mcp.MethodHandler) mcp.MethodHandler {
-		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
-			result, err := next(ctx, method, request)
-			if method != "tools/list" {
-				return result, err
-			}
-			snapshot := listToolsSnapshot{err: err}
-			if err == nil {
-				listed, ok := result.(*mcp.ListToolsResult)
-				if !ok {
-					snapshot.err = fmt.Errorf("tools/list result = %T, want *mcp.ListToolsResult", result)
-				} else if listed == nil {
-					snapshot.err = fmt.Errorf("tools/list result is a nil *mcp.ListToolsResult")
-				} else {
-					snapshot.tools, snapshot.err = cloneToolsWithRawSchemas(listed.Tools)
-				}
-			}
-			snapshots <- snapshot
-			return result, err
-		}
+	return &listToolsCaptureTransport{inner: inner, snapshots: snapshots}, snapshots
+}
+
+func (t *listToolsCaptureTransport) Connect(ctx context.Context) (mcp.Connection, error) {
+	connection, err := t.inner.Connect(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return middleware, snapshots
+	return &listToolsCaptureConnection{
+		Connection: connection,
+		snapshots:  t.snapshots,
+		pending:    make(map[string]struct{}),
+	}, nil
+}
+
+type listToolsCaptureConnection struct {
+	mcp.Connection
+	snapshots chan<- listToolsSnapshot
+	mu        sync.Mutex
+	pending   map[string]struct{}
+}
+
+func (c *listToolsCaptureConnection) Write(ctx context.Context, message jsonrpc.Message) error {
+	request, capture := message.(*jsonrpc.Request)
+	capture = capture && request.Method == "tools/list" && request.ID.IsValid()
+	var key string
+	if capture {
+		key = jsonRPCIDKey(request.ID)
+		c.mu.Lock()
+		c.pending[key] = struct{}{}
+		c.mu.Unlock()
+	}
+	if err := c.Connection.Write(ctx, message); err != nil {
+		if capture {
+			c.mu.Lock()
+			delete(c.pending, key)
+			c.mu.Unlock()
+		}
+		return err
+	}
+	return nil
+}
+
+func (c *listToolsCaptureConnection) Read(ctx context.Context) (jsonrpc.Message, error) {
+	message, err := c.Connection.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := message.(*jsonrpc.Response)
+	if !ok || !c.takePending(response.ID) {
+		return message, nil
+	}
+	snapshot := decodeListToolsSnapshot(response)
+	select {
+	case c.snapshots <- snapshot:
+		return message, nil
+	default:
+		return nil, fmt.Errorf("tools/list wire snapshot buffer is full")
+	}
+}
+
+func (c *listToolsCaptureConnection) takePending(id jsonrpc.ID) bool {
+	key := jsonRPCIDKey(id)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.pending[key]; !ok {
+		return false
+	}
+	delete(c.pending, key)
+	return true
+}
+
+func jsonRPCIDKey(id jsonrpc.ID) string {
+	raw := id.Raw()
+	return fmt.Sprintf("%T:%v", raw, raw)
+}
+
+func decodeListToolsSnapshot(response *jsonrpc.Response) listToolsSnapshot {
+	if response.Error != nil {
+		return listToolsSnapshot{err: fmt.Errorf("tools/list wire response: %w", response.Error)}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(response.Result))
+	decoder.UseNumber()
+	var result mcp.ListToolsResult
+	if err := decoder.Decode(&result); err != nil {
+		return listToolsSnapshot{err: fmt.Errorf("decode tools/list wire result: %w", err)}
+	}
+	tools, err := cloneToolsWithRawSchemas(result.Tools)
+	if err != nil {
+		return listToolsSnapshot{err: err}
+	}
+	result.Tools = tools
+	return listToolsSnapshot{result: &result}
 }
 
 func cloneToolsWithRawSchemas(tools []*mcp.Tool) ([]*mcp.Tool, error) {
@@ -58,16 +137,19 @@ func cloneToolsWithRawSchemas(tools []*mcp.Tool) ([]*mcp.Tool, error) {
 	return result, nil
 }
 
-func takeListedToolsSnapshot(t *testing.T, snapshots <-chan listToolsSnapshot) []*mcp.Tool {
+func takeListedToolsSnapshot(t *testing.T, snapshots <-chan listToolsSnapshot) *mcp.ListToolsResult {
 	t.Helper()
 	select {
 	case snapshot := <-snapshots:
 		if snapshot.err != nil {
-			t.Fatalf("capture raw tools/list schemas: %v", snapshot.err)
+			t.Fatalf("capture tools/list wire result: %v", snapshot.err)
 		}
-		return snapshot.tools
+		if snapshot.result == nil {
+			t.Fatal("tools/list wire snapshot has a nil result")
+		}
+		return snapshot.result
 	default:
-		t.Fatal("tools/list completed without a server-side schema snapshot")
+		t.Fatal("tools/list completed without a wire response snapshot")
 		return nil
 	}
 }
@@ -93,10 +175,10 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 	rawByName := make(map[string]*mcp.Tool, len(rawSchemaTools))
 	for index, tool := range rawSchemaTools {
 		if tool == nil {
-			t.Fatalf("nil server-side tool snapshot at index %d", index)
+			t.Fatalf("nil wire tool snapshot at index %d", index)
 		}
 		if _, duplicate := rawByName[tool.Name]; duplicate {
-			t.Fatalf("duplicate server-side tool snapshot %q", tool.Name)
+			t.Fatalf("duplicate wire tool snapshot %q", tool.Name)
 		}
 		rawByName[tool.Name] = tool
 	}
@@ -107,12 +189,16 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 		}
 		rawTool, ok := rawByName[clientTool.Name]
 		if !ok {
-			t.Fatalf("client-discovered tool %q missing from server-side snapshot", clientTool.Name)
+			t.Fatalf("client-discovered tool %q missing from wire snapshot", clientTool.Name)
 		}
 		if clientTool.Description != rawTool.Description {
-			t.Fatalf("tool %q description diverged across discovery: client=%q server=%q",
+			t.Fatalf("tool %q description diverged across discovery: client=%q wire=%q",
 				clientTool.Name, clientTool.Description, rawTool.Description)
 		}
+		// The SDK client exposes InputSchema as map[string]any, so JSON numbers may
+		// already be float64 values. This comparison detects nonnumeric client
+		// decoding drift. The exact contract below remains the schema captured from
+		// the wire response, whose decoder uses json.Number.
 		clientSchema, err := schemaAfterGenericDecode(clientTool.InputSchema)
 		if err != nil {
 			t.Fatalf("normalize client schema for %q: %v", clientTool.Name, err)
@@ -122,7 +208,7 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 			t.Fatalf("normalize server schema for %q: %v", clientTool.Name, err)
 		}
 		if !bytes.Equal(clientSchema, rawSchema) {
-			t.Fatalf("DAH-002/discovery-schema-drift: tool %q client=%s server=%s",
+			t.Fatalf("DAH-002/discovery-schema-drift: tool %q client=%s wire=%s",
 				clientTool.Name, clientSchema, rawSchema)
 		}
 		clone := *clientTool
@@ -131,9 +217,16 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 		delete(rawByName, clientTool.Name)
 	}
 	if len(rawByName) != 0 {
-		t.Fatalf("server-side tools missing from client discovery: %v", sortedKeys(rawByName))
+		t.Fatalf("wire tools missing from client discovery: %v", sortedKeys(rawByName))
 	}
 	return result
+}
+
+func reconcileNextCursor(client, wire string) (string, error) {
+	if client != wire {
+		return "", fmt.Errorf("DAH-002/discovery-cursor-drift: client=%q wire=%q", client, wire)
+	}
+	return wire, nil
 }
 
 func TestSchemaAfterGenericDecodePreservesDiscoveryComparison(t *testing.T) {
@@ -168,5 +261,49 @@ func TestSchemaAfterGenericDecodePreservesDiscoveryComparison(t *testing.T) {
 	}
 	if bytes.Equal(changedSchema, rawSchema) {
 		t.Fatal("nonnumeric discovery drift was hidden by generic number normalization")
+	}
+}
+
+func TestReconcileNextCursorRejectsDiscoveryDrift(t *testing.T) {
+	if cursor, err := reconcileNextCursor("next", "next"); err != nil || cursor != "next" {
+		t.Fatalf("reconcileNextCursor(equal) = %q, %v", cursor, err)
+	}
+	if _, err := reconcileNextCursor("client", "wire"); err == nil ||
+		!strings.Contains(err.Error(), "DAH-002/discovery-cursor-drift") {
+		t.Fatalf("reconcileNextCursor(drift) error = %v, want stable drift key", err)
+	}
+}
+
+func TestRegisteredMCPToolsPreservesWirePagination(t *testing.T) {
+	want := map[string]bool{"one": true, "two": true, "three": true}
+	tools, pages := registeredMCPToolsWithOptions(t, &mcp.ServerOptions{PageSize: 1},
+		func(server *mcp.Server, _ *Config) {
+			for name := range want {
+				server.AddTool(&mcp.Tool{
+					Name:        name,
+					InputSchema: json.RawMessage(`{"type":"object"}`),
+				}, nil)
+			}
+		})
+	if pages != len(want) {
+		t.Fatalf("discovery pages = %d, want %d", pages, len(want))
+	}
+	seen := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			t.Fatal("discovery returned a nil tool")
+		}
+		if seen[tool.Name] {
+			t.Fatalf("discovery returned duplicate tool %q", tool.Name)
+		}
+		seen[tool.Name] = true
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("discovered tools = %v, want %v", sortedKeys(seen), sortedKeys(want))
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Fatalf("discovered tools = %v, want %v", sortedKeys(seen), sortedKeys(want))
+		}
 	}
 }
