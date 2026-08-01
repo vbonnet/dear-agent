@@ -8,34 +8,61 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 )
 
-// outputProviderCommand returns stdout only when the command and its inherited
-// stdout writers finish before ctx. The pipe is caller-owned rather than an
-// os/exec copying pipe, so ctx can close the reader at the configured deadline
-// without imposing an earlier post-process WaitDelay. CommandContext still
-// terminates only the direct process; this does not claim descendant cleanup.
-func outputProviderCommand(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
+// outputProviderCommand passes input and captures stdout through caller-owned
+// pipes. This lets direct-process exit or ctx unblock both directions without
+// os/exec waiting on descendants that retain inherited descriptors. stdout is
+// accepted until EOF or ctx; CommandContext still terminates only the direct
+// process, so this does not claim descendant cleanup.
+func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]byte, error) {
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("create provider stdin pipe: %w", err)
+	}
 	stdoutReader, stdoutWriter, err := os.Pipe()
 	if err != nil {
-		return nil, fmt.Errorf("create provider stdout pipe: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("create provider stdout pipe: %w", err),
+			stdinReader.Close(),
+			stdinWriter.Close(),
+		)
 	}
+	cmd.Stdin = stdinReader
 	cmd.Stdout = stdoutWriter
 	if err := cmd.Start(); err != nil {
 		return nil, errors.Join(
 			fmt.Errorf("start provider: %w", err),
+			stdinReader.Close(),
+			stdinWriter.Close(),
 			stdoutReader.Close(),
 			stdoutWriter.Close(),
 		)
 	}
-	if err := stdoutWriter.Close(); err != nil {
+	if err := errors.Join(stdinReader.Close(), stdoutWriter.Close()); err != nil {
 		return nil, errors.Join(
-			fmt.Errorf("close parent provider stdout: %w", err),
+			fmt.Errorf("close parent provider pipes: %w", err),
+			stdinWriter.Close(),
+			stdoutReader.Close(),
 			cmd.Process.Kill(),
 			cmd.Wait(),
-			stdoutReader.Close(),
 		)
 	}
+
+	var (
+		stdinCloseOnce sync.Once
+		stdinCloseErr  error
+	)
+	closeStdin := func() error {
+		stdinCloseOnce.Do(func() { stdinCloseErr = stdinWriter.Close() })
+		return stdinCloseErr
+	}
+	inputDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(stdinWriter, bytes.NewReader(input))
+		inputDone <- errors.Join(copyErr, closeStdin())
+	}()
 
 	var output bytes.Buffer
 	readDone := make(chan error, 1)
@@ -51,17 +78,20 @@ func outputProviderCommand(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 		select {
 		case waitErr := <-waitDone:
 			waitDone = nil
+			inputCloseErr := closeStdin()
+			<-inputDone
 			if waitErr != nil {
 				closeErr := stdoutReader.Close()
 				if readDone != nil {
 					readErr = <-readDone
 				}
-				return output.Bytes(), errors.Join(waitErr, closeErr, readErr)
+				return output.Bytes(), errors.Join(waitErr, inputCloseErr, closeErr, readErr)
 			}
 		case readErr = <-readDone:
 			readDone = nil
 		case <-ctx.Done():
-			closeErr := stdoutReader.Close()
+			closeErr := errors.Join(closeStdin(), stdoutReader.Close())
+			<-inputDone
 			if waitDone != nil {
 				<-waitDone
 			}

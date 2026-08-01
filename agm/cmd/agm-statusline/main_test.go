@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -224,6 +225,33 @@ exit 0
 	)
 	if len(segments) != 1 || segments[0] != "ready" {
 		t.Fatalf("segments = %v, want provider output before configured deadline", segments)
+	}
+}
+
+func TestRunProvidersInDir_BoundsInheritedStdinAfterDirectExit(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-retains-stdin")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+sleep 5 <&0 >/dev/null 2>&1 &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	started := time.Now()
+	segments := runProvidersInDir(
+		dir,
+		100*time.Millisecond,
+		config{Separator: " │ "},
+		bytes.Repeat([]byte("x"), 1<<20),
+		sessionData{},
+	)
+	elapsed := time.Since(started)
+	if len(segments) != 0 {
+		t.Fatalf("segments = %v, want empty successful output omitted", segments)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("inherited stdin cleanup took %s, want less than 2s", elapsed)
 	}
 }
 

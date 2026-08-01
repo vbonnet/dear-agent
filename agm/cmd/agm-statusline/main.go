@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -271,14 +270,13 @@ func runProvidersInDir(dir string, timeout time.Duration, cfg config, raw []byte
 			defer cancel()
 
 			cmd := exec.CommandContext(ctx, p.path)
-			cmd.Stdin = bytes.NewReader(raw)
 			cmd.Env = append(os.Environ(),
 				"AGM_SESSION_NAME="+sd.SessionName,
 				"AGM_SESSION_ID="+sd.SessionID,
 				"AGM_WORKSPACE="+sd.Workspace.CurrentDir,
 			)
 
-			out, err := outputProviderCommand(ctx, cmd)
+			out, err := outputProviderCommand(ctx, cmd, raw)
 			if err != nil {
 				return
 			}
