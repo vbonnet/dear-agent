@@ -1217,6 +1217,18 @@ func TestRenderIsOfflineAndEscapesEvidence(t *testing.T) {
 	}
 }
 
+func TestRenderConstrainsResponsiveGridContent(t *testing.T) {
+	output := renderHTML(validReport(), nil)
+	for _, guard := range []string{
+		".scope-grid>*,.two-col>*,.topology>*,.toolbar>*{min-width:0}",
+		".scope-grid,.two-col,.topology,.toolbar{grid-template-columns:minmax(0,1fr)}",
+	} {
+		if !strings.Contains(output, guard) {
+			t.Fatalf("renderer omitted responsive overflow guard %q", guard)
+		}
+	}
+}
+
 func TestRenderRetainsEscapedApplicabilityEvidenceRecords(t *testing.T) {
 	report := validReport()
 	applicabilityEvidence := evidence{
