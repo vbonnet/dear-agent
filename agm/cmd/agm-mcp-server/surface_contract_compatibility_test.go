@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -20,9 +19,9 @@ const contractAbsent = "<absent>"
 type contractSchemaNode struct {
 	Path                 string
 	Type                 string
-	ItemType             string
+	ItemSchema           string
 	Description          string
-	Enum                 string
+	Enum                 []string
 	EnumPresent          bool
 	AdditionalProperties string
 	Required             bool
@@ -131,7 +130,30 @@ func TestMCPCompatibilityComparatorRejectsDriftAndStaleExceptions(t *testing.T) 
 			mutate: func(got map[string]contractTool) {
 				tool := got["agm_get_session_metadata"]
 				node := tool.Nodes["/identifier"]
+				node.Enum = []string{}
 				node.EnumPresent = true
+				tool.Nodes[node.Path] = node
+				got[tool.Name] = tool
+			},
+		},
+		{
+			name:    "nested item constraint changes path compatibility record",
+			wantKey: "DAH-002/unaccounted-difference",
+			mutate: func(got map[string]contractTool) {
+				tool := got["agm_list_sessions"]
+				node := tool.Nodes["/fields"]
+				node.ItemSchema = `{"enum":[],"type":"string"}`
+				tool.Nodes[node.Path] = node
+				got[tool.Name] = tool
+			},
+		},
+		{
+			name:    "item schema added to shared path",
+			wantKey: "DAH-002/unaccounted-item-schema",
+			mutate: func(got map[string]contractTool) {
+				tool := got["agm_create_session"]
+				node := tool.Nodes["/name"]
+				node.ItemSchema = `{"type":"string"}`
 				tool.Nodes[node.Path] = node
 				got[tool.Name] = tool
 			},
@@ -162,30 +184,6 @@ func TestMCPCompatibilityComparatorRejectsOmittedFieldRequirednessDrift(t *testi
 	if err == nil || !strings.Contains(err.Error(), "DAH-002/unaccounted-requiredness") ||
 		!strings.Contains(err.Error(), `registry="/offset":"required"`) {
 		t.Fatalf("compareCompatibility() error = %v, want exact /offset requiredness drift", err)
-	}
-}
-
-func TestSchemaCanonicalizationPreservesAbsentAndEmptyEnum(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want string
-	}{
-		{name: "absent", raw: `{"type":"string"}`, want: contractAbsent},
-		{name: "explicit empty", raw: `{"type":"string","enum":[]}`, want: "[]"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var schema map[string]any
-			if err := json.Unmarshal([]byte(tt.raw), &schema); err != nil {
-				t.Fatalf("decode raw schema fixture: %v", err)
-			}
-			nodes := make(map[string]contractSchemaNode)
-			canonicalizeSchema(t, "/", schema, false, nodes)
-			if got := enumValue(nodes["/"]); got != tt.want {
-				t.Fatalf("canonical enum = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -293,8 +291,8 @@ func logicalRegistryContract(t *testing.T) map[string]contractTool {
 			values := slices.Clone(field.Enum)
 			sort.Strings(values)
 			tool.Nodes[path] = contractSchemaNode{
-				Path: path, Type: typeName, ItemType: itemType, Description: field.Description,
-				Enum: strings.Join(values, ","), EnumPresent: field.Enum != nil, Required: field.Required,
+				Path: path, Type: typeName, ItemSchema: logicalItemSchema(t, itemType), Description: field.Description,
+				Enum: values, EnumPresent: field.Enum != nil, Required: field.Required,
 				AdditionalProperties: contractAbsent,
 			}
 		}
@@ -342,8 +340,8 @@ func canonicalizeSchema(
 		Enum: enum, EnumPresent: enumPresent, Required: required,
 		AdditionalProperties: contractAbsent,
 	}
-	if items, ok := schema["items"].(map[string]any); ok {
-		node.ItemType = canonicalType(t, items["type"])
+	if rawItems, present := schema["items"]; present {
+		node.ItemSchema = canonicalSchemaJSON(t, rawItems)
 	}
 	if value, ok := schema["additionalProperties"]; ok {
 		node.AdditionalProperties = fmt.Sprint(value)
@@ -527,7 +525,7 @@ func compareNodes(
 		live      string
 	}{
 		{"type", registry.Type, live.Type},
-		{"item_type", registry.ItemType, live.ItemType},
+		{"item_schema", itemSchemaValue(registry.ItemSchema), itemSchemaValue(live.ItemSchema)},
 		{"requiredness", requiredValue(registry.Required), requiredValue(live.Required)},
 		{"enum", enumValue(registry), enumValue(live)},
 		{"description", registry.Description, live.Description},
@@ -585,6 +583,8 @@ func consumeCompatibilityRecords(observed, expected []compatibilityRecord) error
 				key = "DAH-002/unaccounted-requiredness"
 			case "enum":
 				key = "DAH-002/unaccounted-enum"
+			case "item_schema":
+				key = "DAH-002/unaccounted-item-schema"
 			}
 			return fmt.Errorf("%s: %s", key, describeCompatibility(difference))
 		}
@@ -612,7 +612,7 @@ func validateCompatibilityRecords(records []compatibilityRecord) error {
 	validDimensions := map[string]bool{
 		"tool_rename": true, "operation_omission": true, "tool_addition": true,
 		"path_move": true, "path_omission": true, "path_addition": true,
-		"type": true, "item_type": true, "requiredness": true, "enum": true,
+		"type": true, "item_schema": true, "requiredness": true, "enum": true,
 		"description": true, "closed_object": true, "tool_description": true,
 	}
 	seenIDs := make(map[string]bool, len(records))
@@ -676,7 +676,7 @@ func currentCompatibilityRecords() []compatibilityRecord {
 			"requiredness", "/filters", "/filters", "optional", "required"),
 		pathRule("DAH-002/list-sessions-fields-addition", "list_sessions", "agm_list_sessions",
 			"path_addition", contractAbsent, "/fields", contractAbsent,
-			pathShape(contractSchemaNode{Type: "array|null", ItemType: "string",
+			pathShape(contractSchemaNode{Type: "array|null", ItemSchema: `{"type":"string"}`,
 				Description:          "Field mask: only return these fields (e.g. [id, name, status]). Omit for all fields.",
 				AdditionalProperties: contractAbsent})),
 		pathRule("DAH-002/list-sessions-status-enum", "list_sessions", "agm_list_sessions",
@@ -808,7 +808,10 @@ func cloneContract(input map[string]contractTool) map[string]contractTool {
 	for name, tool := range input {
 		cloned := tool
 		cloned.Nodes = make(map[string]contractSchemaNode, len(tool.Nodes))
-		maps.Copy(cloned.Nodes, tool.Nodes)
+		for path, node := range tool.Nodes {
+			node.Enum = slices.Clone(node.Enum)
+			cloned.Nodes[path] = node
+		}
 		result[name] = cloned
 	}
 	return result
@@ -827,8 +830,8 @@ func describeCompatibility(record compatibilityRecord) string {
 }
 
 func pathShape(node contractSchemaNode) string {
-	return fmt.Sprintf("type=%q,item=%q,description=%q,enum=%q,additionalProperties=%q",
-		node.Type, node.ItemType, node.Description, enumValue(node), node.AdditionalProperties)
+	return fmt.Sprintf("type=%q,item_schema=%q,description=%q,enum=%q,additionalProperties=%q",
+		node.Type, itemSchemaValue(node.ItemSchema), node.Description, enumValue(node), node.AdditionalProperties)
 }
 
 func logicalJSONType(goType string) (string, string) {
@@ -875,16 +878,16 @@ func stringValue(value any) string {
 	return text
 }
 
-func schemaEnum(t *testing.T, schema map[string]any) (string, bool) {
+func schemaEnum(t *testing.T, schema map[string]any) ([]string, bool) {
 	t.Helper()
 	value, present := schema["enum"]
 	if !present {
-		return "", false
+		return nil, false
 	}
 	if value == nil {
 		t.Fatal("DAH-002/schema-enum-null: enum must be a string array")
 	}
-	return strings.Join(stringSlice(t, value), ","), true
+	return stringSlice(t, value), true
 }
 
 func stringSlice(t *testing.T, value any) []string {
@@ -911,14 +914,18 @@ func stringSlice(t *testing.T, value any) []string {
 func enumList(values ...string) string {
 	values = slices.Clone(values)
 	sort.Strings(values)
-	return "[" + strings.Join(values, ",") + "]"
+	if values == nil {
+		values = []string{}
+	}
+	data, _ := json.Marshal(values)
+	return string(data)
 }
 
 func enumValue(node contractSchemaNode) string {
 	if !node.EnumPresent {
 		return contractAbsent
 	}
-	return "[" + node.Enum + "]"
+	return enumList(node.Enum...)
 }
 
 func requiredValue(required bool) string {

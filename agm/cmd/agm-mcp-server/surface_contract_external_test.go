@@ -84,14 +84,14 @@ func exactExternalToolContracts() map[string]contractTool {
 
 func exactExternalRoot() contractSchemaNode {
 	return contractSchemaNode{
-		Path: "/", Type: "object", ItemType: "", Description: "", Enum: "",
+		Path: "/", Type: "object", ItemSchema: contractAbsent, Description: "",
 		AdditionalProperties: "false", Required: false,
 	}
 }
 
 func exactExternalField(path, typeName, description string, required bool) contractSchemaNode {
 	return contractSchemaNode{
-		Path: path, Type: typeName, ItemType: "", Description: description, Enum: "",
+		Path: path, Type: typeName, ItemSchema: contractAbsent, Description: description,
 		AdditionalProperties: contractAbsent, Required: required,
 	}
 }
@@ -152,10 +152,10 @@ func TestExactExternalMCPToolContractsRejectDrift(t *testing.T) {
 			}),
 		},
 		{
-			name:    "item type",
-			wantKey: "DAH-002/external-tool-schema-item-type",
+			name:    "item schema",
+			wantKey: "DAH-002/external-tool-schema-item-schema",
 			mutate: externalNodeMutation("agm_create_session", "/model", func(node *contractSchemaNode) {
-				node.ItemType = "string"
+				node.ItemSchema = `{"type":"string"}`
 			}),
 		},
 		{
@@ -169,7 +169,7 @@ func TestExactExternalMCPToolContractsRejectDrift(t *testing.T) {
 			name:    "enum",
 			wantKey: "DAH-002/external-tool-schema-enum",
 			mutate: externalNodeMutation("agm_create_session", "/harness", func(node *contractSchemaNode) {
-				node.Enum = "codex-cli"
+				node.Enum = []string{"codex-cli"}
 				node.EnumPresent = true
 			}),
 		},
