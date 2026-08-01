@@ -47,6 +47,19 @@ type baselineTransition struct {
 	Reference              string              `json:"reference,omitempty"`
 }
 
+var canonicalBaselineJSONMemberNames = [...]string{
+	"version",
+	"scanner_version",
+	"findings",
+	"transitions",
+	"previous_baseline_sha256",
+	"previous_scanner_version",
+	"added",
+	"removed",
+	"reason",
+	"reference",
+}
+
 type baselineChange struct {
 	Added   map[string][]string
 	Removed map[string][]string
@@ -95,7 +108,7 @@ func readBaselineFile(path string) (baseline, []byte, error) {
 	if err != nil {
 		return baseline{}, nil, err
 	}
-	if err := rejectDuplicateJSONMembers(data); err != nil {
+	if err := validateBaselineJSONMembers(data); err != nil {
 		return baseline{}, nil, fmt.Errorf("parse: %w", err)
 	}
 
@@ -114,7 +127,7 @@ func readBaselineFile(path string) (baseline, []byte, error) {
 	return bl, data, nil
 }
 
-func rejectDuplicateJSONMembers(data []byte) error {
+func validateBaselineJSONMembers(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := scanJSONValue(dec); err != nil {
 		return err
@@ -144,6 +157,9 @@ func scanJSONValue(dec *json.Decoder) error {
 			if !keyOK {
 				return fmt.Errorf("object member name has type %T", keyToken)
 			}
+			if canonical, matched := canonicalBaselineJSONMemberName(key); matched && key != canonical {
+				return fmt.Errorf("noncanonical JSON object member %q, want %q", key, canonical)
+			}
 			if seen[key] {
 				return fmt.Errorf("duplicate JSON object member %q", key)
 			}
@@ -163,6 +179,15 @@ func scanJSONValue(dec *json.Decoder) error {
 	default:
 		return fmt.Errorf("unexpected JSON delimiter %q", delim)
 	}
+}
+
+func canonicalBaselineJSONMemberName(key string) (string, bool) {
+	for _, canonical := range canonicalBaselineJSONMemberNames {
+		if strings.EqualFold(key, canonical) {
+			return canonical, true
+		}
+	}
+	return "", false
 }
 
 func consumeJSONDelimiter(dec *json.Decoder, expected json.Delim) error {
