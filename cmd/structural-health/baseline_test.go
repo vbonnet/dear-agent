@@ -468,6 +468,40 @@ func TestReadBaselineRejectsNoncanonicalJSONMemberAliases(t *testing.T) {
 	}
 }
 
+func TestReadBaselineRejectsInvalidUTF8(t *testing.T) {
+	bl := validV2Baseline(keySet(map[string][]string{
+		"dead-package": {"pkg/valid"},
+	}))
+	bl.Transitions[0].Reason = "audited transition"
+	bl.Transitions[0].Reference = "ce-test"
+	valid := mustMarshalBaseline(t, bl)
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "finding key",
+			data: bytes.Replace(valid, []byte("pkg/valid"), []byte{'p', 'k', 'g', '/', 0xff}, 1),
+		},
+		{
+			name: "provenance value",
+			data: bytes.Replace(valid, []byte("ce-test"), []byte{'c', 'e', '-', 0xff}, 1),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "baseline.json")
+			if err := os.WriteFile(path, tt.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readBaseline(path)
+			if err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
+				t.Fatalf("readBaseline error = %v, want invalid UTF-8", err)
+			}
+		})
+	}
+}
+
 func TestCanonicalBaselineJSONMemberNamesCoverSchemaTags(t *testing.T) {
 	want := make(map[string]bool)
 	for _, typ := range []reflect.Type{

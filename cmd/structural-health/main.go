@@ -165,7 +165,12 @@ func main() {
 
 	bl, err := readBaseline(blPath)
 	if err != nil {
-		fail("read baseline %s: %v\n\nIf this is the first run, generate it with:\n  structural-health --update-baseline", blPath, err)
+		fail(
+			"read baseline %s: %v\n\nIf this is the first run, generate it with:\n  %s",
+			blPath,
+			err,
+			bootstrapCommand(*root, *baselinePath),
+		)
 	}
 
 	report := diff(current, bl)
@@ -180,6 +185,18 @@ func main() {
 	if report.regressionCount() > 0 {
 		os.Exit(1)
 	}
+}
+
+func bootstrapCommand(root, baselinePath string) string {
+	return fmt.Sprintf(
+		"structural-health --root %s --baseline %s --update-baseline --accept-new \\\n    --reason '<why>' --reference '<bead-or-pr>'",
+		quoteShellWord(root),
+		quoteShellWord(baselinePath),
+	)
+}
+
+func quoteShellWord(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func validateModeFlags(updateBaseline, jsonOut bool, request updateRequest) error {

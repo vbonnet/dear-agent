@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +61,35 @@ func TestScanDocPaths(t *testing.T) {
 	got := scanDocPaths(root)
 	if len(got) != 1 || got[0].Key != "internal/ghost/" {
 		t.Fatalf("scanDocPaths = %+v, want single finding internal/ghost/", got)
+	}
+}
+
+func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
+	got := bootstrapCommand("repo root/$USER's", "custom/baseline.json")
+	for _, want := range []string{
+		`--root 'repo root/$USER'"'"'s'`,
+		`--baseline 'custom/baseline.json'`,
+		"--update-baseline",
+		"--accept-new",
+		`--reason '<why>'`,
+		`--reference '<bead-or-pr>'`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("bootstrap command %q does not contain %q", got, want)
+		}
+	}
+}
+
+func TestQuoteShellWordRoundTripsPathBytes(t *testing.T) {
+	want := "repo $HOME $(exit 42) `exit 43` ' \" back\\slash\nnext"
+	// #nosec G204 -- exercising generated shell syntax is the purpose of this test.
+	cmd := exec.Command("sh", "-c", "printf %s "+quoteShellWord(want))
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("shell round trip: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("shell round trip = %q, want %q", got, want)
 	}
 }
 

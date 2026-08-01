@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -128,6 +129,9 @@ func readBaselineFile(path string) (baseline, []byte, error) {
 }
 
 func validateBaselineJSONMembers(data []byte) error {
+	if !utf8.Valid(data) {
+		return errors.New("invalid UTF-8")
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := scanJSONValue(dec); err != nil {
 		return err

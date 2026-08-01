@@ -33,7 +33,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-08** When setup or usage fails, the system shall exit with code 2.
 
-**STRUCT-HEALTH-10** When a baseline is read, the system shall reject malformed JSON, duplicate JSON object-member names and noncanonical case-folded aliases of schema member names at any nesting level before decoding, unsupported schema or scanner-key versions, incomplete canonical scan coverage, unknown scans, null lists, unsorted lists, empty keys, and duplicate keys.
+**STRUCT-HEALTH-10** When a baseline is read, the system shall reject invalid UTF-8, malformed JSON, duplicate JSON object-member names and noncanonical case-folded aliases of schema member names at any nesting level before decoding, unsupported schema or scanner-key versions, incomplete canonical scan coverage, unknown scans, null lists, unsorted lists, empty keys, and duplicate keys.
 
 **STRUCT-HEALTH-11** When a valid schema-v1 baseline is updated, the system shall preserve its finding-key semantics and shall write schema v2.
 
@@ -60,6 +60,10 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 **STRUCT-HEALTH-22** When baseline update mode is requested without expansion authorization and any current finding key is absent from the prior baseline, the system shall reject the entire update without removing fixed keys or otherwise modifying the baseline.
 
 **STRUCT-HEALTH-23** When a schema-v2 baseline with transition history is read, the system shall reject it if any reconstructable transition's `previous_baseline_sha256` differs from the SHA-256 of the predecessor baseline's deterministic canonical serialization.
+
+**STRUCT-HEALTH-24** When ordinary scan mode cannot read an absent first-run baseline, the system shall print a guarded bootstrap command that preserves the requested root and baseline path and includes expansion authorization, reason, and durable-reference flags.
+
+**STRUCT-HEALTH-25** When schema-v2 transition history is reverse-reconstructed, the system shall reject the history unless its initial scanner version equals the legacy scanner-key version.
 
 ## BDD Traceability
 
