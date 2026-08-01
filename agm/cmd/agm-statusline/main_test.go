@@ -283,6 +283,58 @@ exit 0
 	}
 }
 
+func TestRunProvidersInDir_PassesInputToInheritedWorkerBeforeDeadline(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-delegates-io")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+exec 3<&0
+(
+  sleep 1
+  count=$(wc -c <&3)
+  printf '%s\n' "$count"
+) &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	segments := runProvidersInDir(
+		dir,
+		10*time.Second,
+		config{Separator: " │ "},
+		bytes.Repeat([]byte("x"), 1<<20),
+		sessionData{},
+	)
+	if len(segments) != 1 || segments[0] != "1048576" {
+		t.Fatalf("segments = %v, want inherited worker to receive complete input", segments)
+	}
+}
+
+func TestRunProvidersInDir_PreservesSuccessfulOutputWhenProviderClosesInput(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-closes-input")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+exec 0<&-
+printf 'ready\n'
+sleep 0.05
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	for range 5 {
+		segments := runProvidersInDir(
+			dir,
+			10*time.Second,
+			config{Separator: " │ "},
+			bytes.Repeat([]byte("x"), 1<<20),
+			sessionData{},
+		)
+		if len(segments) != 1 || segments[0] != "ready" {
+			t.Fatalf("segments = %v, want successful output despite closed stdin", segments)
+		}
+	}
+}
+
 func writeUncooperativeProvider(t *testing.T, dir string) {
 	t.Helper()
 	script := filepath.Join(dir, "10-slow")

@@ -74,22 +74,28 @@ func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]
 	go func() { waitDone <- cmd.Wait() }()
 
 	var readErr error
-	for waitDone != nil || readDone != nil {
+	for waitDone != nil || readDone != nil || inputDone != nil {
 		select {
 		case waitErr := <-waitDone:
 			waitDone = nil
-			inputCloseErr := closeStdin()
-			if inputDone != nil {
-				<-inputDone
-				inputDone = nil
-			}
 			if waitErr != nil {
+				inputCloseErr := closeStdin()
+				if inputDone != nil {
+					<-inputDone
+					inputDone = nil
+				}
 				closeErr := stdoutReader.Close()
 				if readDone != nil {
 					readErr = <-readDone
 				}
 				return output.Bytes(), errors.Join(waitErr, inputCloseErr, closeErr, readErr)
 			}
+		case <-inputDone:
+			// A successful provider may deliberately close or ignore stdin.
+			// Treat its side of the pipe closing like os/exec does: input came
+			// from an infallible byte reader, so the copy error is not a
+			// provider failure.
+			inputDone = nil
 		case readErr = <-readDone:
 			readDone = nil
 		case <-ctx.Done():
@@ -106,14 +112,22 @@ func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]
 			}
 			return output.Bytes(), errors.Join(ctx.Err(), closeErr)
 		}
+		if waitDone == nil && readDone == nil && inputDone != nil {
+			closeErr := closeStdin()
+			<-inputDone
+			inputDone = nil
+			if closeErr != nil {
+				return output.Bytes(), closeErr
+			}
+		}
 	}
 
 	closeErr := stdoutReader.Close()
 	if readErr != nil {
-		return output.Bytes(), errors.Join(
-			fmt.Errorf("read provider stdout: %w", readErr),
-			closeErr,
-		)
+		readErr = fmt.Errorf("read provider stdout: %w", readErr)
+	}
+	if readErr != nil {
+		return output.Bytes(), errors.Join(readErr, closeErr)
 	}
 	return output.Bytes(), closeErr
 }
