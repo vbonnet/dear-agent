@@ -3,9 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/gclog"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -14,6 +18,19 @@ var (
 	sandboxGCReap   bool
 	sandboxGCMinAge string
 	sandboxGCJSON   bool
+)
+
+type sandboxGCSessionStore interface {
+	ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error)
+	Close() error
+}
+
+var (
+	sandboxGCStoreConfigs = configuredSandboxGCStoreConfigs
+	openSandboxGCStore    = func(config *dolt.Config) (sandboxGCSessionStore, error) {
+		return dolt.New(config)
+	}
+	logSandboxGCEntry = logSandboxGCEntryDefault
 )
 
 var sandboxCmd = &cobra.Command{
@@ -56,13 +73,8 @@ Examples:
 }
 
 func runSandboxGC(cmd *cobra.Command, args []string) error {
-	opCtx, cleanup, err := newOpContextWithStorage()
-	if err != nil {
-		return fmt.Errorf("failed to connect to storage: %w", err)
-	}
-	defer cleanup()
-
 	var minAge time.Duration
+	var err error
 	if sandboxGCMinAge != "" {
 		minAge, err = parseDuration(sandboxGCMinAge)
 		if err != nil {
@@ -70,11 +82,38 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	result, err := ops.SandboxGC(opCtx, &ops.SandboxGCRequest{
-		Reap:   sandboxGCReap,
-		MinAge: minAge,
+	liveSessionIDs, warnings, err := sandboxGCLiveSessionIDs()
+	if err != nil {
+		logSandboxGCEntry(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "live_session_inventory_failed",
+			Error:     err.Error(),
+			DryRun:    !sandboxGCReap,
+		})
+		return fmt.Errorf("failed to build live-session inventory: %w", err)
+	}
+	for _, warning := range warnings {
+		logSandboxGCEntry(gclog.Entry{
+			Operation: "sandbox_gc_warning",
+			Reason:    "workspace_store_skipped",
+			Error:     warning,
+			DryRun:    !sandboxGCReap,
+		})
+	}
+
+	result, err := ops.SandboxGC(&ops.OpContext{}, &ops.SandboxGCRequest{
+		Reap:           sandboxGCReap,
+		MinAge:         minAge,
+		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
+		Warnings:       warnings,
 	})
 	if err != nil {
+		logSandboxGCEntry(gclog.Entry{
+			Operation: "sandbox_gc_error",
+			Reason:    "sweep_failed",
+			Error:     err.Error(),
+			DryRun:    !sandboxGCReap,
+		})
 		return handleError(err)
 	}
 
@@ -92,6 +131,9 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 func printSandboxGCText(result *ops.SandboxGCResult) {
 	if result.DryRun {
 		fmt.Println("DRY RUN — no sandboxes were removed (use --reap to delete)")
+	}
+	for _, warning := range result.Warnings {
+		ui.PrintWarning(warning)
 	}
 	for _, e := range result.Entries {
 		switch e.Action {
@@ -122,6 +164,85 @@ func printSandboxGCText(result *ops.SandboxGCResult) {
 	if result.Errors > 0 {
 		ui.PrintWarning(fmt.Sprintf("%d sandbox(es) failed to remove — check ~/.agm/logs/gc.jsonl", result.Errors))
 	}
+}
+
+func configuredSandboxGCStoreConfigs() ([]*dolt.Config, error) {
+	path, err := getWorkspaceConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGM workspace config path: %w", err)
+	}
+	return dolt.ConfiguredWorkspaceConfigsAt(path)
+}
+
+func constantLiveSessionIDs(live map[string]bool) func() (map[string]bool, error) {
+	return func() (map[string]bool, error) {
+		return live, nil
+	}
+}
+
+func sandboxGCLiveSessionIDs() (map[string]bool, []string, error) {
+	configs, err := sandboxGCStoreConfigs()
+	if err != nil {
+		return nil, nil, err
+	}
+	live := make(map[string]bool)
+	var warnings []string
+	var totalSessions int
+	var reachableStores int
+	for _, config := range configs {
+		store, err := openSandboxGCStore(config)
+		if err != nil {
+			if isMissingDoltDatabaseError(err, config.Database) {
+				warnings = append(warnings, fmt.Sprintf(
+					"workspace %q skipped: Dolt database %q does not exist",
+					config.Workspace, config.Database,
+				))
+				continue
+			}
+			return nil, warnings, fmt.Errorf("open Dolt session store for workspace %q: %w", config.Workspace, err)
+		}
+		sessions, listErr := store.ListSessions(nil)
+		closeErr := store.Close()
+		if listErr != nil {
+			return nil, warnings, fmt.Errorf("list sessions from workspace %q: %w", config.Workspace, listErr)
+		}
+		if closeErr != nil {
+			return nil, warnings, fmt.Errorf("close Dolt session store for workspace %q: %w", config.Workspace, closeErr)
+		}
+		reachableStores++
+		totalSessions += len(sessions)
+		for _, session := range sessions {
+			if session.Lifecycle != manifest.LifecycleArchived {
+				live[session.SessionID] = true
+			}
+		}
+	}
+	if reachableStores == 0 {
+		return nil, warnings, fmt.Errorf("no configured Dolt session stores were reachable")
+	}
+	if totalSessions == 0 {
+		return nil, warnings, fmt.Errorf("configured Dolt session stores returned zero sessions — refusing to treat all sandboxes as orphaned")
+	}
+	return live, warnings, nil
+}
+
+func isMissingDoltDatabaseError(err error, database string) bool {
+	if err == nil || database == "" {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	db := strings.ToLower(database)
+	return strings.Contains(msg, "database not found: "+db) ||
+		strings.Contains(msg, "unknown database '"+db+"'") ||
+		strings.Contains(msg, "unknown database \""+db+"\"")
+}
+
+func logSandboxGCEntryDefault(entry gclog.Entry) {
+	logger, err := gclog.NewDefault()
+	if err != nil {
+		return
+	}
+	_ = logger.Log(entry)
 }
 
 func init() {
