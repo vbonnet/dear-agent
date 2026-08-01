@@ -1679,7 +1679,13 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
-	cmd := testHarnessCommandWithCodex("codex-cli", "5.4", "codex-session", "/tmp/work", false, &manifest.Codex{SessionID: "thr_123"})
+	req := &CreateSessionRequest{Cwd: "/tmp/work"}
+	params := &createSessionParams{name: "codex-session", harness: "codex-cli", model: "5.4"}
+	spec := buildHarnessLaunchSpec(req, params, "session-id", &manifest.Codex{SessionID: "thr_123"})
+	if spec.CodexRemoteResume {
+		t.Fatal("fresh remote Codex create was marked as a cold resume")
+	}
+	cmd := BuildHarnessLaunchCommand(spec).Command
 	for _, want := range []string{
 		"agm __exec-codex",
 		"--session 'codex-session'",
@@ -1692,6 +1698,11 @@ func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("remote Codex command %q missing %q", cmd, want)
+		}
+	}
+	for _, forbidden := range []string{"--remote-resume", `model_reasoning_effort="xhigh"`} {
+		if strings.Contains(cmd, forbidden) {
+			t.Fatalf("fresh remote Codex command unexpectedly contains %q: %q", forbidden, cmd)
 		}
 	}
 }

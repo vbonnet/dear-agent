@@ -41,11 +41,14 @@ type HarnessLaunchSpec struct {
 	CodexHookDigest       string
 	ForwardTelemetry      bool
 	Codex                 *manifest.Codex
-	Pi                    *manifest.Pi
-	PiLaunchID            string
-	PiExtension           string
-	PiPolicyJSON          string
-	PiPolicyFile          string
+	// CodexRemoteResume marks an existing Codex thread reattachment. A fresh
+	// remote-controlled session has Codex metadata but must leave this false.
+	CodexRemoteResume bool
+	Pi                *manifest.Pi
+	PiLaunchID        string
+	PiExtension       string
+	PiPolicyJSON      string
+	PiPolicyFile      string
 	// BeforeSpawn is an optional surface-owned admission callback. Launch
 	// adapters invoke it after command preparation and executable resolution,
 	// immediately before the irreversible process or tmux submission boundary.
@@ -409,6 +412,7 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		AddDirs:                spec.ExtraAddDirs,
 		ResumeID:               resumeID,
 		Remote:                 resumeID != "",
+		RemoteResume:           spec.CodexRemoteResume && resumeID != "",
 		BypassHookTrust:        spec.BypassCodexHookTrust,
 		HookRoot:               spec.CodexHookRoot,
 		HookTrustReason:        spec.CodexHookTrustReason,

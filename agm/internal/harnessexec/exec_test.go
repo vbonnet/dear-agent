@@ -169,7 +169,7 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
 		"--sandbox", "workspace-write", "--approval", "never",
 		"--add-dir", "/tmp/one", "--add-dir", "/tmp/two",
-		"--resume-id", "thread-123", "--remote",
+		"--resume-id", "thread-123", "--remote", "--remote-resume",
 	})
 	if err != nil {
 		t.Fatalf("parse Codex request: %v", err)
@@ -182,6 +182,20 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	}
 	if got := request.argv(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Codex argv = %q, want %q", got, want)
+	}
+
+	freshRemote, err := parseCodex([]string{
+		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
+		"--sandbox", "workspace-write", "--resume-id", "new-thread", "--remote",
+	})
+	if err != nil {
+		t.Fatalf("parse fresh remote Codex launch: %v", err)
+	}
+	if got, want := freshRemote.argv(), []string{
+		"resume", "--remote", "unix://", "-m", "gpt-test", "-C", "/tmp/work",
+		"-s", "workspace-write", "new-thread",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("fresh remote Codex argv = %q, want %q", got, want)
 	}
 
 	bypass, err := parseCodex([]string{
@@ -501,6 +515,7 @@ func TestExecutorRejectsUnvalidatedArguments(t *testing.T) {
 		{name: "tab control character", protocol: CodexProtocol, args: []string{"--session", "s\tnext", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write"}},
 		{name: "escape control character", protocol: ClaudeProtocol, args: []string{"--session", "s\x1bnext", "--model", "m"}},
 		{name: "sandbox", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "unsafe"}},
+		{name: "cold remote marker without remote", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--remote-resume"}},
 		{name: "bypass without hook root", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--bypass-hook-trust"}},
 		{name: "relative hook root", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "relative"}},
 		{name: "hook root without bypass", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--hook-root", "/trusted/hooks"}},

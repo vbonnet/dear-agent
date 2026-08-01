@@ -140,6 +140,7 @@ type codexLaunchBinding struct {
 	AddDirs               []string                    `json:"add_dirs,omitempty"`
 	ResumeID              string                      `json:"resume_id,omitempty"`
 	Remote                bool                        `json:"remote,omitempty"`
+	RemoteResume          bool                        `json:"remote_resume,omitempty"`
 	HookRoot              string                      `json:"hook_root"`
 	HookTrustReason       string                      `json:"hook_trust_reason"`
 	HookTrustActor        string                      `json:"hook_trust_actor"`
@@ -432,6 +433,7 @@ func bindCodexLaunch(launch CodexLaunch) codexLaunchBinding {
 		AddDirs:               append([]string(nil), launch.AddDirs...),
 		ResumeID:              launch.ResumeID,
 		Remote:                launch.Remote,
+		RemoteResume:          launch.RemoteResume,
 		HookRoot:              launch.HookRoot,
 		HookTrustReason:       launch.HookTrustReason,
 		HookTrustActor:        launch.HookTrustActor,
@@ -586,6 +588,7 @@ func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
 		slices.Equal(binding.AddDirs, other.AddDirs) &&
 		binding.ResumeID == other.ResumeID &&
 		binding.Remote == other.Remote &&
+		binding.RemoteResume == other.RemoteResume &&
 		binding.HookRoot == other.HookRoot
 }
 
