@@ -5,7 +5,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-spawn-routing",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/pretool-spawn-routing",
             "statusMessage": "Checking AGM/VROOM routing",
             "timeout": 5,
             "type": "command"
@@ -16,7 +16,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-bead-close-guard",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/pretool-bead-close-guard",
             "statusMessage": "Checking bead Definition of Done",
             "timeout": 30,
             "type": "command"
@@ -27,7 +27,7 @@
         "matcher": "Bash|Write|Edit|MultiEdit|apply_patch",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-beads-dir-block",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/pretool-beads-dir-block",
             "statusMessage": "Checking Beads database targeting",
             "timeout": 5,
             "type": "command"
@@ -38,7 +38,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-bypass-guard",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/pretool-bypass-guard",
             "statusMessage": "Checking for bypass flags",
             "timeout": 5,
             "type": "command"
@@ -49,7 +49,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-pr-guard",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/pretool-pr-guard",
             "statusMessage": "Checking PR lifecycle compliance",
             "timeout": 5,
             "type": "command"
@@ -61,7 +61,7 @@
       {
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/stop-guardrail-feedback",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",
             "timeout": 120,
             "type": "command"
@@ -73,7 +73,7 @@
       {
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/stop-guardrail-feedback",
+            "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",
             "timeout": 120,
             "type": "command"
@@ -85,7 +85,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook PostCompact",
+            "command": "test -n \"${AGM_CODEX_HOOK_ROOT:-}\" || exec bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook PostCompact",
             "statusMessage": "Scheduling Beads context refresh",
             "type": "command"
           }
@@ -97,7 +97,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook PreCompact",
+            "command": "test -n \"${AGM_CODEX_HOOK_ROOT:-}\" || exec bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook PreCompact",
             "statusMessage": "Checking Beads context",
             "type": "command"
           }
@@ -109,7 +109,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook SessionStart",
+            "command": "test -n \"${AGM_CODEX_HOOK_ROOT:-}\" || exec bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook SessionStart",
             "statusMessage": "Loading Beads context",
             "type": "command"
           }
@@ -121,7 +121,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook UserPromptSubmit",
+            "command": "test -n \"${AGM_CODEX_HOOK_ROOT:-}\" || exec bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook UserPromptSubmit",
             "statusMessage": "Refreshing Beads context",
             "type": "command"
           }

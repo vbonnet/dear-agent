@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 func TestResolveHarnessLaunchSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
@@ -72,6 +74,58 @@ func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing
 	}
 }
 
+func TestReserveCodexLaunchCarriesExactReservationToSubmission(t *testing.T) {
+	originalReserve := reserveCodexHookTrust
+	t.Cleanup(func() { reserveCodexHookTrust = originalReserve })
+
+	const (
+		reason  = "sandbox path rotates per spawn so hooks cannot be pre-trusted"
+		actor   = "vroom-dispatch"
+		session = "worker-ce-6xfu"
+	)
+	reservation := &override.Reservation{}
+	var wantProof override.AuthorizationProof
+	reserveCodexHookTrust = func(gotReason, gotActor, gotSession, subject string) (
+		*override.Reservation, override.AuthorizationProof, error,
+	) {
+		if gotReason != reason || gotActor != actor || gotSession != session || subject == "" {
+			t.Fatalf("reservation request = (%q, %q, %q, %q)", gotReason, gotActor, gotSession, subject)
+		}
+		wantProof = override.AuthorizationProof{
+			Kind:            override.KindCodexHookTrust,
+			Reason:          gotReason,
+			Actor:           gotActor,
+			Session:         gotSession,
+			Subject:         subject,
+			AuthorizationID: "0123456789abcdef0123456789abcdef",
+		}
+		return reservation, wantProof, nil
+	}
+	launch, _ := codexLaunch(HarnessLaunchSpec{
+		Harness:               "codex-cli",
+		Model:                 "gpt-test",
+		SessionName:           session,
+		WorkDir:               "/tmp/work",
+		BypassCodexHookTrust:  true,
+		CodexHookRoot:         "/trusted/hooks/digest",
+		CodexHookTrustReason:  reason,
+		CodexHookTrustActor:   actor,
+		CodexHookSourceRepo:   "/reviewed/dear-agent",
+		CodexHookSourceCommit: strings.Repeat("a", 40),
+		CodexHookDigest:       strings.Repeat("b", 64),
+	})
+	prepared, reservations, err := reserveCodexLaunch(launch)
+	if err != nil {
+		t.Fatalf("reserve Codex launch: %v", err)
+	}
+	if prepared.HookTrustProof != wantProof || prepared.HookTrustSubject != wantProof.Subject {
+		t.Fatalf("prepared Codex proof = %+v, subject %q; want %+v", prepared.HookTrustProof, prepared.HookTrustSubject, wantProof)
+	}
+	if len(reservations) != 1 || reservations[0] != reservation {
+		t.Fatalf("prepared reservations = %v, want exact hook-trust reservation", reservations)
+	}
+}
+
 func TestPrepareGeminiLaunchCommandValidatesOnlyPastedModel(t *testing.T) {
 	command, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
 		Harness: "gemini-cli",
@@ -92,6 +146,57 @@ func TestPrepareGeminiLaunchCommandValidatesOnlyPastedModel(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "control characters") {
 		t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want model control rejection", err)
+	}
+}
+
+func TestPrepareNonCodexLaunchWithAdmissionUsesPrivateExecutor(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	launch, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness:     "agy",
+		SessionName: "admission-bound-agy",
+		WorkDir:     "/tmp",
+		BeforeSpawn: func(
+			reservations ...*override.Reservation,
+		) ([]*override.Reservation, error) {
+			return reservations, nil
+		},
+		AfterAuthorization: func() {},
+	})
+	if err != nil {
+		t.Fatalf("PrepareHarnessLaunchCommand() error = %v", err)
+	}
+	t.Cleanup(func() { _ = launch.CancelUndelivered() })
+	if !strings.Contains(launch.Command, harnessexec.HarnessProtocol) {
+		t.Fatalf("prepared launch = %q, want private harness executor", launch.Command)
+	}
+	if launch.BindOverrideReservations == nil || launch.Cancel == nil {
+		t.Fatal("admission-bound launch omitted handoff binding or cancellation")
+	}
+}
+
+func TestPrepareClaudeLaunchCarriesAdmissionBinding(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	launch, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness:     "claude-code",
+		SessionName: "admission-bound-claude",
+		WorkDir:     "/tmp",
+		BeforeSpawn: func(
+			reservations ...*override.Reservation,
+		) ([]*override.Reservation, error) {
+			return reservations, nil
+		},
+		AfterAuthorization: func() {},
+		DisableOAuth:       true,
+	})
+	if err != nil {
+		t.Fatalf("PrepareHarnessLaunchCommand() error = %v", err)
+	}
+	t.Cleanup(func() { _ = launch.CancelUndelivered() })
+	if !strings.Contains(launch.Command, harnessexec.ClaudeProtocol) {
+		t.Fatalf("prepared launch = %q, want private Claude executor", launch.Command)
+	}
+	if launch.BindOverrideReservations == nil || launch.Cancel == nil {
+		t.Fatal("admission-bound Claude launch omitted handoff binding or cancellation")
 	}
 }
 

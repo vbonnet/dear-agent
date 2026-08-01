@@ -152,7 +152,9 @@ func TestBuildCommandsContainNoAmbientCredentialValues(t *testing.T) {
 }
 
 func TestProtocolRecognition(t *testing.T) {
-	for _, protocol := range []string{CodexProtocol, ClaudeProtocol, ExpiryProtocol} {
+	for _, protocol := range []string{
+		CodexProtocol, ClaudeProtocol, HarnessProtocol, ExpiryProtocol,
+	} {
 		if !IsProtocol(protocol) {
 			t.Errorf("IsProtocol(%q) = false", protocol)
 		}
@@ -181,6 +183,43 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 		t.Fatalf("Codex argv = %q, want %q", got, want)
 	}
 
+	bypass, err := parseCodex([]string{
+		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
+		"--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "/trusted/hooks/digest",
+	})
+	if err != nil {
+		t.Fatalf("parse Codex hook-trust bypass: %v", err)
+	}
+	if got, want := bypass.argv(), []string{
+		"-m", "gpt-test", "-C", "/tmp/work", "-s", "workspace-write",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("bypass Codex argv = %q, want %q", got, want)
+	}
+	bypass.ConfigOverrides = []string{
+		`projects={"/tmp/work"={trust_level="untrusted"}}`,
+		`hooks={"PreToolUse"=[]}`,
+	}
+	if got, want := bypass.argv(), []string{
+		"-m", "gpt-test", "-C", "/tmp/work", "-s", "workspace-write",
+		"-c", `projects={"/tmp/work"={trust_level="untrusted"}}`,
+		"-c", `hooks={"PreToolUse"=[]}`,
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("immutable-hook Codex argv = %q, want %q", got, want)
+	}
+
+	noBypass, err := parseCodex([]string{
+		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+	})
+	if err != nil {
+		t.Fatalf("parse Codex without bypass: %v", err)
+	}
+	for _, arg := range noBypass.argv() {
+		if arg == "--dangerously-bypass-hook-trust" {
+			t.Fatal("hook-trust bypass leaked into argv without the flag")
+		}
+	}
+
 	local, err := parseCodex([]string{
 		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
 		"--sandbox", "read-only", "--resume-id", "thread-456",
@@ -197,10 +236,12 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 
 func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	request, err := parseClaude([]string{
+		"--binary", "/opt/claude/bin/claude",
 		"--session", "session", "--session-id", "session-id", "--model", "claude-test",
 		"--add-dir", "/tmp/one", "--add-dir", "/tmp/two", "--auto-mode",
 		"--permission", "plan", "--max-budget-usd", "12.50", "--forward-telemetry",
 		"--resume-id", "native-claude-id", "--workdir", "/tmp/resume",
+		"--extra-arg", "--verbose",
 	})
 	if err != nil {
 		t.Fatalf("parse Claude request: %v", err)
@@ -208,13 +249,14 @@ func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	want := []string{
 		"--model", "claude-test", "--add-dir", "/tmp/one", "--add-dir", "/tmp/two",
 		"--enable-auto-mode", "--permission-mode", "plan", "--max-budget-usd", "12.50",
-		"--resume", "native-claude-id",
+		"--resume", "native-claude-id", "--verbose",
 	}
 	if got := request.argv(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Claude argv = %q, want %q", got, want)
 	}
 	launch := request.launch()
-	if launch.SessionName != "session" || launch.SessionID != "session-id" ||
+	if launch.Binary != "/opt/claude/bin/claude" ||
+		launch.SessionName != "session" || launch.SessionID != "session-id" ||
 		launch.ResumeID != "native-claude-id" || launch.WorkDir != "/tmp/resume" || !launch.ForwardTelemetry {
 		t.Fatalf("Claude launch metadata not preserved: %+v", launch)
 	}
@@ -384,6 +426,7 @@ func TestEnvironmentContracts(t *testing.T) {
 }
 
 func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
+	t.Setenv("AGM_CODEX_HOOK_ROOT", "/attacker/controlled")
 	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
@@ -416,7 +459,9 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	if got := environmentMap(gotEnv)["AGM_SESSION_NAME"]; got != "codex-session" {
 		t.Fatalf("Codex replacement session environment = %q", got)
 	}
-
+	if got := environmentMap(gotEnv)["AGM_CODEX_HOOK_ROOT"]; got != "" {
+		t.Fatalf("ordinary Codex replacement inherited untrusted hook root %q", got)
+	}
 	resolveClaudeOAuth = func() string { return "resolved-oauth" }
 	err = Run(ClaudeProtocol, []string{
 		"--session", "claude-session", "--model", "claude-test", "--auto-mode",
@@ -455,6 +500,9 @@ func TestExecutorRejectsUnvalidatedArguments(t *testing.T) {
 		{name: "tab control character", protocol: CodexProtocol, args: []string{"--session", "s\tnext", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write"}},
 		{name: "escape control character", protocol: ClaudeProtocol, args: []string{"--session", "s\x1bnext", "--model", "m"}},
 		{name: "sandbox", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "unsafe"}},
+		{name: "bypass without hook root", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--bypass-hook-trust"}},
+		{name: "relative hook root", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "relative"}},
+		{name: "hook root without bypass", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--hook-root", "/trusted/hooks"}},
 		{name: "permission", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--permission", "unsafe"}},
 		{name: "resume control character", protocol: ClaudeProtocol, args: []string{"--session", "s", "--resume-id", "id\nnext"}},
 		{name: "non-finite budget", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--max-budget-usd", "NaN"}},

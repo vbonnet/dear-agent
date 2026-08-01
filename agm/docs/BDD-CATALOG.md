@@ -1495,6 +1495,26 @@ infrastructure, and protocol services are part of the shipped control plane.
 
 ---
 
+### Dangerous Override Governance
+
+**File:** [`dangerous_override_governance.feature`](../test/bdd/features/dangerous_override_governance.feature)
+
+**Drives:** the shared contract behind every escape hatch that switches off a
+safety control — today the Codex hook-trust bypass and the admission brake
+override.
+
+**Key scenarios:**
+- The dangerous-override package carries a co-located strict EARS specification
+  with reciprocal executable traceability.
+
+**Why this matters:** An override is meant to be an exception, and its failure
+mode is becoming routine — the control it disables then dies without anyone
+deciding that. Holding the contract to the same spec discipline as every other
+package is what stops a new override kind from being added beside the gates
+(reason, human approval, ledger, recurring audit) instead of through them.
+
+---
+
 ### Test Support Package Guardrails
 
 **File:** [`test_support_package_guardrails.feature`](../test/bdd/features/test_support_package_guardrails.feature)

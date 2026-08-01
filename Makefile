@@ -64,8 +64,10 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-codex-hook-json    Build the fixed JSON helper for attested Codex hooks
+#   install-codex-hook-json  Operator-install the digest-bound JSON helper
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
-#   install-bead-close-guard Install bead-close-guard to ~/go/bin
+#   install-bead-close-guard Install bead-close-guard to ~/go/bin and the operator-owned Codex hook path
 #   build-drift-check       Build the legacy deployment-drift detector (cmd/drift-check)
 #   install-drift-check     Install drift-check to ~/go/bin
 #   deploy-status           Manifest-driven drift audit (dear-deploy status: hooks/plists + binary version stamps)
@@ -87,6 +89,12 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-disk-watchdog   Install disk-watchdog to ~/go/bin
 #   install-disk-watchdog-launchagent   Stage the disk-watchdog launch agent (5-min tick)
 #   uninstall-disk-watchdog-launchagent Remove the disk-watchdog launch agent
+#   build-override-ledger-helper        Build the fixed privileged Unix ledger append helper
+#   install-override-ledger-helper      Operator-install the helper and exact sudoers rule (Unix)
+#   install-override-audit-launchdaemon Install the macOS dangerous-override audit
+#   uninstall-override-audit-launchdaemon Remove the macOS dangerous-override audit
+#   install-override-audit-systemd      Operator-install the daily dangerous-override audit (Linux)
+#   uninstall-override-audit-systemd    Remove the Linux dangerous-override audit
 #   install-gobin-guard             Install the ~/go/bin SENSE+ESCALATE guard outside GOBIN (ce-24f1)
 #   install-gobin-guard-launchagent Stage the gobin-guard launch agent (60-sec tick)
 #   uninstall-gobin-guard-launchagent Remove the gobin-guard launch agent
@@ -117,12 +125,13 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
 .PHONY: lint-headers
+.PHONY: build-override-ledger-helper install-override-ledger-helper install-override-ledger-helper-locked
 
 include mk/install-go-bin.mk
 
@@ -546,6 +555,48 @@ build-bead-pr-guard:
 install-bead-pr-guard: build-bead-pr-guard
 	$(call install-go-bin,bin/bead-pr-guard)
 
+# Supplies only the fixed JSON filters used by attested Codex hook scripts as a
+# static Go binary. The privileged install is digest-confirmed and root-staged
+# so the unattended agent cannot replace either the executable or its runtime.
+build-codex-hook-json:
+	@echo "Building codex-hook-json..."
+	@mkdir -p bin
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/codex-hook-json ./cmd/codex-hook-json/
+	@echo "Built: bin/codex-hook-json"
+
+install-codex-hook-json: build-codex-hook-json
+	@set -eu; \
+		test -t 0 || { echo "refusing non-interactive privileged Codex hook JSON helper installation" >&2; exit 2; }; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$$repo_root/bin/codex-hook-json"; \
+		helper="/usr/local/libexec/dear-agent-codex-hook-json"; \
+		root_installer_path="$$repo_root/scripts/install-root-artifact.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
+		printf 'Reviewed Codex hook JSON helper SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "Codex hook JSON helper digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
+		echo "Installed digest-bound operator-owned Codex hook JSON helper: $$helper"
+
 # Enforces Definition of Done before bead closure: blocks `bd close` when
 # referenced PRs are not yet merged. Used by the pretool-bead-close-guard hook.
 # Usage: bead-close-guard --bead <id> [--repo owner/name] [--beads-dir /path]
@@ -556,6 +607,37 @@ build-bead-close-guard:
 	@echo "Built: bin/bead-close-guard"
 
 install-bead-close-guard: build-bead-close-guard
+	@set -eu; \
+		test -t 0 || { echo "refusing non-interactive privileged bead-close guard installation" >&2; exit 2; }; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$$repo_root/bin/bead-close-guard"; \
+		guard="/usr/local/libexec/dear-agent-bead-close-guard"; \
+		root_installer_path="$$repo_root/scripts/install-root-artifact.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
+		printf 'Reviewed bead-close guard SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "bead-close guard digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$guard" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$guard" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
+		echo "Installed digest-bound operator-owned Codex hook guard: $$guard"
 	$(call install-go-bin,bin/bead-close-guard)
 
 # Detects deployment drift: deployed artifacts (Claude Code hooks, launchd
@@ -888,6 +970,320 @@ uninstall-disk-watchdog-launchagent:
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist
 	@echo "Removed: com.dear-agent.disk-watchdog launch agent"
 
+# On Unix systems without macOS authopen, authorized uses append through this
+# one-purpose root-owned helper. Installation is an explicit operator action:
+# it requires a fresh interactive sudo challenge and installs a NOPASSWD rule
+# only for the helper's exact path, never for AGM, tee, chmod, or a variable
+# destination.
+build-override-ledger-helper:
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
+
+install-override-ledger-helper: build-override-ledger-helper build-agm build-agm-mcp-server
+	@set -eu; \
+		install_lock_platform="$$(uname -s)"; \
+		case "$$install_lock_platform" in \
+			Darwin) install_lock_path="/private/var/run"; install_lock_tool="/usr/bin/lockf"; install_lock_ancestry="/ /dev /dev/fd /usr /usr/bin /private /private/var $$install_lock_path" ;; \
+			Linux) install_lock_path="/run"; install_lock_tool="/usr/bin/flock"; install_lock_ancestry="/ /usr /usr/bin $$install_lock_path" ;; \
+			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
+		esac; \
+		for install_lock_ancestor in $$install_lock_ancestry; do test -d "$$install_lock_ancestor" && test ! -L "$$install_lock_ancestor" && test ! -w "$$install_lock_ancestor"; case "$$install_lock_platform" in Darwin) install_lock_uid="$$(/usr/bin/stat -f '%u' "$$install_lock_ancestor")" ;; Linux) install_lock_uid="$$(/usr/bin/stat -c '%u' "$$install_lock_ancestor")" ;; esac; test "$$install_lock_uid" = 0; done; \
+		for install_lock_executable in "$$install_lock_tool" /usr/bin/make; do test -f "$$install_lock_executable" && test ! -L "$$install_lock_executable" && test ! -w "$$install_lock_executable" && test -x "$$install_lock_executable"; case "$$install_lock_platform" in Darwin) install_lock_uid="$$(/usr/bin/stat -f '%u' "$$install_lock_executable")" ;; Linux) install_lock_uid="$$(/usr/bin/stat -c '%u' "$$install_lock_executable")" ;; esac; test "$$install_lock_uid" = 0; done; \
+		exec 9<"$$install_lock_path"; \
+		case "$$install_lock_platform" in \
+			Darwin) DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" -k -t 0 /dev/fd/9 /usr/bin/make --no-print-directory install-override-ledger-helper-locked ;; \
+			Linux) DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED=1 exec "$$install_lock_tool" --no-fork -n /proc/self/fd/9 /usr/bin/make --no-print-directory install-override-ledger-helper-locked ;; \
+		esac
+
+install-override-ledger-helper-locked:
+	@set -eu; \
+		test "$${DEAR_AGENT_OVERRIDE_LEDGER_INSTALL_LOCKED:-}" = 1 || { echo "refusing privileged ledger installation without the host transaction lock" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive privileged helper installation" >&2; exit 2; }; \
+		operator_user="$$(id -un)"; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$$repo_root/bin/dear-agent-override-ledger-append"; \
+		agm_artifact="$$repo_root/bin/agm"; \
+		companion_artifact="$$repo_root/bin/agm-mcp-server"; \
+		agm_executable="$(HOME)/go/bin/agm"; \
+		companion_executable="$(HOME)/go/bin/agm-mcp-server"; \
+		agm_staging=""; \
+		companion_staging=""; \
+		agm_policy_artifact=""; \
+		companion_policy_artifact=""; \
+		transaction_nonce=""; \
+		launcher_txdir=""; \
+		agm_existed=0; companion_existed=0; launcher_activation_started=0; launcher_set_active=0; launcher_activation_complete=0; \
+		root_installer_path="$$repo_root/scripts/install-override-ledger-root.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		/bin/mkdir -p "$(HOME)/go/bin"; \
+		cleanup_staging() { status=$$1; trap - EXIT HUP INT TERM; set +e; /bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_policy_artifact" "$$companion_policy_artifact"; exit "$$status"; }; \
+		trap 'cleanup_staging $$?' EXIT; trap 'cleanup_staging 129' HUP; trap 'cleanup_staging 130' INT; trap 'cleanup_staging 143' TERM; \
+		agm_staging="$$(/usr/bin/mktemp "$$agm_executable.XXXXXX")"; \
+		companion_staging="$$(/usr/bin/mktemp "$$companion_executable.XXXXXX")"; \
+		/bin/cp "$$agm_artifact" "$$agm_staging"; \
+		/bin/cp "$$companion_artifact" "$$companion_staging"; \
+		/bin/chmod 0755 "$$agm_staging" "$$companion_staging"; \
+		case "$$(uname -s)" in \
+			Darwin) \
+				/usr/bin/codesign -f -s - --options runtime "$$agm_staging"; \
+				/usr/bin/codesign -f -s - --options runtime "$$companion_staging"; \
+				;; \
+			Linux) ;; \
+			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
+		esac; \
+		agm_policy_artifact="$$(/usr/bin/mktemp "$$agm_executable.policy.XXXXXX")"; \
+		companion_policy_artifact="$$(/usr/bin/mktemp "$$companion_executable.policy.XXXXXX")"; \
+		/bin/cp "$$agm_staging" "$$agm_policy_artifact"; \
+		/bin/cp "$$companion_staging" "$$companion_policy_artifact"; \
+		/bin/chmod 0755 "$$agm_policy_artifact" "$$companion_policy_artifact"; \
+		transaction_nonce="$$(/usr/bin/openssl rand -hex 32)"; test "$${#transaction_nonce}" = 64; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
+		case "$$(uname -s)" in \
+			Darwin) \
+				caller_digest="$$(/usr/bin/codesign -dvvv "$$agm_staging" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
+				test -n "$$caller_digest" || { echo "staged AGM has no kernel-verifiable code identity" >&2; exit 1; }; \
+				caller_identity="darwin-cdhash:$$caller_digest"; \
+				companion_digest="$$(/usr/bin/codesign -dvvv "$$companion_staging" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p' | /usr/bin/tr '[:upper:]' '[:lower:]')"; \
+				test -n "$$companion_digest" || { echo "staged AGM MCP companion has no kernel-verifiable code identity" >&2; exit 1; }; \
+				companion_caller_identity="darwin-cdhash:$$companion_digest"; \
+				;; \
+			Linux) \
+				caller_digest="$$(/usr/bin/sha256sum "$$agm_staging")"; \
+				caller_digest="$${caller_digest%% *}"; \
+				caller_identity="linux-sha256:$$caller_digest"; \
+				companion_digest="$$(/usr/bin/sha256sum "$$companion_staging")"; \
+				companion_digest="$${companion_digest%% *}"; \
+				companion_caller_identity="linux-sha256:$$companion_digest"; \
+				;; \
+			*) echo "authenticated ledger callers are unsupported on this platform" >&2; exit 2 ;; \
+		esac; \
+		printf 'Reviewed helper SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "helper digest confirmation did not match" >&2; exit 2; }; \
+		printf 'Reviewed installed AGM caller identity: %s\n' "$$caller_identity"; \
+		printf 'Type that complete identity to bind privileged appends to these exact AGM bytes: '; \
+		IFS= read -r confirmed_identity; \
+		test "$$confirmed_identity" = "$$caller_identity" || { echo "AGM caller identity confirmation did not match" >&2; exit 2; }; \
+		printf 'Reviewed installed AGM MCP companion identity: %s\n' "$$companion_caller_identity"; \
+		printf 'Type that complete identity to permit launch-capability issuance from these exact companion bytes: '; \
+		IFS= read -r confirmed_companion_identity; \
+		test "$$confirmed_companion_identity" = "$$companion_caller_identity" || { echo "AGM MCP companion identity confirmation did not match" >&2; exit 2; }; \
+		printf 'Reviewed fixed privileged installer SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged installer digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		restore_launcher() { restore_live=$$1; restore_backup=$$2; restore_existed=$$3; if test "$$restore_existed" = 1; then if test -e "$$restore_backup" || test -L "$$restore_backup"; then /bin/mv -f "$$restore_backup" "$$restore_live"; else test -e "$$restore_live" || test -L "$$restore_live"; fi; else /bin/rm -f "$$restore_live"; fi; }; \
+		cleanup_launchers() { status=$$1; trap - EXIT HUP INT TERM; set +e; cleanup_failed=0; if test "$$launcher_activation_started" = 1 && test "$$launcher_activation_complete" != 1; then restore_launcher "$$agm_executable" "$$launcher_txdir/agm" "$$agm_existed" || cleanup_failed=1; restore_launcher "$$companion_executable" "$$launcher_txdir/agm-mcp-server" "$$companion_existed" || cleanup_failed=1; fi; /bin/rm -f "$$agm_staging" "$$companion_staging" "$$agm_policy_artifact" "$$companion_policy_artifact"; test -z "$$launcher_txdir" || /bin/rm -rf "$$launcher_txdir"; test "$$cleanup_failed" = 0 || { echo "failed to restore the prior authenticated launcher set" >&2; status=1; }; exit "$$status"; }; \
+		root_transaction_committed() { test "$$(/bin/cat /usr/local/libexec/dear-agent-override-ledger-install.receipt 2>/dev/null)" = "$$transaction_nonce"; }; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; set +e; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; privileged_child=""; }; if test "$$launcher_set_active" = 1 && root_transaction_committed; then launcher_activation_complete=1; fi; cleanup_launchers "$$status"; }; \
+		trap 'cleanup_launchers $$?' EXIT; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_policy_artifact" "$$companion_policy_artifact" "$$transaction_nonce" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		launcher_txdir="$$(/usr/bin/mktemp -d "$(HOME)/go/bin/.dear-agent-launchers.XXXXXX")"; launcher_activation_started=1; \
+		if test -e "$$agm_executable" || test -L "$$agm_executable"; then agm_existed=1; /bin/mv "$$agm_executable" "$$launcher_txdir/agm"; fi; \
+		if test -e "$$companion_executable" || test -L "$$companion_executable"; then companion_existed=1; /bin/mv "$$companion_executable" "$$launcher_txdir/agm-mcp-server"; fi; \
+		/bin/mv -f "$$agm_staging" "$$agm_executable"; agm_staging=""; \
+		/bin/mv -f "$$companion_staging" "$$companion_executable"; companion_staging=""; launcher_set_active=1; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-override-ledger-installer "$$root_gid" "$$operator_user" "$$artifact" "$$expected_hash" "$$caller_identity" "$$companion_caller_identity" "$$agm_policy_artifact" "$$companion_policy_artifact" "$$transaction_nonce" & privileged_child=$$!; \
+		set +e; wait "$$privileged_child"; install_status=$$?; set -e; \
+		root_transaction_committed && launcher_activation_complete=1; privileged_child=""; \
+		test "$$install_status" = 0 && test "$$launcher_activation_complete" = 1; \
+		/bin/rm -f "$$agm_policy_artifact" "$$companion_policy_artifact"; agm_policy_artifact=""; companion_policy_artifact=""; \
+		/bin/rm -rf "$$launcher_txdir"; launcher_txdir=""; \
+		trap - EXIT HUP INT TERM; \
+		echo "Installed digest-bound root-owned ledger helper, AGM and MCP companion caller identities, and exact sudoers rule for $$operator_user"
+
+# Install the macOS audit under launchd's system domain without activating it.
+# Both scheduler and executable are root-owned, so an unattended same-user
+# agent cannot replace them or disable the job through its GUI launchd domain.
+# Installation is an explicit, freshly authenticated operator action.
+build-override-audit-launchdaemon-installer:
+	@mkdir -p bin
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/dear-agent-override-audit-launchdaemon-installer ./agm/cmd/override-audit-launchdaemon-installer/
+
+install-override-audit-launchdaemon: build-agm build-override-audit-launchdaemon-installer
+	@set -eu; \
+		test "$$(uname -s)" = "Darwin" || { echo "launchd audit installation is macOS-only" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
+		operator_user="$$(/usr/bin/id -un)"; \
+		case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		audit_artifact="$$repo_root/bin/agm"; \
+		helper_artifact="$$repo_root/bin/dear-agent-override-audit-launchdaemon-installer"; \
+		plist_candidate="$$(/usr/bin/mktemp "$${TMPDIR:-/tmp}/dear-agent-override-audit.XXXXXX")"; privileged_child=""; \
+		cleanup_plist_candidate() { status=$$1; trap - EXIT HUP INT TERM; /bin/rm -f "$$plist_candidate"; exit "$$status"; }; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; privileged_child=""; }; cleanup_plist_candidate "$$status"; }; \
+		trap 'cleanup_plist_candidate $$?' EXIT; \
+		trap 'forward_privileged HUP 129' HUP; \
+		trap 'forward_privileged INT 130' INT; \
+		trap 'forward_privileged TERM 143' TERM; \
+		root_installer_path="$$repo_root/scripts/install-override-audit-launchdaemon-root.sh"; \
+		test -f "$$root_installer_path" || { echo "missing fixed privileged bootstrap: $$root_installer_path" >&2; exit 2; }; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged bootstrap is empty" >&2; exit 2; }; \
+		/usr/bin/sed "s|__OPERATOR_USER__|$$operator_user|g" "$$repo_root/deploy/launchd/com.dear-agent.override-audit.plist" >"$$plist_candidate"; \
+		/usr/bin/plutil -lint "$$plist_candidate" >/dev/null; \
+		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; expected_audit_hash="$${expected_audit_hash%% *}"; \
+		expected_plist_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$plist_candidate")"; expected_plist_hash="$${expected_plist_hash%% *}"; \
+		expected_helper_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_artifact")"; expected_helper_hash="$${expected_helper_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; expected_installer_hash="$${expected_installer_hash%% *}"; \
+		printf 'Reviewed audit executable SHA-256: %s\n' "$$expected_audit_hash"; \
+		printf 'Reviewed rendered LaunchDaemon SHA-256: %s\n' "$$expected_plist_hash"; \
+		printf 'Reviewed transaction helper SHA-256: %s\n' "$$expected_helper_hash"; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type the executable SHA-256 to approve these exact bytes: '; IFS= read -r confirmed_audit_hash; \
+		printf 'Type the LaunchDaemon SHA-256 to approve these exact bytes: '; IFS= read -r confirmed_plist_hash; \
+		printf 'Type the transaction helper SHA-256 to approve these exact bytes: '; IFS= read -r confirmed_helper_hash; \
+		printf 'Type the bootstrap SHA-256 to approve the exact privileged command: '; IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_plist_hash" = "$$expected_plist_hash" || { echo "LaunchDaemon digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_helper_hash" = "$$expected_helper_hash" || { echo "transaction helper digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		installer_marker="dear-agent-override-audit-launchdaemon-installer"; set +e; \
+		printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" \
+			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
+			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" \
+			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
+			"$$audit_artifact" "$$plist_candidate" "$$expected_audit_hash" "$$expected_plist_hash" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; \
+		/bin/rm -f "$$plist_candidate"; plist_candidate=""; trap - EXIT HUP INT TERM; \
+		echo "Installed digest-bound root-owned audit executable and system LaunchDaemon"; \
+		echo "Review, activate, and monitor it yourself (ask-gated host actions):"; \
+		echo "  sudo launchctl bootstrap system /Library/LaunchDaemons/com.dear-agent.override-audit.plist"; \
+		echo "  log stream --predicate 'senderImagePath == \"/usr/bin/logger\"'"
+
+uninstall-override-audit-launchdaemon:
+	@set -eu; \
+		test "$$(uname -s)" = "Darwin" || { echo "launchd audit removal is macOS-only" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
+		repo_root="$$(pwd -P)"; root_uninstaller_path="$$repo_root/scripts/uninstall-override-audit-launchdaemon-root.sh"; \
+		root_uninstaller="$$(/bin/cat "$$root_uninstaller_path")"; test -n "$$root_uninstaller" || exit 2; \
+		expected_uninstaller_hash="$$(printf '%s' "$$root_uninstaller" | /usr/bin/openssl dgst -sha256 -r)"; expected_uninstaller_hash="$${expected_uninstaller_hash%% *}"; \
+		printf 'Reviewed fixed privileged uninstaller SHA-256: %s\n' "$$expected_uninstaller_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; IFS= read -r confirmed_uninstaller_hash; \
+		test "$$confirmed_uninstaller_hash" = "$$expected_uninstaller_hash" || { echo "privileged uninstaller digest confirmation did not match" >&2; exit 2; }; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-launchdaemon-uninstaller >/dev/null 2>&1; probe_status=$$?; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo uninstaller; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged uninstaller probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'UNINSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-launchdaemon-uninstaller; \
+		echo "Removed the root-owned dangerous-override audit LaunchDaemon and executable"
+
+# Install the Linux audit under the system manager without activating it. The
+# template runs a root-owned AGM copy as the named unprivileged operator, so an
+# unattended same-user agent cannot replace the executable or disable the timer
+# through `systemctl --user`. Installation is an explicit, freshly
+# authenticated operator action.
+build-override-audit-systemd-installer:
+	@mkdir -p bin
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/dear-agent-override-audit-systemd-installer ./agm/cmd/override-audit-systemd-installer/
+
+install-override-audit-systemd: build-agm build-override-audit-systemd-installer
+	@set -eu; \
+		test "$$(uname -s)" = "Linux" || { echo "systemd audit installation is Linux-only" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive system audit installation" >&2; exit 2; }; \
+		command -v systemctl >/dev/null || { echo "systemctl is required" >&2; exit 2; }; \
+		operator_user="$$(/usr/bin/id -un)"; \
+		case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		audit_artifact="$$repo_root/bin/agm"; \
+		service_artifact="$$repo_root/agm/systemd/dear-agent-override-audit@.service"; \
+		timer_artifact="$$repo_root/agm/systemd/dear-agent-override-audit@.timer"; \
+		helper_artifact="$$repo_root/bin/dear-agent-override-audit-systemd-installer"; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; \
+		trap 'forward_privileged INT 130' INT; \
+		trap 'forward_privileged TERM 143' TERM; \
+		root_installer_path="$$repo_root/scripts/install-override-audit-systemd-root.sh"; \
+		test -f "$$root_installer_path" || { echo "missing fixed privileged installer: $$root_installer_path" >&2; exit 2; }; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		expected_audit_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$audit_artifact")"; \
+		expected_audit_hash="$${expected_audit_hash%% *}"; \
+		expected_service_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$service_artifact")"; \
+		expected_service_hash="$${expected_service_hash%% *}"; \
+		expected_timer_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$timer_artifact")"; \
+		expected_timer_hash="$${expected_timer_hash%% *}"; \
+		expected_helper_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$helper_artifact")"; \
+		expected_helper_hash="$${expected_helper_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
+		printf 'Reviewed audit executable SHA-256: %s\n' "$$expected_audit_hash"; \
+		printf 'Reviewed systemd service SHA-256: %s\n' "$$expected_service_hash"; \
+		printf 'Reviewed systemd timer SHA-256: %s\n' "$$expected_timer_hash"; \
+		printf 'Reviewed privileged transaction helper SHA-256: %s\n' "$$expected_helper_hash"; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type the executable SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_audit_hash; \
+		printf 'Type the service SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_service_hash; \
+		printf 'Type the timer SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_timer_hash; \
+		printf 'Type the helper SHA-256 to approve the privileged transaction logic: '; \
+		IFS= read -r confirmed_helper_hash; \
+		printf 'Type the bootstrap SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_audit_hash" = "$$expected_audit_hash" || { echo "audit executable digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_service_hash" = "$$expected_service_hash" || { echo "systemd service digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_timer_hash" = "$$expected_timer_hash" || { echo "systemd timer digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_helper_hash" = "$$expected_helper_hash" || { echo "privileged helper digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		installer_marker="dear-agent-override-audit-systemd-installer"; \
+		set +e; \
+		printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" \
+			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
+			"$$audit_artifact" "$$service_artifact" "$$timer_artifact" \
+			"$$expected_audit_hash" "$$expected_service_hash" "$$expected_timer_hash" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; \
+		set -e; \
+		if test "$$probe_status" = 42; then \
+			echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; \
+			exit 2; \
+		fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" \
+			"$$installer_marker" "$$helper_artifact" "$$expected_helper_hash" "$$root_gid" \
+			"$$audit_artifact" "$$service_artifact" "$$timer_artifact" \
+			"$$expected_audit_hash" "$$expected_service_hash" "$$expected_timer_hash" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
+		echo "Installed digest-bound root-owned audit executable and system unit templates"; \
+		echo "Review, activate, and monitor them yourself (ask-gated host actions):"; \
+		echo "  sudo systemctl enable --now dear-agent-override-audit@$$operator_user.timer"; \
+		echo "  journalctl -t dear-agent-override-audit"
+
+uninstall-override-audit-systemd:
+	@set -eu; \
+		test "$$(uname -s)" = "Linux" || { echo "systemd audit removal is Linux-only" >&2; exit 2; }; \
+		test -t 0 || { echo "refusing non-interactive system audit removal" >&2; exit 2; }; \
+		operator_user="$$(/usr/bin/id -un)"; case "$$operator_user" in *[!A-Za-z0-9._-]*|"") echo "unsupported operator account name" >&2; exit 2;; esac; \
+		repo_root="$$(pwd -P)"; root_uninstaller_path="$$repo_root/scripts/uninstall-override-audit-systemd-root.sh"; \
+		root_uninstaller="$$(/bin/cat "$$root_uninstaller_path")"; test -n "$$root_uninstaller" || exit 2; \
+		expected_uninstaller_hash="$$(printf '%s' "$$root_uninstaller" | /usr/bin/openssl dgst -sha256 -r)"; expected_uninstaller_hash="$${expected_uninstaller_hash%% *}"; \
+		printf 'Reviewed fixed privileged uninstaller SHA-256: %s\n' "$$expected_uninstaller_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; IFS= read -r confirmed_uninstaller_hash; \
+		test "$$confirmed_uninstaller_hash" = "$$expected_uninstaller_hash" || { echo "privileged uninstaller digest confirmation did not match" >&2; exit 2; }; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-systemd-uninstaller "$$operator_user" >/dev/null 2>&1; probe_status=$$?; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo uninstaller; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged uninstaller probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'UNINSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_uninstaller" dear-agent-override-audit-systemd-uninstaller "$$operator_user"; \
+		echo "Removed the root-owned dangerous-override audit units and executable"
+
 # gobin-guard (ce-24f1): SENSE + ESCALATE guard for ~/go/bin. Installed OUTSIDE
 # ~/go/bin (into ~/.local/state/dear-agent/bin) so it survives the very wipe it
 # is meant to detect — a compiled guard living in ~/go/bin would be deleted with
@@ -1006,8 +1402,8 @@ install-vroom-governor: build-vroom-governor
 build-agm:
 	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
-	go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
 
 install-agm: build-agm
@@ -1017,7 +1413,7 @@ install-agm: build-agm
 build-agm-mcp-server:
 	@echo "Building agm-mcp-server..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/agm-mcp-server ./agm/cmd/agm-mcp-server/
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-mcp-server ./agm/cmd/agm-mcp-server/
 	@echo "Built: bin/agm-mcp-server"
 
 install-agm-mcp-server: build-agm-mcp-server

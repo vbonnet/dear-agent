@@ -317,7 +317,8 @@ func missingTmuxTarget(output []byte) bool {
 	message := strings.ToLower(string(output))
 	return strings.Contains(message, "no server running") ||
 		strings.Contains(message, "no such file or directory") ||
-		strings.Contains(message, "can't find session")
+		strings.Contains(message, "can't find session") ||
+		strings.Contains(message, "server exited unexpectedly")
 }
 
 func findSourceRoot() (string, error) {

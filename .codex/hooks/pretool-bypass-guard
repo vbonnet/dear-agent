@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # PreToolUse hook: intercepts bypass flags removed from our tools (ADR-031).
 # CDX harness port of .claude/hooks/pretool-bypass-guard.
 #
@@ -6,11 +6,19 @@
 
 set -uo pipefail
 
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  [ -x /usr/local/libexec/dear-agent-codex-hook-json ] || exit 0
+  hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }
+else
+  command -v jq >/dev/null 2>&1 || exit 0
+  hook_json() { jq "$@"; }
+fi
+
 input="$(cat)"
-tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | hook_json -r '.tool_name // empty' 2>/dev/null || true)"
 [ "$tool" = "Bash" ] || exit 0
 
-cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 
 block() {
@@ -24,7 +32,7 @@ If no approved path exists and this is an AGM session, escalate via:
   agm escalate ask --kind blocked-action --context \"<why this flag was needed>\" \"<describe what you need>\"
 Outside AGM, add --session <registered-session>; if none exists, ask the current user directly.
 The command creates a durable escalation record and routes it through supervisory review; it does not create or update a Bead."
-  jq -cn --arg m "$msg" \
+  hook_json -cn --arg m "$msg" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m},permissionDecision:"deny",denialReason:$m}'
   exit 2
 }

@@ -43,3 +43,5 @@ broken.
 **DEP-10** When a clean linked-worktree build succeeds without a `vcs.revision`, the system shall rebuild in a temporary standalone clone and apply the same provenance gate before installation. The fallback clone and its detached checkout shall use the finite clone-fallback deadline.
 
 **DEP-11** When `AtomicInstall` invokes `go build`, the system shall use the finite ten-minute cold-build deadline and leave the live binary untouched if that deadline expires.
+
+**DEP-12** When an operator installs a root-owned hook helper, the system shall require exact artifact and fixed-bootstrap digest confirmation, reject a passwordless probe, and stage, verify, and atomically activate the helper beneath verified root-owned non-writable non-symlink ancestry in one non-caching privileged command.
