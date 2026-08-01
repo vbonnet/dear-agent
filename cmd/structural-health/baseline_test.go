@@ -408,6 +408,92 @@ func TestReadBaselineRejectsDuplicateJSONMembers(t *testing.T) {
 	}
 }
 
+func TestReadBaselineRejectsNoncanonicalJSONMemberAliases(t *testing.T) {
+	validV1 := string(mustMarshalBaseline(t, baseline{
+		Version:  baselineSchemaV1,
+		Findings: keySet(nil),
+	}))
+	validV2 := string(mustMarshalBaseline(t, validV2Baseline(keySet(nil))))
+	tests := []struct {
+		name          string
+		data          string
+		canonicalName string
+	}{
+		{
+			name:          "single root case alias",
+			data:          strings.Replace(validV1, "\"findings\":", "\"Findings\":", 1),
+			canonicalName: "findings",
+		},
+		{
+			name: "case alias shadows canonical member",
+			data: strings.Replace(
+				validV1,
+				"  \"findings\": {",
+				"  \"findings\": null,\n  \"Findings\": {",
+				1,
+			),
+			canonicalName: "findings",
+		},
+		{
+			name:          "unicode simple-fold alias",
+			data:          strings.Replace(validV1, "\"findings\":", "\"finding\\u017f\":", 1),
+			canonicalName: "findings",
+		},
+		{
+			name: "transition field case alias",
+			data: strings.Replace(
+				validV2,
+				"\"previous_baseline_sha256\":",
+				"\"Previous_Baseline_SHA256\":",
+				1,
+			),
+			canonicalName: "previous_baseline_sha256",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "baseline.json")
+			if err := os.WriteFile(path, []byte(tt.data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readBaseline(path)
+			if err == nil || !strings.Contains(
+				err.Error(),
+				fmt.Sprintf("want %q", tt.canonicalName),
+			) {
+				t.Fatalf("readBaseline error = %v, want canonical member %q", err, tt.canonicalName)
+			}
+		})
+	}
+}
+
+func TestCanonicalBaselineJSONMemberNamesCoverSchemaTags(t *testing.T) {
+	want := make(map[string]bool)
+	for _, typ := range []reflect.Type{
+		reflect.TypeFor[baseline](),
+		reflect.TypeFor[baselineTransition](),
+	} {
+		for field := range typ.Fields() {
+			tag := strings.Split(field.Tag.Get("json"), ",")[0]
+			if tag != "" && tag != "-" {
+				want[tag] = true
+			}
+		}
+	}
+
+	got := make(map[string]bool, len(canonicalBaselineJSONMemberNames))
+	for _, name := range canonicalBaselineJSONMemberNames {
+		if got[name] {
+			t.Fatalf("canonical JSON member list repeats %q", name)
+		}
+		got[name] = true
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("canonical JSON member names = %v, want schema tags %v", got, want)
+	}
+}
+
 func TestReadBaselineValidatesEveryReconstructableTransitionDigest(t *testing.T) {
 	initial := baseline{
 		Version: baselineSchemaV1,

@@ -33,7 +33,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-08** When setup or usage fails, the system shall exit with code 2.
 
-**STRUCT-HEALTH-10** When a baseline is read, the system shall reject malformed JSON, duplicate JSON object-member names at any nesting level before decoding, unsupported schema or scanner-key versions, incomplete canonical scan coverage, unknown scans, null lists, unsorted lists, empty keys, and duplicate keys.
+**STRUCT-HEALTH-10** When a baseline is read, the system shall reject malformed JSON, duplicate JSON object-member names and noncanonical case-folded aliases of schema member names at any nesting level before decoding, unsupported schema or scanner-key versions, incomplete canonical scan coverage, unknown scans, null lists, unsorted lists, empty keys, and duplicate keys.
 
 **STRUCT-HEALTH-11** When a valid schema-v1 baseline is updated, the system shall preserve its finding-key semantics and shall write schema v2.
 
