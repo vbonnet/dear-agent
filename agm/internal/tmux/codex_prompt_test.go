@@ -83,6 +83,17 @@ func TestIsCodexComposerReady(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "Codex 0.145 welcome composer with current styled suggestion",
+			content: "\x1b[2m╭────────────────────────────────────────────╮\x1b[0m\n" +
+				"\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0)                 │\x1b[0m\n" +
+				"\x1b[2m│ model:     \x1b[0mgpt-5.5 high\x1b[2m   \x1b[0m/model to change │\n" +
+				"\x1b[2m╰────────────────────────────────────────────╯\x1b[0m\n" +
+				"  To get started, describe a task or try /review\n\n" +
+				"\x1b[1m»\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+				"  gpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			expected: true,
+		},
+		{
 			name: "Codex 0.145 welcome composer with human draft",
 			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
 				"\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n" +
@@ -132,8 +143,18 @@ func TestIsCodexComposerReady(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "current post-turn cursor and footer",
+			content:  "»\n\n  gpt-5.6 xhigh · ~/src/project",
+			expected: true,
+		},
+		{
 			name:     "typed post-turn draft is not ready",
 			content:  "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			expected: false,
+		},
+		{
+			name:     "typed current post-turn draft is not ready",
+			content:  "» Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
 			expected: false,
 		},
 		{
@@ -696,6 +717,19 @@ func TestWaitForCodexPromptSelectsExistingModel(t *testing.T) {
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
 		t.Errorf("WaitForCodexPrompt failed after model upgrade selection: %v", err)
+	}
+}
+
+// TestWaitForCodexPromptSkipsUpdateWithCurrentComposerCursor verifies the
+// full resume transition: a current update selector is deliberately advanced
+// to Skip, then Codex 0.145's current cursor is accepted as ready.
+func TestWaitForCodexPromptSkipsUpdateWithCurrentComposerCursor(t *testing.T) {
+	sessionName := "test-codex-update-current-cursor"
+	script := "printf '✨ Update available! 0.145.0 -> 0.146.0\\n› 1. Update now (runs `brew upgrade --cask codex`)\\n  2. Skip\\n  3. Skip until next version\\nPress enter to continue\\n'; read _; printf 'OpenAI Codex (v0.145.0)\\n/model to change\\n»\\ngpt-5.6 high · /isolated-workdir\\n'; sleep 30"
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
+		t.Errorf("WaitForCodexPrompt failed after update skip: %v", err)
 	}
 }
 

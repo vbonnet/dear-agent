@@ -19,7 +19,9 @@ import (
 // Captured empirically from a live `codex` pane (codex-cli v0.141.0, see
 // DESIGN-agm-codex-harness §4.3). Once the composer renders, Codex draws a
 // bordered input box whose header reads "OpenAI Codex (vX.Y.Z)" with a
-// "/model to change" status line and a "›" (U+203A) input cursor:
+// "/model to change" status line and a "›" (U+203A) input cursor. Codex
+// 0.145 changed the rendered cursor to "»" (U+00BB), so both observed
+// cursor glyphs remain part of the structural grammar:
 //
 //	╭───────────────────────────────────────╮
 //	│ >_ OpenAI Codex (v0.141.0)            │
@@ -47,7 +49,9 @@ var CodexPromptPatterns = []string{
 }
 
 var codexFooterPattern = regexp.MustCompile(`^gpt-\d[^\n]*\s·\s[^\n]+$`)
-var codexSelectorChoicePattern = regexp.MustCompile(`^[›>]\s+\d+\.`)
+var codexSelectorChoicePattern = regexp.MustCompile(`^[›»>]\s+\d+\.`)
+
+var codexCursorGlyphs = []string{"›", "»"}
 
 // CodexTrustPromptPatterns are substrings that indicate Codex is showing a
 // first-run trust / onboarding consent prompt for the working directory,
@@ -211,8 +215,8 @@ func IsCodexComposerReady(content string) bool {
 			// input the user has not submitted yet. Codex 0.145 renders current
 			// welcome suggestions as dim placeholder text after the cursor; retain
 			// ANSI so that placeholder remains distinguishable from human input.
-			return candidate == "›" ||
-				strings.HasPrefix(candidate, "›") && isCodexGhostComposerLine(lines[j])
+			return isCodexEmptyCursor(candidate) ||
+				hasCodexCursorPrefix(candidate) && isCodexGhostComposerLine(lines[j])
 		}
 		return false
 	}
@@ -246,11 +250,11 @@ func codexInitialComposerOwnsTail(lines []string) bool {
 		case candidate == "":
 		case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
 		case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
-		case candidate == "›":
+		case isCodexEmptyCursor(candidate):
 			emptyCursor = true
-		case strings.HasPrefix(candidate, "›") && isCodexGhostComposerLine(line):
+		case hasCodexCursorPrefix(candidate) && isCodexGhostComposerLine(line):
 			emptyCursor = true
-		case strings.HasPrefix(candidate, "›"):
+		case hasCodexCursorPrefix(candidate):
 			return false
 		default:
 			return false
@@ -260,7 +264,7 @@ func codexInitialComposerOwnsTail(lines []string) bool {
 }
 
 func isCodexGhostComposerLine(line string) bool {
-	_, afterPrompt, found := strings.Cut(line, "›")
+	afterPrompt, found := codexCursorInput(line)
 	if !found {
 		return false
 	}
@@ -284,6 +288,41 @@ func isCodexGhostComposerLine(line string) bool {
 		afterPrompt = afterPrompt[match[1]:]
 	}
 	return false
+}
+
+func isCodexEmptyCursor(line string) bool {
+	return slices.Contains(codexCursorGlyphs, line)
+}
+
+func hasCodexCursorPrefix(line string) bool {
+	for _, glyph := range codexCursorGlyphs {
+		if strings.HasPrefix(line, glyph) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCodexCursorInputPrefix(line string) bool {
+	for _, glyph := range codexCursorGlyphs {
+		if strings.HasPrefix(line, glyph+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// codexCursorInput returns the styled input rendered after a Codex cursor.
+// Its callers first establish that the plain line starts with a supported
+// cursor, while this helper preserves ANSI preceding the glyph for ghost-text
+// classification.
+func codexCursorInput(line string) (string, bool) {
+	for _, glyph := range codexCursorGlyphs {
+		if _, afterCursor, found := strings.Cut(line, glyph); found {
+			return afterCursor, true
+		}
+	}
+	return "", false
 }
 
 func updateCodexGhostStyle(params []string, dim, grey bool) (bool, bool) {

@@ -27,6 +27,8 @@ func TestContainsCodexUpdatePromptPattern(t *testing.T) {
 		"composer":         "OpenAI Codex (v0.145.0)\nmodel: gpt-5.6 xhigh   /model to change\n›",
 		"stale selector above current composer": livePane +
 			"\nOpenAI Codex (v0.145.0)\nmodel: gpt-5.6 xhigh   /model to change\n›",
+		"stale selector above current cursor composer": livePane +
+			"\nOpenAI Codex (v0.145.0)\nmodel: gpt-5.6 xhigh   /model to change\n»",
 	} {
 		if containsCodexUpdatePromptPattern(content) {
 			t.Errorf("%s was misread as the update selector", name)
