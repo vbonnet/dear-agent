@@ -74,7 +74,6 @@
       "github.com/vbonnet/dear-agent/tools/devlog/internal/output",
       "github.com/vbonnet/dear-agent/tools/dod-enforcer",
       "github.com/vbonnet/dear-agent/tools/schema-registry/internal/mcp",
-      "github.com/vbonnet/dear-agent/wayfinder/internal/corpus",
       "github.com/vbonnet/dear-agent/wayfinder/internal/project",
       "github.com/vbonnet/dear-agent/wayfinder/internal/tracker",
       "github.com/vbonnet/dear-agent/wayfinder/lib/presets"
@@ -301,6 +300,29 @@
       },
       "reason": "Record line-only key shifts from merged PR 1105; the two goroutine bodies are unchanged and semantic-key remediation is tracked separately",
       "reference": "ce-3knl.13.2; vbonnet/dear-agent#1105; dear-agent@389e266c933fcbe1c7f94b4cad92c38712293171"
+    },
+    {
+      "previous_baseline_sha256": "34834a559654b201b1a46f2724a55221a26f2b13ba95ee571ec35958ebe15a0f",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/wayfinder/internal/corpus"
+        ],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
     }
   ]
 }
