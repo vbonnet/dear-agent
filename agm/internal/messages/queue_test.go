@@ -54,6 +54,36 @@ func TestEnqueue(t *testing.T) {
 	assert.Equal(t, PriorityHigh, pending[0].Priority)
 }
 
+func TestEnqueueRejectsInvalidPriorityBeforeSQLite(t *testing.T) {
+	queue := setupTestQueue(t)
+	defer queue.Close()
+
+	entry := &QueueEntry{
+		MessageID: "invalid-priority",
+		From:      "session-a",
+		To:        "session-b",
+		Message:   "must not be persisted",
+		Priority:  Priority("URGENT"),
+		QueuedAt:  time.Now(),
+	}
+
+	err := queue.Enqueue(entry)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid message priority "URGENT"`)
+
+	entries, listErr := queue.GetQueueList("", 10)
+	require.NoError(t, listErr)
+	assert.Empty(t, entries)
+}
+
+func TestEnqueueRejectsNilEntryBeforeSQLite(t *testing.T) {
+	t.Parallel()
+
+	var queue MessageQueue
+	err := queue.Enqueue(nil)
+	require.EqualError(t, err, "failed to enqueue message: entry is nil")
+}
+
 // TestEnqueueDuplicate tests duplicate message handling
 func TestEnqueueDuplicate(t *testing.T) {
 	queue := setupTestQueue(t)
