@@ -271,6 +271,7 @@ func runProvidersInDir(dir string, timeout time.Duration, cfg config, raw []byte
 			defer cancel()
 
 			cmd := exec.CommandContext(ctx, p.path)
+			configureProviderCommand(cmd)
 			cmd.Stdin = bytes.NewReader(raw)
 			cmd.Env = append(os.Environ(),
 				"AGM_SESSION_NAME="+sd.SessionName,

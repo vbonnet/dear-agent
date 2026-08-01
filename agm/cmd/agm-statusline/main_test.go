@@ -190,10 +190,7 @@ func TestRunProvidersInDir_NoDir(t *testing.T) {
 
 func TestRunProvidersInDir_TimesOut(t *testing.T) {
 	dir := t.TempDir()
-	script := filepath.Join(dir, "10-slow")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5\necho 'late'\n"), 0o755); err != nil {
-		t.Fatalf("write slow provider: %v", err)
-	}
+	writeUncooperativeProvider(t, dir)
 
 	started := time.Now()
 	segments := runProvidersInDir(dir, 100*time.Millisecond, config{Separator: " │ "}, nil, sessionData{})
@@ -204,6 +201,22 @@ func TestRunProvidersInDir_TimesOut(t *testing.T) {
 	}
 	if elapsed >= 2*time.Second {
 		t.Fatalf("provider timeout took %s, want less than 2s", elapsed)
+	}
+}
+
+func writeUncooperativeProvider(t *testing.T, dir string) {
+	t.Helper()
+	script := filepath.Join(dir, "10-slow")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+(
+  trap '' HUP
+  sleep 5
+  echo 'late'
+) &
+child=$!
+wait "$child"
+`), 0o755); err != nil {
+		t.Fatalf("write slow provider: %v", err)
 	}
 }
 
