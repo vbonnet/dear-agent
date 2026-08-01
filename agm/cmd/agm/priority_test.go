@@ -33,7 +33,7 @@ func TestPriorityInstructionsMap_Complete(t *testing.T) {
 func TestPriorityToQueuePriority_Mapping(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected string
+		expected messages.Priority
 	}{
 		{"critical", messages.PriorityCritical},
 		{"urgent", messages.PriorityHigh},
