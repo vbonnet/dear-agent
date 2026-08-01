@@ -4,7 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 
-<!-- Last audited at: 2026-08-01 -->
+<!-- Last audited at: 2026-07-03 -->
 
 ## Purpose
 
@@ -16,9 +16,9 @@ CLI, and workflow-triggered audits share the same lifecycle semantics.
 The exported `Remediator`, `ApplyOutcome`, and `Runner.Remediator` shapes are a
 dormant compatibility seam. `Runner` ignores outcome status and reference,
 passes a note to the store only with a valid finding-state change, and therefore
-does not treat the outcome as durable remediation evidence. No side-effecting
-adapter may be added until a separate idempotent remediation-event persistence
-and legacy-migration contract exists.
+does not treat the outcome as durable remediation evidence. `Runner` rejects
+every adapter except the side-effect-free no-op until a separate idempotent
+remediation-event persistence and legacy-migration contract exists.
 
 ## EARS Requirements
 
@@ -38,4 +38,4 @@ and legacy-migration contract exists.
 
 **AUDIT-08** When a remediator returns an invalid or unchanged finding state, the system shall discard the returned note without updating the finding state.
 
-**AUDIT-09** While no idempotent remediation-event persistence and legacy-migration contract exists, the system shall prohibit production Remediator implementations other than the side-effect-free no-op.
+**AUDIT-09** While no idempotent remediation-event persistence and legacy-migration contract exists, the system shall reject any runner configured with a Remediator other than the side-effect-free no-op before writing audit state.

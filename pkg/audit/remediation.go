@@ -101,6 +101,8 @@ func (r Remediation) Validate() error {
 // The current runner cannot treat Apply's result as durable evidence: it
 // ignores ApplyOutcome.Status and ApplyOutcome.Reference, and passes Note to
 // the store only when State is valid and differs from the stored state.
+// Preflight rejects any implementation other than NewNoopRemediator before
+// writing audit state.
 //
 // Deprecated: Do not add or configure side-effecting implementations. This
 // interface remains exported for compatibility until an idempotent remediation

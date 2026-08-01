@@ -2,19 +2,8 @@ package audit
 
 import (
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"go/types"
-	"io/fs"
 	"log/slog"
-	"path/filepath"
-	"runtime"
-	"sort"
-	"strings"
 	"testing"
-
-	"golang.org/x/tools/go/packages"
 )
 
 type contractRemediator struct {
@@ -107,206 +96,21 @@ func TestRunnerRemediatorOutcomePersistenceBoundary(t *testing.T) {
 	}
 }
 
-func TestProductionRemediatorAdaptersRemainNoopOnly(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve remediation contract test path")
-	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+func TestRunnerRejectsCustomRemediatorBeforeStoreMutation(t *testing.T) {
+	check := fakeCheck{id: "demo"}
+	runner, store, _ := newTestRunner(t, check)
+	runner.Remediator = contractRemediator{}
 
-	patterns, methodCandidates, err := remediatorCandidates(repoRoot)
-	if err != nil {
-		t.Fatalf("find production packages with Remediator candidates: %v", err)
+	plan := Plan{
+		Repo: "demo", RepoRoot: "/tmp/demo", Cadence: CadenceDaily,
+		Trees: []TreePlan{{WorkingDir: "/tmp/demo", Checks: []ScheduledCheck{{CheckID: "demo"}}}},
 	}
-	// This source-level inventory intentionally ignores build constraints. It
-	// closes the host-context gap in go/packages: a platform-specific adapter
-	// must first receive explicit review here before it can reach type checking.
-	wantMethodCandidates := []string{
-		"engram/internal/security/sandbox.go:Sandbox",
-		"pkg/audit/remediation.go:noopRemediator",
+	_, err := runner.Run(context.Background(), plan)
+	const want = "audit: Runner.Remediator must be NewNoopRemediator until remediation outcomes are durably persisted"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Run error = %v, want %q", err, want)
 	}
-	if strings.Join(methodCandidates, "\n") != strings.Join(wantMethodCandidates, "\n") {
-		t.Fatalf(
-			"production method declarations shaped like Remediator.Apply = %v, want reviewed inventory %v; new declarations are forbidden until an idempotent remediation-event persistence and legacy-migration contract exists",
-			methodCandidates,
-			wantMethodCandidates,
-		)
-	}
-
-	loaded, err := packages.Load(&packages.Config{
-		Dir: repoRoot,
-		Mode: packages.NeedName |
-			packages.NeedFiles |
-			packages.NeedCompiledGoFiles |
-			packages.NeedImports |
-			packages.NeedDeps |
-			packages.NeedTypes |
-			packages.NeedTypesSizes,
-	}, patterns...)
-	if err != nil {
-		t.Fatalf("type-check production Remediator candidates: %v", err)
-	}
-	var loadErrors []string
-	packages.Visit(loaded, nil, func(pkg *packages.Package) {
-		for _, pkgErr := range pkg.Errors {
-			loadErrors = append(loadErrors, pkgErr.Error())
-		}
-	})
-	if len(loadErrors) != 0 {
-		sort.Strings(loadErrors)
-		t.Fatalf("type-check production Remediator candidates:\n%s", strings.Join(loadErrors, "\n"))
-	}
-
-	var auditPackage *packages.Package
-	for _, pkg := range loaded {
-		if pkg.PkgPath == "github.com/vbonnet/dear-agent/pkg/audit" {
-			auditPackage = pkg
-			break
-		}
-	}
-	if auditPackage == nil || auditPackage.Types == nil {
-		t.Fatalf("loaded packages %v do not include pkg/audit type information", patterns)
-	}
-	remediatorObject := auditPackage.Types.Scope().Lookup("Remediator")
-	if remediatorObject == nil {
-		t.Fatal("pkg/audit.Remediator type not found")
-	}
-	remediator, ok := remediatorObject.Type().Underlying().(*types.Interface)
-	if !ok {
-		t.Fatalf("pkg/audit.Remediator has type %T, want interface", remediatorObject.Type().Underlying())
-	}
-	remediator.Complete()
-
-	var implementations []string
-	for _, pkg := range loaded {
-		if pkg.Types == nil {
-			continue
-		}
-		scope := pkg.Types.Scope()
-		for _, name := range scope.Names() {
-			typeName, isType := scope.Lookup(name).(*types.TypeName)
-			if !isType || typeName.IsAlias() {
-				continue
-			}
-			candidate := typeName.Type()
-			if _, isInterface := candidate.Underlying().(*types.Interface); isInterface {
-				continue
-			}
-			if types.Implements(candidate, remediator) || types.Implements(types.NewPointer(candidate), remediator) {
-				implementations = append(implementations, pkg.PkgPath+":"+name)
-			}
-		}
-	}
-
-	sort.Strings(implementations)
-	want := []string{"github.com/vbonnet/dear-agent/pkg/audit:noopRemediator"}
-	if strings.Join(implementations, "\n") != strings.Join(want, "\n") {
-		t.Fatalf(
-			"production Remediator implementations = %v, want %v; side-effecting adapters are forbidden until an idempotent remediation-event persistence and legacy-migration contract exists",
-			implementations,
-			want,
-		)
-	}
-}
-
-func remediatorCandidates(repoRoot string) ([]string, []string, error) {
-	candidateDirs := make(map[string]struct{})
-	var methodCandidates []string
-	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", "node_modules", "testdata", "vendor":
-				if path != repoRoot {
-					return fs.SkipDir
-				}
-			}
-			return nil
-		}
-		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-
-		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
-		if parseErr != nil {
-			return parseErr
-		}
-		isCandidatePackage := false
-		for _, decl := range parsed.Decls {
-			fn, isFunc := decl.(*ast.FuncDecl)
-			if isFunc && fn.Recv != nil && fn.Name.Name == "Apply" &&
-				fieldCount(fn.Type.Params) == 3 && fieldCount(fn.Type.Results) == 2 {
-				isCandidatePackage = true
-				rel, relErr := filepath.Rel(repoRoot, path)
-				if relErr != nil {
-					return relErr
-				}
-				methodCandidates = append(
-					methodCandidates,
-					filepath.ToSlash(rel)+":"+receiverTypeName(fn.Recv.List[0].Type),
-				)
-			}
-		}
-		if !isCandidatePackage {
-			ast.Inspect(parsed, func(node ast.Node) bool {
-				ident, isIdent := node.(*ast.Ident)
-				if isIdent && ident.Name == "Remediator" {
-					isCandidatePackage = true
-					return false
-				}
-				return !isCandidatePackage
-			})
-		}
-		if isCandidatePackage {
-			relDir, relErr := filepath.Rel(repoRoot, filepath.Dir(path))
-			if relErr != nil {
-				return relErr
-			}
-			candidateDirs[filepath.ToSlash(relDir)] = struct{}{}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	patterns := make([]string, 0, len(candidateDirs))
-	for dir := range candidateDirs {
-		patterns = append(patterns, "./"+dir)
-	}
-	sort.Strings(patterns)
-	sort.Strings(methodCandidates)
-	return patterns, methodCandidates, nil
-}
-
-func fieldCount(fields *ast.FieldList) int {
-	if fields == nil {
-		return 0
-	}
-	count := 0
-	for _, field := range fields.List {
-		fieldNames := len(field.Names)
-		if fieldNames == 0 {
-			fieldNames = 1
-		}
-		count += fieldNames
-	}
-	return count
-}
-
-func receiverTypeName(expr ast.Expr) string {
-	switch typed := expr.(type) {
-	case *ast.Ident:
-		return typed.Name
-	case *ast.StarExpr:
-		return receiverTypeName(typed.X)
-	case *ast.IndexExpr:
-		return receiverTypeName(typed.X)
-	case *ast.IndexListExpr:
-		return receiverTypeName(typed.X)
-	default:
-		return "<unknown>"
+	if len(store.runs) != 0 || len(store.findings) != 0 {
+		t.Fatalf("preflight mutated store: runs=%d findings=%d", len(store.runs), len(store.findings))
 	}
 }
