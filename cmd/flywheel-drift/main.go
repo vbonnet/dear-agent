@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -66,12 +67,12 @@ func run() int {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(toJSONResults(results)); encErr != nil {
+		exitCode, encErr := writeJSONReport(os.Stdout, results)
+		if encErr != nil {
 			fmt.Fprintf(os.Stderr, "encode: %v\n", encErr)
 			return 1
 		}
+		return exitCode
 	} else {
 		printReport(results)
 	}
@@ -87,6 +88,15 @@ type jsonResult struct {
 	Status   healthchecker.Status `json:"status"`
 	Message  string               `json:"message"`
 	Fixable  bool                 `json:"fixable,omitempty"`
+}
+
+func writeJSONReport(w io.Writer, results []healthchecker.Result) (int, error) {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(toJSONResults(results)); err != nil {
+		return 0, err
+	}
+	return healthchecker.Summarize(results).ExitCode(), nil
 }
 
 func toJSONResults(results []healthchecker.Result) []jsonResult {
