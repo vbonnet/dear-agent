@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-06-12 ce-dn72 -->
+<!-- Last audited at: 2026-08-01 ce-1hu9.5 -->
 
 # AGM MCP Server — Architecture
 
@@ -22,6 +22,16 @@ The running artifact's implementation identity comes from the shared
 `pkg/version` package and is exposed consistently in the process header,
 startup log, and MCP initialization response. This build identity is distinct
 from the wire protocol version, which the MCP SDK negotiates independently.
+
+## MCP contract ownership
+
+`registerMCPTools` in `main.go` and the typed request handlers in `tools.go`
+own the provider-visible tool names and schemas. `surface.Registry` supplies
+only the logical side of the compiled-contract comparator; it does not generate
+or register MCP handlers. `ops.ListOps` owns the `agm_list_ops` discovery
+catalog, which tests require to project the compiled logical tool names exactly.
+Changing a public tool therefore updates registration, typed handler schema,
+contract tests, this inventory, and the local ADR together.
 
 ## Source Files
 

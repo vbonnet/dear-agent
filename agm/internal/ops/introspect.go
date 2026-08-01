@@ -24,8 +24,6 @@ func ListOps() *ListOpsResult {
 		{Name: "get_completion_relay_target", Description: "Read the live AGM completion relay target. Use before relying on AGM-created session completion notifications.", Category: "read", Surface: "cli,mcp"},
 		{Name: "get_quota_status", Description: "Read the latest provider quota status captured by CodexBar. Use to pace Dispatch work when providers are throttled or near-empty.", Category: "read", Surface: "cli,mcp"},
 		{Name: "search_sessions", Description: "Search sessions by name with relevance scoring. Use when finding a specific session.", Category: "read", Surface: "cli,mcp,skill"},
-		{Name: "get_status", Description: "Get live status of all sessions with summary counts. Use for dashboard views.", Category: "read", Surface: "cli,mcp,skill"},
-		{Name: "list_workspaces", Description: "List configured workspaces. Use when checking workspace configuration.", Category: "read", Surface: "cli,mcp"},
 		{Name: "list_wayfinder_sessions", Description: "List Wayfinder project sessions. Use when checking SDLC workflow status.", Category: "read", Surface: "mcp"},
 		{Name: "get_wayfinder_session", Description: "Get detailed Wayfinder project session metadata. Use when inspecting phase status.", Category: "read", Surface: "mcp"},
 		{Name: "create_session", Description: "Create a tmux-backed AGM session for a supported harness. Use when spawning work programmatically.", Category: "mutation", Surface: "cli,mcp"},
