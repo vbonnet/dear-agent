@@ -224,6 +224,9 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if harness == "codex-cli" && IsCodexHookReviewRequired(content) {
 		return false, HarnessInputReviewRequired, nil
 	}
+	if harness == "codex-cli" && containsCodexUpdatePromptPattern(content) {
+		return false, HarnessInputOnboarding, nil
+	}
 
 	// Pi's managed ready footer remains visible while its native confirmation
 	// dialog owns input. Treat that dialog as authoritative before consulting
@@ -332,7 +335,7 @@ func isCurrentComposerAnchor(line, harness string) bool {
 }
 
 func isCodexComposerAnchor(line string) bool {
-	return line == "›" || strings.HasPrefix(line, "› ") || line == ">" || strings.HasPrefix(line, "> [Pasted Content")
+	return isCodexEmptyCursor(line) || hasCodexCursorInputPrefix(line) || line == ">" || strings.HasPrefix(line, "> [Pasted Content")
 }
 
 func queuedComposerOwnsTail(region, content, harness string) bool {
@@ -366,7 +369,7 @@ func queuedComposerOwnsTail(region, content, harness string) bool {
 }
 
 var queuedPastedTextLinePattern = regexp.MustCompile(`\[Pasted text(?: #\d+)? \+(\d+) lines?\]`)
-var codexQueuedPasteCharPattern = regexp.MustCompile(`^[›>]\s+\[Pasted Content (\d+) chars\]$`)
+var codexQueuedPasteCharPattern = regexp.MustCompile(`^[›»>]\s+\[Pasted Content (\d+) chars\]$`)
 
 func queuedPastePayloadOwnsTail(lines []string, isChrome func(string) bool) bool {
 	if len(lines) == 0 {
@@ -471,7 +474,7 @@ func codexInitialQueuedComposerOwnsTail(content string) bool {
 				case candidate == "":
 				case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
 				case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
-				case (strings.HasPrefix(candidate, "› ") || strings.HasPrefix(candidate, "> ")) && hasQueuedInputMarker(candidate):
+				case (hasCodexCursorInputPrefix(candidate) || strings.HasPrefix(candidate, "> ")) && hasQueuedInputMarker(candidate):
 					return codexQueuedPastePayloadOwnsTail(lines[j+1+k:])
 				default:
 					return false
@@ -915,7 +918,7 @@ func hasOnboardingPrompt(content, harness string) bool {
 	case "claude-code":
 		return containsTrustPromptPattern(content)
 	case "codex-cli":
-		return containsCodexTrustPromptPattern(content) || containsCodexModelUpgradePromptPattern(content)
+		return containsCodexTrustPromptPattern(content) || containsCodexModelUpgradePromptPattern(content) || containsCodexUpdatePromptPattern(content)
 	case "agy":
 		return containsAgyTrustPromptPattern(content)
 	case "gemini-cli":
@@ -932,6 +935,9 @@ func containsGeminiTrustPromptPattern(content string) bool {
 }
 
 func onboardingKind(content, harness string) string {
+	if harness == "codex-cli" && containsCodexUpdatePromptPattern(content) {
+		return "update"
+	}
 	if harness == "codex-cli" && containsCodexModelUpgradePromptPattern(content) {
 		return "model-upgrade"
 	}
@@ -959,7 +965,7 @@ func advanceHarnessStartup(ctx context.Context, targetPane, harness, content str
 }
 
 func harnessStartupAdvanceKeys(harness, content string) []string {
-	if harness == "codex-cli" && containsCodexModelUpgradePromptPattern(content) {
+	if harness == "codex-cli" && (containsCodexModelUpgradePromptPattern(content) || containsCodexUpdatePromptPattern(content)) {
 		return []string{"Down", "Enter"}
 	}
 	if harness == "agy" && ContainsAgySurveyPrompt(content) {

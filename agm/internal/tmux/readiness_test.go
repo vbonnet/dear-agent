@@ -84,6 +84,25 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "current Codex post-turn composer",
+			harness: "codex-cli",
+			content: "»\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "current Codex post-turn human draft",
+			harness: "codex-cli",
+			content: "» preserve this human draft\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex update selector owns input",
+			harness: "codex-cli",
+			content: "✨ Update available! 0.145.0 -> 0.146.0\n› 1. Update now (runs `brew upgrade --cask codex`)\n  2. Skip\n  3. Skip until next version\nPress enter to continue",
+			state:   HarnessInputOnboarding,
+		},
+		{
 			name:    "Codex model footer without input owner",
 			harness: "codex-cli",
 			content: "Working (12s)\ngpt-5.5 xhigh · /repo",
@@ -547,6 +566,7 @@ func TestHarnessStartupAdvanceKeys(t *testing.T) {
 	}{
 		{name: "Gemini trust selection", harness: "gemini-cli", content: "Do you trust the files in this folder?", want: []string{"1", "Enter"}},
 		{name: "Codex model upgrade", harness: "codex-cli", content: "Choose how you'd like Codex to proceed", want: []string{"Down", "Enter"}},
+		{name: "Codex update selector", harness: "codex-cli", content: "Update available!\nUpdate now\nSkip until next version", want: []string{"Down", "Enter"}},
 		{name: "AGY survey", harness: "agy", content: "How's the CLI experience so far?\n[0] Skip", want: []string{"0"}},
 		{name: "default trust selection", harness: "claude-code", content: "Do you trust the files in this folder?", want: []string{"Enter"}},
 	}
