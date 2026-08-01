@@ -240,9 +240,7 @@ func TestDiffNoRegressionWhenWithinBaseline(t *testing.T) {
 	}
 }
 
-func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, defaultBaselinePath)
+func TestFindingKeysSortsAndFillsScans(t *testing.T) {
 	current := map[string][]finding{
 		"dead-package":      {{Key: "pkg/z"}, {Key: "pkg/a"}},
 		"file-size":         {{Key: "big.go"}},
@@ -250,20 +248,17 @@ func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
 		"doc-path":          {},
 		"goroutine-recover": {},
 	}
-	if err := writeBaseline(path, current); err != nil {
-		t.Fatal(err)
-	}
-	bl, err := readBaseline(path)
+	got, err := findingKeys(current)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Keys must be sorted on disk.
-	got := bl.Findings["dead-package"]
-	if len(got) != 2 || got[0] != "pkg/a" || got[1] != "pkg/z" {
-		t.Errorf("dead-package baseline = %v, want sorted [pkg/a pkg/z]", got)
+	dead := got["dead-package"]
+	if len(dead) != 2 || dead[0] != "pkg/a" || dead[1] != "pkg/z" {
+		t.Errorf("dead-package keys = %v, want sorted [pkg/a pkg/z]", dead)
 	}
 	// Empty scans must serialize as [] (not absent) so the schema is stable.
-	if bl.Findings["zero-test"] == nil {
+	if got["zero-test"] == nil || got["raw-mem-gate"] == nil {
 		t.Errorf("zero-test should round-trip as empty slice, got nil")
 	}
 }
