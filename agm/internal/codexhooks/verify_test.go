@@ -352,6 +352,40 @@ func TestValidateScriptAssetRejectsCommandOutsideCapabilityAllowlist(t *testing.
 	}
 }
 
+func TestValidateScriptAssetRejectsMutableFileOperands(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\ncat decision.json\n",
+		"#!/bin/sh\ngrep pattern decision.json\n",
+		"#!/bin/sh\nhead -1 decision.json\n",
+		"#!/bin/sh\ntail -1 decision.json\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err == nil {
+			t.Fatalf("validateScriptAsset(%q) accepted mutable file operand", script)
+		}
+	}
+}
+
+func TestValidateScriptAssetAllowsSafeFileUtilityModes(t *testing.T) {
+	for _, script := range []string{
+		"#!/bin/sh\ncat\n",
+		"#!/bin/sh\nprintf pattern | grep pattern\n",
+		"#!/bin/sh\nprintf pattern | head -1\n",
+		"#!/bin/sh\nprintf pattern | tail -1\n",
+		"#!/bin/sh\ncat /dev/null\n",
+		"#!/bin/sh\ncmd=value\nprintf '%s' \"$cmd\" | grep -q -- '--emergency'\n",
+	} {
+		if err := validateScriptAsset([]byte(script)); err != nil {
+			t.Fatalf("validateScriptAsset(%q) rejected safe file utility mode: %v", script, err)
+		}
+	}
+}
+
+func TestValidateScriptAssetRejectsGH(t *testing.T) {
+	if err := validateScriptAsset([]byte("#!/bin/sh\ngh pr view 1\n")); err == nil {
+		t.Fatal("validateScriptAsset accepted gh, which can dispatch user-defined aliases")
+	}
+}
+
 func TestValidateScriptAssetRejectsJQExternalFileModes(t *testing.T) {
 	for _, script := range []string{
 		"#!/bin/sh\n/usr/bin/jq -n -f helper\n",

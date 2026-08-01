@@ -18,11 +18,11 @@
 # bow out, never a bare "you can't stop."
 #
 # WHY it cannot wedge a session (principle 2 + anti-stall): three independent
-# brakes — (1) a per-session attempt counter capped at MAX_ITERS yields control
-# back to the human after a bounded number of tries; (2) it only acts when the
-# working tree is dirty, so read-only / chat / planning turns are never touched;
-# (3) it fails OPEN — any missing tool, unreadable input, non-repo cwd, or
-# unwritable state exits 0 and lets the stop proceed. Opt out for a session with
+# brakes — (1) the harness stop-hook continuation flag yields control back to
+# the human after one blocked continuation; (2) it only acts when the working
+# tree is dirty, so read-only / chat / planning turns are never touched; (3) it
+# fails OPEN — any missing tool, unreadable input, non-repo cwd, or unwritable
+# state exits 0 and lets the stop proceed. Opt out for a session with
 # `export DEAR_GUARDRAIL_LOOP=0`.
 #
 # SCOPE (principle 1): WF-A owns the *loop mechanism* only. The guardrail
@@ -50,9 +50,8 @@ case "$event" in
   *) exit 0 ;;  # never fire on other events
 esac
 
-session="$(printf '%s' "$input" | hook_json -r '.session_id // empty' 2>/dev/null || true)"
-# Secondary loop brake (used only if the attempt counter can't be persisted):
-# true when this stop was itself triggered by a prior stop-hook block.
+# Secondary loop brake: true when this stop was itself triggered by a prior
+# stop-hook block.
 stop_active="$(printf '%s' "$input" | hook_json -r '.stop_hook_active // false' 2>/dev/null || echo false)"
 cwd="$(printf '%s' "$input" | hook_json -r '.cwd // empty' 2>/dev/null || true)"
 [ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
@@ -69,24 +68,11 @@ bundle="$root/scripts/guardrail-bundle.sh"
 # guardrails have nothing to say about this turn.
 [ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ] || exit 0
 
-# --- attempt-budget bookkeeping ----------------------------------------------
-MAX_ITERS="${DEAR_GUARDRAIL_MAX_ITERS:-3}"
-state_dir="${CLAUDE_STATE_DIR:-$HOME/.claude/state}/guardrail-loop"
-# Key the counter by session so concurrent agents don't share a budget. Sanitize
-# to a filesystem-safe token; fall back to a constant if the id is absent.
-key="$(printf '%s' "${session:-nosession}" | tr -c 'A-Za-z0-9._-' '_')"
-count_file="$state_dir/$key.count"
-mkdir -p "$state_dir" 2>/dev/null || true
-count=0
-[ -f "$count_file" ] && count="$(cat "$count_file" 2>/dev/null || echo 0)"
-case "$count" in *[!0-9]*|'') count=0 ;; esac
-
 # --- run the guardrail bundle ------------------------------------------------
 out="$(cd "$root" && bash "$bundle" 2>&1)"; rc=$?
 
 if [ "$rc" -eq 0 ]; then
-  # Green: clear the counter and let the agent stop.
-  rm -f "$count_file" 2>/dev/null || true
+  # Green: let the agent stop.
   exit 0
 fi
 
@@ -94,8 +80,6 @@ fi
 trimmed="$(printf '%s' "$out" | tail -c 4000)"
 [ "$(printf '%s' "$out" | wc -c)" -gt 4000 ] && trimmed="...(earlier output trimmed)...
 $trimmed"
-
-attempt=$((count + 1))
 
 emit_block() { # $1 = reason text -> block the stop, feed reason to the agent
   hook_json -cn --arg r "$1" '{decision:"block",reason:$r}'
@@ -107,28 +91,15 @@ emit_context() { # $1 = text -> non-blocking note, let the agent stop
   exit 0
 }
 
-if [ "$attempt" -gt "$MAX_ITERS" ]; then
-  # Budget exhausted — stop blocking so we never wedge the agent. Surface the
-  # unresolved state, reset, and hand control back to the human.
-  rm -f "$count_file" 2>/dev/null || true
-  emit_context "Guardrails are still failing after ${MAX_ITERS} automated attempts, so the WF-A loop is yielding control rather than retrying further (anti-stall). The remaining failures are below — please resolve them or escalate before relying on this change.
+if [ "$stop_active" = "true" ]; then
+  # The harness has already continued once because of this hook. Yield rather
+  # than persist or reread mutable state and risk an unbounded loop.
+  emit_context "Guardrails are still failing after one automated continuation, so the WF-A loop is yielding control rather than retrying further (anti-stall). The remaining failures are below — please resolve them or escalate before relying on this change.
 
 ${trimmed}"
 fi
 
-# Wrap the write so that even a failure to *open* the target (state dir is
-# unwritable or not a directory) is silenced — the brake below handles it.
-write_count() { printf '%s' "$attempt" > "$count_file"; }
-if ! write_count 2>/dev/null; then
-  # Counter is untrackable (unwritable state dir). Fall back to the harness's
-  # own loop flag so a broken state dir can't spin us forever: if this stop was
-  # already a continuation of a prior block, yield instead of blocking again.
-  [ "$stop_active" = "true" ] && emit_context "Guardrails are still failing and the WF-A loop cannot persist its attempt counter (state dir unwritable), so it is yielding control rather than risk an unbounded loop. Remaining failures:
-
-${trimmed}"
-fi
-
-emit_block "GUARDRAILS FAILING — not done yet (WF-A stop-hook loop, attempt ${attempt}/${MAX_ITERS}).
+emit_block "GUARDRAILS FAILING — not done yet (WF-A stop-hook loop, first attempt).
 
 You're about to finish, but the guardrail bundle is red. This is the same feedback a human reviewer would have given you, delivered on your laptop instead of in CI — fix it before stopping rather than shipping a known-red change.
 
@@ -139,4 +110,4 @@ Do this:
   2. Re-run locally to confirm green:  scripts/guardrail-bundle.sh   (or: make preflight)
   3. When it passes, finish normally — the loop will let you stop.
 
-If a failure is a genuine false positive or truly out of scope for this task, state that explicitly in your next message and stop anyway: the loop yields after ${MAX_ITERS} attempts and will not wedge you. To disable it for this session: export DEAR_GUARDRAIL_LOOP=0"
+If a failure is a genuine false positive or truly out of scope for this task, state that explicitly in your next message and stop anyway: the harness continuation brake yields after one retry and will not wedge you. To disable it for this session: export DEAR_GUARDRAIL_LOOP=0"

@@ -983,7 +983,7 @@ func dynamicNormalizedCommand(
 	if _, declared := functions[command]; declared {
 		return nil, ""
 	}
-	if trustedHookCommandAllowed(command) {
+	if trustedHookCommandAllowed(command, args) {
 		return nil, ""
 	}
 	return commandWord, "command outside trusted capability allowlist"
@@ -2166,7 +2166,7 @@ func commandResolutionStateBuiltin(command string) bool {
 // that remain after the mode-specific runtime and wrapper analysis above.
 // Adding a new executable here requires a reviewed argument-mode analysis when
 // that executable can load code, dispatch children, or change resolution.
-func trustedHookCommandAllowed(command string) bool {
+func trustedHookCommandAllowed(command string, args []*syntax.Word) bool {
 	switch filepath.Base(command) {
 	case
 		// Side-effect-limited shell builtins and control helpers.
@@ -2174,19 +2174,160 @@ func trustedHookCommandAllowed(command string) bool {
 		"local", "printf", "readonly", "return", "set", "shift", "test",
 		"true", "typeset", "unset",
 		// Data and filesystem utilities used by the committed hook assets.
-		"basename", "cat", "chmod", "cp", "cut", "date", "dirname", "grep",
-		"egrep", "fgrep", "head", "jq", "mkdir", "mktemp", "mv", "rm",
-		"sleep", "tail", "tee", "touch", "tr", "wc",
+		"basename", "chmod", "cp", "cut", "date", "dirname", "jq", "mkdir",
+		"mktemp", "mv", "rm", "sleep", "tee", "touch", "tr", "wc",
 		// Tools whose command-capable modes are rejected before this boundary.
 		"awk", "gawk", "mawk", "nawk", "find", "git", "gsed", "gtar",
 		"sed", "sort", "tar",
 		// Operator-owned hook helpers with fixed installed capabilities.
 		"agm", "bd", "bead-close-guard", "dear-agent-bead-close-guard",
-		"dear-agent-codex-hook-json", "gh":
+		"dear-agent-codex-hook-json":
+		return true
+	case "cat", "grep", "egrep", "fgrep", "head", "tail":
+		return trustedHookFileOperandsAreSafe(filepath.Base(command), args)
+	default:
+		return false
+	}
+}
+
+// trustedHookFileOperandsAreSafe keeps simple data utilities on stdin or
+// fixed system-owned inputs. A relative or expanded file operand is mutable
+// from the hook's workspace or home directory and cannot be trusted merely
+// because the utility itself is allowlisted.
+func trustedHookFileOperandsAreSafe(command string, args []*syntax.Word) bool {
+	operands, ok := trustedHookFileOperands(command, args)
+	if !ok {
+		return false
+	}
+	for _, operand := range operands {
+		value, static := staticShellWord(operand)
+		if !static || !filepath.IsAbs(value) || !trustedHookSystemInputPath(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func trustedHookFileOperands(command string, args []*syntax.Word) ([]*syntax.Word, bool) {
+	switch command {
+	case "cat":
+		return trustedHookCatOperands(args)
+	case "head", "tail":
+		return trustedHookHeadTailOperands(args)
+	case "grep", "egrep", "fgrep":
+		return trustedHookGrepOperands(args)
+	default:
+		return nil, false
+	}
+}
+
+func trustedHookCatOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	var operands []*syntax.Word
+	options := true
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			return nil, false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			continue
+		}
+		operands = append(operands, word)
+	}
+	return operands, true
+}
+
+func trustedHookHeadTailOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	var operands []*syntax.Word
+	options := true
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return nil, false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && (strings.HasPrefix(value, "-") || value == "+") {
+			if headTailOptionConsumesNext(value) {
+				if index+1 >= len(args) {
+					return nil, false
+				}
+				index++
+			}
+			continue
+		}
+		operands = append(operands, word)
+	}
+	return operands, true
+}
+
+func headTailOptionConsumesNext(value string) bool {
+	switch value {
+	case "-n", "-c", "-b":
 		return true
 	default:
 		return false
 	}
+}
+
+func trustedHookGrepOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	var operands []*syntax.Word
+	options := true
+	patternSeen := false
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			if !patternSeen {
+				patternSeen = true
+				continue
+			}
+			return nil, false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			if grepOptionConsumesNext(value) {
+				if index+1 >= len(args) {
+					return nil, false
+				}
+				if value == "-f" || value == "--file" {
+					operands = append(operands, args[index+1])
+				}
+				index++
+			}
+			continue
+		}
+		if !patternSeen {
+			patternSeen = true
+			continue
+		}
+		operands = append(operands, word)
+	}
+	return operands, true
+}
+
+func grepOptionConsumesNext(value string) bool {
+	switch value {
+	case "-e", "-f", "-A", "-B", "-C", "--regexp", "--file",
+		"--after-context", "--before-context", "--context":
+		return true
+	default:
+		return false
+	}
+}
+
+func trustedHookSystemInputPath(path string) bool {
+	return isSystemRuntimePath(path) || path == "/dev/null"
 }
 
 func rejectMutableInputRedirections(script string) error {
