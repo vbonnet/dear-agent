@@ -963,8 +963,6 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 		if positive || f.BDD.Consequence != "none" {
 			return fmt.Errorf("finding %q without BDD features must be non-positive with consequence none", f.ID)
 		}
-	} else if f.BDD.Consequence == "none" {
-		return fmt.Errorf("finding %q with BDD features cannot use consequence none", f.ID)
 	}
 	seenMembers := map[string]bool{}
 	for _, entry := range f.Applicability {
