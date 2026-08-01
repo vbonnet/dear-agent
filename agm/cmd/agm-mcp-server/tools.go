@@ -270,8 +270,12 @@ func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 	addArchiveSessionToolWithFactory(server, newMCPOpContext)
 }
 
+func archiveSessionWithOps(opCtx *ops.OpContext, request *ops.ArchiveSessionRequest) (*ops.ArchiveSessionResult, error) {
+	return ops.ArchiveSession(opCtx, request)
+}
+
 func addArchiveSessionToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
-	addArchiveSessionToolWithDependencies(server, newOpContext, ops.ArchiveSession)
+	addArchiveSessionToolWithDependencies(server, newOpContext, archiveSessionWithOps)
 }
 
 func addArchiveSessionToolWithDependencies(
@@ -309,11 +313,15 @@ func addKillSessionTool(server *mcp.Server, _ *Config) {
 	addKillSessionToolWithFactory(server, newMCPOpContextWithTmux)
 }
 
+func killSessionWithOps(opCtx *ops.OpContext, request *ops.KillSessionRequest) (*ops.KillSessionResult, error) {
+	return ops.KillSession(opCtx, request)
+}
+
 // addKillSessionToolWithFactory keeps dependency construction private while
 // allowing the complete MCP transport and shared mutation contract to be
 // exercised with deterministic storage and tmux adapters.
 func addKillSessionToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
-	addKillSessionToolWithDependencies(server, newOpContext, ops.KillSession)
+	addKillSessionToolWithDependencies(server, newOpContext, killSessionWithOps)
 }
 
 func addKillSessionToolWithDependencies(
