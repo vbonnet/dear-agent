@@ -136,6 +136,9 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) (retErr error) {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Ensure migrations are applied
 	if err := a.ApplyMigrations(); err != nil {
@@ -174,7 +177,10 @@ func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservat
 		return err
 	}
 	harness := defaultIfEmpty(session.Harness, "claude-code")
-	status := lifecycleStorageStatus(session.Lifecycle)
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
+	}
 	permissionMode := defaultIfEmpty(session.PermissionMode, "default")
 	permissionModeSource := defaultIfEmpty(session.PermissionModeSource, "init")
 
@@ -345,10 +351,16 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Ensure migrations are applied
 	if err := a.ApplyMigrations(); err != nil {
 		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	if err := a.validateStoredSessionLifecycleAndOutcome(session.SessionID); err != nil {
+		return err
 	}
 
 	// Marshal context tags to JSON
@@ -371,7 +383,10 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 
 	// Preserve transitional lifecycle values such as "reaping" so detached
 	// reapers can recover across processes in an isolated SQLite test store.
-	status := lifecycleStorageStatus(session.Lifecycle)
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
+	}
 
 	// Update timestamp
 	session.UpdatedAt = time.Now()
@@ -949,7 +964,7 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 	if err := a.ApplyMigrations(); err != nil {
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
-	query := `SELECT name FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
+	query := `SELECT name, status FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
 	rows, err := a.conn.QueryContext(ctx, query, a.workspace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active sessions: %w", err)
@@ -958,9 +973,12 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 
 	var names []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, status string
+		if err := rows.Scan(&name, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan session name: %w", err)
+		}
+		if _, err := lifecycleFromStorageStatus(status); err != nil {
+			return nil, fmt.Errorf("validate listed session lifecycle: %w", err)
 		}
 		names = append(names, name)
 	}
@@ -1245,14 +1263,14 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}
 
-	// Set lifecycle from status. Runtime active/stopped state remains outside the
-	// durable lifecycle field; terminal/transitional lifecycle values round-trip.
-	switch status {
-	case manifest.LifecycleArchived, manifest.LifecycleReaping:
-		session.Lifecycle = status
-	default:
-		session.Lifecycle = ""
+	// Runtime active/stopped state remains outside the durable lifecycle field.
+	// Decode every stored status through the closed manifest vocabulary so an
+	// unknown nonempty durable value cannot masquerade as an active session.
+	lifecycle, err := lifecycleFromStorageStatus(status)
+	if err != nil {
+		return nil, err
 	}
+	session.Lifecycle = lifecycle
 
 	// Set workspace and model
 	session.Workspace = workspace
@@ -1280,13 +1298,76 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	return &session, nil
 }
 
-func lifecycleStorageStatus(lifecycle string) string {
-	switch lifecycle {
-	case manifest.LifecycleArchived, manifest.LifecycleReaping:
-		return lifecycle
-	default:
-		return "active"
+func validateSessionLifecycleAndOutcome(session *manifest.Manifest) error {
+	if _, err := manifest.ParseSessionLifecycle(session.Lifecycle); err != nil {
+		return fmt.Errorf("validate persisted lifecycle: %w", err)
 	}
+	if _, err := manifest.ParseSessionOutcome(string(session.Outcome)); err != nil {
+		return fmt.Errorf("validate persisted outcome: %w", err)
+	}
+	return nil
+}
+
+// validateStoredSessionLifecycleAndOutcome prevents a valid caller snapshot
+// from overwriting an invalid durable value that has not been decoded first.
+func (a *Adapter) validateStoredSessionLifecycleAndOutcome(sessionID string) error {
+	var status string
+	var metadataJSON []byte
+	err := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT status, metadata FROM agm_sessions WHERE id = ? AND workspace = ?`,
+		sessionID,
+		a.workspace,
+	).Scan(&status, &metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect stored lifecycle and outcome before update: %w", err)
+	}
+	if _, err := lifecycleFromStorageStatus(status); err != nil {
+		return fmt.Errorf("validate stored lifecycle before update: %w", err)
+	}
+	if len(metadataJSON) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return fmt.Errorf("inspect stored metadata before update: %w", err)
+	}
+	if _, _, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return fmt.Errorf("validate stored metadata outcome before update: %w", err)
+	}
+	return nil
+}
+
+// lifecycleStorageStatus converts the manifest's legacy empty lifecycle into
+// the established Dolt "active" spelling. All nonempty values must be part of
+// the closed manifest vocabulary.
+func lifecycleStorageStatus(lifecycle string) (string, error) {
+	parsed, err := manifest.ParseSessionLifecycle(lifecycle)
+	if err != nil {
+		return "", err
+	}
+	switch parsed {
+	case manifest.LifecycleReaping, manifest.LifecycleArchived:
+		return string(parsed), nil
+	default:
+		return "active", nil
+	}
+}
+
+// lifecycleFromStorageStatus preserves both legacy storage spellings for the
+// empty manifest lifecycle and rejects any unknown nonempty stored status.
+func lifecycleFromStorageStatus(status string) (string, error) {
+	switch status {
+	case "", "active":
+		return "", nil
+	}
+	parsed, err := manifest.ParseSessionLifecycle(status)
+	if err != nil {
+		return "", fmt.Errorf("invalid stored lifecycle status %q: %w", status, err)
+	}
+	return string(parsed), nil
 }
 
 // applyNullableScanFields copies the nullable sql.Null* values from a Scan call
@@ -1348,8 +1429,10 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	}
 	// Outcome lives alongside engram fields but is independent of them — read it
 	// before the engram early-return so it round-trips even when engram is off.
-	if outcome, ok := metadata["outcome"].(string); ok {
-		session.Outcome = manifest.SessionOutcome(outcome)
+	if outcome, present, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return err
+	} else if present {
+		session.Outcome = outcome
 	}
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory
@@ -1365,6 +1448,22 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	applyPiMetadata(session, metadata)
 	applyEngramMetadata(session, metadata)
 	return nil
+}
+
+func parseSessionMetadataOutcome(metadata map[string]any) (manifest.SessionOutcome, bool, error) {
+	rawOutcome, present := metadata["outcome"]
+	if !present {
+		return manifest.OutcomeUnknown, false, nil
+	}
+	outcome, ok := rawOutcome.(string)
+	if !ok {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome type %T", rawOutcome)
+	}
+	parsed, err := manifest.ParseSessionOutcome(outcome)
+	if err != nil {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome: %w", err)
+	}
+	return parsed, true, nil
 }
 
 func applyCodexMetadata(session *manifest.Manifest, metadata map[string]any) {

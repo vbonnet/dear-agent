@@ -2,13 +2,6 @@ package manifest
 
 import "time"
 
-// SessionOutcome describes how a session ended, stamped on the record at
-// archive time. It makes the archive pile triage-legible instead of showing
-// rows of identical, indistinguishable archived sessions. Values are defined
-// as constants (OutcomeCompleted, OutcomeCrashed, OutcomeKilled, OutcomeGCStale)
-// in constants.go.
-type SessionOutcome string
-
 // Manifest represents an AGM session manifest (v2 schema)
 type Manifest struct {
 	SchemaVersion           string            `yaml:"schema_version"`

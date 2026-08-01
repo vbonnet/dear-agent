@@ -285,17 +285,21 @@ func (a *Adapter) reserveParentLinkName(ctx context.Context, sessionID string, i
 	if inheritedName == nil {
 		return false, "", nil
 	}
-	var currentName, lifecycle string
+	var currentName, status string
 	if err := a.conn.QueryRowContext(
 		ctx,
 		`SELECT name, status FROM agm_sessions WHERE id = ? AND workspace = ?`,
 		sessionID,
 		a.workspace,
-	).Scan(&currentName, &lifecycle); err != nil {
+	).Scan(&currentName, &status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, "", fmt.Errorf("session not found: %s", sessionID)
 		}
 		return false, "", fmt.Errorf("inspect session before linking parent: %w", err)
+	}
+	lifecycle, err := lifecycleFromStorageStatus(status)
+	if err != nil {
+		return false, "", fmt.Errorf("validate session lifecycle before linking parent: %w", err)
 	}
 	if lifecycle == manifest.LifecycleArchived || currentName == *inheritedName {
 		// Archived rows do not occupy the active-name set. ReactivateSession
