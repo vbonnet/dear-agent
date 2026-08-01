@@ -5,8 +5,9 @@
 ## Overview
 
 `agm/internal/messages` provides the SQLite-backed queue and acknowledgement
-manager for non-disruptive cross-session messages. It preserves priority order,
-delivery status, retry state, and acknowledgement timeouts.
+manager for non-disruptive cross-session messages. It owns the typed queue
+priority vocabulary and preserves priority order, delivery status, retry state,
+and acknowledgement timeouts.
 
 ## EARS Requirements
 
@@ -24,9 +25,14 @@ delivery status, retry state, and acknowledgement timeouts.
 
 **MSG-07** When dead-letter messages are requested without a queue, the system shall return a queue-not-configured error.
 
+**MSG-08** When a raw message priority is parsed, the system shall return a typed priority only for the exact values `CRITICAL`, `HIGH`, `MEDIUM`, and `LOW`.
+
+**MSG-09** When a queue entry has an undeclared priority, the system shall reject the enqueue before attempting a SQLite write.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Package tests: `agm/internal/messages/priority_test.go`
 - Package tests: `agm/internal/messages/queue_test.go`
 - Package tests: `agm/internal/messages/ack_test.go`
 - Package tests: `agm/internal/messages/rate_limit_test.go`

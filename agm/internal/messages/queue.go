@@ -18,7 +18,7 @@ type QueueEntry struct {
 	From         string
 	To           string
 	Message      string
-	Priority     string
+	Priority     Priority
 	QueuedAt     time.Time
 	AttemptCount int
 	LastAttempt  *time.Time
@@ -32,14 +32,6 @@ type QueueEntry struct {
 type MessageQueue struct {
 	db *sql.DB
 }
-
-// Priority constants
-const (
-	PriorityCritical = "CRITICAL"
-	PriorityHigh     = "HIGH"
-	PriorityMedium   = "MEDIUM"
-	PriorityLow      = "LOW"
-)
 
 // Status constants
 const (
@@ -122,6 +114,13 @@ func (q *MessageQueue) Close() error {
 
 // Enqueue adds a message to the queue
 func (q *MessageQueue) Enqueue(entry *QueueEntry) error {
+	if entry == nil {
+		return fmt.Errorf("failed to enqueue message: entry is nil")
+	}
+	if !entry.Priority.IsValid() {
+		return fmt.Errorf("failed to enqueue message: invalid message priority %q (valid: CRITICAL, HIGH, MEDIUM, LOW)", entry.Priority)
+	}
+
 	//nolint:noctx // TODO(context): plumb ctx through this layer
 	_, err := q.db.Exec(`
 		INSERT INTO message_queue (message_id, from_session, to_session, message, priority, queued_at, status)
