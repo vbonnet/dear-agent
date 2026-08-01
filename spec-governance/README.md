@@ -9,9 +9,13 @@ This directory contains the canonical source workflows for two skills:
   authored workflow for a pinned, read-only ownership audit that produces a
   structured ledger and self-contained HTML.
 
-These source files are not harness adapters or discovery registrations. A
-committed skill proves source presence only; whether a harness discovers or
-invokes it remains `UNVERIFIED` until separately observed in that harness.
+Two generated, regular-file discovery delegates under
+`.agents/skills/{write-spec,audit-specs}/SKILL.md` contain only each
+canonical skill's name, description, and pointer. `tools/skill-projections`
+checks their exact bytes as part of `make lint-skills`; the delegates are not
+an authored policy surface. Their committed presence proves only the
+in-repository projection. Whether any harness discovers or invokes it remains
+`UNVERIFIED` until separately observed in that harness.
 
 The authoring skill is the canonical guidance for the rule that one shared
 observable behavior has one harness-neutral product `SPEC.md` owner. The audit

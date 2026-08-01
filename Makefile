@@ -149,6 +149,7 @@ lint-specs:
 # interface required CI uses. Hidden and nonstandard skill roots are included.
 lint-skills:
 	@go run ./tools/skill-lint -repo .
+	@go run ./tools/skill-projections -repo .
 
 # Validate retired vocabulary and prohibited command guidance across declared
 # active instruction surfaces.
