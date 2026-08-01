@@ -29,7 +29,10 @@ SPEC uses a deterministic strict-EARS parser. PLAN uses the architecture review
 adapter when configured. Document review removes one canonical leading YAML
 frontmatter block before checking the Markdown body; a malformed leading block
 fails closed. BUILD rejects placeholder-only evidence and runs bounded
-build/test checks for discovered code.
+build/test checks for discovered code. Methodology hashing keeps the portable
+`phase_engram_path` representation in frontmatter and resolves relative values
+against the project directory only at the validation seam; absolute and `~/`
+values remain compatible.
 
 ## Trust boundaries
 

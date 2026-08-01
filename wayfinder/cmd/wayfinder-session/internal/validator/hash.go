@@ -3,6 +3,7 @@ package validator
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/pkg/hash"
 )
@@ -14,6 +15,18 @@ import (
 // - File cannot be read
 func calculatePhaseEngramHash(engramPath string) (string, error) {
 	return hash.CalculateFileHash(engramPath)
+}
+
+func resolvePhaseEngramPath(projectDir, engramPath string) (string, error) {
+	if filepath.IsAbs(engramPath) || strings.HasPrefix(engramPath, "~") {
+		return hash.ExpandPath(engramPath)
+	}
+
+	absoluteProjectDir, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve project directory: %w", err)
+	}
+	return filepath.Join(absoluteProjectDir, engramPath), nil
 }
 
 // validateMethodologyFreshness validates that the deliverable was created using
@@ -56,8 +69,18 @@ func validateMethodologyFreshness(projectDir, phaseName, hashMismatchReason stri
 		return nil
 	}
 
-	// Calculate current hash of the phase engram
-	currentHash, err := calculatePhaseEngramHash(fm.PhaseEngramPath)
+	// Resolve portable project-relative frontmatter to an absolute runtime path.
+	engramPath, err := resolvePhaseEngramPath(projectDir, fm.PhaseEngramPath)
+	if err != nil {
+		return NewValidationError(
+			"complete "+phaseName,
+			fmt.Sprintf("failed to resolve phase engram path %s: %v", fm.PhaseEngramPath, err),
+			"Ensure the phase_engram_path in frontmatter points to a valid engram file",
+		)
+	}
+
+	// Calculate current hash of the phase engram.
+	currentHash, err := calculatePhaseEngramHash(engramPath)
 	if err != nil {
 		return NewValidationError(
 			"complete "+phaseName,

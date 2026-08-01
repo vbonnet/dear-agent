@@ -33,6 +33,8 @@
 
 **WFVALID-13** When BUILD or RETRO completion validates Git state, the system shall allow the current phase artifact to reach the scoped completion commit while rejecting untracked artifacts from earlier phases and untracked BUILD source code.
 
+**WFVALID-14** When `phase_engram_path` is relative, the system shall resolve it against the Wayfinder project directory before hashing while continuing to accept absolute and home-relative paths.
+
 ## Traceability
 
 - Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`

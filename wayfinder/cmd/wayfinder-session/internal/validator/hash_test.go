@@ -134,6 +134,80 @@ func TestCalculatePhaseEngramHash(t *testing.T) {
 	}
 }
 
+func TestResolvePhaseEngramPath(t *testing.T) {
+	projectDir := t.TempDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir() error = %v", err)
+	}
+	absolute := filepath.Join(t.TempDir(), "method.md")
+
+	tests := []struct {
+		name    string
+		path    string
+		want    string
+		wantErr bool
+	}{
+		{name: "project relative", path: filepath.Join("methods", "problem.md"), want: filepath.Join(projectDir, "methods", "problem.md")},
+		{name: "absolute", path: absolute, want: absolute},
+		{name: "home relative", path: filepath.Join("~", "methods", "problem.md"), want: filepath.Join(homeDir, "methods", "problem.md")},
+		{name: "named home unsupported", path: "~other/method.md", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolvePhaseEngramPath(projectDir, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolvePhaseEngramPath() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolvePhaseEngramPath() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolvePhaseEngramPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateMethodologyFreshnessProjectRelativeEngramPath(t *testing.T) {
+	projectDir := t.TempDir()
+	relativeEngramPath := filepath.Join("methods", "problem.md")
+	engramPath := filepath.Join(projectDir, relativeEngramPath)
+	if err := os.MkdirAll(filepath.Dir(engramPath), 0o755); err != nil {
+		t.Fatalf("create methodology directory: %v", err)
+	}
+	if err := os.WriteFile(engramPath, []byte("# Problem methodology\n"), 0o600); err != nil {
+		t.Fatalf("write methodology: %v", err)
+	}
+	expectedHash, err := calculatePhaseEngramHash(engramPath)
+	if err != nil {
+		t.Fatalf("calculate methodology hash: %v", err)
+	}
+
+	deliverable := `---
+phase: "PROBLEM"
+phase_name: "Problem Validation"
+wayfinder_session_id: "relative-engram"
+created_at: "2026-08-01T00:00:00Z"
+phase_engram_hash: "` + expectedHash + `"
+phase_engram_path: "` + relativeEngramPath + `"
+---
+
+# Problem
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "PROBLEM-problem-validation.md"), []byte(deliverable), 0o600); err != nil {
+		t.Fatalf("write deliverable: %v", err)
+	}
+
+	if err := validateMethodologyFreshness(projectDir, "PROBLEM", ""); err != nil {
+		t.Fatalf("validateMethodologyFreshness() error = %v", err)
+	}
+}
+
 func TestCalculatePhaseEngramHash_TildeExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
