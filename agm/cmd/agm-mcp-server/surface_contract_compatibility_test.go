@@ -116,6 +116,8 @@ func registeredMCPTools(t *testing.T, register func(*mcp.Server, *Config)) []*mc
 	t.Helper()
 	server := mcp.NewServer(&mcp.Implementation{Name: "surface-contract-test", Version: "test"}, nil)
 	register(server, &Config{})
+	captureMiddleware, snapshots := captureListedTools()
+	server.AddReceivingMiddleware(captureMiddleware)
 	client := mcp.NewClient(&mcp.Implementation{Name: "surface-contract-client", Version: "test"}, nil)
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
@@ -128,11 +130,20 @@ func registeredMCPTools(t *testing.T, register func(*mcp.Server, *Config)) []*mc
 		t.Fatalf("client.Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
-	result, err := clientSession.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
+	var tools []*mcp.Tool
+	var params *mcp.ListToolsParams
+	for {
+		result, err := clientSession.ListTools(t.Context(), params)
+		if err != nil {
+			t.Fatalf("ListTools: %v", err)
+		}
+		rawSchemaTools := takeListedToolsSnapshot(t, snapshots)
+		tools = append(tools, reconcileListedTools(t, result.Tools, rawSchemaTools)...)
+		if result.NextCursor == "" {
+			return tools
+		}
+		params = &mcp.ListToolsParams{Cursor: result.NextCursor}
 	}
-	return result.Tools
 }
 
 func logicalRegistryContract(t *testing.T) map[string]contractTool {
