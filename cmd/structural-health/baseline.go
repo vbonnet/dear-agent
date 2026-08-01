@@ -726,17 +726,21 @@ func writeBaselineAtomicWithRename(path string, bl baseline, rename func(string,
 	if err != nil {
 		return err
 	}
+	writePath, err := resolveBaselineWritePath(path)
+	if err != nil {
+		return err
+	}
 
 	mode := os.FileMode(0o644)
-	info, err := os.Stat(path)
+	info, err := os.Stat(writePath)
 	if err == nil {
 		mode = info.Mode().Perm()
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
-	dir := filepath.Dir(path)
-	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	dir := filepath.Dir(writePath)
+	temp, err := os.CreateTemp(dir, "."+filepath.Base(writePath)+".tmp-*")
 	if err != nil {
 		return err
 	}
@@ -765,11 +769,29 @@ func writeBaselineAtomicWithRename(path string, bl baseline, rename func(string,
 		return err
 	}
 	closed = true
-	if err := rename(tempPath, path); err != nil {
+	if err := rename(tempPath, writePath); err != nil {
 		return err
 	}
 	tempPath = ""
 	return nil
+}
+
+func resolveBaselineWritePath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		}
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve baseline symlink %s: %w", path, err)
+	}
+	return resolved, nil
 }
 
 func marshalBaseline(bl baseline) ([]byte, error) {

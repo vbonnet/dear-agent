@@ -65,6 +65,8 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-25** When schema-v2 transition history is reverse-reconstructed, the system shall reject the history unless its initial scanner version equals the legacy scanner-key version.
 
+**STRUCT-HEALTH-26** When baseline persistence targets a symlink, the system shall atomically replace the resolved target while preserving the symlink directory entry and the target file mode.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/quality_command_guardrails.feature` enforces that this command keeps co-located SPEC coverage.
