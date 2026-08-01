@@ -35,6 +35,8 @@
 
 **WFVALID-14** When `phase_engram_path` is relative, the system shall resolve it against the Wayfinder project directory before hashing while continuing to accept absolute and home-relative paths.
 
+Only exact `~` and `~` followed by a platform path separator are home-relative. Other leading-tilde path components are project-relative.
+
 ## Traceability
 
 - Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`

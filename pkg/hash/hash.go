@@ -13,7 +13,7 @@ import (
 //
 // Supports:
 //   - ~ (tilde only) - expands to home directory
-//   - ~/path (tilde with path) - expands to home directory + path
+//   - ~/path (tilde with a platform path separator) - expands to home directory + path
 //   - /absolute/path - returns absolute path
 //   - relative/path - converts to absolute path
 //
@@ -46,12 +46,12 @@ func ExpandPath(path string) (string, error) {
 	if path == "~" {
 		return filepath.Clean(home), nil
 	}
-	if strings.HasPrefix(path, "~/") {
+	if len(path) > 1 && path[0] == '~' && os.IsPathSeparator(path[1]) {
 		return filepath.Join(home, path[2:]), nil
 	}
 
 	// Path like ~user/... is not supported
-	return "", fmt.Errorf("cannot expand path: %s (only ~ and ~/ are supported)", path)
+	return "", fmt.Errorf("cannot expand path: %s (only ~ and ~ followed by a path separator are supported)", path)
 }
 
 // CalculateFileHash calculates SHA-256 hash of a file and returns it in the format "sha256:{hex_hash}".

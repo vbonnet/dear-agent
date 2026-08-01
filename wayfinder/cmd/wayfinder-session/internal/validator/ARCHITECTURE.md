@@ -32,7 +32,9 @@ fails closed. BUILD rejects placeholder-only evidence and runs bounded
 build/test checks for discovered code. Methodology hashing keeps the portable
 `phase_engram_path` representation in frontmatter and resolves relative values
 against the project directory only at the validation seam; absolute and `~/`
-values remain compatible.
+values remain compatible. Home-relative recognition is boundary-aware: exact
+`~` and `~` followed by a platform path separator expand to the home directory,
+while other leading-tilde components remain project-relative.
 
 ## Trust boundaries
 

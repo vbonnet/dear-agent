@@ -2,8 +2,8 @@ package validator
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/vbonnet/dear-agent/pkg/hash"
 )
@@ -18,7 +18,7 @@ func calculatePhaseEngramHash(engramPath string) (string, error) {
 }
 
 func resolvePhaseEngramPath(projectDir, engramPath string) (string, error) {
-	if filepath.IsAbs(engramPath) || strings.HasPrefix(engramPath, "~") {
+	if filepath.IsAbs(engramPath) || isHomeRelativePath(engramPath) {
 		return hash.ExpandPath(engramPath)
 	}
 
@@ -27,6 +27,10 @@ func resolvePhaseEngramPath(projectDir, engramPath string) (string, error) {
 		return "", fmt.Errorf("failed to resolve project directory: %w", err)
 	}
 	return filepath.Join(absoluteProjectDir, engramPath), nil
+}
+
+func isHomeRelativePath(path string) bool {
+	return path == "~" || (len(path) > 1 && path[0] == '~' && os.IsPathSeparator(path[1]))
 }
 
 // validateMethodologyFreshness validates that the deliverable was created using

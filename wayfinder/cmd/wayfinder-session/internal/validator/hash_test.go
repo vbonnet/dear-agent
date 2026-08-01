@@ -150,8 +150,10 @@ func TestResolvePhaseEngramPath(t *testing.T) {
 	}{
 		{name: "project relative", path: filepath.Join("methods", "problem.md"), want: filepath.Join(projectDir, "methods", "problem.md")},
 		{name: "absolute", path: absolute, want: absolute},
+		{name: "home root", path: "~", want: filepath.Clean(homeDir)},
 		{name: "home relative", path: filepath.Join("~", "methods", "problem.md"), want: filepath.Join(homeDir, "methods", "problem.md")},
-		{name: "named home unsupported", path: "~other/method.md", wantErr: true},
+		{name: "leading tilde directory", path: "~methods/problem.md", want: filepath.Join(projectDir, "~methods/problem.md")},
+		{name: "named-home-like directory", path: "~other/method.md", want: filepath.Join(projectDir, "~other/method.md")},
 	}
 
 	for _, tt := range tests {

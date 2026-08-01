@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrAmbiguousHistory means both the legacy and canonical append-only logs
@@ -20,13 +21,15 @@ var ErrAmbiguousHistory = errors.New("ambiguous history state")
 
 // History manages append-only event logging to WAYFINDER-HISTORY.jsonl
 type History struct {
-	path string
+	path        string
+	userHomeDir func() (string, error)
 }
 
 // New creates a new History for the given directory
 func New(dir string) *History {
 	return &History{
-		path: filepath.Join(dir, HistoryFilename),
+		path:        filepath.Join(dir, HistoryFilename),
+		userHomeDir: os.UserHomeDir,
 	}
 }
 
@@ -107,7 +110,7 @@ func (h *History) sanitizeEventData(data map[string]any) (map[string]any, error)
 	if err != nil {
 		return nil, fmt.Errorf("resolve project directory: %w", err)
 	}
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := h.userHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home directory: %w", err)
 	}
@@ -163,12 +166,12 @@ func replacePathRoot(value, root, placeholder string) string {
 	searchFrom := 0
 	replaced := false
 	for searchFrom < len(value) {
-		relativeIndex := strings.Index(value[searchFrom:], root)
+		relativeIndex, matchedLength := indexPathRoot(value[searchFrom:], root)
 		if relativeIndex == -1 {
 			break
 		}
 		index := searchFrom + relativeIndex
-		end := index + len(root)
+		end := index + matchedLength
 		if hasPathStartBoundary(value, index) && hasPathEndBoundary(value, end) {
 			result.WriteString(value[lastWritten:index])
 			result.WriteString(placeholder)
@@ -182,6 +185,43 @@ func replacePathRoot(value, root, placeholder string) string {
 	}
 	result.WriteString(value[lastWritten:])
 	return result.String()
+}
+
+func indexPathRoot(value, root string) (int, int) {
+	if filepath.Separator != '\\' {
+		return strings.Index(value, root), len(root)
+	}
+	for index := range value {
+		if matchedLength, ok := matchWindowsPathRoot(value[index:], root); ok {
+			return index, matchedLength
+		}
+	}
+	return -1, 0
+}
+
+func matchWindowsPathRoot(value, root string) (int, bool) {
+	consumed := 0
+	for _, rootRune := range root {
+		if value == "" {
+			return 0, false
+		}
+		valueRune, valueRuneSize := utf8.DecodeRuneInString(value)
+		if !windowsPathRunesEqual(valueRune, rootRune) {
+			return 0, false
+		}
+		consumed += valueRuneSize
+		value = value[valueRuneSize:]
+	}
+	return consumed, true
+}
+
+func windowsPathRunesEqual(left, right rune) bool {
+	leftIsSeparator := left == '/' || left == '\\'
+	rightIsSeparator := right == '/' || right == '\\'
+	if leftIsSeparator || rightIsSeparator {
+		return leftIsSeparator && rightIsSeparator
+	}
+	return strings.EqualFold(string(left), string(right))
 }
 
 func hasPathStartBoundary(value string, index int) bool {
@@ -201,7 +241,7 @@ func hasPathEndBoundary(value string, index int) bool {
 	if index == len(value) {
 		return true
 	}
-	if value[index] == byte(filepath.Separator) {
+	if os.IsPathSeparator(value[index]) {
 		return true
 	}
 	if value[index] == '.' && index+1 == len(value) {

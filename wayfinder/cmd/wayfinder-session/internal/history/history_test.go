@@ -156,6 +156,30 @@ func TestAppendEventSanitizesNewDataWithoutMutationOrHistoryRewrite(t *testing.T
 	}
 }
 
+func TestAppendEventFailsClosedWhenHomeDirectoryCannotBeResolved(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := New(tmpDir)
+	existing := []byte("{\"type\":\"existing\"}\n")
+	if err := os.WriteFile(h.path, existing, 0o600); err != nil {
+		t.Fatalf("write existing history: %v", err)
+	}
+	h.userHomeDir = func() (string, error) {
+		return "", errors.New("home unavailable")
+	}
+
+	err := h.AppendEvent(EventTypePhaseStarted, "BUILD", map[string]any{"path": "/host/private/path"})
+	if err == nil || !strings.Contains(err.Error(), "resolve home directory") {
+		t.Fatalf("AppendEvent() error = %v, want home-directory resolution error", err)
+	}
+	persisted, readErr := os.ReadFile(h.path)
+	if readErr != nil {
+		t.Fatalf("read history: %v", readErr)
+	}
+	if !bytes.Equal(persisted, existing) {
+		t.Fatalf("history changed after failed sanitation: got %q, want %q", persisted, existing)
+	}
+}
+
 func TestReplacePathRootBoundaries(t *testing.T) {
 	root := filepath.Join(string(filepath.Separator), "project")
 	descendant := root + string(filepath.Separator) + "child"
@@ -182,6 +206,13 @@ func TestReplacePathRootBoundaries(t *testing.T) {
 			want  string
 		}{name: "backslash is not a POSIX descendant", value: root + `\unrelated`, want: root + `\unrelated`})
 	}
+	if filepath.Separator == '\\' {
+		tests = append(tests, struct {
+			name  string
+			value string
+			want  string
+		}{name: "forward slashes throughout Windows root", value: filepath.ToSlash(root) + "/child", want: "$PROJECT_DIR/child"})
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,6 +220,18 @@ func TestReplacePathRootBoundaries(t *testing.T) {
 				t.Errorf("replacePathRoot(%q) = %q, want %q", tt.value, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMatchWindowsPathRootTreatsCaseAndSeparatorsAsEquivalent(t *testing.T) {
+	value := `c:/users/agent/project/private.txt`
+	root := `C:\Users\Agent\Project`
+	matchedLength, ok := matchWindowsPathRoot(value, root)
+	if !ok {
+		t.Fatal("matchWindowsPathRoot() did not match a case-folded forward-slash root")
+	}
+	if want := len(`c:/users/agent/project`); matchedLength != want {
+		t.Errorf("matchWindowsPathRoot() length = %d, want %d", matchedLength, want)
 	}
 }
 
