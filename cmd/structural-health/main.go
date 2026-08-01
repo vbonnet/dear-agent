@@ -24,9 +24,9 @@
 //	                   it protects. See docs/policies/harness-hygiene and the
 //	                   ce-xj1b over-fit class (re-embedded three times).
 //
-// Each scan emits a set of stable "finding keys". The baseline file is a
-// JSON snapshot of those keys. On every run the tool diffs current findings
-// against the baseline:
+// Each scan emits a set of stable "finding keys". The baseline file records
+// accepted keys and append-only provenance for changes to that set. On every
+// run the tool diffs current findings against the baseline:
 //
 //   - A key present now but absent from the baseline is a REGRESSION and
 //     fails the build (exit 1).
@@ -36,7 +36,7 @@
 // Usage:
 //
 //	structural-health [flags]
-//	structural-health --update-baseline   # snapshot current state
+//	structural-health --update-baseline   # remove findings that are now fixed
 //	structural-health --json              # machine-readable report
 //
 // Exit codes:
@@ -52,6 +52,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -109,21 +110,27 @@ type finding struct {
 	Detail string
 }
 
-// baseline is the on-disk snapshot. Findings maps each scan name to its
-// sorted list of accepted finding keys.
-type baseline struct {
-	Version  int                 `json:"version"`
-	Findings map[string][]string `json:"findings"`
-}
-
 func main() {
 	var (
 		root           = flag.String("root", ".", "repository root to scan")
 		baselinePath   = flag.String("baseline", defaultBaselinePath, "path to the baseline JSON file (relative to --root unless absolute)")
-		updateBaseline = flag.Bool("update-baseline", false, "overwrite the baseline with the current findings, then exit 0")
+		updateBaseline = flag.Bool("update-baseline", false, "update the baseline without admitting new finding keys, then exit 0")
+		acceptNew      = flag.Bool("accept-new", false, "allow --update-baseline to admit new finding keys")
+		acceptScanner  = flag.Bool("accept-scanner-change", false, "allow --update-baseline to migrate stable-key semantics")
+		reason         = flag.String("reason", "", "reason for accepting findings or scanner changes")
+		reference      = flag.String("reference", "", "durable tracker, PR, URL, or commit reference for an acceptance")
 		jsonOut        = flag.Bool("json", false, "emit a machine-readable JSON report")
 	)
 	flag.Parse()
+	request := updateRequest{
+		AcceptNew:           *acceptNew,
+		AcceptScannerChange: *acceptScanner,
+		Reason:              *reason,
+		Reference:           *reference,
+	}
+	if err := validateModeFlags(*updateBaseline, *jsonOut, request); err != nil {
+		fail("%v", err)
+	}
 
 	absRoot, err := filepath.Abs(*root)
 	if err != nil {
@@ -141,15 +148,18 @@ func main() {
 	}
 
 	if *updateBaseline {
-		if err := writeBaseline(blPath, current); err != nil {
-			fail("write baseline: %v", err)
+		plan, err := updateBaselineFile(blPath, current, request)
+		if err != nil {
+			fail("update baseline: %v", err)
+		}
+		if !plan.Write {
+			fmt.Printf("baseline unchanged: %s\n", blPath)
+			return
 		}
 		fmt.Printf("baseline updated: %s\n", blPath)
-		total := 0
-		for _, fs := range current {
-			total += len(fs)
-		}
+		total := keyMapCount(plan.Baseline.Findings)
 		fmt.Printf("recorded %d findings across %d scans\n", total, len(scanNames))
+		fmt.Printf("transition added=%d removed=%d\n", plan.Change.addedCount(), plan.Change.removedCount())
 		return
 	}
 
@@ -170,6 +180,17 @@ func main() {
 	if report.regressionCount() > 0 {
 		os.Exit(1)
 	}
+}
+
+func validateModeFlags(updateBaseline, jsonOut bool, request updateRequest) error {
+	if updateBaseline && jsonOut {
+		return errors.New("--json cannot be combined with --update-baseline")
+	}
+	if !updateBaseline && (request.AcceptNew || request.AcceptScannerChange ||
+		strings.TrimSpace(request.Reason) != "" || strings.TrimSpace(request.Reference) != "") {
+		return errors.New("baseline acceptance flags require --update-baseline")
+	}
+	return nil
 }
 
 // fail prints a message to stderr and exits with the usage/setup code.
@@ -700,8 +721,9 @@ func emitText(rep report) {
 	switch {
 	case regressions > 0:
 		fmt.Printf("FAIL: %d new finding(s) versus baseline.\n", regressions)
-		fmt.Println("Fix the regressions above, or — if intentional — re-baseline with:")
-		fmt.Println("  go run ./cmd/structural-health --update-baseline")
+		fmt.Println("Fix the regressions above. If they are intentional, admit them with:")
+		fmt.Println("  go run ./cmd/structural-health --update-baseline --accept-new \\")
+		fmt.Println("    --reason \"<why>\" --reference \"<bead-or-pr>\"")
 	default:
 		fmt.Println("PASS: no regressions versus baseline.")
 		if fixedTotal(rep) > 0 {
@@ -724,43 +746,4 @@ func emitJSON(rep report) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(rep)
-}
-
-// readBaseline loads and validates the baseline file.
-func readBaseline(path string) (baseline, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return baseline{}, err
-	}
-	var bl baseline
-	if err := json.Unmarshal(data, &bl); err != nil {
-		return baseline{}, fmt.Errorf("parse: %w", err)
-	}
-	if bl.Findings == nil {
-		bl.Findings = map[string][]string{}
-	}
-	return bl, nil
-}
-
-// writeBaseline snapshots the current findings into the baseline file,
-// sorting every list so the on-disk form is stable and diff-friendly.
-func writeBaseline(path string, current map[string][]finding) error {
-	bl := baseline{Version: 1, Findings: map[string][]string{}}
-	for _, name := range scanNames {
-		keys := make([]string, 0, len(current[name]))
-		for _, f := range current[name] {
-			keys = append(keys, f.Key)
-		}
-		sort.Strings(keys)
-		if keys == nil {
-			keys = []string{}
-		}
-		bl.Findings[name] = keys
-	}
-	data, err := json.MarshalIndent(bl, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
 }
