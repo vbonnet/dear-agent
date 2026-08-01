@@ -14,7 +14,7 @@
 
 **HEALTH-02** When sequential checks run, the system shall preserve declaration order and stop with partial results on context cancellation.
 
-**HEALTH-03** When parallel checks run, the system shall preserve result indexes and convert panics into error results.
+**HEALTH-03** When parallel checks run, the system shall preserve result indexes, convert panics into error results, and preserve owning check identity when identity access succeeds.
 
 **HEALTH-04** When results are summarized, the system shall count passed, warning, error, and fixable outcomes consistently.
 

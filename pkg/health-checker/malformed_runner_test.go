@@ -18,6 +18,86 @@ func (c fixedResultCheck) Run(context.Context) Result {
 	return c.result
 }
 
+type panicResultCheck struct {
+	name     string
+	category string
+}
+
+func (c panicResultCheck) Name() string     { return c.name }
+func (c panicResultCheck) Category() string { return c.category }
+func (panicResultCheck) Run(context.Context) Result {
+	panic("boom")
+}
+
+type typedNilPanicCheck struct {
+	name string
+}
+
+func (c *typedNilPanicCheck) Name() string             { return c.name }
+func (*typedNilPanicCheck) Category() string           { return "runtime" }
+func (*typedNilPanicCheck) Run(context.Context) Result { panic("typed nil") }
+
+func TestRunner_RunAll_ParallelPanicPreservesCheckIdentity(t *testing.T) {
+	results, err := NewRunner(
+		panicResultCheck{name: "panic-check", category: "runtime"},
+	).WithParallel(true).RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("RunAll() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("RunAll() returned %d results, want 1", len(results))
+	}
+
+	got := results[0]
+	if got.Name != "panic-check" || got.Category != "runtime" {
+		t.Errorf("panic identity = %q/%q, want %q/%q", got.Category, got.Name, "runtime", "panic-check")
+	}
+	if got.Status != StatusError || got.Message != "check panicked: boom" {
+		t.Errorf("panic result = %+v, want status error and stable diagnostic", got)
+	}
+}
+
+func TestRunner_RunAll_ParallelTypedNilCheckFailsClosed(t *testing.T) {
+	var check *typedNilPanicCheck
+	results, err := NewRunner(check).WithParallel(true).RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("RunAll() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("RunAll() returned %d results, want 1", len(results))
+	}
+
+	got := results[0]
+	if got.Status != StatusError || got.Message != "check panicked: typed nil" {
+		t.Errorf("typed-nil result = %+v, want status error and stable diagnostic", got)
+	}
+	if got.Name != "" || got.Category != "" {
+		t.Errorf("typed-nil identity = %q/%q, want empty unavailable identity", got.Category, got.Name)
+	}
+}
+
+func TestRunner_RunAll_ParallelPreCancelledTypedNilCheckFailsClosed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var check *typedNilPanicCheck
+	results, err := NewRunner(check).WithParallel(true).RunAll(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunAll() error = %v, want %v", err, context.Canceled)
+	}
+	if len(results) != 1 {
+		t.Fatalf("RunAll() returned %d results, want 1", len(results))
+	}
+
+	got := results[0]
+	if got.Status != StatusError || got.Message == "" {
+		t.Errorf("typed-nil cancellation result = %+v, want fail-closed diagnostic", got)
+	}
+	if got.Name != "" || got.Category != "" {
+		t.Errorf("typed-nil identity = %q/%q, want empty unavailable identity", got.Category, got.Name)
+	}
+}
+
 func TestRunner_RunAll_NormalizesMalformedResults(t *testing.T) {
 	tests := []struct {
 		name     string

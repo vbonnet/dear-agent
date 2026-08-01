@@ -56,10 +56,24 @@ func (r *Runner) runSequential(ctx context.Context) ([]Result, error) {
 // retain every caller-supplied field for compatibility.
 func normalizeCheckResult(check Check, result Result) Result {
 	if err := result.Validate(); err != nil {
-		result.Name = check.Name()
-		result.Category = check.Category()
+		result.Name, result.Category = safeCheckIdentity(check)
 	}
 	return normalizeResult(result)
+}
+
+// safeCheckIdentity captures check identity before execution without allowing a
+// typed-nil or otherwise panicking identity method to escape the runner.
+func safeCheckIdentity(check Check) (name, category string) {
+	if check == nil {
+		return "", ""
+	}
+	defer func() {
+		if recover() != nil {
+			name = ""
+			category = ""
+		}
+	}()
+	return check.Name(), check.Category()
 }
 
 // runParallel runs checks in parallel
@@ -72,14 +86,22 @@ func (r *Runner) runParallel(ctx context.Context) ([]Result, error) {
 	for i, check := range r.checks {
 		wg.Add(1)
 		go func(idx int, c Check) {
+			var checkName, checkCategory string
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
+					result := Result{
+						Name:     checkName,
+						Category: checkCategory,
+						Status:   StatusError,
+						Message:  fmt.Sprintf("check panicked: %v", r),
+					}
 					mu.Lock()
-					results[idx] = Result{Status: StatusError, Message: fmt.Sprintf("check panicked: %v", r)}
+					results[idx] = result
 					mu.Unlock()
 				}
 			}()
+			checkName, checkCategory = safeCheckIdentity(c)
 
 			// Check if context is cancelled
 			select {
