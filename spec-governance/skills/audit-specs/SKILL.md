@@ -67,11 +67,37 @@ Source and BDD evidence do not establish live behavior. Mark runtime consistency
    material differences, current and proposed owner, applicability, BDD
    consequence, confidence, limitations, and the maintainer decision required.
    Every positive finding must include a pending-maintainer-approval ownership
-   plan. For every retired owner, map each pinned source requirement to the
-   proposed neutral owner, preserve reciprocal BDD topology (including the
-   shared contract feature), and copy the exact applicability matrix. The plan
-   records a proposal only; it never authorizes editing or deleting a file.
-8. Validate the authored ledger against a freshly recomputed pinned inventory,
+   plan. An existing proposed owner must already be a current owner and is the
+   only owner that may retain the selected contract. A new owner must be outside
+   every current owner's directory by path components; do not hide a replacement
+   in the same directory or a descendant. Registration-local current owners are
+   factual audit results, but must retire rather than remain canonical.
+   Use full retirement only when every requirement and reciprocal feature owned
+   by that source is selected. Otherwise retire only the selected records and
+   preserve each unrelated record exactly in place pending a separate audit.
+   A reciprocal feature that still traces residual source behavior, or proves
+   only co-location/topology rather than the selected observable, also remains
+   in place under selected retirement. Use BDD consequence `preserve-residual`
+   when the feature directly covers both the selected and residual behavior;
+   use `add-matrix` and name the missing behavioral scenario or feature when it
+   is only topology evidence. Do not transfer the whole traceability link.
+   Reconcile overlapping findings before validation: the same exact selected
+   requirement may not receive incompatible dispositions or targets in two
+   candidates. If one requirement bundles observables that belong to different
+   owners, record a split-required or insufficient-evidence decision rather
+   than transferring the indivisible source line twice.
+   Copy the exact applicability matrix and planned BDD transfers into the plan.
+   The plan records a proposal only; it never authorizes editing or deleting a
+   file.
+8. Require each current owner in a positive finding to have exactly one
+   traceability state: an existing reciprocal selected feature, or one planned
+   transfer to the existing proposed owner through a selected feature that is
+   already reciprocal with that owner. Cite exact behavioral rows from the
+   target feature for each planned transfer. A matching path graph, feature
+   title, scenario title, or tag alone is topology, not evidence of equivalent
+   observable behavior; validation resolves citations but cannot make that
+   semantic judgment.
+9. Validate the authored ledger against a freshly recomputed pinned inventory,
    then render it:
 
    ```sh
@@ -89,10 +115,10 @@ Source and BDD evidence do not establish live behavior. Mark runtime consistency
    Validation rejects mismatched evidence and incomplete decision structure. It
    does not prove that an authored relationship, verdict, or proposed owner is
    semantically correct.
-9. Inspect the self-contained HTML at desktop and narrow viewports. Check
+10. Inspect the self-contained HTML at desktop and narrow viewports. Check
    navigation, readability, clipping, exact evidence, filters, limitations,
    and source disclosure. Record defects instead of claiming inspection.
-10. Present ranked candidates, keep-separate examples, reproducibility commands,
+11. Present ranked candidates, keep-separate examples, reproducibility commands,
     artifact paths, the Git trust boundary, and runtime `UNVERIFIED` status.
     Wait for maintainer selection. Do not modify specifications or BDD, perform
     consolidation, create follow-up work, or change delivery state.
@@ -123,6 +149,14 @@ Before delivery, confirm:
 - deterministic seeds remain distinguishable from semantic verdicts;
 - reciprocal SPEC/BDD diagnostics and every positive recommendation retain
   exact pinned source evidence;
+- every positive owner has exactly one current or planned BDD traceability state,
+  and every `PLANNED` entry is visibly pending and cites exact behavioral text;
+- full and selected retirement preserve all selected and residual records under
+  the closed dispositions described by the report schema;
+- topology-only or residual-source BDD links remain with their source while the
+  report names the missing canonical behavioral coverage;
+- no exact selected requirement receives incompatible cross-finding ownership
+  mappings, and every mixed requirement is left pending an explicit split;
 - every `keep-separate` result names the boundary that makes merging unsafe;
 - JSON and HTML contain the same candidate IDs and verdicts;
 - HTML is bounded, escaped, self-contained, and has no runtime dependency;

@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -344,7 +345,16 @@ type bddRef struct {
 	Line int    `json:"line"`
 }
 
-const pendingMaintainerApproval = "pending-maintainer-approval"
+const (
+	pendingMaintainerApproval        = "pending-maintainer-approval"
+	retainDistinctContract           = "retain-distinct-contract"
+	retireNormativeOwnership         = "retire-normative-ownership"
+	retireSelectedNormativeOwnership = "retire-selected-normative-ownership"
+	retainDistinct                   = "retain-distinct"
+	transferToProposedOwner          = "transfer-to-proposed-owner"
+	representAsApplicability         = "represent-as-applicability"
+	preservePendingSeparateAudit     = "preserve-in-place-pending-separate-audit"
+)
 
 type ownershipPlan struct {
 	Status                 string                    `json:"status"`
@@ -352,6 +362,7 @@ type ownershipPlan struct {
 	OwnerActions           []ownerPreservation       `json:"owner_actions"`
 	Requirements           []requirementPreservation `json:"requirements"`
 	Features               []featurePreservation     `json:"features"`
+	BDDPlannedTransfers    []plannedBDDTransfer      `json:"bdd_planned_transfers"`
 	ApplicabilityBasis     string                    `json:"applicability_basis"`
 	ApplicabilityRationale string                    `json:"applicability_rationale"`
 	Applicability          []applicability           `json:"applicability"`
@@ -379,6 +390,18 @@ type featurePreservation struct {
 	TargetPath  string `json:"target_path"`
 	TargetState string `json:"target_state"`
 	Rationale   string `json:"rationale"`
+}
+
+// plannedBDDTransfer records a maintainer-pending traceability migration for
+// a current owner that the selected pinned feature does not yet reciprocally
+// name. It is reviewer-authored semantic evidence, not proof that the feature
+// covers the same observable or that the transfer has happened.
+type plannedBDDTransfer struct {
+	SourceOwner      string               `json:"source_owner"`
+	TargetOwner      string               `json:"target_owner"`
+	TargetFeature    string               `json:"target_feature"`
+	BehaviorEvidence []supportingEvidence `json:"behavior_evidence"`
+	Rationale        string               `json:"rationale"`
 }
 
 type seed struct {
@@ -459,8 +482,9 @@ type applicability struct {
 }
 
 type bddImpact struct {
-	Features    []string `json:"features"`
-	Consequence string   `json:"consequence"`
+	Features         []string             `json:"features"`
+	PlannedTransfers []plannedBDDTransfer `json:"planned_transfers"`
+	Consequence      string               `json:"consequence"`
 }
 
 func main() {
@@ -532,6 +556,7 @@ func runInventory(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+//nolint:gocyclo // Ordered validation keeps every fail-closed ledger transition explicit.
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -571,7 +596,11 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		}
 		inventoryReport := reportFromInventoryDocument(inventoryDocument)
 		auditReport := reviewReportFromLedger(ledger, inventoryReport)
-		auditReport.InventoryRef, _ = canonicalInventoryRef(inventoryReport)
+		auditReport.InventoryRef, inventoryErr = canonicalInventoryRef(inventoryReport)
+		if inventoryErr != nil {
+			fmt.Fprintf(stderr, "specaudit validate: canonicalize inventory: %v\n", inventoryErr)
+			return 1
+		}
 		if inventoryErr = validateAgainstInventory(auditReport, inventoryReport); inventoryErr != nil {
 			fmt.Fprintf(stderr, "specaudit validate: %v\n", inventoryErr)
 			return 1
@@ -591,6 +620,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+//nolint:gocyclo // Ordered validation keeps every fail-closed render transition explicit.
 func runRender(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("render", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -632,7 +662,11 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		}
 		decodedInventory := reportFromInventoryDocument(inventoryDocument)
 		auditReport = reviewReportFromLedger(ledger, decodedInventory)
-		auditReport.InventoryRef, _ = canonicalInventoryRef(decodedInventory)
+		auditReport.InventoryRef, inventoryErr = canonicalInventoryRef(decodedInventory)
+		if inventoryErr != nil {
+			fmt.Fprintf(stderr, "specaudit render: canonicalize inventory: %v\n", inventoryErr)
+			return 1
+		}
 		if inventoryErr = validateAgainstInventory(auditReport, decodedInventory); inventoryErr != nil {
 			fmt.Fprintf(stderr, "specaudit render: %v\n", inventoryErr)
 			return 1
@@ -817,7 +851,7 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 			GitTrustInputs:   gitTrustInputs,
 			Reproduce:        []string{fmt.Sprintf("go run ./tools/specaudit inventory -repo . -repository %s -revision %s", strings.TrimSpace(repository), commit)},
 		},
-		CollectorExecution:           ptrCollectorExecution(currentCollectorExecution()),
+		CollectorExecution:           new(currentCollectorExecution()),
 		CollectorExecutionDisclosure: collectorExecutionDisclosure,
 		Inventory:                    files,
 		Features:                     features,
@@ -855,8 +889,6 @@ func currentCollectorExecution() collectorExecution {
 	}
 	return execution
 }
-
-func ptrCollectorExecution(value collectorExecution) *collectorExecution { return &value }
 
 func requireAuthenticatedInputPlatform() error {
 	return authenticatedInputPlatform(runtime.GOOS)
@@ -1012,11 +1044,11 @@ func pinnedBodyForPath(blobs []pinnedBlob, bodies map[string][]byte, path string
 
 func activeMembersFromPinnedBodies(blobs []pinnedBlob, bodies map[string][]byte) ([]string, []string) {
 	if body, ok := pinnedBodyForPath(blobs, bodies, canonicalActiveHarnessRegistryPath); ok {
-		active, limitations := activeMembersFromBody(body, true)
+		active, limitations := activeMembersFromBody(body)
 		return active, append(limitations, "Active members were extracted by the dear-agent registry adapter from "+canonicalActiveHarnessRegistryPath+"; this is not a portable registry contract.")
 	}
 	if body, ok := pinnedBodyForPath(blobs, bodies, legacyActiveHarnessRegistryPath); ok {
-		active, limitations := activeMembersFromBody(body, true)
+		active, limitations := activeMembersFromBody(body)
 		return active, append(limitations, "Active members were extracted by the legacy dear-agent registry adapter from "+legacyActiveHarnessRegistryPath+"; this is not a portable registry contract.")
 	}
 	return []string{}, []string{"Active harness inventory was unavailable at the pinned revision; no active-member parity finding is supported.", "The collector currently has only dear-agent-specific registry adapters; a generic pinned registry seam remains future work."}
@@ -1301,10 +1333,8 @@ func isHarnessIdentifierByte(value byte) bool {
 	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '_' || value == '-'
 }
 
-func activeMembersFromBody(body string, available bool) ([]string, []string) {
-	if !available {
-		return []string{}, []string{"Active harness inventory was unavailable at the pinned revision."}
-	}
+//nolint:gocyclo // Explicit AST admission rejects every ambiguous registry shape fail closed.
+func activeMembersFromBody(body string) ([]string, []string) {
 	file, err := parser.ParseFile(token.NewFileSet(), "registry.go", body, 0)
 	if err != nil {
 		return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
@@ -1704,80 +1734,37 @@ func gitBytesWithContext(ctx context.Context, executable gitExecutable, root str
 	return result, nil
 }
 
-func readReport(path string) (report, error) { return readReportWithLimit(path, maxReportInputBytes) }
-
-func readInventoryDocument(path string) (report, error) {
-	document, err := readReport(path)
-	if err != nil {
-		return report{}, err
-	}
-	if err := validateInventoryDocument(document); err != nil {
-		return report{}, err
-	}
-	return document, nil
-}
-
-func readDecisionLedger(path string) (report, error) {
-	document, err := readReport(path)
-	if err != nil {
-		return report{}, err
-	}
-	if err := validateDecisionLedger(document); err != nil {
-		return report{}, err
-	}
-	return document, nil
-}
-
 func readInventoryDocumentV2(path string) (inventoryDocument, error) {
-	data, err := readStableBoundedFile(path, maxReportInputBytes)
-	if err != nil {
-		return inventoryDocument{}, err
-	}
-	if err := validateUniqueJSONDocument(data, maxJSONDepth); err != nil {
-		return inventoryDocument{}, fmt.Errorf("decode %s: %w", path, err)
-	}
-	if err := validateExactJSONFieldNames(data, reflect.TypeFor[inventoryDocument]()); err != nil {
-		return inventoryDocument{}, fmt.Errorf("decode %s: %w", path, err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var document inventoryDocument
-	if err := decoder.Decode(&document); err != nil {
-		return inventoryDocument{}, fmt.Errorf("decode %s: %w", path, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return inventoryDocument{}, fmt.Errorf("decode %s: contains multiple JSON values", path)
-	}
-	if err := validateInventoryDocumentV2(document); err != nil {
-		return inventoryDocument{}, err
-	}
-	return document, nil
+	return readTypedDocument(path, validateInventoryDocumentV2)
 }
 
 func readDecisionLedgerV2(path string) (decisionLedger, error) {
+	return readTypedDocument(path, validateDecisionLedgerV2)
+}
+
+func readTypedDocument[T any](path string, validate func(T) error) (T, error) {
+	var document T
 	data, err := readStableBoundedFile(path, maxReportInputBytes)
 	if err != nil {
-		return decisionLedger{}, err
+		return document, err
 	}
 	if err := validateUniqueJSONDocument(data, maxJSONDepth); err != nil {
-		return decisionLedger{}, fmt.Errorf("decode %s: %w", path, err)
+		return document, fmt.Errorf("decode %s: %w", path, err)
 	}
-	if err := validateExactJSONFieldNames(data, reflect.TypeFor[decisionLedger]()); err != nil {
-		return decisionLedger{}, fmt.Errorf("decode %s: %w", path, err)
+	if err := validateExactJSONFieldNames(data, reflect.TypeFor[T]()); err != nil {
+		return document, fmt.Errorf("decode %s: %w", path, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	var document decisionLedger
 	if err := decoder.Decode(&document); err != nil {
-		return decisionLedger{}, fmt.Errorf("decode %s: %w", path, err)
+		return document, fmt.Errorf("decode %s: %w", path, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return decisionLedger{}, fmt.Errorf("decode %s: contains multiple JSON values", path)
+		return document, fmt.Errorf("decode %s: contains multiple JSON values", path)
 	}
-	if err := validateDecisionLedgerV2(document); err != nil {
-		return decisionLedger{}, err
+	if err := validate(document); err != nil {
+		return document, err
 	}
 	return document, nil
 }
@@ -1888,9 +1875,10 @@ func splitPersistedEvidence(source []evidence) ([]contractEvidence, []supporting
 	contracts := []contractEvidence{}
 	supporting := []supportingEvidence{}
 	for _, item := range source {
-		if item.Kind == "normative-contract" {
+		switch item.Kind {
+		case "normative-contract":
 			contracts = append(contracts, contractEvidence{Path: item.Path, Line: item.Line, RequirementID: item.RequirementID, Excerpt: item.Excerpt})
-		} else if item.Kind == "supporting" {
+		case "supporting":
 			supporting = append(supporting, supportingEvidence{Path: item.Path, Line: item.Line, Excerpt: item.Excerpt})
 		}
 	}
@@ -1922,6 +1910,7 @@ func validateInventoryDocumentV2(document inventoryDocument) error {
 	return validateInventoryDocument(view)
 }
 
+//nolint:gocyclo // Sequential schema checks keep each persisted trust boundary explicit.
 func validateDecisionLedgerV2(document decisionLedger) error {
 	if document.SchemaVersion != schemaVersion || document.DocumentKind != ledgerDocumentKind {
 		return errors.New("decision ledger must be a spec-audit/v2 decision-ledger document")
@@ -1936,6 +1925,12 @@ func validateDecisionLedgerV2(document decisionLedger) error {
 		if finding.DecisionStatus != pendingMaintainerApproval {
 			return fmt.Errorf("finding %q must have decision_status %q", finding.ID, pendingMaintainerApproval)
 		}
+		positive := finding.Verdict == "merge-now" || finding.Verdict == "extract-neutral-contract"
+		if positive {
+			if err := validateNewProposedOwnerDirectory(finding); err != nil {
+				return fmt.Errorf("finding %q proposed_owner: %w", finding.ID, err)
+			}
+		}
 		if err := validatePersistedEvidence(finding.ContractEvidence, finding.SupportingEvidence); err != nil {
 			return fmt.Errorf("finding %q: %w", finding.ID, err)
 		}
@@ -1947,10 +1942,12 @@ func validateDecisionLedgerV2(document decisionLedger) error {
 				return fmt.Errorf("finding %q applicability for %q: %w", finding.ID, entry.Member, err)
 			}
 		}
+		if err := validatePersistedPlannedBDDTransfers(finding.BDD.PlannedTransfers); err != nil {
+			return fmt.Errorf("finding %q planned BDD transfers: %w", finding.ID, err)
+		}
 		if err := validatePersistedOwnershipPlan(finding.OwnershipPlan); err != nil {
 			return fmt.Errorf("finding %q ownership_plan: %w", finding.ID, err)
 		}
-		positive := finding.Verdict == "merge-now" || finding.Verdict == "extract-neutral-contract"
 		if positive && finding.OwnershipPlan == nil {
 			return fmt.Errorf("finding %q requires ownership_plan", finding.ID)
 		}
@@ -1971,12 +1968,46 @@ func validatePersistedOwnershipPlan(plan *ownershipPlan) error {
 	if !applicabilityBases[plan.ApplicabilityBasis] || strings.TrimSpace(plan.ApplicabilityRationale) == "" {
 		return errors.New("must copy a valid applicability basis and rationale")
 	}
+	if err := validatePersistedPlannedBDDTransfers(plan.BDDPlannedTransfers); err != nil {
+		return fmt.Errorf("planned BDD transfers: %w", err)
+	}
 	for _, entry := range plan.Applicability {
 		if len(entry.ContractEvidence) == 0 {
 			return errors.New("applicability entries require contract_evidence")
 		}
 		if err := validatePersistedEvidence(entry.ContractEvidence, entry.SupportingEvidence); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validatePersistedPlannedBDDTransfers(transfers []plannedBDDTransfer) error {
+	seenSources := map[string]bool{}
+	for _, transfer := range transfers {
+		if !isSpecPath(transfer.SourceOwner) || !isSpecPath(transfer.TargetOwner) || !validFeaturePath(transfer.TargetFeature) || strings.TrimSpace(transfer.Rationale) == "" {
+			return errors.New("entries require SPEC source and target owners, a feature target, and rationale")
+		}
+		if seenSources[transfer.SourceOwner] {
+			return fmt.Errorf("source owner %q is duplicated", transfer.SourceOwner)
+		}
+		seenSources[transfer.SourceOwner] = true
+		if len(transfer.BehaviorEvidence) == 0 {
+			return fmt.Errorf("source owner %q requires behavior_evidence", transfer.SourceOwner)
+		}
+		if err := validatePersistedEvidence(nil, transfer.BehaviorEvidence); err != nil {
+			return fmt.Errorf("source owner %q behavior_evidence: %w", transfer.SourceOwner, err)
+		}
+		seenEvidence := map[string]bool{}
+		for _, item := range transfer.BehaviorEvidence {
+			if item.Path != transfer.TargetFeature {
+				return fmt.Errorf("source owner %q behavior_evidence must cite target_feature", transfer.SourceOwner)
+			}
+			key := item.Path + "\x00" + strconv.Itoa(item.Line) + "\x00" + item.Excerpt
+			if seenEvidence[key] {
+				return fmt.Errorf("source owner %q repeats behavior_evidence", transfer.SourceOwner)
+			}
+			seenEvidence[key] = true
 		}
 	}
 	return nil
@@ -2043,6 +2074,7 @@ func validateExactJSONFieldNames(data []byte, valueType reflect.Type) error {
 	return validateExactJSONValue(json.RawMessage(data), valueType)
 }
 
+//nolint:gocyclo // Recursive JSON shape validation is clearer as an explicit kind dispatch.
 func validateExactJSONValue(raw json.RawMessage, valueType reflect.Type) error {
 	for valueType.Kind() == reflect.Pointer {
 		valueType = valueType.Elem()
@@ -2050,7 +2082,7 @@ func validateExactJSONValue(raw json.RawMessage, valueType reflect.Type) error {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
 	}
-	switch valueType.Kind() {
+	switch valueType.Kind() { //nolint:exhaustive // Only recursive container kinds require child-field validation.
 	case reflect.Struct:
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {
@@ -2086,14 +2118,15 @@ func validateExactJSONValue(raw json.RawMessage, valueType reflect.Type) error {
 				return err
 			}
 		}
+	default:
+		return nil
 	}
 	return nil
 }
 
 func jsonFieldTypes(valueType reflect.Type) map[string]reflect.Type {
 	fields := make(map[string]reflect.Type, valueType.NumField())
-	for index := 0; index < valueType.NumField(); index++ {
-		field := valueType.Field(index)
+	for field := range valueType.Fields() {
 		if !field.IsExported() {
 			continue
 		}
@@ -2803,11 +2836,72 @@ func validateReport(report report) error {
 		}
 		ids[finding.ID] = true
 	}
+	if err := validateCrossFindingRequirementMappings(report); err != nil {
+		return err
+	}
 	if report.Summary.CandidateCount != len(report.Candidates) {
 		return fmt.Errorf("summary candidate_count=%d, want %d", report.Summary.CandidateCount, len(report.Candidates))
 	}
 	if report.Summary.SpecFiles < 0 || report.Summary.Requirements < 0 || report.Summary.Diagnostics < 0 || !equalHistogram(report.Summary.ByVerdict, verdictHistogram(report)) {
 		return errors.New("summary counts or by_verdict do not match report findings")
+	}
+	return nil
+}
+
+type requirementMappingTarget struct {
+	findingID           string
+	disposition         string
+	targetPath          string
+	targetRequirementID string
+	targetState         string
+}
+
+// validateCrossFindingRequirementMappings prevents one pinned normative record
+// from acquiring mutually incompatible migration instructions in otherwise
+// individually valid findings. Identical mappings may appear in overlapping
+// analytical views, but disposition or target drift must be resolved before the
+// ledger can be treated as a coherent maintainer-pending plan.
+func validateCrossFindingRequirementMappings(document report) error {
+	seen := map[contractEvidenceKey]requirementMappingTarget{}
+	for _, candidate := range document.Candidates {
+		if candidate.OwnershipPlan == nil {
+			continue
+		}
+		selected := map[contractEvidenceKey]bool{}
+		for _, item := range candidate.ContractEvidence {
+			selected[contractEvidenceKey{path: item.Path, line: item.Line, requirementID: item.RequirementID, excerpt: item.Excerpt}] = true
+		}
+		for _, item := range candidate.Evidence {
+			if item.Kind == "normative-contract" {
+				selected[contractEvidenceKey{path: item.Path, line: item.Line, requirementID: item.RequirementID, excerpt: item.Excerpt}] = true
+			}
+		}
+		for _, entry := range candidate.OwnershipPlan.Requirements {
+			key := contractEvidenceKey{
+				path:          entry.ContractEvidence.Path,
+				line:          entry.ContractEvidence.Line,
+				requirementID: entry.ContractEvidence.RequirementID,
+				excerpt:       entry.ContractEvidence.Excerpt,
+			}
+			if !selected[key] {
+				continue
+			}
+			target := requirementMappingTarget{
+				findingID:           candidate.ID,
+				disposition:         entry.Disposition,
+				targetPath:          entry.TargetPath,
+				targetRequirementID: entry.TargetRequirementID,
+				targetState:         entry.TargetState,
+			}
+			prior, exists := seen[key]
+			if !exists {
+				seen[key] = target
+				continue
+			}
+			if prior.disposition != target.disposition || prior.targetPath != target.targetPath || prior.targetRequirementID != target.targetRequirementID || prior.targetState != target.targetState {
+				return fmt.Errorf("findings %q and %q assign conflicting ownership mappings to %s:%d requirement %q", prior.findingID, candidate.ID, key.path, key.line, key.requirementID)
+			}
+		}
 	}
 	return nil
 }
@@ -2866,10 +2960,6 @@ func validCollectorExecution(execution collectorExecution) bool {
 		return shaPattern.MatchString(execution.VCSRevision) && execution.VCSModified != nil
 	}
 	return execution.VCSRevision == "" && execution.VCSModified == nil
-}
-
-func validateSemanticReport(report report) error {
-	return validateDecisionLedger(report)
 }
 
 //nolint:gocyclo // Sequential pinned-evidence cross-checks keep every trust transition visible and fail closed.
@@ -3010,6 +3100,9 @@ func validateAgainstInventory(semantic, inventory report) error {
 			if !ok {
 				return fmt.Errorf("finding %q BDD feature %q is absent from the pinned feature inventory", finding.ID, featurePath)
 			}
+			if positive && excludedFromReview[featurePath] {
+				return fmt.Errorf("positive finding %q cannot select reviewer-excluded BDD feature %q", finding.ID, featurePath)
+			}
 			featureOwners := map[string]bool{}
 			for _, related := range feature.RelatedSpecs {
 				featureOwners[related] = true
@@ -3025,8 +3118,35 @@ func validateAgainstInventory(semantic, inventory report) error {
 				return fmt.Errorf("finding %q BDD feature %q does not reciprocally name any current owner", finding.ID, featurePath)
 			}
 		}
+		plannedOwners := map[string]bool{}
+		if positive {
+			currentOwners := stringSet(ownerPaths(finding.CurrentOwners))
+			selectedFeatures := stringSet(finding.BDD.Features)
+			for _, transfer := range finding.BDD.PlannedTransfers {
+				if !currentOwners[transfer.SourceOwner] || plannedOwners[transfer.SourceOwner] {
+					return fmt.Errorf("finding %q planned BDD transfer source %q must name one uncovered current owner exactly once", finding.ID, transfer.SourceOwner)
+				}
+				if coveredOwners[transfer.SourceOwner] {
+					return fmt.Errorf("finding %q current owner %q cannot have both reciprocal and planned BDD coverage", finding.ID, transfer.SourceOwner)
+				}
+				if finding.ProposedOwner == nil || finding.ProposedOwner.State != "existing" || transfer.TargetOwner != finding.ProposedOwner.Path {
+					return fmt.Errorf("finding %q planned BDD transfer for %q must target the existing proposed owner", finding.ID, transfer.SourceOwner)
+				}
+				if !selectedFeatures[transfer.TargetFeature] || excludedFromReview[transfer.TargetFeature] {
+					return fmt.Errorf("finding %q planned BDD transfer for %q must target a selected, non-excluded feature", finding.ID, transfer.SourceOwner)
+				}
+				targetFeature, ok := features[transfer.TargetFeature]
+				if !ok || !containsString(targetFeature.RelatedSpecs, transfer.TargetOwner) || !specFeatures[transfer.TargetOwner][transfer.TargetFeature] {
+					return fmt.Errorf("finding %q planned BDD transfer for %q must target an existing feature reciprocal with proposed owner %q", finding.ID, transfer.SourceOwner, transfer.TargetOwner)
+				}
+				plannedOwners[transfer.SourceOwner] = true
+			}
+		}
 		for _, owner := range finding.CurrentOwners {
-			if len(finding.BDD.Features) > 0 && !coveredOwners[owner.Path] {
+			if positive && coveredOwners[owner.Path] == plannedOwners[owner.Path] {
+				return fmt.Errorf("positive finding %q current owner %q must have exactly one of reciprocal or planned BDD coverage", finding.ID, owner.Path)
+			}
+			if !positive && len(finding.BDD.Features) > 0 && !coveredOwners[owner.Path] {
 				return fmt.Errorf("finding %q BDD features do not reciprocally name current owner %q", finding.ID, owner.Path)
 			}
 		}
@@ -3039,6 +3159,7 @@ func validateAgainstInventory(semantic, inventory report) error {
 	return nil
 }
 
+//nolint:gocyclo // Full preservation validation keeps requirement and feature accounting in one auditable pass.
 func validateOwnershipPlanAgainstInventory(finding finding, inventory report, features map[string]featureFile, specFeatures map[string]map[string]bool) error {
 	plan := finding.OwnershipPlan
 	if plan == nil || plan.Status != pendingMaintainerApproval || plan.DeletionAuthority {
@@ -3047,10 +3168,20 @@ func validateOwnershipPlanAgainstInventory(finding finding, inventory report, fe
 	if plan.ApplicabilityBasis != finding.ApplicabilityBasis || plan.ApplicabilityRationale != finding.ApplicabilityRationale || !reflect.DeepEqual(plan.Applicability, finding.Applicability) {
 		return errors.New("applicability basis, rationale, and matrix must exactly match the finding")
 	}
+	if !reflect.DeepEqual(plan.BDDPlannedTransfers, finding.BDD.PlannedTransfers) {
+		return errors.New("planned BDD transfers must exactly match the finding")
+	}
 	owners := map[string]bool{}
 	expectedRequirements := map[contractEvidenceKey]bool{}
 	expectedFeatures := map[featurePreservationKey]bool{}
 	allRequirements := map[string]map[string]bool{}
+	selectedRequirements := map[contractEvidenceKey]bool{}
+	selectedFeatures := stringSet(finding.BDD.Features)
+	for _, item := range finding.Evidence {
+		if item.Kind == "normative-contract" {
+			selectedRequirements[contractEvidenceKey{path: item.Path, line: item.Line, requirementID: item.RequirementID, excerpt: item.Excerpt}] = true
+		}
+	}
 	for _, owner := range finding.CurrentOwners {
 		owners[owner.Path] = true
 		for _, file := range inventory.Inventory {
@@ -3074,18 +3205,34 @@ func validateOwnershipPlanAgainstInventory(finding finding, inventory report, fe
 	}
 	ownerActions := map[string]string{}
 	for _, action := range plan.OwnerActions {
-		if !owners[action.OwnerPath] || ownerActions[action.OwnerPath] != "" || (action.Disposition != "retain-distinct-contract" && action.Disposition != "retire-normative-ownership") || strings.TrimSpace(action.Rationale) == "" {
-			return errors.New("owner_actions must cover each current owner exactly once with an explicit retain or retire disposition")
+		if !owners[action.OwnerPath] || ownerActions[action.OwnerPath] != "" || strings.TrimSpace(action.Rationale) == "" {
+			return errors.New("owner_actions must cover each current owner exactly once with rationale")
+		}
+		switch action.Disposition {
+		case retainDistinctContract, retireNormativeOwnership, retireSelectedNormativeOwnership:
+		default:
+			return errors.New("owner_actions contain an unsupported disposition")
 		}
 		ownerActions[action.OwnerPath] = action.Disposition
 	}
 	if !sameStringSet(mapKeys(owners), mapKeys(ownerActionPaths(ownerActions))) {
 		return errors.New("owner_actions do not exactly cover current owners")
 	}
+	for ownerPath, action := range ownerActions {
+		if action == retainDistinctContract && (finding.ProposedOwner == nil || ownerPath != finding.ProposedOwner.Path) {
+			return errors.New("only the existing proposed owner may retain the selected normative contract")
+		}
+		if isHarnessRegistrationOwner(ownerPath) && action == retainDistinctContract {
+			return errors.New("a harness registration current owner cannot retain normative ownership")
+		}
+	}
+	if finding.ProposedOwner != nil && finding.ProposedOwner.State == "existing" && ownerActions[finding.ProposedOwner.Path] != retainDistinctContract {
+		return errors.New("the existing proposed owner must retain the canonical contract")
+	}
 	requirements := map[contractEvidenceKey]bool{}
 	for _, entry := range plan.Requirements {
 		key := contractEvidenceKey{path: entry.ContractEvidence.Path, line: entry.ContractEvidence.Line, requirementID: entry.ContractEvidence.RequirementID, excerpt: entry.ContractEvidence.Excerpt}
-		if !expectedRequirements[key] || requirements[key] || !validRequirementOwnershipMapping(entry, finding.ProposedOwner, ownerActions[key.path], allRequirements) || strings.TrimSpace(entry.Rationale) == "" {
+		if !expectedRequirements[key] || requirements[key] || !validRequirementOwnershipMapping(entry, finding.ProposedOwner, ownerActions[key.path], allRequirements, selectedRequirements[key]) || strings.TrimSpace(entry.Rationale) == "" {
 			return errors.New("requirements must map each full current-owner contract evidence record exactly once")
 		}
 		requirements[key] = true
@@ -3094,49 +3241,67 @@ func validateOwnershipPlanAgainstInventory(finding finding, inventory report, fe
 		return errors.New("requirements do not fully preserve every current-owner requirement")
 	}
 	featureMappings := map[featurePreservationKey]bool{}
+	preservedSelectedFeature := false
 	for _, entry := range plan.Features {
 		feature, ok := features[entry.Path]
 		key := featurePreservationKey{owner: entry.SourceOwner, path: entry.Path}
 		if !expectedFeatures[key] || featureMappings[key] || !ok || strings.TrimSpace(entry.Rationale) == "" {
 			return errors.New("features must map each reciprocal current-owner BDD feature exactly once")
 		}
-		if !validFeatureOwnershipMapping(entry, finding.ProposedOwner, ownerActions[entry.SourceOwner], feature) {
+		if !validFeatureOwnershipMapping(entry, finding.ProposedOwner, ownerActions[entry.SourceOwner], feature, selectedFeatures[entry.Path]) {
 			return errors.New("BDD feature mapping has invalid disposition or target")
+		}
+		if selectedFeatures[entry.Path] && entry.Disposition == preservePendingSeparateAudit {
+			preservedSelectedFeature = true
 		}
 		featureMappings[key] = true
 	}
 	if !sameFeaturePreservationKeys(expectedFeatures, featureMappings) {
 		return errors.New("features do not fully preserve every reciprocal current-owner BDD feature")
 	}
+	if preservedSelectedFeature && finding.BDD.Consequence != "add-matrix" && finding.BDD.Consequence != "preserve-residual" {
+		return errors.New("preserved selected BDD feature requires add-matrix or preserve-residual consequence")
+	}
+	if finding.BDD.Consequence == "preserve-residual" && !preservedSelectedFeature {
+		return errors.New("preserve-residual consequence requires a selected BDD feature preserved at its source")
+	}
 	return nil
 }
 
 type featurePreservationKey struct{ owner, path string }
 
-func validRequirementOwnershipMapping(entry requirementPreservation, proposed *proposedOwnerClaim, action string, requirements map[string]map[string]bool) bool {
+//nolint:gocyclo // Closed disposition combinations are intentionally enumerated in one predicate.
+func validRequirementOwnershipMapping(entry requirementPreservation, proposed *proposedOwnerClaim, action string, requirements map[string]map[string]bool, selected bool) bool {
 	if !validPath(entry.TargetPath) || entry.TargetRequirementID == "" || (entry.TargetState != "existing" && entry.TargetState != "planned") {
 		return false
 	}
-	if action == "retain-distinct-contract" {
-		return entry.Disposition == "retain-distinct" && entry.TargetPath == entry.ContractEvidence.Path && entry.TargetRequirementID == entry.ContractEvidence.RequirementID && entry.TargetState == "existing"
+	if action == retainDistinctContract {
+		return entry.Disposition == retainDistinct && entry.TargetPath == entry.ContractEvidence.Path && entry.TargetRequirementID == entry.ContractEvidence.RequirementID && entry.TargetState == "existing"
 	}
-	if action != "retire-normative-ownership" || proposed == nil || entry.TargetPath != proposed.Path || !validProposedTargetState(proposed, entry.TargetState) || entry.Disposition == "retain-distinct" {
+	if action == retireSelectedNormativeOwnership && !selected {
+		return entry.Disposition == preservePendingSeparateAudit && entry.TargetPath == entry.ContractEvidence.Path && entry.TargetRequirementID == entry.ContractEvidence.RequirementID && entry.TargetState == "existing"
+	}
+	if !selected || (action != retireNormativeOwnership && action != retireSelectedNormativeOwnership) || proposed == nil || entry.TargetPath != proposed.Path || !validProposedTargetState(proposed, entry.TargetState) {
 		return false
 	}
-	if entry.Disposition != "transfer-to-proposed-owner" && entry.Disposition != "represent-as-applicability" {
+	if entry.Disposition != transferToProposedOwner && entry.Disposition != representAsApplicability {
 		return false
 	}
 	return entry.TargetState != "existing" || requirements[entry.TargetPath][entry.TargetRequirementID]
 }
 
-func validFeatureOwnershipMapping(entry featurePreservation, proposed *proposedOwnerClaim, action string, feature featureFile) bool {
+//nolint:gocyclo // Closed feature-preservation combinations are intentionally enumerated in one predicate.
+func validFeatureOwnershipMapping(entry featurePreservation, proposed *proposedOwnerClaim, action string, feature featureFile, selected bool) bool {
 	if !validPath(entry.TargetPath) || (entry.TargetState != "existing" && entry.TargetState != "planned") {
 		return false
 	}
-	if action == "retain-distinct-contract" {
-		return entry.Disposition == "retain-distinct" && entry.TargetPath == entry.SourceOwner && entry.TargetState == "existing" && containsString(feature.RelatedSpecs, entry.SourceOwner)
+	if action == retainDistinctContract {
+		return entry.Disposition == retainDistinct && entry.TargetPath == entry.SourceOwner && entry.TargetState == "existing" && containsString(feature.RelatedSpecs, entry.SourceOwner)
 	}
-	if action != "retire-normative-ownership" || proposed == nil || entry.TargetPath != proposed.Path || !validProposedTargetState(proposed, entry.TargetState) || (entry.Disposition != "transfer-to-proposed-owner" && entry.Disposition != "represent-as-applicability") {
+	if action == retireSelectedNormativeOwnership && entry.Disposition == preservePendingSeparateAudit {
+		return entry.TargetPath == entry.SourceOwner && entry.TargetState == "existing" && containsString(feature.RelatedSpecs, entry.SourceOwner)
+	}
+	if !selected || (action != retireNormativeOwnership && action != retireSelectedNormativeOwnership) || proposed == nil || entry.TargetPath != proposed.Path || !validProposedTargetState(proposed, entry.TargetState) || (entry.Disposition != transferToProposedOwner && entry.Disposition != representAsApplicability) {
 		return false
 	}
 	return entry.TargetState != "existing" || containsString(feature.RelatedSpecs, proposed.Path)
@@ -3224,7 +3389,6 @@ func validateInventoryAgainstRepo(supplied report, repoPath string) error {
 		!reflect.DeepEqual(supplied.Scope, recomputed.Scope) ||
 		!reflect.DeepEqual(supplied.Summary, recomputed.Summary) ||
 		!reflect.DeepEqual(supplied.Methodology, recomputed.Methodology) ||
-		!reflect.DeepEqual(supplied.CollectorExecution, recomputed.CollectorExecution) ||
 		supplied.CollectorExecutionDisclosure != recomputed.CollectorExecutionDisclosure ||
 		!reflect.DeepEqual(supplied.Inventory, recomputed.Inventory) ||
 		!reflect.DeepEqual(supplied.Features, recomputed.Features) ||
@@ -3232,6 +3396,12 @@ func validateInventoryAgainstRepo(supplied report, repoPath string) error {
 		!reflect.DeepEqual(supplied.Limitations, recomputed.Limitations) {
 		return errors.New("supplied inventory does not match a fresh Git-object inventory at the pinned revision")
 	}
+	// CollectorExecution is an explicitly non-attesting record of the original
+	// collection process. Requiring it to equal this validator's build and
+	// platform would make a pinned inventory impossible to validate across
+	// supported hosts while falsely suggesting that replay authenticated the
+	// original binary. validateInventoryDocument already checks its closed
+	// structural invariants and fixed disclosure.
 	return nil
 }
 
@@ -3307,6 +3477,7 @@ type supportingEvidenceRecord struct {
 	item      evidence
 }
 
+//nolint:gocyclo // Evidence sources are enumerated explicitly to preserve attribution and budgets.
 func supportingEvidenceRecords(ledger report) ([]supportingEvidenceRecord, error) {
 	records := make([]supportingEvidenceRecord, 0)
 	seenRecords := map[string]bool{}
@@ -3338,6 +3509,13 @@ func supportingEvidenceRecords(ledger report) ([]supportingEvidenceRecord, error
 				}
 			}
 		}
+		for _, transfer := range finding.BDD.PlannedTransfers {
+			for _, item := range transfer.BehaviorEvidence {
+				if err := appendRecord("finding "+finding.ID+" planned BDD transfer "+transfer.SourceOwner, evidence{Kind: "supporting", Path: item.Path, Line: item.Line, Excerpt: item.Excerpt}); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	for _, exclusion := range ledger.Exclusions {
 		for _, item := range exclusion.SupportingEvidence {
@@ -3356,6 +3534,7 @@ func supportingEvidenceRecords(ledger report) ([]supportingEvidenceRecord, error
 	return records, nil
 }
 
+//nolint:gocyclo // Batched Git evidence resolution keeps each fail-closed bound and identity check visible.
 func resolveSupportingEvidenceBlobs(ctx context.Context, executable gitExecutable, repoPath, revision string, records []supportingEvidenceRecord) (map[string]pinnedBlob, error) {
 	paths := make([]string, 0, len(records))
 	requested := map[string]bool{}
@@ -3547,6 +3726,9 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 	if !bddConsequences[f.BDD.Consequence] || !uniqueRelativeFeaturePaths(f.BDD.Features) {
 		return fmt.Errorf("finding %q has invalid BDD impact", f.ID)
 	}
+	if err := validatePersistedPlannedBDDTransfers(f.BDD.PlannedTransfers); err != nil {
+		return fmt.Errorf("finding %q has invalid planned BDD transfers: %w", f.ID, err)
+	}
 	if len(f.BDD.Features) == 0 {
 		if positive || f.BDD.Consequence != "none" {
 			return fmt.Errorf("finding %q without BDD features must be non-positive with consequence none", f.ID)
@@ -3572,17 +3754,27 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 		if strings.TrimSpace(f.OwnershipCompleteness) == "" || strings.TrimSpace(f.ProposedOwner.Rationale) == "" || strings.TrimSpace(f.ProposedOwner.NeutralityRationale) == "" {
 			return fmt.Errorf("positive finding %q requires owner-completeness, proposed-owner rationale, and neutrality rationale", f.ID)
 		}
-		if hasHarnessRegistrationOwner(append(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path)) {
-			return fmt.Errorf("positive finding %q includes a harness registration owner", f.ID)
+		if isHarnessRegistrationOwner(f.ProposedOwner.Path) {
+			return fmt.Errorf("positive finding %q cannot select harness registration proposed owner %q", f.ID, f.ProposedOwner.Path)
+		}
+		if err := validateNewProposedOwnerDirectory(f); err != nil {
+			return fmt.Errorf("positive finding %q proposed_owner: %w", f.ID, err)
 		}
 		if f.OwnershipPlan == nil || f.OwnershipPlan.Status != pendingMaintainerApproval || f.OwnershipPlan.DeletionAuthority {
 			return fmt.Errorf("positive finding %q requires a pending non-deletion ownership_plan", f.ID)
 		}
 		if f.ProposedOwner.State == "existing" {
-			// Existing neutral targets are permitted; pinned validation resolves
-			// them without requiring an already-existing reciprocal BDD link.
+			if !containsString(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path) {
+				return fmt.Errorf("positive finding %q must include existing proposed owner %q in current owners", f.ID, f.ProposedOwner.Path)
+			}
 		} else if containsString(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path) {
 			return fmt.Errorf("positive finding %q cannot mark a current owner as new", f.ID)
+		}
+		if !reflect.DeepEqual(f.OwnershipPlan.BDDPlannedTransfers, f.BDD.PlannedTransfers) {
+			return fmt.Errorf("positive finding %q ownership_plan must exactly copy planned BDD transfers", f.ID)
+		}
+		if err := validateOwnerActionIntent(f); err != nil {
+			return fmt.Errorf("positive finding %q owner_actions: %w", f.ID, err)
 		}
 		if f.Confidence != "confirmed" || f.Strength == "exploratory" {
 			return fmt.Errorf("positive finding %q requires confirmed evidence and non-exploratory strength", f.ID)
@@ -3633,6 +3825,9 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 	if !positive && f.OwnershipPlan != nil {
 		return fmt.Errorf("non-positive finding %q cannot select an ownership_plan", f.ID)
 	}
+	if !positive && len(f.BDD.PlannedTransfers) != 0 {
+		return fmt.Errorf("non-positive finding %q cannot select planned BDD transfers", f.ID)
+	}
 	if nonCandidate {
 		if f.Rank != 0 || f.Verdict != "keep-separate" || strings.TrimSpace(f.Boundary) == "" {
 			return fmt.Errorf("non-candidate %q must be keep-separate with a boundary", f.ID)
@@ -3645,25 +3840,152 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 
 func evidencePathsByKind(items []evidence, kind string) []string {
 	paths := make([]string, 0, len(items))
+	seen := map[string]bool{}
 	for _, item := range items {
-		if item.Kind == kind {
+		if item.Kind == kind && !seen[item.Path] {
 			paths = append(paths, item.Path)
+			seen[item.Path] = true
 		}
 	}
 	return paths
 }
 
-func hasHarnessRegistrationOwner(paths []string) bool {
-	registrationRoots := []string{".agents/", ".claude/", ".claude-plugin/", ".codex/", ".opencode/", ".pi/"}
-	for _, path := range paths {
-		canonical := filepath.ToSlash(path)
-		for _, root := range registrationRoots {
-			if strings.HasPrefix(canonical, root) || strings.Contains(canonical, "/"+root) {
-				return true
-			}
+func isHarnessRegistrationOwner(path string) bool {
+	directory := pathpkg.Dir(filepath.ToSlash(path))
+	segments := strings.Split(directory, "/")
+	// Intrinsic registration surfaces stay local even when nested beneath a
+	// logical implementation seam. Check them before applying the internal/cmd
+	// exception so paths such as agm/internal/.codex/SPEC.md cannot hide.
+	for index, rawSegment := range segments {
+		segment := strings.ToLower(rawSegment)
+		if isDottedHarnessRegistrationRoot(segment) || segment == "plugins" || strings.HasSuffix(segment, "-plugin") {
+			return true
+		}
+		// A harness grouping is implementation-local by construction. Treat
+		// unknown future members conservatively instead of waiting for an alias
+		// table update to close the path.
+		if (segment == "harness" || segment == "harnesses") && index+1 < len(segments) {
+			return true
+		}
+		if index == 0 && isHarnessRegistrationAlias(segment) {
+			return true
+		}
+	}
+	for _, rawSegment := range segments {
+		// Exact internal and cmd segments are eligible logical module seams.
+		// Harness-like package names beneath them describe implementations when
+		// no intrinsic registration marker was present.
+		if rawSegment == "internal" || rawSegment == "cmd" {
+			return false
 		}
 	}
 	return false
+}
+
+func isHarnessRegistrationAlias(segment string) bool {
+	_, ok := harnessRegistrationAuthority[normalizeHarnessRegistrationAlias(strings.TrimPrefix(segment, "."))]
+	return ok
+}
+
+func isDottedHarnessRegistrationRoot(segment string) bool {
+	if !strings.HasPrefix(segment, ".") {
+		return false
+	}
+	alias := strings.TrimPrefix(segment, ".")
+	alias = strings.TrimSuffix(alias, "-plugin")
+	return isHarnessRegistrationAlias(alias)
+}
+
+func normalizeHarnessRegistrationAlias(value string) string {
+	return strings.Map(func(character rune) rune {
+		switch {
+		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
+			return character
+		case character >= 'A' && character <= 'Z':
+			return character + ('a' - 'A')
+		default:
+			return -1
+		}
+	}, value)
+}
+
+// harnessRegistrationAuthority is the closed authority for normalized
+// canonical harness IDs, accepted aliases, and known configuration roots.
+// `.dear-agent` is intentionally absent because it is a product catalog.
+var harnessRegistrationAuthority = map[string]string{
+	"agents":      "agents",
+	"agy":         "agy",
+	"agycli":      "agy",
+	"antigravity": "agy",
+	"aider":       "aider",
+	"claude":      "claude-code",
+	"claudecode":  "claude-code",
+	"codex":       "codex-cli",
+	"codexcli":    "codex-cli",
+	"continue":    "continue",
+	"cursor":      "cursor",
+	"deepsec":     "deepsec",
+	"gemini":      "gemini-cli",
+	"geminicli":   "gemini-cli",
+	"opencode":    "opencode-cli",
+	"opencodecli": "opencode-cli",
+	"pi":          "pi-cli",
+	"picli":       "pi-cli",
+	"roo":         "roo",
+	"vscode":      "vscode",
+	"windsurf":    "windsurf",
+}
+
+func validateNewProposedOwnerDirectory(f finding) error {
+	if f.ProposedOwner == nil || f.ProposedOwner.State != "new" || !isSpecPath(f.ProposedOwner.Path) {
+		return nil
+	}
+	proposedDirectory := pathpkg.Dir(f.ProposedOwner.Path)
+	for _, owner := range f.CurrentOwners {
+		if !isSpecPath(owner.Path) {
+			continue
+		}
+		currentDirectory := pathpkg.Dir(owner.Path)
+		if currentDirectory == "." || proposedDirectory == currentDirectory || strings.HasPrefix(proposedDirectory, currentDirectory+"/") {
+			return fmt.Errorf("new proposed owner %q must be outside current-owner directory %q", f.ProposedOwner.Path, currentDirectory)
+		}
+	}
+	return nil
+}
+
+//nolint:gocyclo // Closed owner-action policy is clearer as one explicit validation sequence.
+func validateOwnerActionIntent(f finding) error {
+	if f.ProposedOwner == nil || f.OwnershipPlan == nil {
+		return errors.New("requires a proposed owner and ownership plan")
+	}
+	owners := stringSet(ownerPaths(f.CurrentOwners))
+	actions := map[string]string{}
+	for _, action := range f.OwnershipPlan.OwnerActions {
+		if !owners[action.OwnerPath] || actions[action.OwnerPath] != "" || strings.TrimSpace(action.Rationale) == "" {
+			return errors.New("must cover each current owner exactly once with rationale")
+		}
+		switch action.Disposition {
+		case retainDistinctContract, retireNormativeOwnership, retireSelectedNormativeOwnership:
+		default:
+			return fmt.Errorf("owner %q has unsupported disposition %q", action.OwnerPath, action.Disposition)
+		}
+		actions[action.OwnerPath] = action.Disposition
+	}
+	if !sameStringSet(mapKeys(owners), mapKeys(ownerActionPaths(actions))) {
+		return errors.New("must exactly cover current owners")
+	}
+	for ownerPath, action := range actions {
+		if isHarnessRegistrationOwner(ownerPath) && action == retainDistinctContract {
+			return fmt.Errorf("harness registration current owner %q cannot retain normative ownership", ownerPath)
+		}
+		if action == retainDistinctContract && ownerPath != f.ProposedOwner.Path {
+			return fmt.Errorf("non-proposed owner %q cannot retain the selected normative contract", ownerPath)
+		}
+	}
+	if f.ProposedOwner.State == "existing" && actions[f.ProposedOwner.Path] != retainDistinctContract {
+		return fmt.Errorf("existing proposed owner %q must retain the canonical contract", f.ProposedOwner.Path)
+	}
+	return nil
 }
 
 func validateEvidence(items []evidence) error {
@@ -3703,14 +4025,6 @@ func ownerPaths(claims []ownerClaim) []string {
 	return paths
 }
 
-func evidencePaths(items []evidence) []string {
-	seen := map[string]bool{}
-	for _, item := range items {
-		seen[item.Path] = true
-	}
-	return mapKeys(seen)
-}
-
 func mapKeys(values map[string]bool) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {
@@ -3728,7 +4042,7 @@ var (
 	ownerStates                    = map[string]bool{"existing": true, "new": true}
 	applicabilityBases             = map[string]bool{"active-members": true, "non-harness-domain": true}
 	dispositions                   = map[string]bool{"supported": true, "adapted": true, "unsupported": true, "not-applicable": true, "unknown": true}
-	bddConsequences                = map[string]bool{"merge": true, "add-matrix": true, "applicability-specific": true, "none": true, "resolve": true}
+	bddConsequences                = map[string]bool{"merge": true, "add-matrix": true, "preserve-residual": true, "applicability-specific": true, "none": true, "resolve": true}
 	seedKinds                      = map[string]bool{"exact-body": true, "duplicate-id": true, "shared-bdd": true, "identical-file": true, "harness-terminology": true}
 	evidenceKinds                  = map[string]bool{"normative-contract": true, "supporting": true}
 	diagnosticKinds                = map[string]bool{"anonymous-requirement": true, "nonconforming-requirement": true, "missing-bdd-feature": true, "nonreciprocal-bdd-feature": true, "malformed-bdd-feature-reference": true, "duplicate-bdd-feature-reference": true, "ambiguous-bdd-traceability-section": true}
@@ -4207,6 +4521,7 @@ func renderFinding(out *boundedHTMLBuilder, finding finding) {
 		}
 		out.WriteString("</ul>")
 	}
+	renderPlannedBDDTransfers(out, finding.BDD.PlannedTransfers)
 	out.WriteString("</div><div><span class=\"label\">Ordered recommendation</span>")
 	renderStringList(out, finding.Recommendation, true)
 	out.WriteString("</div></div>")
@@ -4238,7 +4553,26 @@ func renderOwnershipPlan(out *boundedHTMLBuilder, plan *ownershipPlan) {
 	for _, entry := range plan.Features {
 		fmt.Fprintf(out, "<li><code>%s</code> via <code>%s</code> → <code>%s</code> (%s, %s)</li>", esc(entry.Path), esc(entry.SourceOwner), esc(entry.TargetPath), esc(entry.TargetState), esc(entry.Disposition))
 	}
-	out.WriteString("</ul></details>")
+	out.WriteString("</ul>")
+	renderPlannedBDDTransfers(out, plan.BDDPlannedTransfers)
+	out.WriteString("</details>")
+}
+
+func renderPlannedBDDTransfers(out *boundedHTMLBuilder, transfers []plannedBDDTransfer) {
+	if len(transfers) == 0 {
+		return
+	}
+	out.WriteString("<span class=\"label\">Planned BDD traceability transfers</span><ul class=\"compact\">")
+	for _, transfer := range transfers {
+		fmt.Fprintf(out, "<li><span class=\"tag\">PLANNED</span> <code>%s</code> → <code>%s</code> via <code>%s</code><br>%s", esc(transfer.SourceOwner), esc(transfer.TargetOwner), esc(transfer.TargetFeature), esc(transfer.Rationale))
+		items := make([]evidence, 0, len(transfer.BehaviorEvidence))
+		for _, item := range transfer.BehaviorEvidence {
+			items = append(items, evidence{Kind: "supporting", Path: item.Path, Line: item.Line, Excerpt: item.Excerpt})
+		}
+		renderEvidence(out, items, "planned-bdd-evidence")
+		out.WriteString("</li>")
+	}
+	out.WriteString("</ul><p class=\"source-note\">PLANNED entries are maintainer-pending traceability work, not current reciprocal links or deterministic semantic proof.</p>")
 }
 
 // renderEvidence renders every supplied record in order. Applicability evidence

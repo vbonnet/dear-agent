@@ -1346,14 +1346,16 @@ diff-based package guard gives fast changed-package diagnostics, and the
 actual-checkout gate prevents any implementation directory from remaining
 outside strict SPEC and executable BDD enforcement.
 
-### SPEC Audit Tooling Evidence Boundary
+### SPEC Governance Tooling Evidence Boundary
 
 **File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)
 
 **Drives:** focused `tools/specaudit` unit tests for the root-module command's
-pinned inventory, validation, and offline HTML rendering behavior. It does not
-exercise skill discovery, skill invocation, provider behavior, or maintainer
-decisions.
+pinned inventory, validation, and offline HTML rendering behavior, plus focused
+`tools/skill-projections` unit tests for exact check, pre-Git retained-root
+identity, resource-bounded no-follow marker scans, checked elapsed-time
+fail-closed behavior, and safe exclusive-create behavior. It does not exercise
+skill discovery, skill invocation, provider behavior, or maintainer decisions.
 
 **Key scenarios:**
 - Exact pinned Git-object inventory ignores dirty worktree content.
@@ -1368,12 +1370,25 @@ decisions.
 - Successful inventory, validation, and rendering emit their expected stdout
   while preserving tracked bytes and status, index identity and content,
   `HEAD`, refs, and relevant SPEC and feature bytes in the target repository.
+- Skill-projection check mode requires exact regular-file bytes without writing;
+  write mode authenticates a linked worktree through a fixed system Git
+  executable, but first retains the caller-requested device/inode-bound root;
+  Git's reported path and reciprocal metadata must bind to that identity before
+  canonical reads, both exclusive 0644 delegate creations, resource-bounded
+  deterministic no-follow marker discovery, and post-write readback.
+- Projection checks fail closed on unsupported platforms and report explicit
+  file, directory, depth, or byte marker-scan limit failures. They check elapsed
+  time after directory and file reads, after sorting, and before success; they
+  reject over-budget results after synchronous filesystem calls return rather
+  than claiming those calls can be interrupted at a hard deadline.
 
 **Why this matters:** The audit command cannot credibly supply review evidence
 if dirty bytes can alter pinned evidence, lexical similarity becomes a merge
 verdict, reciprocal BDD drift is hidden, or a report mutates product state
-before maintainer review. The focused checks are not evidence that a skill is
-discoverable or that a maintainer accepted a recommendation.
+before maintainer review. Projection checks prevent generated pointers from
+silently drifting or replacing maintainer-owned files. The focused checks are
+not evidence that a skill is discoverable or that a maintainer accepted a
+recommendation.
 
 ### VROOM Runtime Guardrails
 

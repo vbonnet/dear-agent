@@ -1011,14 +1011,7 @@ func TestValidateFindingOwnerStateCoherence(t *testing.T) {
 	candidateFinding := semanticReport.Candidates[0]
 	active := map[string]bool{"codex-cli": true, "pi-cli": true}
 
-	candidateFinding.ProposedOwner = &proposedOwnerClaim{Path: "shared/SPEC.md", State: "new", Rationale: "A new implemented shared seam is required.", NeutralityRationale: "The shared seam is outside harness configuration and owns only the shared observable."}
-	candidateFinding.OwnershipPlan.Requirements[1].TargetPath = "shared/SPEC.md"
-	candidateFinding.OwnershipPlan.Requirements[1].TargetRequirementID = "TWO-01"
-	candidateFinding.OwnershipPlan.Requirements[1].TargetState = "planned"
-	candidateFinding.OwnershipPlan.Features[1].TargetPath = "shared/SPEC.md"
-	candidateFinding.OwnershipPlan.Features[1].TargetState = "planned"
-	candidateFinding.OwnershipPlan.Features[3].TargetPath = "shared/SPEC.md"
-	candidateFinding.OwnershipPlan.Features[3].TargetState = "planned"
+	configureNewProposedOwner(&candidateFinding, "shared/SPEC.md")
 	if err := validateFinding(candidateFinding, false, active); err != nil {
 		t.Fatalf("new proposed owner should be valid: %v", err)
 	}
@@ -1042,6 +1035,121 @@ func TestValidateFindingOwnerStateCoherence(t *testing.T) {
 	if err := validateFinding(candidateFinding, false, active); err == nil || !strings.Contains(err.Error(), "cannot select a canonical owner") {
 		t.Fatalf("non-positive proposed owner error = %v", err)
 	}
+}
+
+func configureNewProposedOwner(candidate *finding, target string) {
+	candidate.ProposedOwner = &proposedOwnerClaim{Path: target, State: "new", Rationale: "A new implemented shared seam is required.", NeutralityRationale: "The shared seam is outside harness configuration and owns only the shared observable."}
+	candidate.OwnershipPlan.OwnerActions[0].Disposition = retireSelectedNormativeOwnership
+	candidate.OwnershipPlan.Requirements[0].Disposition = transferToProposedOwner
+	candidate.OwnershipPlan.Requirements[0].TargetPath = target
+	candidate.OwnershipPlan.Requirements[0].TargetState = "planned"
+	candidate.OwnershipPlan.Requirements[1].TargetPath = target
+	candidate.OwnershipPlan.Requirements[1].TargetRequirementID = "TWO-01"
+	candidate.OwnershipPlan.Requirements[1].TargetState = "planned"
+	candidate.OwnershipPlan.Features[0].Disposition = transferToProposedOwner
+	candidate.OwnershipPlan.Features[0].TargetPath = target
+	candidate.OwnershipPlan.Features[0].TargetState = "planned"
+	candidate.OwnershipPlan.Features[1].TargetPath = target
+	candidate.OwnershipPlan.Features[1].TargetState = "planned"
+	candidate.OwnershipPlan.Features[2].Disposition = preservePendingSeparateAudit
+}
+
+func TestNewProposedOwnerDirectoryContainmentUsesPathComponents(t *testing.T) {
+	_, _, semantic := auditFixture(t)
+	active := map[string]bool{"codex-cli": true, "pi-cli": true}
+	tests := []struct {
+		name   string
+		target string
+		reject bool
+	}{
+		{name: "sibling directory", target: "shared/SPEC.md"},
+		{name: "deceptive string prefix", target: "one-shared/SPEC.md"},
+		{name: "same current-owner directory", target: "one/SPEC.md", reject: true},
+		{name: "first owner component descendant", target: "one/shared/SPEC.md", reject: true},
+		{name: "second owner component descendant", target: "two/shared/SPEC.md", reject: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := cloneReport(t, semantic).Candidates[0]
+			configureNewProposedOwner(&candidate, test.target)
+			err := validateFinding(candidate, false, active)
+			if test.reject {
+				if err == nil || !strings.Contains(err.Error(), "must be outside current-owner directory") {
+					t.Fatalf("validateFinding() error = %v, want component-containment rejection", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateFinding() rejected allowed new-owner sibling %q: %v", test.target, err)
+			}
+		})
+	}
+
+	t.Run("root current owner blocks all nested new owners", func(t *testing.T) {
+		candidate := cloneReport(t, semantic).Candidates[0]
+		configureNewProposedOwner(&candidate, "shared/SPEC.md")
+		candidate.CurrentOwners[0].Path = "SPEC.md"
+		candidate.Evidence[0].Path = "SPEC.md"
+		candidate.OwnershipPlan.OwnerActions[0].OwnerPath = "SPEC.md"
+		if err := validateFinding(candidate, false, active); err == nil || !strings.Contains(err.Error(), `current-owner directory "."`) {
+			t.Fatalf("validateFinding() root-owner error = %v, want root containment rejection", err)
+		}
+	})
+}
+
+func TestNewProposedOwnerDirectoryRuleSurvivesPinnedLedgerRoundTrip(t *testing.T) {
+	_, inventoryReport, semantic := auditFixture(t)
+
+	for _, target := range []string{"shared/SPEC.md", "one-shared/SPEC.md"} {
+		t.Run("allowed/"+target, func(t *testing.T) {
+			candidate := cloneReport(t, semantic)
+			configureNewProposedOwner(&candidate.Candidates[0], target)
+			if err := validateReport(candidate); err != nil {
+				t.Fatalf("validateReport() rejected %q: %v", target, err)
+			}
+			if err := validateAgainstInventory(candidate, inventoryReport); err != nil {
+				t.Fatalf("pinned validation rejected %q: %v", target, err)
+			}
+			ledger, err := decisionLedgerFromReport(candidate, inventoryReport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledgerPath := filepath.Join(realTempDir(t), strings.ReplaceAll(target, "/", "-")+".json")
+			writeJSON(t, ledgerPath, ledger)
+			decoded, err := readDecisionLedgerV2(ledgerPath)
+			if err != nil {
+				t.Fatalf("persisted ledger rejected %q: %v", target, err)
+			}
+			replayed := reviewReportFromLedger(decoded, inventoryReport)
+			replayed.InventoryRef, _ = canonicalInventoryRef(inventoryReport)
+			if err := validateAgainstInventory(replayed, inventoryReport); err != nil {
+				t.Fatalf("round-tripped pinned validation rejected %q: %v", target, err)
+			}
+		})
+	}
+
+	t.Run("descendant rejected before and after persistence", func(t *testing.T) {
+		candidate := cloneReport(t, semantic)
+		configureNewProposedOwner(&candidate.Candidates[0], "one/shared/SPEC.md")
+		if err := validateReport(candidate); err == nil || !strings.Contains(err.Error(), "must be outside current-owner directory") {
+			t.Fatalf("validateReport() error = %v, want descendant rejection", err)
+		}
+		if err := validateAgainstInventory(candidate, inventoryReport); err == nil || !strings.Contains(err.Error(), "must be outside current-owner directory") {
+			t.Fatalf("validateAgainstInventory() error = %v, want descendant rejection", err)
+		}
+		ledger, err := decisionLedgerFromReport(candidate, inventoryReport)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateDecisionLedgerV2(ledger); err == nil || !strings.Contains(err.Error(), "must be outside current-owner directory") {
+			t.Fatalf("validateDecisionLedgerV2() error = %v, want persisted descendant rejection", err)
+		}
+		ledgerPath := filepath.Join(realTempDir(t), "descendant-new-owner.json")
+		writeJSON(t, ledgerPath, ledger)
+		if _, err := readDecisionLedgerV2(ledgerPath); err == nil || !strings.Contains(err.Error(), "must be outside current-owner directory") {
+			t.Fatalf("readDecisionLedgerV2() error = %v, want persisted descendant rejection", err)
+		}
+	})
 }
 
 func TestValidateFindingRejectsNonProductPositiveOwners(t *testing.T) {
@@ -1305,7 +1413,7 @@ func TestReadReportRejectsSemanticNullInventoryPayload(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := readReport(path)
+	decoded, err := readReportWithLimit(path, maxReportInputBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1320,6 +1428,12 @@ func TestPinnedValidationAcceptsBDDReciprocityAcrossFeatures(t *testing.T) {
 		"agm/test/bdd/features/one-only.feature",
 		"agm/test/bdd/features/two-only.feature",
 	}
+	semanticReport.Candidates[0].OwnershipPlan.Features[1].Disposition = preservePendingSeparateAudit
+	semanticReport.Candidates[0].OwnershipPlan.Features[1].TargetPath = "two/SPEC.md"
+	semanticReport.Candidates[0].OwnershipPlan.Features[1].TargetState = "existing"
+	semanticReport.Candidates[0].OwnershipPlan.Features[3].Disposition = transferToProposedOwner
+	semanticReport.Candidates[0].OwnershipPlan.Features[3].TargetPath = "one/SPEC.md"
+	semanticReport.Candidates[0].OwnershipPlan.Features[3].TargetState = "planned"
 
 	if err := validateReport(semanticReport); err != nil {
 		t.Fatalf("semantic report should be structurally valid: %v", err)
@@ -1380,7 +1494,7 @@ func TestPinnedValidationRejectsCurrentOwnerWithoutSelectedFeature(t *testing.T)
 		t.Fatalf("inventory should match the recomputed pinned repository view: %v", err)
 	}
 	err := validateAgainstInventory(semanticReport, inventoryReport)
-	if err == nil || !strings.Contains(err.Error(), "do not reciprocally name current owner \"two/SPEC.md") {
+	if err == nil || !strings.Contains(err.Error(), "exactly one of reciprocal or planned BDD coverage") {
 		t.Fatalf("uncovered current-owner error=%v, want pinned owner-degree rejection", err)
 	}
 }
@@ -1548,45 +1662,27 @@ func TestPinnedValidationRejectsForgedEvidenceAndUnsafeVerdicts(t *testing.T) {
 	}
 }
 
-func TestValidateReportRejectsImplementationOnlyHarnessCatalogOwners(t *testing.T) {
+func TestValidateReportRejectsHarnessRegistrationProposedOwners(t *testing.T) {
 	_, _, semanticReport := auditFixture(t)
 	for _, ownerPath := range []string{
+		".agents/SPEC.md",
+		".claude/SPEC.md",
 		"agm/.claude-plugin/SPEC.md",
-		"wayfinder/.claude-plugin/SPEC.md",
-		"spec-governance/.claude-plugin/SPEC.md",
+		".codex/SPEC.md",
+		".gemini/SPEC.md",
+		".opencode/SPEC.md",
+		".pi/SPEC.md",
 	} {
 		t.Run(ownerPath, func(t *testing.T) {
 			report := cloneReport(t, semanticReport)
-			report.Candidates[0].CurrentOwners[0].Path = ownerPath
-			report.Candidates[0].Evidence[0].Path = ownerPath
-			report.Candidates[0].ProposedOwner.Path = ownerPath
-			report.Candidates[0].ApplicabilityBasis = "non-harness-domain"
-			report.Candidates[0].ApplicabilityRationale = "claimed to exclude every active harness"
-			report.Candidates[0].Applicability = nil
+			report.Candidates[0].ProposedOwner = &proposedOwnerClaim{Path: ownerPath, State: "new", Rationale: "claimed canonical target", NeutralityRationale: "claimed neutral target"}
 
 			err := validateReport(report)
-			if err == nil || !strings.Contains(err.Error(), "includes a harness registration owner") {
-				t.Fatalf("validateReport() error = %v, want harness-owner applicability rejection", err)
+			if err == nil || !strings.Contains(err.Error(), "cannot select harness registration proposed owner") {
+				t.Fatalf("validateReport() error = %v, want harness proposed-owner rejection", err)
 			}
 		})
 	}
-	t.Run("new proposed nested harness owner", func(t *testing.T) {
-		report := cloneReport(t, semanticReport)
-		report.Candidates[0].ProposedOwner = &proposedOwnerClaim{
-			Path:                "wayfinder/.claude-plugin/new/SPEC.md",
-			State:               "new",
-			Rationale:           "claimed to create a non-harness-domain owner",
-			NeutralityRationale: "claimed neutral owner",
-		}
-		report.Candidates[0].ApplicabilityBasis = "non-harness-domain"
-		report.Candidates[0].ApplicabilityRationale = "claimed to exclude every active harness"
-		report.Candidates[0].Applicability = nil
-
-		err := validateReport(report)
-		if err == nil || !strings.Contains(err.Error(), "includes a harness registration owner") {
-			t.Fatalf("validateReport() error = %v, want proposed harness-owner applicability rejection", err)
-		}
-	})
 }
 
 func auditFixture(t *testing.T) (string, report, report) {
@@ -1624,20 +1720,21 @@ func auditFixture(t *testing.T) (string, report, report) {
 		ApplicabilityBasis:     "active-members",
 		ApplicabilityRationale: "The shared contract applies to both pinned active members.",
 		OwnerActions: []ownerPreservation{
-			{OwnerPath: "one/SPEC.md", Disposition: "retain-distinct-contract", Rationale: "The selected owner retains the shared contract during maintainer review."},
-			{OwnerPath: "two/SPEC.md", Disposition: "retire-normative-ownership", Rationale: "The duplicate normative ownership remains preserved until a maintainer-approved transfer."},
+			{OwnerPath: "one/SPEC.md", Disposition: retainDistinctContract, Rationale: "The selected owner retains the shared contract during maintainer review."},
+			{OwnerPath: "two/SPEC.md", Disposition: retireSelectedNormativeOwnership, Rationale: "The selected duplicate ownership retires while unrelated records remain pending separate audit."},
 		},
 		Requirements: []requirementPreservation{
-			{ContractEvidence: contractEvidence{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, Disposition: "retain-distinct", TargetPath: "one/SPEC.md", TargetRequirementID: first.ID, TargetState: "existing", Rationale: "Preserve the selected owner requirement."},
-			{ContractEvidence: contractEvidence{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}, Disposition: "transfer-to-proposed-owner", TargetPath: "one/SPEC.md", TargetRequirementID: first.ID, TargetState: "existing", Rationale: "Transfer only after maintainer approval."},
+			{ContractEvidence: contractEvidence{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, Disposition: retainDistinct, TargetPath: "one/SPEC.md", TargetRequirementID: first.ID, TargetState: "existing", Rationale: "Preserve the selected owner requirement."},
+			{ContractEvidence: contractEvidence{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}, Disposition: transferToProposedOwner, TargetPath: "one/SPEC.md", TargetRequirementID: first.ID, TargetState: "existing", Rationale: "Transfer only after maintainer approval."},
 		},
 		Features: []featurePreservation{
-			{SourceOwner: "one/SPEC.md", Path: "agm/test/bdd/features/shared.feature", Disposition: "retain-distinct", TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the shared reciprocal BDD feature for the selected owner."},
-			{SourceOwner: "two/SPEC.md", Path: "agm/test/bdd/features/shared.feature", Disposition: "transfer-to-proposed-owner", TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the shared reciprocal BDD feature for the retiring owner."},
-			{SourceOwner: "one/SPEC.md", Path: "agm/test/bdd/features/one-only.feature", Disposition: "retain-distinct", TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the one-owner reciprocal BDD feature."},
-			{SourceOwner: "two/SPEC.md", Path: "agm/test/bdd/features/two-only.feature", Disposition: "transfer-to-proposed-owner", TargetPath: "one/SPEC.md", TargetState: "planned", Rationale: "Transfer only after maintainer approval."},
+			{SourceOwner: "one/SPEC.md", Path: "agm/test/bdd/features/shared.feature", Disposition: retainDistinct, TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the shared reciprocal BDD feature for the selected owner."},
+			{SourceOwner: "two/SPEC.md", Path: "agm/test/bdd/features/shared.feature", Disposition: transferToProposedOwner, TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the shared reciprocal BDD feature for the retiring owner."},
+			{SourceOwner: "one/SPEC.md", Path: "agm/test/bdd/features/one-only.feature", Disposition: retainDistinct, TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the one-owner reciprocal BDD feature."},
+			{SourceOwner: "two/SPEC.md", Path: "agm/test/bdd/features/two-only.feature", Disposition: preservePendingSeparateAudit, TargetPath: "two/SPEC.md", TargetState: "existing", Rationale: "Preserve unrelated BDD traceability pending a separate audit."},
 		},
-		Applicability: fixtureApplicability,
+		BDDPlannedTransfers: []plannedBDDTransfer{},
+		Applicability:       fixtureApplicability,
 	}
 	semantic := report{
 		SchemaVersion: schemaVersion,
@@ -1661,7 +1758,137 @@ func auditFixture(t *testing.T) (string, report, report) {
 			SharedOutcome: "Requests preserve identity.", MaterialDifferences: []string{"Only the owner path differs."}, Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, {Kind: "normative-contract", Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}},
 			ApplicabilityBasis: "active-members", ApplicabilityRationale: "The shared contract applies to both pinned active members.",
 			Applicability: fixtureApplicability,
-			BDD:           bddImpact{Features: []string{"agm/test/bdd/features/shared.feature"}, Consequence: "merge"}, Recommendation: []string{"Keep ONE-01 as canonical."}, Risk: "Traceability could be lost.", Decision: "Approve one owner.", DecisionStatus: pendingMaintainerApproval, OwnershipPlan: fixturePlan,
+			BDD:           bddImpact{Features: []string{"agm/test/bdd/features/shared.feature"}, PlannedTransfers: []plannedBDDTransfer{}, Consequence: "merge"}, Recommendation: []string{"Keep ONE-01 as canonical."}, Risk: "Traceability could be lost.", Decision: "Approve one owner.", DecisionStatus: pendingMaintainerApproval, OwnershipPlan: fixturePlan,
+		}},
+		NonCandidates: []finding{}, Limitations: append([]string{}, inventoryReport.Limitations...),
+	}
+	ref, err := canonicalInventoryRef(inventoryReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic.InventoryRef = ref
+	return repo, inventoryReport, semantic
+}
+
+func plannedBDDTransferFixture(t *testing.T) (string, report, report) {
+	t.Helper()
+	repo := t.TempDir()
+	gitTest(t, repo, "init", "-q")
+	gitTest(t, repo, "config", "user.email", "test@example.com")
+	gitTest(t, repo, "config", "user.name", "Test")
+	writeTestFile(t, repo, "agm/internal/harnessregistry/registry.go", "package harnessregistry\nvar activeHarnesses = []string{\"claude-code\", \"opencode-cli\"}\n")
+	writeTestFile(t, repo, ".claude/SPEC.md", strings.Join([]string{
+		"# Claude configuration",
+		"",
+		"**CLAUDE-DIR-02** When Claude permissions are configured, the system shall preserve the Claude allow-list.",
+		"",
+		"**CLAUDE-DIR-04** When Claude stop hooks are configured, the system shall run stop guardrail feedback.",
+		"",
+		"## BDD Traceability",
+		"",
+		"- Feature: `agm/test/bdd/features/harness_config_surface_guardrails.feature`",
+	}, "\n")+"\n")
+	writeTestFile(t, repo, ".opencode/SPEC.md", strings.Join([]string{
+		"# OpenCode configuration",
+		"",
+		"**OPENCODE-DIR-01** When OpenCode hooks are configured, the system shall preserve OpenCode-specific command wiring.",
+		"",
+		"**OPENCODE-DIR-03** When OpenCode stop hooks are configured, the system shall run stop guardrail feedback.",
+		"",
+		"## BDD Traceability",
+		"",
+		"- Feature: `agm/test/bdd/features/harness_config_surface_guardrails.feature`",
+	}, "\n")+"\n")
+	writeTestFile(t, repo, "internal/hookparity/SPEC.md", strings.Join([]string{
+		"# Hook parity",
+		"",
+		"**HHP-03** When an active harness configures stop events, the system shall run stop guardrail feedback.",
+		"",
+		"**HHP-04** When a hook manifest references a script, the system shall keep that script executable.",
+		"",
+		"## BDD Traceability",
+		"",
+		"- Feature: `agm/test/bdd/features/hook_parity.feature`",
+	}, "\n")+"\n")
+	writeTestFile(t, repo, "agm/test/bdd/features/harness_config_surface_guardrails.feature", strings.Join([]string{
+		"# SPEC: .claude/SPEC.md",
+		"# RELATED-SPEC: .opencode/SPEC.md",
+		"Feature: Configuration surface topology",
+		"  Scenario: Harness configuration surfaces retain declared files",
+	}, "\n")+"\n")
+	hookFeaturePath := "agm/test/bdd/features/hook_parity.feature"
+	writeTestFile(t, repo, hookFeaturePath, strings.Join([]string{
+		"# SPEC: internal/hookparity/SPEC.md",
+		"Feature: Hook parity",
+		"  Scenario Outline: Active harness stop events expose shared guardrail feedback",
+		"    Then hook harness \"<harness>\" should include guardrail \"<guardrail>\"",
+		"    Examples:",
+		"      | harness      | guardrail                   |",
+		"      | claude-code  | stop-guardrail-feedback     |",
+		"      | opencode-cli | stop-guardrail-feedback     |",
+	}, "\n")+"\n")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-qm", "planned BDD transfer fixture")
+	revision := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
+	inventoryReport, err := inventory(repo, "owner/repo", revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claudePermissions := inventoryRequirementByID(t, inventoryReport, ".claude/SPEC.md", "CLAUDE-DIR-02")
+	claudeStop := inventoryRequirementByID(t, inventoryReport, ".claude/SPEC.md", "CLAUDE-DIR-04")
+	opencodeWiring := inventoryRequirementByID(t, inventoryReport, ".opencode/SPEC.md", "OPENCODE-DIR-01")
+	opencodeStop := inventoryRequirementByID(t, inventoryReport, ".opencode/SPEC.md", "OPENCODE-DIR-03")
+	hookStop := inventoryRequirementByID(t, inventoryReport, "internal/hookparity/SPEC.md", "HHP-03")
+	hookExecutable := inventoryRequirementByID(t, inventoryReport, "internal/hookparity/SPEC.md", "HHP-04")
+	transfers := []plannedBDDTransfer{
+		{SourceOwner: ".claude/SPEC.md", TargetOwner: "internal/hookparity/SPEC.md", TargetFeature: hookFeaturePath, BehaviorEvidence: []supportingEvidence{{Path: hookFeaturePath, Line: 7, Excerpt: "| claude-code  | stop-guardrail-feedback     |"}}, Rationale: "Transfer CLAUDE-DIR-04 traceability to the existing neutral behavior feature after approval."},
+		{SourceOwner: ".opencode/SPEC.md", TargetOwner: "internal/hookparity/SPEC.md", TargetFeature: hookFeaturePath, BehaviorEvidence: []supportingEvidence{{Path: hookFeaturePath, Line: 8, Excerpt: "| opencode-cli | stop-guardrail-feedback     |"}}, Rationale: "Transfer OPENCODE-DIR-03 traceability to the existing neutral behavior feature after approval."},
+	}
+	applicabilityRows := []applicability{
+		{Member: "claude-code", Disposition: "supported", Evidence: []evidence{{Kind: "normative-contract", Path: ".claude/SPEC.md", Line: claudeStop.Line, RequirementID: claudeStop.ID, Excerpt: claudeStop.Excerpt}}},
+		{Member: "opencode-cli", Disposition: "supported", Evidence: []evidence{{Kind: "normative-contract", Path: ".opencode/SPEC.md", Line: opencodeStop.Line, RequirementID: opencodeStop.ID, Excerpt: opencodeStop.Excerpt}}},
+	}
+	plan := &ownershipPlan{
+		Status: pendingMaintainerApproval,
+		OwnerActions: []ownerPreservation{
+			{OwnerPath: "internal/hookparity/SPEC.md", Disposition: retainDistinctContract, Rationale: "HHP-03 remains the neutral canonical contract."},
+			{OwnerPath: ".claude/SPEC.md", Disposition: retireSelectedNormativeOwnership, Rationale: "Retire only CLAUDE-DIR-04; preserve unrelated Claude requirements pending separate audit."},
+			{OwnerPath: ".opencode/SPEC.md", Disposition: retireSelectedNormativeOwnership, Rationale: "Retire only OPENCODE-DIR-03; preserve unrelated OpenCode requirements pending separate audit."},
+		},
+		Requirements: []requirementPreservation{
+			{ContractEvidence: contractEvidence{Path: "internal/hookparity/SPEC.md", Line: hookStop.Line, RequirementID: hookStop.ID, Excerpt: hookStop.Excerpt}, Disposition: retainDistinct, TargetPath: "internal/hookparity/SPEC.md", TargetRequirementID: hookStop.ID, TargetState: "existing", Rationale: "Retain the selected neutral requirement."},
+			{ContractEvidence: contractEvidence{Path: "internal/hookparity/SPEC.md", Line: hookExecutable.Line, RequirementID: hookExecutable.ID, Excerpt: hookExecutable.Excerpt}, Disposition: retainDistinct, TargetPath: "internal/hookparity/SPEC.md", TargetRequirementID: hookExecutable.ID, TargetState: "existing", Rationale: "Retain the distinct executable-script requirement."},
+			{ContractEvidence: contractEvidence{Path: ".claude/SPEC.md", Line: claudeStop.Line, RequirementID: claudeStop.ID, Excerpt: claudeStop.Excerpt}, Disposition: transferToProposedOwner, TargetPath: "internal/hookparity/SPEC.md", TargetRequirementID: hookStop.ID, TargetState: "existing", Rationale: "Transfer the selected duplicate stop-hook contract."},
+			{ContractEvidence: contractEvidence{Path: ".claude/SPEC.md", Line: claudePermissions.Line, RequirementID: claudePermissions.ID, Excerpt: claudePermissions.Excerpt}, Disposition: preservePendingSeparateAudit, TargetPath: ".claude/SPEC.md", TargetRequirementID: claudePermissions.ID, TargetState: "existing", Rationale: "Preserve unrelated permission policy pending separate audit."},
+			{ContractEvidence: contractEvidence{Path: ".opencode/SPEC.md", Line: opencodeStop.Line, RequirementID: opencodeStop.ID, Excerpt: opencodeStop.Excerpt}, Disposition: transferToProposedOwner, TargetPath: "internal/hookparity/SPEC.md", TargetRequirementID: hookStop.ID, TargetState: "existing", Rationale: "Transfer the selected duplicate stop-hook contract."},
+			{ContractEvidence: contractEvidence{Path: ".opencode/SPEC.md", Line: opencodeWiring.Line, RequirementID: opencodeWiring.ID, Excerpt: opencodeWiring.Excerpt}, Disposition: preservePendingSeparateAudit, TargetPath: ".opencode/SPEC.md", TargetRequirementID: opencodeWiring.ID, TargetState: "existing", Rationale: "Preserve unrelated native wiring pending separate audit."},
+		},
+		Features: []featurePreservation{
+			{SourceOwner: "internal/hookparity/SPEC.md", Path: hookFeaturePath, Disposition: retainDistinct, TargetPath: "internal/hookparity/SPEC.md", TargetState: "existing", Rationale: "Retain the selected neutral behavior feature."},
+			{SourceOwner: ".claude/SPEC.md", Path: "agm/test/bdd/features/harness_config_surface_guardrails.feature", Disposition: preservePendingSeparateAudit, TargetPath: ".claude/SPEC.md", TargetState: "existing", Rationale: "Preserve unrelated configuration topology traceability pending separate audit."},
+			{SourceOwner: ".opencode/SPEC.md", Path: "agm/test/bdd/features/harness_config_surface_guardrails.feature", Disposition: preservePendingSeparateAudit, TargetPath: ".opencode/SPEC.md", TargetState: "existing", Rationale: "Preserve unrelated configuration topology traceability pending separate audit."},
+		},
+		BDDPlannedTransfers:    append([]plannedBDDTransfer(nil), transfers...),
+		ApplicabilityBasis:     "active-members",
+		ApplicabilityRationale: "The shared stop-hook behavior applies to both pinned active members.",
+		Applicability:          applicabilityRows,
+	}
+	semantic := report{
+		SchemaVersion: schemaVersion,
+		DocumentKind:  ledgerDocumentKind,
+		Snapshot:      inventoryReport.Snapshot,
+		Scope:         inventoryReport.Scope,
+		Summary: summary{SpecFiles: inventoryReport.Summary.SpecFiles, Requirements: inventoryReport.Summary.Requirements, Diagnostics: inventoryReport.Summary.Diagnostics,
+			CandidateCount: 1, ByVerdict: map[string]int{"merge-now": 1}},
+		Methodology: methodology{Collector: inventoryReport.Methodology.Collector, SeedKinds: inventoryReport.Methodology.SeedKinds, SemanticReview: "exact source and behavior-feature review", GitEvidenceTrust: inventoryReport.Methodology.GitEvidenceTrust, GitTrustInputs: inventoryReport.Methodology.GitTrustInputs, Reproduce: []string{"go run ./tools/specaudit validate fixture"}},
+		Candidates: []finding{{
+			ID: "SPEC-CLUSTER-NC005", Rank: 1, Title: "Stop-hook feedback ownership", Verdict: "merge-now", Relationship: "same-observable", Classification: "shared-contract", Confidence: "confirmed", Strength: "strong",
+			CurrentOwners: []ownerClaim{{Path: "internal/hookparity/SPEC.md", Rationale: "HHP-03 owns the shared behavior."}, {Path: ".claude/SPEC.md", Rationale: "CLAUDE-DIR-04 duplicates the shared behavior."}, {Path: ".opencode/SPEC.md", Rationale: "OPENCODE-DIR-03 duplicates the shared behavior."}}, OwnershipCompleteness: "Pinned exact requirements and bounded hook-parity review found these three current owners.",
+			ProposedOwner: &proposedOwnerClaim{Path: "internal/hookparity/SPEC.md", State: "existing", Rationale: "HHP-03 already owns the cross-harness observable.", NeutralityRationale: "The hook-parity domain contract is independent of native harness registration paths."},
+			SharedOutcome: "Active harness stop events expose shared guardrail feedback.", MaterialDifferences: []string{"Native hook wiring remains implementation evidence, not separate normative ownership."},
+			Evidence:           []evidence{{Kind: "normative-contract", Path: "internal/hookparity/SPEC.md", Line: hookStop.Line, RequirementID: hookStop.ID, Excerpt: hookStop.Excerpt}, {Kind: "normative-contract", Path: ".claude/SPEC.md", Line: claudeStop.Line, RequirementID: claudeStop.ID, Excerpt: claudeStop.Excerpt}, {Kind: "normative-contract", Path: ".opencode/SPEC.md", Line: opencodeStop.Line, RequirementID: opencodeStop.ID, Excerpt: opencodeStop.Excerpt}},
+			ApplicabilityBasis: "active-members", ApplicabilityRationale: "The shared stop-hook behavior applies to both pinned active members.", Applicability: applicabilityRows,
+			BDD: bddImpact{Features: []string{hookFeaturePath}, PlannedTransfers: transfers, Consequence: "merge"}, Recommendation: []string{"Keep HHP-03 canonical and retire the two selected local declarations after traceability transfer."}, Risk: "Unrelated local contracts could be moved into hook parity without selected retirement controls.", Decision: "Approve the selected retirement and planned traceability transfers.", DecisionStatus: pendingMaintainerApproval, OwnershipPlan: plan,
 		}},
 		NonCandidates: []finding{}, Limitations: append([]string{}, inventoryReport.Limitations...),
 	}
@@ -1736,6 +1963,22 @@ func inventoryRequirement(t *testing.T, source report, path string) requirement 
 	return requirement{}
 }
 
+func inventoryRequirementByID(t *testing.T, source report, path, id string) requirement {
+	t.Helper()
+	for _, file := range source.Inventory {
+		if file.Path != path {
+			continue
+		}
+		for _, item := range file.Requirements {
+			if item.ID == id {
+				return item
+			}
+		}
+	}
+	t.Fatalf("inventory has no requirement %s in %s", id, path)
+	return requirement{}
+}
+
 func inventoryFeature(t *testing.T, source report, path string) featureFile {
 	t.Helper()
 	for _, feature := range source.Features {
@@ -1745,6 +1988,39 @@ func inventoryFeature(t *testing.T, source report, path string) featureFile {
 	}
 	t.Fatalf("inventory has no feature for %s", path)
 	return featureFile{}
+}
+
+func ownershipRequirementByID(t *testing.T, plan *ownershipPlan, id string) *requirementPreservation {
+	t.Helper()
+	for index := range plan.Requirements {
+		if plan.Requirements[index].ContractEvidence.RequirementID == id {
+			return &plan.Requirements[index]
+		}
+	}
+	t.Fatalf("ownership plan has no requirement %s", id)
+	return nil
+}
+
+func ownershipFeature(t *testing.T, plan *ownershipPlan, owner, path string) *featurePreservation {
+	t.Helper()
+	for index := range plan.Features {
+		if plan.Features[index].SourceOwner == owner && plan.Features[index].Path == path {
+			return &plan.Features[index]
+		}
+	}
+	t.Fatalf("ownership plan has no feature %s for %s", path, owner)
+	return nil
+}
+
+func ownerAction(t *testing.T, plan *ownershipPlan, owner string) *ownerPreservation {
+	t.Helper()
+	for index := range plan.OwnerActions {
+		if plan.OwnerActions[index].OwnerPath == owner {
+			return &plan.OwnerActions[index]
+		}
+	}
+	t.Fatalf("ownership plan has no action for %s", owner)
+	return nil
 }
 
 func validReport() report {
@@ -1869,13 +2145,13 @@ func TestActiveMembersRequirePackageASTDeclaration(t *testing.T) {
 	active, limitations := activeMembersFromBody(`package registry
 // activeHarnesses = []string{"comment-only"}
 const example = "activeHarnesses = []string{\\\"literal-only\\\"}"
-`, true)
+`)
 	if len(active) != 0 || len(limitations) == 0 {
 		t.Fatalf("comment/literal registry parsed as active=%#v limitations=%#v", active, limitations)
 	}
 	active, limitations = activeMembersFromBody(`package registry
 var activeHarnesses = []string{"pi-cli", "codex-cli"}
-`, true)
+`)
 	if !reflect.DeepEqual(active, []string{"codex-cli", "pi-cli"}) || len(limitations) != 0 {
 		t.Fatalf("AST registry active=%#v limitations=%#v", active, limitations)
 	}
@@ -1928,14 +2204,359 @@ func TestSupportingMetadataBudgetAllowsLongLiteralPaths(t *testing.T) {
 	}
 }
 
-func TestPositiveFindingRejectsHarnessRegistrationRegardlessOfApplicabilityBasis(t *testing.T) {
+func TestHarnessRegistrationCurrentOwnersRequireRetirement(t *testing.T) {
 	_, _, semantic := auditFixture(t)
-	semantic.Candidates[0].CurrentOwners[0].Path = "agm/.claude-plugin/SPEC.md"
-	semantic.Candidates[0].Evidence[0].Path = "agm/.claude-plugin/SPEC.md"
-	semantic.Candidates[0].ApplicabilityBasis = "active-members"
-	semantic.Candidates[0].ApplicabilityRationale = "all active members are explicitly listed"
-	if err := validateReport(semantic); err == nil || !strings.Contains(err.Error(), "harness registration owner") {
-		t.Fatalf("active-members harness owner error=%v, want unconditional rejection", err)
+	baseline := cloneReport(t, semantic).Candidates[0]
+	baseline.CurrentOwners[1].Path = ".claude/SPEC.md"
+	baseline.Evidence[1].Path = ".claude/SPEC.md"
+	baseline.OwnershipPlan.OwnerActions[1].OwnerPath = ".claude/SPEC.md"
+	active := map[string]bool{"codex-cli": true, "pi-cli": true}
+	if err := validateFinding(baseline, false, active); err != nil {
+		t.Fatalf("factual harness registration owner with selected retirement rejected: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*finding)
+	}{
+		{name: "registration owner retained", mutate: func(candidate *finding) {
+			candidate.OwnershipPlan.OwnerActions[1].Disposition = retainDistinctContract
+		}},
+		{name: "owner action missing", mutate: func(candidate *finding) {
+			candidate.OwnershipPlan.OwnerActions = candidate.OwnershipPlan.OwnerActions[:1]
+		}},
+		{name: "owner action duplicated", mutate: func(candidate *finding) {
+			candidate.OwnershipPlan.OwnerActions = append(candidate.OwnershipPlan.OwnerActions, candidate.OwnershipPlan.OwnerActions[0])
+		}},
+		{name: "owner action disposition open", mutate: func(candidate *finding) {
+			candidate.OwnershipPlan.OwnerActions[1].Disposition = "retire-someday"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := cloneReport(t, report{Candidates: []finding{baseline}}).Candidates[0]
+			test.mutate(&candidate)
+			if err := validateFinding(candidate, false, active); err == nil {
+				t.Fatal("unsafe owner-action mutation passed validation")
+			}
+		})
+	}
+}
+
+func TestHarnessRegistrationRootsIncludeAliasesAndFutureGroupedHarnesses(t *testing.T) {
+	for _, path := range []string{
+		".agents/SPEC.md",
+		".claude/SPEC.md",
+		"nested/.claude-plugin/SPEC.md",
+		".codex/SPEC.md",
+		".gemini/SPEC.md",
+		".opencode/SPEC.md",
+		".pi/SPEC.md",
+		"claude-code/SPEC.md",
+		"codex_cli/SPEC.md",
+		"opencode-cli/SPEC.md",
+		"pi-cli/SPEC.md",
+		"agy-cli/SPEC.md",
+		"antigravity/SPEC.md",
+		"agm/harness/codex/SPEC.md",
+		"agm/harnesses/future-harness/SPEC.md",
+		"agm/internal/.codex/SPEC.md",
+		"cmd/.claude/SPEC.md",
+		"agm/agm-plugin/commands/SPEC.md",
+		"nested/plugins/example/SPEC.md",
+	} {
+		if !isHarnessRegistrationOwner(path) {
+			t.Fatalf("registration-local path %q was not classified", path)
+		}
+	}
+	for _, path := range []string{
+		".dear-agent/SPEC.md",
+		"agm/internal/agent/SPEC.md",
+		"internal/codexarchive/SPEC.md",
+		"agm/internal/codex-cli/SPEC.md",
+		"agm/cmd/claude/SPEC.md",
+		"pkg/plugin/SPEC.md",
+	} {
+		if isHarnessRegistrationOwner(path) {
+			t.Fatalf("logical product/domain path %q was classified as harness registration", path)
+		}
+	}
+}
+
+func TestReportRejectsConflictingCrossFindingRequirementMappings(t *testing.T) {
+	_, inventory, semantic := auditFixture(t)
+	second := cloneReport(t, report{Candidates: []finding{semantic.Candidates[0]}}).Candidates[0]
+	second.ID = "FINDING-2"
+	second.Rank = 2
+	changed := false
+	selectedEvidence := second.ContractEvidence
+	for _, item := range second.Evidence {
+		if item.Kind == "normative-contract" {
+			selectedEvidence = append(selectedEvidence, contractEvidence{Path: item.Path, Line: item.Line, RequirementID: item.RequirementID, Excerpt: item.Excerpt})
+		}
+	}
+	for _, selected := range selectedEvidence {
+		for index := range second.OwnershipPlan.Requirements {
+			entry := &second.OwnershipPlan.Requirements[index]
+			if entry.ContractEvidence == selected && entry.Disposition == transferToProposedOwner {
+				entry.Disposition = representAsApplicability
+				changed = true
+				break
+			}
+		}
+		if changed {
+			break
+		}
+	}
+	if !changed {
+		t.Fatal("fixture has no selected transfer mapping")
+	}
+	semantic.Candidates = append(semantic.Candidates, second)
+	semantic.Summary.CandidateCount = len(semantic.Candidates)
+	semantic.Summary.ByVerdict = verdictHistogram(semantic)
+
+	err := validateAgainstInventory(semantic, inventory)
+	if err == nil || !strings.Contains(err.Error(), "conflicting ownership mappings") {
+		t.Fatalf("cross-finding ownership conflict error=%v", err)
+	}
+}
+
+func TestFindingAllowsMultipleSelectedRequirementsPerCurrentOwner(t *testing.T) {
+	_, _, semantic := auditFixture(t)
+	candidate := cloneReport(t, semantic).Candidates[0]
+	additional := candidate.Evidence[0]
+	additional.Line++
+	additional.RequirementID = "ONE-02"
+	additional.Excerpt = "When another request runs, the system shall preserve identity."
+	candidate.Evidence = append(candidate.Evidence, additional)
+	if err := validateFinding(candidate, false, map[string]bool{"codex-cli": true, "pi-cli": true}); err != nil {
+		t.Fatalf("multiple selected requirements for one current owner were rejected: %v", err)
+	}
+}
+
+func TestNC005PlannedBDDTransfersSupportMixedHarnessOwnerRetirement(t *testing.T) {
+	repo, inventory, semantic := plannedBDDTransferFixture(t)
+	if err := validateReport(semantic); err != nil {
+		t.Fatalf("mixed-owner finding rejected structurally: %v", err)
+	}
+	if err := validateInventoryAgainstRepo(inventory, repo); err != nil {
+		t.Fatalf("fixture inventory did not replay: %v", err)
+	}
+	if err := validateAgainstInventory(semantic, inventory); err != nil {
+		t.Fatalf("planned traceability transfer rejected: %v", err)
+	}
+	if err := validateSupportingEvidenceAgainstRepo(semantic, inventory, repo); err != nil {
+		t.Fatalf("planned behavior evidence rejected: %v", err)
+	}
+
+	ledger, err := decisionLedgerFromReport(semantic, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDecisionLedgerV2(ledger); err != nil {
+		t.Fatalf("persisted planned transfer rejected: %v", err)
+	}
+	path := filepath.Join(realTempDir(t), "planned-transfer-ledger.json")
+	writeJSON(t, path, ledger)
+	decoded, err := readDecisionLedgerV2(path)
+	if err != nil {
+		t.Fatalf("planned transfer did not survive strict JSON read: %v", err)
+	}
+	replayed := reviewReportFromLedger(decoded, inventory)
+	if !reflect.DeepEqual(replayed.Candidates[0].BDD.PlannedTransfers, semantic.Candidates[0].BDD.PlannedTransfers) || !reflect.DeepEqual(replayed.Candidates[0].OwnershipPlan.BDDPlannedTransfers, semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers) {
+		t.Fatal("planned BDD transfers changed across persistence round-trip")
+	}
+	records, err := supportingEvidenceRecords(replayed)
+	if err != nil || len(records) != 2 {
+		t.Fatalf("planned behavior evidence records=%d err=%v, want two bounded records", len(records), err)
+	}
+
+	html := renderHTML(replayed, &inventory)
+	for _, want := range []string{"PLANNED", "Planned BDD traceability transfers", ".claude/SPEC.md", ".opencode/SPEC.md", "internal/hookparity/SPEC.md", "stop-guardrail-feedback", "not current reciprocal links or deterministic semantic proof"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("rendered HTML omitted planned-transfer fact %q", want)
+		}
+	}
+}
+
+func TestOwnershipPlanSeparatesSelectedRetirementFromResidualRecords(t *testing.T) {
+	_, inventory, semantic := plannedBDDTransferFixture(t)
+
+	tests := []struct {
+		name   string
+		mutate func(*report, *report)
+	}{
+		{name: "selected requirement preserved in place", mutate: func(semantic, _ *report) {
+			entry := ownershipRequirementByID(t, semantic.Candidates[0].OwnershipPlan, "CLAUDE-DIR-04")
+			entry.Disposition, entry.TargetPath, entry.TargetRequirementID, entry.TargetState = preservePendingSeparateAudit, ".claude/SPEC.md", "CLAUDE-DIR-04", "existing"
+		}},
+		{name: "unselected requirement transferred", mutate: func(semantic, _ *report) {
+			entry := ownershipRequirementByID(t, semantic.Candidates[0].OwnershipPlan, "CLAUDE-DIR-02")
+			entry.Disposition, entry.TargetPath, entry.TargetRequirementID = transferToProposedOwner, "internal/hookparity/SPEC.md", "HHP-03"
+		}},
+		{name: "residual requirement target planned", mutate: func(semantic, _ *report) {
+			ownershipRequirementByID(t, semantic.Candidates[0].OwnershipPlan, "CLAUDE-DIR-02").TargetState = "planned"
+		}},
+		{name: "unselected BDD link transferred", mutate: func(semantic, _ *report) {
+			entry := ownershipFeature(t, semantic.Candidates[0].OwnershipPlan, ".claude/SPEC.md", "agm/test/bdd/features/harness_config_surface_guardrails.feature")
+			entry.Disposition, entry.TargetPath, entry.TargetState = transferToProposedOwner, "internal/hookparity/SPEC.md", "planned"
+		}},
+		{name: "local owner retained", mutate: func(semantic, _ *report) {
+			ownerAction(t, semantic.Candidates[0].OwnershipPlan, ".claude/SPEC.md").Disposition = retainDistinctContract
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := cloneReport(t, semantic)
+			pinned := cloneReport(t, inventory)
+			test.mutate(&candidate, &pinned)
+			if err := validateReport(candidate); err != nil {
+				return
+			}
+			if err := validateAgainstInventory(candidate, pinned); err != nil {
+				return
+			}
+			t.Fatal("unsafe selected/residual ownership mutation passed validation")
+		})
+	}
+}
+
+func TestPlannedBDDTransferValidationFailsClosed(t *testing.T) {
+	repo, inventory, semantic := plannedBDDTransferFixture(t)
+
+	tests := []struct {
+		name   string
+		mutate func(*report, *report)
+	}{
+		{name: "missing source transfer", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.PlannedTransfers = semantic.Candidates[0].BDD.PlannedTransfers[1:]
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "duplicate source transfer", mutate: func(semantic, _ *report) {
+			duplicate := semantic.Candidates[0].BDD.PlannedTransfers[0]
+			semantic.Candidates[0].BDD.PlannedTransfers = append(semantic.Candidates[0].BDD.PlannedTransfers, duplicate)
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "unknown source owner", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.PlannedTransfers[0].SourceOwner = ".gemini/SPEC.md"
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "plan copy drift", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers[:1]
+		}},
+		{name: "wrong target owner", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.PlannedTransfers[0].TargetOwner = ".claude/SPEC.md"
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "unselected target feature", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.PlannedTransfers[0].TargetFeature = "agm/test/bdd/features/harness_config_surface_guardrails.feature"
+			semantic.Candidates[0].BDD.PlannedTransfers[0].BehaviorEvidence[0].Path = "agm/test/bdd/features/harness_config_surface_guardrails.feature"
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "already reciprocal source", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.Features = append(semantic.Candidates[0].BDD.Features, "agm/test/bdd/features/harness_config_surface_guardrails.feature")
+		}},
+		{name: "excluded target feature", mutate: func(semantic, _ *report) {
+			semantic.Exclusions = []reviewExclusion{{Path: "agm/test/bdd/features/hook_parity.feature", Classification: "fixture", Rationale: "exercise exclusion rejection", SupportingEvidence: []supportingEvidence{{Path: "agm/test/bdd/features/hook_parity.feature", Line: 2, Excerpt: "Feature: Hook parity"}}}}
+		}},
+		{name: "behavior evidence cites another blob", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.PlannedTransfers[0].BehaviorEvidence[0].Path = "agm/test/bdd/features/harness_config_surface_guardrails.feature"
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "behavior evidence excerpt drift", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].BDD.PlannedTransfers[0].BehaviorEvidence[0].Excerpt = "forged behavior row"
+			semantic.Candidates[0].OwnershipPlan.BDDPlannedTransfers = append([]plannedBDDTransfer(nil), semantic.Candidates[0].BDD.PlannedTransfers...)
+		}},
+		{name: "new proposed owner", mutate: func(semantic, _ *report) {
+			semantic.Candidates[0].ProposedOwner.State = "new"
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := cloneReport(t, semantic)
+			pinned := cloneReport(t, inventory)
+			test.mutate(&candidate, &pinned)
+			if err := validateReport(candidate); err != nil {
+				return
+			}
+			if err := validateAgainstInventory(candidate, pinned); err != nil {
+				return
+			}
+			if err := validateSupportingEvidenceAgainstRepo(candidate, pinned, repo); err != nil {
+				return
+			}
+			t.Fatal("unsafe planned BDD transfer mutation passed all validation")
+		})
+	}
+}
+
+func TestFullRetirementRequiresEveryRecordSelected(t *testing.T) {
+	_, inventory, semantic := auditFixture(t)
+	finding := &semantic.Candidates[0]
+	finding.OwnershipPlan.OwnerActions[1].Disposition = retireNormativeOwnership
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "BDD feature mapping") {
+		t.Fatalf("full retirement with unselected BDD record error=%v", err)
+	}
+
+	finding.BDD.Features = append(finding.BDD.Features, "agm/test/bdd/features/two-only.feature")
+	finding.OwnershipPlan.Features[3].Disposition = transferToProposedOwner
+	finding.OwnershipPlan.Features[3].TargetPath = "one/SPEC.md"
+	finding.OwnershipPlan.Features[3].TargetState = "planned"
+	if err := validateReport(semantic); err != nil {
+		t.Fatalf("fully selected retirement rejected structurally: %v", err)
+	}
+	if err := validateAgainstInventory(semantic, inventory); err != nil {
+		t.Fatalf("fully selected retirement rejected: %v", err)
+	}
+}
+
+func TestSelectedRetirementMayPreserveSelectedReciprocalFeatureForResidualContract(t *testing.T) {
+	_, inventory, semantic := auditFixture(t)
+	entry := ownershipFeature(t, semantic.Candidates[0].OwnershipPlan, "two/SPEC.md", "agm/test/bdd/features/shared.feature")
+	entry.Disposition = preservePendingSeparateAudit
+	entry.TargetPath = "two/SPEC.md"
+	entry.TargetState = "existing"
+	entry.Rationale = "The reciprocal feature still covers residual source behavior and remains in place pending separate behavioral coverage."
+	semantic.Candidates[0].BDD.Consequence = "preserve-residual"
+
+	if err := validateReport(semantic); err != nil {
+		t.Fatalf("selected feature preservation rejected structurally: %v", err)
+	}
+	if err := validateAgainstInventory(semantic, inventory); err != nil {
+		t.Fatalf("selected feature preservation rejected against inventory: %v", err)
+	}
+
+	withMatrix := cloneReport(t, semantic)
+	withMatrix.Candidates[0].BDD.Consequence = "add-matrix"
+	if err := validateAgainstInventory(withMatrix, inventory); err != nil {
+		t.Fatalf("selected topology feature with missing-behavior matrix rejected: %v", err)
+	}
+
+	withoutConsequence := cloneReport(t, semantic)
+	withoutConsequence.Candidates[0].BDD.Consequence = "merge"
+	if err := validateAgainstInventory(withoutConsequence, inventory); err == nil || !strings.Contains(err.Error(), "preserved selected BDD feature requires") {
+		t.Fatalf("selected feature preservation without explicit consequence error=%v", err)
+	}
+}
+
+func TestExistingProposedOwnerMustBeCurrent(t *testing.T) {
+	_, _, semantic := auditFixture(t)
+	semantic.Candidates[0].ProposedOwner = &proposedOwnerClaim{Path: "three/SPEC.md", State: "existing", Rationale: "claimed existing owner", NeutralityRationale: "claimed neutral owner"}
+	if err := validateReport(semantic); err == nil || !strings.Contains(err.Error(), "must include existing proposed owner") {
+		t.Fatalf("unowned existing proposed owner error=%v", err)
+	}
+}
+
+func TestSupportingEvidenceBudgetCountsPlannedBDDTransfers(t *testing.T) {
+	items := make([]supportingEvidence, maxSupportingEvidenceRecords+1)
+	for index := range items {
+		items[index] = supportingEvidence{Path: "agm/test/bdd/features/hook_parity.feature", Line: 1, Excerpt: "behavior"}
+	}
+	ledger := report{Candidates: []finding{{ID: "FINDING-1", BDD: bddImpact{PlannedTransfers: []plannedBDDTransfer{{SourceOwner: ".claude/SPEC.md", TargetOwner: "internal/hookparity/SPEC.md", TargetFeature: "agm/test/bdd/features/hook_parity.feature", BehaviorEvidence: items, Rationale: "bounded evidence test"}}}}}}
+	if _, err := supportingEvidenceRecords(ledger); err == nil || !strings.Contains(err.Error(), "record limit") {
+		t.Fatalf("planned behavior evidence budget error=%v, want record-limit rejection", err)
 	}
 }
 
@@ -1980,15 +2601,9 @@ func TestHTMLRendersPendingDecisionAndOwnershipPreservationPlan(t *testing.T) {
 
 func TestReviewerExclusionsResolveAndCannotSelectProposedOwner(t *testing.T) {
 	_, inventory, semantic := auditFixture(t)
-	finding := &semantic.Candidates[0]
-	finding.ProposedOwner = &proposedOwnerClaim{Path: "three/SPEC.md", State: "existing", Rationale: "Existing neutral owner is under review.", NeutralityRationale: "It is a product-domain owner."}
-	finding.OwnershipPlan.Requirements[1].TargetPath = "three/SPEC.md"
-	finding.OwnershipPlan.Requirements[1].TargetRequirementID = "THREE-01"
-	finding.OwnershipPlan.Features[1].TargetPath = "three/SPEC.md"
-	finding.OwnershipPlan.Features[3].TargetPath = "three/SPEC.md"
-	semantic.Exclusions = []reviewExclusion{{Path: "three/SPEC.md", Classification: "fixture", Rationale: "Test reviewer exclusion remains collected.", SupportingEvidence: []supportingEvidence{{Path: "three/SPEC.md", Line: 1, Excerpt: "# Three"}}}}
-	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "reviewer-excluded proposed owner") {
-		t.Fatalf("excluded proposed owner error=%v", err)
+	semantic.Exclusions = []reviewExclusion{{Path: "one/SPEC.md", Classification: "fixture", Rationale: "Test reviewer exclusion remains collected.", SupportingEvidence: []supportingEvidence{{Path: "one/SPEC.md", Line: 1, Excerpt: "# One"}}}}
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "reviewer-excluded current owner") {
+		t.Fatalf("excluded positive owner error=%v", err)
 	}
 	semantic.Exclusions[0].Path = "missing/SPEC.md"
 	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "does not resolve") {
@@ -2031,6 +2646,22 @@ func TestCollectorExecutionAvailabilityIsTruthful(t *testing.T) {
 	complete.VCSModified = &modified
 	if !validCollectorExecution(complete) {
 		t.Fatal("collector execution rejected complete truthful build metadata")
+	}
+}
+
+func TestPinnedInventoryValidationTreatsCollectorExecutionAsNonAttesting(t *testing.T) {
+	repository, inventory, _ := auditFixture(t)
+	historical := *inventory.CollectorExecution
+	if runtime.GOOS == "darwin" {
+		historical.GOOS = "linux"
+	} else {
+		historical.GOOS = "darwin"
+	}
+	historical.GOARCH = "historical-collector-arch"
+	inventory.CollectorExecution = &historical
+
+	if err := validateInventoryAgainstRepo(inventory, repository); err != nil {
+		t.Fatalf("cross-platform validation rejected non-attesting collector metadata: %v", err)
 	}
 }
 

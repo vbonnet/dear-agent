@@ -116,7 +116,10 @@ destination.
 values. Availability is explicit: no fallback module path or inferred VCS
 value is emitted. The fixed `collector_execution_disclosure` appears in JSON
 and HTML and is not a provenance attestation. Collection does not accept
-reviewer exclusions: it accounts for the complete pinned corpus.
+reviewer exclusions: it accounts for the complete pinned corpus. A later
+validator checks the self-report's closed shape and disclosure but does not
+require the current validator's build or platform to match the historical
+collector; replaying a corpus cannot authenticate the original binary.
 
 ## Reviewer decision ledger
 
@@ -241,10 +244,15 @@ claim ownership at the audited snapshot; it is evidence, not policy approval.
 For a positive finding, the ledger must identify one neutral proposed owner
 with an explicit `neutrality_rationale`; the rationale explains why the owner
 is a product/domain seam rather than a harness configuration or implementation
-colocation. This is a maintainer-pending preservation plan, not deletion
-authority: current-owner requirement evidence, BDD coverage, and any
-applicability evidence remain visible until a maintainer selects and executes a
-separate migration. Path colocation never supplies that legitimacy.
+colocation. An existing proposed owner must be a pinned current owner. A new
+proposed owner's directory must not equal or be a path-component descendant of
+any current owner's directory. Thus a root-directory current owner blocks all
+nested new owners, while sibling directories and deceptive string prefixes that
+do not share a complete component remain eligible. This is a maintainer-pending
+preservation plan, not deletion authority: current-owner requirement evidence,
+BDD coverage, and any applicability evidence remain visible until a maintainer
+selects and executes a separate migration. Path colocation never supplies that
+legitimacy.
 
 The current active-member extraction is a dear-agent-specific adapter over the
 pinned Go registry paths `agm/internal/harnessregistry/registry.go` and legacy
@@ -303,7 +311,14 @@ guard; they are not runtime authentication proof.
   }],
   "bdd": {
     "features": ["agm/test/bdd/features/example.feature"],
-    "consequence": "merge|add-matrix|applicability-specific|none|resolve"
+    "planned_transfers": [{
+      "source_owner": ".claude/SPEC.md",
+      "target_owner": "path/SPEC.md",
+      "target_feature": "agm/test/bdd/features/example.feature",
+      "behavior_evidence": [{"path": "agm/test/bdd/features/example.feature", "line": 24, "excerpt": "exact behavioral step or example row"}],
+      "rationale": "why the selected target behavior supports the pending traceability transfer"
+    }],
+    "consequence": "merge|add-matrix|preserve-residual|applicability-specific|none|resolve"
   },
   "recommendation": ["ordered proposed change"],
   "risk": "bounded risk",
@@ -313,9 +328,16 @@ guard; they are not runtime authentication proof.
   "ownership_plan": {
     "status": "pending-maintainer-approval",
     "deletion_authority": false,
-    "owner_actions": [{"owner_path": "path/SPEC.md", "disposition": "retain-distinct-contract|retire-normative-ownership", "rationale": "preservation decision pending maintainer approval"}],
-    "requirements": [{"contract_evidence": {"path": "path/SPEC.md", "line": 12, "requirement_id": "REQ-01", "excerpt": "exact pinned source line"}, "disposition": "retain-distinct|transfer-to-proposed-owner|represent-as-applicability", "target_path": "path/SPEC.md", "target_requirement_id": "REQ-01", "target_state": "existing|planned", "rationale": "preserve requirement traceability"}],
-    "features": [{"source_owner": "path/SPEC.md", "path": "agm/test/bdd/features/example.feature", "disposition": "retain-distinct|transfer-to-proposed-owner|represent-as-applicability", "target_path": "path/SPEC.md", "target_state": "existing|planned", "rationale": "preserve BDD traceability"}],
+    "owner_actions": [{"owner_path": "path/SPEC.md", "disposition": "retain-distinct-contract|retire-normative-ownership|retire-selected-normative-ownership", "rationale": "preservation decision pending maintainer approval"}],
+    "requirements": [{"contract_evidence": {"path": "path/SPEC.md", "line": 12, "requirement_id": "REQ-01", "excerpt": "exact pinned source line"}, "disposition": "retain-distinct|transfer-to-proposed-owner|represent-as-applicability|preserve-in-place-pending-separate-audit", "target_path": "path/SPEC.md", "target_requirement_id": "REQ-01", "target_state": "existing|planned", "rationale": "preserve requirement traceability"}],
+    "features": [{"source_owner": "path/SPEC.md", "path": "agm/test/bdd/features/example.feature", "disposition": "retain-distinct|transfer-to-proposed-owner|represent-as-applicability|preserve-in-place-pending-separate-audit", "target_path": "path/SPEC.md", "target_state": "existing|planned", "rationale": "preserve BDD traceability"}],
+    "bdd_planned_transfers": [{
+      "source_owner": ".claude/SPEC.md",
+      "target_owner": "path/SPEC.md",
+      "target_feature": "agm/test/bdd/features/example.feature",
+      "behavior_evidence": [{"path": "agm/test/bdd/features/example.feature", "line": 24, "excerpt": "exact behavioral step or example row"}],
+      "rationale": "why the selected target behavior supports the pending traceability transfer"
+    }],
     "applicability_basis": "active-members|non-harness-domain",
     "applicability_rationale": "exact copy of finding basis rationale",
     "applicability": []
@@ -330,13 +352,46 @@ and non-candidates; `candidate_count` counts only `candidates`.
 
 Every finding uses the closed `decision_status`
 `pending-maintainer-approval`. Positive findings additionally carry an
-`ownership_plan` with the same applicability basis, rationale, and matrix. The
-plan maps every current-owner requirement by its full contract evidence and
-every reciprocal BDD link by `(source_owner, path)` exactly once. An existing
-target resolves its requirement ID or reciprocal BDD link at the pinned
-revision; a planned target may intentionally lack that link. The plan preserves
+`ownership_plan` with the same applicability basis, rationale, matrix, and exact
+copy of `bdd.planned_transfers`. The plan maps every current-owner requirement
+by its full contract evidence and every reciprocal BDD link by
+`(source_owner, path)` exactly once. Owner actions are closed: only an existing
+proposed owner may retain; full retirement requires every source requirement and
+reciprocal feature to be selected and moved; selected retirement moves selected
+records while every residual record remains at its exact existing source with
+`preserve-in-place-pending-separate-audit`. An existing transfer target resolves
+its requirement ID or reciprocal BDD link at the pinned revision; a planned
+target may intentionally lack that destination record. The plan preserves
 review traceability and is explicitly not authorization to delete or mutate a
 source owner.
+
+For `retire-selected-normative-ownership`, a selected reciprocal feature may
+also use `preserve-in-place-pending-separate-audit` when it continues to trace
+unselected source requirements or establishes only co-location/topology rather
+than the selected observable. Such preservation requires BDD consequence
+`preserve-residual` when the feature directly covers both selected and residual
+behavior, or `add-matrix` when direct selected behavior is missing. The latter
+names the concrete missing behavioral feature or scenario in its recommendation
+or limitation; neither case transfers the entire source feature to manufacture
+coverage for the proposed owner.
+
+Across positive findings, each exact selected `contract_evidence` record must
+have one coherent disposition and target. The validator permits repeated
+analysis only when that ownership mapping is identical and rejects conflicting
+cross-finding mappings. An EARS statement that bundles observables for multiple
+owners must remain in place under a split-required or insufficient-evidence
+decision until a maintainer approves a source split; the ledger cannot model
+the whole line as two independent transfers.
+
+For a positive finding, each current owner has exactly one traceability state:
+current reciprocal coverage by a selected feature, or one planned BDD transfer.
+A planned transfer names an uncovered current owner, the existing proposed
+owner, and a selected reviewer-included feature already reciprocal with the
+proposed owner. Its `behavior_evidence` contains one or more exact citations to
+that target feature and is resolved through the same deduplicated, bounded
+supporting-evidence pipeline as other supporting citations. These checks prove
+path and pinned-text consistency only. A topology match, title, tag, or cited
+row does not let deterministic validation prove equivalent observable behavior.
 
 ## Enumerations
 
@@ -351,6 +406,11 @@ source owner.
 - strength: `strong`, `moderate`, `exploratory`
 - applicability basis: `active-members`, `non-harness-domain`
 - disposition: `supported`, `adapted`, `unsupported`, `not-applicable`, `unknown`
+- owner action: `retain-distinct-contract`, `retire-normative-ownership`,
+  `retire-selected-normative-ownership`
+- ownership-record disposition: `retain-distinct`,
+  `transfer-to-proposed-owner`, `represent-as-applicability`,
+  `preserve-in-place-pending-separate-audit`
 
 ## Validation boundary
 
@@ -368,9 +428,16 @@ runtime behavior, or authorize changes.
 - Require positive findings to name every current owner, a bounded
   completeness rationale, a defensible proposed owner, material differences,
   applicability, BDD consequences, risk, and maintainer decision.
-- Require every selected BDD feature to exist and reciprocally name at least one
-  current owner; require every current owner to be represented by a selected
-  feature. A finding without selected BDD uses non-positive consequence `none`.
+- Reject a new proposed-owner directory equal to or component-descendant of any
+  current-owner directory. Treat a root current-owner directory as containing
+  every nested path, and compare complete components so siblings and deceptive
+  lexical prefixes remain allowed.
+- Require every selected BDD feature to exist, remain reviewer-included, and
+  reciprocally name at least one current owner. Require every positive current
+  owner to have exactly one current reciprocal or planned traceability state,
+  and validate each planned transfer and its exact target-feature behavior
+  citation under the rules above. A finding without selected BDD uses
+  non-positive consequence `none`.
 - Require active-member findings to cover each pinned member with evidence.
   Do not hide a harness-owned contract behind `non-harness-domain`.
 - Require `merge-now` to use `same-observable` and
@@ -385,4 +452,7 @@ owner topology, applicability, exact evidence, BDD consequences,
 recommendations, decisions, keep-separate boundaries, lead and diagnostic
 summary, methodology including every Git trust-input identity, and reproduction
 commands.
+Render every planned BDD transfer explicitly as `PLANNED`, including its source,
+target, selected feature, rationale, and exact behavior evidence, and state that
+it is neither a current reciprocal link nor deterministic semantic proof.
 Load no network font, style, script, or data.
