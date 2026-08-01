@@ -201,7 +201,6 @@ func TestArchiveMCPHandlerPropagatesContextAndDryRun(t *testing.T) {
 	}
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(blockingStore.release) }) }
-	t.Cleanup(release)
 	opCtx := &ops.OpContext{Storage: blockingStore}
 	cleaned := make(chan struct{})
 	var cleanupOnce sync.Once
@@ -210,6 +209,9 @@ func TestArchiveMCPHandlerPropagatesContextAndDryRun(t *testing.T) {
 			return opCtx, func() { cleanupOnce.Do(func() { close(cleaned) }) }, nil
 		})
 	})
+	// Register after the MCP session cleanups so LIFO cleanup releases the
+	// injected blocker before session shutdown can wait for the handler.
+	t.Cleanup(release)
 
 	requestCtx, cancel := context.WithCancel(t.Context())
 	callDone := make(chan error, 1)
