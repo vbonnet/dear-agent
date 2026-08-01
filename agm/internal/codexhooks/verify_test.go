@@ -363,6 +363,7 @@ func TestValidateScriptAssetRejectsMutableFileOperands(t *testing.T) {
 		"#!/bin/sh\nsort decision.json\n",
 		"#!/bin/sh\ncut -f1 decision.json\n",
 		"#!/bin/sh\nwc decision.json\n",
+		"#!/bin/sh\nfind .decision -mindepth 1 -maxdepth 1 -printf '%f\\n'\n",
 	} {
 		if err := validateScriptAsset([]byte(script)); err == nil {
 			t.Fatalf("validateScriptAsset(%q) accepted mutable file operand", script)
@@ -649,7 +650,6 @@ func TestTrustedHookAssetsAllowLiteralCommandsAndExpandedArguments(t *testing.T)
 		"#!/bin/bash\nbuiltin source /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/sed --sandbox -n 's/a/b/p'\n",
 		"#!/bin/sh\n/usr/bin/sed -n 's|e|x|g'\n",
-		"#!/bin/sh\n/usr/bin/find /usr/bin -name true -print\n",
 		"#!/bin/sh\n/usr/bin/tar -cf /dev/null /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/tar --create --file=/dev/null /usr/bin/true\n",
 		"#!/bin/sh\n/usr/bin/tar --checkpoint=1 -cf /dev/null /usr/bin/true\n",

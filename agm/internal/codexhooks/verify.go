@@ -2232,7 +2232,7 @@ func trustedHookCommandAllowed(command string, args []*syntax.Word) bool {
 		"basename", "chmod", "cp", "date", "dirname", "jq", "mkdir", "mktemp",
 		"mv", "rm", "sleep", "tee", "touch", "tr",
 		// Tools whose command-capable modes are rejected before this boundary.
-		"find", "git", "gsed", "gtar", "sed", "tar",
+		"git", "gsed", "gtar", "sed", "tar",
 		// Operator-owned hook helpers with fixed installed capabilities.
 		"agm", "bd", "bead-close-guard", "dear-agent-bead-close-guard",
 		"dear-agent-codex-hook-json":
