@@ -33,7 +33,7 @@ something breaks you open a terminal, not a dashboard.
 
 ### Prerequisites
 
-- Go 1.26.4+
+- Go 1.26.5+
 - tmux
 - Git
 

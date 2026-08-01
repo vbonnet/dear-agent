@@ -36,17 +36,17 @@ behavior for repository specifications.
 
 **SPEC-GOV-14** When skill behavior is validated, the system shall treat a false consolidation or false canonical-owner selection as a release-blocking defect.
 
-**SPEC-GOV-15** When an audit makes a positive recommendation, the system shall require the current owners to exactly match authenticated source-evidence paths, record bounded ownership-completeness and selection rationale, and select an existing proposed owner only from that authenticated owner set.
+**SPEC-GOV-15** When an audit makes a positive recommendation, the system shall require every current and proposed owner to be a product `SPEC.md` path, require the current owners to exactly match authenticated source-evidence paths, record bounded ownership-completeness and selection rationale, and select an existing proposed owner only from that authenticated owner set.
 
-**SPEC-GOV-16** When the canonical audit skill invokes `specaudit`, the system shall resolve the executable package from the authenticated skill or plugin distribution and shall not resolve executable code from the active working directory or the repository being audited.
+**SPEC-GOV-16** When the canonical audit skill invokes `specaudit`, the system shall resolve the executable package from the skill or plugin resource root supplied by the active loader and shall not resolve executable code from the active working directory or the repository being audited.
 
-**SPEC-GOV-17** When the native Claude audit skill is installed, the system shall distribute only the explicit `audit-specs` and `write-spec` skill exports, their isolated module metadata, `specaudit`, and the single canonical EARS library in one authenticated package boundary and shall not expose plugin-level agents, hooks, MCP servers, or language servers.
+**SPEC-GOV-17** When the native Claude audit skill is installed, the system shall expose only the explicit `audit-specs` and `write-spec` skill exports from one isolated package boundary containing their required tooling and shall not expose plugin-level agents, hooks, MCP servers, or language servers.
 
-**SPEC-GOV-19** When the canonical audit launcher invokes `specaudit`, the system shall disable inherited Go workspaces, flags, environment files, and toolchain selection before executing the collector from the authenticated distribution.
+**SPEC-GOV-18** When a non-Claude harness discovers a generated audit-skill projection, the system shall use that projection only to resolve and load the canonical skill and its relative resources; the projection shall not own a second execution workflow.
+
+**SPEC-GOV-19** When the canonical audit launcher invokes `specaudit`, the system shall disable inherited Go workspaces, flags, environment files, and toolchain selection before executing the collector from the resolved distribution root.
 
 **SPEC-GOV-20** When SPEC governance skills are distributed, the system shall reject any canonical or native export outside the fixed `audit-specs` and `write-spec` set even when all edited discovery manifests agree on the additional export.
-
-**SPEC-GOV-18** When a non-Claude harness discovers a generated audit-skill projection, the system shall use that projection only to authenticate and load the canonical skill and its relative resources; the projection shall not own a second execution workflow.
 
 ## BDD Traceability
 

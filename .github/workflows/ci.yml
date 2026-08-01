@@ -39,8 +39,10 @@ jobs:
         include:
           - os: ubuntu-latest
             race: "-race"
+            spec_governance_mode: race
           - os: macos-latest
             race: ""
+            spec_governance_mode: test
 
     steps:
       - name: Checkout
@@ -57,7 +59,18 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-          cache-dependency-path: "go.sum"
+          cache-dependency-path: |
+            go.sum
+            spec-governance/go.mod
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          install-only: true
+          # The later root Lint step owns cache saving; this step only makes
+          # the pinned binary available to the shared Make gate.
+          skip-save-cache: true
 
       - name: Install tmux (macOS)
         if: matrix.os == 'macos-latest'
@@ -96,6 +109,9 @@ jobs:
       - name: Validate tracked AI skills
         run: make lint-skills
 
+      - name: Verify SPEC governance
+        run: make verify-spec-governance SPEC_GOVERNANCE_MODE=${{ matrix.spec_governance_mode }}
+
       - name: Verify generated AGM surfaces and plugin hashes
         run: |
           make verify-surface-codegen
@@ -115,6 +131,9 @@ jobs:
           # which can introduce new findings (e.g. SA5011) on an unrelated PR
           # and red main without any code change. Bump this intentionally.
           version: v2.12.2
+          # The earlier SPEC-governance gate installs this exact version and
+          # exports it to PATH for subsequent steps.
+          install-mode: none
           # On push-to-main: diff against the previous commit (HEAD~1) so
           # admin-bypass-merged PRs that skipped CI are still caught. On PRs:
           # pass nothing — .golangci.yml's new-from-merge-base: origin/main
@@ -310,6 +329,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            spec-governance/go.mod
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -348,3 +371,9 @@ jobs:
           echo "No unallowed vulnerabilities."
         env:
           GOWORK: "off"
+
+      - name: Verify SPEC governance vulnerabilities
+        run: make verify-spec-governance SPEC_GOVERNANCE_MODE=vuln
+
+      - name: Verify versioned command installs
+        run: make verify-spec-governance SPEC_GOVERNANCE_MODE=install

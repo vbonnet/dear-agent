@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/spec-governance/internal/gittest"
 )
@@ -17,19 +20,7 @@ import (
 func TestInstalledPluginRunsFromUnrelatedWorkingDirectory(t *testing.T) {
 	distributionRoot := specauditDistributionRoot(t)
 	installedRoot := t.TempDir()
-	for _, relative := range []string{
-		"go.mod",
-		"go.sum",
-		".claude-plugin/plugin.json",
-		"scripts/specaudit",
-		"earslint/config.go",
-		"earslint/earslint.go",
-		"skills/audit-specs/scripts/specaudit/main.go",
-		"skills/audit-specs/SKILL.md",
-		"skills/write-spec/SKILL.md",
-	} {
-		copyInstalledPluginFile(t, distributionRoot, installedRoot, relative)
-	}
+	copyInstalledPluginTree(t, distributionRoot, installedRoot)
 	assertInstalledPluginSurface(t, installedRoot)
 
 	unrelated := t.TempDir()
@@ -59,6 +50,11 @@ func TestInstalledPluginRunsFromUnrelatedWorkingDirectory(t *testing.T) {
 	if err := os.WriteFile(maliciousGoEnv, []byte("GOFLAGS=-mod=vendor\nGOTOOLCHAIN=go1.1\n"), 0o600); err != nil {
 		t.Fatalf("write hostile Go environment: %v", err)
 	}
+	hostileMarker := filepath.Join(t.TempDir(), "hostile-go-execution")
+	hostileProgram := filepath.Join(t.TempDir(), "hostile-go-program")
+	if err := os.WriteFile(hostileProgram, []byte("#!/bin/sh\n: > \"$SPECAUDIT_HOSTILE_MARKER\"\nexit 99\n"), 0o755); err != nil {
+		t.Fatalf("write hostile Go execution program: %v", err)
+	}
 	command := exec.Command(
 		filepath.Join(installedRoot, "scripts", "specaudit"),
 		"inventory", "-repo", auditedRepository, "-repository", "owner/trusted", "-revision", revision,
@@ -69,6 +65,16 @@ func TestInstalledPluginRunsFromUnrelatedWorkingDirectory(t *testing.T) {
 		"GOFLAGS=-mod=vendor",
 		"GOENV="+maliciousGoEnv,
 		"GOTOOLCHAIN=go1.1",
+		"GO111MODULE=off",
+		"GOROOT="+filepath.Join(unrelated, "hostile-goroot"),
+		"GOEXPERIMENT=fieldtrack",
+		"GOPROXY=https://proxy.attacker.invalid",
+		"GOSUMDB=sum.attacker.invalid",
+		"GOVCS=*:all",
+		"CGO_ENABLED=1",
+		"GOCACHEPROG="+hostileProgram,
+		"CC="+hostileProgram,
+		"SPECAUDIT_HOSTILE_MARKER="+hostileMarker,
 		"GIT_DIR="+filepath.Join(ambientRepository, ".git"),
 		"GIT_WORK_TREE="+ambientRepository,
 		"GIT_INDEX_FILE="+filepath.Join(ambientRepository, ".git", "index"),
@@ -90,6 +96,91 @@ func TestInstalledPluginRunsFromUnrelatedWorkingDirectory(t *testing.T) {
 	if strings.Contains(string(output), "UNTRUSTED-CWD-SPECAUDIT") {
 		t.Fatalf("installed execution selected the active-working-directory lookalike: %s", output)
 	}
+	if _, err := os.Stat(hostileMarker); !os.IsNotExist(err) {
+		t.Fatalf("installed launcher executed hostile Go environment program: %v", err)
+	}
+}
+
+func TestInstalledPluginRejectsUndeclaredExecutableGoSource(t *testing.T) {
+	distributionRoot := specauditDistributionRoot(t)
+	installedRoot := t.TempDir()
+	copyInstalledPluginTree(t, distributionRoot, installedRoot)
+	writeTestFile(t, installedRoot, "skills/audit-specs/scripts/specaudit/stale.go", "package main\n")
+
+	command := exec.Command(filepath.Join(installedRoot, "scripts", "specaudit"), "--help")
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "undeclared executable Go source") {
+		t.Fatalf("installed artifact accepted stale Go source: %v\n%s", err, output)
+	}
+}
+
+func TestInstalledPluginRunsOfflineWithFreshCaches(t *testing.T) {
+	distributionRoot := specauditDistributionRoot(t)
+	installedRoot := t.TempDir()
+	copyInstalledPluginTree(t, distributionRoot, installedRoot)
+	assertInstalledPluginSurface(t, installedRoot)
+
+	cacheRoot := t.TempDir()
+	moduleCache := filepath.Join(cacheRoot, "module-cache")
+	buildCache := filepath.Join(cacheRoot, "build-cache")
+	goPath := filepath.Join(cacheRoot, "gopath")
+	for _, path := range []string{moduleCache, buildCache, goPath} {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("fresh cache %s is not empty", path)
+		}
+	}
+
+	command := exec.Command(filepath.Join(installedRoot, "scripts", "specaudit"), "--help")
+	command.Dir = t.TempDir()
+	command.Env = append(os.Environ(),
+		"GOMODCACHE="+moduleCache,
+		"GOCACHE="+buildCache,
+		"GOPATH="+goPath,
+		"GOPROXY=off",
+		"GOSUMDB=off",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run installed specaudit offline with fresh caches: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "specaudit inventory") {
+		t.Fatalf("offline installed help omitted collector usage: %s", output)
+	}
+}
+
+func TestInstalledPluginRejectsUnsupportedGoVersionBeforeCompilation(t *testing.T) {
+	distributionRoot := specauditDistributionRoot(t)
+	for _, goVersion := range []string{"go1.26.4", "go2.0"} {
+		t.Run(goVersion, func(t *testing.T) {
+			installedRoot := t.TempDir()
+			copyInstalledPluginTree(t, distributionRoot, installedRoot)
+			binDir := t.TempDir()
+			goStub := filepath.Join(binDir, "go")
+			stub := "#!/bin/sh\nif [ \"$1 $2\" = \"env GOVERSION\" ]; then printf '" + goVersion + "\\n'; exit 0; fi\nprintf 'unexpected go invocation\\n' >&2\nexit 99\n"
+			if err := os.WriteFile(goStub, []byte(stub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			command := exec.Command(filepath.Join(installedRoot, "scripts", "specaudit"), "--help")
+			command.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
+			output, err := command.CombinedOutput()
+			if err == nil {
+				t.Fatalf("unsupported Go version unexpectedly executed collector: %s", output)
+			}
+			if want := "Go 1.26.5 or newer is required; found " + goVersion; !strings.Contains(string(output), want) {
+				t.Fatalf("unsupported Go version diagnostic = %q, want %q", output, want)
+			}
+			if strings.Contains(string(output), "unexpected go invocation") {
+				t.Fatalf("launcher attempted compilation after version rejection: %s", output)
+			}
+		})
+	}
 }
 
 func TestGitOutputIsBounded(t *testing.T) {
@@ -104,6 +195,91 @@ func TestGitOutputIsBounded(t *testing.T) {
 
 	if _, err := gitWithOutputLimit(repository, 64, "show", "HEAD:large.txt"); err == nil || !strings.Contains(err.Error(), "output exceeds 64 bytes") {
 		t.Fatalf("gitWithOutputLimit() error = %v, want bounded-output rejection", err)
+	}
+}
+
+func TestGitWallTimeIsBounded(t *testing.T) {
+	fakeBin := t.TempDir()
+	fakeGit := filepath.Join(fakeBin, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nwhile :; do :; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := gitWithLimits(t.TempDir(), 64, 50*time.Millisecond, "version")
+	if err == nil || !strings.Contains(err.Error(), "exceeded 50ms wall-time limit") {
+		t.Fatalf("gitWithLimits() error = %v, want deterministic wall-time rejection", err)
+	}
+}
+
+func TestInventoryRejectsAggregateCorpusAboveLimit(t *testing.T) {
+	repository := t.TempDir()
+	gitTest(t, repository, "init", "-q")
+	gittest.HardenRepo(t, repository)
+	gitTest(t, repository, "config", "user.email", "test@example.com")
+	gitTest(t, repository, "config", "user.name", "Test")
+	writeTestFile(t, repository, "one/SPEC.md", "# One\n\n**ONE-01** When one runs, the system shall "+strings.Repeat("x", 96)+".\n")
+	writeTestFile(t, repository, "two/SPEC.md", "# Two\n\n**TWO-01** When two runs, the system shall "+strings.Repeat("y", 96)+".\n")
+	gitTest(t, repository, "add", ".")
+	gitTest(t, repository, "commit", "-qm", "large corpus")
+	revision := strings.TrimSpace(gitTest(t, repository, "rev-parse", "HEAD"))
+
+	_, err := inventoryWithCorpusLimit(repository, "owner/repository", revision, 100)
+	if err == nil || !strings.Contains(err.Error(), "SPEC audit corpus exceeds 100 bytes") {
+		t.Fatalf("inventoryWithCorpusLimit() error = %v, want aggregate corpus rejection", err)
+	}
+}
+
+func TestReportInputsAndArtifactsAreBounded(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(input, []byte(strings.Repeat("x", 128)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readReportWithLimit(input, 64); err == nil || !strings.Contains(err.Error(), "exceeds 64 bytes") {
+		t.Fatalf("readReportWithLimit() error = %v, want bounded-input rejection", err)
+	}
+
+	report := validReport()
+	report.Limitations = []string{strings.Repeat("z", 256)}
+	if _, err := marshalReportWithLimit(report, 64); err == nil || !strings.Contains(err.Error(), "64-byte artifact output limit") {
+		t.Fatalf("marshalReportWithLimit() error = %v, want bounded JSON rejection", err)
+	}
+	if _, err := renderHTMLWithLimit(report, nil, 64); err == nil || !strings.Contains(err.Error(), "64-byte artifact output limit") {
+		t.Fatalf("renderHTMLWithLimit() error = %v, want bounded HTML rejection", err)
+	}
+}
+
+func TestStableReportReadRejectsInPlaceMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	before, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("mutated!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changedTime := before.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
+		t.Fatal(err)
+	}
+	after, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathAfter, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stableReportRead(before, after, pathAfter, len("mutated!")) {
+		t.Fatal("stableReportRead accepted an in-place mutation on the same inode")
 	}
 }
 
@@ -151,23 +327,59 @@ func assertInstalledPluginSurface(t *testing.T, root string) {
 	}
 }
 
-func copyInstalledPluginFile(t *testing.T, sourceRoot, destinationRoot, relative string) {
+func copyInstalledPluginTree(t *testing.T, sourceRoot, destinationRoot string) {
 	t.Helper()
-	source := filepath.Join(sourceRoot, relative)
-	data, err := os.ReadFile(source)
+	err := filepath.WalkDir(sourceRoot, func(source string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(sourceRoot, source)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(source)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return &os.PathError{Op: "copy installed plugin symlink", Path: relative, Err: syscall.ELOOP}
+		}
+		destination := filepath.Join(destinationRoot, relative)
+		if info.IsDir() {
+			if relative == "." {
+				return nil
+			}
+			return os.Mkdir(destination, info.Mode().Perm())
+		}
+		if !info.Mode().IsRegular() {
+			return &os.PathError{Op: "copy installed plugin non-regular file", Path: relative, Err: syscall.EINVAL}
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Nlink != 1 {
+			return &os.PathError{Op: "copy installed plugin hard link", Path: relative, Err: syscall.EMLINK}
+		}
+		sourceFile, err := os.Open(source)
+		if err != nil {
+			return err
+		}
+		defer sourceFile.Close()
+		openedInfo, err := sourceFile.Stat()
+		if err != nil || !os.SameFile(info, openedInfo) {
+			return &os.PathError{Op: "copy changed installed plugin file", Path: relative, Err: syscall.ESTALE}
+		}
+		destinationFile, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(destinationFile, sourceFile)
+		closeErr := destinationFile.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
 	if err != nil {
-		t.Fatalf("read installed plugin source %s: %v", relative, err)
-	}
-	info, err := os.Stat(source)
-	if err != nil {
-		t.Fatalf("stat installed plugin source %s: %v", relative, err)
-	}
-	destination := filepath.Join(destinationRoot, relative)
-	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-		t.Fatalf("create installed plugin directory for %s: %v", relative, err)
-	}
-	if err := os.WriteFile(destination, data, info.Mode().Perm()); err != nil {
-		t.Fatalf("write installed plugin file %s: %v", relative, err)
+		t.Fatalf("copy complete installed plugin subtree: %v", err)
 	}
 }
 
@@ -336,7 +548,7 @@ func TestValidateRejectsInvalidPositiveFinding(t *testing.T) {
 	}}
 	report.Summary.CandidateCount = 1
 	report.Summary.ByVerdict = map[string]int{"merge-now": 1}
-	if err := validateReport(report); err == nil || !strings.Contains(err.Error(), "two SPEC owners") {
+	if err := validateReport(report); err == nil || !strings.Contains(err.Error(), "product SPEC current owners") {
 		t.Fatalf("validateReport error=%v, want positive evidence rejection", err)
 	}
 }
@@ -367,6 +579,47 @@ func TestValidateFindingOwnerStateCoherence(t *testing.T) {
 	candidateFinding.Strength = "moderate"
 	if err := validateFinding(candidateFinding, false, active); err == nil || !strings.Contains(err.Error(), "cannot select a canonical owner") {
 		t.Fatalf("non-positive proposed owner error = %v", err)
+	}
+}
+
+func TestValidateFindingRejectsNonProductPositiveOwners(t *testing.T) {
+	_, _, semanticReport := auditFixture(t)
+	base := semanticReport.Candidates[0]
+	active := map[string]bool{"codex-cli": true, "pi-cli": true}
+
+	for _, path := range []string{
+		"testdata/owners/SPEC.md",
+		"vendor/example/SPEC.md",
+		"generated/owners/SPEC.md",
+		"fixture/owners/SPEC.md",
+	} {
+		t.Run(path, func(t *testing.T) {
+			finding := base
+			finding.Classification = "fixture"
+			finding.CurrentOwners = append([]ownerClaim(nil), base.CurrentOwners...)
+			finding.CurrentOwners[0].Path = path
+			finding.Evidence = append([]evidence(nil), base.Evidence...)
+			finding.Evidence[0].Path = path
+			if err := validateFinding(finding, false, active); err == nil || !strings.Contains(err.Error(), "product SPEC current owners") {
+				t.Fatalf("validateFinding() error = %v, want product-owner rejection", err)
+			}
+		})
+	}
+
+	for _, path := range []string{
+		"testdata/new/SPEC.md",
+		"vendor/new/SPEC.md",
+		"generated/new/SPEC.md",
+		"fixture/new/SPEC.md",
+	} {
+		t.Run("proposed/"+path, func(t *testing.T) {
+			finding := base
+			finding.Classification = "fixture"
+			finding.ProposedOwner = &proposedOwnerClaim{Path: path, State: "new", Rationale: "must become the product owner"}
+			if err := validateFinding(finding, false, active); err == nil || !strings.Contains(err.Error(), "product SPEC proposed owner") {
+				t.Fatalf("validateFinding() error = %v, want product-owner rejection", err)
+			}
+		})
 	}
 }
 

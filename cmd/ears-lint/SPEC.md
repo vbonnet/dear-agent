@@ -26,6 +26,8 @@ are linked to BDD coverage.
 
 **EARS-LINT-08** When one or more linted files fail, the system shall exit with code 1.
 
+**EARS-LINT-09** If an explicit EARS YAML configuration is missing or malformed, then the command shall return an explicit configuration diagnostic without constructing the linter.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/quality_command_guardrails.feature` enforces that this command keeps co-located SPEC coverage.

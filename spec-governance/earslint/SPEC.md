@@ -8,10 +8,11 @@
 
 ## Overview
 
-`spec-governance/earslint` owns the repository's single EARS grammar
-implementation. The public package is shared by the repository gates and the
-distributable SPEC audit command so plugin execution does not depend on a
-root-only internal package.
+`spec-governance/earslint` owns the repository's single authored EARS grammar
+implementation. The distributable SPEC audit command imports it directly;
+root-module consumers use only the deterministic generated projection under
+`internal/earslint`. YAML configuration is a root-only adapter concern and is
+not part of this distributable core.
 
 ## EARS Requirements
 
@@ -26,8 +27,6 @@ root-only internal package.
 **EARSLINT-05** When strict mode is enabled, the system shall fail on any nonconforming candidate requirement.
 
 **EARSLINT-06** When a specification has no valid EARS requirements, the system shall report an error finding.
-
-**EARSLINT-07** When linter configuration is missing or malformed, the system shall return an explicit configuration diagnostic.
 
 ## BDD Traceability
 

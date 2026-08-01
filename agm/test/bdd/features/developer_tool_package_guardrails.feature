@@ -18,7 +18,8 @@
 # RELATED-SPEC: tools/schema-registry/internal/registry/SPEC.md
 # RELATED-SPEC: tools/schema-registry/internal/schema/SPEC.md
 # RELATED-SPEC: spec-governance/SPEC.md
-# RELATED-SPEC: spec-governance/cmd/sync-skill-projections/SPEC.md
+# RELATED-SPEC: tools/sync-spec-governance/SPEC.md
+# RELATED-SPEC: tools/versioned-install-canary/SPEC.md
 # RELATED-SPEC: spec-governance/skills/audit-specs/scripts/specaudit/SPEC.md
 Feature: Developer tool package guardrails
   Repository support tools must keep executable specifications, and their
@@ -51,7 +52,8 @@ Feature: Developer tool package guardrails
       | tools/schema-registry/internal/query               |
       | tools/schema-registry/internal/registry            |
       | tools/schema-registry/internal/schema              |
-      | spec-governance/cmd/sync-skill-projections         |
+      | tools/sync-spec-governance                          |
+      | tools/versioned-install-canary                      |
       | spec-governance/skills/audit-specs/scripts/specaudit |
 
   Scenario Outline: Shared developer tooling is provider neutral

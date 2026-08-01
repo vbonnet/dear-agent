@@ -73,8 +73,11 @@ patterns:
 
 ## Library
 
+Repository packages consume the generated internal projection; the authored
+grammar remains in the isolated SPEC-governance module.
+
 ```go
-import "github.com/vbonnet/dear-agent/spec-governance/earslint"
+import "github.com/vbonnet/dear-agent/internal/earslint"
 
 linter, _ := earslint.New(earslint.Config{}) // empty == defaults
 res, _ := linter.LintFile("SPEC.md")

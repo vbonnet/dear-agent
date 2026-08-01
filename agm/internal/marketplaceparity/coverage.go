@@ -8,14 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
-	"github.com/vbonnet/dear-agent/spec-governance/skillset"
+	"github.com/vbonnet/dear-agent/internal/specgovernance"
 )
 
 const (
@@ -81,6 +83,52 @@ type nativeSpecGovernanceManifest struct {
 		Name string `json:"name"`
 	} `json:"author"`
 	Skills []string `json:"skills"`
+}
+
+type distributionEntryKind uint8
+
+const (
+	distributionDirectory distributionEntryKind = iota
+	distributionRegularFile
+)
+
+type distributionEntry struct {
+	path       string
+	kind       distributionEntryKind
+	executable bool
+}
+
+// specGovernanceDistributionManifest is the minimum validated closure
+// required to load both skills and execute specaudit without consulting the
+// active repository or a network dependency.
+var specGovernanceDistributionManifest = []distributionEntry{
+	{path: ".claude-plugin", kind: distributionDirectory},
+	{path: ".claude-plugin/plugin.json", kind: distributionRegularFile},
+	{path: "go.mod", kind: distributionRegularFile},
+	{path: "internal", kind: distributionDirectory},
+	{path: "internal/gittest", kind: distributionDirectory},
+	// This test helper is shipped as declared non-runtime support; the launcher
+	// independently inventories only the packages reachable by its go run target.
+	{path: "internal/gittest/gittest.go", kind: distributionRegularFile},
+	{path: "earslint", kind: distributionDirectory},
+	{path: "earslint/config.go", kind: distributionRegularFile},
+	{path: "earslint/earslint.go", kind: distributionRegularFile},
+	{path: "scripts", kind: distributionDirectory},
+	{path: "scripts/specaudit", kind: distributionRegularFile, executable: true},
+	{path: "skills", kind: distributionDirectory},
+	{path: "skills/audit-specs", kind: distributionDirectory},
+	{path: "skills/audit-specs/SKILL.md", kind: distributionRegularFile},
+	{path: "skills/audit-specs/references", kind: distributionDirectory},
+	{path: "skills/audit-specs/references/audit-verdicts.md", kind: distributionRegularFile},
+	{path: "skills/audit-specs/references/report-schema.md", kind: distributionRegularFile},
+	{path: "skills/audit-specs/scripts", kind: distributionDirectory},
+	{path: "skills/audit-specs/scripts/specaudit", kind: distributionDirectory},
+	{path: "skills/audit-specs/scripts/specaudit/main.go", kind: distributionRegularFile},
+	{path: "skills/write-spec", kind: distributionDirectory},
+	{path: "skills/write-spec/SKILL.md", kind: distributionRegularFile},
+	{path: "skills/write-spec/references", kind: distributionDirectory},
+	{path: "skills/write-spec/references/contract-model.md", kind: distributionRegularFile},
+	{path: "skills/write-spec/references/ears-and-bdd.md", kind: distributionRegularFile},
 }
 
 // LoadCatalog reads the harness-neutral marketplace catalog from root.
@@ -169,31 +217,65 @@ func ValidateClaudeMarketplaceMirror(root string) error {
 	if neutral.Name != claude.Name {
 		return fmt.Errorf("claude marketplace name = %q, want %q", claude.Name, neutral.Name)
 	}
+	neutralNames, err := sortedUniquePluginNames("neutral", neutral.Plugins, func(plugin PluginEntry) string {
+		return plugin.Name
+	})
+	if err != nil {
+		return err
+	}
+	claudeNames, err := sortedUniquePluginNames("claude", claude.Plugins, func(plugin claudePluginEntry) string {
+		return plugin.Name
+	})
+	if err != nil {
+		return err
+	}
 	byName := make(map[string]claudePluginEntry, len(claude.Plugins))
 	for _, plugin := range claude.Plugins {
-		if _, exists := byName[plugin.Name]; exists {
-			return fmt.Errorf("claude marketplace has duplicate plugin %q", plugin.Name)
-		}
 		byName[plugin.Name] = plugin
 	}
+	if !slices.Equal(claudeNames, neutralNames) {
+		return fmt.Errorf("claude marketplace plugins = %v, want exact neutral set %v", claudeNames, neutralNames)
+	}
 	for _, plugin := range neutral.Plugins {
-		claudePlugin, ok := byName[plugin.Name]
-		if !ok {
-			return fmt.Errorf("claude marketplace missing plugin %q", plugin.Name)
+		if err := validateClaudePluginMirror(root, plugin, byName[plugin.Name]); err != nil {
+			return err
 		}
-		if claudePlugin.Source != plugin.Source {
-			if err := validateClaudeSkillBundleAdapter(root, plugin, claudePlugin); err != nil {
-				return fmt.Errorf("claude marketplace plugin %q source = %q, want %q or a valid native skill-bundle adapter: %w", plugin.Name, claudePlugin.Source, plugin.Source, err)
-			}
+	}
+	return nil
+}
+
+func sortedUniquePluginNames[T any](catalog string, plugins []T, name func(T) string) ([]string, error) {
+	names := make([]string, 0, len(plugins))
+	seen := make(map[string]struct{}, len(plugins))
+	for _, plugin := range plugins {
+		pluginName := name(plugin)
+		if pluginName == "" {
+			return nil, fmt.Errorf("%s marketplace has a plugin with an empty name", catalog)
 		}
-		if claudePlugin.Version != plugin.Version {
-			return fmt.Errorf("claude marketplace plugin %q version = %q, want %q", plugin.Name, claudePlugin.Version, plugin.Version)
+		if _, exists := seen[pluginName]; exists {
+			return nil, fmt.Errorf("%s marketplace has duplicate plugin %q", catalog, pluginName)
 		}
-		if plugin.Name == "spec-governance" {
-			if err := validateNativeSpecGovernanceSurface(root, plugin, claudePlugin); err != nil {
-				return fmt.Errorf("claude marketplace SPEC governance plugin: %w", err)
-			}
+		seen[pluginName] = struct{}{}
+		names = append(names, pluginName)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func validateClaudePluginMirror(root string, neutral PluginEntry, claude claudePluginEntry) error {
+	if claude.Source != neutral.Source {
+		if err := validateClaudeSkillBundleAdapter(root, neutral, claude); err != nil {
+			return fmt.Errorf("claude marketplace plugin %q source = %q, want %q or a valid native skill-bundle adapter: %w", neutral.Name, claude.Source, neutral.Source, err)
 		}
+	}
+	if claude.Version != neutral.Version {
+		return fmt.Errorf("claude marketplace plugin %q version = %q, want %q", neutral.Name, claude.Version, neutral.Version)
+	}
+	if neutral.Name != "spec-governance" {
+		return nil
+	}
+	if err := validateNativeSpecGovernanceSurface(root, neutral, claude); err != nil {
+		return fmt.Errorf("claude marketplace SPEC governance plugin: %w", err)
 	}
 	return nil
 }
@@ -203,7 +285,7 @@ func validateNativeSpecGovernanceSurface(root string, neutral PluginEntry, claud
 		return errors.New("must use the isolated spec-governance plugin root")
 	}
 	pluginRoot := filepath.Join(root, "spec-governance")
-	if err := requireRealDirectoryTree(root, "spec-governance"); err != nil {
+	if err := validateDistributionClosure(root, "spec-governance"); err != nil {
 		return fmt.Errorf("isolated plugin root: %w", err)
 	}
 	want, err := nativeSkillExports(pluginRoot)
@@ -250,7 +332,7 @@ func nativeSkillExports(pluginRoot string) ([]string, error) {
 		names = append(names, entry.Name())
 	}
 	sort.Strings(names)
-	wantNames := skillset.Names()
+	wantNames := specgovernance.Names()
 	if !slices.Equal(names, wantNames) {
 		return nil, fmt.Errorf("isolated plugin canonical skill directories = %v, want fixed set %v", names, wantNames)
 	}
@@ -264,7 +346,146 @@ func nativeSkillExports(pluginRoot string) ([]string, error) {
 			return nil, fmt.Errorf("isolated plugin skill %q has no regular SKILL.md", name)
 		}
 	}
-	return skillset.NativeExports(), nil
+	return specgovernance.NativeExports(), nil
+}
+
+func validateDistributionClosure(repositoryRoot, relativeRoot string) error {
+	pluginRoot, err := requireContainedRelativePath(repositoryRoot, relativeRoot)
+	if err != nil {
+		return err
+	}
+	rootInfo, err := os.Lstat(pluginRoot)
+	if err != nil {
+		return err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return errors.New("distribution root must be a real directory")
+	}
+	for _, entry := range specGovernanceDistributionManifest {
+		if err := validateDistributionEntry(pluginRoot, entry); err != nil {
+			return fmt.Errorf("distribution closure %q: %w", filepath.ToSlash(entry.path), err)
+		}
+	}
+	declaredGoSources := make(map[string]bool)
+	for _, entry := range specGovernanceDistributionManifest {
+		if strings.HasSuffix(entry.path, ".go") {
+			declaredGoSources[filepath.ToSlash(entry.path)] = true
+		}
+	}
+	return filepath.WalkDir(pluginRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		return validateDistributionTreeEntry(pluginRoot, path, entry, declaredGoSources, walkErr)
+	})
+}
+
+func validateDistributionEntry(pluginRoot string, entry distributionEntry) error {
+	path, err := requireContainedRelativePath(pluginRoot, entry.path)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(pluginRoot, path)
+	if err != nil {
+		return err
+	}
+	info, err := lstatDistributionPath(pluginRoot, relative)
+	if err != nil {
+		return err
+	}
+	return validateDistributionLeaf(info, entry)
+}
+
+func lstatDistributionPath(pluginRoot, relative string) (fs.FileInfo, error) {
+	current := pluginRoot
+	parts := strings.Split(filepath.Clean(relative), string(filepath.Separator))
+	for index, part := range parts {
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			return nil, statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("path or ancestor must not be a symlink")
+		}
+		if index < len(parts)-1 && !info.IsDir() {
+			return nil, errors.New("ancestor must be a real directory")
+		}
+		if index == len(parts)-1 {
+			return info, nil
+		}
+	}
+	return nil, errors.New("distribution path has no entries")
+}
+
+func validateDistributionLeaf(info fs.FileInfo, entry distributionEntry) error {
+	switch entry.kind {
+	case distributionDirectory:
+		if !info.IsDir() {
+			return errors.New("must be a real directory")
+		}
+	case distributionRegularFile:
+		if !info.Mode().IsRegular() {
+			return errors.New("must be a regular file")
+		}
+		if !hasSingleHardLink(info) {
+			return errors.New("must have exactly one hard link")
+		}
+		if entry.executable && info.Mode().Perm()&0o111 == 0 {
+			return errors.New("must be executable")
+		}
+	default:
+		return errors.New("has an invalid manifest kind")
+	}
+	return nil
+}
+
+func validateDistributionTreeEntry(pluginRoot, path string, _ fs.DirEntry, declaredGoSources map[string]bool, walkErr error) error {
+	if walkErr != nil {
+		return walkErr
+	}
+	relative, err := filepath.Rel(pluginRoot, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("distribution entry escapes its root: %s", path)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("distribution entry %q must not be a symlink", filepath.ToSlash(relative))
+	}
+	if info.IsDir() {
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("distribution entry %q must be a regular file", filepath.ToSlash(relative))
+	}
+	if !hasSingleHardLink(info) {
+		return fmt.Errorf("distribution entry %q must have exactly one hard link", filepath.ToSlash(relative))
+	}
+	if strings.HasSuffix(relative, ".go") && !strings.HasSuffix(relative, "_test.go") && !declaredGoSources[filepath.ToSlash(relative)] {
+		return fmt.Errorf("distribution entry %q is undeclared executable Go source", filepath.ToSlash(relative))
+	}
+	return nil
+}
+
+func requireContainedRelativePath(root, relative string) (string, error) {
+	if filepath.IsAbs(relative) {
+		return "", errors.New("path must be relative")
+	}
+	clean := filepath.Clean(relative)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("path must remain inside the distribution root")
+	}
+	joined := filepath.Join(root, clean)
+	resolvedRelative, err := filepath.Rel(root, joined)
+	if err != nil || resolvedRelative != clean {
+		return "", errors.New("path must remain inside the distribution root")
+	}
+	return joined, nil
+}
+
+func hasSingleHardLink(info fs.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink == 1
 }
 
 func validateClaudeSkillBundleAdapter(root string, neutral PluginEntry, claude claudePluginEntry) error {

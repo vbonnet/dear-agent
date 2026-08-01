@@ -27,20 +27,24 @@ or canonical skill resource path, stop and report the missing execution trust
 root. Do not recover with `pwd`, a Git top level, a filesystem search, or the
 repository under audit.
 
-Require regular files at `<distribution-root>/go.mod`,
-`<distribution-root>/earslint/earslint.go`,
-`<distribution-root>/scripts/specaudit`, and
-`<distribution-root>/skills/audit-specs/scripts/specaudit/main.go`.
+Use only a distribution whose validated closure contains real directory
+ancestors, single-link regular runtime files, the exact two canonical skills,
+and an executable `scripts/specaudit` launcher. The closure includes `go.mod`,
+the canonical EARS sources, this skill and its references, the write-spec skill
+and its references, and the collector source. Reject a symlink, path escape,
+special file, hard-linked file, missing closure entry, or extra skill surface.
 Never derive `<distribution-root>` from the active working directory, the
 repository being audited, or a similarly named path inside that repository.
 Every collector command below uses this single execution prefix:
 
 `"<distribution-root>/scripts/specaudit"`
 
-The launcher sets `GOWORK=off`, clears `GOFLAGS`, disables `GOENV`, and uses
-the locally installed Go toolchain before selecting the collector package. Do
-not replace it with `go run`, even for a direct loader: inherited Go settings
-must not change which module or build flags execute an authenticated skill.
+The launcher requires an absolute Go 1.26.5 or newer executable selected from
+the caller's `PATH`, neutralizes Go settings that could change code selection,
+and runs the standard-library-only collector with module lookup disabled. It
+works offline with fresh empty module and build caches. Do not replace it with
+`go run`, even for a direct loader: the launcher owns these execution
+invariants and its proactive diagnostics.
 
 ## Workflow
 

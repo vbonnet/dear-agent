@@ -1,4 +1,4 @@
-package skillset
+package specgovernance
 
 import (
 	"slices"

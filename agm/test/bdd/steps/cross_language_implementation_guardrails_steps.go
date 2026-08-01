@@ -10,7 +10,7 @@ import (
 	"github.com/cucumber/godog"
 
 	e2etest "github.com/vbonnet/dear-agent/agm/test/e2e"
-	"github.com/vbonnet/dear-agent/spec-governance/earslint"
+	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
 const crossLanguageFeaturePath = "agm/test/bdd/features/cross_language_implementation_guardrails.feature"

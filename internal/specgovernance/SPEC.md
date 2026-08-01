@@ -1,4 +1,7 @@
-# SPEC governance fixed skill-set specification
+# SPEC governance fixed skill-set integration specification
+
+**Scope:** Root-module validation and projection tooling. The canonical skill
+workflows remain under `spec-governance/skills`.
 
 ## EARS Requirements
 

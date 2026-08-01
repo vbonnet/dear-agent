@@ -10,7 +10,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/vbonnet/dear-agent/spec-governance/earslint"
+	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
 const legacySpecBDDLinkageFeature = "agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature"

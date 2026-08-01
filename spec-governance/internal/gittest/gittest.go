@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// Run executes a hermetic Git command in dir and returns its combined output.
 func Run(t testing.TB, dir string, args ...string) string {
 	t.Helper()
 	command := exec.Command("git", append([]string{
@@ -28,6 +29,7 @@ func Run(t testing.TB, dir string, args ...string) string {
 	return string(output)
 }
 
+// NewRepo creates a hermetic Git repository with one initial commit.
 func NewRepo(t testing.TB) string {
 	t.Helper()
 	repository := filepath.Join(t.TempDir(), "repo")
@@ -44,6 +46,7 @@ func NewRepo(t testing.TB) string {
 	return repository
 }
 
+// HardenRepo disables inherited hooks and configures a deterministic identity.
 func HardenRepo(t testing.TB, repository string) {
 	t.Helper()
 	Run(t, repository, "config", "core.hooksPath", os.DevNull)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -698,6 +699,29 @@ func TestChangedGoFilesHonorsCanceledContext(t *testing.T) {
 	_, err := ChangedGoFiles(ctx, repoRoot(), "origin/main")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ChangedGoFiles error = %v, want context.Canceled", err)
+	}
+}
+
+func TestChangedGoFilesSkipsPackageRemovedInWorkingTree(t *testing.T) {
+	sandbox := gittest.New(t)
+	root := sandbox.NewRepo(t)
+	base := strings.TrimSpace(sandbox.Run(t, root, "rev-parse", "HEAD"))
+
+	writeCoverageFile(t, root, "internal/live/live.go", "package live\n")
+	writeCoverageFile(t, root, "internal/retired/retired.go", "package retired\n")
+	sandbox.Run(t, root, "add", "internal/live/live.go", "internal/retired/retired.go")
+	sandbox.Run(t, root, "commit", "-m", "add packages")
+	if err := os.Remove(filepath.Join(root, "internal", "retired", "retired.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := ChangedGoFiles(context.Background(), root, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"internal/live/live.go"}
+	if !slices.Equal(files, want) {
+		t.Fatalf("ChangedGoFiles() = %v, want %v", files, want)
 	}
 }
 

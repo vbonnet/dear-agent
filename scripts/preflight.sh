@@ -102,6 +102,17 @@ warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
 
+case "$MODE" in
+  race|full) SPEC_GOVERNANCE_MODE="race" ;;
+  *) SPEC_GOVERNANCE_MODE="test" ;;
+esac
+if [[ "$MODE" == "full" ]]; then
+  SPEC_GOVERNANCE_MODE="full"
+fi
+step "verify SPEC governance module (${SPEC_GOVERNANCE_MODE})"
+make verify-spec-governance SPEC_GOVERNANCE_MODE="$SPEC_GOVERNANCE_MODE" || fail "SPEC governance verification failed"
+ok "SPEC governance module verified"
+
 step "verify generated AGM surfaces and plugin hashes"
 make verify-surface-codegen || fail "generated AGM surface artifacts are stale"
 make plugin-verify-hashes || fail "AGM plugin content hashes are stale"

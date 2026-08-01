@@ -42,7 +42,6 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	github.com/vbonnet/dear-agent/spec-governance v0.0.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	github.com/yuin/goldmark v1.8.4
 	go.opentelemetry.io/otel v1.44.0
@@ -68,8 +67,6 @@ require (
 	mvdan.cc/sh/v3 v3.13.1
 	tailscale.com v1.102.0
 )
-
-replace github.com/vbonnet/dear-agent/spec-governance => ./spec-governance
 
 require (
 	cloud.google.com/go v0.123.0 // indirect

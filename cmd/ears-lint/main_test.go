@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/earslint"
 	"github.com/vbonnet/dear-agent/internal/gittest"
-	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 func writeSpec(t *testing.T, dir, name, body string) string {

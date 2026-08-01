@@ -1,9 +1,10 @@
 # SPEC: spec-governance/SPEC.md
-# RELATED-SPEC: spec-governance/cmd/sync-skill-projections/SPEC.md
+# RELATED-SPEC: tools/sync-spec-governance/SPEC.md
 # RELATED-SPEC: spec-governance/earslint/SPEC.md
+# RELATED-SPEC: internal/earslint/SPEC.md
+# RELATED-SPEC: internal/specgovernance/SPEC.md
 # RELATED-SPEC: spec-governance/internal/gittest/SPEC.md
 # RELATED-SPEC: spec-governance/scripts/SPEC.md
-# RELATED-SPEC: spec-governance/skillset/SPEC.md
 # RELATED-SPEC: spec-governance/skills/audit-specs/agents/SPEC.md
 # RELATED-SPEC: spec-governance/skills/audit-specs/scripts/specaudit/SPEC.md
 # RELATED-SPEC: spec-governance/skills/write-spec/agents/SPEC.md
@@ -33,6 +34,10 @@ Feature: SPEC governance tooling evidence boundary
 
   Scenario: Native plugin and OpenAI skill metadata fail closed
     When AGM exercises strict SPEC governance package metadata
+    Then the SPEC governance behavioral contract should pass
+
+  Scenario: Root consumers use the generated canonical EARS core
+    When AGM exercises the deterministic root EARS projection
     Then the SPEC governance behavioral contract should pass
 
   Scenario: Installed audit tooling ignores the active working directory

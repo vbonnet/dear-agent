@@ -12,8 +12,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/internal/earslint"
 	"github.com/vbonnet/dear-agent/internal/repoinventory"
-	"github.com/vbonnet/dear-agent/spec-governance/earslint"
 )
 
 // Surface maps one parity-critical implementation area to its executable BDD
@@ -630,7 +630,17 @@ func ChangedGoFiles(ctx context.Context, root, baseRef string) ([]string, error)
 		if line == "" {
 			continue
 		}
-		files = append(files, filepath.ToSlash(filepath.Clean(line)))
+		line = filepath.ToSlash(filepath.Clean(line))
+		if _, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(line))); statErr != nil {
+			if os.IsNotExist(statErr) {
+				// The base-to-HEAD diff can name a file added by an earlier
+				// commit and then removed by the current working-tree change.
+				// A retired package has no live SPEC.md to validate.
+				continue
+			}
+			return nil, fmt.Errorf("inspect changed Go file %q: %w", line, statErr)
+		}
+		files = append(files, line)
 	}
 	slices.Sort(files)
 	return files, nil

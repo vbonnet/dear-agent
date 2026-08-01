@@ -55,6 +55,27 @@ func TestClaudeMarketplaceMirrorsNeutralCatalog(t *testing.T) {
 	}
 }
 
+func TestClaudeMarketplaceRejectsNonCanonicalPluginSet(t *testing.T) {
+	root := t.TempDir()
+	writeMarketplaceFixture(t, root, NeutralCatalogPath, Catalog{
+		SchemaVersion: "dear-agent.marketplace/v1",
+		Name:          "test",
+		Plugins:       []PluginEntry{{Name: "canonical", Source: "./canonical", Version: "1.0.0"}},
+	})
+	writeMarketplaceFixture(t, root, ClaudeCatalogPath, claudeCatalog{
+		Name: "test",
+		Plugins: []claudePluginEntry{
+			{Name: "canonical", Source: "./canonical", Version: "1.0.0"},
+			{Name: "claude-only", Source: "./unowned", Version: "1.0.0"},
+		},
+	})
+
+	err := ValidateClaudeMarketplaceMirror(root)
+	if err == nil || !strings.Contains(err.Error(), "want exact neutral set [canonical]") {
+		t.Fatalf("ValidateClaudeMarketplaceMirror() error = %v, want exact-set rejection", err)
+	}
+}
+
 func TestClaudeMarketplaceRejectsInvalidExpandedSkillBundle(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -216,20 +237,16 @@ func TestClaudeMarketplaceRejectsSpecGovernanceNativeSurfaceExpansion(t *testing
 				claudePlugin.Skills = []string{"./skills/audit-specs", "./skills/review-spec", "./skills/write-spec"}
 			}
 			writeMarketplaceFixture(t, root, ClaudeCatalogPath, claudeCatalog{Name: "test", Plugins: []claudePluginEntry{claudePlugin}})
-			names := []string{"audit-specs", "write-spec"}
+			writeValidSpecGovernanceDistribution(t, root, test.manifest)
 			if test.extraSkill != "" {
-				names = append(names, test.extraSkill)
-			}
-			for _, name := range names {
-				path := filepath.Join(root, "spec-governance", "skills", name, "SKILL.md")
+				path := filepath.Join(root, "spec-governance", "skills", test.extraSkill, "SKILL.md")
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(path, []byte("---\nname: "+name+"\ndescription: test\n---\n"), 0o644); err != nil {
+				if err := os.WriteFile(path, []byte("---\nname: "+test.extraSkill+"\ndescription: test\n---\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
-			writeMarketplaceFixture(t, root, "spec-governance/.claude-plugin/plugin.json", json.RawMessage(test.manifest))
 			if test.extraPath != "" {
 				writeMarketplaceFixture(t, root, test.extraPath, map[string]any{})
 			}
@@ -238,6 +255,144 @@ func TestClaudeMarketplaceRejectsSpecGovernanceNativeSurfaceExpansion(t *testing
 			}
 		})
 	}
+}
+
+func TestSpecGovernanceDistributionClosureRejectsUnsafeEntries(t *testing.T) {
+	const manifest = `{"name":"spec-governance","version":"0.1.0","description":"test","author":{"name":"test"},"skills":["./skills/audit-specs","./skills/write-spec"]}`
+	tests := []struct {
+		name    string
+		mutate  func(*testing.T, string)
+		wantErr string
+	}{
+		{
+			name: "missing required file",
+			mutate: func(t *testing.T, pluginRoot string) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(pluginRoot, "skills", "audit-specs", "scripts", "specaudit", "main.go")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "main.go",
+		},
+		{
+			name: "symlinked required ancestor",
+			mutate: func(t *testing.T, pluginRoot string) {
+				t.Helper()
+				original := filepath.Join(pluginRoot, "skills", "audit-specs")
+				outside := filepath.Join(t.TempDir(), "audit-specs")
+				if err := os.Rename(original, outside); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, original); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "must not be a symlink",
+		},
+		{
+			name: "non-regular required file",
+			mutate: func(t *testing.T, pluginRoot string) {
+				t.Helper()
+				path := filepath.Join(pluginRoot, "go.mod")
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "must be a regular file",
+		},
+		{
+			name: "hard-linked required file",
+			mutate: func(t *testing.T, pluginRoot string) {
+				t.Helper()
+				path := filepath.Join(pluginRoot, "go.mod")
+				outside := filepath.Join(t.TempDir(), "go.mod")
+				if err := os.WriteFile(outside, []byte("module example.invalid/test\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Link(outside, path); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "exactly one hard link",
+		},
+		{
+			name: "non-executable launcher",
+			mutate: func(t *testing.T, pluginRoot string) {
+				t.Helper()
+				if err := os.Chmod(filepath.Join(pluginRoot, "scripts", "specaudit"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "must be executable",
+		},
+		{
+			name: "unsafe-extra-Go",
+			mutate: func(t *testing.T, pluginRoot string) {
+				t.Helper()
+				path := filepath.Join(pluginRoot, "skills", "audit-specs", "scripts", "specaudit", "stale.go")
+				if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "undeclared executable Go source",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			pluginRoot := writeValidSpecGovernanceDistribution(t, root, manifest)
+			test.mutate(t, pluginRoot)
+			neutral := PluginEntry{Name: "spec-governance", Source: "./spec-governance", Version: "0.1.0", Capabilities: []string{"skills"}}
+			claude := claudePluginEntry{Name: "spec-governance", Source: "./spec-governance", Version: "0.1.0"}
+			err := validateNativeSpecGovernanceSurface(root, neutral, claude)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validateNativeSpecGovernanceSurface() error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestDistributionClosureRejectsEscapingManifestPath(t *testing.T) {
+	_, err := requireContainedRelativePath(t.TempDir(), "../outside")
+	if err == nil || !strings.Contains(err.Error(), "inside the distribution root") {
+		t.Fatalf("requireContainedRelativePath() error = %v, want escape rejection", err)
+	}
+}
+
+func writeValidSpecGovernanceDistribution(t *testing.T, root, manifest string) string {
+	t.Helper()
+	pluginRoot := filepath.Join(root, "spec-governance")
+	for _, entry := range specGovernanceDistributionManifest {
+		path := filepath.Join(pluginRoot, entry.path)
+		switch entry.kind {
+		case distributionDirectory:
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		case distributionRegularFile:
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			mode := os.FileMode(0o644)
+			if entry.executable {
+				mode = 0o755
+			}
+			if err := os.WriteFile(path, []byte("fixture\n"), mode); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, ".claude-plugin", "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return pluginRoot
 }
 
 func writeMarketplaceFixture(t *testing.T, root, relative string, value any) {

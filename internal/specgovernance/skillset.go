@@ -1,5 +1,5 @@
-// Package skillset owns the fixed SPEC-governance skill export boundary.
-package skillset
+// Package specgovernance owns repository-side SPEC-governance integration data.
+package specgovernance
 
 import "slices"
 

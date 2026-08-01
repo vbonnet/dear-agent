@@ -109,7 +109,7 @@ repository's agents, hooks, MCP servers, or language servers. Pi loads the
 canonical tree directly. Codex, AGY, and OpenCode load generated regular
 `.agents/skills/{write-spec,audit-specs}/SKILL.md` delegators because the active
 runtimes did not all discover symlinks consistently. Those files contain no
-second workflow; `cmd/sync-skill-projections` derives them from canonical
+second workflow; `tools/sync-spec-governance` derives them from canonical
 metadata, creates only missing targets without clobbering, and never replaces
 or deletes an existing entry automatically. Stale and obsolete paths must be
 inspected and explicitly removed by a human; `make lint-skills` blocks drift in

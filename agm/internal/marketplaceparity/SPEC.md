@@ -39,6 +39,10 @@ format.
 
 **MKT-11** When Claude validates the native SPEC governance plugin, the system shall require the isolated `spec-governance` root, the fixed `audit-specs` and `write-spec` manifest skill set, and no plugin-level agents, hooks, MCP servers, or language servers.
 
+**MKT-12** When the Claude marketplace mirror is validated, the system shall require its plugin-name set to exactly equal the canonical neutral catalog and shall reject missing, duplicate, empty, or Claude-only plugin names.
+
+**MKT-13** When the isolated SPEC governance distribution is validated, the system shall require every declared runtime or test-support file and ancestor to remain inside the distribution root without symlinks, require every file in the subtree to be regular with exactly one hard link, require every non-test Go source to appear in the exact declared inventory, and require the audit launcher to be executable.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/marketplace_parity.feature`

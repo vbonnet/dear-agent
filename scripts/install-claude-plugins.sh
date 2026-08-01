@@ -75,52 +75,123 @@ require_marketplace_manifest() {
   [[ -f "$manifest" ]] || die "marketplace manifest not found at: $manifest"
 }
 
-# Parse top-level plugin names from .claude-plugin/marketplace.json without jq.
-# Object depth keeps nested component arrays and metadata from terminating or
-# contributing names to the plugins[] scan.
-list_plugin_names() {
+# Parse the root marketplace name and direct plugin-object names together
+# without adding a JSON runtime dependency. Names containing JSON escapes are
+# rejected rather than decoded ambiguously; escapes remain valid in other text.
+parse_marketplace_manifest() {
   local manifest="$REPO_ROOT/.claude-plugin/marketplace.json"
   awk '
-    /"plugins"[[:space:]]*:[[:space:]]*\[/ {
-      in_plugins = 1
-      object_depth = 0
-      next
+    function invalid() {
+      invalid_json = 1
+      exit 1
     }
-    in_plugins {
-      structural = $0
-      opens = gsub(/\{/, "", structural)
-      closes = gsub(/\}/, "", structural)
-      object_depth += opens - closes
-    }
-    in_plugins && object_depth == 1 && /"name"[[:space:]]*:/ {
-      match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
-      if (RSTART) {
-        s = substr($0, RSTART, RLENGTH)
-        sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-        sub(/".*/, "", s)
-        print s
+    {
+      for (i = 1; i <= length($0); i++) {
+        ch = substr($0, i, 1)
+        if (in_string) {
+          if (escaped) {
+            token = token ch
+            escaped = 0
+          } else if (ch == "\\") {
+            escaped = 1
+            string_escaped = 1
+          } else if (ch == "\"") {
+            in_string = 0
+            if (want_marketplace_name) {
+              if (token == "" || string_escaped) invalid()
+              marketplace_name = token
+              marketplace_names++
+              want_marketplace_name = 0
+            } else if (want_plugin_name) {
+              if (token == "" || string_escaped || seen_plugin_name[token]) invalid()
+              seen_plugin_name[token] = 1
+              plugin_name[++plugin_names] = token
+              direct_plugin_names++
+              want_plugin_name = 0
+            }
+            last_string = token
+            last_string_escaped = string_escaped
+            have_string = 1
+          } else {
+            token = token ch
+          }
+          continue
+        }
+        if (ch ~ /[[:space:]]/) continue
+        if (ch == "\"") {
+          if (want_plugins_array) invalid()
+          in_string = 1
+          escaped = 0
+          string_escaped = 0
+          token = ""
+          continue
+        }
+        if ((want_plugins_array && ch != "[") || want_marketplace_name || want_plugin_name) invalid()
+        if (ch == ":") {
+          if (!have_string) invalid()
+          if (!in_plugins && depth == 1 && last_string == "name") {
+            if (last_string_escaped || marketplace_names || want_marketplace_name) invalid()
+            want_marketplace_name = 1
+          } else if (!in_plugins && depth == 1 && last_string == "plugins") {
+            if (last_string_escaped || saw_plugins) invalid()
+            want_plugins_array = 1
+          } else if (direct_plugin && depth == direct_plugin_depth && last_string == "name") {
+            if (last_string_escaped || direct_plugin_names || want_plugin_name) invalid()
+            want_plugin_name = 1
+          }
+          have_string = 0
+        } else if (ch == "[") {
+          if (in_plugins && depth == plugins_depth) invalid()
+          depth++
+          if (want_plugins_array) {
+            in_plugins = 1
+            plugins_depth = depth
+            plugin_array_has_value = 0
+            want_plugins_array = 0
+          }
+          have_string = 0
+        } else if (ch == "]") {
+          if (depth < 1) invalid()
+          if (in_plugins && depth == plugins_depth) {
+            if (direct_plugin || (plugin_names && !plugin_array_has_value)) invalid()
+            in_plugins = 0
+            saw_plugins = 1
+          }
+          depth--
+          have_string = 0
+        } else if (ch == "{") {
+          if (in_plugins && depth == plugins_depth) {
+            if (direct_plugin || plugin_array_has_value) invalid()
+            direct_plugin = 1
+            direct_plugin_depth = depth + 1
+            direct_plugin_names = 0
+          }
+          depth++
+          have_string = 0
+        } else if (ch == "}") {
+          if (depth < 1) invalid()
+          if (direct_plugin && depth == direct_plugin_depth) {
+            if (direct_plugin_names != 1) invalid()
+            direct_plugin = 0
+            plugin_array_has_value = 1
+          }
+          depth--
+          have_string = 0
+        } else if (ch == ",") {
+          if (in_plugins && depth == plugins_depth) {
+            if (direct_plugin || !plugin_array_has_value) invalid()
+            plugin_array_has_value = 0
+          }
+          have_string = 0
+        } else {
+          have_string = 0
+        }
       }
     }
-    in_plugins && object_depth == 0 && /\]/ { exit }
-  ' "$manifest"
-}
-
-marketplace_name() {
-  if [[ -n "${MARKETPLACE_NAME:-}" ]]; then
-    printf '%s\n' "$MARKETPLACE_NAME"
-    return
-  fi
-  local manifest="$REPO_ROOT/.claude-plugin/marketplace.json"
-  awk '
-    /^[[:space:]]*"name"[[:space:]]*:/ && !seen {
-      match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]+"/)
-      if (RSTART) {
-        s = substr($0, RSTART, RLENGTH)
-        sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-        sub(/".*/, "", s)
-        print s
-        seen = 1
-      }
+    END {
+      if (invalid_json || in_string || escaped || depth != 0 || in_plugins || direct_plugin || want_plugins_array || want_marketplace_name || want_plugin_name || marketplace_names != 1 || !saw_plugins || plugin_names == 0) exit 1
+      printf "marketplace\t%s\n", marketplace_name
+      for (i = 1; i <= plugin_names; i++) printf "plugin\t%s\n", plugin_name[i]
     }
   ' "$manifest"
 }
@@ -144,15 +215,18 @@ plugin_is_installed() {
 require_claude
 require_marketplace_manifest
 
-MARKET="$(marketplace_name)"
-[[ -n "$MARKET" ]] || die "could not parse marketplace name from .claude-plugin/marketplace.json"
-
-# Bash 3.2-compatible array population (no mapfile).
+MANIFEST_ENTRIES="$(parse_marketplace_manifest)" || die "could not parse an unambiguous marketplace name and complete plugin set from marketplace manifest"
+PARSED_MARKET=""
 PLUGINS=()
-while IFS= read -r _name; do
-  [[ -n "$_name" ]] && PLUGINS+=("$_name")
-done < <(list_plugin_names)
-[[ ${#PLUGINS[@]} -gt 0 ]] || die "no plugins found in marketplace manifest"
+while IFS=$'\t' read -r _kind _name; do
+  case "$_kind" in
+    marketplace) PARSED_MARKET="$_name" ;;
+    plugin)      PLUGINS+=("$_name") ;;
+    *)           die "marketplace manifest scanner returned an unknown entry" ;;
+  esac
+done <<<"$MANIFEST_ENTRIES"
+MARKET="${MARKETPLACE_NAME:-$PARSED_MARKET}"
+[[ -n "$MARKET" && -n "$PARSED_MARKET" && ${#PLUGINS[@]} -gt 0 ]] || die "marketplace manifest has no usable marketplace or plugin names"
 
 case "$SOURCE_MODE" in
   local)  SOURCE_ARG="$REPO_ROOT" ;;
@@ -192,16 +266,16 @@ for p in "${PLUGINS[@]}"; do
   if plugin_is_installed "$spec"; then
     log "Updating $spec..."
     if [[ -n "$SCOPE" ]]; then
-      run "$CLAUDE_BIN" plugin update "$spec" --scope "$SCOPE" || warn "update $spec failed"
+      run "$CLAUDE_BIN" plugin update "$spec" --scope "$SCOPE" || die "update $spec failed; refusing to report success while a declared plugin may be stale"
     else
-      run "$CLAUDE_BIN" plugin update "$spec" || warn "update $spec failed"
+      run "$CLAUDE_BIN" plugin update "$spec" || die "update $spec failed; refusing to report success while a declared plugin may be stale"
     fi
   else
     log "Installing $spec..."
     if [[ -n "$SCOPE" ]]; then
-      run "$CLAUDE_BIN" plugin install "$spec" --scope "$SCOPE"
+      run "$CLAUDE_BIN" plugin install "$spec" --scope "$SCOPE" || die "install $spec failed; refusing to report success while a declared plugin is missing"
     else
-      run "$CLAUDE_BIN" plugin install "$spec"
+      run "$CLAUDE_BIN" plugin install "$spec" || die "install $spec failed; refusing to report success while a declared plugin is missing"
     fi
   fi
 done

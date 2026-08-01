@@ -29,6 +29,7 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM exercises the fixed SPEC skill export boundary$`, exerciseFixedSPECSkillExportBoundary)
 	ctx.Step(`^AGM exercises fail-closed SPEC skill projection mutation$`, exerciseFailClosedSPECProjectionMutation)
 	ctx.Step(`^AGM exercises strict SPEC governance package metadata$`, exerciseStrictSPECMetadata)
+	ctx.Step(`^AGM exercises the deterministic root EARS projection$`, exerciseRootEARSProjection)
 	ctx.Step(`^AGM exercises the installed SPEC audit execution seam$`, exerciseInstalledSPECAuditExecution)
 	ctx.Step(`^AGM exercises bounded SPEC audit Git collection$`, exerciseBoundedSPECAuditGitCollection)
 	ctx.Step(`^AGM runs the repository SPEC skill drift gate$`, runRepositorySPECDriftGate)
@@ -36,35 +37,39 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 }
 
 func exercisePinnedSPECInventory(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestInventoryReadsPinnedRevisionAndProducesSeedsDeterministically|TestParseSpec")
+	return runSpecGovernanceGoTests(ctx, "TestInventoryReadsPinnedRevisionAndProducesSeedsDeterministically|TestParseSpec")
 }
 
 func exerciseForgedSPECFindingRejection(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestValidateAuthenticatesFindingsAgainstPinnedGitInventory|TestAuthenticatedValidationRejectsForgedEvidenceAndUnsafeVerdicts")
+	return runSpecGovernanceGoTests(ctx, "TestValidateAuthenticatesFindingsAgainstPinnedGitInventory|TestAuthenticatedValidationRejectsForgedEvidenceAndUnsafeVerdicts")
 }
 
 func exerciseOfflineSPECAuditRendering(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestRenderIsOfflineAndEscapesEvidence|TestCommandsRejectFilesystemOutputFlags")
+	return runSpecGovernanceGoTests(ctx, "TestRenderIsOfflineAndEscapesEvidence|TestCommandsRejectFilesystemOutputFlags")
 }
 
 func exerciseFixedSPECSkillExportBoundary(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncWritesAndChecksProjections|TestSyncRejectsFullyDeclaredAdditionalCanonicalSkill|TestSyncFindsObsoleteGeneratedProjection")
+	return runRootGoTests(ctx, "TestSyncWritesAndChecksProjections|TestSyncRejectsFullyDeclaredAdditionalCanonicalSkill|TestSyncFindsObsoleteGeneratedProjection")
 }
 
 func exerciseFailClosedSPECProjectionMutation(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncRefuses|TestSyncNoClobber|TestSyncFailsClosed|TestSyncRequiresExplicitRemoval|TestSyncRejectsHardLinkedProjection|TestSyncRejectsUnexpectedProjectionPermissions|TestSyncRejectsOversizedProjectionTarget|TestSyncValidatesAllMetadataBeforeWriting|TestReadMetadataUsesStrictYAMLFrontmatter|TestRunWriteRejectsExplicitRoot|TestRequireLinkedWorktreeRoot")
+	return runRootGoTests(ctx, "TestSyncRefuses|TestSyncNoClobber|TestSyncFailsClosed|TestSyncRequiresExplicitRemoval|TestSyncRejectsHardLinkedProjection|TestSyncRejectsUnexpectedProjectionPermissions|TestSyncRejectsOversizedProjectionTarget|TestSyncValidatesAllMetadataBeforeWriting|TestReadMetadataUsesStrictYAMLFrontmatter|TestRunWriteRejectsExplicitRoot|TestRequireLinkedWorktreeRoot")
 }
 
 func exerciseStrictSPECMetadata(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/cmd/sync-skill-projections", "TestSyncRejectsInvalidPackageMetadataBeforeWriting")
+	return runRootGoTests(ctx, "TestSyncRejectsInvalidPackageMetadataBeforeWriting")
+}
+
+func exerciseRootEARSProjection(ctx context.Context) error {
+	return runRootGoTests(ctx, "TestSyncWritesAndChecksProjections|TestSyncCheckReportsStaleEARSProjection|TestSyncRequiresExplicitRemovalForStaleEARSProjection|TestSyncRejectsUnprojectedCanonicalEARSFile")
 }
 
 func exerciseInstalledSPECAuditExecution(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestInstalledPluginRunsFromUnrelatedWorkingDirectory")
+	return runSpecGovernanceGoTests(ctx, "TestInstalledPluginRunsFromUnrelatedWorkingDirectory")
 }
 
 func exerciseBoundedSPECAuditGitCollection(ctx context.Context) error {
-	return runSpecGovernanceGoTests(ctx, "./spec-governance/skills/audit-specs/scripts/specaudit", "TestGitOutputIsBounded")
+	return runSpecGovernanceGoTests(ctx, "TestGitOutputIsBounded")
 }
 
 func runRepositorySPECDriftGate(ctx context.Context) error {
@@ -81,17 +86,29 @@ func runRepositorySPECDriftGate(ctx context.Context) error {
 	return nil
 }
 
-func runSpecGovernanceGoTests(ctx context.Context, packagePath, pattern string) error {
+func runSpecGovernanceGoTests(ctx context.Context, pattern string) error {
 	state, err := getSpecGovernanceToolingState(ctx)
 	if err != nil {
 		return err
 	}
-	const modulePrefix = "./spec-governance/"
-	if !strings.HasPrefix(packagePath, modulePrefix) {
-		return fmt.Errorf("SPEC governance package %q is outside its isolated module", packagePath)
-	}
-	relativePackage := "./" + strings.TrimPrefix(packagePath, modulePrefix)
+	const relativePackage = "./skills/audit-specs/scripts/specaudit"
 	arguments := []string{"-C", "spec-governance", "test", relativePackage, "-run", pattern, "-count=1"}
+	state.command = "go " + strings.Join(arguments, " ")
+	command := exec.Command("go", arguments...)
+	command.Dir = state.repoRoot
+	output, commandErr := command.CombinedOutput()
+	state.output = string(output)
+	state.err = commandErr
+	return nil
+}
+
+func runRootGoTests(ctx context.Context, pattern string) error {
+	state, err := getSpecGovernanceToolingState(ctx)
+	if err != nil {
+		return err
+	}
+	const packagePath = "./tools/sync-spec-governance"
+	arguments := []string{"test", packagePath, "-run", pattern, "-count=1"}
 	state.command = "go " + strings.Join(arguments, " ")
 	command := exec.Command("go", arguments...)
 	command.Dir = state.repoRoot

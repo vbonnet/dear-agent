@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,29 @@ import (
 
 const schemaVersion = "spec-audit/v1"
 
-const maxGitOutputBytes = 16 * 1024 * 1024
+const (
+	maxGitOutputBytes      = 16 * 1024 * 1024
+	maxReportInputBytes    = 32 * 1024 * 1024
+	maxCorpusBytes         = 64 * 1024 * 1024
+	maxArtifactOutputBytes = 64 * 1024 * 1024
+	maxGitCommandDuration  = 30 * time.Second
+)
+
+type corpusBudget struct {
+	limit int64
+	used  int64
+}
+
+func (budget *corpusBudget) consume(label string, size int) error {
+	if budget.limit <= 0 {
+		return errors.New("SPEC audit corpus limit must be positive")
+	}
+	if size < 0 || int64(size) > budget.limit-budget.used {
+		return fmt.Errorf("SPEC audit corpus exceeds %d bytes while reading %q", budget.limit, label)
+	}
+	budget.used += int64(size)
+	return nil
+}
 
 var (
 	requirementPattern  = regexp.MustCompile(`^\s*\*\*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[A-Z0-9]*\d+)\*\*\s+(.+?)\s*$`)
@@ -241,12 +264,11 @@ func runInventory(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "specaudit inventory: generated invalid report: %v\n", err)
 		return 1
 	}
-	data, err := json.MarshalIndent(report, "", "  ")
+	data, err := marshalReportWithLimit(report, maxArtifactOutputBytes)
 	if err != nil {
 		fmt.Fprintf(stderr, "specaudit inventory: encode: %v\n", err)
 		return 2
 	}
-	data = append(data, '\n')
 	if _, err := stdout.Write(data); err != nil {
 		fmt.Fprintf(stderr, "specaudit inventory: %v\n", err)
 		return 2
@@ -346,7 +368,11 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		}
 		inventoryReport = &decodedInventory
 	}
-	htmlOutput := renderHTML(auditReport, inventoryReport)
+	htmlOutput, err := renderHTMLWithLimit(auditReport, inventoryReport, maxArtifactOutputBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "specaudit render: %v\n", err)
+		return 2
+	}
 	if _, err := fmt.Fprint(stdout, htmlOutput); err != nil {
 		fmt.Fprintf(stderr, "specaudit render: %v\n", err)
 		return 2
@@ -354,8 +380,13 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-//nolint:gocyclo // Linear pinned-object collection keeps inventory and reciprocal-diagnostic construction auditable.
 func inventory(repoPath, repository, revision string) (report, error) {
+	return inventoryWithCorpusLimit(repoPath, repository, revision, maxCorpusBytes)
+}
+
+//nolint:gocyclo // Linear pinned-object collection keeps inventory and reciprocal-diagnostic construction auditable.
+func inventoryWithCorpusLimit(repoPath, repository, revision string, corpusLimit int64) (report, error) {
+	budget := corpusBudget{limit: corpusLimit}
 	root, err := git(repoPath, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return report{}, err
@@ -370,6 +401,9 @@ func inventory(repoPath, repository, revision string) (report, error) {
 	if err != nil {
 		return report{}, fmt.Errorf("list %s: %w", commit, err)
 	}
+	if err := budget.consume("tracked path inventory", len(pathsRaw)); err != nil {
+		return report{}, err
+	}
 	paths := strings.Split(pathsRaw, "\x00")
 	files := make([]specFile, 0)
 	features := make([]featureFile, 0)
@@ -383,11 +417,17 @@ func inventory(repoPath, repository, revision string) (report, error) {
 			if showErr != nil {
 				return report{}, fmt.Errorf("read %s at %s: %w", path, commit, showErr)
 			}
+			if budgetErr := budget.consume(path, len(body)); budgetErr != nil {
+				return report{}, budgetErr
+			}
 			files = append(files, parseSpec(path, body))
 		case strings.HasSuffix(path, ".feature"):
 			body, showErr := git(root, "show", commit+":"+path)
 			if showErr != nil {
 				return report{}, fmt.Errorf("read %s at %s: %w", path, commit, showErr)
+			}
+			if budgetErr := budget.consume(path, len(body)); budgetErr != nil {
+				return report{}, budgetErr
 			}
 			features = append(features, parseFeature(path, body))
 		}
@@ -599,14 +639,23 @@ func activeMembers(root, commit string) ([]string, []string) {
 }
 
 func git(root string, args ...string) (string, error) {
-	return gitWithOutputLimit(root, maxGitOutputBytes, args...)
+	return gitWithLimits(root, maxGitOutputBytes, maxGitCommandDuration, args...)
 }
 
 func gitWithOutputLimit(root string, limit int64, args ...string) (string, error) {
-	if limit <= 0 {
+	return gitWithLimits(root, limit, maxGitCommandDuration, args...)
+}
+
+func gitWithLimits(root string, outputLimit int64, wallTime time.Duration, args ...string) (string, error) {
+	if outputLimit <= 0 {
 		return "", errors.New("git output limit must be positive")
 	}
-	command := exec.Command("git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
+	if wallTime <= 0 {
+		return "", errors.New("git wall-time limit must be positive")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wallTime)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", root}, args...)...)
 	command.Env = cleanGitEnvironment()
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -625,26 +674,123 @@ func gitWithOutputLimit(root string, limit int64, args ...string) (string, error
 		_ = command.Wait()
 		return "", fmt.Errorf("close parent Git output writer: %w", err)
 	}
-	output, readErr := io.ReadAll(io.LimitReader(reader, limit+1))
-	exceeded := int64(len(output)) > limit
-	if readErr != nil || exceeded {
+
+	type readResult struct {
+		output []byte
+		err    error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		output, readErr := io.ReadAll(io.LimitReader(reader, outputLimit+1))
+		readDone <- readResult{output: output, err: readErr}
+	}()
+
+	var result readResult
+	select {
+	case result = <-readDone:
+	case <-ctx.Done():
+		_ = command.Process.Kill()
+		_ = reader.Close()
+		_ = command.Wait()
+		return "", fmt.Errorf("git %s exceeded %s wall-time limit", strings.Join(args, " "), wallTime)
+	}
+	exceeded := int64(len(result.output)) > outputLimit
+	if result.err != nil || exceeded {
 		_ = command.Process.Kill()
 	}
 	closeErr := reader.Close()
 	waitErr := command.Wait()
-	if readErr != nil {
-		return "", fmt.Errorf("read git %s output: %w", strings.Join(args, " "), readErr)
+	if result.err != nil {
+		return "", fmt.Errorf("read git %s output: %w", strings.Join(args, " "), result.err)
 	}
 	if closeErr != nil {
 		return "", fmt.Errorf("close git %s output: %w", strings.Join(args, " "), closeErr)
 	}
 	if exceeded {
-		return "", fmt.Errorf("git %s output exceeds %d bytes", strings.Join(args, " "), limit)
+		return "", fmt.Errorf("git %s output exceeds %d bytes", strings.Join(args, " "), outputLimit)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "", fmt.Errorf("git %s exceeded %s wall-time limit", strings.Join(args, " "), wallTime)
 	}
 	if waitErr != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), waitErr, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), waitErr, strings.TrimSpace(string(result.output)))
 	}
-	return string(output), nil
+	return string(result.output), nil
+}
+
+func readReport(path string) (report, error) {
+	return readReportWithLimit(path, maxReportInputBytes)
+}
+
+func readReportWithLimit(path string, limit int64) (report, error) {
+	data, err := readStableBoundedFile(path, limit)
+	if err != nil {
+		return report{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var decoded report
+	if err := decoder.Decode(&decoded); err != nil {
+		return report{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return report{}, fmt.Errorf("decode %s: contains multiple JSON values", path)
+	}
+	return decoded, nil
+}
+
+func readStableBoundedFile(path string, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, errors.New("report input limit must be positive")
+	}
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("report input %q must be a regular non-symlink file", path)
+	}
+	if pathInfo.Size() > limit {
+		return nil, fmt.Errorf("report input %q exceeds %d bytes", path, limit)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(pathInfo, openedInfo) {
+		return nil, fmt.Errorf("report input %q changed before it was opened", path)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, limit+1))
+	if readErr != nil {
+		return nil, readErr
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("report input %q exceeds %d bytes", path, limit)
+	}
+	finalOpenedInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	finalPathInfo, err := os.Lstat(path)
+	if err != nil || !stableReportRead(openedInfo, finalOpenedInfo, finalPathInfo, len(data)) {
+		return nil, fmt.Errorf("report input %q changed while it was read", path)
+	}
+	return data, nil
+}
+
+func stableReportRead(openedBefore, openedAfter, pathAfter os.FileInfo, bytesRead int) bool {
+	return os.SameFile(openedBefore, openedAfter) &&
+		os.SameFile(openedAfter, pathAfter) &&
+		openedBefore.Mode() == openedAfter.Mode() &&
+		openedBefore.Size() == openedAfter.Size() &&
+		openedAfter.Size() == int64(bytesRead) &&
+		openedBefore.ModTime().Equal(openedAfter.ModTime())
 }
 
 func cleanGitEnvironment() []string {
@@ -663,22 +809,30 @@ func cleanGitEnvironment() []string {
 	)
 }
 
-func readReport(path string) (report, error) {
-	data, err := os.ReadFile(path)
+func marshalReportWithLimit(value report, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, errors.New("artifact output limit must be positive")
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return report{}, err
+		return nil, err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var decoded report
-	if err := decoder.Decode(&decoded); err != nil {
-		return report{}, fmt.Errorf("decode %s: %w", path, err)
+	data = append(data, '\n')
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("inventory JSON exceeds %d-byte artifact output limit", limit)
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return report{}, fmt.Errorf("decode %s: contains multiple JSON values", path)
+	return data, nil
+}
+
+func renderHTMLWithLimit(audit report, inventory *report, limit int64) (string, error) {
+	if limit <= 0 {
+		return "", errors.New("artifact output limit must be positive")
 	}
-	return decoded, nil
+	output := renderHTML(audit, inventory)
+	if int64(len(output)) > limit {
+		return "", fmt.Errorf("rendered HTML exceeds %d-byte artifact output limit", limit)
+	}
+	return output, nil
 }
 
 //nolint:gocyclo // Exhaustive fail-closed schema validation is intentionally kept as one ordered guard sequence.
@@ -1019,8 +1173,8 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 		seenMembers[entry.Member] = true
 	}
 	if positive {
-		if len(f.CurrentOwners) < 2 || distinctProductSpecPaths(f.Evidence) < 2 || f.ProposedOwner == nil || !isSpecPath(f.ProposedOwner.Path) || !ownerStates[f.ProposedOwner.State] || len(f.BDD.Features) == 0 {
-			return fmt.Errorf("positive finding %q requires two SPEC owners, proposed owner state, and BDD features", f.ID)
+		if len(f.CurrentOwners) < 2 || !allProductSpecPaths(ownerPaths(f.CurrentOwners)) || distinctProductSpecPaths(f.Evidence) < 2 || f.ProposedOwner == nil || !isProductSpecPath(f.ProposedOwner.Path) || !ownerStates[f.ProposedOwner.State] || len(f.BDD.Features) == 0 {
+			return fmt.Errorf("positive finding %q requires product SPEC current owners, a product SPEC proposed owner state, and BDD features", f.ID)
 		}
 		if strings.TrimSpace(f.OwnershipCompleteness) == "" || strings.TrimSpace(f.ProposedOwner.Rationale) == "" {
 			return fmt.Errorf("positive finding %q requires owner-completeness and proposed-owner rationale", f.ID)
@@ -1311,13 +1465,22 @@ func distinctProductSpecPaths(items []evidence) int {
 	return len(seen)
 }
 
+func allProductSpecPaths(paths []string) bool {
+	for _, path := range paths {
+		if !isProductSpecPath(path) {
+			return false
+		}
+	}
+	return true
+}
+
 func isProductSpecPath(path string) bool {
 	if !isSpecPath(path) {
 		return false
 	}
 	for segment := range strings.SplitSeq(filepath.ToSlash(path), "/") {
 		switch segment {
-		case "testdata", "migrations", "vendor", "node_modules":
+		case "fixture", "fixtures", "generated", "migrations", "node_modules", "testdata", "vendor":
 			return false
 		}
 	}

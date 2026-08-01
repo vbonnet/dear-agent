@@ -1,13 +1,19 @@
 #!/bin/sh
-# Run the installed SPEC-audit collector from this authenticated distribution.
+# Run the installed SPEC-audit collector from this distribution.
 set -eu
-
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-distribution_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
-
-exec env \
-  GOWORK=off \
-  GOFLAGS= \
-  GOENV=off \
-  GOTOOLCHAIN=local \
-  go -C "$distribution_root" run ./skills/audit-specs/scripts/specaudit "$@"
+minimum_go_version=1.26.5
+fail() { printf 'specaudit: %s\n' "$1" >&2; exit 1; }
+case "$0" in /*) launcher_path=$0 ;; *) fail "launcher path must be absolute" ;; esac
+[ ! -L "$launcher_path" ] && [ -f "$launcher_path" ] && [ -x "$launcher_path" ] || fail "launcher must be a regular executable file"
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$launcher_path")" && pwd -P)
+distribution_root=$(CDPATH='' cd -- "$script_dir/.." && pwd -P)
+case "$distribution_root" in /*) ;; *) fail "distribution root must be absolute" ;; esac
+go_bin=$(command -v go 2>/dev/null || :)
+case "$go_bin" in /*) ;; *) fail "Go $minimum_go_version or newer is required; select an absolute Go executable through PATH" ;; esac
+unset GOROOT
+if ! go_version=$(env GOWORK=off GOFLAGS= GOENV=off GOTOOLCHAIN=local "$go_bin" env GOVERSION 2>/dev/null); then fail "Go $minimum_go_version or newer is required; could not query $go_bin"; fi
+numeric_version=${go_version#go}
+case "$numeric_version" in ''|*[!0-9.]*|.*|*..*|*.|*.*.*.*) fail "Go $minimum_go_version or newer is required; found $go_version at $go_bin" ;; esac
+if ! printf '%s\n' "$numeric_version" | awk -F. '{ok=(NF==3&&($1>1||($1==1&&($2>26||($2==26&&$3>=5)))))} END{exit !ok}'; then fail "Go $minimum_go_version or newer is required; found $go_version at $go_bin"; fi
+for source in "$distribution_root"/earslint/*.go "$distribution_root"/skills/audit-specs/scripts/specaudit/*.go; do case "$source" in "$distribution_root"/earslint/config.go|"$distribution_root"/earslint/earslint.go|"$distribution_root"/skills/audit-specs/scripts/specaudit/main.go|*_test.go) [ -f "$source" ] || fail "installed distribution has undeclared executable Go source" ;; *) fail "installed distribution has undeclared executable Go source" ;; esac; done
+exec env AR= CC= CGO_ENABLED=0 CXX= GO111MODULE=on GOARCH= GOCACHEPROG= GODEBUG= GOENV=off GOEXPERIMENT=none GOFLAGS= GOINSECURE= GONOPROXY= GONOSUMDB= GOPRIVATE= GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOVCS='*:off' GOWORK=off GOOS= PKG_CONFIG= "$go_bin" -C "$distribution_root" run ./skills/audit-specs/scripts/specaudit "$@"

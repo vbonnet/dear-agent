@@ -127,7 +127,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 
 .PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
-.PHONY: lint-skills sync-spec-skill-projections check-spec-skill-projections
+.PHONY: lint-skills sync-spec-skill-projections check-spec-skill-projections verify-spec-governance
 .PHONY: lint-instructions
 .PHONY: lint-adrs
 .PHONY: lint-headers
@@ -149,15 +149,52 @@ lint-specs:
 # interface required CI uses. Hidden and nonstandard skill roots are included.
 lint-skills:
 	@go run ./tools/skill-lint -repo .
-	@go -C spec-governance run ./cmd/sync-skill-projections --check --root ..
+	@go run ./tools/sync-spec-governance --check --root .
 
-# Generate the regular AGENTS-compatible projections for canonical SPEC
-# governance skills. The corresponding check target is suitable for CI.
+# Generate repository projections from canonical SPEC-governance sources,
+# including AGENTS-compatible skill delegators and the root EARS package. The
+# target names remain compatibility aliases; the check target is suitable for
+# CI.
 sync-spec-skill-projections:
-	@go -C spec-governance run ./cmd/sync-skill-projections
+	@go run ./tools/sync-spec-governance
 
 check-spec-skill-projections:
-	@go -C spec-governance run ./cmd/sync-skill-projections --check --root ..
+	@go run ./tools/sync-spec-governance --check --root .
+
+# Exercise the isolated SPEC-governance module through one
+# interface shared by local preflight and required CI. Supported modes:
+# test (default), race, vuln, install, and full.
+SPEC_GOVERNANCE_MODE ?= test
+verify-spec-governance:
+	@set -eu; \
+		mode="$(SPEC_GOVERNANCE_MODE)"; \
+		case "$$mode" in \
+			test|race|vuln|install|full) ;; \
+			*) echo "verify-spec-governance: unsupported mode '$$mode' (expected test, race, vuln, install, or full)" >&2; exit 2 ;; \
+		esac; \
+		if [ "$$mode" = install ]; then \
+			GOWORK=off go run ./tools/versioned-install-canary --root .; \
+			exit 0; \
+		fi; \
+		GOWORK=off go -C spec-governance mod download; \
+		if [ "$$mode" != vuln ]; then \
+			command -v golangci-lint >/dev/null 2>&1 || { echo "verify-spec-governance: golangci-lint is required" >&2; exit 1; }; \
+			GOWORK=off go -C spec-governance build ./...; \
+			GOWORK=off go -C spec-governance vet ./...; \
+			( cd spec-governance && GOWORK=off golangci-lint run --config ../.golangci.yml --timeout=5m --new=false --new-from-rev= --new-from-patch= --new-from-merge-base= ./... ); \
+			test_flags="-count=1 -timeout=10m"; \
+			case "$$mode" in race|full) test_flags="-race $$test_flags" ;; esac; \
+			GOWORK=off go -C spec-governance test $$test_flags ./...; \
+		fi; \
+		case "$$mode" in \
+			vuln|full) \
+				command -v govulncheck >/dev/null 2>&1 || { echo "verify-spec-governance: govulncheck is required" >&2; exit 1; }; \
+				( cd spec-governance && GOWORK=off govulncheck -scan package ./... ) \
+				;; \
+		esac; \
+		if [ "$$mode" = full ]; then \
+			GOWORK=off go run ./tools/versioned-install-canary --root .; \
+		fi
 
 # Validate retired vocabulary and prohibited command guidance across declared
 # active instruction surfaces.

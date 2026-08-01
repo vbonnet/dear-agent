@@ -17,8 +17,11 @@ From a local clone of this repo:
 
 This registers the marketplace and installs every plugin declared by its
 manifest. It is idempotent — re-running just refreshes the marketplace and
-updates each plugin to the declared version. Restart Claude Code afterward to
-pick up the new commands and skills.
+updates each plugin to the declared version. Any declared-plugin update or
+install failure stops the script non-zero without a success message, so rerun it
+after fixing the Claude CLI failure rather than treating a partial or stale
+plugin set as current. Restart Claude Code afterward to pick up the new commands
+and skills.
 
 Common flags:
 
@@ -76,10 +79,15 @@ claude plugin update agm@dear-agent
 ## External prerequisites
 
 The plugins themselves install cleanly without these, but some commands won't
-work until you also install:
+work until you also install their execution prerequisites:
 
 - **`agm` plugin** — `agm` binary (`go install
   github.com/vbonnet/dear-agent/agm/cmd/agm@latest`) and `tmux`.
+- **`spec-governance` plugin** — the `audit-specs` collector requires an
+  absolute Go 1.26.5 or newer executable selected from the caller's `PATH`.
+  Its isolated module is standard-library-only and runs with module lookup
+  disabled, including with fresh empty Go caches; `write-spec` does not invoke
+  the collector.
 - **`youtube` plugin** — `yt-dlp` (`brew install yt-dlp` /
   `pipx install yt-dlp`).
 
