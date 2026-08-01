@@ -293,28 +293,39 @@ func TestAuthenticatedValidationAcceptsBDDReciprocityAcrossFeatures(t *testing.T
 	}
 }
 
-func TestAuthenticatedValidationAcceptsNonCandidateWithoutBDDFeatures(t *testing.T) {
-	repo, inventoryReport, semanticReport := auditFixture(t)
-	nonCandidate := semanticReport.Candidates[0]
-	nonCandidate.Rank = 0
-	nonCandidate.Verdict = "keep-separate"
-	nonCandidate.ProposedOwner = nil
-	nonCandidate.BDD.Features = nil
-	nonCandidate.BDD.Consequence = "none"
-	nonCandidate.Boundary = "The observables remain separately owned."
-	semanticReport.Candidates = nil
-	semanticReport.NonCandidates = []finding{nonCandidate}
-	semanticReport.Summary.CandidateCount = 0
-	semanticReport.Summary.ByVerdict = map[string]int{"keep-separate": 1}
+func TestAuthenticatedValidationAcceptsNonCandidateWithNoBDDAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		features []string
+	}{
+		{name: "no selected feature"},
+		{name: "existing reciprocal feature", features: []string{"agm/test/bdd/features/shared.feature"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo, inventoryReport, semanticReport := auditFixture(t)
+			nonCandidate := semanticReport.Candidates[0]
+			nonCandidate.Rank = 0
+			nonCandidate.Verdict = "keep-separate"
+			nonCandidate.ProposedOwner = nil
+			nonCandidate.BDD.Features = test.features
+			nonCandidate.BDD.Consequence = "none"
+			nonCandidate.Boundary = "The observables remain separately owned."
+			semanticReport.Candidates = nil
+			semanticReport.NonCandidates = []finding{nonCandidate}
+			semanticReport.Summary.CandidateCount = 0
+			semanticReport.Summary.ByVerdict = map[string]int{"keep-separate": 1}
 
-	if err := validateReport(semanticReport); err != nil {
-		t.Fatalf("no-feature non-candidate should be structurally valid: %v", err)
-	}
-	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
-		t.Fatalf("inventory should authenticate against the pinned repository: %v", err)
-	}
-	if err := validateAgainstInventory(semanticReport, inventoryReport); err != nil {
-		t.Fatalf("no-feature non-candidate should authenticate: %v", err)
+			if err := validateReport(semanticReport); err != nil {
+				t.Fatalf("no-action non-candidate should be structurally valid: %v", err)
+			}
+			if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
+				t.Fatalf("inventory should authenticate against the pinned repository: %v", err)
+			}
+			if err := validateAgainstInventory(semanticReport, inventoryReport); err != nil {
+				t.Fatalf("no-action non-candidate should authenticate: %v", err)
+			}
+		})
 	}
 }
 
