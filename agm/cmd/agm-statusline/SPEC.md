@@ -42,6 +42,8 @@ provider is missing, slow, or broken.
 
 **STATUSLINE-13** When a provider deadline expires, the system shall return after bounded cancellation cleanup even if a descendant retains inherited I/O.
 
+**STATUSLINE-14** When a provider exits successfully before its deadline, the system shall accept its output until inherited stdout reaches EOF or the configured deadline expires.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

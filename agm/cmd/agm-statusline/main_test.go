@@ -204,6 +204,29 @@ func TestRunProvidersInDir_TimesOut(t *testing.T) {
 	}
 }
 
+func TestRunProvidersInDir_PreservesOutputUntilDeadline(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-ready")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf 'ready\n'
+(sleep 1) &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	segments := runProvidersInDir(
+		dir,
+		3*time.Second,
+		config{Separator: " │ "},
+		nil,
+		sessionData{},
+	)
+	if len(segments) != 1 || segments[0] != "ready" {
+		t.Fatalf("segments = %v, want provider output before configured deadline", segments)
+	}
+}
+
 func writeUncooperativeProvider(t *testing.T, dir string) {
 	t.Helper()
 	script := filepath.Join(dir, "10-slow")
