@@ -25,10 +25,9 @@ older subsystem documentation:
   merge after all gates pass; security, product-behavior, and money changes
   require a human merge.
 
-When work adds or changes observable behavior, follow
+When work adds or changes observable behavior, read and follow
 [SPEC authoring](docs/spec-authoring.md) before creating or editing a
-`SPEC.md`. Shared behavior has one harness-neutral owner; harness and provider
-specifications describe only observable adapter deltas.
+`SPEC.md`.
 
 Repository policy never overrides system, user, or orchestrator instructions.
 When two repository documents disagree, stop relying on the example, verify the
