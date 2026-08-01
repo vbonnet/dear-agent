@@ -565,6 +565,27 @@ func TestReadBaselineValidatesEveryReconstructableTransitionDigest(t *testing.T)
 	}
 }
 
+func TestValidateTransitionHistoryRejectsTruncatedLegacyAnchor(t *testing.T) {
+	bl := baseline{
+		Version:        baselineSchemaV2,
+		ScannerVersion: legacyKeyVersion + 1,
+		Findings:       keySet(nil),
+		Transitions: []baselineTransition{
+			{
+				PreviousScannerVersion: legacyKeyVersion + 1,
+				ScannerVersion:         legacyKeyVersion + 1,
+				Added:                  keySet(nil),
+				Removed:                keySet(nil),
+			},
+		},
+	}
+
+	err := validateTransitionHistory(bl)
+	if err == nil || !strings.Contains(err.Error(), "want legacy version") {
+		t.Fatalf("validateTransitionHistory error = %v, want missing legacy anchor", err)
+	}
+}
+
 func TestUpdateBaselineFileRejectionPreservesBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "baseline.json")
 	prior := baseline{Version: baselineSchemaV1, Findings: keySet(map[string][]string{
