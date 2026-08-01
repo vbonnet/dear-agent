@@ -223,6 +223,10 @@ func validateNativeSpecGovernanceSurface(root string, neutral PluginEntry, claud
 	if !slices.Equal(manifest.Skills, want) {
 		return fmt.Errorf("isolated plugin skills = %v, want exact canonical set %v", manifest.Skills, want)
 	}
+	return rejectForbiddenSpecGovernanceSurfaces(pluginRoot)
+}
+
+func rejectForbiddenSpecGovernanceSurfaces(pluginRoot string) error {
 	for _, forbidden := range []string{".mcp.json", "mcp.json", ".lsp.json", "lsp.json", "hooks", "agents", "commands"} {
 		if _, err := os.Lstat(filepath.Join(pluginRoot, forbidden)); err == nil {
 			return fmt.Errorf("isolated plugin must not expose %s", forbidden)
