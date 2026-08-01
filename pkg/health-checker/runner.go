@@ -45,10 +45,21 @@ func (r *Runner) runSequential(ctx context.Context) ([]Result, error) {
 		default:
 		}
 
-		result := check.Run(ctx)
+		result := normalizeCheckResult(check, check.Run(ctx))
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// normalizeCheckResult canonicalizes a check result. Check identity is
+// authoritative only when the returned status is malformed; valid results
+// retain every caller-supplied field for compatibility.
+func normalizeCheckResult(check Check, result Result) Result {
+	if err := result.Validate(); err != nil {
+		result.Name = check.Name()
+		result.Category = check.Category()
+	}
+	return normalizeResult(result)
 }
 
 // runParallel runs checks in parallel
@@ -91,6 +102,13 @@ func (r *Runner) runParallel(ctx context.Context) ([]Result, error) {
 	wg.Wait()
 	close(errorCh)
 
+	// Canonicalize every declared index after all writers have completed. A
+	// pre-cancelled check leaves a zero-value slot, which must still fail closed
+	// while the context error remains authoritative.
+	for i, check := range r.checks {
+		results[i] = normalizeCheckResult(check, results[i])
+	}
+
 	// Return first error if any
 	if err := <-errorCh; err != nil {
 		return results, err
@@ -115,6 +133,7 @@ func Summarize(results []Result) Summary {
 	}
 
 	for _, r := range results {
+		r = normalizeResult(r)
 		switch r.Status {
 		case StatusOK, StatusInfo:
 			summary.Passed++
@@ -172,6 +191,7 @@ func (s Summary) OverallStatus() string {
 func FilterIssues(results []Result) []Result {
 	issues := []Result{}
 	for _, r := range results {
+		r = normalizeResult(r)
 		if r.IsIssue() {
 			issues = append(issues, r)
 		}
@@ -183,6 +203,7 @@ func FilterIssues(results []Result) []Result {
 func FilterFixable(results []Result) []Result {
 	fixable := []Result{}
 	for _, r := range results {
+		r = normalizeResult(r)
 		if r.Fixable && r.Fix != nil {
 			fixable = append(fixable, r)
 		}
