@@ -86,10 +86,12 @@ skill actually discovers and triggers.
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
 
-`.dear-agent/marketplace.json` is the neutral catalog: it declares
-`native-claude-plugin-marketplace` for Claude Code and `agents-md-skill-fallback`
-for Codex, AGY, and OpenCode. Pi instead loads only the paths declared in
-`.pi/settings.json`.
+The neutral catalog declares a Pi fallback surface, while `.pi/settings.json`
+lists Pi's native skill roots. The
+[neutral marketplace contract](../.dear-agent/SPEC.md) and
+[Pi adapter contract](../.pi/SPEC.md) describe these complementary surfaces.
+This placement guide records the observed topology without choosing a
+cross-harness catalog owner while that audit decision remains pending.
 
 ### The canonical packaging pattern
 

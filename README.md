@@ -45,11 +45,14 @@ go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
 go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
-### Install the Claude Code plugins (`/agm:*`, Wayfinder skill, `/youtube`)
+### Install the Claude Code plugins
 
-This repo also ships as a Claude Code plugin marketplace. The Wayfinder skill
-delegates to the `wayfinder` binary installed above. To install the namespaced
-AGM/YouTube commands and the Wayfinder skill, run:
+This repo also ships commands and skills through a Claude Code plugin
+marketplace. The harness-neutral
+[`.dear-agent/marketplace.json`](.dear-agent/marketplace.json) is the canonical
+plugin inventory; [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)
+is its parity-checked native Claude mirror. To register that Claude marketplace
+and install every declared plugin, run:
 
 ```bash
 ./scripts/install-claude-plugins.sh             # from a local clone (default)

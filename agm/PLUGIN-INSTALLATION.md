@@ -1,9 +1,11 @@
 # Plugin Installation
 
 This repository ships its slash commands and skills through the Claude Code
-plugin marketplace system. The marketplace is named **`dear-agent`** and is
-defined by [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
-at the repo root.
+plugin marketplace system. The harness-neutral
+[`.dear-agent/marketplace.json`](../.dear-agent/marketplace.json) is the canonical
+plugin inventory. Claude installs from the parity-checked
+[native mirror](../.claude-plugin/marketplace.json), whose marketplace name is
+**`dear-agent`**.
 
 ## Recommended: the install script
 
@@ -13,10 +15,10 @@ From a local clone of this repo:
 ./scripts/install-claude-plugins.sh
 ```
 
-This registers the marketplace and installs every plugin it declares (`agm`,
-`wayfinder`, `youtube`). It is idempotent — re-running just refreshes the
-marketplace and updates each plugin to the version declared in
-`marketplace.json`. Restart Claude Code afterward to pick up the new commands.
+This registers the marketplace and installs every plugin declared by its
+manifest. It is idempotent — re-running just refreshes the marketplace and
+updates each plugin to the declared version. Restart Claude Code afterward to
+pick up the new commands and skills.
 
 Common flags:
 
@@ -28,35 +30,31 @@ Common flags:
 ./scripts/install-claude-plugins.sh --help       # full help
 ```
 
-## Manual install (equivalent commands)
+## Manual install of one plugin
 
-If you prefer to run the underlying `claude` CLI yourself:
+The script is the supported bulk-install path. To use the underlying `claude`
+CLI for one plugin, register either source and choose a name from the canonical
+neutral catalog:
 
 ```bash
 # From a local clone:
 claude plugin marketplace add ~/src/dear-agent
-claude plugin install agm@dear-agent
-claude plugin install wayfinder@dear-agent
-claude plugin install youtube@dear-agent
 
 # Or from GitHub:
 claude plugin marketplace add vbonnet/dear-agent
-claude plugin install agm@dear-agent wayfinder@dear-agent youtube@dear-agent
+
+# Then install any declared plugin, for example:
+claude plugin install spec-governance@dear-agent
 ```
 
 ## Available plugins
 
-After install, the following are exposed:
-
-- **`agm@dear-agent`** — session and orchestration commands: `/agm:agm-assoc`,
-  `/agm:agm-exit`, `/agm:agm-list`, `/agm:agm-new`, `/agm:agm-resume`,
-  `/agm:agm-search`, `/agm:agm-send`, `/agm:agm-status`,
-  `/agm:audit-completion`, `/agm:wiki-ingest`, `/agm:wiki-lint`,
-  `/agm:wiki-query-save`, and the `scan-health` skill.
-- **`wayfinder@dear-agent`** — the top-level `wayfinder` skill (9-phase SDLC
-  workflow); it does not install slash commands.
-- **`youtube@dear-agent`** — `/youtube:youtube` for transcript extraction
-  (needs `yt-dlp`).
+The [neutral catalog](../.dear-agent/marketplace.json) is the canonical
+inventory; the [Claude marketplace manifest](../.claude-plugin/marketplace.json)
+is its parity-checked native mirror and describes each plugin's Claude commands
+or skills. For example, the AGM plugin exposes `/agm:agm-assoc`. Use
+`claude plugin list` and `claude plugin details <name>@dear-agent` to inspect the
+installed snapshot.
 
 ## Verification
 

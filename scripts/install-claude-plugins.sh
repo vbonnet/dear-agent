@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install dear-agent Claude Code plugins (agm, wayfinder, youtube).
+# Install every Claude Code plugin declared by the dear-agent marketplace.
 #
 # This script registers the dear-agent marketplace (from a local repo checkout
 # or from GitHub) and installs every plugin it declares. It is idempotent:

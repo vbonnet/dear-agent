@@ -101,10 +101,11 @@ permission, model-selection, and other overlays are not ready.
 ## Repository instructions, skills, and hooks
 
 Pi reads the repository's root `AGENTS.md` directly. `.pi/settings.json`
-discovers the living AGM and Wayfinder skill trees; it does not copy those
-skills. `.pi/hooks.json` maps native Pi events to the repository's shared
-lifecycle and tool guardrails. The wrappers under `.pi/guardrails/` reuse the living
-OpenCode shell policies so rule fixes have one implementation owner.
+discovers the living skill roots declared by the [Pi configuration
+contract](../../.pi/SPEC.md); it does not copy those skills. `.pi/hooks.json`
+maps native Pi events to the repository's shared lifecycle and tool guardrails.
+The wrappers under `.pi/guardrails/` reuse the living OpenCode shell policies
+so rule fixes have one implementation owner.
 
 Repository hooks load only from the explicitly approved working directory.
 `PreToolUse` failures block the native call before auto or allowlist decisions.
