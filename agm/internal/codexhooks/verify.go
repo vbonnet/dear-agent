@@ -2229,16 +2229,15 @@ func trustedHookCommandAllowed(command string, args []*syntax.Word) bool {
 		"local", "printf", "readonly", "return", "set", "shift", "test",
 		"true", "typeset", "unset",
 		// Data and filesystem utilities used by the committed hook assets.
-		"basename", "chmod", "cp", "cut", "date", "dirname", "jq", "mkdir",
-		"mktemp", "mv", "rm", "sleep", "tee", "touch", "tr", "wc",
+		"basename", "chmod", "cp", "date", "dirname", "jq", "mkdir", "mktemp",
+		"mv", "rm", "sleep", "tee", "touch", "tr",
 		// Tools whose command-capable modes are rejected before this boundary.
-		"awk", "gawk", "mawk", "nawk", "find", "git", "gsed", "gtar",
-		"sed", "sort", "tar",
+		"find", "git", "gsed", "gtar", "sed", "tar",
 		// Operator-owned hook helpers with fixed installed capabilities.
 		"agm", "bd", "bead-close-guard", "dear-agent-bead-close-guard",
 		"dear-agent-codex-hook-json":
 		return true
-	case "cat", "grep", "egrep", "fgrep", "head", "tail":
+	case "awk", "gawk", "mawk", "nawk", "cat", "grep", "egrep", "fgrep", "head", "tail", "sort", "cut", "wc":
 		return trustedHookFileOperandsAreSafe(filepath.Base(command), args)
 	default:
 		return false
@@ -2271,6 +2270,14 @@ func trustedHookFileOperands(command string, args []*syntax.Word) ([]*syntax.Wor
 		return trustedHookHeadTailOperands(args)
 	case "grep", "egrep", "fgrep":
 		return trustedHookGrepOperands(args)
+	case "awk", "gawk", "mawk", "nawk":
+		return trustedHookAwkOperands(args)
+	case "sort":
+		return trustedHookSortOperands(args)
+	case "cut":
+		return trustedHookCutOperands(args)
+	case "wc":
+		return trustedHookWcOperands(args)
 	default:
 		return nil, false
 	}
@@ -2379,6 +2386,104 @@ func grepOptionConsumesNext(value string) bool {
 	default:
 		return false
 	}
+}
+
+func trustedHookAwkOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	var operands []*syntax.Word
+	programSeen := false
+	options := true
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return nil, false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			if value == "-F" || value == "-v" || value == "--assign" {
+				if index+1 >= len(args) {
+					return nil, false
+				}
+				index++
+			}
+			continue
+		}
+		if !programSeen {
+			programSeen = true
+			continue
+		}
+		if strings.Contains(value, "=") && !strings.ContainsAny(value, "{}") {
+			continue
+		}
+		operands = append(operands, word)
+	}
+	return operands, true
+}
+
+func trustedHookSortOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	return trustedHookOptionOperands(args, map[string]struct{}{
+		"-k": {}, "-S": {}, "-T": {}, "-t": {}, "-o": {},
+		"--key": {}, "--buffer-size": {}, "--field-separator": {},
+		"--output": {}, "--temporary-directory": {},
+	})
+}
+
+func trustedHookCutOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	return trustedHookOptionOperands(args, map[string]struct{}{
+		"-b": {}, "-c": {}, "-d": {}, "-f": {},
+		"--bytes": {}, "--characters": {}, "--delimiter": {},
+		"--fields": {},
+	})
+}
+
+func trustedHookOptionOperands(args []*syntax.Word, consumes map[string]struct{}) ([]*syntax.Word, bool) {
+	var operands []*syntax.Word
+	options := true
+	for index := 0; index < len(args); index++ {
+		word := args[index]
+		value, static := staticShellWord(word)
+		if !static {
+			return nil, false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			if _, takesNext := consumes[value]; takesNext {
+				if index+1 >= len(args) {
+					return nil, false
+				}
+				index++
+			}
+			continue
+		}
+		operands = append(operands, word)
+	}
+	return operands, true
+}
+
+func trustedHookWcOperands(args []*syntax.Word) ([]*syntax.Word, bool) {
+	var operands []*syntax.Word
+	options := true
+	for _, word := range args {
+		value, static := staticShellWord(word)
+		if !static {
+			return nil, false
+		}
+		if options && value == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(value, "-") {
+			continue
+		}
+		operands = append(operands, word)
+	}
+	return operands, true
 }
 
 func trustedHookSystemInputPath(path string) bool {
