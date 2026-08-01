@@ -3,7 +3,6 @@ module github.com/vbonnet/dear-agent
 go 1.26.5
 
 require (
-	github.com/vbonnet/dear-agent/spec-governance v0.0.0
 	cloud.google.com/go/aiplatform v1.126.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2
@@ -43,6 +42,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
+	github.com/vbonnet/dear-agent/spec-governance v0.0.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	github.com/yuin/goldmark v1.8.4
 	go.opentelemetry.io/otel v1.44.0
