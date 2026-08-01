@@ -13,6 +13,9 @@ older subsystem documentation:
   the retired path, flags, tests, and documentation in the same change.
 - [Harness Hygiene](docs/policies/harness-hygiene.ai.md): keep one owner per
   rule, turn hard requirements into checks, and continuously earn complexity.
+- [SPEC authoring](docs/spec-authoring.md): write observable contracts once in
+  a harness- and implementation-neutral owner; use applicability for real
+  member variation.
 - [Anti-stall](docs/policies/anti-stall.ai.md): continue through known work and
   stop only at explicit safety, authority, failure, or completion boundaries.
 - [DEAR retrospectives](docs/policies/dear-retro.ai.md): systemic defects get a
