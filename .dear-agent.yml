@@ -304,9 +304,9 @@ acceptance-criteria:
     description: "No previously-passing test is now failing"
 
 # DEAR Audit subsystem configuration. See ADR-011 and pkg/audit/config.
-# This is the dogfood configuration: dear-agent itself runs the daily
-# checks below on every push (via the workflow-audit CLI in CI). The
-# weekly / monthly tiers cost more and run from a scheduled trigger.
+# This block selects audit checks; scheduling is operator-owned per ADR-011.
+# Invoke workflow-audit directly or through configs/workflows wrappers, from
+# cron, CI, or another wrapper. No deployed scheduler is claimed here.
 #
 # Severity policy is the package default; we leave it implicit. Override
 # only when this repo deviates from the recommended P0/P1/P2/P3 actions.
@@ -316,8 +316,7 @@ audits:
       - check: build
       - check: test
         config:
-          # Skip -race in CI to keep the daily under 5 min; the weekly
-          # tier picks it up.
+          # Skip -race in the daily selection; the weekly tier picks it up.
           race: false
           timeout: "3m"
       - check: lint.go
