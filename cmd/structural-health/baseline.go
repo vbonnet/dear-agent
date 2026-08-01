@@ -285,6 +285,13 @@ func validateTransitionHistory(bl baseline) error {
 		resulting = predecessor
 		resultingScannerVersion = transition.PreviousScannerVersion
 	}
+	if resultingScannerVersion != legacyKeyVersion {
+		return fmt.Errorf(
+			"transition history starts at scanner version %d, want legacy version %d",
+			resultingScannerVersion,
+			legacyKeyVersion,
+		)
+	}
 
 	// Transition zero may cover literal v1 bytes or an absent bootstrap file,
 	// neither of which can be reconstructed from the resulting v2 snapshot.
