@@ -12,16 +12,22 @@ import (
 )
 
 // Runner orchestrates one audit invocation. Construct with NewRunner,
-// configure (Registry, Store, Remediator, optional clock), and call
-// Run with a Plan describing what to execute.
+// configure its Registry, Store, and optional clock, and call Run with a
+// Plan describing what to execute.
 //
 // One Runner instance is safe for concurrent Run calls — each call
 // owns its own Plan and its own audit_runs row. The Runner does not
 // own the SQLite connection; the Store does.
 type Runner struct {
-	Registry   *Registry
-	Store      Store
-	Logger     *slog.Logger
+	Registry *Registry
+	Store    Store
+	Logger   *slog.Logger
+
+	// Remediator is the dormant StrategyAuto compatibility seam. Runner drops
+	// Status and Reference, and drops Note unless State changes.
+	//
+	// Deprecated: Leave this set to NewNoopRemediator until an idempotent
+	// remediation-event persistence and legacy-migration contract exists.
 	Remediator Remediator
 
 	// Now is overridable in tests. Production callers leave it nil
@@ -634,10 +640,12 @@ func (r *Runner) persistFinding(
 	return stored, true
 }
 
-// applyInlineRemediation runs a remediator and (when it reports a
-// state change) writes the new state back to the store. Errors are
-// logged; nothing here is allowed to fail the audit run because the
-// finding is already persisted.
+// applyInlineRemediation runs the dormant remediator seam and, when it reports
+// a valid state change, passes only the state and note to the store. Status and
+// Reference are ignored; Note is also ignored for an invalid or unchanged
+// state. The outcome is therefore not durable evidence. Errors are logged;
+// nothing here is allowed to fail the audit run because the finding is already
+// persisted.
 func (r *Runner) applyInlineRemediation(ctx context.Context, stored Finding, env Env, logger *slog.Logger) {
 	if remErr := stored.Suggested.Validate(); remErr != nil {
 		logger.Warn("audit: remediation invalid; skipping", "err", remErr)
