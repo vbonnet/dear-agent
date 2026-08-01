@@ -329,34 +329,69 @@ func isSupervisorAuthFailed(sup supervisor) bool {
 }
 
 func supervisorPaneAuthFailed(content, harness string) bool {
-	lower := strings.ToLower(content)
-	generic := []string{
-		"please run /login",
-		"authentication failed",
-		"not authenticated",
-		"session expired",
-		"token expired",
+	lines := recentSupervisorPaneLines(content)
+	if len(lines) == 0 || supervisorPaneEndsAtPrompt(lines) {
+		return false
 	}
-	for _, marker := range generic {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
+	lower := strings.Join(lines, "\n")
 	switch harness {
 	case "claude-code":
-		return strings.Contains(lower, "claude") &&
-			(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth"))
+		return hasExactLine(lines, "please run /login") ||
+			(strings.Contains(lower, "claude") &&
+				(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth")) &&
+				hasAny(lower, "401", "unauthorized", "authentication", "session expired", "token expired", "not authenticated"))
 	case "codex-cli":
 		return strings.Contains(lower, "codex login") ||
 			strings.Contains(lower, "run `codex login`") ||
-			(strings.Contains(lower, "openai") && strings.Contains(lower, "api key"))
+			(strings.Contains(lower, "openai") && strings.Contains(lower, "api key") &&
+				hasAny(lower, "missing", "not found", "unauthorized", "authentication", "not authenticated"))
 	case "agy":
 		return strings.Contains(lower, "gcloud auth application-default login") ||
 			strings.Contains(lower, "google_application_credentials") ||
-			(strings.Contains(lower, "agy") && strings.Contains(lower, "sign in"))
+			(strings.Contains(lower, "agy") && strings.Contains(lower, "sign in") &&
+				hasAny(lower, "authentication", "not authenticated", "session expired", "token expired"))
 	default:
 		return false
 	}
+}
+
+func recentSupervisorPaneLines(content string) []string {
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	var lines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			lines = append(lines, strings.ToLower(line))
+		}
+	}
+	const recentLineLimit = 12
+	if len(lines) > recentLineLimit {
+		lines = lines[len(lines)-recentLineLimit:]
+	}
+	return lines
+}
+
+func supervisorPaneEndsAtPrompt(lines []string) bool {
+	last := strings.TrimSpace(lines[len(lines)-1])
+	return last == ">" || last == "›"
+}
+
+func hasAny(content string, markers ...string) bool {
+	for _, marker := range markers {
+		if strings.Contains(content, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExactLine(lines []string, want string) bool {
+	for _, line := range lines {
+		if line == want {
+			return true
+		}
+	}
+	return false
 }
 
 // heartbeatFileName maps a supervisor identity to the compact heartbeat file
@@ -647,9 +682,13 @@ var runSpawn = func(sup supervisor, model string) ([]byte, error) {
 var runArchiveSupervisor = func(sup supervisor) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), spawnCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", "session", "archive", "--async", "--outcome", "crashed", sup.Name)
+	cmd := exec.CommandContext(ctx, "agm", sessionArchiveArgs(sup)...)
 	cmd.Env = scrubAPIKey(os.Environ())
 	return cmd.CombinedOutput()
+}
+
+func sessionArchiveArgs(sup supervisor) []string {
+	return []string{"session", "archive", "--async", "--allow-supervisor-reap", "--outcome", "crashed", sup.Name}
 }
 
 // sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package

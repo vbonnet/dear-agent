@@ -664,6 +664,30 @@ func TestSupervisorPaneAuthFailed(t *testing.T) {
 			content: "The API should return 401 Unauthorized for bad user credentials.\n>",
 			want:    false,
 		},
+		{
+			name:    "Claude auth phrase with healthy prompt",
+			harness: "claude-code",
+			content: "We need to handle a \"Please run /login\" response after token rotation.\n>",
+			want:    false,
+		},
+		{
+			name:    "Claude auth phrase in current explanation",
+			harness: "claude-code",
+			content: "The recovery code should detect Please run /login when Claude Code is blocked.",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by prompt",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login\n>",
+			want:    false,
+		},
+		{
+			name:    "generic auth phrase without harness evidence",
+			harness: "codex-cli",
+			content: "authentication failed in the mocked dependency; continue with the implementation",
+			want:    false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -671,6 +695,25 @@ func TestSupervisorPaneAuthFailed(t *testing.T) {
 				t.Fatalf("supervisorPaneAuthFailed() = %t, want %t", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
+	args := sessionArchiveArgs(supervisor{Name: "vroom-orchestrator"})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"session archive",
+		"--async",
+		"--allow-supervisor-reap",
+		"--outcome crashed",
+		"vroom-orchestrator",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("sessionArchiveArgs missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "--force") {
+		t.Fatalf("sessionArchiveArgs must not force supervisor archive: %v", args)
 	}
 }
 
