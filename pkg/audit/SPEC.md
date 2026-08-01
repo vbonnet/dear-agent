@@ -4,7 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-08-01 -->
 
 ## Purpose
 

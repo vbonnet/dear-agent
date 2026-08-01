@@ -1,6 +1,6 @@
 # ADR-011: Scheduled repository audit subsystem
 
-Status: Accepted (2026-06-16)
+Status: Accepted (2026-06-16; verified 2026-07-17; amended 2026-08-01)
 
 ## Context
 
