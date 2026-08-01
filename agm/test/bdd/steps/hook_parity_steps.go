@@ -235,8 +235,8 @@ func agmRunsCanonicalAGMCompanionInstallRegression(ctx context.Context) error {
 		return err
 	}
 	state.companionOutput, state.companionRegression = runLocalGuardrailGoTest(ctx,
-		`^TestCanonicalAGMInstallBuildsCompanionPair$`,
-		"./tests/githooks",
+		`^TestCanonicalAGMInstallBuildsCompanionPairWithProtectedStamps$`,
+		"./tests/buildstamp",
 	)
 	return nil
 }
@@ -249,7 +249,7 @@ func rootAGMInstallTargetShouldBuildAndInstallCompanionPair(ctx context.Context)
 	if state.companionRegression != nil {
 		return fmt.Errorf("canonical AGM companion install regression: %w: %s", state.companionRegression, state.companionOutput)
 	}
-	if !strings.Contains(state.companionOutput, "--- PASS: TestCanonicalAGMInstallBuildsCompanionPair") {
+	if !strings.Contains(state.companionOutput, "--- PASS: TestCanonicalAGMInstallBuildsCompanionPairWithProtectedStamps") {
 		return fmt.Errorf("canonical AGM companion install output missing passing regression: %s", state.companionOutput)
 	}
 	return nil

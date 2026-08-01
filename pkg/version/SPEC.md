@@ -20,6 +20,14 @@
 
 **VERSION-08** When exact companion-process compatibility is compared, the system shall shorten the commit hash while preserving any dirty-source marker so clean and modified builds cannot be treated as identical.
 
+**VERSION-09** When a governed Make build receives ordinary effective `GOFLAGS`, the system shall preserve those Go settings while injecting Version, GitCommit, BuildDate, and BuiltBy provenance.
+
+**VERSION-10** When effective `GOFLAGS` contains `-ldflags` or `--ldflags`, the governed Make build shall fail before invoking Go and direct linker customization to `EXTRA_GO_LDFLAGS`.
+
+**VERSION-11** When `EXTRA_GO_LDFLAGS` supplies an unpatterned linker argument list beginning with a hyphen, the governed Make build shall treat caller text as opaque data and compose one linker value with protected provenance assignments last; when it supplies Go's package-pattern form, the build shall reject it before invoking Go.
+
+**VERSION-12** When caller provenance contains a Go linker whitespace separator or quote delimiter, the governed Make build shall reject it before invoking Go so metadata cannot reshape or inject linker tokens.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/validation_workspace_parity.feature`
@@ -28,3 +36,4 @@
 ## Test Traceability
 
 - Unit package: `pkg/version`
+- Integration package: `tests/buildstamp`
