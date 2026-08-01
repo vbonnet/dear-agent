@@ -62,19 +62,26 @@ func (c WorkspaceCheck) Run(ctx context.Context) healthchecker.Result {
 ```go
 func main() {
     checks := []healthchecker.Check{
-        WorkspaceCheck{path: "~/.myapp"},
+        WorkspaceCheck{path: ".myapp"},
     }
 
     runner := healthchecker.NewRunner(checks...)
-    results, _ := runner.RunAll(context.Background())
+    results, err := runner.RunAll(context.Background())
+    if err != nil {
+        log.Fatal(err)
+    }
 
     summary := healthchecker.Summarize(results)
     fmt.Printf("Status: %s\n", summary.OverallStatus())
 
     if summary.Fixable > 0 {
         fixer := healthchecker.NewFixer()
-        applied, updated, _ := fixer.Apply(context.Background(), results)
+        applied, updated, err := fixer.Apply(context.Background(), results)
+        if err != nil {
+            log.Fatal(err)
+        }
         fmt.Printf("Applied %d fixes\n", applied)
+        summary = healthchecker.Summarize(updated)
     }
 
     os.Exit(summary.ExitCode())
