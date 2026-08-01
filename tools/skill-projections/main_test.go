@@ -7,10 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 const canonicalSkill = `---
@@ -616,9 +617,5 @@ func createLinkedWorktree(t *testing.T) (string, string) {
 
 func runTestGit(t *testing.T, args ...string) {
 	t.Helper()
-	command := exec.Command("git", args...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
+	gittest.Run(t, "", args...)
 }
