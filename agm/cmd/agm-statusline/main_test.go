@@ -218,7 +218,7 @@ exit 0
 
 	segments := runProvidersInDir(
 		dir,
-		3*time.Second,
+		10*time.Second,
 		config{Separator: " │ "},
 		nil,
 		sessionData{},
@@ -252,6 +252,34 @@ exit 0
 	}
 	if elapsed >= 2*time.Second {
 		t.Fatalf("inherited stdin cleanup took %s, want less than 2s", elapsed)
+	}
+}
+
+func TestRunProvidersInDir_BoundsInheritedStdoutAfterDirectExit(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-retains-stdout")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf 'ready\n'
+(sleep 5) &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	started := time.Now()
+	segments := runProvidersInDir(
+		dir,
+		100*time.Millisecond,
+		config{Separator: " │ "},
+		nil,
+		sessionData{},
+	)
+	elapsed := time.Since(started)
+	if len(segments) != 0 {
+		t.Fatalf("segments = %v, want output with inherited writer past deadline omitted", segments)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("inherited stdout cleanup took %s, want less than 2s", elapsed)
 	}
 }
 

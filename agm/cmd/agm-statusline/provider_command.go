@@ -79,7 +79,10 @@ func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]
 		case waitErr := <-waitDone:
 			waitDone = nil
 			inputCloseErr := closeStdin()
-			<-inputDone
+			if inputDone != nil {
+				<-inputDone
+				inputDone = nil
+			}
 			if waitErr != nil {
 				closeErr := stdoutReader.Close()
 				if readDone != nil {
@@ -91,7 +94,10 @@ func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]
 			readDone = nil
 		case <-ctx.Done():
 			closeErr := errors.Join(closeStdin(), stdoutReader.Close())
-			<-inputDone
+			if inputDone != nil {
+				<-inputDone
+				inputDone = nil
+			}
 			if waitDone != nil {
 				<-waitDone
 			}
