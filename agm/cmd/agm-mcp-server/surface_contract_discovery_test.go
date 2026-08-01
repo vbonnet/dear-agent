@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -71,6 +72,22 @@ func takeListedToolsSnapshot(t *testing.T, snapshots <-chan listToolsSnapshot) [
 	}
 }
 
+func schemaAfterGenericDecode(schema any) ([]byte, error) {
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return nil, fmt.Errorf("marshal schema: %w", err)
+	}
+	var generic any
+	if err := json.Unmarshal(encoded, &generic); err != nil {
+		return nil, fmt.Errorf("decode generic schema: %w", err)
+	}
+	normalized, err := json.Marshal(generic)
+	if err != nil {
+		return nil, fmt.Errorf("marshal generic schema: %w", err)
+	}
+	return normalized, nil
+}
+
 func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool) []*mcp.Tool {
 	t.Helper()
 	rawByName := make(map[string]*mcp.Tool, len(rawSchemaTools))
@@ -96,6 +113,18 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 			t.Fatalf("tool %q description diverged across discovery: client=%q server=%q",
 				clientTool.Name, clientTool.Description, rawTool.Description)
 		}
+		clientSchema, err := schemaAfterGenericDecode(clientTool.InputSchema)
+		if err != nil {
+			t.Fatalf("normalize client schema for %q: %v", clientTool.Name, err)
+		}
+		rawSchema, err := schemaAfterGenericDecode(rawTool.InputSchema)
+		if err != nil {
+			t.Fatalf("normalize server schema for %q: %v", clientTool.Name, err)
+		}
+		if !bytes.Equal(clientSchema, rawSchema) {
+			t.Fatalf("DAH-002/discovery-schema-drift: tool %q client=%s server=%s",
+				clientTool.Name, clientSchema, rawSchema)
+		}
 		clone := *clientTool
 		clone.InputSchema = rawTool.InputSchema
 		result[index] = &clone
@@ -105,4 +134,39 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 		t.Fatalf("server-side tools missing from client discovery: %v", sortedKeys(rawByName))
 	}
 	return result
+}
+
+func TestSchemaAfterGenericDecodePreservesDiscoveryComparison(t *testing.T) {
+	raw := json.RawMessage(
+		`{"type":"object","properties":{"value":{"const":9007199254740993,"description":"same"}}}`,
+	)
+	var client any
+	if err := json.Unmarshal(raw, &client); err != nil {
+		t.Fatalf("decode client fixture: %v", err)
+	}
+	rawSchema, err := schemaAfterGenericDecode(raw)
+	if err != nil {
+		t.Fatalf("normalize raw fixture: %v", err)
+	}
+	clientSchema, err := schemaAfterGenericDecode(client)
+	if err != nil {
+		t.Fatalf("normalize client fixture: %v", err)
+	}
+	if !bytes.Equal(clientSchema, rawSchema) {
+		t.Fatalf("generic number normalization diverged: client=%s server=%s", clientSchema, rawSchema)
+	}
+
+	var changed any
+	if err := json.Unmarshal([]byte(
+		`{"type":"object","properties":{"value":{"const":9007199254740993,"description":"changed"}}}`,
+	), &changed); err != nil {
+		t.Fatalf("decode changed fixture: %v", err)
+	}
+	changedSchema, err := schemaAfterGenericDecode(changed)
+	if err != nil {
+		t.Fatalf("normalize changed fixture: %v", err)
+	}
+	if bytes.Equal(changedSchema, rawSchema) {
+		t.Fatal("nonnumeric discovery drift was hidden by generic number normalization")
+	}
 }
