@@ -14,7 +14,11 @@ func newLifecycleBoundaryAdapter(t *testing.T) *Adapter {
 	if err != nil {
 		t.Fatalf("NewSQLiteAdapter() error: %v", err)
 	}
-	t.Cleanup(func() { _ = adapter.Close() })
+	t.Cleanup(func() {
+		if err := adapter.Close(); err != nil {
+			t.Logf("failed to close adapter: %v", err)
+		}
+	})
 	return adapter
 }
 
