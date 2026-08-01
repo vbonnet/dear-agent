@@ -121,7 +121,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	identity := repository.identity()
-	operationErr := error(nil)
+	var operationErr error
 	if *write {
 		operationErr = writeDelegates(repository)
 		if operationErr == nil {

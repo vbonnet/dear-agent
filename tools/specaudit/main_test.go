@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,19 @@ done
 	}
 	if string(invocations) != "x" {
 		t.Fatalf("batch Git invocations = %q, want exactly one", invocations)
+	}
+}
+
+func TestParsePinnedBlobBatchRejectsNativeIntOverflow(t *testing.T) {
+	if strconv.IntSize != 32 {
+		t.Skip("native-int overflow boundary is observable on 32-bit targets")
+	}
+	oid := strings.Repeat("a", 40)
+	tooLarge := int64(1) << 31
+	batch := fmt.Sprintf("%s blob %d\n", oid, tooLarge)
+	_, err := parsePinnedBlobBatch([]byte(batch), []pinnedBlob{{oid: oid, size: tooLarge}})
+	if err == nil || !strings.Contains(err.Error(), "returned an unexpected size") {
+		t.Fatalf("parsePinnedBlobBatch() error = %v, want native-int overflow rejection", err)
 	}
 }
 
