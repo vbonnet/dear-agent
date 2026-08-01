@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,8 @@ func normalizeSchemaObject(schema map[string]any) map[string]any {
 			result[keyword] = normalizeSetArray(value)
 		case "dependentRequired":
 			result[keyword] = normalizeDependentRequired(value)
+		case "dependencies":
+			result[keyword] = normalizeDependencies(value)
 		case "allOf", "anyOf", "oneOf":
 			result[keyword] = normalizeSchemaArray(value, true)
 		case "prefixItems":
@@ -66,6 +69,22 @@ func normalizeDependentRequired(value any) any {
 	result := make(map[string]any, len(properties))
 	for property, dependencies := range properties {
 		result[property] = normalizeSetArray(dependencies)
+	}
+	return result
+}
+
+func normalizeDependencies(value any) any {
+	dependencies, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	result := make(map[string]any, len(dependencies))
+	for property, dependency := range dependencies {
+		if _, propertyDependency := dependency.([]any); propertyDependency {
+			result[property] = normalizeSetArray(dependency)
+			continue
+		}
+		result[property] = normalizeSubschema(dependency)
 	}
 	return result
 }
@@ -133,6 +152,41 @@ func itemSchemaValue(value string) string {
 	return value
 }
 
+func schemaConstraints(t *testing.T, schema map[string]any) string {
+	t.Helper()
+	constraints := make(map[string]any)
+	for keyword, value := range schema {
+		switch keyword {
+		case "additionalProperties", "description", "enum", "items", "properties", "required", "type":
+			continue
+		default:
+			constraints[keyword] = value
+		}
+	}
+	if len(constraints) == 0 {
+		return contractAbsent
+	}
+	return canonicalSchemaJSON(t, constraints)
+}
+
+func constraintValue(value string) string {
+	if value == "" {
+		return contractAbsent
+	}
+	return value
+}
+
+func decodeSchemaJSON(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var schema map[string]any
+	if err := decoder.Decode(&schema); err != nil {
+		t.Fatalf("decode raw schema fixture: %v", err)
+	}
+	return schema
+}
+
 func TestSchemaCanonicalizationPreservesAbsentAndEmptyEnum(t *testing.T) {
 	tests := []struct {
 		name string
@@ -147,10 +201,7 @@ func TestSchemaCanonicalizationPreservesAbsentAndEmptyEnum(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var schema map[string]any
-			if err := json.Unmarshal([]byte(tt.raw), &schema); err != nil {
-				t.Fatalf("decode raw schema fixture: %v", err)
-			}
+			schema := decodeSchemaJSON(t, tt.raw)
 			nodes := make(map[string]contractSchemaNode)
 			canonicalizeSchema(t, "/", schema, false, nodes)
 			if got := enumValue(nodes["/"]); got != tt.want {
@@ -189,14 +240,60 @@ func TestSchemaCanonicalizationPreservesNestedItemConstraints(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var schema map[string]any
-			if err := json.Unmarshal([]byte(tt.raw), &schema); err != nil {
-				t.Fatalf("decode raw schema fixture: %v", err)
-			}
+			schema := decodeSchemaJSON(t, tt.raw)
 			nodes := make(map[string]contractSchemaNode)
 			canonicalizeSchema(t, "/", schema, false, nodes)
 			if got := itemSchemaValue(nodes["/"].ItemSchema); got != tt.want {
 				t.Fatalf("canonical item schema = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSchemaCanonicalizationPreservesPropertyConstraints(t *testing.T) {
+	raw := `{"type":"object","properties":{"value":{"type":"string","pattern":"^x+$","minLength":1}}}`
+	schema := decodeSchemaJSON(t, raw)
+	nodes := make(map[string]contractSchemaNode)
+	canonicalizeSchema(t, "/", schema, false, nodes)
+	if got, want := constraintValue(nodes["/value"].Constraints), `{"minLength":1,"pattern":"^x+$"}`; got != want {
+		t.Fatalf("canonical property constraints = %q, want %q", got, want)
+	}
+	if got := constraintValue(nodes["/"].Constraints); got != contractAbsent {
+		t.Fatalf("canonical root constraints = %q, want %q", got, contractAbsent)
+	}
+}
+
+func TestSchemaCanonicalizationPreservesBooleanPropertySchemas(t *testing.T) {
+	raw := `{"type":"object","properties":{"allowed":true,"blocked":false},"required":["blocked"]}`
+	schema := decodeSchemaJSON(t, raw)
+	nodes := make(map[string]contractSchemaNode)
+	canonicalizeSchema(t, "/", schema, false, nodes)
+	if got := constraintValue(nodes["/allowed"].Constraints); got != "true" {
+		t.Fatalf("allowed property schema = %q, want true", got)
+	}
+	blocked := nodes["/blocked"]
+	if got := constraintValue(blocked.Constraints); got != "false" {
+		t.Fatalf("blocked property schema = %q, want false", got)
+	}
+	if !blocked.Required {
+		t.Fatal("blocked boolean property lost requiredness")
+	}
+}
+
+func TestLogicalJSONTypeDistinguishesIntegerAndNumber(t *testing.T) {
+	tests := []struct {
+		goType string
+		want   string
+	}{
+		{goType: "int", want: "integer"},
+		{goType: "int64", want: "integer"},
+		{goType: "float64", want: "number"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goType, func(t *testing.T) {
+			got, itemType := logicalJSONType(tt.goType)
+			if got != tt.want || itemType != "" {
+				t.Fatalf("logicalJSONType(%q) = (%q, %q), want (%q, empty)", tt.goType, got, itemType, tt.want)
 			}
 		})
 	}
@@ -213,6 +310,18 @@ func TestSchemaCanonicalizationUsesSchemaContext(t *testing.T) {
 			name:      "dependent-required-order-is-semantic-set",
 			left:      `{"dependentRequired":{"card":["billing","security"]}}`,
 			right:     `{"dependentRequired":{"card":["security","billing"]}}`,
+			wantEqual: true,
+		},
+		{
+			name:      "draft-seven-property-dependency-order-is-semantic-set",
+			left:      `{"dependencies":{"card":["billing","security"]}}`,
+			right:     `{"dependencies":{"card":["security","billing"]}}`,
+			wantEqual: true,
+		},
+		{
+			name:      "draft-seven-schema-dependency-is-normalized-as-schema",
+			left:      `{"dependencies":{"card":{"required":["billing","security"]}}}`,
+			right:     `{"dependencies":{"card":{"required":["security","billing"]}}}`,
 			wantEqual: true,
 		},
 		{
@@ -289,9 +398,13 @@ func TestSchemaCanonicalizationUsesSchemaContext(t *testing.T) {
 
 func canonicalSchemaFixture(t *testing.T, raw string) string {
 	t.Helper()
-	var schema map[string]any
-	if err := json.Unmarshal([]byte(raw), &schema); err != nil {
-		t.Fatalf("decode raw schema fixture: %v", err)
+	return canonicalSchemaJSON(t, decodeSchemaJSON(t, raw))
+}
+
+func TestSchemaCanonicalizationPreservesLargeIntegerPrecision(t *testing.T) {
+	left := canonicalSchemaFixture(t, `{"const":9007199254740992}`)
+	right := canonicalSchemaFixture(t, `{"const":9007199254740993}`)
+	if left == right {
+		t.Fatalf("distinct exact integer constraints collapsed to %s", left)
 	}
-	return canonicalSchemaJSON(t, schema)
 }

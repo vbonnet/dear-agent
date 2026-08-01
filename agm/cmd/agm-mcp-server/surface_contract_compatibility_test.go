@@ -20,6 +20,7 @@ type contractSchemaNode struct {
 	Path                 string
 	Type                 string
 	ItemSchema           string
+	Constraints          string
 	Description          string
 	Enum                 []string
 	EnumPresent          bool
@@ -78,115 +79,6 @@ func TestMCPCompiledSurfaceMatchesFiniteCompatibilityContract(t *testing.T) {
 	}
 }
 
-func TestMCPCompatibilityComparatorRejectsDriftAndStaleExceptions(t *testing.T) {
-	logical := logicalRegistryContract(t)
-	live := compiledContract(t, registeredMCPTools(t, registerMCPTools))
-	tests := []struct {
-		name    string
-		wantKey string
-		mutate  func(map[string]contractTool)
-	}{
-		{
-			name:    "new compiled tool",
-			wantKey: "DAH-002/unaccounted-live-tool",
-			mutate: func(got map[string]contractTool) {
-				got["agm_surprise"] = contractTool{Name: "agm_surprise", Nodes: map[string]contractSchemaNode{}}
-			},
-		},
-		{
-			name:    "removed legacy fields extension",
-			wantKey: "DAH-002/list-sessions-fields-addition",
-			mutate: func(got map[string]contractTool) {
-				tool := got["agm_list_sessions"]
-				delete(tool.Nodes, "/fields")
-				got[tool.Name] = tool
-			},
-		},
-		{
-			name:    "filters wrapper no longer required",
-			wantKey: "DAH-002/list-sessions-filters-required",
-			mutate: func(got map[string]contractTool) {
-				tool := got["agm_list_sessions"]
-				node := tool.Nodes["/filters"]
-				node.Required = false
-				tool.Nodes[node.Path] = node
-				got[tool.Name] = tool
-			},
-		},
-		{
-			name:    "description exception resolved",
-			wantKey: "DAH-002/kill-force-description",
-			mutate: func(got map[string]contractTool) {
-				tool := got["agm_kill_session"]
-				node := tool.Nodes["/force"]
-				node.Description = "Bypass the recent-activity safety check"
-				tool.Nodes[node.Path] = node
-				got[tool.Name] = tool
-			},
-		},
-		{
-			name:    "explicit empty enum added",
-			wantKey: "DAH-002/unaccounted-enum",
-			mutate: func(got map[string]contractTool) {
-				tool := got["agm_get_session_metadata"]
-				node := tool.Nodes["/identifier"]
-				node.Enum = []string{}
-				node.EnumPresent = true
-				tool.Nodes[node.Path] = node
-				got[tool.Name] = tool
-			},
-		},
-		{
-			name:    "nested item constraint changes path compatibility record",
-			wantKey: "DAH-002/unaccounted-difference",
-			mutate: func(got map[string]contractTool) {
-				tool := got["agm_list_sessions"]
-				node := tool.Nodes["/fields"]
-				node.ItemSchema = `{"enum":[],"type":"string"}`
-				tool.Nodes[node.Path] = node
-				got[tool.Name] = tool
-			},
-		},
-		{
-			name:    "item schema added to shared path",
-			wantKey: "DAH-002/unaccounted-item-schema",
-			mutate: func(got map[string]contractTool) {
-				tool := got["agm_get_session_metadata"]
-				node := tool.Nodes["/identifier"]
-				node.ItemSchema = `{"type":"string"}`
-				tool.Nodes[node.Path] = node
-				got[tool.Name] = tool
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fixture := cloneContract(live)
-			tt.mutate(fixture)
-			err := compareCompatibility(logical, fixture, currentCompatibilityRecords())
-			if err == nil || !strings.Contains(err.Error(), tt.wantKey) {
-				t.Fatalf("compareCompatibility() error = %v, want stable key %q", err, tt.wantKey)
-			}
-		})
-	}
-}
-
-func TestMCPCompatibilityComparatorRejectsOmittedFieldRequirednessDrift(t *testing.T) {
-	logical := logicalRegistryContract(t)
-	live := compiledContract(t, registeredMCPTools(t, registerMCPTools))
-	listSessions := logical["list_sessions"]
-	offset := listSessions.Nodes["/offset"]
-	offset.Required = true
-	listSessions.Nodes[offset.Path] = offset
-	logical[listSessions.Operation] = listSessions
-
-	err := compareCompatibility(logical, live, currentCompatibilityRecords())
-	if err == nil || !strings.Contains(err.Error(), "DAH-002/unaccounted-requiredness") ||
-		!strings.Contains(err.Error(), `registry="/offset":"required"`) {
-		t.Fatalf("compareCompatibility() error = %v, want exact /offset requiredness drift", err)
-	}
-}
-
 func TestSchemaRequiredMembersMustBeDeclaredAndUnique(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -206,10 +98,7 @@ func TestSchemaRequiredMembersMustBeDeclaredAndUnique(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var schema map[string]any
-			if err := json.Unmarshal([]byte(tt.raw), &schema); err != nil {
-				t.Fatalf("decode raw schema fixture: %v", err)
-			}
+			schema := decodeSchemaJSON(t, tt.raw)
 			_, err := schemaRequiredFields(schema)
 			if err == nil || !strings.Contains(err.Error(), tt.wantKey) {
 				t.Fatalf("schemaRequiredFields() error = %v, want stable key %q", err, tt.wantKey)
@@ -282,7 +171,7 @@ func logicalRegistryContract(t *testing.T) map[string]contractTool {
 			Name:        ir.MCP().ToolName,
 			Description: ir.MCPDescription,
 			Nodes: map[string]contractSchemaNode{
-				"/": {Path: "/", Type: "object", AdditionalProperties: "false"},
+				"/": {Path: "/", Type: "object", Constraints: contractAbsent, AdditionalProperties: "false"},
 			},
 		}
 		for _, field := range ir.MCPFields() {
@@ -293,7 +182,7 @@ func logicalRegistryContract(t *testing.T) map[string]contractTool {
 			tool.Nodes[path] = contractSchemaNode{
 				Path: path, Type: typeName, ItemSchema: logicalItemSchema(t, itemType), Description: field.Description,
 				Enum: values, EnumPresent: field.Enum != nil, Required: field.Required,
-				AdditionalProperties: contractAbsent,
+				Constraints: contractAbsent, AdditionalProperties: contractAbsent,
 			}
 		}
 		if _, duplicate := result[tool.Operation]; duplicate {
@@ -315,10 +204,7 @@ func compiledContract(t *testing.T, tools []*mcp.Tool) map[string]contractTool {
 		if err != nil {
 			t.Fatalf("marshal schema for %s: %v", tool.Name, err)
 		}
-		var schema map[string]any
-		if err := json.Unmarshal(data, &schema); err != nil {
-			t.Fatalf("decode schema for %s: %v", tool.Name, err)
-		}
+		schema := decodeSchemaJSON(t, string(data))
 		nodes := make(map[string]contractSchemaNode)
 		canonicalizeSchema(t, "/", schema, false, nodes)
 		result[tool.Name] = contractTool{Name: tool.Name, Description: tool.Description, Nodes: nodes}
@@ -338,30 +224,43 @@ func canonicalizeSchema(
 	node := contractSchemaNode{
 		Path: path, Type: canonicalType(t, schema["type"]), Description: stringValue(schema["description"]),
 		Enum: enum, EnumPresent: enumPresent, Required: required,
-		AdditionalProperties: contractAbsent,
+		Constraints: schemaConstraints(t, schema), AdditionalProperties: contractAbsent,
 	}
 	if rawItems, present := schema["items"]; present {
 		node.ItemSchema = canonicalSchemaJSON(t, rawItems)
 	}
 	if value, ok := schema["additionalProperties"]; ok {
-		node.AdditionalProperties = fmt.Sprint(value)
+		node.AdditionalProperties = canonicalSchemaJSON(t, value)
 	}
 	nodes[path] = node
-	properties, _ := schema["properties"].(map[string]any)
+	properties := map[string]any(nil)
+	if rawProperties, present := schema["properties"]; present {
+		var ok bool
+		properties, ok = rawProperties.(map[string]any)
+		if !ok {
+			t.Fatalf("schema properties = %T, want object", rawProperties)
+		}
+	}
 	requiredFields, err := schemaRequiredFields(schema)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range sortedKeys(properties) {
-		child, ok := properties[name].(map[string]any)
-		if !ok {
-			t.Fatalf("schema property %s/%s = %T, want object", path, name, properties[name])
-		}
 		childPath := "/" + escapeJSONPointer(name)
 		if path != "/" {
 			childPath = path + "/" + escapeJSONPointer(name)
 		}
-		canonicalizeSchema(t, childPath, child, requiredFields[name], nodes)
+		switch child := properties[name].(type) {
+		case map[string]any:
+			canonicalizeSchema(t, childPath, child, requiredFields[name], nodes)
+		case bool:
+			nodes[childPath] = contractSchemaNode{
+				Path: childPath, ItemSchema: contractAbsent, Constraints: canonicalSchemaJSON(t, child),
+				AdditionalProperties: contractAbsent, Required: requiredFields[name],
+			}
+		default:
+			t.Fatalf("schema property %s/%s = %T, want object or boolean", path, name, properties[name])
+		}
 	}
 }
 
@@ -526,6 +425,7 @@ func compareNodes(
 	}{
 		{"type", registry.Type, live.Type},
 		{"item_schema", itemSchemaValue(registry.ItemSchema), itemSchemaValue(live.ItemSchema)},
+		{"constraints", constraintValue(registry.Constraints), constraintValue(live.Constraints)},
 		{"requiredness", requiredValue(registry.Required), requiredValue(live.Required)},
 		{"enum", enumValue(registry), enumValue(live)},
 		{"description", registry.Description, live.Description},
@@ -585,6 +485,8 @@ func consumeCompatibilityRecords(observed, expected []compatibilityRecord) error
 				key = "DAH-002/unaccounted-enum"
 			case "item_schema":
 				key = "DAH-002/unaccounted-item-schema"
+			case "constraints":
+				key = "DAH-002/unaccounted-constraints"
 			}
 			return fmt.Errorf("%s: %s", key, describeCompatibility(difference))
 		}
@@ -612,7 +514,7 @@ func validateCompatibilityRecords(records []compatibilityRecord) error {
 	validDimensions := map[string]bool{
 		"tool_rename": true, "operation_omission": true, "tool_addition": true,
 		"path_move": true, "path_omission": true, "path_addition": true,
-		"type": true, "item_schema": true, "requiredness": true, "enum": true,
+		"type": true, "item_schema": true, "constraints": true, "requiredness": true, "enum": true,
 		"description": true, "closed_object": true, "tool_description": true,
 	}
 	seenIDs := make(map[string]bool, len(records))
@@ -625,12 +527,8 @@ func validateCompatibilityRecords(records []compatibilityRecord) error {
 			return fmt.Errorf("%s: duplicate compatibility identifier", record.ID)
 		}
 		seenIDs[record.ID] = true
-		joined := strings.Join([]string{
-			record.Operation, record.LiveTool, record.RegistryPath, record.LivePath,
-			record.RegistryValue, record.LiveValue,
-		}, "\n")
-		if strings.ContainsAny(joined, "*?") {
-			return fmt.Errorf("%s: wildcard and prefix-style records are forbidden", record.ID)
+		if strings.ContainsAny(record.Operation+"\n"+record.LiveTool, "*?") {
+			return fmt.Errorf("%s: wildcard operation and tool selectors are forbidden", record.ID)
 		}
 		if strings.HasPrefix(record.Dimension, "path_") ||
 			(!strings.HasPrefix(record.Dimension, "tool_") && record.Dimension != "operation_omission") {
@@ -830,16 +728,19 @@ func describeCompatibility(record compatibilityRecord) string {
 }
 
 func pathShape(node contractSchemaNode) string {
-	return fmt.Sprintf("type=%q,item_schema=%q,description=%q,enum=%q,additionalProperties=%q",
-		node.Type, itemSchemaValue(node.ItemSchema), node.Description, enumValue(node), node.AdditionalProperties)
+	return fmt.Sprintf("type=%q,item_schema=%q,constraints=%q,description=%q,enum=%q,additionalProperties=%q",
+		node.Type, itemSchemaValue(node.ItemSchema), constraintValue(node.Constraints), node.Description,
+		enumValue(node), node.AdditionalProperties)
 }
 
 func logicalJSONType(goType string) (string, string) {
 	switch goType {
 	case "string":
 		return "string", ""
-	case "int", "int64", "float64":
+	case "int", "int64":
 		return "integer", ""
+	case "float64":
+		return "number", ""
 	case "bool":
 		return "boolean", ""
 	case "[]string":

@@ -84,14 +84,14 @@ func exactExternalToolContracts() map[string]contractTool {
 
 func exactExternalRoot() contractSchemaNode {
 	return contractSchemaNode{
-		Path: "/", Type: "object", ItemSchema: contractAbsent, Description: "",
+		Path: "/", Type: "object", ItemSchema: contractAbsent, Constraints: contractAbsent, Description: "",
 		AdditionalProperties: "false", Required: false,
 	}
 }
 
 func exactExternalField(path, typeName, description string, required bool) contractSchemaNode {
 	return contractSchemaNode{
-		Path: path, Type: typeName, ItemSchema: contractAbsent, Description: description,
+		Path: path, Type: typeName, ItemSchema: contractAbsent, Constraints: contractAbsent, Description: description,
 		AdditionalProperties: contractAbsent, Required: required,
 	}
 }
@@ -163,6 +163,13 @@ func TestExactExternalMCPToolContractsRejectDrift(t *testing.T) {
 			wantKey: "DAH-002/external-tool-schema-requiredness",
 			mutate: externalNodeMutation("agm_create_session", "/title", func(node *contractSchemaNode) {
 				node.Required = true
+			}),
+		},
+		{
+			name:    "constraints",
+			wantKey: "DAH-002/external-tool-schema-constraints",
+			mutate: externalNodeMutation("agm_create_session", "/title", func(node *contractSchemaNode) {
+				node.Constraints = `{"minLength":1}`
 			}),
 		},
 		{
