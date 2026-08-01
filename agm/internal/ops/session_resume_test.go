@@ -469,6 +469,9 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 	if !strings.Contains(launch.Command, want) {
 		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
 	}
+	if !strings.Contains(launch.Command, "--remote-resume") {
+		t.Fatalf("prepareResumeLaunch() command = %q, want cold remote resume marker", launch.Command)
+	}
 }
 
 func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {

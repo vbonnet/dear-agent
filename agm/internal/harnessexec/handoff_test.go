@@ -1156,6 +1156,43 @@ func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
 		t.Fatalf("mismatched Codex launch error = %v", err)
 	}
 
+	bound, err = PrepareCodexCommand(CodexLaunch{
+		SessionName:           "bound-cold-remote-resume",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		ResumeID:              "thread-123",
+		Remote:                true,
+		RemoteResume:          true,
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bound-cold-remote-resume", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare cold remote resume Codex bypass: %v", err)
+	}
+	bindProof(bound, testCodexHookProof("bound-cold-remote-resume", hookTrustReason, hookTrustActor))
+	err = Run(CodexProtocol, []string{
+		"--handoff", bound.path,
+		"--session", "bound-cold-remote-resume",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--resume-id", "thread-123",
+		"--remote",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested Codex launch") {
+		t.Fatalf("cold remote resume marker mutation error = %v", err)
+	}
+
 	err = Run(CodexProtocol, []string{
 		"--session", "forged-bypass",
 		"--model", "gpt-test",

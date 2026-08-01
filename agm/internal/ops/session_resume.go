@@ -781,6 +781,8 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		WorkDir:        health.WorktreePath,
 		PermissionMode: m.PermissionMode,
 		Codex:          m.Codex,
+		CodexRemoteResume: harnessName == "codex-cli" && m.Codex != nil &&
+			m.Codex.SessionID != "",
 	}
 	switch harnessName {
 	case "claude-code":
