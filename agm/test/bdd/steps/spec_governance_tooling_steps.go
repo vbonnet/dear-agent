@@ -39,6 +39,8 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM runs the focused non-verdict SPEC audit lead unit check$`, exerciseNonVerdictSPECAuditLeads)
 	ctx.Step(`^AGM runs the focused reciprocal SPEC and BDD diagnostic unit check$`, exerciseReciprocalSPECBDDDiagnostics)
 	ctx.Step(`^AGM runs the focused pinned finding validation unit check$`, exercisePinnedSPECFindingValidation)
+	ctx.Step(`^AGM runs the focused v2 inventory and ledger unit check$`, exerciseV2InventoryAndLedger)
+	ctx.Step(`^AGM runs the focused SPEC audit platform applicability unit check$`, exerciseSPECAuditPlatformApplicability)
 	ctx.Step(`^AGM runs the focused bounded offline rendering unit check$`, exerciseBoundedOfflineSPECAuditRendering)
 	ctx.Step(`^AGM runs the focused read-only audit boundary unit check$`, exerciseReadOnlySPECAuditBoundary)
 	ctx.Step(`^the focused SPEC audit unit check should pass$`, specGovernanceBehaviorShouldPass)
@@ -58,6 +60,14 @@ func exerciseReciprocalSPECBDDDiagnostics(ctx context.Context) error {
 
 func exercisePinnedSPECFindingValidation(ctx context.Context) error {
 	return runSpecAuditGoTests(ctx, "TestValidatePinsFindingsToGitResolvedInventory|TestPinnedValidationRejectsForgedEvidenceAndUnsafeVerdicts|TestPositiveOwnershipPlanRejectsDuplicateRetentionAndDivergentApplicability|TestPinnedValidationRejectsIncompleteSharedFeatureAndPreservationTargets|TestPinnedValidationRequiresEverySelectedReciprocalFeatureInRetirementPlan")
+}
+
+func exerciseV2InventoryAndLedger(ctx context.Context) error {
+	return runSpecAuditGoTests(ctx, "TestV2InventoryAndDecisionLedger")
+}
+
+func exerciseSPECAuditPlatformApplicability(ctx context.Context) error {
+	return runSpecAuditGoTests(ctx, "TestValidateAndRenderPlatformApplicability")
 }
 
 func exerciseBoundedOfflineSPECAuditRendering(ctx context.Context) error {

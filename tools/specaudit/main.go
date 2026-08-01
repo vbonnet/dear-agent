@@ -10,6 +10,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -17,6 +20,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -30,7 +34,14 @@ import (
 
 const schemaVersion = "spec-audit/v2"
 
+const (
+	inventoryDocumentKind = "inventory"
+	ledgerDocumentKind    = "decision-ledger"
+)
+
 const gitEvidenceTrustDisclosure = "The collector trusts the PATH-selected Git executable, repository Git metadata, the common object store, and configured object alternates. It disables replacement objects and lazy fetching and resolves evidence from the pinned commit through Git; it does not independently authenticate source provenance or object-store integrity."
+
+const collectorExecutionDisclosure = "Collector execution is self-reported runtime/build metadata only. It does not attest the collector source, compiler, repository, or binary provenance."
 
 const (
 	canonicalActiveHarnessRegistryPath = "agm/internal/harnessregistry/registry.go"
@@ -49,6 +60,11 @@ const (
 	maxGitExecutableIdentityBytes      = 128 * 1024 * 1024
 	maxAlternateConfigBytes            = 1024 * 1024
 	maxAlternateObjectRoutes           = 1024
+	maxSupportingEvidenceRecords       = 512
+	maxSupportingEvidencePaths         = 256
+	maxSupportingEvidenceBlobBytes     = 4 * 1024 * 1024
+	maxSupportingEvidenceBytes         = 32 * 1024 * 1024
+	maxGitPathBytes                    = 4096
 )
 
 type corpusBudget struct {
@@ -135,21 +151,95 @@ func mustEARSLinter() *earslint.Linter {
 }
 
 type report struct {
-	SchemaVersion string        `json:"schema_version"`
-	Snapshot      snapshot      `json:"snapshot"`
-	Scope         scope         `json:"scope"`
-	Summary       summary       `json:"summary"`
-	Methodology   methodology   `json:"methodology"`
-	Inventory     []specFile    `json:"inventory,omitempty"`
-	Features      []featureFile `json:"features,omitempty"`
-	Seeds         []seed        `json:"seeds,omitempty"`
-	Candidates    []finding     `json:"candidates"`
-	NonCandidates []finding     `json:"non_candidates"`
-	Limitations   []string      `json:"limitations"`
+	SchemaVersion                string              `json:"schema_version"`
+	DocumentKind                 string              `json:"document_kind"`
+	InventoryRef                 string              `json:"inventory_ref,omitempty"`
+	Snapshot                     snapshot            `json:"snapshot"`
+	Scope                        scope               `json:"scope"`
+	Summary                      summary             `json:"summary"`
+	Methodology                  methodology         `json:"methodology"`
+	Inventory                    []specFile          `json:"inventory,omitempty"`
+	Features                     []featureFile       `json:"features,omitempty"`
+	Seeds                        []seed              `json:"seeds,omitempty"`
+	Candidates                   []finding           `json:"candidates,omitempty"`
+	NonCandidates                []finding           `json:"non_candidates,omitempty"`
+	Exclusions                   []reviewExclusion   `json:"reviewer_exclusions,omitempty"`
+	Limitations                  []string            `json:"limitations"`
+	CollectorExecution           *collectorExecution `json:"collector_execution,omitempty"`
+	CollectorExecutionDisclosure string              `json:"collector_execution_disclosure,omitempty"`
 
 	// inventoryPayloadPresent preserves whether a decoded semantic document
 	// embedded an inventory field as null. Non-nil fields are caught directly.
 	inventoryPayloadPresent bool
+	decisionPayloadPresent  bool
+}
+
+// inventoryDocument is the only persisted collector output. It deliberately
+// contains no reviewer classification, exclusion, finding, or recommendation.
+type inventoryDocument struct {
+	SchemaVersion                string             `json:"schema_version"`
+	DocumentKind                 string             `json:"document_kind"`
+	Snapshot                     snapshot           `json:"snapshot"`
+	Scope                        collectionScope    `json:"scope"`
+	Summary                      inventorySummary   `json:"summary"`
+	Methodology                  methodology        `json:"methodology"`
+	CollectorExecution           collectorExecution `json:"collector_execution"`
+	CollectorExecutionDisclosure string             `json:"collector_execution_disclosure"`
+	Inventory                    []specFile         `json:"inventory"`
+	Features                     []featureFile      `json:"features"`
+	Seeds                        []seed             `json:"seeds"`
+	Limitations                  []string           `json:"limitations"`
+}
+
+type collectionScope struct {
+	Roots         []string `json:"roots"`
+	ActiveMembers []string `json:"active_members"`
+}
+
+type inventorySummary struct {
+	SpecFiles    int `json:"spec_files"`
+	Requirements int `json:"requirements"`
+	Diagnostics  int `json:"diagnostics"`
+}
+
+// decisionLedger is the only persisted reviewer input. It binds immutable
+// collection through inventory_ref and cannot repeat corpus facts or collector
+// trust inputs.
+type decisionLedger struct {
+	SchemaVersion string            `json:"schema_version"`
+	DocumentKind  string            `json:"document_kind"`
+	InventoryRef  string            `json:"inventory_ref"`
+	ReviewScope   reviewScope       `json:"review_scope"`
+	Summary       decisionSummary   `json:"summary"`
+	Methodology   reviewMethodology `json:"methodology"`
+	Candidates    []finding         `json:"candidates"`
+	NonCandidates []finding         `json:"non_candidates"`
+	Limitations   []string          `json:"limitations"`
+}
+
+type reviewScope struct {
+	Exclusions []reviewExclusion `json:"exclusions"`
+}
+type decisionSummary struct {
+	CandidateCount int            `json:"candidate_count"`
+	ByVerdict      map[string]int `json:"by_verdict"`
+}
+type reviewMethodology struct {
+	SemanticReview string   `json:"semantic_review"`
+	Reproduce      []string `json:"reproduce"`
+}
+
+// collectorExecution is a self-reported runtime disclosure. It is not an
+// attestation of the source, compiler, repository, or binary provenance.
+type collectorExecution struct {
+	BuildInfoAvailable   bool   `json:"build_info_available"`
+	VCSMetadataAvailable bool   `json:"vcs_metadata_available"`
+	ModulePath           string `json:"module_path,omitempty"`
+	VCSRevision          string `json:"vcs_revision,omitempty"`
+	VCSModified          *bool  `json:"vcs_modified,omitempty"`
+	GoToolchain          string `json:"go_toolchain"`
+	GOOS                 string `json:"goos"`
+	GOARCH               string `json:"goarch"`
 }
 
 type snapshot struct {
@@ -169,6 +259,15 @@ type scope struct {
 type exclusion struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+}
+
+// reviewExclusion records reviewer classification without suppressing
+// collection. It is never deletion authority or a waiver for owner evidence.
+type reviewExclusion struct {
+	Path               string               `json:"path"`
+	Classification     string               `json:"classification"`
+	Rationale          string               `json:"rationale"`
+	SupportingEvidence []supportingEvidence `json:"supporting_evidence"`
 }
 
 type summary struct {
@@ -245,6 +344,43 @@ type bddRef struct {
 	Line int    `json:"line"`
 }
 
+const pendingMaintainerApproval = "pending-maintainer-approval"
+
+type ownershipPlan struct {
+	Status                 string                    `json:"status"`
+	DeletionAuthority      bool                      `json:"deletion_authority"`
+	OwnerActions           []ownerPreservation       `json:"owner_actions"`
+	Requirements           []requirementPreservation `json:"requirements"`
+	Features               []featurePreservation     `json:"features"`
+	ApplicabilityBasis     string                    `json:"applicability_basis"`
+	ApplicabilityRationale string                    `json:"applicability_rationale"`
+	Applicability          []applicability           `json:"applicability"`
+}
+
+type ownerPreservation struct {
+	OwnerPath   string `json:"owner_path"`
+	Disposition string `json:"disposition"`
+	Rationale   string `json:"rationale"`
+}
+
+type requirementPreservation struct {
+	ContractEvidence    contractEvidence `json:"contract_evidence"`
+	Disposition         string           `json:"disposition"`
+	TargetPath          string           `json:"target_path"`
+	TargetRequirementID string           `json:"target_requirement_id"`
+	TargetState         string           `json:"target_state"`
+	Rationale           string           `json:"rationale"`
+}
+
+type featurePreservation struct {
+	SourceOwner string `json:"source_owner"`
+	Path        string `json:"path"`
+	Disposition string `json:"disposition"`
+	TargetPath  string `json:"target_path"`
+	TargetState string `json:"target_state"`
+	Rationale   string `json:"rationale"`
+}
+
 type seed struct {
 	ID       string     `json:"id"`
 	Kind     string     `json:"kind"`
@@ -253,83 +389,78 @@ type seed struct {
 }
 
 type finding struct {
-	ID                     string              `json:"id"`
-	Rank                   int                 `json:"rank,omitempty"`
-	Title                  string              `json:"title"`
-	Verdict                string              `json:"verdict"`
-	Relationship           string              `json:"relationship"`
-	Classification         string              `json:"classification"`
-	Confidence             string              `json:"confidence"`
-	Strength               string              `json:"strength"`
-	CurrentOwners          []ownerClaim        `json:"current_owners"`
-	OwnershipCompleteness  string              `json:"ownership_completeness,omitempty"`
-	ProposedOwner          *proposedOwnerClaim `json:"proposed_owner,omitempty"`
-	OwnershipPlan          *ownershipPlan      `json:"ownership_plan,omitempty"`
-	SharedOutcome          string              `json:"shared_outcome"`
-	MaterialDifferences    []string            `json:"material_differences"`
-	Evidence               []evidence          `json:"evidence"`
-	ApplicabilityBasis     string              `json:"applicability_basis,omitempty"`
-	ApplicabilityRationale string              `json:"applicability_rationale,omitempty"`
-	Applicability          []applicability     `json:"applicability"`
-	BDD                    bddImpact           `json:"bdd"`
-	Recommendation         []string            `json:"recommendation"`
-	Risk                   string              `json:"risk"`
-	Limitations            []string            `json:"limitations"`
-	Decision               string              `json:"decision"`
-	Boundary               string              `json:"boundary,omitempty"`
+	ID                     string               `json:"id"`
+	Rank                   int                  `json:"rank,omitempty"`
+	Title                  string               `json:"title"`
+	Verdict                string               `json:"verdict"`
+	Relationship           string               `json:"relationship"`
+	Classification         string               `json:"classification"`
+	Confidence             string               `json:"confidence"`
+	Strength               string               `json:"strength"`
+	CurrentOwners          []ownerClaim         `json:"current_owners"`
+	OwnershipCompleteness  string               `json:"ownership_completeness,omitempty"`
+	ProposedOwner          *proposedOwnerClaim  `json:"proposed_owner,omitempty"`
+	SharedOutcome          string               `json:"shared_outcome"`
+	MaterialDifferences    []string             `json:"material_differences"`
+	ContractEvidence       []contractEvidence   `json:"contract_evidence,omitempty"`
+	SupportingEvidence     []supportingEvidence `json:"supporting_evidence,omitempty"`
+	Evidence               []evidence           `json:"-"`
+	ApplicabilityBasis     string               `json:"applicability_basis,omitempty"`
+	ApplicabilityRationale string               `json:"applicability_rationale,omitempty"`
+	Applicability          []applicability      `json:"applicability"`
+	BDD                    bddImpact            `json:"bdd"`
+	Recommendation         []string             `json:"recommendation"`
+	Risk                   string               `json:"risk"`
+	Limitations            []string             `json:"limitations"`
+	Decision               string               `json:"decision"`
+	DecisionStatus         string               `json:"decision_status"`
+	OwnershipPlan          *ownershipPlan       `json:"ownership_plan,omitempty"`
+	Boundary               string               `json:"boundary,omitempty"`
 }
 
 type evidence struct {
+	Kind          string `json:"kind"`
 	Path          string `json:"path"`
 	Line          int    `json:"line"`
 	RequirementID string `json:"requirement_id,omitempty"`
 	Excerpt       string `json:"excerpt"`
 }
 
+// contractEvidence is the only persisted evidence type that can establish an
+// owner, proposed owner, or applicability claim.
+type contractEvidence struct {
+	Path          string `json:"path"`
+	Line          int    `json:"line"`
+	RequirementID string `json:"requirement_id"`
+	Excerpt       string `json:"excerpt"`
+}
+
+type contractEvidenceKey struct {
+	path          string
+	line          int
+	requirementID string
+	excerpt       string
+}
+
+// supportingEvidence is a pinned tracked-blob citation. Its shape cannot
+// carry a requirement identifier, preventing it from impersonating a contract.
+type supportingEvidence struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Excerpt string `json:"excerpt"`
+}
+
 type applicability struct {
-	Member      string     `json:"member"`
-	Disposition string     `json:"disposition"`
-	Evidence    []evidence `json:"evidence"`
+	Member             string               `json:"member"`
+	Disposition        string               `json:"disposition"`
+	ContractEvidence   []contractEvidence   `json:"contract_evidence,omitempty"`
+	SupportingEvidence []supportingEvidence `json:"supporting_evidence,omitempty"`
+	Evidence           []evidence           `json:"-"`
 }
 
 type bddImpact struct {
-	Features              []string `json:"features"`
-	SharedContractFeature string   `json:"shared_contract_feature,omitempty"`
-	Consequence           string   `json:"consequence"`
-}
-
-// ownershipPlan records a migration proposal for maintainer review. It is
-// deliberately not an authorization to edit or remove a current owner.
-type ownershipPlan struct {
-	Approval      string               `json:"approval"`
-	CurrentOwners []ownershipPlanOwner `json:"current_owners"`
-}
-
-type ownershipPlanOwner struct {
-	Path         string            `json:"path"`
-	Action       string            `json:"action"`
-	Rationale    string            `json:"rationale"`
-	Preservation *preservationPlan `json:"preservation,omitempty"`
-}
-
-type preservationPlan struct {
-	Requirements       []requirementPreservation `json:"requirements"`
-	BDD                []bddPreservation         `json:"bdd"`
-	ApplicabilityBasis string                    `json:"applicability_basis"`
-	Applicability      []applicability           `json:"applicability"`
-}
-
-type requirementPreservation struct {
-	Source      evidence `json:"source"`
-	TargetID    string   `json:"target_id"`
-	TargetState string   `json:"target_state"`
-	Strategy    string   `json:"strategy"`
-}
-
-type bddPreservation struct {
-	Feature     string `json:"feature"`
-	SourceOwner string `json:"source_owner"`
-	TargetOwner string `json:"target_owner"`
+	Features    []string `json:"features"`
+	Consequence string   `json:"consequence"`
 }
 
 func main() {
@@ -384,11 +515,12 @@ func runInventory(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "specaudit inventory: %v\n", err)
 		return 2
 	}
-	if err := validateReport(report); err != nil {
+	document := inventoryDocumentFromReport(report)
+	if err := validateInventoryDocumentV2(document); err != nil {
 		fmt.Fprintf(stderr, "specaudit inventory: generated invalid report: %v\n", err)
 		return 1
 	}
-	data, err := marshalReportWithLimit(report, maxArtifactOutputBytes)
+	data, err := marshalReportWithLimit(document, maxArtifactOutputBytes)
 	if err != nil {
 		fmt.Fprintf(stderr, "specaudit inventory: encode: %v\n", err)
 		return 2
@@ -417,21 +549,29 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "specaudit validate: -inventory and -repo are required")
 		return 2
 	}
-	auditReport, err := readReport(*input)
+	if err := requireAuthenticatedInputPlatform(); err != nil {
+		fmt.Fprintf(stderr, "specaudit validate: %v\n", err)
+		return 2
+	}
+	ledger, err := readDecisionLedgerV2(*input)
 	if err != nil {
 		fmt.Fprintf(stderr, "specaudit validate: %v\n", err)
 		return 2
 	}
-	if err := validateSemanticReport(auditReport); err != nil {
-		fmt.Fprintf(stderr, "specaudit validate: %v\n", err)
-		return 1
-	}
 	{
-		inventoryReport, inventoryErr := readReport(*inventoryPath)
+		inventoryDocument, inventoryErr := readInventoryDocumentV2(*inventoryPath)
 		if inventoryErr != nil {
 			fmt.Fprintf(stderr, "specaudit validate: read inventory: %v\n", inventoryErr)
 			return 2
 		}
+		inventoryRef, inventoryErr := canonicalInventoryRefV2(inventoryDocument)
+		if inventoryErr != nil || ledger.InventoryRef != inventoryRef {
+			fmt.Fprintln(stderr, "specaudit validate: decision ledger inventory_ref does not match the supplied canonical inventory digest")
+			return 1
+		}
+		inventoryReport := reportFromInventoryDocument(inventoryDocument)
+		auditReport := reviewReportFromLedger(ledger, inventoryReport)
+		auditReport.InventoryRef, _ = canonicalInventoryRef(inventoryReport)
 		if inventoryErr = validateAgainstInventory(auditReport, inventoryReport); inventoryErr != nil {
 			fmt.Fprintf(stderr, "specaudit validate: %v\n", inventoryErr)
 			return 1
@@ -441,9 +581,13 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "specaudit validate: %v\n", inventoryErr)
 				return 1
 			}
+			if inventoryErr = validateSupportingEvidenceAgainstRepo(auditReport, inventoryReport, *repoPath); inventoryErr != nil {
+				fmt.Fprintf(stderr, "specaudit validate: %v\n", inventoryErr)
+				return 1
+			}
 		}
 	}
-	fmt.Fprintln(stdout, "specaudit: valid spec-audit/v2 report")
+	fmt.Fprintln(stdout, "specaudit: valid spec-audit/v2 decision ledger")
 	return 0
 }
 
@@ -464,22 +608,31 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "specaudit render: -inventory and -repo are required")
 		return 2
 	}
-	auditReport, err := readReport(*input)
+	if err := requireAuthenticatedInputPlatform(); err != nil {
+		fmt.Fprintf(stderr, "specaudit render: %v\n", err)
+		return 2
+	}
+	ledger, err := readDecisionLedgerV2(*input)
 	if err != nil {
 		fmt.Fprintf(stderr, "specaudit render: %v\n", err)
 		return 2
 	}
-	if err := validateSemanticReport(auditReport); err != nil {
-		fmt.Fprintf(stderr, "specaudit render: %v\n", err)
-		return 1
-	}
 	var inventoryReport *report
+	var auditReport report
 	{
-		decodedInventory, inventoryErr := readReport(*inventoryPath)
+		inventoryDocument, inventoryErr := readInventoryDocumentV2(*inventoryPath)
 		if inventoryErr != nil {
 			fmt.Fprintf(stderr, "specaudit render: read inventory: %v\n", inventoryErr)
 			return 2
 		}
+		inventoryRef, inventoryErr := canonicalInventoryRefV2(inventoryDocument)
+		if inventoryErr != nil || ledger.InventoryRef != inventoryRef {
+			fmt.Fprintln(stderr, "specaudit render: decision ledger inventory_ref does not match the supplied canonical inventory digest")
+			return 1
+		}
+		decodedInventory := reportFromInventoryDocument(inventoryDocument)
+		auditReport = reviewReportFromLedger(ledger, decodedInventory)
+		auditReport.InventoryRef, _ = canonicalInventoryRef(decodedInventory)
 		if inventoryErr = validateAgainstInventory(auditReport, decodedInventory); inventoryErr != nil {
 			fmt.Fprintf(stderr, "specaudit render: %v\n", inventoryErr)
 			return 1
@@ -489,10 +642,14 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "specaudit render: %v\n", inventoryErr)
 				return 1
 			}
+			if inventoryErr = validateSupportingEvidenceAgainstRepo(auditReport, decodedInventory, *repoPath); inventoryErr != nil {
+				fmt.Fprintf(stderr, "specaudit render: %v\n", inventoryErr)
+				return 1
+			}
 		}
 		inventoryReport = &decodedInventory
 	}
-	htmlOutput, err := renderHTMLWithLimit(auditReport, inventoryReport, maxArtifactOutputBytes)
+	htmlOutput, err := renderHTMLWithLimit(presentationReport(auditReport, *inventoryReport), inventoryReport, maxArtifactOutputBytes)
 	if err != nil {
 		fmt.Fprintf(stderr, "specaudit render: %v\n", err)
 		return 2
@@ -648,6 +805,7 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 	}
 	return report{
 		SchemaVersion: schemaVersion,
+		DocumentKind:  inventoryDocumentKind,
 		Snapshot:      snapshot{Repository: strings.TrimSpace(repository), Revision: commit, RevisionCommittedAt: revisionCommittedAt},
 		Scope:         scope{Roots: []string{"."}, Excluded: []exclusion{}, ActiveMembers: active},
 		Summary:       summary{SpecFiles: len(files), Requirements: requirementCount, Diagnostics: diagnosticCount, CandidateCount: 0, ByVerdict: map[string]int{}},
@@ -659,13 +817,56 @@ func inventoryWithLimits(repoPath, repository, revision string, limits inventory
 			GitTrustInputs:   gitTrustInputs,
 			Reproduce:        []string{fmt.Sprintf("go run ./tools/specaudit inventory -repo . -repository %s -revision %s", strings.TrimSpace(repository), commit)},
 		},
-		Inventory:     files,
-		Features:      features,
-		Seeds:         collectSeeds(files, active),
-		Candidates:    []finding{},
-		NonCandidates: []finding{},
-		Limitations:   activeLimitations,
+		CollectorExecution:           ptrCollectorExecution(currentCollectorExecution()),
+		CollectorExecutionDisclosure: collectorExecutionDisclosure,
+		Inventory:                    files,
+		Features:                     features,
+		Seeds:                        collectSeeds(files, active),
+		Limitations:                  activeLimitations,
 	}, nil
+}
+
+func currentCollectorExecution() collectorExecution {
+	execution := collectorExecution{GoToolchain: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		execution.BuildInfoAvailable = true
+		execution.ModulePath = info.Main.Path
+		if info.GoVersion != "" {
+			execution.GoToolchain = info.GoVersion
+		}
+		var revision string
+		var modified *bool
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				revision = setting.Value
+			case "vcs.modified":
+				parsed, err := strconv.ParseBool(setting.Value)
+				if err == nil {
+					modified = &parsed
+				}
+			}
+		}
+		if shaPattern.MatchString(revision) && modified != nil {
+			execution.VCSMetadataAvailable = true
+			execution.VCSRevision = revision
+			execution.VCSModified = modified
+		}
+	}
+	return execution
+}
+
+func ptrCollectorExecution(value collectorExecution) *collectorExecution { return &value }
+
+func requireAuthenticatedInputPlatform() error {
+	return authenticatedInputPlatform(runtime.GOOS)
+}
+
+func authenticatedInputPlatform(goos string) error {
+	if goos != "darwin" && goos != "linux" {
+		return fmt.Errorf("validate and render are supported only on darwin or linux; %s is not authenticated by no-follow descriptor traversal", goos)
+	}
+	return nil
 }
 
 func selectPinnedBlobs(treeOutput []byte, budget *corpusBudget) ([]pinnedBlob, error) {
@@ -703,8 +904,8 @@ func selectPinnedBlobs(treeOutput []byte, budget *corpusBudget) ([]pinnedBlob, e
 }
 
 func pinnedGitBlobSize(fields []string, path string) (int64, error) {
-	if fields[1] != "blob" || !shaPattern.MatchString(fields[2]) {
-		return 0, fmt.Errorf("pinned inventory object %q is not a Git blob with a 40-hex object ID", path)
+	if !regularGitBlobMode(fields[0]) || fields[1] != "blob" || !shaPattern.MatchString(fields[2]) {
+		return 0, fmt.Errorf("pinned inventory object %q is not a regular Git blob with a 40-hex object ID", path)
 	}
 	if fields[3] == "-" || fields[3] == "BAD" {
 		return 0, fmt.Errorf("pinned inventory object %s for %q is a missing object; lazy fetching is disabled", fields[2], path)
@@ -715,6 +916,8 @@ func pinnedGitBlobSize(fields []string, path string) (int64, error) {
 	}
 	return size, nil
 }
+
+func regularGitBlobMode(mode string) bool { return mode == "100644" || mode == "100755" }
 
 func readPinnedBlobBodies(ctx context.Context, executable gitExecutable, root string, blobs []pinnedBlob, corpusLimit int64, inventoryWallTime time.Duration) (map[string][]byte, error) {
 	if corpusLimit <= 0 {
@@ -809,12 +1012,14 @@ func pinnedBodyForPath(blobs []pinnedBlob, bodies map[string][]byte, path string
 
 func activeMembersFromPinnedBodies(blobs []pinnedBlob, bodies map[string][]byte) ([]string, []string) {
 	if body, ok := pinnedBodyForPath(blobs, bodies, canonicalActiveHarnessRegistryPath); ok {
-		return activeMembersFromBody(body, true)
+		active, limitations := activeMembersFromBody(body, true)
+		return active, append(limitations, "Active members were extracted by the dear-agent registry adapter from "+canonicalActiveHarnessRegistryPath+"; this is not a portable registry contract.")
 	}
 	if body, ok := pinnedBodyForPath(blobs, bodies, legacyActiveHarnessRegistryPath); ok {
-		return activeMembersFromBody(body, true)
+		active, limitations := activeMembersFromBody(body, true)
+		return active, append(limitations, "Active members were extracted by the legacy dear-agent registry adapter from "+legacyActiveHarnessRegistryPath+"; this is not a portable registry contract.")
 	}
-	return activeMembersFromBody("", false)
+	return []string{}, []string{"Active harness inventory was unavailable at the pinned revision; no active-member parity finding is supported.", "The collector currently has only dear-agent-specific registry adapters; a generic pinned registry seam remains future work."}
 }
 
 func inventoryContextError(ctx context.Context, wallTime time.Duration) error {
@@ -1001,14 +1206,14 @@ func collectSeeds(files []specFile, activeHarnesses []string) []seed {
 	features := map[string][]evidence{}
 	identical := map[string][]evidence{}
 	for _, file := range files {
-		identical[file.SHA256] = append(identical[file.SHA256], evidence{Path: file.Path, Line: 1, Excerpt: "identical full SPEC body"})
+		identical[file.SHA256] = append(identical[file.SHA256], evidence{Kind: "supporting", Path: file.Path, Line: 1, Excerpt: "identical full SPEC body"})
 		for _, req := range file.Requirements {
-			e := evidence{Path: file.Path, Line: req.Line, RequirementID: req.ID, Excerpt: req.Excerpt}
+			e := evidence{Kind: "normative-contract", Path: file.Path, Line: req.Line, RequirementID: req.ID, Excerpt: req.Excerpt}
 			bodies[req.Body] = append(bodies[req.Body], bodyEntry{key: req.Body, evidence: e})
 			ids[req.ID] = append(ids[req.ID], e)
 		}
 		for _, ref := range file.BDDFeatures {
-			features[ref.Path] = append(features[ref.Path], evidence{Path: file.Path, Line: ref.Line, Excerpt: ref.Path})
+			features[ref.Path] = append(features[ref.Path], evidence{Kind: "supporting", Path: file.Path, Line: ref.Line, Excerpt: ref.Path})
 		}
 	}
 	var seeds []seed
@@ -1066,7 +1271,7 @@ func harnessTerminologyEvidence(files []specFile, harness string) []evidence {
 }
 
 func evidenceForRequirement(path string, requirement requirement) evidence {
-	return evidence{Path: path, Line: requirement.Line, RequirementID: requirement.ID, Excerpt: requirement.Excerpt}
+	return evidence{Kind: "normative-contract", Path: path, Line: requirement.Line, RequirementID: requirement.ID, Excerpt: requirement.Excerpt}
 }
 
 func containsHarnessTerminology(text, harness string) bool {
@@ -1100,17 +1305,67 @@ func activeMembersFromBody(body string, available bool) ([]string, []string) {
 	if !available {
 		return []string{}, []string{"Active harness inventory was unavailable at the pinned revision."}
 	}
-	match := regexp.MustCompile(`activeHarnesses\s*=\s*\[\]string\{([^}]*)\}`).FindStringSubmatch(body)
-	if match == nil {
+	file, err := parser.ParseFile(token.NewFileSet(), "registry.go", body, 0)
+	if err != nil {
 		return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
 	}
-	quoted := regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(match[1], -1)
-	active := make([]string, 0, len(quoted))
-	for _, item := range quoted {
-		active = append(active, item[1])
+	var values []ast.Expr
+	found := false
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.VAR {
+			continue
+		}
+		for _, declarationSpec := range general.Specs {
+			value, ok := declarationSpec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			isActiveDeclaration := false
+			for _, name := range value.Names {
+				isActiveDeclaration = isActiveDeclaration || name.Name == "activeHarnesses"
+			}
+			if !isActiveDeclaration {
+				continue
+			}
+			if found || len(value.Names) != 1 || len(value.Values) != 1 {
+				return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
+			}
+			literal, ok := value.Values[0].(*ast.CompositeLit)
+			if !ok || !isStringSliceType(literal.Type) {
+				return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
+			}
+			values, found = literal.Elts, true
+		}
+	}
+	if !found {
+		return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
+	}
+	active := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		literal, ok := value.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
+		}
+		member, err := strconv.Unquote(literal.Value)
+		if err != nil || member == "" || seen[member] {
+			return []string{}, []string{"Active harness inventory could not be parsed at the pinned revision."}
+		}
+		seen[member] = true
+		active = append(active, member)
 	}
 	sort.Strings(active)
 	return active, nil
+}
+
+func isStringSliceType(expression ast.Expr) bool {
+	array, ok := expression.(*ast.ArrayType)
+	if !ok || array.Len != nil {
+		return false
+	}
+	name, ok := array.Elt.(*ast.Ident)
+	return ok && name.Name == "string"
 }
 
 func gitWithOutputLimit(root string, limit int64, args ...string) (string, error) {
@@ -1449,8 +1704,299 @@ func gitBytesWithContext(ctx context.Context, executable gitExecutable, root str
 	return result, nil
 }
 
-func readReport(path string) (report, error) {
-	return readReportWithLimit(path, maxReportInputBytes)
+func readReport(path string) (report, error) { return readReportWithLimit(path, maxReportInputBytes) }
+
+func readInventoryDocument(path string) (report, error) {
+	document, err := readReport(path)
+	if err != nil {
+		return report{}, err
+	}
+	if err := validateInventoryDocument(document); err != nil {
+		return report{}, err
+	}
+	return document, nil
+}
+
+func readDecisionLedger(path string) (report, error) {
+	document, err := readReport(path)
+	if err != nil {
+		return report{}, err
+	}
+	if err := validateDecisionLedger(document); err != nil {
+		return report{}, err
+	}
+	return document, nil
+}
+
+func readInventoryDocumentV2(path string) (inventoryDocument, error) {
+	data, err := readStableBoundedFile(path, maxReportInputBytes)
+	if err != nil {
+		return inventoryDocument{}, err
+	}
+	if err := validateUniqueJSONDocument(data, maxJSONDepth); err != nil {
+		return inventoryDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if err := validateExactJSONFieldNames(data, reflect.TypeFor[inventoryDocument]()); err != nil {
+		return inventoryDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var document inventoryDocument
+	if err := decoder.Decode(&document); err != nil {
+		return inventoryDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return inventoryDocument{}, fmt.Errorf("decode %s: contains multiple JSON values", path)
+	}
+	if err := validateInventoryDocumentV2(document); err != nil {
+		return inventoryDocument{}, err
+	}
+	return document, nil
+}
+
+func readDecisionLedgerV2(path string) (decisionLedger, error) {
+	data, err := readStableBoundedFile(path, maxReportInputBytes)
+	if err != nil {
+		return decisionLedger{}, err
+	}
+	if err := validateUniqueJSONDocument(data, maxJSONDepth); err != nil {
+		return decisionLedger{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if err := validateExactJSONFieldNames(data, reflect.TypeFor[decisionLedger]()); err != nil {
+		return decisionLedger{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var document decisionLedger
+	if err := decoder.Decode(&document); err != nil {
+		return decisionLedger{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return decisionLedger{}, fmt.Errorf("decode %s: contains multiple JSON values", path)
+	}
+	if err := validateDecisionLedgerV2(document); err != nil {
+		return decisionLedger{}, err
+	}
+	return document, nil
+}
+
+func inventoryDocumentFromReport(source report) inventoryDocument {
+	return inventoryDocument{SchemaVersion: schemaVersion, DocumentKind: inventoryDocumentKind, Snapshot: source.Snapshot,
+		Scope:       collectionScope{Roots: source.Scope.Roots, ActiveMembers: source.Scope.ActiveMembers},
+		Summary:     inventorySummary{SpecFiles: source.Summary.SpecFiles, Requirements: source.Summary.Requirements, Diagnostics: source.Summary.Diagnostics},
+		Methodology: source.Methodology, CollectorExecution: *source.CollectorExecution, CollectorExecutionDisclosure: source.CollectorExecutionDisclosure, Inventory: source.Inventory, Features: source.Features, Seeds: source.Seeds, Limitations: source.Limitations}
+}
+
+func reportFromInventoryDocument(source inventoryDocument) report {
+	collector := source.CollectorExecution
+	return report{SchemaVersion: source.SchemaVersion, DocumentKind: source.DocumentKind, Snapshot: source.Snapshot,
+		Scope:       scope{Roots: source.Scope.Roots, Excluded: []exclusion{}, ActiveMembers: source.Scope.ActiveMembers},
+		Summary:     summary{SpecFiles: source.Summary.SpecFiles, Requirements: source.Summary.Requirements, Diagnostics: source.Summary.Diagnostics, ByVerdict: map[string]int{}},
+		Methodology: source.Methodology, CollectorExecution: &collector, CollectorExecutionDisclosure: source.CollectorExecutionDisclosure, Inventory: source.Inventory, Features: source.Features, Seeds: source.Seeds, Limitations: source.Limitations}
+}
+
+func canonicalInventoryRefV2(document inventoryDocument) (string, error) {
+	if err := validateInventoryDocumentV2(document); err != nil {
+		return "", err
+	}
+	data, err := marshalReportWithLimit(document, maxArtifactOutputBytes)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(data)
+	return "sha256:" + fmt.Sprintf("%x", digest), nil
+}
+
+func reviewReportFromLedger(ledger decisionLedger, inventory report) report {
+	candidates := make([]finding, len(ledger.Candidates))
+	for index, finding := range ledger.Candidates {
+		candidates[index] = findingFromPersistedEvidence(finding)
+	}
+	nonCandidates := make([]finding, len(ledger.NonCandidates))
+	for index, finding := range ledger.NonCandidates {
+		nonCandidates[index] = findingFromPersistedEvidence(finding)
+	}
+	return report{SchemaVersion: schemaVersion, DocumentKind: ledgerDocumentKind, InventoryRef: ledger.InventoryRef,
+		Snapshot: inventory.Snapshot, Scope: scope{Roots: inventory.Scope.Roots, ActiveMembers: inventory.Scope.ActiveMembers},
+		Summary:     summary{SpecFiles: inventory.Summary.SpecFiles, Requirements: inventory.Summary.Requirements, Diagnostics: inventory.Summary.Diagnostics, CandidateCount: ledger.Summary.CandidateCount, ByVerdict: ledger.Summary.ByVerdict},
+		Methodology: methodology{Collector: inventory.Methodology.Collector, SeedKinds: inventory.Methodology.SeedKinds, SemanticReview: ledger.Methodology.SemanticReview, GitEvidenceTrust: inventory.Methodology.GitEvidenceTrust, GitTrustInputs: inventory.Methodology.GitTrustInputs, Reproduce: ledger.Methodology.Reproduce},
+		Candidates:  candidates, NonCandidates: nonCandidates, Exclusions: ledger.ReviewScope.Exclusions, Limitations: ledger.Limitations}
+}
+
+func decisionLedgerFromReport(source, inventory report) (decisionLedger, error) {
+	ref, err := canonicalInventoryRefV2(inventoryDocumentFromReport(inventory))
+	if err != nil {
+		return decisionLedger{}, err
+	}
+	candidates := make([]finding, len(source.Candidates))
+	for index, finding := range source.Candidates {
+		candidates[index] = findingForPersistence(finding)
+	}
+	nonCandidates := make([]finding, len(source.NonCandidates))
+	for index, finding := range source.NonCandidates {
+		nonCandidates[index] = findingForPersistence(finding)
+	}
+	return decisionLedger{SchemaVersion: schemaVersion, DocumentKind: ledgerDocumentKind, InventoryRef: ref,
+		ReviewScope: reviewScope{Exclusions: source.Exclusions},
+		Summary:     decisionSummary{CandidateCount: source.Summary.CandidateCount, ByVerdict: source.Summary.ByVerdict},
+		Methodology: reviewMethodology{SemanticReview: source.Methodology.SemanticReview, Reproduce: source.Methodology.Reproduce},
+		Candidates:  candidates, NonCandidates: nonCandidates, Limitations: source.Limitations}, nil
+}
+
+func findingForPersistence(source finding) finding {
+	result := source
+	result.Applicability = append([]applicability(nil), source.Applicability...)
+	result.ContractEvidence, result.SupportingEvidence = splitPersistedEvidence(source.Evidence)
+	result.Evidence = nil
+	for index := range result.Applicability {
+		result.Applicability[index].ContractEvidence, result.Applicability[index].SupportingEvidence = splitPersistedEvidence(source.Applicability[index].Evidence)
+		result.Applicability[index].Evidence = nil
+	}
+	if result.OwnershipPlan != nil {
+		plan := *result.OwnershipPlan
+		plan.Applicability = append([]applicability(nil), source.OwnershipPlan.Applicability...)
+		for index := range plan.Applicability {
+			plan.Applicability[index].ContractEvidence, plan.Applicability[index].SupportingEvidence = splitPersistedEvidence(source.OwnershipPlan.Applicability[index].Evidence)
+			plan.Applicability[index].Evidence = nil
+		}
+		result.OwnershipPlan = &plan
+	}
+	return result
+}
+
+func findingFromPersistedEvidence(source finding) finding {
+	result := source
+	result.Applicability = append([]applicability(nil), source.Applicability...)
+	result.Evidence = joinPersistedEvidence(source.ContractEvidence, source.SupportingEvidence)
+	for index := range result.Applicability {
+		result.Applicability[index].Evidence = joinPersistedEvidence(source.Applicability[index].ContractEvidence, source.Applicability[index].SupportingEvidence)
+	}
+	if result.OwnershipPlan != nil {
+		plan := *result.OwnershipPlan
+		plan.Applicability = append([]applicability(nil), source.OwnershipPlan.Applicability...)
+		for index := range plan.Applicability {
+			plan.Applicability[index].Evidence = joinPersistedEvidence(plan.Applicability[index].ContractEvidence, plan.Applicability[index].SupportingEvidence)
+		}
+		result.OwnershipPlan = &plan
+	}
+	return result
+}
+
+func splitPersistedEvidence(source []evidence) ([]contractEvidence, []supportingEvidence) {
+	contracts := []contractEvidence{}
+	supporting := []supportingEvidence{}
+	for _, item := range source {
+		if item.Kind == "normative-contract" {
+			contracts = append(contracts, contractEvidence{Path: item.Path, Line: item.Line, RequirementID: item.RequirementID, Excerpt: item.Excerpt})
+		} else if item.Kind == "supporting" {
+			supporting = append(supporting, supportingEvidence{Path: item.Path, Line: item.Line, Excerpt: item.Excerpt})
+		}
+	}
+	return contracts, supporting
+}
+
+func joinPersistedEvidence(contracts []contractEvidence, supporting []supportingEvidence) []evidence {
+	result := make([]evidence, 0, len(contracts)+len(supporting))
+	for _, item := range contracts {
+		result = append(result, evidence{Kind: "normative-contract", Path: item.Path, Line: item.Line, RequirementID: item.RequirementID, Excerpt: item.Excerpt})
+	}
+	for _, item := range supporting {
+		result = append(result, evidence{Kind: "supporting", Path: item.Path, Line: item.Line, Excerpt: item.Excerpt})
+	}
+	return result
+}
+
+func validateInventoryDocumentV2(document inventoryDocument) error {
+	if document.SchemaVersion != schemaVersion || document.DocumentKind != inventoryDocumentKind {
+		return errors.New("inventory must be a spec-audit/v2 inventory document")
+	}
+	if document.CollectorExecutionDisclosure != collectorExecutionDisclosure || !validCollectorExecution(document.CollectorExecution) {
+		return errors.New("inventory collector_execution is incomplete")
+	}
+	view := report{SchemaVersion: document.SchemaVersion, DocumentKind: document.DocumentKind, Snapshot: document.Snapshot,
+		Scope:       scope{Roots: document.Scope.Roots, Excluded: []exclusion{}, ActiveMembers: document.Scope.ActiveMembers},
+		Summary:     summary{SpecFiles: document.Summary.SpecFiles, Requirements: document.Summary.Requirements, Diagnostics: document.Summary.Diagnostics, ByVerdict: map[string]int{}},
+		Methodology: document.Methodology, CollectorExecution: &document.CollectorExecution, CollectorExecutionDisclosure: document.CollectorExecutionDisclosure, Inventory: document.Inventory, Features: document.Features, Seeds: document.Seeds, Limitations: document.Limitations}
+	return validateInventoryDocument(view)
+}
+
+func validateDecisionLedgerV2(document decisionLedger) error {
+	if document.SchemaVersion != schemaVersion || document.DocumentKind != ledgerDocumentKind {
+		return errors.New("decision ledger must be a spec-audit/v2 decision-ledger document")
+	}
+	if !strings.HasPrefix(document.InventoryRef, "sha256:") || !identityPattern.MatchString(document.InventoryRef) {
+		return errors.New("decision ledger inventory_ref must be a canonical sha256 inventory digest")
+	}
+	if !validReviewExclusions(document.ReviewScope.Exclusions) || strings.TrimSpace(document.Methodology.SemanticReview) == "" || len(document.Methodology.Reproduce) == 0 {
+		return errors.New("decision ledger review scope or methodology is incomplete")
+	}
+	for _, finding := range append(append([]finding{}, document.Candidates...), document.NonCandidates...) {
+		if finding.DecisionStatus != pendingMaintainerApproval {
+			return fmt.Errorf("finding %q must have decision_status %q", finding.ID, pendingMaintainerApproval)
+		}
+		if err := validatePersistedEvidence(finding.ContractEvidence, finding.SupportingEvidence); err != nil {
+			return fmt.Errorf("finding %q: %w", finding.ID, err)
+		}
+		for _, entry := range finding.Applicability {
+			if len(entry.ContractEvidence) == 0 {
+				return fmt.Errorf("finding %q applicability for %q requires contract_evidence", finding.ID, entry.Member)
+			}
+			if err := validatePersistedEvidence(entry.ContractEvidence, entry.SupportingEvidence); err != nil {
+				return fmt.Errorf("finding %q applicability for %q: %w", finding.ID, entry.Member, err)
+			}
+		}
+		if err := validatePersistedOwnershipPlan(finding.OwnershipPlan); err != nil {
+			return fmt.Errorf("finding %q ownership_plan: %w", finding.ID, err)
+		}
+		positive := finding.Verdict == "merge-now" || finding.Verdict == "extract-neutral-contract"
+		if positive && finding.OwnershipPlan == nil {
+			return fmt.Errorf("finding %q requires ownership_plan", finding.ID)
+		}
+		if !positive && finding.OwnershipPlan != nil {
+			return fmt.Errorf("non-positive finding %q cannot include ownership_plan", finding.ID)
+		}
+	}
+	return nil
+}
+
+func validatePersistedOwnershipPlan(plan *ownershipPlan) error {
+	if plan == nil {
+		return nil
+	}
+	if plan.Status != pendingMaintainerApproval || plan.DeletionAuthority {
+		return errors.New("must be pending maintainer approval and cannot authorize deletion")
+	}
+	if !applicabilityBases[plan.ApplicabilityBasis] || strings.TrimSpace(plan.ApplicabilityRationale) == "" {
+		return errors.New("must copy a valid applicability basis and rationale")
+	}
+	for _, entry := range plan.Applicability {
+		if len(entry.ContractEvidence) == 0 {
+			return errors.New("applicability entries require contract_evidence")
+		}
+		if err := validatePersistedEvidence(entry.ContractEvidence, entry.SupportingEvidence); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePersistedEvidence(contracts []contractEvidence, supporting []supportingEvidence) error {
+	if len(contracts)+len(supporting) == 0 {
+		return errors.New("evidence is required")
+	}
+	for _, item := range contracts {
+		if !validPath(item.Path) || item.Line < 1 || strings.TrimSpace(item.RequirementID) == "" || strings.TrimSpace(item.Excerpt) == "" {
+			return errors.New("contract_evidence is incomplete")
+		}
+	}
+	for _, item := range supporting {
+		if !validPath(item.Path) || item.Line < 1 || strings.TrimSpace(item.Excerpt) == "" {
+			return errors.New("supporting_evidence is incomplete")
+		}
+	}
+	return nil
 }
 
 func readReportWithLimit(path string, limit int64) (report, error) {
@@ -1459,9 +2005,6 @@ func readReportWithLimit(path string, limit int64) (report, error) {
 		return report{}, err
 	}
 	if err := validateUniqueJSONDocument(data, maxJSONDepth); err != nil {
-		return report{}, fmt.Errorf("decode %s: %w", path, err)
-	}
-	if err := validateExactJSONFieldNames(data, reflect.TypeFor[report]()); err != nil {
 		return report{}, fmt.Errorf("decode %s: %w", path, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -1478,9 +2021,15 @@ func readReportWithLimit(path string, limit int64) (report, error) {
 	if err := json.Unmarshal(data, &topLevel); err != nil {
 		return report{}, fmt.Errorf("decode %s: inspect inventory payload fields: %w", path, err)
 	}
-	for _, key := range []string{"inventory", "features", "seeds"} {
+	for _, key := range []string{"inventory", "features", "seeds", "collector_execution"} {
 		if _, ok := topLevel[key]; ok {
 			decoded.inventoryPayloadPresent = true
+			break
+		}
+	}
+	for _, key := range []string{"candidates", "non_candidates", "reviewer_exclusions", "inventory_ref"} {
+		if _, ok := topLevel[key]; ok {
+			decoded.decisionPayloadPresent = true
 			break
 		}
 	}
@@ -1494,7 +2043,6 @@ func validateExactJSONFieldNames(data []byte, valueType reflect.Type) error {
 	return validateExactJSONValue(json.RawMessage(data), valueType)
 }
 
-//nolint:gocyclo // Recursive schema walking handles each composite JSON shape explicitly and rejects unknown object keys.
 func validateExactJSONValue(raw json.RawMessage, valueType reflect.Type) error {
 	for valueType.Kind() == reflect.Pointer {
 		valueType = valueType.Elem()
@@ -1502,9 +2050,7 @@ func validateExactJSONValue(raw json.RawMessage, valueType reflect.Type) error {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil
 	}
-	// Primitive kinds have no nested field names to validate. Pointers are
-	// dereferenced above; the report schema contains no interface fields.
-	switch valueType.Kind() { //nolint:exhaustive // Primitive kinds contain no nested JSON field names.
+	switch valueType.Kind() {
 	case reflect.Struct:
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {
@@ -1540,15 +2086,14 @@ func validateExactJSONValue(raw json.RawMessage, valueType reflect.Type) error {
 				return err
 			}
 		}
-	default:
-		return nil
 	}
 	return nil
 }
 
 func jsonFieldTypes(valueType reflect.Type) map[string]reflect.Type {
 	fields := make(map[string]reflect.Type, valueType.NumField())
-	for field := range valueType.Fields() {
+	for index := 0; index < valueType.NumField(); index++ {
+		field := valueType.Field(index)
 		if !field.IsExported() {
 			continue
 		}
@@ -1859,6 +2404,7 @@ func cleanGitEnvironment(executable string) []string {
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_NO_LAZY_FETCH=1",
 		"GIT_NO_REPLACE_OBJECTS=1",
+		"GIT_LITERAL_PATHSPECS=1",
 		"GIT_OPTIONAL_LOCKS=0",
 		"GIT_PAGER=cat",
 		"GIT_TERMINAL_PROMPT=0",
@@ -1872,7 +2418,7 @@ func cleanGitEnvironment(executable string) []string {
 	return environment
 }
 
-func marshalReportWithLimit(value report, limit int64) ([]byte, error) {
+func marshalReportWithLimit(value any, limit int64) ([]byte, error) {
 	if limit <= 0 {
 		return nil, errors.New("artifact output limit must be positive")
 	}
@@ -2266,23 +2812,80 @@ func validateReport(report report) error {
 	return nil
 }
 
-func validateSemanticReport(report report) error {
-	if report.hasInventoryPayload() {
-		return errors.New("semantic report must omit inventory, features, and seeds; use the separately supplied pinned inventory")
+// validateInventoryDocument accepts only immutable, collector-produced facts.
+// Reviewer classifications and exclusions belong exclusively to a separate
+// decision ledger and therefore cannot affect collection.
+func validateInventoryDocument(document report) error {
+	if document.DocumentKind != inventoryDocumentKind {
+		return fmt.Errorf("document_kind must be %q", inventoryDocumentKind)
 	}
-	return validateReport(report)
+	if len(document.Scope.Excluded) != 0 {
+		return errors.New("inventory scope exclusions must be empty; collection is complete")
+	}
+	if document.InventoryRef != "" || document.decisionPayloadPresent || len(document.Candidates) != 0 || len(document.NonCandidates) != 0 || len(document.Exclusions) != 0 {
+		return errors.New("inventory must not contain reviewer decisions, exclusions, or inventory_ref")
+	}
+	if document.Inventory == nil || document.Features == nil || document.Seeds == nil {
+		return errors.New("inventory must contain complete immutable inventory, features, seeds, and collector_execution")
+	}
+	if document.CollectorExecution == nil || document.CollectorExecutionDisclosure != collectorExecutionDisclosure || !validCollectorExecution(*document.CollectorExecution) {
+		return errors.New("inventory collector_execution disclosure is incomplete or invalid")
+	}
+	return validateReport(document)
+}
+
+// validateDecisionLedger accepts reviewer judgments which refer to, but do
+// not copy or filter, the independently collected pinned inventory.
+func validateDecisionLedger(document report) error {
+	if document.DocumentKind != ledgerDocumentKind {
+		return fmt.Errorf("document_kind must be %q", ledgerDocumentKind)
+	}
+	if !strings.HasPrefix(document.InventoryRef, "sha256:") || !identityPattern.MatchString(document.InventoryRef) {
+		return errors.New("decision ledger inventory_ref must be a canonical sha256 inventory digest")
+	}
+	if document.hasInventoryPayload() {
+		return errors.New("semantic report must omit inventory, features, and seeds (including collector_execution); decision ledgers use the separately supplied pinned inventory")
+	}
+	if len(document.Scope.Excluded) != 0 {
+		return errors.New("decision ledger scope exclusions must be empty; use reviewer_exclusions")
+	}
+	if !validReviewExclusions(document.Exclusions) {
+		return errors.New("decision ledger reviewer_exclusions must be unique repository-relative classifications with rationale and supporting evidence")
+	}
+	return validateReport(document)
+}
+
+func validCollectorExecution(execution collectorExecution) bool {
+	if strings.TrimSpace(execution.GoToolchain) == "" || strings.TrimSpace(execution.GOOS) == "" || strings.TrimSpace(execution.GOARCH) == "" {
+		return false
+	}
+	if execution.BuildInfoAvailable != (strings.TrimSpace(execution.ModulePath) != "") {
+		return false
+	}
+	if execution.VCSMetadataAvailable {
+		return shaPattern.MatchString(execution.VCSRevision) && execution.VCSModified != nil
+	}
+	return execution.VCSRevision == "" && execution.VCSModified == nil
+}
+
+func validateSemanticReport(report report) error {
+	return validateDecisionLedger(report)
 }
 
 //nolint:gocyclo // Sequential pinned-evidence cross-checks keep every trust transition visible and fail closed.
 func validateAgainstInventory(semantic, inventory report) error {
-	if err := validateSemanticReport(semantic); err != nil {
+	if err := validateDecisionLedger(semantic); err != nil {
 		return err
 	}
-	if err := validateReport(inventory); err != nil {
+	if err := validateInventoryDocument(inventory); err != nil {
 		return fmt.Errorf("inventory report is invalid: %w", err)
 	}
-	if inventory.Inventory == nil {
-		return errors.New("inventory report must include its inventory")
+	canonicalRef, err := canonicalInventoryRef(inventory)
+	if err != nil {
+		return fmt.Errorf("canonicalize inventory: %w", err)
+	}
+	if semantic.InventoryRef != canonicalRef {
+		return errors.New("decision ledger inventory_ref does not match the supplied canonical inventory digest")
 	}
 	if semantic.Snapshot.Repository != inventory.Snapshot.Repository || semantic.Snapshot.Revision != inventory.Snapshot.Revision || semantic.Snapshot.RevisionCommittedAt != inventory.Snapshot.RevisionCommittedAt {
 		return errors.New("semantic report and inventory must name the same repository, pinned revision, and revision timestamp")
@@ -2290,8 +2893,8 @@ func validateAgainstInventory(semantic, inventory report) error {
 	if semantic.Summary.SpecFiles != inventory.Summary.SpecFiles || semantic.Summary.Requirements != inventory.Summary.Requirements || semantic.Summary.Diagnostics != inventory.Summary.Diagnostics {
 		return errors.New("semantic report corpus counts do not match the pinned inventory")
 	}
-	if !reflect.DeepEqual(semantic.Scope.Roots, inventory.Scope.Roots) || !reflect.DeepEqual(semantic.Scope.Excluded, inventory.Scope.Excluded) {
-		return errors.New("semantic report scope roots or exclusions do not match the pinned inventory")
+	if !reflect.DeepEqual(semantic.Scope.Roots, inventory.Scope.Roots) {
+		return errors.New("decision ledger scope roots do not match the pinned inventory")
 	}
 	if !sameStringSet(semantic.Scope.ActiveMembers, inventory.Scope.ActiveMembers) {
 		return errors.New("semantic report active members do not match the pinned inventory")
@@ -2310,18 +2913,15 @@ func validateAgainstInventory(semantic, inventory report) error {
 		id   string
 	}
 	requirements := map[string]map[requirementKey]string{}
-	requirementIDs := map[string]map[string]bool{}
 	features := map[string]featureFile{}
 	files := map[string]bool{}
 	specFeatures := map[string]map[string]bool{}
 	for _, file := range inventory.Inventory {
 		files[file.Path] = true
 		requirements[file.Path] = map[requirementKey]string{}
-		requirementIDs[file.Path] = map[string]bool{}
 		specFeatures[file.Path] = map[string]bool{}
 		for _, requirement := range file.Requirements {
 			requirements[file.Path][requirementKey{line: requirement.Line, id: requirement.ID}] = requirement.Excerpt
-			requirementIDs[file.Path][requirement.ID] = true
 		}
 		for _, ref := range file.BDDFeatures {
 			specFeatures[file.Path][ref.Path] = true
@@ -2330,15 +2930,29 @@ func validateAgainstInventory(semantic, inventory report) error {
 	for _, feature := range inventory.Features {
 		features[feature.Path] = feature
 	}
+	excludedFromReview := map[string]bool{}
+	for _, exclusion := range semantic.Exclusions {
+		if !files[exclusion.Path] && features[exclusion.Path].Path == "" {
+			return fmt.Errorf("reviewer exclusion path %q does not resolve in the pinned inventory", exclusion.Path)
+		}
+		excludedFromReview[exclusion.Path] = true
+	}
 
 	for _, finding := range allFindings(semantic) {
+		positive := finding.Verdict == "merge-now" || finding.Verdict == "extract-neutral-contract"
 		for _, owner := range finding.CurrentOwners {
 			if !files[owner.Path] {
 				return fmt.Errorf("finding %q names current owner %q outside the pinned inventory", finding.ID, owner.Path)
 			}
+			if positive && excludedFromReview[owner.Path] {
+				return fmt.Errorf("positive finding %q cannot select reviewer-excluded current owner %q", finding.ID, owner.Path)
+			}
 		}
 		evidenceOwners := map[string]bool{}
 		for _, item := range finding.Evidence {
+			if item.Kind == "supporting" {
+				continue
+			}
 			if !files[item.Path] {
 				return fmt.Errorf("finding %q evidence path %q is outside the pinned inventory", finding.ID, item.Path)
 			}
@@ -2363,7 +2977,12 @@ func validateAgainstInventory(semantic, inventory report) error {
 			return fmt.Errorf("finding %q current owners must exactly match its source-evidence paths", finding.ID)
 		}
 		for _, applicabilityEntry := range finding.Applicability {
+			normativeCount := 0
 			for _, item := range applicabilityEntry.Evidence {
+				if item.Kind == "supporting" {
+					continue
+				}
+				normativeCount++
 				if !files[item.Path] || item.RequirementID == "" {
 					return fmt.Errorf("finding %q applicability for %q has evidence outside the pinned requirement inventory", finding.ID, applicabilityEntry.Member)
 				}
@@ -2372,6 +2991,9 @@ func validateAgainstInventory(semantic, inventory report) error {
 					return fmt.Errorf("finding %q applicability for %q does not exactly match pinned evidence", finding.ID, applicabilityEntry.Member)
 				}
 			}
+			if normativeCount == 0 {
+				return fmt.Errorf("finding %q applicability for %q has no normative-contract evidence", finding.ID, applicabilityEntry.Member)
+			}
 		}
 		if finding.ProposedOwner != nil && finding.ProposedOwner.State == "existing" && !files[finding.ProposedOwner.Path] {
 			return fmt.Errorf("finding %q marks proposed owner %q existing, but it is absent from the pinned inventory", finding.ID, finding.ProposedOwner.Path)
@@ -2379,16 +3001,8 @@ func validateAgainstInventory(semantic, inventory report) error {
 		if finding.ProposedOwner != nil && finding.ProposedOwner.State == "new" && files[finding.ProposedOwner.Path] {
 			return fmt.Errorf("finding %q marks proposed owner %q new, but it already exists in the pinned inventory", finding.ID, finding.ProposedOwner.Path)
 		}
-		positive := finding.Verdict == "merge-now" || finding.Verdict == "extract-neutral-contract"
-		if positive && finding.Classification == "shared-contract" {
-			if err := validateSharedContractFeature(finding, features, specFeatures); err != nil {
-				return err
-			}
-		}
-		if positive {
-			if err := validateOwnershipPlanAgainstInventory(finding, features, specFeatures, requirementIDs); err != nil {
-				return err
-			}
+		if positive && finding.ProposedOwner != nil && excludedFromReview[finding.ProposedOwner.Path] {
+			return fmt.Errorf("positive finding %q cannot select reviewer-excluded proposed owner %q", finding.ID, finding.ProposedOwner.Path)
 		}
 		coveredOwners := map[string]bool{}
 		for _, featurePath := range finding.BDD.Features {
@@ -2416,60 +3030,189 @@ func validateAgainstInventory(semantic, inventory report) error {
 				return fmt.Errorf("finding %q BDD features do not reciprocally name current owner %q", finding.ID, owner.Path)
 			}
 		}
-	}
-	return nil
-}
-
-func validateSharedContractFeature(f finding, features map[string]featureFile, specFeatures map[string]map[string]bool) error {
-	feature, ok := features[f.BDD.SharedContractFeature]
-	if !ok {
-		return fmt.Errorf("finding %q shared BDD feature %q is absent from the pinned feature inventory", f.ID, f.BDD.SharedContractFeature)
-	}
-	related := stringSet(feature.RelatedSpecs)
-	for _, owner := range f.CurrentOwners {
-		if !related[owner.Path] || !specFeatures[owner.Path][f.BDD.SharedContractFeature] {
-			return fmt.Errorf("finding %q shared BDD feature %q must reciprocally link current owner %q", f.ID, f.BDD.SharedContractFeature, owner.Path)
+		if positive {
+			if err := validateOwnershipPlanAgainstInventory(finding, inventory, features, specFeatures); err != nil {
+				return fmt.Errorf("finding %q ownership_plan: %w", finding.ID, err)
+			}
 		}
 	}
 	return nil
 }
 
-func validateOwnershipPlanAgainstInventory(f finding, features map[string]featureFile, specFeatures map[string]map[string]bool, requirementIDs map[string]map[string]bool) error {
-	for _, entry := range f.OwnershipPlan.CurrentOwners {
-		if entry.Action != "retire-normative-ownership" {
-			continue
-		}
-		for _, mapping := range entry.Preservation.Requirements {
-			if f.ProposedOwner.State == "existing" && !requirementIDs[f.ProposedOwner.Path][mapping.TargetID] {
-				return fmt.Errorf("finding %q preservation target ID %q is absent from pinned proposed owner %q", f.ID, mapping.TargetID, f.ProposedOwner.Path)
+func validateOwnershipPlanAgainstInventory(finding finding, inventory report, features map[string]featureFile, specFeatures map[string]map[string]bool) error {
+	plan := finding.OwnershipPlan
+	if plan == nil || plan.Status != pendingMaintainerApproval || plan.DeletionAuthority {
+		return errors.New("must be pending maintainer approval and cannot authorize deletion")
+	}
+	if plan.ApplicabilityBasis != finding.ApplicabilityBasis || plan.ApplicabilityRationale != finding.ApplicabilityRationale || !reflect.DeepEqual(plan.Applicability, finding.Applicability) {
+		return errors.New("applicability basis, rationale, and matrix must exactly match the finding")
+	}
+	owners := map[string]bool{}
+	expectedRequirements := map[contractEvidenceKey]bool{}
+	expectedFeatures := map[featurePreservationKey]bool{}
+	allRequirements := map[string]map[string]bool{}
+	for _, owner := range finding.CurrentOwners {
+		owners[owner.Path] = true
+		for _, file := range inventory.Inventory {
+			if file.Path != owner.Path {
+				continue
+			}
+			for _, requirement := range file.Requirements {
+				expectedRequirements[contractEvidenceKey{path: file.Path, line: requirement.Line, requirementID: requirement.ID, excerpt: requirement.Excerpt}] = true
+				if allRequirements[file.Path] == nil {
+					allRequirements[file.Path] = map[string]bool{}
+				}
+				allRequirements[file.Path][requirement.ID] = true
 			}
 		}
-		for _, mapping := range entry.Preservation.BDD {
-			feature, ok := features[mapping.Feature]
-			if !ok || !containsString(feature.RelatedSpecs, entry.Path) || !specFeatures[entry.Path][mapping.Feature] {
-				return fmt.Errorf("finding %q preservation BDD feature %q must reciprocally link retired owner %q", f.ID, mapping.Feature, entry.Path)
+		for featurePath := range specFeatures[owner.Path] {
+			feature, ok := features[featurePath]
+			if ok && containsString(feature.RelatedSpecs, owner.Path) {
+				expectedFeatures[featurePreservationKey{owner: owner.Path, path: featurePath}] = true
 			}
-		}
-		expectedFeatures := map[string]bool{}
-		for _, featurePath := range f.BDD.Features {
-			feature := features[featurePath]
-			if containsString(feature.RelatedSpecs, entry.Path) && specFeatures[entry.Path][featurePath] {
-				expectedFeatures[featurePath] = true
-			}
-		}
-		mappedFeatures := map[string]bool{}
-		for _, mapping := range entry.Preservation.BDD {
-			mappedFeatures[mapping.Feature] = true
-		}
-		if !sameStringSet(mapKeys(expectedFeatures), mapKeys(mappedFeatures)) {
-			return fmt.Errorf("finding %q preservation BDD mappings for retired owner %q must exactly cover selected reciprocal features", f.ID, entry.Path)
 		}
 	}
+	ownerActions := map[string]string{}
+	for _, action := range plan.OwnerActions {
+		if !owners[action.OwnerPath] || ownerActions[action.OwnerPath] != "" || (action.Disposition != "retain-distinct-contract" && action.Disposition != "retire-normative-ownership") || strings.TrimSpace(action.Rationale) == "" {
+			return errors.New("owner_actions must cover each current owner exactly once with an explicit retain or retire disposition")
+		}
+		ownerActions[action.OwnerPath] = action.Disposition
+	}
+	if !sameStringSet(mapKeys(owners), mapKeys(ownerActionPaths(ownerActions))) {
+		return errors.New("owner_actions do not exactly cover current owners")
+	}
+	requirements := map[contractEvidenceKey]bool{}
+	for _, entry := range plan.Requirements {
+		key := contractEvidenceKey{path: entry.ContractEvidence.Path, line: entry.ContractEvidence.Line, requirementID: entry.ContractEvidence.RequirementID, excerpt: entry.ContractEvidence.Excerpt}
+		if !expectedRequirements[key] || requirements[key] || !validRequirementOwnershipMapping(entry, finding.ProposedOwner, ownerActions[key.path], allRequirements) || strings.TrimSpace(entry.Rationale) == "" {
+			return errors.New("requirements must map each full current-owner contract evidence record exactly once")
+		}
+		requirements[key] = true
+	}
+	if !sameContractEvidenceKeys(expectedRequirements, requirements) {
+		return errors.New("requirements do not fully preserve every current-owner requirement")
+	}
+	featureMappings := map[featurePreservationKey]bool{}
+	for _, entry := range plan.Features {
+		feature, ok := features[entry.Path]
+		key := featurePreservationKey{owner: entry.SourceOwner, path: entry.Path}
+		if !expectedFeatures[key] || featureMappings[key] || !ok || strings.TrimSpace(entry.Rationale) == "" {
+			return errors.New("features must map each reciprocal current-owner BDD feature exactly once")
+		}
+		if !validFeatureOwnershipMapping(entry, finding.ProposedOwner, ownerActions[entry.SourceOwner], feature) {
+			return errors.New("BDD feature mapping has invalid disposition or target")
+		}
+		featureMappings[key] = true
+	}
+	if !sameFeaturePreservationKeys(expectedFeatures, featureMappings) {
+		return errors.New("features do not fully preserve every reciprocal current-owner BDD feature")
+	}
 	return nil
+}
+
+type featurePreservationKey struct{ owner, path string }
+
+func validRequirementOwnershipMapping(entry requirementPreservation, proposed *proposedOwnerClaim, action string, requirements map[string]map[string]bool) bool {
+	if !validPath(entry.TargetPath) || entry.TargetRequirementID == "" || (entry.TargetState != "existing" && entry.TargetState != "planned") {
+		return false
+	}
+	if action == "retain-distinct-contract" {
+		return entry.Disposition == "retain-distinct" && entry.TargetPath == entry.ContractEvidence.Path && entry.TargetRequirementID == entry.ContractEvidence.RequirementID && entry.TargetState == "existing"
+	}
+	if action != "retire-normative-ownership" || proposed == nil || entry.TargetPath != proposed.Path || !validProposedTargetState(proposed, entry.TargetState) || entry.Disposition == "retain-distinct" {
+		return false
+	}
+	if entry.Disposition != "transfer-to-proposed-owner" && entry.Disposition != "represent-as-applicability" {
+		return false
+	}
+	return entry.TargetState != "existing" || requirements[entry.TargetPath][entry.TargetRequirementID]
+}
+
+func validFeatureOwnershipMapping(entry featurePreservation, proposed *proposedOwnerClaim, action string, feature featureFile) bool {
+	if !validPath(entry.TargetPath) || (entry.TargetState != "existing" && entry.TargetState != "planned") {
+		return false
+	}
+	if action == "retain-distinct-contract" {
+		return entry.Disposition == "retain-distinct" && entry.TargetPath == entry.SourceOwner && entry.TargetState == "existing" && containsString(feature.RelatedSpecs, entry.SourceOwner)
+	}
+	if action != "retire-normative-ownership" || proposed == nil || entry.TargetPath != proposed.Path || !validProposedTargetState(proposed, entry.TargetState) || (entry.Disposition != "transfer-to-proposed-owner" && entry.Disposition != "represent-as-applicability") {
+		return false
+	}
+	return entry.TargetState != "existing" || containsString(feature.RelatedSpecs, proposed.Path)
+}
+
+func validProposedTargetState(proposed *proposedOwnerClaim, state string) bool {
+	if proposed == nil {
+		return false
+	}
+	if proposed.State == "new" {
+		return state == "planned"
+	}
+	return state == "existing" || state == "planned"
+}
+
+func ownerActionPaths(values map[string]string) map[string]bool {
+	result := map[string]bool{}
+	for path := range values {
+		result[path] = true
+	}
+	return result
+}
+
+func sameFeaturePreservationKeys(left, right map[featurePreservationKey]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key := range left {
+		if !right[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameContractEvidenceKeys(left, right map[contractEvidenceKey]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key := range left {
+		if !right[key] {
+			return false
+		}
+	}
+	return true
 }
 
 func (report report) hasInventoryPayload() bool {
 	return report.inventoryPayloadPresent || report.Inventory != nil || report.Features != nil || report.Seeds != nil
+}
+
+func canonicalInventoryRef(document report) (string, error) {
+	if err := validateInventoryDocument(document); err != nil {
+		return "", err
+	}
+	data, err := marshalReportWithLimit(document, maxArtifactOutputBytes)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(data)
+	return "sha256:" + fmt.Sprintf("%x", digest), nil
+}
+
+func presentationReport(ledger, inventory report) report {
+	view := ledger
+	view.Snapshot = inventory.Snapshot
+	view.Scope = inventory.Scope
+	view.Scope.Excluded = reviewExclusionsForPresentation(ledger.Exclusions)
+	view.Summary.SpecFiles = inventory.Summary.SpecFiles
+	view.Summary.Requirements = inventory.Summary.Requirements
+	view.Summary.Diagnostics = inventory.Summary.Diagnostics
+	view.Methodology = inventory.Methodology
+	view.Limitations = append([]string{}, inventory.Limitations...)
+	view.CollectorExecution = inventory.CollectorExecution
+	view.CollectorExecutionDisclosure = inventory.CollectorExecutionDisclosure
+	return view
 }
 
 func validateInventoryAgainstRepo(supplied report, repoPath string) error {
@@ -2481,6 +3224,8 @@ func validateInventoryAgainstRepo(supplied report, repoPath string) error {
 		!reflect.DeepEqual(supplied.Scope, recomputed.Scope) ||
 		!reflect.DeepEqual(supplied.Summary, recomputed.Summary) ||
 		!reflect.DeepEqual(supplied.Methodology, recomputed.Methodology) ||
+		!reflect.DeepEqual(supplied.CollectorExecution, recomputed.CollectorExecution) ||
+		supplied.CollectorExecutionDisclosure != recomputed.CollectorExecutionDisclosure ||
 		!reflect.DeepEqual(supplied.Inventory, recomputed.Inventory) ||
 		!reflect.DeepEqual(supplied.Features, recomputed.Features) ||
 		!reflect.DeepEqual(supplied.Seeds, recomputed.Seeds) ||
@@ -2488,6 +3233,221 @@ func validateInventoryAgainstRepo(supplied report, repoPath string) error {
 		return errors.New("supplied inventory does not match a fresh Git-object inventory at the pinned revision")
 	}
 	return nil
+}
+
+// validateSupportingEvidenceAgainstRepo resolves supporting citations from the
+// pinned tree rather than from the worktree. Supporting citations may explain
+// an assessment, but validation deliberately never lets them establish owners,
+// a proposed owner, or applicability without normative-contract evidence.
+func validateSupportingEvidenceAgainstRepo(ledger, inventory report, repoPath string) error {
+	if err := requireAuthenticatedInputPlatform(); err != nil {
+		return err
+	}
+	records, err := supportingEvidenceRecords(ledger)
+	if err != nil || len(records) == 0 {
+		return err
+	}
+	executable, err := trustedGitExecutable()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), maxGitCommandDuration)
+	defer cancel()
+	blobs, err := resolveSupportingEvidenceBlobs(ctx, executable, repoPath, inventory.Snapshot.Revision, records)
+	if err != nil {
+		return err
+	}
+	batch := supportingBlobSlice(blobs)
+	bodies, err := readPinnedBlobBodies(ctx, executable, repoPath, batch, maxSupportingEvidenceBytes, maxGitCommandDuration)
+	if err != nil {
+		return fmt.Errorf("read supporting evidence blobs: %w", err)
+	}
+	return validateSupportingEvidenceBodies(ctx, records, blobs, bodies)
+}
+
+func validateSupportingEvidenceBodies(ctx context.Context, records []supportingEvidenceRecord, blobs map[string]pinnedBlob, bodies map[string][]byte) error {
+	byPath := map[string][]supportingEvidenceRecord{}
+	for _, record := range records {
+		byPath[record.item.Path] = append(byPath[record.item.Path], record)
+	}
+	paths := mapKeys(mapFromSupportingPaths(byPath))
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("supporting evidence validation exceeded shared deadline: %w", err)
+		}
+		blob := blobs[path]
+		body, ok := bodies[blob.oid]
+		if !ok {
+			return fmt.Errorf("supporting evidence %q was absent from the pinned batch", path)
+		}
+		lines := strings.Split(string(body), "\n")
+		for _, record := range byPath[path] {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("supporting evidence validation exceeded shared deadline: %w", err)
+			}
+			if record.item.Line > len(lines) || strings.TrimSpace(lines[record.item.Line-1]) != strings.TrimSpace(record.item.Excerpt) {
+				return fmt.Errorf("%s supporting evidence %s:%d does not exactly match the pinned blob", record.findingID, record.item.Path, record.item.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func mapFromSupportingPaths(values map[string][]supportingEvidenceRecord) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for path := range values {
+		result[path] = true
+	}
+	return result
+}
+
+type supportingEvidenceRecord struct {
+	findingID string
+	item      evidence
+}
+
+func supportingEvidenceRecords(ledger report) ([]supportingEvidenceRecord, error) {
+	records := make([]supportingEvidenceRecord, 0)
+	seenRecords := map[string]bool{}
+	count := 0
+	appendRecord := func(owner string, item evidence) error {
+		if !validPath(item.Path) || item.Line < 1 {
+			return fmt.Errorf("%s supporting evidence has invalid path or line", owner)
+		}
+		count++
+		if count > maxSupportingEvidenceRecords {
+			return fmt.Errorf("supporting evidence exceeds %d-record limit", maxSupportingEvidenceRecords)
+		}
+		key := item.Path + "\x00" + strconv.Itoa(item.Line) + "\x00" + item.Excerpt
+		if seenRecords[key] {
+			return nil
+		}
+		seenRecords[key] = true
+		records = append(records, supportingEvidenceRecord{findingID: owner, item: item})
+		return nil
+	}
+	for _, finding := range allFindings(ledger) {
+		for _, items := range [][]evidence{finding.Evidence, applicabilityEvidence(finding.Applicability)} {
+			for _, item := range items {
+				if item.Kind != "supporting" {
+					continue
+				}
+				if err := appendRecord("finding "+finding.ID, item); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	for _, exclusion := range ledger.Exclusions {
+		for _, item := range exclusion.SupportingEvidence {
+			if err := appendRecord("review exclusion "+exclusion.Path, evidence{Kind: "supporting", Path: item.Path, Line: item.Line, Excerpt: item.Excerpt}); err != nil {
+				return nil, err
+			}
+		}
+	}
+	paths := map[string]bool{}
+	for _, record := range records {
+		paths[record.item.Path] = true
+	}
+	if len(paths) > maxSupportingEvidencePaths {
+		return nil, fmt.Errorf("supporting evidence exceeds %d-unique-path limit", maxSupportingEvidencePaths)
+	}
+	return records, nil
+}
+
+func resolveSupportingEvidenceBlobs(ctx context.Context, executable gitExecutable, repoPath, revision string, records []supportingEvidenceRecord) (map[string]pinnedBlob, error) {
+	paths := make([]string, 0, len(records))
+	requested := map[string]bool{}
+	for _, record := range records {
+		if !requested[record.item.Path] {
+			requested[record.item.Path] = true
+			paths = append(paths, record.item.Path)
+		}
+	}
+	sort.Strings(paths)
+	arguments := append([]string{"ls-tree", "-r", "-z", "--long", revision, "--"}, paths...)
+	outputLimit, err := supportingMetadataOutputLimit(paths)
+	if err != nil {
+		return nil, err
+	}
+	output, err := gitBytesWithContext(ctx, executable, repoPath, outputLimit, nil, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("list supporting evidence from pinned revision: %w", err)
+	}
+	blobs := make(map[string]pinnedBlob, len(paths))
+	var total int64
+	for rawEntry := range bytes.SplitSeq(output, []byte{0}) {
+		if len(rawEntry) == 0 {
+			continue
+		}
+		metadata, rawPath, found := bytes.Cut(rawEntry, []byte{'\t'})
+		if !found {
+			return nil, errors.New("parse supporting evidence tree entry: missing path separator")
+		}
+		path := string(rawPath)
+		if !requested[path] || blobs[path].path != "" {
+			return nil, fmt.Errorf("pinned supporting evidence returned unexpected or duplicate path %q", path)
+		}
+		fields := strings.Fields(string(metadata))
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("parse supporting evidence tree entry %q: invalid metadata", path)
+		}
+		size, err := pinnedGitBlobSize(fields, path)
+		if err != nil {
+			return nil, err
+		}
+		if size > maxSupportingEvidenceBlobBytes || size > maxSupportingEvidenceBytes-total {
+			return nil, fmt.Errorf("pinned supporting evidence %q exceeds blob or aggregate byte limit", path)
+		}
+		total += size
+		blobs[path] = pinnedBlob{path: path, oid: fields[2], size: size}
+	}
+	if len(blobs) != len(paths) {
+		for _, path := range paths {
+			if blobs[path].path == "" {
+				return nil, fmt.Errorf("pinned supporting evidence path %q is absent or is not a regular blob", path)
+			}
+		}
+	}
+	return blobs, nil
+}
+
+func supportingMetadataOutputLimit(paths []string) (int64, error) {
+	var outputLimit int64
+	for _, path := range paths {
+		if int64(len(path)) > maxGitOutputBytes-outputLimit-maxBatchHeaderBytes-1 {
+			return 0, errors.New("supporting evidence metadata exceeds bounded Git output limit")
+		}
+		outputLimit += int64(len(path)) + maxBatchHeaderBytes + 1
+	}
+	if outputLimit <= 0 || outputLimit > maxGitOutputBytes {
+		return 0, errors.New("supporting evidence metadata exceeds bounded Git output limit")
+	}
+	return outputLimit, nil
+}
+
+func supportingBlobSlice(blobs map[string]pinnedBlob) []pinnedBlob {
+	result := make([]pinnedBlob, 0, len(blobs))
+	for _, blob := range blobs {
+		result = append(result, blob)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].path < result[j].path })
+	return result
+}
+
+func applicabilityEvidence(entries []applicability) []evidence {
+	items := []evidence{}
+	for _, entry := range entries {
+		items = append(items, entry.Evidence...)
+	}
+	return items
+}
+
+func validatePinnedSupportingEvidence(repoPath, revision string, item evidence) error {
+	ledger := report{Candidates: []finding{{ID: "single", Evidence: []evidence{item}}}}
+	inventory := report{Snapshot: snapshot{Revision: revision}}
+	return validateSupportingEvidenceAgainstRepo(ledger, inventory, repoPath)
 }
 
 func allFindings(report report) []finding {
@@ -2565,6 +3525,9 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 	if len(f.MaterialDifferences) == 0 || !uniqueNonemptyStrings(f.MaterialDifferences) || len(f.Recommendation) == 0 || !uniqueNonemptyStrings(f.Recommendation) || strings.TrimSpace(f.Decision) == "" {
 		return fmt.Errorf("finding %q requires material differences, recommendations, and a maintainer decision", f.ID)
 	}
+	if f.DecisionStatus != pendingMaintainerApproval {
+		return fmt.Errorf("finding %q must have decision_status %q", f.ID, pendingMaintainerApproval)
+	}
 	if f.Strength == "strong" && f.Confidence != "confirmed" {
 		return fmt.Errorf("finding %q cannot be strong without confirmed evidence", f.ID)
 	}
@@ -2577,15 +3540,12 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 	if err := validateEvidence(f.Evidence); err != nil {
 		return fmt.Errorf("finding %q: %w", f.ID, err)
 	}
-	if !sameStringSet(ownerPaths(f.CurrentOwners), evidencePaths(f.Evidence)) {
+	if !sameStringSet(ownerPaths(f.CurrentOwners), evidencePathsByKind(f.Evidence, "normative-contract")) {
 		return fmt.Errorf("finding %q current owners must exactly match its source-evidence paths", f.ID)
 	}
 	positive := f.Verdict == "merge-now" || f.Verdict == "extract-neutral-contract"
 	if !bddConsequences[f.BDD.Consequence] || !uniqueRelativeFeaturePaths(f.BDD.Features) {
 		return fmt.Errorf("finding %q has invalid BDD impact", f.ID)
-	}
-	if f.BDD.SharedContractFeature != "" && (!validFeaturePath(f.BDD.SharedContractFeature) || !containsString(f.BDD.Features, f.BDD.SharedContractFeature)) {
-		return fmt.Errorf("finding %q shared BDD feature must be a selected feature", f.ID)
 	}
 	if len(f.BDD.Features) == 0 {
 		if positive || f.BDD.Consequence != "none" {
@@ -2610,20 +3570,19 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 			return fmt.Errorf("positive finding %q requires product SPEC current owners, a product SPEC proposed owner state, and BDD features", f.ID)
 		}
 		if strings.TrimSpace(f.OwnershipCompleteness) == "" || strings.TrimSpace(f.ProposedOwner.Rationale) == "" || strings.TrimSpace(f.ProposedOwner.NeutralityRationale) == "" {
-			return fmt.Errorf("positive finding %q requires owner-completeness plus proposed-owner and neutrality rationales", f.ID)
+			return fmt.Errorf("positive finding %q requires owner-completeness, proposed-owner rationale, and neutrality rationale", f.ID)
 		}
-		if isHarnessSurfacePath(f.ProposedOwner.Path, active) {
-			return fmt.Errorf("positive finding %q proposes harness-surface owner %q", f.ID, f.ProposedOwner.Path)
+		if hasHarnessRegistrationOwner(append(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path)) {
+			return fmt.Errorf("positive finding %q includes a harness registration owner", f.ID)
 		}
-		switch {
-		case f.ProposedOwner.State == "existing":
-			if !containsString(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path) {
-				return fmt.Errorf("positive finding %q must select an existing proposed owner from its pinned current-owner set", f.ID)
-			}
-		case containsString(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path):
+		if f.OwnershipPlan == nil || f.OwnershipPlan.Status != pendingMaintainerApproval || f.OwnershipPlan.DeletionAuthority {
+			return fmt.Errorf("positive finding %q requires a pending non-deletion ownership_plan", f.ID)
+		}
+		if f.ProposedOwner.State == "existing" {
+			// Existing neutral targets are permitted; pinned validation resolves
+			// them without requiring an already-existing reciprocal BDD link.
+		} else if containsString(ownerPaths(f.CurrentOwners), f.ProposedOwner.Path) {
 			return fmt.Errorf("positive finding %q cannot mark a current owner as new", f.ID)
-		case isStrictDescendantOfCurrentOwner(f.ProposedOwner.Path, ownerPaths(f.CurrentOwners)):
-			return fmt.Errorf("positive finding %q cannot propose a new owner beneath a current-owner directory", f.ID)
 		}
 		if f.Confidence != "confirmed" || f.Strength == "exploratory" {
 			return fmt.Errorf("positive finding %q requires confirmed evidence and non-exploratory strength", f.ID)
@@ -2647,42 +3606,32 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 			if len(active) == 0 || len(seenMembers) != len(active) {
 				return fmt.Errorf("positive finding %q must cover every pinned active member", f.ID)
 			}
-		case "implementation-only":
-			implementationOwners := ownerPaths(f.CurrentOwners)
-			if f.ProposedOwner != nil {
-				implementationOwners = append(implementationOwners, f.ProposedOwner.Path)
-			}
-			if hasHarnessSurfaceOwner(implementationOwners, active) {
-				return fmt.Errorf("implementation-only finding %q includes a harness configuration owner", f.ID)
-			}
+		case "non-harness-domain":
 			if len(seenMembers) != 0 {
 				if len(active) == 0 || len(seenMembers) != len(active) {
-					return fmt.Errorf("implementation-only finding %q must omit harness rows or mark every active member", f.ID)
+					return fmt.Errorf("non-harness-domain finding %q must omit harness rows or mark every active member", f.ID)
 				}
 				for _, entry := range f.Applicability {
 					if entry.Disposition != "not-applicable" {
-						return fmt.Errorf("implementation-only finding %q has non-applicable harness disposition %q", f.ID, entry.Disposition)
+						return fmt.Errorf("non-harness-domain finding %q has non-applicable harness disposition %q", f.ID, entry.Disposition)
 					}
 				}
 			}
 		}
-		if f.Classification == "shared-contract" && strings.TrimSpace(f.BDD.SharedContractFeature) == "" {
-			return fmt.Errorf("positive shared-contract finding %q requires bdd.shared_contract_feature", f.ID)
-		}
-		if f.OwnershipPlan == nil {
-			return fmt.Errorf("positive finding %q requires an ownership_plan", f.ID)
-		}
-		if err := validateOwnershipPlanShape(f); err != nil {
-			return fmt.Errorf("positive finding %q ownership_plan: %w", f.ID, err)
-		}
+	}
+	if f.ApplicabilityBasis == "active-members" && len(active) == 0 {
+		return fmt.Errorf("finding %q cannot claim active-member parity because the pinned dear-agent registry adapter found no active members", f.ID)
 	}
 	if f.Verdict == "resolve-product-divergence" || f.Verdict == "insufficient-evidence" {
 		if strings.TrimSpace(f.Decision) == "" || f.Strength == "strong" {
 			return fmt.Errorf("finding %q requires a decision and non-strong strength", f.ID)
 		}
 	}
-	if !positive && (f.ProposedOwner != nil || f.OwnershipPlan != nil || f.BDD.SharedContractFeature != "") {
-		return fmt.Errorf("non-positive finding %q cannot carry a canonical owner, ownership plan, or shared BDD feature", f.ID)
+	if !positive && f.ProposedOwner != nil {
+		return fmt.Errorf("non-positive finding %q cannot select a canonical owner", f.ID)
+	}
+	if !positive && f.OwnershipPlan != nil {
+		return fmt.Errorf("non-positive finding %q cannot select an ownership_plan", f.ID)
 	}
 	if nonCandidate {
 		if f.Rank != 0 || f.Verdict != "keep-separate" || strings.TrimSpace(f.Boundary) == "" {
@@ -2694,199 +3643,24 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool) error
 	return nil
 }
 
-//nolint:gocyclo // Ownership topology is intentionally validated in one fail-closed sequence.
-func validateOwnershipPlanShape(f finding) error {
-	plan := f.OwnershipPlan
-	if plan.Approval != "pending-maintainer-approval" {
-		return errors.New("approval must be pending-maintainer-approval")
-	}
-	if len(plan.CurrentOwners) != len(f.CurrentOwners) {
-		return errors.New("must include exactly one entry for every current owner")
-	}
-	ownerSet := stringSet(ownerPaths(f.CurrentOwners))
-	seen := map[string]bool{}
-	for _, entry := range plan.CurrentOwners {
-		if !ownerSet[entry.Path] || seen[entry.Path] || strings.TrimSpace(entry.Rationale) == "" {
-			return errors.New("must include exact current-owner paths with rationales")
-		}
-		seen[entry.Path] = true
-		switch entry.Action {
-		case "retain":
-			if entry.Preservation != nil {
-				return fmt.Errorf("retained owner %q cannot carry a preservation migration", entry.Path)
-			}
-		case "retire-normative-ownership":
-			if entry.Preservation == nil {
-				return fmt.Errorf("retired owner %q requires structured preservation", entry.Path)
-			}
-			if err := validatePreservationShape(f, entry); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("owner %q has unsupported action %q", entry.Path, entry.Action)
+func evidencePathsByKind(items []evidence, kind string) []string {
+	paths := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Kind == kind {
+			paths = append(paths, item.Path)
 		}
 	}
-	for _, entry := range plan.CurrentOwners {
-		if f.ProposedOwner.State == "existing" && entry.Path == f.ProposedOwner.Path {
-			if entry.Action != "retain" {
-				return fmt.Errorf("existing proposed owner %q must be retained", entry.Path)
-			}
-			continue
-		}
-		if entry.Action != "retire-normative-ownership" {
-			return fmt.Errorf("current owner %q must retire normative ownership", entry.Path)
-		}
-	}
-	return nil
+	return paths
 }
 
-//nolint:gocyclo // Preservation coverage keeps requirement, BDD, applicability, and target-state checks together.
-func validatePreservationShape(f finding, entry ownershipPlanOwner) error {
-	preservation := entry.Preservation
-	ownerEvidence := make([]evidence, 0)
-	for _, item := range f.Evidence {
-		if item.Path == entry.Path {
-			ownerEvidence = append(ownerEvidence, item)
-		}
-	}
-	if len(ownerEvidence) == 0 || len(preservation.Requirements) != len(ownerEvidence) {
-		return fmt.Errorf("retired owner %q must map every source requirement evidence record", entry.Path)
-	}
-	sourceKeys := map[string]bool{}
-	for _, item := range ownerEvidence {
-		sourceKeys[evidenceKey(item)] = true
-	}
-	seenSources := map[string]bool{}
-	for _, mapping := range preservation.Requirements {
-		key := evidenceKey(mapping.Source)
-		if !sourceKeys[key] || seenSources[key] || strings.TrimSpace(mapping.TargetID) == "" || !targetStates[mapping.TargetState] || !preservationStrategies[mapping.Strategy] {
-			return fmt.Errorf("retired owner %q has invalid requirement preservation", entry.Path)
-		}
-		if mapping.Strategy == "preserve-id" && mapping.TargetID != mapping.Source.RequirementID {
-			return fmt.Errorf("retired owner %q preserve-id mapping must retain %q", entry.Path, mapping.Source.RequirementID)
-		}
-		if f.ProposedOwner.State == "existing" && mapping.TargetState != "existing" {
-			return fmt.Errorf("retired owner %q cannot plan a target in an existing proposed owner", entry.Path)
-		}
-		if f.ProposedOwner.State == "new" && mapping.TargetState != "planned" {
-			return fmt.Errorf("retired owner %q must plan targets for a new proposed owner", entry.Path)
-		}
-		seenSources[key] = true
-	}
-	if len(seenSources) != len(sourceKeys) {
-		return fmt.Errorf("retired owner %q must map every source requirement evidence record", entry.Path)
-	}
-	if preservation.ApplicabilityBasis != f.ApplicabilityBasis || !reflect.DeepEqual(preservation.Applicability, f.Applicability) {
-		return fmt.Errorf("retired owner %q must copy the finding applicability basis and matrix exactly", entry.Path)
-	}
-	if len(preservation.BDD) == 0 {
-		return fmt.Errorf("retired owner %q requires reciprocal BDD preservation mappings", entry.Path)
-	}
-	sharedMapped := false
-	seenBDD := map[string]bool{}
-	for _, mapping := range preservation.BDD {
-		if !containsString(f.BDD.Features, mapping.Feature) || mapping.SourceOwner != entry.Path || mapping.TargetOwner != f.ProposedOwner.Path || seenBDD[mapping.Feature] {
-			return fmt.Errorf("retired owner %q has invalid BDD preservation", entry.Path)
-		}
-		if mapping.Feature == f.BDD.SharedContractFeature {
-			sharedMapped = true
-		}
-		seenBDD[mapping.Feature] = true
-	}
-	if f.Classification == "shared-contract" && !sharedMapped {
-		return fmt.Errorf("retired owner %q preservation must include bdd.shared_contract_feature", entry.Path)
-	}
-	return nil
-}
-
-func evidenceKey(item evidence) string {
-	return item.Path + "\x00" + strconv.Itoa(item.Line) + "\x00" + item.RequirementID + "\x00" + item.Excerpt
-}
-
-func hasHarnessSurfaceOwner(paths []string, active map[string]bool) bool {
+func hasHarnessRegistrationOwner(paths []string) bool {
+	registrationRoots := []string{".agents/", ".claude/", ".claude-plugin/", ".codex/", ".opencode/", ".pi/"}
 	for _, path := range paths {
-		if isHarnessSurfacePath(path, active) {
-			return true
-		}
-	}
-	return false
-}
-
-// isHarnessSurfacePath recognizes a bounded catalog of harness registration
-// surfaces plus finite aliases derived from the pinned active-member names.
-// It intentionally does not classify arbitrary internal/ or pkg/ paths.
-func isHarnessSurfacePath(path string, active map[string]bool) bool {
-	harnessSegments := map[string]bool{
-		".agents":        true,
-		".claude":        true,
-		".claude-plugin": true,
-		".codex":         true,
-		".dear-agent":    true,
-		".gemini":        true,
-		".opencode":      true,
-		".pi":            true,
-		".aider":         true,
-		".continue":      true,
-		".cursor":        true,
-		".roo":           true,
-		".vscode":        true,
-		".windsurf":      true,
-		"agysession":     true,
-		"claudehooks":    true,
-		"claudeui":       true,
-		"codexadapter":   true,
-		"codexarchive":   true,
-		"codexcommand":   true,
-		"codexcontrol":   true,
-		"codexhooks":     true,
-		"codexsession":   true,
-		"piadapter":      true,
-		"picommand":      true,
-		"pisession":      true,
-	}
-	aliases := activeMemberAliases(active)
-	for segment := range strings.SplitSeq(filepath.ToSlash(path), "/") {
-		if harnessSegments[strings.ToLower(segment)] || aliases[normalizeHarnessAlias(segment)] {
-			return true
-		}
-	}
-	return false
-}
-
-func activeMemberAliases(active map[string]bool) map[string]bool {
-	aliases := map[string]bool{}
-	for member := range active {
-		normalized := normalizeHarnessAlias(member)
-		if normalized == "" {
-			continue
-		}
-		aliases[normalized] = true
-		for _, suffix := range []string{"cli", "code", "agent", "harness"} {
-			aliases[strings.TrimSuffix(normalized, suffix)] = true
-		}
-	}
-	delete(aliases, "")
-	return aliases
-}
-
-func normalizeHarnessAlias(value string) string {
-	return strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			return r
-		}
-		if r >= 'A' && r <= 'Z' {
-			return r + ('a' - 'A')
-		}
-		return -1
-	}, value)
-}
-
-func isStrictDescendantOfCurrentOwner(proposed string, owners []string) bool {
-	proposedDirectory := filepath.ToSlash(filepath.Dir(proposed))
-	for _, owner := range owners {
-		ownerDirectory := filepath.ToSlash(filepath.Dir(owner))
-		if proposedDirectory != ownerDirectory && strings.HasPrefix(proposedDirectory, ownerDirectory+"/") {
-			return true
+		canonical := filepath.ToSlash(path)
+		for _, root := range registrationRoots {
+			if strings.HasPrefix(canonical, root) || strings.Contains(canonical, "/"+root) {
+				return true
+			}
 		}
 	}
 	return false
@@ -2897,8 +3671,14 @@ func validateEvidence(items []evidence) error {
 		return errors.New("evidence is required")
 	}
 	for _, item := range items {
-		if !validPath(item.Path) || item.Line < 1 || strings.TrimSpace(item.Excerpt) == "" {
-			return errors.New("evidence requires a relative path, positive line, and excerpt")
+		if !evidenceKinds[item.Kind] || !validPath(item.Path) || item.Line < 1 || strings.TrimSpace(item.Excerpt) == "" {
+			return errors.New("evidence requires a supported kind, relative path, positive line, and excerpt")
+		}
+		if item.Kind == "normative-contract" && strings.TrimSpace(item.RequirementID) == "" {
+			return errors.New("normative-contract evidence requires a requirement identifier")
+		}
+		if item.Kind == "supporting" && item.RequirementID != "" {
+			return errors.New("supporting evidence cannot claim a normative requirement identifier")
 		}
 	}
 	return nil
@@ -2940,20 +3720,20 @@ func mapKeys(values map[string]bool) []string {
 }
 
 var (
-	verdicts               = map[string]bool{"merge-now": true, "extract-neutral-contract": true, "keep-separate": true, "resolve-product-divergence": true, "insufficient-evidence": true}
-	relationships          = map[string]bool{"same-observable": true, "overlapping-observables": true, "contradictory-observables": true, "same-vocabulary-only": true, "fixture-or-generated-copy": true}
-	classifications        = map[string]bool{"shared-contract": true, "capability-variation": true, "native-adapter": true, "wrapper": true, "fixture": true, "implementation-detail": true}
-	confidences            = map[string]bool{"confirmed": true, "likely": true, "tentative": true}
-	strengths              = map[string]bool{"strong": true, "moderate": true, "exploratory": true}
-	ownerStates            = map[string]bool{"existing": true, "new": true}
-	targetStates           = map[string]bool{"existing": true, "planned": true}
-	preservationStrategies = map[string]bool{"preserve-id": true, "canonical-reference": true}
-	applicabilityBases     = map[string]bool{"active-members": true, "implementation-only": true}
-	dispositions           = map[string]bool{"supported": true, "adapted": true, "unsupported": true, "not-applicable": true, "unknown": true}
-	bddConsequences        = map[string]bool{"merge": true, "add-matrix": true, "adapter-only": true, "none": true, "resolve": true}
-	seedKinds              = map[string]bool{"exact-body": true, "duplicate-id": true, "shared-bdd": true, "identical-file": true, "harness-terminology": true}
-	diagnosticKinds        = map[string]bool{"anonymous-requirement": true, "nonconforming-requirement": true, "missing-bdd-feature": true, "nonreciprocal-bdd-feature": true, "malformed-bdd-feature-reference": true, "duplicate-bdd-feature-reference": true, "ambiguous-bdd-traceability-section": true}
-	featureDiagnosticKinds = map[string]bool{"missing-feature-spec-reference": true, "malformed-feature-spec-reference": true, "ambiguous-feature-spec-reference": true, "missing-feature-spec": true, "nonreciprocal-feature-spec": true}
+	verdicts                       = map[string]bool{"merge-now": true, "extract-neutral-contract": true, "keep-separate": true, "resolve-product-divergence": true, "insufficient-evidence": true}
+	relationships                  = map[string]bool{"same-observable": true, "overlapping-observables": true, "contradictory-observables": true, "same-vocabulary-only": true, "fixture-or-generated-copy": true}
+	classifications                = map[string]bool{"shared-contract": true, "capability-variation": true, "wrapper": true, "fixture": true, "implementation-detail": true}
+	confidences                    = map[string]bool{"confirmed": true, "likely": true, "tentative": true}
+	strengths                      = map[string]bool{"strong": true, "moderate": true, "exploratory": true}
+	ownerStates                    = map[string]bool{"existing": true, "new": true}
+	applicabilityBases             = map[string]bool{"active-members": true, "non-harness-domain": true}
+	dispositions                   = map[string]bool{"supported": true, "adapted": true, "unsupported": true, "not-applicable": true, "unknown": true}
+	bddConsequences                = map[string]bool{"merge": true, "add-matrix": true, "applicability-specific": true, "none": true, "resolve": true}
+	seedKinds                      = map[string]bool{"exact-body": true, "duplicate-id": true, "shared-bdd": true, "identical-file": true, "harness-terminology": true}
+	evidenceKinds                  = map[string]bool{"normative-contract": true, "supporting": true}
+	diagnosticKinds                = map[string]bool{"anonymous-requirement": true, "nonconforming-requirement": true, "missing-bdd-feature": true, "nonreciprocal-bdd-feature": true, "malformed-bdd-feature-reference": true, "duplicate-bdd-feature-reference": true, "ambiguous-bdd-traceability-section": true}
+	featureDiagnosticKinds         = map[string]bool{"missing-feature-spec-reference": true, "malformed-feature-spec-reference": true, "ambiguous-feature-spec-reference": true, "missing-feature-spec": true, "nonreciprocal-feature-spec": true}
+	reviewExclusionClassifications = map[string]bool{"fixture": true, "generated": true, "third-party": true, "archived": true, "nested-repository": true}
 )
 
 func validExclusions(items []exclusion) bool {
@@ -2965,6 +3745,28 @@ func validExclusions(items []exclusion) bool {
 		seen[item.Path] = true
 	}
 	return true
+}
+
+func validReviewExclusions(items []reviewExclusion) bool {
+	seen := map[string]bool{}
+	for _, item := range items {
+		if !validPath(item.Path) || !reviewExclusionClassifications[item.Classification] || strings.TrimSpace(item.Rationale) == "" || len(item.SupportingEvidence) == 0 || seen[item.Path] {
+			return false
+		}
+		if err := validatePersistedEvidence(nil, item.SupportingEvidence); err != nil {
+			return false
+		}
+		seen[item.Path] = true
+	}
+	return true
+}
+
+func reviewExclusionsForPresentation(items []reviewExclusion) []exclusion {
+	result := make([]exclusion, 0, len(items))
+	for _, item := range items {
+		result = append(result, exclusion{Path: item.Path, Reason: item.Classification + ": " + item.Rationale})
+	}
+	return result
 }
 
 func validGitTrustInputs(inputs gitTrustInputs) bool {
@@ -2994,11 +3796,16 @@ func validEnumSlice(items []string, allowed map[string]bool) bool {
 }
 
 func validPath(path string) bool {
-	if strings.TrimSpace(path) == "" || filepath.IsAbs(path) {
+	if strings.TrimSpace(path) == "" || len(path) > maxGitPathBytes || !utf8.ValidString(path) || filepath.IsAbs(path) || strings.Contains(path, "\\") {
 		return false
 	}
+	for _, value := range path {
+		if value < 0x20 || value == 0x7f {
+			return false
+		}
+	}
 	clean := filepath.ToSlash(filepath.Clean(path))
-	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+	return clean == path && clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
 func validFeaturePath(path string) bool {
@@ -3293,6 +4100,11 @@ html,body,.toc{overflow-x:hidden}
 		fmt.Fprintf(out, "<li><code>%s</code></li>", esc(command))
 	}
 	out.WriteString("</ol></div></div>")
+	if audit.CollectorExecution != nil {
+		out.WriteString("<p class=\"source-note\"><strong>Collector execution disclosure.</strong> ")
+		fmt.Fprintf(out, "%s", esc(audit.CollectorExecutionDisclosure))
+		out.WriteString("</p>")
+	}
 	renderSeedSummary(out, seeds, inventory)
 	proof := "Schema validation was performed without a freshly recomputed Git-resolved inventory."
 	if inventory != nil {
@@ -3342,7 +4154,7 @@ func renderTopology(out *boundedHTMLBuilder, finding finding) {
 	if finding.ProposedOwner == nil {
 		out.WriteString("<p class=\"empty\">No consolidation owner.</p>")
 	} else {
-		fmt.Fprintf(out, "<p><code>%s</code></p><span class=\"pill\">%s owner</span><p>%s</p><p><strong>Neutrality:</strong> %s</p>", esc(finding.ProposedOwner.Path), esc(finding.ProposedOwner.State), esc(finding.ProposedOwner.Rationale), esc(finding.ProposedOwner.NeutralityRationale))
+		fmt.Fprintf(out, "<p><code>%s</code></p><span class=\"pill\">%s owner</span><p>%s</p><p><strong>Neutrality basis:</strong> %s</p>", esc(finding.ProposedOwner.Path), esc(finding.ProposedOwner.State), esc(finding.ProposedOwner.Rationale), esc(finding.ProposedOwner.NeutralityRationale))
 	}
 	out.WriteString("</div></div>")
 }
@@ -3355,6 +4167,10 @@ func renderFinding(out *boundedHTMLBuilder, finding finding) {
 	fmt.Fprintf(out, "</div><h3>%s</h3></div><div><span class=\"tag verdict\">%s</span><span class=\"tag\">%s</span><span class=\"tag\">%s</span></div></header>", esc(finding.Title), esc(finding.Verdict), esc(finding.Confidence), esc(finding.Strength))
 	fmt.Fprintf(out, "<p><span class=\"tag\">%s</span><span class=\"tag\">%s</span></p><span class=\"label\">Shared outcome or apparent overlap</span><p class=\"outcome\">%s</p>", esc(finding.Relationship), esc(finding.Classification), esc(finding.SharedOutcome))
 	renderTopology(out, finding)
+	if finding.DecisionStatus != "" {
+		fmt.Fprintf(out, "<p class=\"source-note\"><strong>Decision status:</strong> %s</p>", esc(finding.DecisionStatus))
+	}
+	renderOwnershipPlan(out, finding.OwnershipPlan)
 	if finding.OwnershipCompleteness != "" {
 		fmt.Fprintf(out, "<p class=\"source-note\"><strong>Owner-set completeness:</strong> %s</p>", esc(finding.OwnershipCompleteness))
 	}
@@ -3391,13 +4207,9 @@ func renderFinding(out *boundedHTMLBuilder, finding finding) {
 		}
 		out.WriteString("</ul>")
 	}
-	if finding.BDD.SharedContractFeature != "" {
-		fmt.Fprintf(out, "<p><strong>Shared contract feature:</strong> <code>%s</code></p>", esc(finding.BDD.SharedContractFeature))
-	}
 	out.WriteString("</div><div><span class=\"label\">Ordered recommendation</span>")
 	renderStringList(out, finding.Recommendation, true)
 	out.WriteString("</div></div>")
-	renderOwnershipPlan(out, finding)
 	fmt.Fprintf(out, "<p class=\"risk\"><strong>Risk:</strong> %s</p><p class=\"decision\"><strong>Maintainer decision:</strong> %s</p>", esc(finding.Risk), esc(finding.Decision))
 	out.WriteString("<details><summary>Finding limitations</summary>")
 	if len(finding.Limitations) == 0 {
@@ -3408,38 +4220,25 @@ func renderFinding(out *boundedHTMLBuilder, finding finding) {
 	out.WriteString("</details></article>")
 }
 
-func renderOwnershipPlan(out *boundedHTMLBuilder, finding finding) {
-	if finding.OwnershipPlan == nil {
+func renderOwnershipPlan(out *boundedHTMLBuilder, plan *ownershipPlan) {
+	if plan == nil {
 		return
 	}
-	out.WriteString("<details open><summary>Pending ownership and preservation plan</summary>")
-	fmt.Fprintf(out, "<p class=\"decision\"><strong>Approval:</strong> %s. This plan does not authorize a change or file deletion.</p>", esc(finding.OwnershipPlan.Approval))
-	for _, owner := range finding.OwnershipPlan.CurrentOwners {
-		fmt.Fprintf(out, "<div class=\"panel\"><p><code>%s</code> <span class=\"tag\">%s</span></p><p>%s</p>", esc(owner.Path), esc(owner.Action), esc(owner.Rationale))
-		if owner.Preservation != nil {
-			out.WriteString("<span class=\"label\">Requirement preservation</span><ul class=\"compact\">")
-			for _, mapping := range owner.Preservation.Requirements {
-				fmt.Fprintf(out, "<li><code>%s:%d %s</code> → <code>%s</code> (%s; %s)</li>", esc(mapping.Source.Path), mapping.Source.Line, esc(mapping.Source.RequirementID), esc(mapping.TargetID), esc(mapping.TargetState), esc(mapping.Strategy))
-			}
-			out.WriteString("</ul><span class=\"label\">BDD preservation</span><ul class=\"compact\">")
-			for _, mapping := range owner.Preservation.BDD {
-				fmt.Fprintf(out, "<li><code>%s</code>: <code>%s</code> → <code>%s</code></li>", esc(mapping.Feature), esc(mapping.SourceOwner), esc(mapping.TargetOwner))
-			}
-			out.WriteString("</ul><span class=\"label\">Copied applicability</span>")
-			fmt.Fprintf(out, "<p><span class=\"pill\">%s</span></p>", esc(owner.Preservation.ApplicabilityBasis))
-			if len(owner.Preservation.Applicability) == 0 {
-				out.WriteString("<p class=\"empty\">No active-member matrix.</p>")
-			} else {
-				out.WriteString("<table class=\"matrix\"><thead><tr><th>Member</th><th>Disposition</th></tr></thead><tbody>")
-				for _, entry := range owner.Preservation.Applicability {
-					fmt.Fprintf(out, "<tr><td><code>%s</code></td><td>%s</td></tr>", esc(entry.Member), esc(entry.Disposition))
-				}
-				out.WriteString("</tbody></table>")
-			}
-		}
-		out.WriteString("</div>")
+	out.WriteString("<details open><summary>Maintainer-pending ownership preservation plan</summary>")
+	fmt.Fprintf(out, "<p class=\"source-note\"><strong>Status:</strong> %s. This plan preserves traceability for review and is not deletion authority.</p>", esc(plan.Status))
+	out.WriteString("<span class=\"label\">Owner actions</span><ul class=\"compact\">")
+	for _, action := range plan.OwnerActions {
+		fmt.Fprintf(out, "<li><code>%s</code> · %s — %s</li>", esc(action.OwnerPath), esc(action.Disposition), esc(action.Rationale))
 	}
-	out.WriteString("</details>")
+	out.WriteString("</ul><span class=\"label\">Requirement preservation</span><ul class=\"compact\">")
+	for _, entry := range plan.Requirements {
+		fmt.Fprintf(out, "<li><code>%s:%d %s</code> → <code>%s %s</code> (%s, %s)</li>", esc(entry.ContractEvidence.Path), entry.ContractEvidence.Line, esc(entry.ContractEvidence.RequirementID), esc(entry.TargetPath), esc(entry.TargetRequirementID), esc(entry.TargetState), esc(entry.Disposition))
+	}
+	out.WriteString("</ul><span class=\"label\">BDD preservation</span><ul class=\"compact\">")
+	for _, entry := range plan.Features {
+		fmt.Fprintf(out, "<li><code>%s</code> via <code>%s</code> → <code>%s</code> (%s, %s)</li>", esc(entry.Path), esc(entry.SourceOwner), esc(entry.TargetPath), esc(entry.TargetState), esc(entry.Disposition))
+	}
+	out.WriteString("</ul></details>")
 }
 
 // renderEvidence renders every supplied record in order. Applicability evidence
@@ -3456,7 +4255,7 @@ func renderEvidence(out *boundedHTMLBuilder, items []evidence, class string) {
 		if item.RequirementID != "" {
 			fmt.Fprintf(out, " <span class=\"pill\">%s</span>", esc(item.RequirementID))
 		}
-		fmt.Fprintf(out, "<br>%s</li>", esc(item.Excerpt))
+		fmt.Fprintf(out, "<br><span class=\"pill\">%s</span> %s</li>", esc(item.Kind), esc(item.Excerpt))
 	}
 	out.WriteString("</ul>")
 }

@@ -19,6 +19,14 @@ Feature: SPEC audit tooling evidence boundary
     When AGM runs the focused pinned finding validation unit check
     Then the focused SPEC audit unit check should pass
 
+  Scenario: Immutable inventory and reviewer ledger stay separate
+    When AGM runs the focused v2 inventory and ledger unit check
+    Then the focused SPEC audit unit check should pass
+
+  Scenario: Input authentication has an explicit platform boundary
+    When AGM runs the focused SPEC audit platform applicability unit check
+    Then the focused SPEC audit unit check should pass
+
   Scenario: Offline audit rendering is escaped and bounded
     When AGM runs the focused bounded offline rendering unit check
     Then the focused SPEC audit unit check should pass

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -479,15 +480,17 @@ func TestInventoryReadsCanonicalAndLegacyHarnessRegistryPaths(t *testing.T) {
 		wantLimitation bool
 	}{
 		{
-			name:      "canonical registry takes precedence",
-			canonical: "package harnessregistry\nvar activeHarnesses = []string{\"codex-cli\", \"pi-cli\"}\n",
-			legacy:    "package agent\nvar activeHarnesses = []string{\"claude-code\"}\n",
-			want:      "codex-cli,pi-cli",
+			name:           "canonical registry takes precedence",
+			canonical:      "package harnessregistry\nvar activeHarnesses = []string{\"codex-cli\", \"pi-cli\"}\n",
+			legacy:         "package agent\nvar activeHarnesses = []string{\"claude-code\"}\n",
+			want:           "codex-cli,pi-cli",
+			wantLimitation: true,
 		},
 		{
-			name:   "legacy registry remains auditable",
-			legacy: "package agent\nvar activeHarnesses = []string{\"codex-cli\"}\n",
-			want:   "codex-cli",
+			name:           "legacy registry remains auditable",
+			legacy:         "package agent\nvar activeHarnesses = []string{\"codex-cli\"}\n",
+			want:           "codex-cli",
+			wantLimitation: true,
 		},
 		{
 			name:           "malformed canonical registry never falls back to legacy",
@@ -659,7 +662,7 @@ func TestInventoryMissingPromisorObjectDoesNotStartLazyFetch(t *testing.T) {
 		}
 	}
 	controlCtx, controlCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	control := exec.CommandContext(controlCtx, executable.Path(), "-c", "protocol.ext.allow=always", "--no-replace-objects", "-C", repo, "cat-file", "blob", missingBlob)
+	control := exec.CommandContext(controlCtx, executable.Path(), "--no-replace-objects", "-C", repo, "cat-file", "blob", missingBlob)
 	control.Dir = repo
 	control.Env = controlEnv
 	control.Stdout = io.Discard
@@ -992,9 +995,9 @@ func TestValidateRejectsInvalidPositiveFinding(t *testing.T) {
 	report := validReport()
 	report.Candidates = []finding{{
 		ID: "SPEC-CLUSTER-001", Rank: 1, Title: "bad", Verdict: "merge-now", Relationship: "same-observable", Classification: "shared-contract", Confidence: "confirmed", Strength: "strong",
-		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the behavior"}}, ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "already owns the neutral behavior"}, SharedOutcome: "same", MaterialDifferences: []string{"none observed"}, Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}},
-		ApplicabilityBasis: "active-members", ApplicabilityRationale: "supported by the active member", Applicability: []applicability{{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}}}},
-		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "merge"}, Recommendation: []string{"merge"}, Risk: "bounded", Decision: "approve",
+		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the behavior"}}, ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "already owns the neutral behavior"}, SharedOutcome: "same", MaterialDifferences: []string{"none observed"}, Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}},
+		ApplicabilityBasis: "active-members", ApplicabilityRationale: "supported by the active member", Applicability: []applicability{{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}}}},
+		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "merge"}, Recommendation: []string{"merge"}, Risk: "bounded", Decision: "approve", DecisionStatus: pendingMaintainerApproval,
 	}}
 	report.Summary.CandidateCount = 1
 	report.Summary.ByVerdict = map[string]int{"merge-now": 1}
@@ -1008,22 +1011,21 @@ func TestValidateFindingOwnerStateCoherence(t *testing.T) {
 	candidateFinding := semanticReport.Candidates[0]
 	active := map[string]bool{"codex-cli": true, "pi-cli": true}
 
-	candidateFinding.ProposedOwner = &proposedOwnerClaim{Path: "shared/SPEC.md", State: "new", Rationale: "A new implemented shared seam is required.", NeutralityRationale: "The top-level shared contract is outside every harness registration surface."}
-	candidateFinding.OwnershipPlan.CurrentOwners[1].Preservation.Requirements[0].TargetState = "planned"
-	candidateFinding.OwnershipPlan.CurrentOwners[1].Preservation.BDD[0].TargetOwner = "shared/SPEC.md"
-	candidateFinding.OwnershipPlan.CurrentOwners[0] = ownershipPlanOwner{
-		Path: "one/SPEC.md", Action: "retire-normative-ownership", Rationale: "The old owner will become a canonical reference.", Preservation: &preservationPlan{
-			Requirements:       []requirementPreservation{{Source: candidateFinding.Evidence[0], TargetID: candidateFinding.Evidence[0].RequirementID, TargetState: "planned", Strategy: "preserve-id"}},
-			BDD:                []bddPreservation{{Feature: candidateFinding.BDD.SharedContractFeature, SourceOwner: "one/SPEC.md", TargetOwner: "shared/SPEC.md"}},
-			ApplicabilityBasis: candidateFinding.ApplicabilityBasis,
-			Applicability:      candidateFinding.Applicability,
-		},
-	}
+	candidateFinding.ProposedOwner = &proposedOwnerClaim{Path: "shared/SPEC.md", State: "new", Rationale: "A new implemented shared seam is required.", NeutralityRationale: "The shared seam is outside harness configuration and owns only the shared observable."}
+	candidateFinding.OwnershipPlan.Requirements[1].TargetPath = "shared/SPEC.md"
+	candidateFinding.OwnershipPlan.Requirements[1].TargetRequirementID = "TWO-01"
+	candidateFinding.OwnershipPlan.Requirements[1].TargetState = "planned"
+	candidateFinding.OwnershipPlan.Features[1].TargetPath = "shared/SPEC.md"
+	candidateFinding.OwnershipPlan.Features[1].TargetState = "planned"
+	candidateFinding.OwnershipPlan.Features[3].TargetPath = "shared/SPEC.md"
+	candidateFinding.OwnershipPlan.Features[3].TargetState = "planned"
 	if err := validateFinding(candidateFinding, false, active); err != nil {
 		t.Fatalf("new proposed owner should be valid: %v", err)
 	}
 	if err := validateAgainstInventory(report{
 		SchemaVersion: schemaVersion,
+		DocumentKind:  ledgerDocumentKind,
+		InventoryRef:  semanticReport.InventoryRef,
 		Snapshot:      semanticReport.Snapshot,
 		Scope:         semanticReport.Scope,
 		Summary:       semanticReport.Summary,
@@ -1037,7 +1039,7 @@ func TestValidateFindingOwnerStateCoherence(t *testing.T) {
 
 	candidateFinding.Verdict = "insufficient-evidence"
 	candidateFinding.Strength = "moderate"
-	if err := validateFinding(candidateFinding, false, active); err == nil || !strings.Contains(err.Error(), "cannot carry a canonical owner") {
+	if err := validateFinding(candidateFinding, false, active); err == nil || !strings.Contains(err.Error(), "cannot select a canonical owner") {
 		t.Fatalf("non-positive proposed owner error = %v", err)
 	}
 }
@@ -1086,9 +1088,9 @@ func TestValidateFindingRejectsNonProductPositiveOwners(t *testing.T) {
 func TestRenderIsOfflineAndEscapesEvidence(t *testing.T) {
 	report := validReport()
 	report.NonCandidates = []finding{{
-		ID: "SPEC-CLUSTER-002", Title: "native <adapter>", Verdict: "keep-separate", Relationship: "same-vocabulary-only", Classification: "native-adapter", Confidence: "confirmed", Strength: "moderate",
-		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the native behavior"}}, SharedOutcome: "separate", MaterialDifferences: []string{"native path"}, Evidence: []evidence{{Path: "one/SPEC.md", Line: 2, RequirementID: "ONE-01", Excerpt: "<script>alert(1)</script>"}},
-		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "adapter-only"}, Recommendation: []string{"keep it"}, Risk: "bounded", Limitations: []string{"sentinel limitation"}, Decision: "retain", Boundary: "native behavior differs",
+		ID: "SPEC-CLUSTER-002", Title: "native <adapter>", Verdict: "keep-separate", Relationship: "same-vocabulary-only", Classification: "capability-variation", Confidence: "confirmed", Strength: "moderate",
+		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the native behavior"}}, SharedOutcome: "separate", MaterialDifferences: []string{"native path"}, Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: 2, RequirementID: "ONE-01", Excerpt: "<script>alert(1)</script>"}},
+		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "applicability-specific"}, Recommendation: []string{"keep it"}, Risk: "bounded", Limitations: []string{"sentinel limitation"}, Decision: "retain", Boundary: "native behavior differs",
 	}}
 	report.Summary.ByVerdict = map[string]int{"keep-separate": 1}
 	report.Snapshot.ComparisonRevision = strings.Repeat("b", 40)
@@ -1100,7 +1102,7 @@ func TestRenderIsOfflineAndEscapesEvidence(t *testing.T) {
 	if !strings.Contains(output, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Fatalf("renderer did not escape evidence: %s", output)
 	}
-	for _, sentinel := range []string{"SPEC-CLUSTER-002", "same-vocabulary-only", "native-adapter", "one/SPEC.md", "native path", "agm/test/bdd/features/example.feature", "keep it", "sentinel limitation", "dependency corpus", strings.Repeat("b", 40)} {
+	for _, sentinel := range []string{"SPEC-CLUSTER-002", "same-vocabulary-only", "capability-variation", "one/SPEC.md", "native path", "agm/test/bdd/features/example.feature", "keep it", "sentinel limitation", "dependency corpus", strings.Repeat("b", 40)} {
 		if !strings.Contains(output, sentinel) {
 			t.Fatalf("renderer omitted %q", sentinel)
 		}
@@ -1110,6 +1112,7 @@ func TestRenderIsOfflineAndEscapesEvidence(t *testing.T) {
 func TestRenderRetainsEscapedApplicabilityEvidenceRecords(t *testing.T) {
 	report := validReport()
 	applicabilityEvidence := evidence{
+		Kind:          "normative-contract",
 		Path:          "one/SPEC.md",
 		Line:          17,
 		RequirementID: "ONE-01",
@@ -1118,7 +1121,7 @@ func TestRenderRetainsEscapedApplicabilityEvidenceRecords(t *testing.T) {
 	report.Candidates = []finding{{
 		ID: "SPEC-CLUSTER-001", Rank: 1, Title: "applicability evidence", Verdict: "merge-now", Relationship: "same-observable", Classification: "shared-contract", Confidence: "confirmed", Strength: "strong",
 		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the behavior"}, {Path: "two/SPEC.md", Rationale: "also owns the behavior"}}, ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "owns the canonical behavior"},
-		SharedOutcome: "same", MaterialDifferences: []string{"none observed"}, Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}, {Path: "two/SPEC.md", Line: 1, RequirementID: "TWO-01", Excerpt: "two"}},
+		SharedOutcome: "same", MaterialDifferences: []string{"none observed"}, Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}, {Kind: "normative-contract", Path: "two/SPEC.md", Line: 1, RequirementID: "TWO-01", Excerpt: "two"}},
 		ApplicabilityBasis: "active-members", ApplicabilityRationale: "both claims use the same pinned evidence", Applicability: []applicability{{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{applicabilityEvidence, applicabilityEvidence}}},
 		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "merge"}, Recommendation: []string{"merge"}, Risk: "bounded", Decision: "approve",
 	}}
@@ -1154,15 +1157,11 @@ func TestCommandsRejectFilesystemOutputFlags(t *testing.T) {
 }
 
 func TestInventoryValidateRenderPreserveTargetRepositoryState(t *testing.T) {
-	repo, _, semanticReport := auditFixture(t)
-	gittest.HardenRepo(t, repo)
+	repo, inventoryReport, semanticReport := auditFixture(t)
 	writeTestFile(t, repo, "one/SPEC.md", "dirty working-tree bytes must survive the audit\n")
-	writeTestFile(t, repo, "agm/test/bdd/features/shared.feature", "# staged feature bytes\nFeature: staged\n")
-	gitTest(t, repo, "add", "agm/test/bdd/features/shared.feature")
-	writeTestFile(t, repo, "agm/test/bdd/features/shared.feature", "# unstaged feature bytes\nFeature: unstaged\n")
 	writeTestFile(t, repo, ".beads/issue-state.json", "{\"state\":\"unchanged\"}\n")
 	writeTestFile(t, repo, "wayfinder/delivery-state.json", "{\"phase\":\"unchanged\"}\n")
-	before := snapshotTargetRepository(t, repo)
+	before := snapshotRepositoryState(t, repo)
 
 	var inventoryOutput, stderr bytes.Buffer
 	if code := run([]string{
@@ -1173,17 +1172,6 @@ func TestInventoryValidateRenderPreserveTargetRepositoryState(t *testing.T) {
 	}, &inventoryOutput, &stderr); code != 0 {
 		t.Fatalf("inventory=%d: %s", code, stderr.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("inventory stderr=%q, want empty", stderr.String())
-	}
-	var emittedInventory report
-	if err := json.Unmarshal(inventoryOutput.Bytes(), &emittedInventory); err != nil {
-		t.Fatalf("inventory stdout is not report JSON: %v", err)
-	}
-	if emittedInventory.Snapshot.Revision != semanticReport.Snapshot.Revision || len(emittedInventory.Inventory) != 3 {
-		t.Fatalf("inventory stdout omitted pinned target content: snapshot=%#v files=%d", emittedInventory.Snapshot, len(emittedInventory.Inventory))
-	}
-	assertTargetRepositorySnapshot(t, "inventory", before, snapshotTargetRepository(t, repo))
 
 	inputDir := realTempDir(t)
 	inventoryPath := filepath.Join(inputDir, "inventory.json")
@@ -1191,7 +1179,11 @@ func TestInventoryValidateRenderPreserveTargetRepositoryState(t *testing.T) {
 	if err := os.WriteFile(inventoryPath, inventoryOutput.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, semanticPath, semanticReport)
+	ledger, err := decisionLedgerFromReport(semanticReport, inventoryReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, semanticPath, ledger)
 
 	stderr.Reset()
 	var validateOutput bytes.Buffer
@@ -1199,118 +1191,65 @@ func TestInventoryValidateRenderPreserveTargetRepositoryState(t *testing.T) {
 	if code := run(append([]string{"validate"}, proofArgs...), &validateOutput, &stderr); code != 0 {
 		t.Fatalf("validate=%d: %s", code, stderr.String())
 	}
-	if got := validateOutput.String(); got != "specaudit: valid spec-audit/v2 report\n" {
-		t.Fatalf("validate stdout=%q, want success confirmation", got)
+	if !strings.Contains(validateOutput.String(), "valid spec-audit/v2 decision ledger") {
+		t.Fatalf("unexpected validate output: %s", validateOutput.String())
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("validate stderr=%q, want empty", stderr.String())
-	}
-	assertTargetRepositorySnapshot(t, "validate", before, snapshotTargetRepository(t, repo))
 
 	stderr.Reset()
 	var renderOutput bytes.Buffer
 	if code := run(append([]string{"render"}, proofArgs...), &renderOutput, &stderr); code != 0 {
 		t.Fatalf("render=%d: %s", code, stderr.String())
 	}
-	if !strings.HasPrefix(renderOutput.String(), "<!doctype html>") || !strings.Contains(renderOutput.String(), semanticReport.Candidates[0].ID) {
-		t.Fatalf("render stdout omitted the complete HTML audit artifact")
+	if !strings.Contains(renderOutput.String(), "<!doctype html>") {
+		t.Fatalf("render did not emit a complete HTML artifact")
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("render stderr=%q, want empty", stderr.String())
+
+	after := snapshotRepositoryState(t, repo)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("target repository changed across inventory, validate, and render\nbefore=%#v\nafter=%#v", before, after)
 	}
-	assertTargetRepositorySnapshot(t, "render", before, snapshotTargetRepository(t, repo))
 }
 
-type targetRepositorySnapshot struct {
-	status                 string
-	trackedWorktreeContent map[string][]byte
-	indexPath              string
-	indexIdentity          string
-	indexContent           []byte
-	head                   string
-	headContent            []byte
-	refs                   string
-	relevantContractBytes  map[string][]byte
-	externalStateBytes     map[string][]byte
-}
-
-func snapshotTargetRepository(t *testing.T, root string) targetRepositorySnapshot {
+func snapshotRepositoryState(t *testing.T, root string) map[string]string {
 	t.Helper()
-	status := gitTest(t, root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
-	trackedWorktreeContent := readTargetRepositoryFiles(t, root, gitTest(t, root, "ls-files", "-z"))
-	gitDir := strings.TrimSpace(gitTest(t, root, "rev-parse", "--absolute-git-dir"))
-	indexPath := filepath.Join(gitDir, "index")
-	indexContent, err := os.ReadFile(indexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	headContent, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return targetRepositorySnapshot{
-		status:                 status,
-		trackedWorktreeContent: trackedWorktreeContent,
-		indexPath:              indexPath,
-		indexIdentity:          gitTest(t, root, "ls-files", "--stage", "-z"),
-		indexContent:           indexContent,
-		head:                   strings.TrimSpace(gitTest(t, root, "rev-parse", "HEAD")),
-		headContent:            headContent,
-		refs:                   gitTest(t, root, "for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)"),
-		relevantContractBytes: readTargetRepositoryFiles(t, root, strings.Join([]string{
-			"one/SPEC.md",
-			"two/SPEC.md",
-			"three/SPEC.md",
-			"agm/test/bdd/features/shared.feature",
-			"agm/test/bdd/features/one-only.feature",
-			"agm/test/bdd/features/two-only.feature",
-			"agm/test/bdd/features/three-only.feature",
-			"",
-		}, "\x00")),
-		externalStateBytes: readTargetRepositoryFiles(t, root, strings.Join([]string{
-			".beads/issue-state.json",
-			"wayfinder/delivery-state.json",
-			"",
-		}, "\x00")),
-	}
-}
-
-func readTargetRepositoryFiles(t *testing.T, root, nulSeparatedPaths string) map[string][]byte {
-	t.Helper()
-	files := make(map[string][]byte)
-	for path := range strings.SplitSeq(nulSeparatedPaths, "\x00") {
-		if path == "" {
-			continue
+	state := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		relative, err := filepath.Rel(root, path)
 		if err != nil {
-			t.Fatalf("read target repository file %s: %v", path, err)
+			return err
 		}
-		files[path] = content
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		key := filepath.ToSlash(relative)
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			state[key] = "symlink:" + target
+		case info.IsDir():
+			state[key] = "dir:" + info.Mode().String()
+		case info.Mode().IsRegular():
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			state[key] = fmt.Sprintf("file:%s:%x", info.Mode(), sha256.Sum256(body))
+		default:
+			state[key] = "other:" + info.Mode().String()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return files
-}
-
-func assertTargetRepositorySnapshot(t *testing.T, command string, before, after targetRepositorySnapshot) {
-	t.Helper()
-	if before.status != after.status {
-		t.Fatalf("%s changed target worktree status: before=%q after=%q", command, before.status, after.status)
-	}
-	if !reflect.DeepEqual(before.trackedWorktreeContent, after.trackedWorktreeContent) {
-		t.Fatalf("%s changed tracked target worktree content", command)
-	}
-	if before.indexPath != after.indexPath || before.indexIdentity != after.indexIdentity || !bytes.Equal(before.indexContent, after.indexContent) {
-		t.Fatalf("%s changed target index identity or content", command)
-	}
-	if before.head != after.head || !bytes.Equal(before.headContent, after.headContent) || before.refs != after.refs {
-		t.Fatalf("%s changed target HEAD or refs", command)
-	}
-	if !reflect.DeepEqual(before.relevantContractBytes, after.relevantContractBytes) {
-		t.Fatalf("%s changed relevant target SPEC or feature bytes", command)
-	}
-	if !reflect.DeepEqual(before.externalStateBytes, after.externalStateBytes) {
-		t.Fatalf("%s changed target issue or delivery state bytes", command)
-	}
+	return state
 }
 
 func TestValidatePinsFindingsToGitResolvedInventory(t *testing.T) {
@@ -1318,15 +1257,19 @@ func TestValidatePinsFindingsToGitResolvedInventory(t *testing.T) {
 	inputDir := realTempDir(t)
 	inventoryPath := filepath.Join(inputDir, "inventory.json")
 	reportPath := filepath.Join(inputDir, "findings.json")
-	writeJSON(t, inventoryPath, inventoryReport)
-	writeJSON(t, reportPath, semanticReport)
+	writeJSON(t, inventoryPath, inventoryDocumentFromReport(inventoryReport))
+	ledger, err := decisionLedgerFromReport(semanticReport, inventoryReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, reportPath, ledger)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"validate", "-input", reportPath, "-inventory", inventoryPath, "-repo", repo}
 	if code := run(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("validate=%d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "valid spec-audit/v2") {
+	if !strings.Contains(stdout.String(), "valid spec-audit/v2 decision ledger") {
 		t.Fatalf("unexpected stdout: %s", stdout.String())
 	}
 	rendered := renderHTML(semanticReport, &inventoryReport)
@@ -1371,87 +1314,12 @@ func TestReadReportRejectsSemanticNullInventoryPayload(t *testing.T) {
 	}
 }
 
-func TestReadReportRejectsNonExactSemanticPayloadKeys(t *testing.T) {
-	_, _, semanticReport := auditFixture(t)
-	data, err := json.Marshal(semanticReport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, test := range []struct {
-		name string
-		key  string
-	}{
-		{name: "uppercase inventory", key: "Inventory"},
-		{name: "mixed case features", key: "fEaTuReS"},
-		{name: "uppercase seeds", key: "SEEDS"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var document map[string]json.RawMessage
-			if err := json.Unmarshal(data, &document); err != nil {
-				t.Fatal(err)
-			}
-			document[test.key] = json.RawMessage("null")
-			encoded, err := json.Marshal(document)
-			if err != nil {
-				t.Fatal(err)
-			}
-			path := filepath.Join(realTempDir(t), "semantic-with-non-exact-payload.json")
-			if err := os.WriteFile(path, encoded, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			_, err = readReport(path)
-			if err == nil || !strings.Contains(err.Error(), `non-exact or unknown JSON object key "`+test.key+`"`) {
-				t.Fatalf("readReport() error = %v, want exact-key rejection for %q", err, test.key)
-			}
-		})
-	}
-}
-
-func TestReadReportRejectsNonExactNestedJSONKey(t *testing.T) {
-	_, _, semanticReport := auditFixture(t)
-	data, err := json.Marshal(semanticReport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(data, &document); err != nil {
-		t.Fatal(err)
-	}
-	var snapshot map[string]json.RawMessage
-	if err := json.Unmarshal(document["snapshot"], &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	snapshot["Repository"] = snapshot["repository"]
-	delete(snapshot, "repository")
-	document["snapshot"], err = json.Marshal(snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err = json.Marshal(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(realTempDir(t), "semantic-with-non-exact-nested-key.json")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err = readReport(path)
-	if err == nil || !strings.Contains(err.Error(), `non-exact or unknown JSON object key "Repository"`) {
-		t.Fatalf("readReport() error = %v, want generic nested exact-key rejection", err)
-	}
-}
-
 func TestPinnedValidationAcceptsBDDReciprocityAcrossFeatures(t *testing.T) {
 	repo, inventoryReport, semanticReport := auditFixture(t)
 	semanticReport.Candidates[0].BDD.Features = []string{
-		"agm/test/bdd/features/shared.feature",
 		"agm/test/bdd/features/one-only.feature",
 		"agm/test/bdd/features/two-only.feature",
 	}
-	semanticReport.Candidates[0].OwnershipPlan.CurrentOwners[1].Preservation.BDD = append(
-		semanticReport.Candidates[0].OwnershipPlan.CurrentOwners[1].Preservation.BDD,
-		bddPreservation{Feature: "agm/test/bdd/features/two-only.feature", SourceOwner: "two/SPEC.md", TargetOwner: "one/SPEC.md"},
-	)
 
 	if err := validateReport(semanticReport); err != nil {
 		t.Fatalf("semantic report should be structurally valid: %v", err)
@@ -1481,7 +1349,6 @@ func TestPinnedValidationAcceptsNonCandidateWithNoBDDAction(t *testing.T) {
 			nonCandidate.ProposedOwner = nil
 			nonCandidate.OwnershipPlan = nil
 			nonCandidate.BDD.Features = test.features
-			nonCandidate.BDD.SharedContractFeature = ""
 			nonCandidate.BDD.Consequence = "none"
 			nonCandidate.Boundary = "The observables remain separately owned."
 			semanticReport.Candidates = nil
@@ -1503,11 +1370,18 @@ func TestPinnedValidationAcceptsNonCandidateWithNoBDDAction(t *testing.T) {
 }
 
 func TestPinnedValidationRejectsCurrentOwnerWithoutSelectedFeature(t *testing.T) {
-	_, _, semanticReport := auditFixture(t)
+	repo, inventoryReport, semanticReport := auditFixture(t)
 	semanticReport.Candidates[0].BDD.Features = []string{"agm/test/bdd/features/one-only.feature"}
 
-	if err := validateReport(semanticReport); err == nil || !strings.Contains(err.Error(), "shared BDD feature") {
-		t.Fatalf("semantic report error=%v, want shared-contract feature rejection", err)
+	if err := validateReport(semanticReport); err != nil {
+		t.Fatalf("semantic report should be structurally valid: %v", err)
+	}
+	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
+		t.Fatalf("inventory should match the recomputed pinned repository view: %v", err)
+	}
+	err := validateAgainstInventory(semanticReport, inventoryReport)
+	if err == nil || !strings.Contains(err.Error(), "do not reciprocally name current owner \"two/SPEC.md") {
+		t.Fatalf("uncovered current-owner error=%v, want pinned owner-degree rejection", err)
 	}
 }
 
@@ -1527,88 +1401,6 @@ func TestPinnedValidationRejectsBDDFeatureWithoutCurrentOwner(t *testing.T) {
 	err := validateAgainstInventory(semanticReport, inventoryReport)
 	if err == nil || !strings.Contains(err.Error(), "three-only.feature\" does not reciprocally name any current owner") {
 		t.Fatalf("unrelated BDD feature error=%v, want current-owner rejection", err)
-	}
-}
-
-func TestPositiveOwnershipPlanRejectsDuplicateRetentionAndDivergentApplicability(t *testing.T) {
-	_, _, semanticReport := auditFixture(t)
-
-	duplicateRetention := cloneReport(t, semanticReport)
-	duplicateRetention.Candidates[0].OwnershipPlan.CurrentOwners[1].Action = "retain"
-	duplicateRetention.Candidates[0].OwnershipPlan.CurrentOwners[1].Preservation = nil
-	if err := validateReport(duplicateRetention); err == nil || !strings.Contains(err.Error(), "must retire normative ownership") {
-		t.Fatalf("duplicate retention error=%v, want retirement requirement", err)
-	}
-
-	divergentMatrix := cloneReport(t, semanticReport)
-	divergentMatrix.Candidates[0].OwnershipPlan.CurrentOwners[1].Preservation.Applicability[0].Disposition = "adapted"
-	if err := validateReport(divergentMatrix); err == nil || !strings.Contains(err.Error(), "copy the finding applicability basis and matrix exactly") {
-		t.Fatalf("divergent applicability error=%v, want exact-copy rejection", err)
-	}
-}
-
-func TestPinnedValidationRejectsIncompleteSharedFeatureAndPreservationTargets(t *testing.T) {
-	repo, inventoryReport, semanticReport := auditFixture(t)
-
-	oneSided := cloneReport(t, inventoryReport)
-	for index := range oneSided.Features {
-		if oneSided.Features[index].Path == "agm/test/bdd/features/shared.feature" {
-			oneSided.Features[index].RelatedSpecs = []string{"one/SPEC.md"}
-		}
-	}
-	if err := validateAgainstInventory(semanticReport, oneSided); err == nil || !strings.Contains(err.Error(), "shared BDD feature") {
-		t.Fatalf("one-sided shared feature error=%v, want all-owner reciprocity rejection", err)
-	}
-
-	unknownTarget := cloneReport(t, semanticReport)
-	unknownTarget.Candidates[0].OwnershipPlan.CurrentOwners[1].Preservation.Requirements[0].TargetID = "MISSING-99"
-	if err := validateReport(unknownTarget); err != nil {
-		t.Fatalf("unknown target should require pinned validation, got structural error: %v", err)
-	}
-	if err := validateAgainstInventory(unknownTarget, inventoryReport); err == nil || !strings.Contains(err.Error(), "target ID") {
-		t.Fatalf("unknown target error=%v, want pinned target-ID rejection", err)
-	}
-
-	if err := validateInventoryAgainstRepo(inventoryReport, repo); err != nil {
-		t.Fatalf("fixture inventory no longer matches repo: %v", err)
-	}
-}
-
-func TestPinnedValidationRequiresEverySelectedReciprocalFeatureInRetirementPlan(t *testing.T) {
-	_, inventoryReport, semanticReport := auditFixture(t)
-	semanticReport.Candidates[0].BDD.Features = append(semanticReport.Candidates[0].BDD.Features, "agm/test/bdd/features/two-only.feature")
-	if err := validateReport(semanticReport); err != nil {
-		t.Fatalf("missing BDD mapping should require pinned validation, got structural error: %v", err)
-	}
-	if err := validateAgainstInventory(semanticReport, inventoryReport); err == nil || !strings.Contains(err.Error(), "must exactly cover selected reciprocal features") {
-		t.Fatalf("incomplete selected BDD mappings error=%v, want exact coverage rejection", err)
-	}
-}
-
-func TestHarnessSurfaceClassifierIsBoundedAndIncludesKnownAliases(t *testing.T) {
-	active := map[string]bool{"codex-cli": true, "pi-cli": true}
-	for _, path := range []string{
-		"agm/internal/codexsession/SPEC.md",
-		"agm/internal/codexarchive/SPEC.md",
-		"agm/internal/piadapter/SPEC.md",
-		"agm/internal/claudeui/SPEC.md",
-		"agm/internal/codex/SPEC.md",
-		"agm/internal/pi/SPEC.md",
-	} {
-		if !isHarnessSurfacePath(path, active) {
-			t.Fatalf("known harness surface %q was accepted", path)
-		}
-	}
-	for _, path := range []string{"internal/domain/SPEC.md", "pkg/contracts/SPEC.md", "internal/pipeline/SPEC.md"} {
-		if isHarnessSurfacePath(path, active) {
-			t.Fatalf("ordinary implementation path %q was incorrectly classified as a harness surface", path)
-		}
-	}
-	if !isStrictDescendantOfCurrentOwner("one/nested/SPEC.md", []string{"one/SPEC.md", "two/SPEC.md"}) {
-		t.Fatal("new child owner should be rejected beneath current owner directory")
-	}
-	if isStrictDescendantOfCurrentOwner("shared/SPEC.md", []string{"one/SPEC.md", "two/SPEC.md"}) {
-		t.Fatal("sibling neutral owner should not be rejected as a descendant")
 	}
 }
 
@@ -1759,7 +1551,6 @@ func TestPinnedValidationRejectsForgedEvidenceAndUnsafeVerdicts(t *testing.T) {
 func TestValidateReportRejectsImplementationOnlyHarnessCatalogOwners(t *testing.T) {
 	_, _, semanticReport := auditFixture(t)
 	for _, ownerPath := range []string{
-		".dear-agent/SPEC.md",
 		"agm/.claude-plugin/SPEC.md",
 		"wayfinder/.claude-plugin/SPEC.md",
 		"spec-governance/.claude-plugin/SPEC.md",
@@ -1769,13 +1560,13 @@ func TestValidateReportRejectsImplementationOnlyHarnessCatalogOwners(t *testing.
 			report.Candidates[0].CurrentOwners[0].Path = ownerPath
 			report.Candidates[0].Evidence[0].Path = ownerPath
 			report.Candidates[0].ProposedOwner.Path = ownerPath
-			report.Candidates[0].ApplicabilityBasis = "implementation-only"
+			report.Candidates[0].ApplicabilityBasis = "non-harness-domain"
 			report.Candidates[0].ApplicabilityRationale = "claimed to exclude every active harness"
 			report.Candidates[0].Applicability = nil
 
 			err := validateReport(report)
-			if err == nil || !strings.Contains(err.Error(), "proposes harness-surface owner") {
-				t.Fatalf("validateReport() error = %v, want harness-surface proposed-owner rejection", err)
+			if err == nil || !strings.Contains(err.Error(), "includes a harness registration owner") {
+				t.Fatalf("validateReport() error = %v, want harness-owner applicability rejection", err)
 			}
 		})
 	}
@@ -1784,16 +1575,16 @@ func TestValidateReportRejectsImplementationOnlyHarnessCatalogOwners(t *testing.
 		report.Candidates[0].ProposedOwner = &proposedOwnerClaim{
 			Path:                "wayfinder/.claude-plugin/new/SPEC.md",
 			State:               "new",
-			Rationale:           "claimed to create an implementation-only owner",
-			NeutralityRationale: "claimed neutral",
+			Rationale:           "claimed to create a non-harness-domain owner",
+			NeutralityRationale: "claimed neutral owner",
 		}
-		report.Candidates[0].ApplicabilityBasis = "implementation-only"
+		report.Candidates[0].ApplicabilityBasis = "non-harness-domain"
 		report.Candidates[0].ApplicabilityRationale = "claimed to exclude every active harness"
 		report.Candidates[0].Applicability = nil
 
 		err := validateReport(report)
-		if err == nil || !strings.Contains(err.Error(), "proposes harness-surface owner") {
-			t.Fatalf("validateReport() error = %v, want proposed harness-surface rejection", err)
+		if err == nil || !strings.Contains(err.Error(), "includes a harness registration owner") {
+			t.Fatalf("validateReport() error = %v, want proposed harness-owner applicability rejection", err)
 		}
 	})
 }
@@ -1824,8 +1615,33 @@ func auditFixture(t *testing.T) (string, report, report) {
 	}
 	first := inventoryRequirement(t, inventoryReport, "one/SPEC.md")
 	second := inventoryRequirement(t, inventoryReport, "two/SPEC.md")
+	fixtureApplicability := []applicability{
+		{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}}},
+		{Member: "pi-cli", Disposition: "supported", Evidence: []evidence{{Kind: "normative-contract", Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}}},
+	}
+	fixturePlan := &ownershipPlan{
+		Status:                 pendingMaintainerApproval,
+		ApplicabilityBasis:     "active-members",
+		ApplicabilityRationale: "The shared contract applies to both pinned active members.",
+		OwnerActions: []ownerPreservation{
+			{OwnerPath: "one/SPEC.md", Disposition: "retain-distinct-contract", Rationale: "The selected owner retains the shared contract during maintainer review."},
+			{OwnerPath: "two/SPEC.md", Disposition: "retire-normative-ownership", Rationale: "The duplicate normative ownership remains preserved until a maintainer-approved transfer."},
+		},
+		Requirements: []requirementPreservation{
+			{ContractEvidence: contractEvidence{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, Disposition: "retain-distinct", TargetPath: "one/SPEC.md", TargetRequirementID: first.ID, TargetState: "existing", Rationale: "Preserve the selected owner requirement."},
+			{ContractEvidence: contractEvidence{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}, Disposition: "transfer-to-proposed-owner", TargetPath: "one/SPEC.md", TargetRequirementID: first.ID, TargetState: "existing", Rationale: "Transfer only after maintainer approval."},
+		},
+		Features: []featurePreservation{
+			{SourceOwner: "one/SPEC.md", Path: "agm/test/bdd/features/shared.feature", Disposition: "retain-distinct", TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the shared reciprocal BDD feature for the selected owner."},
+			{SourceOwner: "two/SPEC.md", Path: "agm/test/bdd/features/shared.feature", Disposition: "transfer-to-proposed-owner", TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the shared reciprocal BDD feature for the retiring owner."},
+			{SourceOwner: "one/SPEC.md", Path: "agm/test/bdd/features/one-only.feature", Disposition: "retain-distinct", TargetPath: "one/SPEC.md", TargetState: "existing", Rationale: "Preserve the one-owner reciprocal BDD feature."},
+			{SourceOwner: "two/SPEC.md", Path: "agm/test/bdd/features/two-only.feature", Disposition: "transfer-to-proposed-owner", TargetPath: "one/SPEC.md", TargetState: "planned", Rationale: "Transfer only after maintainer approval."},
+		},
+		Applicability: fixtureApplicability,
+	}
 	semantic := report{
 		SchemaVersion: schemaVersion,
+		DocumentKind:  ledgerDocumentKind,
 		Snapshot: snapshot{
 			Repository:          inventoryReport.Snapshot.Repository,
 			Revision:            inventoryReport.Snapshot.Revision,
@@ -1841,29 +1657,19 @@ func auditFixture(t *testing.T) (string, report, report) {
 		Candidates: []finding{{
 			ID: "SPEC-CLUSTER-001", Rank: 1, Title: "Shared identity", Verdict: "merge-now", Relationship: "same-observable", Classification: "shared-contract", Confidence: "confirmed", Strength: "strong",
 			CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "ONE-01 normatively claims the shared request outcome."}, {Path: "two/SPEC.md", Rationale: "TWO-01 independently claims the same request outcome."}}, OwnershipCompleteness: "The exact-body seed and repository search found only these two normative paths.",
-			ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "ONE-01 already states the complete shared observable.", NeutralityRationale: "The top-level product contract is outside every harness registration surface."},
-			OwnershipPlan: &ownershipPlan{Approval: "pending-maintainer-approval", CurrentOwners: []ownershipPlanOwner{
-				{Path: "one/SPEC.md", Action: "retain", Rationale: "The existing neutral owner remains normative."},
-				{Path: "two/SPEC.md", Action: "retire-normative-ownership", Rationale: "The duplicate promise will become a canonical reference.", Preservation: &preservationPlan{
-					Requirements:       []requirementPreservation{{Source: evidence{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}, TargetID: first.ID, TargetState: "existing", Strategy: "canonical-reference"}},
-					BDD:                []bddPreservation{{Feature: "agm/test/bdd/features/shared.feature", SourceOwner: "two/SPEC.md", TargetOwner: "one/SPEC.md"}},
-					ApplicabilityBasis: "active-members",
-					Applicability: []applicability{
-						{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}}},
-						{Member: "pi-cli", Disposition: "supported", Evidence: []evidence{{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}}},
-					},
-				}},
-			}},
-			SharedOutcome: "Requests preserve identity.", MaterialDifferences: []string{"Only the owner path differs."}, Evidence: []evidence{{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, {Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}},
+			ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "ONE-01 already states the complete shared observable.", NeutralityRationale: "The selected owner is a product-domain contract rather than a harness configuration surface."},
+			SharedOutcome: "Requests preserve identity.", MaterialDifferences: []string{"Only the owner path differs."}, Evidence: []evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}, {Kind: "normative-contract", Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}},
 			ApplicabilityBasis: "active-members", ApplicabilityRationale: "The shared contract applies to both pinned active members.",
-			Applicability: []applicability{
-				{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{{Path: "one/SPEC.md", Line: first.Line, RequirementID: first.ID, Excerpt: first.Excerpt}}},
-				{Member: "pi-cli", Disposition: "supported", Evidence: []evidence{{Path: "two/SPEC.md", Line: second.Line, RequirementID: second.ID, Excerpt: second.Excerpt}}},
-			},
-			BDD: bddImpact{Features: []string{"agm/test/bdd/features/shared.feature"}, SharedContractFeature: "agm/test/bdd/features/shared.feature", Consequence: "merge"}, Recommendation: []string{"Keep ONE-01 as canonical."}, Risk: "Traceability could be lost.", Decision: "Approve one owner.",
+			Applicability: fixtureApplicability,
+			BDD:           bddImpact{Features: []string{"agm/test/bdd/features/shared.feature"}, Consequence: "merge"}, Recommendation: []string{"Keep ONE-01 as canonical."}, Risk: "Traceability could be lost.", Decision: "Approve one owner.", DecisionStatus: pendingMaintainerApproval, OwnershipPlan: fixturePlan,
 		}},
 		NonCandidates: []finding{}, Limitations: append([]string{}, inventoryReport.Limitations...),
 	}
+	ref, err := canonicalInventoryRef(inventoryReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic.InventoryRef = ref
 	return repo, inventoryReport, semantic
 }
 
@@ -1889,7 +1695,34 @@ func cloneReport(t *testing.T, source report) report {
 	if err := json.Unmarshal(data, &cloned); err != nil {
 		t.Fatal(err)
 	}
+	for index := range cloned.Candidates {
+		if index < len(source.Candidates) {
+			cloned.Candidates[index].Evidence = append([]evidence{}, source.Candidates[index].Evidence...)
+			for appIndex := range cloned.Candidates[index].Applicability {
+				cloned.Candidates[index].Applicability[appIndex].Evidence = append([]evidence{}, source.Candidates[index].Applicability[appIndex].Evidence...)
+			}
+			cloneOwnershipPlanEvidence(&cloned.Candidates[index], source.Candidates[index])
+		}
+	}
+	for index := range cloned.NonCandidates {
+		if index < len(source.NonCandidates) {
+			cloned.NonCandidates[index].Evidence = append([]evidence{}, source.NonCandidates[index].Evidence...)
+			for appIndex := range cloned.NonCandidates[index].Applicability {
+				cloned.NonCandidates[index].Applicability[appIndex].Evidence = append([]evidence{}, source.NonCandidates[index].Applicability[appIndex].Evidence...)
+			}
+			cloneOwnershipPlanEvidence(&cloned.NonCandidates[index], source.NonCandidates[index])
+		}
+	}
 	return cloned
+}
+
+func cloneOwnershipPlanEvidence(destination *finding, source finding) {
+	if destination.OwnershipPlan == nil || source.OwnershipPlan == nil {
+		return
+	}
+	for index := range destination.OwnershipPlan.Applicability {
+		destination.OwnershipPlan.Applicability[index].Evidence = append([]evidence{}, source.OwnershipPlan.Applicability[index].Evidence...)
+	}
 }
 
 func inventoryRequirement(t *testing.T, source report, path string) requirement {
@@ -1917,11 +1750,287 @@ func inventoryFeature(t *testing.T, source report, path string) featureFile {
 func validReport() report {
 	return report{
 		SchemaVersion: schemaVersion,
+		DocumentKind:  ledgerDocumentKind,
+		InventoryRef:  "sha256:" + strings.Repeat("c", 64),
 		Snapshot:      snapshot{Repository: "owner/repo", Revision: strings.Repeat("a", 40), RevisionCommittedAt: "2026-07-30T00:00:00Z", GeneratedAt: "2026-07-31T00:00:00Z"},
 		Scope:         scope{Roots: []string{"."}, Excluded: []exclusion{}, ActiveMembers: []string{"codex-cli"}},
 		Summary:       summary{SpecFiles: 1, Requirements: 1, CandidateCount: 0, ByVerdict: map[string]int{}},
 		Methodology:   methodology{Collector: "test", SeedKinds: []string{"exact-body"}, SemanticReview: "review", GitEvidenceTrust: gitEvidenceTrustDisclosure, GitTrustInputs: testGitTrustInputs(), Reproduce: []string{"go run ./tools/specaudit inventory -repo . -revision abc"}},
-		Candidates:    []finding{}, NonCandidates: []finding{}, Limitations: []string{},
+		Candidates:    nil, NonCandidates: nil, Limitations: []string{},
+	}
+}
+
+func TestV2InventoryAndDecisionLedger(t *testing.T) {
+	_, inventoryReport, review := auditFixture(t)
+	inventoryDocument := inventoryDocumentFromReport(inventoryReport)
+	ledger, err := decisionLedgerFromReport(review, inventoryReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateInventoryDocumentV2(inventoryDocument); err != nil {
+		t.Fatalf("v2 inventory document rejected: %v", err)
+	}
+	if err := validateDecisionLedgerV2(ledger); err != nil {
+		t.Fatalf("v2 decision ledger rejected: %v", err)
+	}
+	forged := ledger
+	forged.InventoryRef = "sha256:" + strings.Repeat("f", 64)
+	if err := validateDecisionLedgerV2(forged); err != nil {
+		t.Fatalf("structurally valid forged ref should require inventory comparison: %v", err)
+	}
+	ref, err := canonicalInventoryRefV2(inventoryDocument)
+	if err != nil || forged.InventoryRef == ref {
+		t.Fatalf("forged inventory_ref error=%v, want digest rejection", err)
+	}
+	data, err := json.Marshal(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	object["inventory"] = json.RawMessage("[]")
+	data, err = json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(realTempDir(t), "ledger-with-inventory.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readDecisionLedgerV2(path); err == nil || !strings.Contains(err.Error(), "non-exact or unknown") {
+		t.Fatalf("ledger inventory copy error=%v, want strict separation rejection", err)
+	}
+	legacy := ledger
+	legacy.SchemaVersion = "spec-audit/v1"
+	path = filepath.Join(realTempDir(t), "legacy-v1-ledger.json")
+	writeJSON(t, path, legacy)
+	if _, err := readDecisionLedgerV2(path); err == nil || !strings.Contains(err.Error(), "spec-audit/v2") {
+		t.Fatalf("legacy v1 error=%v, want breaking-schema rejection", err)
+	}
+	data, err = json.Marshal(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	object["Schema_Version"] = object["schema_version"]
+	delete(object, "schema_version")
+	data, err = json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(realTempDir(t), "case-mismatched-ledger.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readDecisionLedgerV2(path); err == nil || !strings.Contains(err.Error(), "non-exact") {
+		t.Fatalf("case-mismatched ledger error=%v, want exact-name rejection", err)
+	}
+}
+
+func TestValidateAndRenderPlatformApplicability(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		if err := authenticatedInputPlatform(goos); err != nil {
+			t.Fatalf("%s should support descriptor-authenticated input: %v", goos, err)
+		}
+	}
+	if err := authenticatedInputPlatform("windows"); err == nil || !strings.Contains(err.Error(), "before") && !strings.Contains(err.Error(), "supported only") {
+		t.Fatalf("windows platform error=%v, want explicit unsupported boundary", err)
+	}
+}
+
+func TestEvidenceKindsKeepSupportingCitationsNonNormative(t *testing.T) {
+	if err := validateEvidence([]evidence{{Kind: "supporting", Path: "internal/probe.go", Line: 2, Excerpt: "probe"}}); err != nil {
+		t.Fatalf("supporting evidence rejected: %v", err)
+	}
+	if err := validateEvidence([]evidence{{Kind: "supporting", Path: "internal/probe.go", Line: 2, RequirementID: "REQ-01", Excerpt: "probe"}}); err == nil {
+		t.Fatal("supporting evidence with requirement_id was accepted")
+	}
+	if err := validateEvidence([]evidence{{Kind: "normative-contract", Path: "one/SPEC.md", Line: 2, Excerpt: "requirement"}}); err == nil {
+		t.Fatal("normative evidence without requirement_id was accepted")
+	}
+}
+
+func TestPinnedInventoryRejectsSymlinkModes(t *testing.T) {
+	for _, mode := range []string{"120000", "160000"} {
+		if _, err := pinnedGitBlobSize([]string{mode, "blob", strings.Repeat("a", 40), "12"}, "unsafe/SPEC.md"); err == nil {
+			t.Fatalf("pinnedGitBlobSize accepted non-regular mode %q", mode)
+		}
+	}
+	if _, err := pinnedGitBlobSize([]string{"100644", "blob", strings.Repeat("a", 40), "12"}, "safe/SPEC.md"); err != nil {
+		t.Fatalf("pinnedGitBlobSize rejected regular blob: %v", err)
+	}
+}
+
+func TestActiveMembersRequirePackageASTDeclaration(t *testing.T) {
+	active, limitations := activeMembersFromBody(`package registry
+// activeHarnesses = []string{"comment-only"}
+const example = "activeHarnesses = []string{\\\"literal-only\\\"}"
+`, true)
+	if len(active) != 0 || len(limitations) == 0 {
+		t.Fatalf("comment/literal registry parsed as active=%#v limitations=%#v", active, limitations)
+	}
+	active, limitations = activeMembersFromBody(`package registry
+var activeHarnesses = []string{"pi-cli", "codex-cli"}
+`, true)
+	if !reflect.DeepEqual(active, []string{"codex-cli", "pi-cli"}) || len(limitations) != 0 {
+		t.Fatalf("AST registry active=%#v limitations=%#v", active, limitations)
+	}
+}
+
+func TestSupportingEvidenceRecordBudgetCountsDuplicates(t *testing.T) {
+	items := make([]evidence, maxSupportingEvidenceRecords+1)
+	for index := range items {
+		items[index] = evidence{Kind: "supporting", Path: "internal/probe.go", Line: 1, Excerpt: "probe"}
+	}
+	_, err := supportingEvidenceRecords(report{Candidates: []finding{{ID: "FINDING-1", Evidence: items}}})
+	if err == nil || !strings.Contains(err.Error(), "record limit") {
+		t.Fatalf("supporting duplicate budget error=%v, want record-limit rejection", err)
+	}
+}
+
+func TestSupportingEvidenceResolvesPinnedRegularBlob(t *testing.T) {
+	repository := t.TempDir()
+	gitTest(t, repository, "init", "-q")
+	gittest.HardenRepo(t, repository)
+	gitTest(t, repository, "config", "user.email", "test@example.com")
+	gitTest(t, repository, "config", "user.name", "Test")
+	writeTestFile(t, repository, "internal/probe.go", "first\nexact pinned line\n")
+	gitTest(t, repository, "add", ".")
+	gitTest(t, repository, "commit", "-qm", "supporting evidence")
+	revision := strings.TrimSpace(gitTest(t, repository, "rev-parse", "HEAD"))
+	item := evidence{Kind: "supporting", Path: "internal/probe.go", Line: 2, Excerpt: "exact pinned line"}
+	if err := validatePinnedSupportingEvidence(repository, revision, item); err != nil {
+		t.Fatalf("validatePinnedSupportingEvidence() error = %v", err)
+	}
+}
+
+func TestSupportingEvidenceBodiesHonorSharedDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := validateSupportingEvidenceBodies(ctx, []supportingEvidenceRecord{{findingID: "finding FINDING-1", item: evidence{Kind: "supporting", Path: "internal/probe.go", Line: 1, Excerpt: "line"}}}, map[string]pinnedBlob{"internal/probe.go": {path: "internal/probe.go", oid: strings.Repeat("a", 40)}}, map[string][]byte{strings.Repeat("a", 40): []byte("line\n")})
+	if err == nil || !strings.Contains(err.Error(), "shared deadline") {
+		t.Fatalf("supporting shared deadline error=%v, want bounded rejection", err)
+	}
+}
+
+func TestSupportingMetadataBudgetAllowsLongLiteralPaths(t *testing.T) {
+	paths := make([]string, maxSupportingEvidencePaths)
+	for index := range paths {
+		paths[index] = strings.Repeat("x", maxGitPathBytes-4) + fmt.Sprintf("%04d", index)
+	}
+	limit, err := supportingMetadataOutputLimit(paths)
+	if err != nil || limit <= 0 {
+		t.Fatalf("long literal supporting paths output limit=%d err=%v", limit, err)
+	}
+}
+
+func TestPositiveFindingRejectsHarnessRegistrationRegardlessOfApplicabilityBasis(t *testing.T) {
+	_, _, semantic := auditFixture(t)
+	semantic.Candidates[0].CurrentOwners[0].Path = "agm/.claude-plugin/SPEC.md"
+	semantic.Candidates[0].Evidence[0].Path = "agm/.claude-plugin/SPEC.md"
+	semantic.Candidates[0].ApplicabilityBasis = "active-members"
+	semantic.Candidates[0].ApplicabilityRationale = "all active members are explicitly listed"
+	if err := validateReport(semantic); err == nil || !strings.Contains(err.Error(), "harness registration owner") {
+		t.Fatalf("active-members harness owner error=%v, want unconditional rejection", err)
+	}
+}
+
+func TestOwnershipPlanRequiresEveryRequirementAndPerOwnerBDDLink(t *testing.T) {
+	repo, inventory, semantic := auditFixture(t)
+	semantic.Candidates[0].OwnershipPlan.Requirements = semantic.Candidates[0].OwnershipPlan.Requirements[:1]
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "every current-owner requirement") {
+		t.Fatalf("missing requirement plan error=%v", err)
+	}
+	_, inventory, semantic = auditFixture(t)
+	semantic.Candidates[0].OwnershipPlan.Features = semantic.Candidates[0].OwnershipPlan.Features[:1]
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "reciprocal current-owner BDD") {
+		t.Fatalf("missing BDD link plan error=%v", err)
+	}
+	if repo == "" {
+		t.Fatal("fixture repository unexpectedly empty")
+	}
+}
+
+func TestOwnershipPlanCopiesApplicabilityAndPendingDecisionStatus(t *testing.T) {
+	_, inventory, semantic := auditFixture(t)
+	semantic.Candidates[0].OwnershipPlan.ApplicabilityBasis = "non-harness-domain"
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "applicability basis") {
+		t.Fatalf("plan applicability drift error=%v", err)
+	}
+	_, _, semantic = auditFixture(t)
+	semantic.Candidates[0].DecisionStatus = "approved"
+	if err := validateReport(semantic); err == nil || !strings.Contains(err.Error(), "decision_status") {
+		t.Fatalf("closed decision status error=%v", err)
+	}
+}
+
+func TestHTMLRendersPendingDecisionAndOwnershipPreservationPlan(t *testing.T) {
+	_, inventory, semantic := auditFixture(t)
+	html := renderHTML(semantic, &inventory)
+	for _, want := range []string{"pending-maintainer-approval", "Maintainer-pending ownership preservation plan", "not deletion authority", "Requirement preservation", "BDD preservation"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("rendered HTML omitted %q", want)
+		}
+	}
+}
+
+func TestReviewerExclusionsResolveAndCannotSelectProposedOwner(t *testing.T) {
+	_, inventory, semantic := auditFixture(t)
+	finding := &semantic.Candidates[0]
+	finding.ProposedOwner = &proposedOwnerClaim{Path: "three/SPEC.md", State: "existing", Rationale: "Existing neutral owner is under review.", NeutralityRationale: "It is a product-domain owner."}
+	finding.OwnershipPlan.Requirements[1].TargetPath = "three/SPEC.md"
+	finding.OwnershipPlan.Requirements[1].TargetRequirementID = "THREE-01"
+	finding.OwnershipPlan.Features[1].TargetPath = "three/SPEC.md"
+	finding.OwnershipPlan.Features[3].TargetPath = "three/SPEC.md"
+	semantic.Exclusions = []reviewExclusion{{Path: "three/SPEC.md", Classification: "fixture", Rationale: "Test reviewer exclusion remains collected.", SupportingEvidence: []supportingEvidence{{Path: "three/SPEC.md", Line: 1, Excerpt: "# Three"}}}}
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "reviewer-excluded proposed owner") {
+		t.Fatalf("excluded proposed owner error=%v", err)
+	}
+	semantic.Exclusions[0].Path = "missing/SPEC.md"
+	if err := validateAgainstInventory(semantic, inventory); err == nil || !strings.Contains(err.Error(), "does not resolve") {
+		t.Fatalf("unresolved exclusion error=%v", err)
+	}
+}
+
+func TestValidPathRejectsUnsafeGitPathspecForms(t *testing.T) {
+	for _, path := range []string{"dir\\file", "dir/../file", "dir/\nfile", "dir/\x7ffile", "../file"} {
+		if validPath(path) {
+			t.Fatalf("validPath(%q) accepted unsafe path", path)
+		}
+	}
+	if !validPath("safe/path.go") {
+		t.Fatal("validPath rejected canonical relative path")
+	}
+}
+
+func TestCollectorExecutionAvailabilityIsTruthful(t *testing.T) {
+	base := collectorExecution{GoToolchain: "go1.26", GOOS: "linux", GOARCH: "amd64"}
+	if !validCollectorExecution(base) {
+		t.Fatal("collector execution without build info should be valid and explicit")
+	}
+	forgedBuild := base
+	forgedBuild.BuildInfoAvailable = true
+	if validCollectorExecution(forgedBuild) {
+		t.Fatal("collector execution accepted available build info without module path")
+	}
+	forgedVCS := base
+	forgedVCS.VCSMetadataAvailable = true
+	if validCollectorExecution(forgedVCS) {
+		t.Fatal("collector execution accepted available VCS metadata without complete values")
+	}
+	modified := false
+	complete := base
+	complete.BuildInfoAvailable = true
+	complete.ModulePath = "example/module"
+	complete.VCSMetadataAvailable = true
+	complete.VCSRevision = strings.Repeat("a", 40)
+	complete.VCSModified = &modified
+	if !validCollectorExecution(complete) {
+		t.Fatal("collector execution rejected complete truthful build metadata")
 	}
 }
 

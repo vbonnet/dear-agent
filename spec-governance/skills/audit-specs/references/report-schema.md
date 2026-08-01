@@ -1,7 +1,9 @@
 # Report schema and offline HTML contract
 
-The structured artifact uses `spec-audit/v2`. It is the source for the HTML
-renderer; HTML is a complete view, not a second findings store.
+The structured artifacts use `spec-audit/v2`. The immutable inventory and
+reviewer-authored decision ledger are separate documents. HTML is a complete
+view of both documents, not a second findings store. `spec-audit/v1` is
+rejected: it conflated collected facts with reviewer judgments.
 
 ## Trust and interpretation
 
@@ -46,11 +48,12 @@ directory names from changing deterministic output. Commands emit inventory or
 HTML bytes to standard output. The caller's authorized redirection selects the
 destination.
 
-## Top-level object
+## Immutable inventory document
 
 ```json
 {
   "schema_version": "spec-audit/v2",
+  "document_kind": "inventory",
   "snapshot": {
     "repository": "owner/name",
     "revision": "40-hex commit",
@@ -60,7 +63,7 @@ destination.
   },
   "scope": {
     "roots": ["."],
-    "excluded": [{"path": "...", "reason": "..."}],
+    "excluded": [],
     "active_members": ["..."]
   },
   "summary": {
@@ -94,11 +97,59 @@ destination.
   "inventory": [],
   "features": [],
   "seeds": [],
+  "limitations": [],
+  "collector_execution_disclosure": "fixed non-attesting disclosure",
+  "collector_execution": {
+    "build_info_available": true,
+    "vcs_metadata_available": false,
+    "module_path": "present only when self-reported build information supplies it",
+    "vcs_revision": "present only with valid complete VCS metadata",
+    "vcs_modified": "boolean present only with valid complete VCS metadata",
+    "go_toolchain": "self-reported Go toolchain",
+    "goos": "runtime GOOS",
+    "goarch": "runtime GOARCH"
+  }
+}
+```
+
+`collector_execution` comes from `runtime/debug.ReadBuildInfo` and runtime
+values. Availability is explicit: no fallback module path or inferred VCS
+value is emitted. The fixed `collector_execution_disclosure` appears in JSON
+and HTML and is not a provenance attestation. Collection does not accept
+reviewer exclusions: it accounts for the complete pinned corpus.
+
+## Reviewer decision ledger
+
+```json
+{
+  "schema_version": "spec-audit/v2",
+  "document_kind": "decision-ledger",
+  "inventory_ref": "sha256:<canonical inventory JSON digest>",
+  "review_scope": {"exclusions": [{
+    "path": "fixture/SPEC.md",
+    "classification": "fixture",
+    "rationale": "review classification; still collected and not deletion authority",
+    "supporting_evidence": [{"path": "fixture/SPEC.md", "line": 1, "excerpt": "fixture marker"}]
+  }]},
+  "summary": {"candidate_count": 0, "by_verdict": {}},
+  "methodology": {"semantic_review": "review method", "reproduce": ["exact decision-review command"]},
   "candidates": [],
   "non_candidates": [],
   "limitations": []
 }
 ```
+
+The ledger must omit `inventory`, `features`, `seeds`, and
+`collector_execution`, including empty and null placeholders. Its
+`inventory_ref` is the SHA-256 digest of the canonical bounded JSON bytes
+emitted for the exact inventory document. Validation recomputes the inventory
+and digest from the pinned revision; exclusions remain visible, never suppress
+collection, and cannot be selected as a positive current owner.
+
+Reviewer exclusion classifications are closed to `fixture`, `generated`,
+`third-party`, `archived`, and `nested-repository`. Each exclusion path must
+resolve in the pinned inventory and carries pinned supporting evidence; it is
+review scope, never deletion authority.
 
 `revision_committed_at` is the commit time, not report creation time. A
 comparison SHA is metadata only unless a separate inventory collects it.
@@ -171,6 +222,42 @@ consolidation.
 
 ## Finding object
 
+Evidence is explicitly typed. `normative-contract` evidence is an exact
+requirement citation from an inventoried `SPEC.md`, must include
+`requirement_id`, and is the only evidence type that can establish a current
+owner, proposed owner, or applicability row. `supporting` evidence may cite
+any bounded tracked regular blob at the pinned revision (for example an
+implementation or lower-level test), has no `requirement_id`, and is checked
+against that pinned blob during validate/render. Supporting evidence can
+explain a judgment but cannot establish those ownership or applicability facts
+alone. HTML labels both kinds.
+
+In the persisted ledger these are separate fields, not a tagged union:
+`contract_evidence` entries contain `path`, `line`, `requirement_id`, and
+`excerpt`; `supporting_evidence` entries contain only `path`, `line`, and
+`excerpt`. This prevents a supporting citation from being represented as a
+normative requirement. `current_owners` means the pinned `SPEC.md` paths that
+claim ownership at the audited snapshot; it is evidence, not policy approval.
+For a positive finding, the ledger must identify one neutral proposed owner
+with an explicit `neutrality_rationale`; the rationale explains why the owner
+is a product/domain seam rather than a harness configuration or implementation
+colocation. This is a maintainer-pending preservation plan, not deletion
+authority: current-owner requirement evidence, BDD coverage, and any
+applicability evidence remain visible until a maintainer selects and executes a
+separate migration. Path colocation never supplies that legitimacy.
+
+The current active-member extraction is a dear-agent-specific adapter over the
+pinned Go registry paths `agm/internal/harnessregistry/registry.go` and legacy
+`agm/internal/agent/harnesses.go`. If neither path exists or parsing fails,
+`active_members` is empty with a limitation and an `active-members` parity
+finding is rejected. A generic pinned registry format is future work; callers
+cannot provide a regex or an unpinned comma list.
+
+Validate and render authenticate input paths with no-follow descriptor
+traversal only on Darwin and Linux. Other GOOS fail before report bytes are
+read or artifacts are emitted. Cross-compilation checks only compile this
+guard; they are not runtime authentication proof.
+
 ```json
 {
   "id": "SPEC-CLUSTER-001",
@@ -190,56 +277,49 @@ consolidation.
     "path": "path/SPEC.md",
     "state": "existing|new",
     "rationale": "why this owner is the correct contract seam",
-    "neutrality_rationale": "why this path is outside harness surfaces and owns a neutral product seam"
-  },
-  "ownership_plan": {
-    "approval": "pending-maintainer-approval",
-    "current_owners": [{
-      "path": "path/SPEC.md",
-      "action": "retain|retire-normative-ownership",
-      "rationale": "why this owner is retained or proposed for retirement",
-      "preservation": {
-        "requirements": [{
-          "source": {"path": "path/SPEC.md", "line": 12, "requirement_id": "REQ-01", "excerpt": "exact pinned source line"},
-          "target_id": "REQ-01",
-          "target_state": "existing|planned",
-          "strategy": "preserve-id|canonical-reference"
-        }],
-        "bdd": [{"feature": "agm/test/bdd/features/example.feature", "source_owner": "path/SPEC.md", "target_owner": "path/SPEC.md"}],
-        "applicability_basis": "active-members",
-        "applicability": []
-      }
-    }]
+    "neutrality_rationale": "why this is a product/domain seam rather than a harness or implementation location"
   },
   "shared_outcome": "observable behavior",
   "material_differences": ["explicit difference or none observed"],
-  "evidence": [{
+  "contract_evidence": [{
     "path": "relative/SPEC.md",
     "line": 12,
     "requirement_id": "REQ-01",
     "excerpt": "exact pinned source line"
   }],
-  "applicability_basis": "active-members|implementation-only",
+  "supporting_evidence": [{"path": "internal/context.go", "line": 8, "excerpt": "optional pinned context"}],
+  "applicability_basis": "active-members|non-harness-domain",
   "applicability_rationale": "why this basis is correct",
   "applicability": [{
     "member": "member-name",
     "disposition": "supported|adapted|unsupported|not-applicable|unknown",
-    "evidence": [{
+    "contract_evidence": [{
       "path": "path/SPEC.md",
       "line": 12,
       "requirement_id": "REQ-01",
       "excerpt": "exact pinned line"
-    }]
+    }],
+    "supporting_evidence": []
   }],
   "bdd": {
     "features": ["agm/test/bdd/features/example.feature"],
-    "shared_contract_feature": "agm/test/bdd/features/example.feature",
-    "consequence": "merge|add-matrix|adapter-only|none|resolve"
+    "consequence": "merge|add-matrix|applicability-specific|none|resolve"
   },
   "recommendation": ["ordered proposed change"],
   "risk": "bounded risk",
   "limitations": ["gap"],
   "decision": "question for maintainer",
+  "decision_status": "pending-maintainer-approval",
+  "ownership_plan": {
+    "status": "pending-maintainer-approval",
+    "deletion_authority": false,
+    "owner_actions": [{"owner_path": "path/SPEC.md", "disposition": "retain-distinct-contract|retire-normative-ownership", "rationale": "preservation decision pending maintainer approval"}],
+    "requirements": [{"contract_evidence": {"path": "path/SPEC.md", "line": 12, "requirement_id": "REQ-01", "excerpt": "exact pinned source line"}, "disposition": "retain-distinct|transfer-to-proposed-owner|represent-as-applicability", "target_path": "path/SPEC.md", "target_requirement_id": "REQ-01", "target_state": "existing|planned", "rationale": "preserve requirement traceability"}],
+    "features": [{"source_owner": "path/SPEC.md", "path": "agm/test/bdd/features/example.feature", "disposition": "retain-distinct|transfer-to-proposed-owner|represent-as-applicability", "target_path": "path/SPEC.md", "target_state": "existing|planned", "rationale": "preserve BDD traceability"}],
+    "applicability_basis": "active-members|non-harness-domain",
+    "applicability_rationale": "exact copy of finding basis rationale",
+    "applicability": []
+  },
   "boundary": "required for keep-separate"
 }
 ```
@@ -248,6 +328,16 @@ Candidate ranks are unique and contiguous from one. `non_candidates` omit rank,
 use `keep-separate`, and name the boundary. Histograms count both candidates
 and non-candidates; `candidate_count` counts only `candidates`.
 
+Every finding uses the closed `decision_status`
+`pending-maintainer-approval`. Positive findings additionally carry an
+`ownership_plan` with the same applicability basis, rationale, and matrix. The
+plan maps every current-owner requirement by its full contract evidence and
+every reciprocal BDD link by `(source_owner, path)` exactly once. An existing
+target resolves its requirement ID or reciprocal BDD link at the pinned
+revision; a planned target may intentionally lack that link. The plan preserves
+review traceability and is explicitly not authorization to delete or mutate a
+source owner.
+
 ## Enumerations
 
 - verdict: `merge-now`, `extract-neutral-contract`, `keep-separate`,
@@ -255,17 +345,12 @@ and non-candidates; `candidate_count` counts only `candidates`.
 - relationship: `same-observable`, `overlapping-observables`,
   `contradictory-observables`, `same-vocabulary-only`,
   `fixture-or-generated-copy`
-- classification: `shared-contract`, `capability-variation`, `native-adapter`,
+- classification: `shared-contract`, `capability-variation`,
   `wrapper`, `fixture`, `implementation-detail`
 - confidence: `confirmed`, `likely`, `tentative`
 - strength: `strong`, `moderate`, `exploratory`
-- applicability basis: `active-members`, `implementation-only`
+- applicability basis: `active-members`, `non-harness-domain`
 - disposition: `supported`, `adapted`, `unsupported`, `not-applicable`, `unknown`
-
-`native-adapter` describes the placement found in the pinned corpus; it does
-not authorize a harness- or implementation-local canonical owner.
-`adapter-only` means an applicability-specific BDD consequence for a canonical
-neutral requirement, not a local adapter `SPEC.md`.
 
 ## Validation boundary
 
@@ -281,22 +366,13 @@ runtime behavior, or authorize changes.
 - Require each source-evidence path, line, ID, and excerpt to equal the pinned
   inventory and require the current-owner set to match the evidence paths.
 - Require positive findings to name every current owner, a bounded
-  completeness rationale, a defensible harness-neutral proposed owner,
-  material differences, applicability, BDD consequences, risk, and maintainer
-  decision. A new owner cannot be nested under a current-owner directory.
-- Require every positive finding to carry a `pending-maintainer-approval`
-  ownership plan with exact entries for all current owners. Retirements map
-  every cited source requirement, selected reciprocal BDD feature, and exact
-  applicability matrix to the proposed owner. Existing targets must already
-  exist in the pinned proposed owner; planned targets are allowed only for a
-  new owner. The plan is not change or deletion authority.
+  completeness rationale, a defensible proposed owner, material differences,
+  applicability, BDD consequences, risk, and maintainer decision.
 - Require every selected BDD feature to exist and reciprocally name at least one
   current owner; require every current owner to be represented by a selected
-  feature. Positive `shared-contract` findings additionally identify a selected
-  `shared_contract_feature` that reciprocally names every current owner. A
-  finding without selected BDD uses non-positive consequence `none`.
+  feature. A finding without selected BDD uses non-positive consequence `none`.
 - Require active-member findings to cover each pinned member with evidence.
-  Do not hide an applicability-scoped contract behind `implementation-only`.
+  Do not hide a harness-owned contract behind `non-harness-domain`.
 - Require `merge-now` to use `same-observable` and
   `resolve-product-divergence` to use `contradictory-observables`. Fixtures and
   generated copies cannot become normative owners.
@@ -305,8 +381,7 @@ runtime behavior, or authorize changes.
 
 Render one bounded, self-contained offline file. Escape all untrusted text and
 retain the snapshot, trust limitations, metrics, exclusions, ranked findings,
-owner topology, neutrality rationale, pending ownership/preservation plan,
-applicability, exact evidence, BDD consequences,
+owner topology, applicability, exact evidence, BDD consequences,
 recommendations, decisions, keep-separate boundaries, lead and diagnostic
 summary, methodology including every Git trust-input identity, and reproduction
 commands.
