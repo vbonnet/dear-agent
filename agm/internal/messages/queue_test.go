@@ -84,6 +84,163 @@ func TestEnqueueRejectsNilEntryBeforeSQLite(t *testing.T) {
 	require.EqualError(t, err, "failed to enqueue message: entry is nil")
 }
 
+func TestQueueStateParser(t *testing.T) {
+	for _, state := range []QueueState{
+		QueueStateQueued,
+		QueueStateDelivered,
+		QueueStateFailed,
+	} {
+		parsed, err := ParseQueueState(string(state))
+		require.NoError(t, err)
+		assert.Equal(t, state, parsed)
+	}
+
+	_, err := ParseQueueState("waiting")
+	assert.ErrorContains(t, err, "invalid queue state")
+}
+
+func TestScannedQueueEntriesRejectMalformedDomains(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority string
+		state    string
+		read     func(*MessageQueue) ([]*QueueEntry, error)
+		domain   string
+	}{
+		{
+			name:     "priority in pending row",
+			priority: "IMMEDIATE",
+			state:    string(QueueStateQueued),
+			read: func(q *MessageQueue) ([]*QueueEntry, error) {
+				return q.GetPending("session-b")
+			},
+			domain: "priority domain",
+		},
+		{
+			name:     "state in queue list row",
+			priority: string(PriorityMedium),
+			state:    "discarded",
+			read: func(q *MessageQueue) ([]*QueueEntry, error) {
+				return q.GetQueueList("", 10)
+			},
+			domain: "state domain",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queue := setupTestQueue(t)
+			defer queue.Close()
+
+			const messageID = "invalid-domain-entry"
+			const body = "persisted body that must not appear in errors"
+			_, err := queue.db.Exec(`
+				INSERT INTO message_queue
+					(message_id, from_session, to_session, message, priority, queued_at, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			`, messageID, "session-a", "session-b", body, tt.priority, time.Now(), tt.state)
+			require.NoError(t, err)
+
+			_, err = tt.read(queue)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), messageID)
+			assert.Contains(t, err.Error(), tt.domain)
+			assert.NotContains(t, err.Error(), body)
+		})
+	}
+}
+
+func TestPendingQueriesRejectUnknownState(t *testing.T) {
+	tests := []struct {
+		name string
+		read func(*MessageQueue) ([]*QueueEntry, error)
+	}{
+		{
+			name: "target session pending",
+			read: func(q *MessageQueue) ([]*QueueEntry, error) {
+				return q.GetPending("target-session")
+			},
+		},
+		{
+			name: "all pending",
+			read: func(q *MessageQueue) ([]*QueueEntry, error) {
+				return q.GetAllPending()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queue := setupTestQueue(t)
+			defer queue.Close()
+
+			const messageID = "unknown-pending-state"
+			const body = "persisted body that must not appear in errors"
+			_, err := queue.db.Exec(`
+				INSERT INTO message_queue
+					(message_id, from_session, to_session, message, priority, queued_at, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			`, messageID, "session-a", "target-session", body, PriorityMedium, time.Now(), "waiting")
+			require.NoError(t, err)
+
+			_, err = tt.read(queue)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), messageID)
+			assert.Contains(t, err.Error(), "state domain")
+			assert.NotContains(t, err.Error(), body)
+		})
+	}
+}
+
+func TestGetPendingKeepsTargetAndKnownStateScope(t *testing.T) {
+	queue := setupTestQueue(t)
+	defer queue.Close()
+
+	for _, entry := range []struct {
+		messageID string
+		to        string
+		state     QueueState
+	}{
+		{messageID: "delivered-target", to: "target-session", state: QueueStateDelivered},
+		{messageID: "failed-target", to: "target-session", state: QueueStateFailed},
+		{messageID: "queued-other", to: "other-session", state: QueueStateQueued},
+	} {
+		_, err := queue.db.Exec(`
+			INSERT INTO message_queue
+				(message_id, from_session, to_session, message, priority, queued_at, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, entry.messageID, "session-a", entry.to, "valid nonpending body", PriorityMedium, time.Now(), entry.state)
+		require.NoError(t, err)
+	}
+
+	entries, err := queue.GetPending("target-session")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+
+	entries, err = queue.GetAllPending()
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "queued-other", entries[0].MessageID)
+}
+
+func TestLegacyQueueVocabularyRowsDecode(t *testing.T) {
+	queue := setupTestQueue(t)
+	defer queue.Close()
+
+	_, err := queue.db.Exec(`
+		INSERT INTO message_queue
+			(message_id, from_session, to_session, message, priority, queued_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, "legacy-queue-entry", "session-a", "session-b", "legacy persisted body", "CRITICAL", time.Now(), "queued")
+	require.NoError(t, err)
+
+	entries, err := queue.GetPending("session-b")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, PriorityCritical, entries[0].Priority)
+	assert.Equal(t, QueueStateQueued, entries[0].Status)
+}
+
 // TestEnqueueDuplicate tests duplicate message handling
 func TestEnqueueDuplicate(t *testing.T) {
 	queue := setupTestQueue(t)

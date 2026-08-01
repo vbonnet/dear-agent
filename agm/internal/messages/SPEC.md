@@ -6,8 +6,8 @@
 
 `agm/internal/messages` provides the SQLite-backed queue and acknowledgement
 manager for non-disruptive cross-session messages. It owns the typed queue
-priority vocabulary and preserves priority order, delivery status, retry state,
-and acknowledgement timeouts.
+priority and state vocabularies and preserves priority order, delivery status,
+retry state, and acknowledgement timeouts.
 
 ## EARS Requirements
 
@@ -28,6 +28,10 @@ and acknowledgement timeouts.
 **MSG-08** When a raw message priority is parsed, the system shall return a typed priority only for the exact values `CRITICAL`, `HIGH`, `MEDIUM`, and `LOW`.
 
 **MSG-09** When a queue entry has an undeclared priority, the system shall reject the enqueue before attempting a SQLite write.
+
+**MSG-10** When a persisted queue row is read, the system shall decode priority and state through one validation seam and return an error for any undeclared value without exposing the message body.
+
+**MSG-11** When a pending-query scan encounters a persisted state outside `queued`, `delivered`, or `failed`, the system shall surface that validation error rather than silently omitting the row. Existing databases are not migrated or rewritten by this policy.
 
 ## BDD Traceability
 

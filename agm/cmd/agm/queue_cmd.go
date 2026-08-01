@@ -98,7 +98,7 @@ func runQueueList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n=== %s ===\n\n", header)
 
 	for _, e := range entries {
-		statusIcon := statusIcon(e.Status)
+		statusIcon := statusIcon(string(e.Status))
 		age := time.Since(e.QueuedAt).Truncate(time.Second)
 		msgPreview := truncateMsg(e.Message, 60)
 
