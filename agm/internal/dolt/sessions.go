@@ -359,6 +359,9 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if err := a.ApplyMigrations(); err != nil {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
+	if err := a.validateStoredSessionLifecycleAndOutcome(session.SessionID); err != nil {
+		return err
+	}
 
 	// Marshal context tags to JSON
 	contextTags, err := json.Marshal(session.Context.Tags)
@@ -961,7 +964,7 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 	if err := a.ApplyMigrations(); err != nil {
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
-	query := `SELECT name FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
+	query := `SELECT name, status FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
 	rows, err := a.conn.QueryContext(ctx, query, a.workspace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active sessions: %w", err)
@@ -970,9 +973,12 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 
 	var names []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, status string
+		if err := rows.Scan(&name, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan session name: %w", err)
+		}
+		if _, err := lifecycleFromStorageStatus(status); err != nil {
+			return nil, fmt.Errorf("validate listed session lifecycle: %w", err)
 		}
 		names = append(names, name)
 	}
@@ -1302,6 +1308,38 @@ func validateSessionLifecycleAndOutcome(session *manifest.Manifest) error {
 	return nil
 }
 
+// validateStoredSessionLifecycleAndOutcome prevents a valid caller snapshot
+// from overwriting an invalid durable value that has not been decoded first.
+func (a *Adapter) validateStoredSessionLifecycleAndOutcome(sessionID string) error {
+	var status string
+	var metadataJSON []byte
+	err := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT status, metadata FROM agm_sessions WHERE id = ? AND workspace = ?`,
+		sessionID,
+		a.workspace,
+	).Scan(&status, &metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect stored lifecycle and outcome before update: %w", err)
+	}
+	if _, err := lifecycleFromStorageStatus(status); err != nil {
+		return fmt.Errorf("validate stored lifecycle before update: %w", err)
+	}
+	if len(metadataJSON) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return fmt.Errorf("inspect stored metadata before update: %w", err)
+	}
+	if _, _, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return fmt.Errorf("validate stored metadata outcome before update: %w", err)
+	}
+	return nil
+}
+
 // lifecycleStorageStatus converts the manifest's legacy empty lifecycle into
 // the established Dolt "active" spelling. All nonempty values must be part of
 // the closed manifest vocabulary.
@@ -1391,16 +1429,10 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	}
 	// Outcome lives alongside engram fields but is independent of them — read it
 	// before the engram early-return so it round-trips even when engram is off.
-	if rawOutcome, present := metadata["outcome"]; present {
-		outcome, ok := rawOutcome.(string)
-		if !ok {
-			return fmt.Errorf("invalid metadata outcome type %T", rawOutcome)
-		}
-		parsed, err := manifest.ParseSessionOutcome(outcome)
-		if err != nil {
-			return fmt.Errorf("invalid metadata outcome: %w", err)
-		}
-		session.Outcome = parsed
+	if outcome, present, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return err
+	} else if present {
+		session.Outcome = outcome
 	}
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory
@@ -1416,6 +1448,22 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	applyPiMetadata(session, metadata)
 	applyEngramMetadata(session, metadata)
 	return nil
+}
+
+func parseSessionMetadataOutcome(metadata map[string]any) (manifest.SessionOutcome, bool, error) {
+	rawOutcome, present := metadata["outcome"]
+	if !present {
+		return manifest.OutcomeUnknown, false, nil
+	}
+	outcome, ok := rawOutcome.(string)
+	if !ok {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome type %T", rawOutcome)
+	}
+	parsed, err := manifest.ParseSessionOutcome(outcome)
+	if err != nil {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome: %w", err)
+	}
+	return parsed, true, nil
 }
 
 func applyCodexMetadata(session *manifest.Manifest, metadata map[string]any) {
