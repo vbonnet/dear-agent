@@ -234,6 +234,40 @@ func TestRenderIsOfflineAndEscapesEvidence(t *testing.T) {
 	}
 }
 
+func TestRenderRetainsEscapedApplicabilityEvidenceRecords(t *testing.T) {
+	report := validReport()
+	applicabilityEvidence := evidence{
+		Path:          "one/SPEC.md",
+		Line:          17,
+		RequirementID: "ONE-01",
+		Excerpt:       `<img src=x onerror="alert('unsafe')">`,
+	}
+	report.Candidates = []finding{{
+		ID: "SPEC-CLUSTER-001", Rank: 1, Title: "applicability evidence", Verdict: "merge-now", Relationship: "same-observable", Classification: "shared-contract", Confidence: "confirmed", Strength: "strong",
+		CurrentOwners: []ownerClaim{{Path: "one/SPEC.md", Rationale: "owns the behavior"}, {Path: "two/SPEC.md", Rationale: "also owns the behavior"}}, ProposedOwner: &proposedOwnerClaim{Path: "one/SPEC.md", State: "existing", Rationale: "owns the canonical behavior"},
+		SharedOutcome: "same", MaterialDifferences: []string{"none observed"}, Evidence: []evidence{{Path: "one/SPEC.md", Line: 1, RequirementID: "ONE-01", Excerpt: "one"}, {Path: "two/SPEC.md", Line: 1, RequirementID: "TWO-01", Excerpt: "two"}},
+		ApplicabilityBasis: "active-members", ApplicabilityRationale: "both claims use the same pinned evidence", Applicability: []applicability{{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{applicabilityEvidence, applicabilityEvidence}}},
+		BDD: bddImpact{Features: []string{"agm/test/bdd/features/example.feature"}, Consequence: "merge"}, Recommendation: []string{"merge"}, Risk: "bounded", Decision: "approve",
+	}}
+	report.Summary.CandidateCount = 1
+	report.Summary.ByVerdict = map[string]int{"merge-now": 1}
+
+	output := renderHTML(report, nil)
+	const escapedExcerpt = "&lt;img src=x onerror=&#34;alert(&#39;unsafe&#39;)&#34;&gt;"
+	if strings.Contains(output, `<img src=x onerror="alert('unsafe')">`) {
+		t.Fatalf("renderer emitted unescaped applicability excerpt: %s", output)
+	}
+	if got := strings.Count(output, escapedExcerpt); got != 2 {
+		t.Fatalf("escaped applicability excerpts=%d, want 2 to preserve duplicate records", got)
+	}
+	if got := strings.Count(output, "one/SPEC.md:17"); got != 2 {
+		t.Fatalf("applicability path and line occurrences=%d, want 2", got)
+	}
+	if got := strings.Count(output, "one/SPEC.md:17</code> <span class=\"pill\">ONE-01</span><br>"); got != 2 {
+		t.Fatalf("applicability requirement ID occurrences=%d, want 2", got)
+	}
+}
+
 func TestCommandsRejectFilesystemOutputFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"inventory", "-output", "/tmp/inventory.json"},

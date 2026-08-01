@@ -12,7 +12,7 @@
 
 **SPECAUDIT-05** When report validation checks BDD impact with one or more selected features, the system shall require every selected feature to exist at the pinned revision and reciprocally reference at least one current owner in both directions, and shall require every current owner to be reciprocally represented by at least one selected feature; when no feature is selected, the system shall require a non-positive finding with BDD consequence `none`.
 
-**SPECAUDIT-06** When rendering an authenticated audit artifact, the system shall emit self-contained offline HTML that escapes evidence and retains every decision field, owner topology, applicability row, BDD path, exclusion, methodology fact, and limitation.
+**SPECAUDIT-06** When rendering an authenticated audit artifact, the system shall emit self-contained offline HTML that escapes evidence and retains every decision field, owner topology, applicability row, BDD path, exclusion, methodology fact, and limitation; each applicability-evidence record shall visibly retain its path, line, requirement ID, and escaped excerpt.
 
 **SPECAUDIT-07** When inventory or rendering completes, the system shall emit artifact bytes only to standard output and shall not create, replace, or delete a caller-selected filesystem path.
 

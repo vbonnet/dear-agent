@@ -5,6 +5,11 @@ HTML renderer; HTML is a complete view, not a second findings store. A supplied
 inventory is not trusted on its own: validation and rendering recompute it from
 Git objects at the pinned revision.
 
+For every applicability entry, HTML renders every evidence record separately,
+including its path, line, requirement ID, and escaped excerpt. Repeated records
+remain repeated: one pinned requirement can independently justify multiple
+active-member dispositions.
+
 ## Required commands
 
 ```sh

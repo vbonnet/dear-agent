@@ -1480,25 +1480,14 @@ func renderFinding(out *strings.Builder, finding finding) {
 		out.WriteString("<table class=\"matrix\"><thead><tr><th>Member</th><th>Disposition</th><th>Evidence</th></tr></thead><tbody>")
 		for _, entry := range finding.Applicability {
 			fmt.Fprintf(out, "<tr><td><code>%s</code></td><td>%s</td><td>", esc(entry.Member), esc(entry.Disposition))
-			for index, item := range entry.Evidence {
-				if index > 0 {
-					out.WriteString("<br>")
-				}
-				fmt.Fprintf(out, "<code>%s:%d %s</code>", esc(item.Path), item.Line, esc(item.RequirementID))
-			}
+			renderEvidence(out, entry.Evidence, "applicability-evidence")
 			out.WriteString("</td></tr>")
 		}
 		out.WriteString("</tbody></table>")
 	}
-	out.WriteString("</div></div><details open><summary>Exact source evidence</summary><ul class=\"evidence\">")
-	for _, item := range finding.Evidence {
-		fmt.Fprintf(out, "<li><code>%s:%d</code>", esc(item.Path), item.Line)
-		if item.RequirementID != "" {
-			fmt.Fprintf(out, " <span class=\"pill\">%s</span>", esc(item.RequirementID))
-		}
-		fmt.Fprintf(out, "<br>%s</li>", esc(item.Excerpt))
-	}
-	out.WriteString("</ul></details><div class=\"two-col\"><div><span class=\"label\">BDD consequence</span>")
+	out.WriteString("</div></div><details open><summary>Exact source evidence</summary>")
+	renderEvidence(out, finding.Evidence, "")
+	out.WriteString("</details><div class=\"two-col\"><div><span class=\"label\">BDD consequence</span>")
 	fmt.Fprintf(out, "<p><span class=\"tag\">%s</span></p>", esc(finding.BDD.Consequence))
 	if len(finding.BDD.Features) == 0 {
 		out.WriteString("<p class=\"empty\">No feature selected.</p>")
@@ -1520,6 +1509,25 @@ func renderFinding(out *strings.Builder, finding finding) {
 		renderStringList(out, finding.Limitations, false)
 	}
 	out.WriteString("</details></article>")
+}
+
+// renderEvidence renders every supplied record in order. Applicability evidence
+// is not a summary: the same pinned requirement may support multiple members
+// and each such claim must remain independently visible in the offline report.
+func renderEvidence(out *strings.Builder, items []evidence, class string) {
+	classes := "evidence"
+	if class != "" {
+		classes += " " + class
+	}
+	fmt.Fprintf(out, "<ul class=\"%s\">", classes)
+	for _, item := range items {
+		fmt.Fprintf(out, "<li><code>%s:%d</code>", esc(item.Path), item.Line)
+		if item.RequirementID != "" {
+			fmt.Fprintf(out, " <span class=\"pill\">%s</span>", esc(item.RequirementID))
+		}
+		fmt.Fprintf(out, "<br>%s</li>", esc(item.Excerpt))
+	}
+	out.WriteString("</ul>")
 }
 
 func renderStringList(out *strings.Builder, items []string, ordered bool) {
