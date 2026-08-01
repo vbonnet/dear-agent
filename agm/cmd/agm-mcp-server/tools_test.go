@@ -574,6 +574,8 @@ func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
 		probeStarted: make(chan struct{}),
 		releaseProbe: make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(tmuxClient.releaseProbe) }) }
 	tmuxClient.Sessions["cancel-target"] = true
 	handlerDone := make(chan struct{})
 	opCtx := &ops.OpContext{Storage: store, Tmux: tmuxClient}
@@ -582,6 +584,9 @@ func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
 			return opCtx, func() { close(handlerDone) }, nil
 		})
 	})
+	// Register after the MCP session cleanups so LIFO cleanup releases the
+	// injected blocker before session shutdown can wait for the handler.
+	t.Cleanup(release)
 
 	requestCtx, cancel := context.WithCancel(t.Context())
 	callDone := make(chan error, 1)
@@ -595,14 +600,18 @@ func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
 		})
 		callDone <- err
 	}()
-	<-tmuxClient.probeStarted
+	select {
+	case <-tmuxClient.probeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP kill handler did not reach injected tmux probe")
+	}
 	cancel()
 	select {
 	case <-opCtx.Context.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("MCP handler context did not observe client cancellation")
 	}
-	close(tmuxClient.releaseProbe)
+	release()
 
 	select {
 	case <-handlerDone:
