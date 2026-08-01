@@ -22,6 +22,10 @@ observable behavior has one harness-neutral product `SPEC.md` owner. The audit
 skill supplies evidence for maintainer review; it neither selects that owner
 nor edits product contracts.
 
+For repository documentation and the behavioral `SPEC.md` starter, begin at
+[`docs/spec-authoring.md`](../docs/spec-authoring.md). That page is a router;
+the authored workflow remains in the canonical skill files above.
+
 The deterministic collector is the root-module command at `tools/specaudit`.
 Its observable command behavior belongs only to
 [`tools/specaudit/SPEC.md`](../tools/specaudit/SPEC.md), whose focused BDD

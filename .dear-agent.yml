@@ -129,6 +129,10 @@ instruction-policy:
       owner: spec-governance-references
     - match: spec-governance/skills/audit-specs/SKILL.md
       owner: spec-governance
+    - match: docs/spec-authoring.md
+      owner: spec-governance
+    - match: docs/templates/SPEC.md.tmpl
+      owner: spec-governance
     - match: wayfinder/PHASES.md
       owner: wayfinder
     - match: wayfinder/SPEC.md

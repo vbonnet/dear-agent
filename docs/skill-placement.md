@@ -98,6 +98,14 @@ tracked **symlink** to it, the Claude plugin manifest exports the directory, and
 both marketplace catalogs register the plugin. Copy this pattern. Do not ship
 two divergent copies of a skill.
 
+`spec-governance` uses a deliberately narrower regular-file projection:
+`spec-governance/skills/{write-spec,audit-specs}/SKILL.md` are the only
+authored workflow bodies, while `.agents/skills/` contains generated discovery
+delegates. `make lint-skills` checks the delegates' exact bytes. This is source
+projection evidence only; it does not prove a harness discovers, installs, or
+invokes either skill. Keep those states separate and verify each claimed
+runtime independently.
+
 ### Version skew is real
 
 Source checkout, installed Go binaries, and the installed plugin snapshot are
