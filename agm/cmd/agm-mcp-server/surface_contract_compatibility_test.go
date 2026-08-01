@@ -137,6 +137,9 @@ func registeredMCPTools(t *testing.T, register func(*mcp.Server, *Config)) []*mc
 		if err != nil {
 			t.Fatalf("ListTools: %v", err)
 		}
+		if result == nil {
+			t.Fatal("ListTools returned a nil result")
+		}
 		rawSchemaTools := takeListedToolsSnapshot(t, snapshots)
 		tools = append(tools, reconcileListedTools(t, result.Tools, rawSchemaTools)...)
 		if result.NextCursor == "" {

@@ -27,6 +27,8 @@ func captureListedTools() (mcp.Middleware, <-chan listToolsSnapshot) {
 				listed, ok := result.(*mcp.ListToolsResult)
 				if !ok {
 					snapshot.err = fmt.Errorf("tools/list result = %T, want *mcp.ListToolsResult", result)
+				} else if listed == nil {
+					snapshot.err = fmt.Errorf("tools/list result is a nil *mcp.ListToolsResult")
 				} else {
 					snapshot.tools, snapshot.err = cloneToolsWithRawSchemas(listed.Tools)
 				}
@@ -41,6 +43,9 @@ func captureListedTools() (mcp.Middleware, <-chan listToolsSnapshot) {
 func cloneToolsWithRawSchemas(tools []*mcp.Tool) ([]*mcp.Tool, error) {
 	result := make([]*mcp.Tool, len(tools))
 	for index, tool := range tools {
+		if tool == nil {
+			return nil, fmt.Errorf("nil tool at index %d", index)
+		}
 		schema, err := json.Marshal(tool.InputSchema)
 		if err != nil {
 			return nil, fmt.Errorf("marshal schema for %s: %w", tool.Name, err)
@@ -69,7 +74,10 @@ func takeListedToolsSnapshot(t *testing.T, snapshots <-chan listToolsSnapshot) [
 func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool) []*mcp.Tool {
 	t.Helper()
 	rawByName := make(map[string]*mcp.Tool, len(rawSchemaTools))
-	for _, tool := range rawSchemaTools {
+	for index, tool := range rawSchemaTools {
+		if tool == nil {
+			t.Fatalf("nil server-side tool snapshot at index %d", index)
+		}
 		if _, duplicate := rawByName[tool.Name]; duplicate {
 			t.Fatalf("duplicate server-side tool snapshot %q", tool.Name)
 		}
@@ -77,6 +85,9 @@ func reconcileListedTools(t *testing.T, clientTools, rawSchemaTools []*mcp.Tool)
 	}
 	result := make([]*mcp.Tool, len(clientTools))
 	for index, clientTool := range clientTools {
+		if clientTool == nil {
+			t.Fatalf("nil client-discovered tool at index %d", index)
+		}
 		rawTool, ok := rawByName[clientTool.Name]
 		if !ok {
 			t.Fatalf("client-discovered tool %q missing from server-side snapshot", clientTool.Name)
