@@ -95,6 +95,11 @@ func TestSchemaRequiredMembersMustBeDeclaredAndUnique(t *testing.T) {
 			raw:     `{"type":"object","properties":{"known":{"type":"string"}},"required":["known","known"]}`,
 			wantKey: "DAH-002/schema-required-duplicate",
 		},
+		{
+			name:    "null required",
+			raw:     `{"type":"object","properties":{},"required":null}`,
+			wantKey: "DAH-002/schema-required-type",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -266,8 +271,8 @@ func canonicalizeSchema(
 
 func schemaRequiredFields(schema map[string]any) (map[string]bool, error) {
 	requiredFields := make(map[string]bool)
-	raw, ok := schema["required"]
-	if !ok || raw == nil {
+	raw, present := schema["required"]
+	if !present {
 		return requiredFields, nil
 	}
 	items, ok := raw.([]any)
