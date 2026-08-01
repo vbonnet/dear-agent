@@ -39,15 +39,15 @@ type MessageQueue struct {
 type QueueState string
 
 const (
-	QueueStateQueued    QueueState = "queued"
-	QueueStateDelivered QueueState = "delivered"
-	QueueStateFailed    QueueState = "failed"
+	// Status names remain untyped constants for compatibility with callers that
+	// compare them to QueueState values or use them as strings.
+	StatusQueued    = "queued"
+	StatusDelivered = "delivered"
+	StatusFailed    = "failed"
 
-	// Status names remain string constants for API compatibility with callers
-	// that use them as map keys or command arguments.
-	StatusQueued    string = string(QueueStateQueued)
-	StatusDelivered string = string(QueueStateDelivered)
-	StatusFailed    string = string(QueueStateFailed)
+	QueueStateQueued    QueueState = StatusQueued
+	QueueStateDelivered QueueState = StatusDelivered
+	QueueStateFailed    QueueState = StatusFailed
 )
 
 // ParseQueueState accepts only the queue's persisted state vocabulary.

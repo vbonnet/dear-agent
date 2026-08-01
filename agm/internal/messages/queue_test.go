@@ -99,6 +99,14 @@ func TestQueueStateParser(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid queue state")
 }
 
+func TestLegacyStatusConstantsRemainUntyped(t *testing.T) {
+	var state QueueState = StatusQueued
+	counts := map[string]int{StatusQueued: 1}
+
+	assert.Equal(t, QueueStateQueued, state)
+	assert.Equal(t, 1, counts[StatusQueued])
+}
+
 func TestScannedQueueEntriesRejectMalformedDomains(t *testing.T) {
 	tests := []struct {
 		name     string
