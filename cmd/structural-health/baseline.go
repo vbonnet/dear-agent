@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -77,7 +78,7 @@ type baselineUpdatePlan struct {
 }
 
 // readBaseline preserves the scan-mode interface while readBaselineFile also
-// exposes literal bytes for update provenance.
+// exposes literal bytes for v1 migration and bootstrap provenance.
 func readBaseline(path string) (baseline, error) {
 	bl, _, err := readBaselineFile(path)
 	if err == nil && effectiveScannerVersion(bl) != scannerKeyVersion {
@@ -94,6 +95,9 @@ func readBaselineFile(path string) (baseline, []byte, error) {
 	if err != nil {
 		return baseline{}, nil, err
 	}
+	if err := rejectDuplicateJSONMembers(data); err != nil {
+		return baseline{}, nil, fmt.Errorf("parse: %w", err)
+	}
 
 	var bl baseline
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -108,6 +112,68 @@ func readBaselineFile(path string) (baseline, []byte, error) {
 		return baseline{}, nil, err
 	}
 	return bl, data, nil
+}
+
+func rejectDuplicateJSONMembers(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := scanJSONValue(dec); err != nil {
+		return err
+	}
+	return ensureJSONEOF(dec)
+}
+
+func scanJSONValue(dec *json.Decoder) error {
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delim {
+	case '{':
+		seen := make(map[string]bool)
+		for dec.More() {
+			keyToken, keyErr := dec.Token()
+			if keyErr != nil {
+				return keyErr
+			}
+			key, keyOK := keyToken.(string)
+			if !keyOK {
+				return fmt.Errorf("object member name has type %T", keyToken)
+			}
+			if seen[key] {
+				return fmt.Errorf("duplicate JSON object member %q", key)
+			}
+			seen[key] = true
+			if err := scanJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		return consumeJSONDelimiter(dec, '}')
+	case '[':
+		for dec.More() {
+			if err := scanJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		return consumeJSONDelimiter(dec, ']')
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delim)
+	}
+}
+
+func consumeJSONDelimiter(dec *json.Decoder, expected json.Delim) error {
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if token != expected {
+		return fmt.Errorf("unexpected JSON delimiter %q, want %q", token, expected)
+	}
+	return nil
 }
 
 func ensureJSONEOF(dec *json.Decoder) error {
@@ -146,6 +212,11 @@ func validateBaseline(bl baseline) error {
 			return fmt.Errorf("transition %d: %w", i, err)
 		}
 	}
+	if bl.Version == baselineSchemaV2 {
+		if err := validateTransitionHistory(bl); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -166,6 +237,99 @@ func validateTransition(transition baselineTransition) error {
 		return err
 	}
 	return validateTransitionProvenance(transition)
+}
+
+func validateTransitionHistory(bl baseline) error {
+	predecessors := make([]map[string][]string, len(bl.Transitions))
+	resulting := cloneKeyMap(bl.Findings)
+	resultingScannerVersion := bl.ScannerVersion
+	for i, transition := range slices.Backward(bl.Transitions) {
+		if transition.ScannerVersion != resultingScannerVersion {
+			return fmt.Errorf(
+				"transition %d scanner version %d does not produce subsequent version %d",
+				i,
+				transition.ScannerVersion,
+				resultingScannerVersion,
+			)
+		}
+		predecessor, err := reverseTransition(resulting, transition)
+		if err != nil {
+			return fmt.Errorf("transition %d: %w", i, err)
+		}
+		predecessors[i] = predecessor
+		resulting = predecessor
+		resultingScannerVersion = transition.PreviousScannerVersion
+	}
+
+	// Transition zero may cover literal v1 bytes or an absent bootstrap file,
+	// neither of which can be reconstructed from the resulting v2 snapshot.
+	// Every later transition has a complete canonical v2 predecessor.
+	for i := 1; i < len(bl.Transitions); i++ {
+		predecessor := baseline{
+			Version:        baselineSchemaV2,
+			ScannerVersion: bl.Transitions[i].PreviousScannerVersion,
+			Findings:       predecessors[i],
+			Transitions:    cloneTransitions(bl.Transitions[:i]),
+		}
+		want, err := canonicalBaselineSHA256(predecessor)
+		if err != nil {
+			return fmt.Errorf("transition %d reconstruct predecessor digest: %w", i, err)
+		}
+		if got := bl.Transitions[i].PreviousBaselineSHA256; got != want {
+			return fmt.Errorf(
+				"transition %d previous_baseline_sha256 %s does not match reconstructed predecessor %s",
+				i,
+				got,
+				want,
+			)
+		}
+	}
+	return nil
+}
+
+func reverseTransition(
+	resulting map[string][]string,
+	transition baselineTransition,
+) (map[string][]string, error) {
+	predecessor := emptyKeyMap()
+	for _, scan := range scanNames {
+		keys := make(map[string]bool, len(resulting[scan]))
+		for _, key := range resulting[scan] {
+			keys[key] = true
+		}
+		for _, key := range transition.Added[scan] {
+			if !keys[key] {
+				return nil, fmt.Errorf("added key %q is absent from resulting scan %q", key, scan)
+			}
+			delete(keys, key)
+		}
+		for _, key := range transition.Removed[scan] {
+			if keys[key] {
+				return nil, fmt.Errorf("removed key %q remains in resulting scan %q", key, scan)
+			}
+			keys[key] = true
+		}
+		for key := range keys {
+			predecessor[scan] = append(predecessor[scan], key)
+		}
+		sort.Strings(predecessor[scan])
+	}
+	return predecessor, nil
+}
+
+func canonicalBaselineSHA256(bl baseline) (string, error) {
+	data, err := marshalBaseline(bl)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
+
+func transitionPredecessorSHA256(previous baseline, literalBytes []byte) (string, error) {
+	if previous.Version == baselineSchemaV2 {
+		return canonicalBaselineSHA256(previous)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(literalBytes)), nil
 }
 
 func validateTransitionVersions(transition baselineTransition) error {
@@ -494,7 +658,10 @@ func updateBaselineFile(
 		previous = baseline{Version: baselineSchemaV1, Findings: emptyKeyMap()}
 		previousBytes = nil
 	}
-	digest := fmt.Sprintf("%x", sha256.Sum256(previousBytes))
+	digest, err := transitionPredecessorSHA256(previous, previousBytes)
+	if err != nil {
+		return baselineUpdatePlan{}, fmt.Errorf("hash previous baseline: %w", err)
+	}
 	plan, err := planBaselineUpdate(previous, current, digest, request)
 	if err != nil {
 		return baselineUpdatePlan{}, err

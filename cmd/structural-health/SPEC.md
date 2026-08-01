@@ -33,7 +33,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-08** When setup or usage fails, the system shall exit with code 2.
 
-**STRUCT-HEALTH-10** When a baseline is read, the system shall reject malformed JSON, unsupported schema or scanner-key versions, incomplete canonical scan coverage, unknown scans, null lists, unsorted lists, empty keys, and duplicate keys.
+**STRUCT-HEALTH-10** When a baseline is read, the system shall reject malformed JSON, duplicate JSON object-member names at any nesting level before decoding, unsupported schema or scanner-key versions, incomplete canonical scan coverage, unknown scans, null lists, unsorted lists, empty keys, and duplicate keys.
 
 **STRUCT-HEALTH-11** When a valid schema-v1 baseline is updated, the system shall preserve its finding-key semantics and shall write schema v2.
 
@@ -43,7 +43,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-14** When the caller uses `--accept-new`, the system shall require baseline-update mode, at least one added key, a non-blank reason, and a non-blank durable reference.
 
-**STRUCT-HEALTH-15** When a baseline transition is written, the system shall append the scanner-key version, literal prior-file SHA-256, exact added keys, exact removed keys, and required admission metadata to transition history.
+**STRUCT-HEALTH-15** When a baseline transition is written, the system shall append the scanner-key version, the literal prior-file SHA-256 for a v1 migration or absent-file bootstrap and otherwise the SHA-256 of the deterministic canonical v2 predecessor, exact added keys, exact removed keys, and required admission metadata to transition history.
 
 **STRUCT-HEALTH-16** When schema v2 is written, the system shall emit deterministic JSON with every canonical scan represented by a sorted non-null key list.
 
@@ -58,6 +58,8 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 **STRUCT-HEALTH-21** When ordinary scan mode reads a checked-in baseline that uses an older supported scanner-key version, the system shall reject it until baseline-update mode records an explicitly authorized scanner-version transition.
 
 **STRUCT-HEALTH-22** When baseline update mode is requested without expansion authorization and any current finding key is absent from the prior baseline, the system shall reject the entire update without removing fixed keys or otherwise modifying the baseline.
+
+**STRUCT-HEALTH-23** When a schema-v2 baseline with transition history is read, the system shall reject it if any reconstructable transition's `previous_baseline_sha256` differs from the SHA-256 of the predecessor baseline's deterministic canonical serialization.
 
 ## BDD Traceability
 
