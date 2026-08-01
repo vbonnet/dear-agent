@@ -201,9 +201,11 @@ func scanSessionFrecency(row scanner) (*manifest.Manifest, int, *time.Time, erro
 		return nil, 0, nil, fmt.Errorf("failed to scan session with frecency: %w", err)
 	}
 
-	if status == "archived" {
-		m.Lifecycle = manifest.LifecycleArchived
+	lifecycle, err := lifecycleFromStorageStatus(status)
+	if err != nil {
+		return nil, 0, nil, err
 	}
+	m.Lifecycle = lifecycle
 	m.Workspace = workspace
 	m.Model = model
 	if tmuxSessionRevision.Valid {

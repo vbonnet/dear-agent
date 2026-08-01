@@ -136,6 +136,9 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) (retErr error) {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Ensure migrations are applied
 	if err := a.ApplyMigrations(); err != nil {
@@ -174,7 +177,10 @@ func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservat
 		return err
 	}
 	harness := defaultIfEmpty(session.Harness, "claude-code")
-	status := lifecycleStorageStatus(session.Lifecycle)
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
+	}
 	permissionMode := defaultIfEmpty(session.PermissionMode, "default")
 	permissionModeSource := defaultIfEmpty(session.PermissionModeSource, "init")
 
@@ -345,6 +351,9 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Ensure migrations are applied
 	if err := a.ApplyMigrations(); err != nil {
@@ -371,7 +380,10 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 
 	// Preserve transitional lifecycle values such as "reaping" so detached
 	// reapers can recover across processes in an isolated SQLite test store.
-	status := lifecycleStorageStatus(session.Lifecycle)
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
+	}
 
 	// Update timestamp
 	session.UpdatedAt = time.Now()
@@ -1245,14 +1257,14 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}
 
-	// Set lifecycle from status. Runtime active/stopped state remains outside the
-	// durable lifecycle field; terminal/transitional lifecycle values round-trip.
-	switch status {
-	case manifest.LifecycleArchived, manifest.LifecycleReaping:
-		session.Lifecycle = status
-	default:
-		session.Lifecycle = ""
+	// Runtime active/stopped state remains outside the durable lifecycle field.
+	// Decode every stored status through the closed manifest vocabulary so an
+	// unknown nonempty durable value cannot masquerade as an active session.
+	lifecycle, err := lifecycleFromStorageStatus(status)
+	if err != nil {
+		return nil, err
 	}
+	session.Lifecycle = lifecycle
 
 	// Set workspace and model
 	session.Workspace = workspace
@@ -1280,13 +1292,44 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	return &session, nil
 }
 
-func lifecycleStorageStatus(lifecycle string) string {
-	switch lifecycle {
-	case manifest.LifecycleArchived, manifest.LifecycleReaping:
-		return lifecycle
-	default:
-		return "active"
+func validateSessionLifecycleAndOutcome(session *manifest.Manifest) error {
+	if _, err := manifest.ParseSessionLifecycle(session.Lifecycle); err != nil {
+		return fmt.Errorf("validate persisted lifecycle: %w", err)
 	}
+	if _, err := manifest.ParseSessionOutcome(string(session.Outcome)); err != nil {
+		return fmt.Errorf("validate persisted outcome: %w", err)
+	}
+	return nil
+}
+
+// lifecycleStorageStatus converts the manifest's legacy empty lifecycle into
+// the established Dolt "active" spelling. All nonempty values must be part of
+// the closed manifest vocabulary.
+func lifecycleStorageStatus(lifecycle string) (string, error) {
+	parsed, err := manifest.ParseSessionLifecycle(lifecycle)
+	if err != nil {
+		return "", err
+	}
+	switch parsed {
+	case manifest.LifecycleReaping, manifest.LifecycleArchived:
+		return string(parsed), nil
+	default:
+		return "active", nil
+	}
+}
+
+// lifecycleFromStorageStatus preserves both legacy storage spellings for the
+// empty manifest lifecycle and rejects any unknown nonempty stored status.
+func lifecycleFromStorageStatus(status string) (string, error) {
+	switch status {
+	case "", "active":
+		return "", nil
+	}
+	parsed, err := manifest.ParseSessionLifecycle(status)
+	if err != nil {
+		return "", fmt.Errorf("invalid stored lifecycle status %q: %w", status, err)
+	}
+	return string(parsed), nil
 }
 
 // applyNullableScanFields copies the nullable sql.Null* values from a Scan call
@@ -1348,8 +1391,16 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	}
 	// Outcome lives alongside engram fields but is independent of them — read it
 	// before the engram early-return so it round-trips even when engram is off.
-	if outcome, ok := metadata["outcome"].(string); ok {
-		session.Outcome = manifest.SessionOutcome(outcome)
+	if rawOutcome, present := metadata["outcome"]; present {
+		outcome, ok := rawOutcome.(string)
+		if !ok {
+			return fmt.Errorf("invalid metadata outcome type %T", rawOutcome)
+		}
+		parsed, err := manifest.ParseSessionOutcome(outcome)
+		if err != nil {
+			return fmt.Errorf("invalid metadata outcome: %w", err)
+		}
+		session.Outcome = parsed
 	}
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory

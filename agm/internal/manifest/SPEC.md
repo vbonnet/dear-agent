@@ -29,6 +29,8 @@ cross-harness session lifecycle state.
 
 **MAN-09** When sandbox metadata is used as cleanup ownership evidence, the manifest shall require an enabled record whose sandbox ID matches the stable session ID, whose provider and creation time are present, whose clean absolute merged boundary is the identified sandbox's `merged` child, and whose clean absolute working directory is contained by that boundary.
 
+**MAN-10** When AGM validates a session manifest, it shall accept lifecycle wire values only as empty legacy active/stopped, `reaping`, or `archived`, and archive outcome wire values only as empty legacy unknown, `completed`, `crashed`, `killed`, or `gc-stale`; every other value shall return an error without coercion.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
