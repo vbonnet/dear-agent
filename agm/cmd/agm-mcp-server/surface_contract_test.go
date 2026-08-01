@@ -45,8 +45,9 @@ func TestMCPHandlersRouteMappedRequestsToOperations(t *testing.T) {
 			t.Fatalf("list operation request = %+v, want %+v", gotRequest, wantRequest)
 		}
 		wantFields := []string{"list-field-one-sentinel", "list-field-two-sentinel"}
-		if !slices.Equal(gotFields, wantFields) || cleanupCalls != 1 {
-			t.Fatalf("list operation fields/cleanup = %v/%d, want %v/1", gotFields, cleanupCalls, wantFields)
+		if !slices.Equal(gotFields, wantFields) || opCtx.Context == nil || cleanupCalls != 1 {
+			t.Fatalf("list operation fields/context/cleanup = %v/%v/%d, want %v/non-nil/1",
+				gotFields, opCtx.Context, cleanupCalls, wantFields)
 		}
 	})
 
@@ -72,8 +73,9 @@ func TestMCPHandlersRouteMappedRequestsToOperations(t *testing.T) {
 		want := ops.SearchSessionsRequest{
 			Query: "search-query-sentinel", Status: "search-status-sentinel", Limit: 29,
 		}
-		if gotRequest != want || cleanupCalls != 1 {
-			t.Fatalf("search operation request/cleanup = %+v/%d, want %+v/1", gotRequest, cleanupCalls, want)
+		if gotRequest != want || opCtx.Context == nil || cleanupCalls != 1 {
+			t.Fatalf("search operation request/context/cleanup = %+v/%v/%d, want %+v/non-nil/1",
+				gotRequest, opCtx.Context, cleanupCalls, want)
 		}
 	})
 
@@ -92,8 +94,9 @@ func TestMCPHandlersRouteMappedRequestsToOperations(t *testing.T) {
 		callMCPContractTool(t, client, "agm_get_session_metadata", map[string]any{
 			"identifier": "get-identifier-sentinel",
 		})
-		if gotIdentifier != "get-identifier-sentinel" || cleanupCalls != 1 {
-			t.Fatalf("get operation identifier/cleanup = %q/%d, want sentinel/1", gotIdentifier, cleanupCalls)
+		if gotIdentifier != "get-identifier-sentinel" || opCtx.Context == nil || cleanupCalls != 1 {
+			t.Fatalf("get operation identifier/context/cleanup = %q/%v/%d, want sentinel/non-nil/1",
+				gotIdentifier, opCtx.Context, cleanupCalls)
 		}
 	})
 
@@ -170,6 +173,117 @@ func callMCPContractTool(t *testing.T, client *mcp.ClientSession, name string, a
 	}
 	if result.IsError {
 		t.Fatalf("CallTool(%s) returned an operation error", name)
+	}
+}
+
+func TestReadMCPHandlersPropagateRequestCancellation(t *testing.T) {
+	tests := []struct {
+		name      string
+		tool      string
+		arguments map[string]any
+		register  func(*mcp.Server, mcpOpContextFactory, func(*ops.OpContext) error)
+	}{
+		{
+			name: "list", tool: "agm_list_sessions",
+			arguments: map[string]any{"filters": map[string]any{}},
+			register: func(server *mcp.Server, factory mcpOpContextFactory, observe func(*ops.OpContext) error) {
+				addListSessionsToolWithDependencies(server, factory,
+					func(opCtx *ops.OpContext, _ *ops.ListSessionsRequest) (*ops.ListSessionsResult, error) {
+						return nil, observe(opCtx)
+					})
+			},
+		},
+		{
+			name: "search", tool: "agm_search_sessions",
+			arguments: map[string]any{
+				"query": "context-sentinel", "filters": map[string]any{},
+			},
+			register: func(server *mcp.Server, factory mcpOpContextFactory, observe func(*ops.OpContext) error) {
+				addSearchSessionsToolWithDependencies(server, factory,
+					func(opCtx *ops.OpContext, _ *ops.SearchSessionsRequest) (*ops.SearchSessionsResult, error) {
+						return nil, observe(opCtx)
+					})
+			},
+		},
+		{
+			name: "get", tool: "agm_get_session_metadata",
+			arguments: map[string]any{"identifier": "context-sentinel"},
+			register: func(server *mcp.Server, factory mcpOpContextFactory, observe func(*ops.OpContext) error) {
+				addGetSessionMetadataToolWithDependencies(server, factory,
+					func(opCtx *ops.OpContext, _ *ops.GetSessionRequest) (*ops.GetSessionResult, error) {
+						return nil, observe(opCtx)
+					})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			started := make(chan struct{})
+			observedCancellation := make(chan bool, 1)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			releaseBlocker := func() { releaseOnce.Do(func() { close(release) }) }
+			cleaned := make(chan struct{})
+			var cleanupOnce sync.Once
+			opCtx := &ops.OpContext{}
+			client := newTestMCPClient(t, func(server *mcp.Server, _ *Config) {
+				tt.register(server, func() (*ops.OpContext, func(), error) {
+					return opCtx, func() { cleanupOnce.Do(func() { close(cleaned) }) }, nil
+				}, func(gotCtx *ops.OpContext) error {
+					close(started)
+					if gotCtx.Context == nil {
+						observedCancellation <- false
+						return context.Canceled
+					}
+					select {
+					case <-gotCtx.Context.Done():
+						observedCancellation <- true
+						return gotCtx.Context.Err()
+					case <-release:
+						observedCancellation <- false
+						return context.Canceled
+					}
+				})
+			})
+			// Release before MCP session cleanup if an assertion stops the test
+			// while a handler is deliberately blocked on the injected context.
+			t.Cleanup(releaseBlocker)
+
+			requestCtx, cancel := context.WithCancel(t.Context())
+			callDone := make(chan error, 1)
+			go func() {
+				_, err := client.CallTool(requestCtx, &mcp.CallToolParams{
+					Name: tt.tool, Arguments: tt.arguments,
+				})
+				callDone <- err
+			}()
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s handler did not reach the injected operation", tt.tool)
+			}
+			cancel()
+			select {
+			case observed := <-observedCancellation:
+				if !observed {
+					t.Fatalf("%s operation did not observe request cancellation", tt.tool)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s operation remained blocked after request cancellation", tt.tool)
+			}
+			releaseBlocker()
+			select {
+			case <-cleaned:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s handler did not clean up after cancellation", tt.tool)
+			}
+			select {
+			case <-callDone:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s client call did not finish after cancellation", tt.tool)
+			}
+		})
 	}
 }
 

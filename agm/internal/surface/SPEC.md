@@ -90,7 +90,7 @@ reconciliation and the compile-generated-versus-retire-reference-output choice.
 
 **AGM-SURFACE-10** When provider-visible MCP tools are registered, the system shall route production and contract tests through one private registration seam containing the exact compiled tool set; SDK discovery order shall not be treated as a wire contract.
 
-**AGM-SURFACE-11** When registry and compiled MCP schemas are compared, the system shall preserve semantic property paths, types, array items, requiredness, enums, descriptions, and closed-object behavior while ignoring serialization order.
+**AGM-SURFACE-11** When registry and compiled MCP schemas are compared, the system shall preserve semantic property paths, types, array items, requiredness, enum keyword presence and values, descriptions, and closed-object behavior while ignoring serialization order.
 
 **AGM-SURFACE-12** When a compiled MCP contract differs from registry intent, the system shall require one dimension-specific compatibility record with an exact operation, tool, old value, and new value and shall reject wildcard or blanket exceptions.
 
@@ -102,12 +102,12 @@ reconciliation and the compile-generated-versus-retire-reference-output choice.
 
 **AGM-SURFACE-16** While build-ignored generated MCP output is not compilation-ready, the system shall not treat it as provider-visible proof or activate it without an explicit compatibility migration.
 
-**AGM-SURFACE-17** When archive or kill handlers invoke a shared mutation operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
+**AGM-SURFACE-17** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 
 ## BDD Traceability
 
 - `agm/test/bdd/features/agm_control_surface_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
 - `agm/test/bdd/features/mcp_parity.feature` validates operation discovery parity.
 - `agm/cmd/agm-mcp-server/surface_contract_compatibility_test.go` audits production SDK registration and the finite schema compatibility records.
-- `agm/cmd/agm-mcp-server/surface_contract_test.go` audits request mapping, archive request context, and discovery output.
+- `agm/cmd/agm-mcp-server/surface_contract_test.go` audits request mapping, read and archive request-context cancellation, and discovery output.
 - `agm/cmd/agm-mcp-server/tools_test.go` audits kill request context and cancellation before mutation.

@@ -170,6 +170,7 @@ func TestExactExternalMCPToolContractsRejectDrift(t *testing.T) {
 			wantKey: "DAH-002/external-tool-schema-enum",
 			mutate: externalNodeMutation("agm_create_session", "/harness", func(node *contractSchemaNode) {
 				node.Enum = "codex-cli"
+				node.EnumPresent = true
 			}),
 		},
 		{

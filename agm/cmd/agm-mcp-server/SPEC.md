@@ -48,9 +48,9 @@ actual SDK registration path.
 
 **MCS-14** When list, search, get, archive, or kill input reaches a shared operation, the system shall use production-called private adapters that preserve every request value, list field mask, and mutation dry-run state.
 
-**MCS-15** When the compiled tool surface is audited, the system shall enumerate the production SDK registration through an in-memory MCP client and reject every registry, schema, mapping, or discovery difference not consumed by one exact compatibility record.
+**MCS-15** When the compiled tool surface is audited, the system shall enumerate the production SDK registration through an in-memory MCP client and reject every registry, schema, mapping, or discovery difference not consumed by one exact compatibility record, including absent versus explicitly empty enum keywords.
 
-**MCS-16** When archive or kill handlers invoke a shared mutation operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
+**MCS-16** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 
 ## BDD Traceability
 

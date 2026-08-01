@@ -98,13 +98,14 @@ func addListSessionsToolWithDependencies(
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_list_sessions",
 		Description: "List AGM sessions. Use when you need to see all active sessions or find sessions by status/type.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input ListSessionsInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input ListSessionsInput) (*mcp.CallToolResult, any, error) {
 		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
 		req, fields := listSessionsRequestFromMCP(input)
+		opCtx.Context = ctx
 		opCtx.Fields = fields
 
 		result, opErr := listSessions(opCtx, req)
@@ -128,7 +129,7 @@ func addSearchSessionsToolWithDependencies(
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_search_sessions",
 		Description: "Search AGM sessions by name. Use when you need to find a specific session by partial name match.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input SearchSessionsInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SearchSessionsInput) (*mcp.CallToolResult, any, error) {
 		if input.Query == "" {
 			return mcpError(ops.ErrInvalidInput("query", "Search query is required.")), nil, nil
 		}
@@ -138,6 +139,7 @@ func addSearchSessionsToolWithDependencies(
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
 		result, opErr := searchSessions(opCtx, searchSessionsRequestFromMCP(input))
 		if opErr != nil {
@@ -160,7 +162,7 @@ func addGetSessionMetadataToolWithDependencies(
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_get_session_metadata",
 		Description: "Get detailed metadata for an AGM session. Use when you need full session details by ID or name.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input GetSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
@@ -170,6 +172,7 @@ func addGetSessionMetadataToolWithDependencies(
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
 		result, opErr := getSession(opCtx, getSessionRequestFromMCP(input))
 		if opErr != nil {
