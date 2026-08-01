@@ -1,5 +1,6 @@
 {
-  "version": 1,
+  "version": 2,
+  "scanner_version": 1,
   "findings": {
     "dead-package": [
       "github.com/vbonnet/dear-agent/agm/internal/a2a/artifacts",
@@ -20,9 +21,10 @@
       "github.com/vbonnet/dear-agent/agm/internal/engram",
       "github.com/vbonnet/dear-agent/agm/internal/evaluation",
       "github.com/vbonnet/dear-agent/agm/internal/hooks",
+      "github.com/vbonnet/dear-agent/agm/internal/monitor/tmux",
       "github.com/vbonnet/dear-agent/agm/internal/plugin",
-      "github.com/vbonnet/dear-agent/agm/internal/procguard",
       "github.com/vbonnet/dear-agent/agm/internal/quality",
+      "github.com/vbonnet/dear-agent/agm/internal/search",
       "github.com/vbonnet/dear-agent/agm/internal/sentinel/intake",
       "github.com/vbonnet/dear-agent/agm/internal/skipdetect",
       "github.com/vbonnet/dear-agent/agm/internal/terminal",
@@ -37,9 +39,9 @@
       "github.com/vbonnet/dear-agent/engram/hooks-bin/internal/pivot",
       "github.com/vbonnet/dear-agent/engram/hooks-bin/internal/worktree",
       "github.com/vbonnet/dear-agent/engram/hooks/builtin",
-      "github.com/vbonnet/dear-agent/engram/internal/benchmark",
       "github.com/vbonnet/dear-agent/engram/internal/dashboard",
       "github.com/vbonnet/dear-agent/engram/internal/detectors",
+      "github.com/vbonnet/dear-agent/engram/internal/document",
       "github.com/vbonnet/dear-agent/engram/internal/enforcement",
       "github.com/vbonnet/dear-agent/engram/internal/memory",
       "github.com/vbonnet/dear-agent/engram/internal/scanners",
@@ -50,7 +52,6 @@
       "github.com/vbonnet/dear-agent/engram/internal/tokens",
       "github.com/vbonnet/dear-agent/engram/internal/tokens/tokenizers",
       "github.com/vbonnet/dear-agent/engram/internal/tokentracking",
-      "github.com/vbonnet/dear-agent/engram/internal/tracking",
       "github.com/vbonnet/dear-agent/internal/baseline",
       "github.com/vbonnet/dear-agent/internal/telemetry/enrichment",
       "github.com/vbonnet/dear-agent/internal/telemetry/errors",
@@ -61,13 +62,11 @@
       "github.com/vbonnet/dear-agent/pkg/hitl/github",
       "github.com/vbonnet/dear-agent/pkg/llm",
       "github.com/vbonnet/dear-agent/pkg/llm/delegation",
-      "github.com/vbonnet/dear-agent/pkg/notify",
       "github.com/vbonnet/dear-agent/pkg/plugin",
       "github.com/vbonnet/dear-agent/pkg/progress",
       "github.com/vbonnet/dear-agent/pkg/security",
       "github.com/vbonnet/dear-agent/pkg/signals",
       "github.com/vbonnet/dear-agent/pkg/source/registry",
-      "github.com/vbonnet/dear-agent/pkg/synchub",
       "github.com/vbonnet/dear-agent/pkg/validation",
       "github.com/vbonnet/dear-agent/pkg/validation/engram",
       "github.com/vbonnet/dear-agent/pkg/workspace/dolt",
@@ -75,27 +74,56 @@
       "github.com/vbonnet/dear-agent/tools/devlog/internal/output",
       "github.com/vbonnet/dear-agent/tools/dod-enforcer",
       "github.com/vbonnet/dear-agent/tools/schema-registry/internal/mcp",
-      "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/parser",
-      "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator",
-      "github.com/vbonnet/dear-agent/wayfinder/internal/phaseisolation",
+      "github.com/vbonnet/dear-agent/wayfinder/internal/corpus",
+      "github.com/vbonnet/dear-agent/wayfinder/internal/project",
+      "github.com/vbonnet/dear-agent/wayfinder/internal/tracker",
       "github.com/vbonnet/dear-agent/wayfinder/lib/presets"
     ],
-    "doc-path": [],
+    "doc-path": [
+      "internal/ops.ResumeSession"
+    ],
     "file-size": [
+      "agm/cmd/agm-mcp-server/tools_test.go",
+      "agm/cmd/agm/archive_test.go",
+      "agm/cmd/agm/new.go",
       "agm/cmd/agm/send_msg.go",
+      "agm/cmd/agm/supervisor.go",
+      "agm/cmd/agm/supervisor_test.go",
+      "agm/internal/agent/agy_adapter_test.go",
       "agm/internal/agent/openai_adapter_test.go",
+      "agm/internal/codexhooks/verify.go",
+      "agm/internal/dolt/adapter_test.go",
+      "agm/internal/dolt/sessions.go",
+      "agm/internal/dolt/sessions_sqlite_test.go",
+      "agm/internal/harnessexec/exec.go",
+      "agm/internal/harnessexec/handoff.go",
+      "agm/internal/harnessexec/handoff_test.go",
+      "agm/internal/ops/session_create.go",
+      "agm/internal/ops/session_create_test.go",
+      "agm/internal/ops/session_mutation_test.go",
+      "agm/internal/ops/session_resume_test.go",
+      "agm/internal/sentinel/daemon/monitor.go",
       "agm/internal/session/context_detector_test.go",
+      "agm/internal/tmux/liveness.go",
+      "agm/internal/tmux/prompt_detector.go",
+      "agm/internal/tmux/tmux.go",
+      "agm/internal/tmux/tmux_test.go",
       "agm/internal/ui/table.go",
+      "agm/test/bdd/steps/harness_parity_steps.go",
       "agm/test/performance/eventbus_load_test.go",
+      "cmd/vroom-dispatch-direct/main.go",
       "cmd/vroom-dispatch/main.go",
-      "engram/cmd/engram/cmd/validate_integration_test.go",
+      "cmd/vroom-dispatch/main_test.go",
       "engram/hooks-bin/internal/validator/validator_bdd_test.go",
-      "engram/internal/config/loader_test.go",
       "engram/internal/health/checks.go",
+      "pkg/headerlint/headerlint_test.go",
+      "pkg/instructionlint/instructionlint_test.go",
+      "pkg/instructionlint/segments.go",
       "pkg/llm/provider/provider_test.go",
-      "pkg/validator/wayfinderartifact_test.go",
+      "pkg/override/override.go",
       "pkg/workflow/runner.go",
-      "wayfinder/cmd/wayfinder-session/internal/integration/wayfinder_v2_test.go"
+      "tests/githooks/post_merge_test.go",
+      "wayfinder/cmd/wayfinder-session/internal/git/git_test.go"
     ],
     "goroutine-recover": [
       "agm/cmd/agm-bus/main.go:190",
@@ -104,38 +132,175 @@
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
       "agm/cmd/agm-statusline/main.go:262",
+      "agm/cmd/agm/archive.go:896",
+      "agm/cmd/agm/watch.go:110",
+      "agm/cmd/agm/watch.go:111",
       "agm/cmd/agm/watch.go:112",
-      "agm/cmd/agm/watch.go:113",
-      "agm/cmd/agm/watch.go:114",
-      "agm/cmd/agm/watch.go:251",
-      "agm/cmd/agm/watch_stalled.go:102",
+      "agm/cmd/override-audit-launchdaemon-installer/main.go:47",
+      "agm/cmd/override-audit-systemd-installer/main.go:47",
       "agm/hooks/cmd/posttool-cost-guard/main.go:85",
       "agm/hooks/cmd/sessionstart-chezmoi-drift/main.go:22",
       "agm/internal/bus/server.go:117",
       "agm/internal/bus/server.go:137",
       "agm/internal/bus/server.go:147",
+      "agm/internal/circuitbreaker/providers.go:161",
+      "agm/internal/harnessexec/handoff.go:42",
+      "agm/internal/harnessexec/handoff.go:759",
+      "agm/internal/harnessexec/handoff.go:818",
       "agm/internal/monitor/opencode/publisher.go:91",
       "agm/internal/monitor/opencode/sse_adapter.go:118",
       "agm/internal/monitor/opencode/sse_adapter.go:93",
-      "agm/internal/ops/workflow.go:230",
+      "agm/internal/ops/workflow.go:229",
       "agm/internal/sentinel/daemon/loop_monitor.go:300",
       "agm/internal/tmux/control.go:260",
       "agm/internal/tmux/output_watcher.go:151",
-      "agm/workflowbus/bridge.go:140"
+      "agm/workflowbus/bridge.go:140",
+      "internal/sandbox/process_monitor.go:219"
     ],
     "raw-mem-gate": [],
     "zero-test": [
-      "github.com/vbonnet/dear-agent/cmd/agm-job",
-      "github.com/vbonnet/dear-agent/cmd/fd-pressure",
-      "github.com/vbonnet/dear-agent/cmd/mergeloop",
-      "github.com/vbonnet/dear-agent/cmd/src-health",
+      "github.com/vbonnet/dear-agent/cmd/merge-velocity",
       "github.com/vbonnet/dear-agent/cmd/workflow-cancel",
       "github.com/vbonnet/dear-agent/cmd/workflow-list",
       "github.com/vbonnet/dear-agent/cmd/workflow-logs",
       "github.com/vbonnet/dear-agent/pkg/validation",
-      "github.com/vbonnet/dear-agent/tools/devlog",
-      "github.com/vbonnet/dear-agent/tools/skill-lint",
-      "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator"
+      "github.com/vbonnet/dear-agent/tools/devlog"
     ]
-  }
+  },
+  "transitions": [
+    {
+      "previous_baseline_sha256": "fd91f139eac97d7b67ff3ed7a8f78d93dc21e5744bdebebe383ba08c524a21d4",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/agm/internal/monitor/tmux",
+          "github.com/vbonnet/dear-agent/agm/internal/search",
+          "github.com/vbonnet/dear-agent/engram/internal/document",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/corpus",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/project",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/tracker"
+        ],
+        "doc-path": [
+          "internal/ops.ResumeSession"
+        ],
+        "file-size": [
+          "agm/cmd/agm-mcp-server/tools_test.go",
+          "agm/cmd/agm/archive_test.go",
+          "agm/cmd/agm/new.go",
+          "agm/cmd/agm/supervisor.go",
+          "agm/cmd/agm/supervisor_test.go",
+          "agm/internal/agent/agy_adapter_test.go",
+          "agm/internal/codexhooks/verify.go",
+          "agm/internal/dolt/adapter_test.go",
+          "agm/internal/dolt/sessions.go",
+          "agm/internal/dolt/sessions_sqlite_test.go",
+          "agm/internal/harnessexec/exec.go",
+          "agm/internal/harnessexec/handoff.go",
+          "agm/internal/harnessexec/handoff_test.go",
+          "agm/internal/ops/session_create.go",
+          "agm/internal/ops/session_create_test.go",
+          "agm/internal/ops/session_mutation_test.go",
+          "agm/internal/ops/session_resume_test.go",
+          "agm/internal/sentinel/daemon/monitor.go",
+          "agm/internal/tmux/liveness.go",
+          "agm/internal/tmux/prompt_detector.go",
+          "agm/internal/tmux/tmux.go",
+          "agm/internal/tmux/tmux_test.go",
+          "agm/test/bdd/steps/harness_parity_steps.go",
+          "cmd/vroom-dispatch-direct/main.go",
+          "cmd/vroom-dispatch/main_test.go",
+          "pkg/headerlint/headerlint_test.go",
+          "pkg/instructionlint/instructionlint_test.go",
+          "pkg/instructionlint/segments.go",
+          "pkg/override/override.go",
+          "tests/githooks/post_merge_test.go",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:896",
+          "agm/cmd/agm/watch.go:110",
+          "agm/cmd/agm/watch.go:111",
+          "agm/cmd/override-audit-launchdaemon-installer/main.go:47",
+          "agm/cmd/override-audit-systemd-installer/main.go:47",
+          "agm/internal/circuitbreaker/providers.go:161",
+          "agm/internal/harnessexec/handoff.go:42",
+          "agm/internal/harnessexec/handoff.go:756",
+          "agm/internal/harnessexec/handoff.go:815",
+          "agm/internal/ops/workflow.go:229",
+          "internal/sandbox/process_monitor.go:219"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": [
+          "github.com/vbonnet/dear-agent/cmd/merge-velocity"
+        ]
+      },
+      "removed": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/agm/internal/procguard",
+          "github.com/vbonnet/dear-agent/engram/internal/benchmark",
+          "github.com/vbonnet/dear-agent/engram/internal/tracking",
+          "github.com/vbonnet/dear-agent/pkg/notify",
+          "github.com/vbonnet/dear-agent/pkg/synchub",
+          "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/parser",
+          "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/phaseisolation"
+        ],
+        "doc-path": [],
+        "file-size": [
+          "engram/cmd/engram/cmd/validate_integration_test.go",
+          "engram/internal/config/loader_test.go",
+          "pkg/validator/wayfinderartifact_test.go",
+          "wayfinder/cmd/wayfinder-session/internal/integration/wayfinder_v2_test.go"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/watch.go:113",
+          "agm/cmd/agm/watch.go:114",
+          "agm/cmd/agm/watch.go:251",
+          "agm/cmd/agm/watch_stalled.go:102",
+          "agm/internal/ops/workflow.go:230"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": [
+          "github.com/vbonnet/dear-agent/cmd/agm-job",
+          "github.com/vbonnet/dear-agent/cmd/fd-pressure",
+          "github.com/vbonnet/dear-agent/cmd/mergeloop",
+          "github.com/vbonnet/dear-agent/cmd/src-health",
+          "github.com/vbonnet/dear-agent/tools/skill-lint",
+          "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator"
+        ]
+      },
+      "reason": "Restore the audited green reference at c0da2ae6 while retaining the exact DAH-001 debt transition",
+      "reference": "ce-3knl.13.1; vbonnet/engram-research#250; dear-agent@c0da2ae6d73cbae9fd15f3aec246251f7d50cdfd"
+    },
+    {
+      "previous_baseline_sha256": "7035bd4de515d76fae0c4428ba0f09c3257d890385447bf3599a00b40f370458",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/internal/harnessexec/handoff.go:759",
+          "agm/internal/harnessexec/handoff.go:818"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/internal/harnessexec/handoff.go:756",
+          "agm/internal/harnessexec/handoff.go:815"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Record line-only key shifts from merged PR 1105; the two goroutine bodies are unchanged and semantic-key remediation is tracked separately",
+      "reference": "ce-3knl.13.2; vbonnet/dear-agent#1105; dear-agent@389e266c933fcbe1c7f94b4cad92c38712293171"
+    }
+  ]
 }

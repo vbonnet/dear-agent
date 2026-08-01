@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +61,47 @@ func TestScanDocPaths(t *testing.T) {
 	got := scanDocPaths(root)
 	if len(got) != 1 || got[0].Key != "internal/ghost/" {
 		t.Fatalf("scanDocPaths = %+v, want single finding internal/ghost/", got)
+	}
+}
+
+func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
+	got := bootstrapCommand("repo root/$USER's", "custom/baseline.json", true)
+	for _, want := range []string{
+		`--root 'repo root/$USER'"'"'s'`,
+		`--baseline 'custom/baseline.json'`,
+		"--update-baseline",
+		"--accept-new",
+		`--reason '<why>'`,
+		`--reference '<bead-or-pr>'`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("bootstrap command %q does not contain %q", got, want)
+		}
+	}
+}
+
+func TestBootstrapCommandOmitsAdmissionForEmptyScan(t *testing.T) {
+	got := bootstrapCommand("repo", "empty.json", false)
+	for _, unwanted := range []string{"--accept-new", "--reason", "--reference"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("empty-scan bootstrap command %q unexpectedly contains %q", got, unwanted)
+		}
+	}
+	if err := validateAddedKeyAuthorization(0, strings.Contains(got, "--accept-new")); err != nil {
+		t.Fatalf("empty-scan bootstrap command is rejected: %v", err)
+	}
+}
+
+func TestQuoteShellWordRoundTripsPathBytes(t *testing.T) {
+	want := "repo $HOME $(exit 42) `exit 43` ' \" back\\slash\nnext"
+	// #nosec G204 -- exercising generated shell syntax is the purpose of this test.
+	cmd := exec.Command("sh", "-c", "printf %s "+quoteShellWord(want))
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("shell round trip: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("shell round trip = %q, want %q", got, want)
 	}
 }
 
@@ -240,9 +283,7 @@ func TestDiffNoRegressionWhenWithinBaseline(t *testing.T) {
 	}
 }
 
-func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, defaultBaselinePath)
+func TestFindingKeysSortsAndFillsScans(t *testing.T) {
 	current := map[string][]finding{
 		"dead-package":      {{Key: "pkg/z"}, {Key: "pkg/a"}},
 		"file-size":         {{Key: "big.go"}},
@@ -250,20 +291,17 @@ func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
 		"doc-path":          {},
 		"goroutine-recover": {},
 	}
-	if err := writeBaseline(path, current); err != nil {
-		t.Fatal(err)
-	}
-	bl, err := readBaseline(path)
+	got, err := findingKeys(current)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Keys must be sorted on disk.
-	got := bl.Findings["dead-package"]
-	if len(got) != 2 || got[0] != "pkg/a" || got[1] != "pkg/z" {
-		t.Errorf("dead-package baseline = %v, want sorted [pkg/a pkg/z]", got)
+	dead := got["dead-package"]
+	if len(dead) != 2 || dead[0] != "pkg/a" || dead[1] != "pkg/z" {
+		t.Errorf("dead-package keys = %v, want sorted [pkg/a pkg/z]", dead)
 	}
 	// Empty scans must serialize as [] (not absent) so the schema is stable.
-	if bl.Findings["zero-test"] == nil {
+	if got["zero-test"] == nil || got["raw-mem-gate"] == nil {
 		t.Errorf("zero-test should round-trip as empty slice, got nil")
 	}
 }
