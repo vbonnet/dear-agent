@@ -3,6 +3,7 @@ package messages
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ type QueueEntry struct {
 	QueuedAt     time.Time
 	AttemptCount int
 	LastAttempt  *time.Time
-	Status       string // queued|delivered|failed
+	Status       QueueState
 	AckRequired  bool
 	AckReceived  bool
 	AckTimeout   *time.Time
@@ -33,12 +34,97 @@ type MessageQueue struct {
 	db *sql.DB
 }
 
-// Status constants
+// QueueState is the persisted message-queue state vocabulary.
+// Its spellings are part of the SQLite wire format.
+type QueueState string
+
 const (
+	// StatusQueued remains untyped alongside StatusDelivered and StatusFailed
+	// for compatibility with callers that compare them to QueueState values or
+	// use them as strings.
 	StatusQueued    = "queued"
 	StatusDelivered = "delivered"
 	StatusFailed    = "failed"
+
+	QueueStateQueued    QueueState = StatusQueued
+	QueueStateDelivered QueueState = StatusDelivered
+	QueueStateFailed    QueueState = StatusFailed
 )
+
+// ParseQueueState accepts only the queue's persisted state vocabulary.
+func ParseQueueState(value string) (QueueState, error) {
+	state := QueueState(value)
+	if !state.IsValid() {
+		return "", fmt.Errorf("invalid queue state %q: must be queued, delivered, or failed", state)
+	}
+	return state, nil
+}
+
+// IsValid reports whether s is a persisted message-queue state.
+func (s QueueState) IsValid() bool {
+	switch s {
+	case QueueStateQueued, QueueStateDelivered, QueueStateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+const queueEntryColumns = `id, message_id, from_session, to_session, message, priority,
+	queued_at, attempt_count, last_attempt, status, ack_required, ack_received, ack_timeout`
+
+type queueRowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanQueueEntry is the sole decode seam for persisted queue rows. It validates
+// both domains before a QueueEntry can be returned to callers.
+func scanQueueEntry(row queueRowScanner) (*QueueEntry, error) {
+	entry := &QueueEntry{}
+	var rawPriority, rawState string
+	var lastAttempt, ackTimeout sql.NullTime
+	var ackRequired, ackReceived int
+
+	if err := row.Scan(
+		&entry.ID,
+		&entry.MessageID,
+		&entry.From,
+		&entry.To,
+		&entry.Message,
+		&rawPriority,
+		&entry.QueuedAt,
+		&entry.AttemptCount,
+		&lastAttempt,
+		&rawState,
+		&ackRequired,
+		&ackReceived,
+		&ackTimeout,
+	); err != nil {
+		return nil, fmt.Errorf("scan message queue row: %w", err)
+	}
+
+	priority, err := ParsePriority(rawPriority)
+	if err != nil {
+		return nil, fmt.Errorf("queue entry %q priority domain: %w", entry.MessageID, err)
+	}
+	state, err := ParseQueueState(rawState)
+	if err != nil {
+		return nil, fmt.Errorf("queue entry %q state domain: %w", entry.MessageID, err)
+	}
+
+	entry.Priority = priority
+	entry.Status = state
+	if lastAttempt.Valid {
+		entry.LastAttempt = &lastAttempt.Time
+	}
+	if ackTimeout.Valid {
+		entry.AckTimeout = &ackTimeout.Time
+	}
+	entry.AckRequired = ackRequired == 1
+	entry.AckReceived = ackReceived == 1
+
+	return entry, nil
+}
 
 // NewMessageQueue creates or opens the message queue database
 // Database location: ~/.config/agm/message_queue.db
@@ -139,9 +225,11 @@ func (q *MessageQueue) GetPending(sessionName string) ([]*QueueEntry, error) {
 	// Priority order: CRITICAL > HIGH > MEDIUM > LOW
 	// Then by queued_at (oldest first)
 	query := `
-		SELECT id, message_id, from_session, to_session, message, priority, queued_at, attempt_count, last_attempt
+		SELECT ` + queueEntryColumns + `
 		FROM message_queue
-		WHERE to_session = ? AND status = ?
+		WHERE to_session = ? AND (
+			status = ? OR status NOT IN (?, ?, ?)
+		)
 		ORDER BY
 			CASE priority
 				WHEN 'CRITICAL' THEN 1
@@ -153,7 +241,14 @@ func (q *MessageQueue) GetPending(sessionName string) ([]*QueueEntry, error) {
 			queued_at ASC
 	`
 
-	rows, err := q.db.Query(query, sessionName, StatusQueued) //nolint:noctx // TODO(context): plumb ctx through this layer
+	rows, err := q.db.Query( //nolint:noctx // TODO(context): plumb ctx through this layer
+		query,
+		sessionName,
+		StatusQueued,
+		StatusQueued,
+		StatusDelivered,
+		StatusFailed,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pending messages: %w", err)
 	}
@@ -161,26 +256,9 @@ func (q *MessageQueue) GetPending(sessionName string) ([]*QueueEntry, error) {
 
 	var entries []*QueueEntry
 	for rows.Next() {
-		e := &QueueEntry{}
-		var lastAttempt sql.NullTime
-
-		err := rows.Scan(
-			&e.ID,
-			&e.MessageID,
-			&e.From,
-			&e.To,
-			&e.Message,
-			&e.Priority,
-			&e.QueuedAt,
-			&e.AttemptCount,
-			&lastAttempt,
-		)
+		e, err := scanQueueEntry(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		if lastAttempt.Valid {
-			e.LastAttempt = &lastAttempt.Time
+			return nil, err
 		}
 
 		entries = append(entries, e)
@@ -194,9 +272,9 @@ func (q *MessageQueue) GetAllPending() ([]*QueueEntry, error) {
 	// Priority order: CRITICAL > HIGH > MEDIUM > LOW
 	// Then by queued_at (oldest first)
 	query := `
-		SELECT id, message_id, from_session, to_session, message, priority, queued_at, attempt_count, last_attempt
+		SELECT ` + queueEntryColumns + `
 		FROM message_queue
-		WHERE status = ?
+		WHERE status = ? OR status NOT IN (?, ?, ?)
 		ORDER BY
 			CASE priority
 				WHEN 'CRITICAL' THEN 1
@@ -208,7 +286,13 @@ func (q *MessageQueue) GetAllPending() ([]*QueueEntry, error) {
 			queued_at ASC
 	`
 
-	rows, err := q.db.Query(query, StatusQueued) //nolint:noctx // TODO(context): plumb ctx through this layer
+	rows, err := q.db.Query( //nolint:noctx // TODO(context): plumb ctx through this layer
+		query,
+		StatusQueued,
+		StatusQueued,
+		StatusDelivered,
+		StatusFailed,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all pending messages: %w", err)
 	}
@@ -216,26 +300,9 @@ func (q *MessageQueue) GetAllPending() ([]*QueueEntry, error) {
 
 	var entries []*QueueEntry
 	for rows.Next() {
-		e := &QueueEntry{}
-		var lastAttempt sql.NullTime
-
-		err := rows.Scan(
-			&e.ID,
-			&e.MessageID,
-			&e.From,
-			&e.To,
-			&e.Message,
-			&e.Priority,
-			&e.QueuedAt,
-			&e.AttemptCount,
-			&lastAttempt,
-		)
+		e, err := scanQueueEntry(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		if lastAttempt.Valid {
-			e.LastAttempt = &lastAttempt.Time
+			return nil, err
 		}
 
 		entries = append(entries, e)
@@ -373,7 +440,7 @@ func (q *MessageQueue) GetStats() (map[string]int, error) {
 	// Count by status
 	//nolint:noctx // TODO(context): plumb ctx through this layer
 	rows, err := q.db.Query(`
-		SELECT status, COUNT(*) as count
+		SELECT status, COUNT(*) as count, MIN(message_id)
 		FROM message_queue
 		GROUP BY status
 	`)
@@ -383,12 +450,16 @@ func (q *MessageQueue) GetStats() (map[string]int, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var status string
+		var rawState, messageID string
 		var count int
-		if err := rows.Scan(&status, &count); err != nil {
-			return nil, err
+		if err := rows.Scan(&rawState, &count, &messageID); err != nil {
+			return nil, fmt.Errorf("scan message queue stats row: %w", err)
 		}
-		stats[status] = count
+		state, err := ParseQueueState(rawState)
+		if err != nil {
+			return nil, fmt.Errorf("queue entry %q state domain: %w", messageID, err)
+		}
+		stats[string(state)] = count
 	}
 
 	return stats, rows.Err()
@@ -447,61 +518,27 @@ func (q *MessageQueue) MarkTimeout(messageID string) error {
 // GetByMessageID retrieves a specific message by its ID
 func (q *MessageQueue) GetByMessageID(messageID string) (*QueueEntry, error) {
 	query := `
-		SELECT id, message_id, from_session, to_session, message, priority,
-		       queued_at, attempt_count, last_attempt, status,
-		       ack_required, ack_received, ack_timeout
+		SELECT ` + queueEntryColumns + `
 		FROM message_queue
 		WHERE message_id = ?
 	`
 
-	var e QueueEntry
-	var lastAttempt sql.NullTime
-	var ackTimeout sql.NullTime
-	var ackRequired, ackReceived int
-
-	err := q.db.QueryRow(query, messageID).Scan( //nolint:noctx // TODO(context): plumb ctx through this layer
-		&e.ID,
-		&e.MessageID,
-		&e.From,
-		&e.To,
-		&e.Message,
-		&e.Priority,
-		&e.QueuedAt,
-		&e.AttemptCount,
-		&lastAttempt,
-		&e.Status,
-		&ackRequired,
-		&ackReceived,
-		&ackTimeout,
-	)
+	e, err := scanQueueEntry(q.db.QueryRow(query, messageID)) //nolint:noctx // TODO(context): plumb ctx through this layer
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("message not found: %s", messageID)
 		}
 		return nil, fmt.Errorf("failed to query message: %w", err)
 	}
 
-	if lastAttempt.Valid {
-		e.LastAttempt = &lastAttempt.Time
-	}
-
-	if ackTimeout.Valid {
-		e.AckTimeout = &ackTimeout.Time
-	}
-
-	e.AckRequired = ackRequired == 1
-	e.AckReceived = ackReceived == 1
-
-	return &e, nil
+	return e, nil
 }
 
 // GetDLQ returns all messages in the dead letter queue (permanently failed)
 func (q *MessageQueue) GetDLQ() ([]*QueueEntry, error) {
 	query := `
-		SELECT id, message_id, from_session, to_session, message, priority,
-		       queued_at, attempt_count, last_attempt, status,
-		       ack_required, ack_received, ack_timeout
+		SELECT ` + queueEntryColumns + `
 		FROM message_queue
 		WHERE status = ?
 		ORDER BY queued_at DESC
@@ -515,40 +552,10 @@ func (q *MessageQueue) GetDLQ() ([]*QueueEntry, error) {
 
 	var entries []*QueueEntry
 	for rows.Next() {
-		e := &QueueEntry{}
-		var lastAttempt sql.NullTime
-		var ackTimeout sql.NullTime
-		var ackRequired, ackReceived int
-
-		err := rows.Scan(
-			&e.ID,
-			&e.MessageID,
-			&e.From,
-			&e.To,
-			&e.Message,
-			&e.Priority,
-			&e.QueuedAt,
-			&e.AttemptCount,
-			&lastAttempt,
-			&e.Status,
-			&ackRequired,
-			&ackReceived,
-			&ackTimeout,
-		)
+		e, err := scanQueueEntry(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+			return nil, err
 		}
-
-		if lastAttempt.Valid {
-			e.LastAttempt = &lastAttempt.Time
-		}
-
-		if ackTimeout.Valid {
-			e.AckTimeout = &ackTimeout.Time
-		}
-
-		e.AckRequired = ackRequired == 1
-		e.AckReceived = ackReceived == 1
 
 		entries = append(entries, e)
 	}
@@ -576,32 +583,35 @@ func (q *MessageQueue) RetryRecentlyFailed(within time.Duration) (int64, error) 
 	return result.RowsAffected()
 }
 
-// GetQueueList returns all messages with optional status filter, ordered by queued_at desc
-func (q *MessageQueue) GetQueueList(statusFilter string, limit int) ([]*QueueEntry, error) {
+// GetQueueList returns all messages with an optional typed status filter,
+// ordered by queued_at desc. The zero QueueState selects every state.
+func (q *MessageQueue) GetQueueList(statusFilter QueueState, limit int) ([]*QueueEntry, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	if statusFilter != "" {
+		if !statusFilter.IsValid() {
+			return nil, fmt.Errorf(
+				"queue state filter domain: invalid queue state %q: must be queued, delivered, or failed",
+				statusFilter,
+			)
+		}
 		query = `
-			SELECT id, message_id, from_session, to_session, message, priority,
-			       queued_at, attempt_count, last_attempt, status,
-			       ack_required, ack_received, ack_timeout
+			SELECT ` + queueEntryColumns + `
 			FROM message_queue
 			WHERE status = ?
 			ORDER BY queued_at DESC
 			LIMIT ?
 		`
-		args = []interface{}{statusFilter, limit}
+		args = []any{string(statusFilter), limit}
 	} else {
 		query = `
-			SELECT id, message_id, from_session, to_session, message, priority,
-			       queued_at, attempt_count, last_attempt, status,
-			       ack_required, ack_received, ack_timeout
+			SELECT ` + queueEntryColumns + `
 			FROM message_queue
 			ORDER BY queued_at DESC
 			LIMIT ?
 		`
-		args = []interface{}{limit}
+		args = []any{limit}
 	}
 
 	rows, err := q.db.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
@@ -612,38 +622,10 @@ func (q *MessageQueue) GetQueueList(statusFilter string, limit int) ([]*QueueEnt
 
 	var entries []*QueueEntry
 	for rows.Next() {
-		e := &QueueEntry{}
-		var lastAttempt sql.NullTime
-		var ackTimeout sql.NullTime
-		var ackRequired, ackReceived int
-
-		err := rows.Scan(
-			&e.ID,
-			&e.MessageID,
-			&e.From,
-			&e.To,
-			&e.Message,
-			&e.Priority,
-			&e.QueuedAt,
-			&e.AttemptCount,
-			&lastAttempt,
-			&e.Status,
-			&ackRequired,
-			&ackReceived,
-			&ackTimeout,
-		)
+		e, err := scanQueueEntry(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+			return nil, err
 		}
-
-		if lastAttempt.Valid {
-			e.LastAttempt = &lastAttempt.Time
-		}
-		if ackTimeout.Valid {
-			e.AckTimeout = &ackTimeout.Time
-		}
-		e.AckRequired = ackRequired == 1
-		e.AckReceived = ackReceived == 1
 
 		entries = append(entries, e)
 	}
@@ -654,9 +636,7 @@ func (q *MessageQueue) GetQueueList(statusFilter string, limit int) ([]*QueueEnt
 // GetUnacknowledged returns all messages that require ack but haven't received it
 func (q *MessageQueue) GetUnacknowledged() ([]*QueueEntry, error) {
 	query := `
-		SELECT id, message_id, from_session, to_session, message, priority,
-		       queued_at, attempt_count, last_attempt, status,
-		       ack_required, ack_received, ack_timeout
+		SELECT ` + queueEntryColumns + `
 		FROM message_queue
 		WHERE ack_required = 1 AND ack_received = 0 AND status = ?
 		ORDER BY queued_at ASC
@@ -670,40 +650,10 @@ func (q *MessageQueue) GetUnacknowledged() ([]*QueueEntry, error) {
 
 	var entries []*QueueEntry
 	for rows.Next() {
-		e := &QueueEntry{}
-		var lastAttempt sql.NullTime
-		var ackTimeout sql.NullTime
-		var ackRequired, ackReceived int
-
-		err := rows.Scan(
-			&e.ID,
-			&e.MessageID,
-			&e.From,
-			&e.To,
-			&e.Message,
-			&e.Priority,
-			&e.QueuedAt,
-			&e.AttemptCount,
-			&lastAttempt,
-			&e.Status,
-			&ackRequired,
-			&ackReceived,
-			&ackTimeout,
-		)
+		e, err := scanQueueEntry(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+			return nil, err
 		}
-
-		if lastAttempt.Valid {
-			e.LastAttempt = &lastAttempt.Time
-		}
-
-		if ackTimeout.Valid {
-			e.AckTimeout = &ackTimeout.Time
-		}
-
-		e.AckRequired = ackRequired == 1
-		e.AckReceived = ackReceived == 1
 
 		entries = append(entries, e)
 	}
