@@ -39,8 +39,9 @@ type MessageQueue struct {
 type QueueState string
 
 const (
-	// Status names remain untyped constants for compatibility with callers that
-	// compare them to QueueState values or use them as strings.
+	// StatusQueued remains untyped alongside StatusDelivered and StatusFailed
+	// for compatibility with callers that compare them to QueueState values or
+	// use them as strings.
 	StatusQueued    = "queued"
 	StatusDelivered = "delivered"
 	StatusFailed    = "failed"
@@ -586,7 +587,7 @@ func (q *MessageQueue) RetryRecentlyFailed(within time.Duration) (int64, error) 
 // ordered by queued_at desc. The zero QueueState selects every state.
 func (q *MessageQueue) GetQueueList(statusFilter QueueState, limit int) ([]*QueueEntry, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	if statusFilter != "" {
 		if !statusFilter.IsValid() {
@@ -602,7 +603,7 @@ func (q *MessageQueue) GetQueueList(statusFilter QueueState, limit int) ([]*Queu
 			ORDER BY queued_at DESC
 			LIMIT ?
 		`
-		args = []interface{}{string(statusFilter), limit}
+		args = []any{string(statusFilter), limit}
 	} else {
 		query = `
 			SELECT ` + queueEntryColumns + `
@@ -610,7 +611,7 @@ func (q *MessageQueue) GetQueueList(statusFilter QueueState, limit int) ([]*Queu
 			ORDER BY queued_at DESC
 			LIMIT ?
 		`
-		args = []interface{}{limit}
+		args = []any{limit}
 	}
 
 	rows, err := q.db.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
