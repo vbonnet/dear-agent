@@ -975,11 +975,11 @@ func parsePinnedBlobBatch(output []byte, expected []pinnedBlob) (map[string][]by
 		if len(fields) != 3 || fields[0] != blob.oid || fields[1] != "blob" {
 			return nil, fmt.Errorf("pinned object %s returned unexpected Git batch metadata", blob.oid)
 		}
-		size, sizeErr := strconv.ParseInt(fields[2], 10, 64)
-		if sizeErr != nil || size != blob.size || size < 0 || size > int64(int(^uint(0)>>1)) {
+		size, sizeErr := strconv.Atoi(fields[2])
+		if sizeErr != nil || size < 0 || int64(size) != blob.size || size > len(output) {
 			return nil, fmt.Errorf("pinned object %s returned an unexpected size", blob.oid)
 		}
-		body := make([]byte, int(size))
+		body := make([]byte, size)
 		if _, err := io.ReadFull(reader, body); err != nil {
 			return nil, fmt.Errorf("read pinned object %s body: %w", blob.oid, err)
 		}

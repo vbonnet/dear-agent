@@ -37,6 +37,15 @@ const (
 	specAuditGoTestFileBytes   = 4 << 20
 	specAuditGoTestTotalBytes  = 32 << 20
 	specAuditProcessGroupWait  = 2 * time.Second
+	specAuditExecutableLimit   = 128 << 20
+	githubHostedToolCacheRoot  = "/opt/hostedtoolcache"
+)
+
+type specAuditExecutableTrustMode uint8
+
+const (
+	specAuditStrictExecutableTrust specAuditExecutableTrustMode = iota
+	specAuditGitHubHostedGoTrust
 )
 
 // The nested package is repository implementation test source and must already
@@ -54,8 +63,28 @@ type specAuditGoChildRuntime struct {
 }
 
 type trustedSpecAuditExecutable struct {
-	path     string
-	identity os.FileInfo
+	path                 string
+	identity             os.FileInfo
+	trustMode            specAuditExecutableTrustMode
+	digest               [sha256.Size]byte
+	githubHostedContext  specAuditGitHubHostedGoContext
+	githubHostedGoRoot   string
+	githubHostedGoRootID os.FileInfo
+}
+
+type specAuditGitHubHostedGoContext struct {
+	GitHubActions     string
+	RunnerEnvironment string
+	RunnerOS          string
+	RunnerArch        string
+	RunnerToolCache   string
+	ImageOS           string
+	ImageVersion      string
+	GOROOTOverride    string
+	RuntimeGOOS       string
+	RuntimeGOARCH     string
+	RuntimeVersion    string
+	RuntimeGOROOT     string
 }
 
 type specGovernanceToolingStateKey struct{}
@@ -66,6 +95,11 @@ type specGovernanceToolingState struct {
 	output   string
 	err      error
 }
+
+var (
+	githubHostedImageOSPattern      = regexp.MustCompile(`^ubuntu[0-9]{2}$`)
+	githubHostedImageVersionPattern = regexp.MustCompile(`^[0-9]{8}\.[0-9]+\.[0-9]+$`)
+)
 
 // RegisterSpecGovernanceToolingSteps registers focused specaudit unit checks.
 func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
@@ -978,13 +1012,8 @@ func newSpecAuditGoChildRuntime() (specAuditGoChildRuntime, error) {
 	// GOMODCACHE is a narrowly validated shared trusted input, not immutable or
 	// sandboxed storage. Network lookup is disabled and -mod=readonly is forced,
 	// so a missing cached dependency fails the child instead of being fetched.
-	for label, directory := range map[string]string{
-		"GOROOT":     goRoot,
-		"GOMODCACHE": moduleCache,
-	} {
-		if err := validateNarrowGoDirectory(label, directory); err != nil {
-			return fail(err)
-		}
+	if err := validateSpecAuditGoDirectories(goExecutable, goRoot, moduleCache); err != nil {
+		return fail(err)
 	}
 	// Put the captured Git directory first so a same-named executable in the Go
 	// tool directory cannot shadow the identity that was validated for children.
@@ -1061,20 +1090,54 @@ func captureTrustedSpecAuditExecutable(name string) (trustedSpecAuditExecutable,
 	if err != nil {
 		return trustedSpecAuditExecutable{}, fmt.Errorf("resolve canonical absolute %s executable: %w", name, err)
 	}
-	identity := trustedSpecAuditExecutable{path: filepath.Clean(path)}
+	identity := trustedSpecAuditExecutable{
+		path:      filepath.Clean(path),
+		trustMode: specAuditStrictExecutableTrust,
+	}
 	if identity.path != path {
 		return trustedSpecAuditExecutable{}, fmt.Errorf("required %s executable path %q is not clean", name, path)
 	}
 	info, err := validateTrustedSpecAuditExecutable(name, identity, false)
-	if err != nil {
+	if err == nil {
+		identity.identity = info
+		return identity, nil
+	}
+	if name != "go" {
 		return trustedSpecAuditExecutable{}, err
 	}
-	identity.identity = info
+	identity.trustMode = specAuditGitHubHostedGoTrust
+	identity.githubHostedContext = currentSpecAuditGitHubHostedGoContext()
+	providerInfo, digest, goRoot, goRootInfo, providerErr := validateGitHubHostedGoExecutable(
+		identity,
+		identity.githubHostedContext,
+		githubHostedToolCacheRoot,
+		false,
+	)
+	if providerErr != nil {
+		return trustedSpecAuditExecutable{}, errors.Join(err, providerErr)
+	}
+	identity.identity = providerInfo
+	identity.digest = digest
+	identity.githubHostedGoRoot = goRoot
+	identity.githubHostedGoRootID = goRootInfo
 	return identity, nil
 }
 
 func (childRuntime specAuditGoChildRuntime) revalidateExecutables() error {
-	if _, err := validateTrustedSpecAuditExecutable("go", childRuntime.goExecutable, true); err != nil {
+	if childRuntime.goExecutable.trustMode == specAuditGitHubHostedGoTrust {
+		currentContext := currentSpecAuditGitHubHostedGoContext()
+		if currentContext != childRuntime.goExecutable.githubHostedContext {
+			return errors.New("GitHub-hosted Go runner context changed after validation")
+		}
+		if _, _, _, _, err := validateGitHubHostedGoExecutable(
+			childRuntime.goExecutable,
+			currentContext,
+			githubHostedToolCacheRoot,
+			true,
+		); err != nil {
+			return err
+		}
+	} else if _, err := validateTrustedSpecAuditExecutable("go", childRuntime.goExecutable, true); err != nil {
 		return err
 	}
 	if _, err := validateTrustedSpecAuditExecutable("git", childRuntime.gitExecutable, true); err != nil {
@@ -1084,6 +1147,20 @@ func (childRuntime specAuditGoChildRuntime) revalidateExecutables() error {
 }
 
 func validateTrustedSpecAuditExecutable(name string, executable trustedSpecAuditExecutable, requireSameIdentity bool) (os.FileInfo, error) {
+	info, err := validateSpecAuditExecutableIdentity(name, executable, requireSameIdentity)
+	if err != nil {
+		return nil, err
+	}
+	if !trustedFileOwner(info) || info.Mode().Perm()&0o022 != 0 {
+		return nil, fmt.Errorf("required %s executable %q is not a narrowly trusted executable", name, executable.path)
+	}
+	if err := validateTrustedCanonicalAncestry(name, filepath.Dir(executable.path)); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func validateSpecAuditExecutableIdentity(name string, executable trustedSpecAuditExecutable, requireSameIdentity bool) (os.FileInfo, error) {
 	if executable.path == "" || !filepath.IsAbs(executable.path) || filepath.Clean(executable.path) != executable.path {
 		return nil, fmt.Errorf("required %s executable path %q is not clean and absolute", name, executable.path)
 	}
@@ -1101,13 +1178,221 @@ func validateTrustedSpecAuditExecutable(name string, executable trustedSpecAudit
 	if requireSameIdentity && (executable.identity == nil || !os.SameFile(executable.identity, info)) {
 		return nil, fmt.Errorf("required %s executable %q was replaced after validation", name, executable.path)
 	}
-	if !trustedFileOwner(info) || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 || info.Mode().Perm()&0o022 != 0 {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return nil, fmt.Errorf("required %s executable %q is not a narrowly trusted executable", name, executable.path)
 	}
-	if err := validateTrustedCanonicalAncestry(name, filepath.Dir(executable.path)); err != nil {
-		return nil, err
+	return info, nil
+}
+
+func currentSpecAuditGitHubHostedGoContext() specAuditGitHubHostedGoContext {
+	return specAuditGitHubHostedGoContext{
+		GitHubActions:     os.Getenv("GITHUB_ACTIONS"),
+		RunnerEnvironment: os.Getenv("RUNNER_ENVIRONMENT"),
+		RunnerOS:          os.Getenv("RUNNER_OS"),
+		RunnerArch:        os.Getenv("RUNNER_ARCH"),
+		RunnerToolCache:   os.Getenv("RUNNER_TOOL_CACHE"),
+		ImageOS:           os.Getenv("ImageOS"),
+		ImageVersion:      os.Getenv("ImageVersion"),
+		GOROOTOverride:    os.Getenv("GOROOT"),
+		RuntimeGOOS:       runtime.GOOS,
+		RuntimeGOARCH:     runtime.GOARCH,
+		RuntimeVersion:    runtime.Version(),
+		RuntimeGOROOT:     specAuditCompiledGoRoot(),
+	}
+}
+
+func validateSpecAuditGoDirectories(executable trustedSpecAuditExecutable, goRoot, moduleCache string) error {
+	if executable.trustMode == specAuditGitHubHostedGoTrust {
+		if err := executable.revalidateGitHubHostedGoRoot(goRoot); err != nil {
+			return err
+		}
+	} else if err := validateNarrowGoDirectory("GOROOT", goRoot); err != nil {
+		return err
+	}
+	return validateNarrowGoDirectory("GOMODCACHE", moduleCache)
+}
+
+func specAuditCompiledGoRoot() string {
+	//nolint:staticcheck // This same-machine gate must bind the executable to the GOROOT used to build this process.
+	return runtime.GOROOT()
+}
+
+// validateGitHubHostedGoExecutable is a runner-context compatibility gate, not
+// cryptographic provider attestation. GitHub's hosted Ubuntu image deliberately
+// makes /opt/hostedtoolcache writable. The outer test process was already built
+// by that toolchain, so this narrow fallback accepts only the exact compiled-in
+// Go root on an official GitHub-hosted Linux/x64 runner and binds the selected
+// go file and root identities plus a bounded digest across launches. The
+// world-writable toolchain still carries ordinary in-place and pre-exec races.
+func validateGitHubHostedGoExecutable(
+	executable trustedSpecAuditExecutable,
+	runnerContext specAuditGitHubHostedGoContext,
+	requiredToolCache string,
+	requireSameIdentity bool,
+) (os.FileInfo, [sha256.Size]byte, string, os.FileInfo, error) {
+	var zeroDigest [sha256.Size]byte
+	if err := validateGitHubHostedGoContext(runnerContext); err != nil {
+		return nil, zeroDigest, "", nil, err
+	}
+	canonicalToolCache, err := canonicalSpecAuditDirectory("GitHub-hosted tool cache", runnerContext.RunnerToolCache)
+	if err != nil {
+		return nil, zeroDigest, "", nil, err
+	}
+	canonicalRequiredToolCache, err := canonicalSpecAuditDirectory("required GitHub-hosted tool cache", requiredToolCache)
+	if err != nil {
+		return nil, zeroDigest, "", nil, err
+	}
+	if canonicalToolCache != canonicalRequiredToolCache {
+		return nil, zeroDigest, "", nil, fmt.Errorf("GitHub-hosted tool cache %q is not the required %q", canonicalToolCache, canonicalRequiredToolCache)
+	}
+	wantGoRoot, canonicalGoRoot, err := githubHostedGoRuntimeRoots(runnerContext, canonicalToolCache)
+	if err != nil {
+		return nil, zeroDigest, "", nil, err
+	}
+	if canonicalGoRoot != wantGoRoot || executable.path != filepath.Join(canonicalGoRoot, "bin", "go") {
+		return nil, zeroDigest, "", nil, fmt.Errorf("go executable %q is outside the exact GitHub-hosted runtime root %q", executable.path, wantGoRoot)
+	}
+	goRootInfo, err := validateGitHubHostedGoRootIdentity(executable, canonicalGoRoot, requireSameIdentity)
+	if err != nil {
+		return nil, zeroDigest, "", nil, err
+	}
+	info, digest, err := validateGitHubHostedGoFile(executable, requireSameIdentity)
+	if err != nil {
+		return nil, zeroDigest, "", nil, err
+	}
+	return info, digest, canonicalGoRoot, goRootInfo, nil
+}
+
+func validateGitHubHostedGoRootIdentity(executable trustedSpecAuditExecutable, goRoot string, requireSameIdentity bool) (os.FileInfo, error) {
+	info, err := os.Lstat(goRoot)
+	if err != nil {
+		return nil, fmt.Errorf("lstat GitHub-hosted GOROOT %q: %w", goRoot, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("GitHub-hosted GOROOT %q is not a real directory", goRoot)
+	}
+	if requireSameIdentity && (executable.githubHostedGoRootID == nil || !os.SameFile(executable.githubHostedGoRootID, info)) {
+		return nil, fmt.Errorf("GitHub-hosted GOROOT %q was replaced after validation", goRoot)
 	}
 	return info, nil
+}
+
+func validateGitHubHostedGoFile(executable trustedSpecAuditExecutable, requireSameIdentity bool) (os.FileInfo, [sha256.Size]byte, error) {
+	var zeroDigest [sha256.Size]byte
+	info, err := validateSpecAuditExecutableIdentity("go", executable, requireSameIdentity)
+	if err != nil {
+		return nil, zeroDigest, err
+	}
+	digest, err := digestSpecAuditExecutable(executable.path, info)
+	if err != nil {
+		return nil, zeroDigest, err
+	}
+	if requireSameIdentity && digest != executable.digest {
+		return nil, zeroDigest, fmt.Errorf("GitHub-hosted Go executable %q changed after validation", executable.path)
+	}
+	return info, digest, nil
+}
+
+func validateGitHubHostedGoContext(runnerContext specAuditGitHubHostedGoContext) error {
+	if runnerContext.GitHubActions != "true" ||
+		runnerContext.RunnerEnvironment != "github-hosted" ||
+		runnerContext.RunnerOS != "Linux" ||
+		runnerContext.RunnerArch != "X64" ||
+		runnerContext.RuntimeGOOS != "linux" ||
+		runnerContext.RuntimeGOARCH != "amd64" ||
+		runnerContext.GOROOTOverride != "" ||
+		!githubHostedImageOSPattern.MatchString(runnerContext.ImageOS) ||
+		!githubHostedImageVersionPattern.MatchString(runnerContext.ImageVersion) {
+		return errors.New("go executable is not in the exact GitHub-hosted Ubuntu runner context")
+	}
+	return nil
+}
+
+func githubHostedGoRuntimeRoots(runnerContext specAuditGitHubHostedGoContext, canonicalToolCache string) (string, string, error) {
+	goVersion := strings.TrimPrefix(runnerContext.RuntimeVersion, "go")
+	if goVersion == runnerContext.RuntimeVersion || goVersion == "" || strings.ContainsAny(goVersion, `/\\`) {
+		return "", "", fmt.Errorf("unsupported GitHub-hosted Go runtime version %q", runnerContext.RuntimeVersion)
+	}
+	wantGoRoot := filepath.Join(canonicalToolCache, "go", goVersion, "x64")
+	canonicalGoRoot, err := canonicalSpecAuditDirectory("GitHub-hosted GOROOT", runnerContext.RuntimeGOROOT)
+	if err != nil {
+		return "", "", err
+	}
+	return wantGoRoot, canonicalGoRoot, nil
+}
+
+func canonicalSpecAuditDirectory(label, path string) (string, error) {
+	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return "", fmt.Errorf("%s path %q is not clean and absolute", label, path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s path %q: %w", label, path, err)
+	}
+	if resolved != path {
+		return "", fmt.Errorf("%s path %q is not canonical", label, path)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("lstat %s path %q: %w", label, path, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%s path %q is not a real directory", label, path)
+	}
+	return path, nil
+}
+
+func digestSpecAuditExecutable(path string, expected os.FileInfo) ([sha256.Size]byte, error) {
+	var zero [sha256.Size]byte
+	if expected == nil || expected.Size() < 0 || expected.Size() > specAuditExecutableLimit {
+		return zero, fmt.Errorf("required executable %q exceeds the %d-byte identity limit", path, specAuditExecutableLimit)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return zero, fmt.Errorf("open required executable %q: %w", path, err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return zero, fmt.Errorf("stat opened required executable %q: %w", path, err)
+	}
+	if !os.SameFile(expected, openedInfo) || !openedInfo.Mode().IsRegular() {
+		return zero, fmt.Errorf("required executable %q changed while opening", path)
+	}
+	hasher := sha256.New()
+	written, err := io.Copy(hasher, io.LimitReader(file, specAuditExecutableLimit+1))
+	if err != nil {
+		return zero, fmt.Errorf("hash required executable %q: %w", path, err)
+	}
+	if written > specAuditExecutableLimit || written != openedInfo.Size() {
+		return zero, fmt.Errorf("required executable %q changed size while hashing", path)
+	}
+	afterInfo, err := file.Stat()
+	if err != nil {
+		return zero, fmt.Errorf("restat required executable %q: %w", path, err)
+	}
+	if !os.SameFile(openedInfo, afterInfo) || afterInfo.Size() != written || afterInfo.ModTime() != openedInfo.ModTime() {
+		return zero, fmt.Errorf("required executable %q changed while hashing", path)
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], hasher.Sum(nil))
+	return digest, nil
+}
+
+func (executable trustedSpecAuditExecutable) revalidateGitHubHostedGoRoot(goRoot string) error {
+	if executable.trustMode != specAuditGitHubHostedGoTrust ||
+		goRoot != executable.githubHostedGoRoot ||
+		executable.githubHostedGoRootID == nil {
+		return errors.New("GitHub-hosted GOROOT is not bound to the selected Go executable")
+	}
+	info, err := os.Lstat(goRoot)
+	if err != nil {
+		return fmt.Errorf("lstat GitHub-hosted GOROOT %q: %w", goRoot, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !os.SameFile(executable.githubHostedGoRootID, info) {
+		return fmt.Errorf("GitHub-hosted GOROOT %q changed after validation", goRoot)
+	}
+	return nil
 }
 
 func validateTrustedCanonicalAncestry(label, directory string) error {

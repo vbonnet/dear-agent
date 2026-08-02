@@ -126,6 +126,20 @@ done
 	}
 }
 
+func TestPinnedBlobBatchRejectsHugeDeclaredSizeBeforeAllocation(t *testing.T) {
+	oid := strings.Repeat("a", 40)
+	declared := strconv.FormatInt(int64(^uint64(0)>>1), 10)
+	output := fmt.Appendf(nil, "%s blob %s\n", oid, declared)
+	_, err := parsePinnedBlobBatch(output, []pinnedBlob{{
+		path: "huge/SPEC.md",
+		oid:  oid,
+		size: int64(^uint64(0) >> 1),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "unexpected size") {
+		t.Fatalf("parsePinnedBlobBatch() error = %v, want bounded size rejection", err)
+	}
+}
+
 func TestInventoryRejectsDistinctInvalidUTF8SelectedPathsWithoutCollapsingArtifact(t *testing.T) {
 	paths := [][]byte{
 		{'b', 'a', 'd', '-', 0xfe, '/', 'S', 'P', 'E', 'C', '.', 'm', 'd'},

@@ -947,6 +947,92 @@ func TestTrustedExecutableValidationRejectsReplacementAndUnsafeAncestry(t *testi
 	}
 }
 
+func TestGitHubHostedGoToolcacheTrustIsNarrowAndDigestBound(t *testing.T) {
+	toolCache, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(GitHub-hosted tool-cache fixture) error = %v", err)
+	}
+	goRoot := filepath.Join(toolCache, "go", "1.26.5", "x64")
+	goExecutable := filepath.Join(goRoot, "bin", "go")
+	if err := os.MkdirAll(filepath.Dir(goExecutable), 0o777); err != nil {
+		t.Fatalf("MkdirAll(GitHub-hosted Go fixture) error = %v", err)
+	}
+	for _, directory := range []string{toolCache, filepath.Join(toolCache, "go"), filepath.Join(toolCache, "go", "1.26.5"), goRoot, filepath.Dir(goExecutable)} {
+		if err := os.Chmod(directory, 0o777); err != nil {
+			t.Fatalf("Chmod(%q) error = %v", directory, err)
+		}
+	}
+	if err := os.WriteFile(goExecutable, []byte("github-hosted-go-fixture"), 0o777); err != nil {
+		t.Fatalf("WriteFile(GitHub-hosted Go fixture) error = %v", err)
+	}
+	executable := trustedSpecAuditExecutable{
+		path:      goExecutable,
+		trustMode: specAuditGitHubHostedGoTrust,
+	}
+	if _, err := validateTrustedSpecAuditExecutable("go", executable, false); err == nil {
+		t.Fatal("strict executable trust unexpectedly accepted a world-writable Go toolchain")
+	}
+	runnerContext := specAuditGitHubHostedGoContext{
+		GitHubActions:     "true",
+		RunnerEnvironment: "github-hosted",
+		RunnerOS:          "Linux",
+		RunnerArch:        "X64",
+		RunnerToolCache:   toolCache,
+		ImageOS:           "ubuntu24",
+		ImageVersion:      "20260720.247.2",
+		RuntimeGOOS:       "linux",
+		RuntimeGOARCH:     "amd64",
+		RuntimeVersion:    "go1.26.5",
+		RuntimeGOROOT:     goRoot,
+	}
+	info, digest, capturedGoRoot, goRootInfo, err := validateGitHubHostedGoExecutable(
+		executable,
+		runnerContext,
+		toolCache,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("validateGitHubHostedGoExecutable() error = %v", err)
+	}
+	executable.identity = info
+	executable.digest = digest
+	executable.githubHostedContext = runnerContext
+	executable.githubHostedGoRoot = capturedGoRoot
+	executable.githubHostedGoRootID = goRootInfo
+	if _, _, _, _, err := validateGitHubHostedGoExecutable(executable, runnerContext, toolCache, true); err != nil {
+		t.Fatalf("GitHub-hosted Go identity revalidation error = %v", err)
+	}
+
+	selfHosted := runnerContext
+	selfHosted.RunnerEnvironment = "self-hosted"
+	if _, _, _, _, err := validateGitHubHostedGoExecutable(executable, selfHosted, toolCache, true); err == nil || !strings.Contains(err.Error(), "exact GitHub-hosted Ubuntu runner context") {
+		t.Fatalf("self-hosted runner context error = %v, want exact-context rejection", err)
+	}
+	wrongArchitecture := runnerContext
+	wrongArchitecture.RunnerArch = "ARM64"
+	if _, _, _, _, err := validateGitHubHostedGoExecutable(executable, wrongArchitecture, toolCache, true); err == nil || !strings.Contains(err.Error(), "exact GitHub-hosted Ubuntu runner context") {
+		t.Fatalf("wrong-architecture runner context error = %v, want exact-context rejection", err)
+	}
+	overriddenGoRoot := runnerContext
+	overriddenGoRoot.GOROOTOverride = goRoot
+	if _, _, _, _, err := validateGitHubHostedGoExecutable(executable, overriddenGoRoot, toolCache, true); err == nil || !strings.Contains(err.Error(), "exact GitHub-hosted Ubuntu runner context") {
+		t.Fatalf("overridden-GOROOT runner context error = %v, want exact-context rejection", err)
+	}
+	otherCache := filepath.Join(toolCache, "other")
+	if err := os.Mkdir(otherCache, 0o777); err != nil {
+		t.Fatalf("Mkdir(other tool cache) error = %v", err)
+	}
+	if _, _, _, _, err := validateGitHubHostedGoExecutable(executable, runnerContext, otherCache, true); err == nil || !strings.Contains(err.Error(), "is not the required") {
+		t.Fatalf("alternate tool-cache root error = %v, want exact-root rejection", err)
+	}
+	if err := os.WriteFile(goExecutable, []byte("mutated-hosted-go-fixture"), 0o777); err != nil {
+		t.Fatalf("mutate GitHub-hosted Go fixture error = %v", err)
+	}
+	if _, _, _, _, err := validateGitHubHostedGoExecutable(executable, runnerContext, toolCache, true); err == nil || !strings.Contains(err.Error(), "changed after validation") {
+		t.Fatalf("mutated GitHub-hosted Go error = %v, want digest rejection", err)
+	}
+}
+
 func newSpecAuditRunnerTestRuntime(t *testing.T) specAuditGoChildRuntime {
 	t.Helper()
 	childRuntime, err := newSpecAuditGoChildRuntime()

@@ -1369,14 +1369,26 @@ when every requested exact top-level name has exactly one `run` event and one
 terminal `pass`, followed by a package pass. Missing, duplicate, malformed,
 skipped, failed, out-of-order, or unrequested test events fail the BDD step even
 if the child process exits zero. Before each launch, the runner revalidates the
-captured Go and Git executable identities, their root/current-user ownership,
-and canonical ancestry. World-writable ancestors and group-writable ancestors
-owned by a different user are rejected; current-user-owned group-writable
-ancestors remain admissible for standard package-manager layouts. Its task root
-is canonical, absolute, current-user-owned, and identity-bound; cleanup refuses
-a missing, replaced, wrong-owner, or wrong-mode root. These checks remain
-subject to ordinary pre-exec filesystem races and do not sandbox trusted test
-code.
+captured Go and Git executable identities, ownership, and canonical ancestry.
+The default contract rejects world-writable executables and ancestors plus
+group-writable ancestors owned by another user; current-user-owned
+group-writable ancestors remain admissible for standard package-manager
+layouts. Git always uses that strict contract.
+
+GitHub-hosted Ubuntu is one explicit compatibility boundary because its image
+deliberately makes `/opt/hostedtoolcache` writable. The Go executable may use a
+runner-context fallback only when GitHub-defined runner variables name
+the `github-hosted` Linux/X64 environment, the image metadata is well formed,
+`RUNNER_TOOL_CACHE` resolves to exactly `/opt/hostedtoolcache`, no `GOROOT`
+override is present, and the compiled runtime version and GOROOT select exactly
+that tool cache's matching `go/<version>/x64/bin/go`. The runner retains the Go
+file and GOROOT identities, hashes the bounded Go executable, and revalidates
+the complete context, identities, and digest before every launch. This is a
+runner-context compatibility gate, not provider attestation: the writable
+GOROOT toolchain remains a trusted input and ordinary in-place and pre-exec
+races remain. Its task root is canonical, absolute, current-user-owned, and
+identity-bound; cleanup refuses a missing, replaced, wrong-owner, or wrong-mode
+root. None of these controls sandbox trusted test code.
 
 **Key scenarios:**
 - Exact pinned Git-object inventory ignores dirty worktree content.
