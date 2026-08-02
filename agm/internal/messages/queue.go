@@ -582,14 +582,18 @@ func (q *MessageQueue) RetryRecentlyFailed(within time.Duration) (int64, error) 
 	return result.RowsAffected()
 }
 
-// GetQueueList returns all messages with optional status filter, ordered by queued_at desc
-func (q *MessageQueue) GetQueueList(statusFilter string, limit int) ([]*QueueEntry, error) {
+// GetQueueList returns all messages with an optional typed status filter,
+// ordered by queued_at desc. The zero QueueState selects every state.
+func (q *MessageQueue) GetQueueList(statusFilter QueueState, limit int) ([]*QueueEntry, error) {
 	var query string
 	var args []interface{}
 
 	if statusFilter != "" {
-		if _, err := ParseQueueState(statusFilter); err != nil {
-			return nil, fmt.Errorf("queue state filter domain: %w", err)
+		if !statusFilter.IsValid() {
+			return nil, fmt.Errorf(
+				"queue state filter domain: invalid queue state %q: must be queued, delivered, or failed",
+				statusFilter,
+			)
 		}
 		query = `
 			SELECT ` + queueEntryColumns + `
@@ -598,7 +602,7 @@ func (q *MessageQueue) GetQueueList(statusFilter string, limit int) ([]*QueueEnt
 			ORDER BY queued_at DESC
 			LIMIT ?
 		`
-		args = []interface{}{statusFilter, limit}
+		args = []interface{}{string(statusFilter), limit}
 	} else {
 		query = `
 			SELECT ` + queueEntryColumns + `

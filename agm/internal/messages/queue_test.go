@@ -99,6 +99,46 @@ func TestQueueStateParser(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid queue state")
 }
 
+func TestGetQueueListRejectsInvalidTypedFilter(t *testing.T) {
+	queue := setupTestQueue(t)
+	defer queue.Close()
+
+	_, err := queue.GetQueueList(QueueState("waiting"), 10)
+	require.EqualError(t, err, `queue state filter domain: invalid queue state "waiting": must be queued, delivered, or failed`)
+}
+
+func TestGetQueueListAcceptsTypedFilter(t *testing.T) {
+	queue := setupTestQueue(t)
+	defer queue.Close()
+
+	for _, messageID := range []string{"still-queued", "now-delivered"} {
+		require.NoError(t, queue.Enqueue(&QueueEntry{
+			MessageID: messageID,
+			From:      "session-a",
+			To:        "session-b",
+			Message:   "typed filter coverage",
+			Priority:  PriorityMedium,
+			QueuedAt:  time.Now(),
+		}))
+	}
+	require.NoError(t, queue.MarkDelivered("now-delivered"))
+
+	entries, err := queue.GetQueueList(QueueStateDelivered, 10)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "now-delivered", entries[0].MessageID)
+	assert.Equal(t, QueueStateDelivered, entries[0].Status)
+}
+
+func TestGetByMessageIDPreservesNotFoundError(t *testing.T) {
+	queue := setupTestQueue(t)
+	defer queue.Close()
+
+	entry, err := queue.GetByMessageID("missing-message")
+	require.Nil(t, entry)
+	require.EqualError(t, err, "message not found: missing-message")
+}
+
 func TestLegacyStatusConstantsRemainUntyped(t *testing.T) {
 	var state QueueState = StatusQueued
 	counts := map[string]int{StatusQueued: 1}
