@@ -12,16 +12,22 @@ import (
 )
 
 // Runner orchestrates one audit invocation. Construct with NewRunner,
-// configure (Registry, Store, Remediator, optional clock), and call
-// Run with a Plan describing what to execute.
+// configure its Registry, Store, and optional clock, and call Run with a
+// Plan describing what to execute.
 //
 // One Runner instance is safe for concurrent Run calls — each call
 // owns its own Plan and its own audit_runs row. The Runner does not
 // own the SQLite connection; the Store does.
 type Runner struct {
-	Registry   *Registry
-	Store      Store
-	Logger     *slog.Logger
+	Registry *Registry
+	Store    Store
+	Logger   *slog.Logger
+
+	// Remediator is the dormant StrategyAuto compatibility seam. Runner drops
+	// Status and Reference, and drops Note unless State changes.
+	//
+	// Deprecated: Do not configure an in-repository side-effecting adapter before
+	// ce-1hu9.13 supplies an idempotent remediation-event persistence contract.
 	Remediator Remediator
 
 	// Now is overridable in tests. Production callers leave it nil
@@ -629,29 +635,39 @@ func (r *Runner) persistFinding(
 		return Finding{}, false
 	}
 	if !plan.DryRun && stored.Suggested.Strategy == StrategyAuto && r.Remediator != nil {
-		r.applyInlineRemediation(ctx, stored, env, logger)
+		stored = r.applyInlineRemediation(ctx, stored, env, logger)
 	}
 	return stored, true
 }
 
-// applyInlineRemediation runs a remediator and (when it reports a
-// state change) writes the new state back to the store. Errors are
-// logged; nothing here is allowed to fail the audit run because the
-// finding is already persisted.
-func (r *Runner) applyInlineRemediation(ctx context.Context, stored Finding, env Env, logger *slog.Logger) {
+// applyInlineRemediation runs the dormant remediator seam and, when it reports
+// a valid state change, passes only the state and note to the store. Status and
+// Reference are ignored; Note is also ignored for an invalid or unchanged
+// state. The outcome is therefore not durable evidence. Errors are logged;
+// nothing here is allowed to fail the audit run because the finding is already
+// persisted.
+func (r *Runner) applyInlineRemediation(
+	ctx context.Context,
+	stored Finding,
+	env Env,
+	logger *slog.Logger,
+) Finding {
 	if remErr := stored.Suggested.Validate(); remErr != nil {
 		logger.Warn("audit: remediation invalid; skipping", "err", remErr)
-		return
+		return stored
 	}
 	out, applyErr := r.Remediator.Apply(ctx, stored, env)
 	if applyErr != nil {
 		logger.Warn("audit: remediation failed", "err", applyErr)
-		return
+		return stored
 	}
 	if !out.State.IsValid() || out.State == stored.State {
-		return
+		return stored
 	}
-	if _, err := r.Store.SetFindingState(ctx, stored.FindingID, out.State, out.Note); err != nil {
+	updated, err := r.Store.SetFindingState(ctx, stored.FindingID, out.State, out.Note)
+	if err != nil {
 		logger.Warn("audit: SetFindingState failed", "err", err)
+		return stored
 	}
+	return updated
 }

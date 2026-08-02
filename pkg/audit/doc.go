@@ -1,6 +1,6 @@
 // Package audit implements the DEAR Audit subsystem — scheduled,
 // repo-scoped health checks that produce de-duplicated findings,
-// drive remediation, and propose amendments back to the Define and
+// record remediation proposals, and propose amendments back to the Define and
 // Enforce layers. See ADR-011 for the architectural decisions this
 // package implements.
 //
@@ -12,9 +12,11 @@
 //
 // The mental model is a fleet of named Checks ("build", "test",
 // "lint.go", "vuln.govulncheck", ...) registered in a Registry and
-// invoked by a Runner against a per-call Env. A Check finds; a
-// Remediator fixes; a Refiner proposes amendments. The three stages
-// are intentionally separate so checks stay pure and trivial to test.
+// invoked by a Runner against a per-call Env. A Check finds and a Refiner
+// proposes amendments. The exported Remediator is a dormant compatibility
+// seam whose only production implementation is a side-effect-free no-op; its
+// outcome is not durable evidence. These stages remain separate so checks stay
+// pure and trivial to test.
 //
 // Higher-level surfaces — the workflow-audit CLI, the .dear-agent.yml
 // > audits: config loader, and workflow YAML wrappers that invoke the
