@@ -44,8 +44,14 @@ Falls back to running everything if `go list` errors. Smart selection is
 | `--tags`    | (empty)        | Comma-separated build tags forwarded to `go list`                |
 | `--root`    | repo root      | Override repo root (default: `git rev-parse --show-toplevel`)    |
 | `--all`     | `false`        | Emit *every* affected package, not just test-bearing ones        |
-| `--run`     | `false`        | Exec `go test -race -count=1` on the selection instead of printing |
+| `--run`     | `false`        | Exec `go test -race -count=1 -timeout=20m` on the selection instead of printing |
 | `--verbose` | `false`        | Log per-package decisions to stderr                              |
+
+`--run` gives each package the same 20-minute deadline as required CI and
+local preflight, while bounding the aggregate `go test` command at 30 minutes
+to reserve 10 minutes for packages delayed by compilation or the worker queue.
+The workflow adds another five minutes around bounded selection and test
+execution for checkout, toolchain setup, and cleanup.
 
 ## Trust boundary
 
