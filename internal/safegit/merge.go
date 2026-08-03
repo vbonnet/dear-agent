@@ -828,7 +828,8 @@ func cleanupWorktree(branch string) {
 	}
 
 	// Delete the local branch if it exists.
-	deleteCmd := exec.Command("git", "branch", "-d", branch)
+	// #nosec G702 -- executable name is fixed; the provider branch is argv after --, never shell-interpreted.
+	deleteCmd := exec.Command("git", "branch", "-d", "--", branch)
 	deleteCmd.Dir = mainWorktree
 	if out, err := deleteCmd.CombinedOutput(); err != nil {
 		// -d refuses to delete if unmerged; that's fine — we already merged.
