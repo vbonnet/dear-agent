@@ -139,16 +139,10 @@ func (run *providerCommandRun) waitFailure(waitErr error) ([]byte, error) {
 
 func (run *providerCommandRun) contextFailure(contextErr error) ([]byte, error) {
 	closeErr := errors.Join(run.closeStdin(), run.stdoutReader.Close())
-	if run.inputDone != nil {
-		<-run.inputDone
-	}
-	if run.waitDone != nil {
-		<-run.waitDone
-	}
-	if run.readDone != nil {
-		<-run.readDone
-	}
-	return run.outputBuffer.Bytes(), errors.Join(contextErr, closeErr)
+	// Every worker publishes to a buffered channel, so owned-descriptor closure
+	// lets it finish without a synchronous drain here. Do not expose partial
+	// output: the stdout worker may still be returning from its interrupted copy.
+	return nil, errors.Join(contextErr, closeErr)
 }
 
 func (run *providerCommandRun) finishInputAfterOutput() error {
