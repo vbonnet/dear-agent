@@ -16,61 +16,59 @@ func TestCanonicalAGMInstallBuildsCompanionPairWithProtectedStamps(t *testing.T)
 	requireMake(t)
 	buildRoot := copyBuildSandbox(t)
 	goBuildEnv := currentGoBuildEnvironment(t)
+	home := t.TempDir()
+	installDir := filepath.Join(home, "go", "bin")
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatalf("create isolated AGM install directory: %v", err)
+	}
 
-	for _, goflags := range []string{"-p=2", "-buildvcs=false"} {
-		t.Run(strings.TrimPrefix(goflags, "-"), func(t *testing.T) {
-			home := t.TempDir()
-			installDir := filepath.Join(home, "go", "bin")
-			if err := os.MkdirAll(installDir, 0o755); err != nil {
-				t.Fatalf("create isolated AGM install directory: %v", err)
-			}
+	// Probe tests cover these ordinary flags independently. Exercise the full
+	// AGM companion install once with both while still crossing the canonical
+	// install seam and validating both installed production binaries.
+	output, err := runMakeAt(t, buildRoot, goBuildEnv,
+		"install-agm",
+		"VERSION="+testBuildVersion,
+		"GIT_COMMIT="+testBuildCommit,
+		"BUILD_DATE="+testBuildDate,
+		"GOFLAGS=-p=2 -buildvcs=false",
+		"HOME="+home,
+	)
+	if err != nil {
+		t.Fatalf("make install-agm failed: %v\n%s", err, output)
+	}
+	for _, installed := range []string{"agm", "agm-reaper"} {
+		path := filepath.Join(installDir, installed)
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			t.Fatalf("stat installed %s: %v\n%s", installed, statErr, output)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			t.Fatalf("installed %s mode = %v, want executable regular file", installed, info.Mode())
+		}
+		assertEmbeddedStampFields(t, path)
+	}
 
-			output, err := runMakeAt(t, buildRoot, goBuildEnv,
-				"install-agm",
-				"VERSION="+testBuildVersion,
-				"GIT_COMMIT="+testBuildCommit,
-				"BUILD_DATE="+testBuildDate,
-				"GOFLAGS="+goflags,
-				"HOME="+home,
-			)
-			if err != nil {
-				t.Fatalf("make install-agm failed: %v\n%s", err, output)
-			}
-			for _, installed := range []string{"agm", "agm-reaper"} {
-				path := filepath.Join(installDir, installed)
-				info, statErr := os.Stat(path)
-				if statErr != nil {
-					t.Fatalf("stat installed %s: %v\n%s", installed, statErr, output)
-				}
-				if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-					t.Fatalf("installed %s mode = %v, want executable regular file", installed, info.Mode())
-				}
-				assertEmbeddedStampFields(t, path)
-			}
+	runtimeEnv := map[string]string{"HOME": home}
+	agmOutput, runErr := runCommandAt(t, buildRoot, runtimeEnv, filepath.Join(installDir, "agm"), "version")
+	if runErr != nil {
+		t.Fatalf("run installed AGM version: %v\n%s", runErr, agmOutput)
+	}
+	for _, want := range []string{
+		"agm version " + testBuildVersion,
+		"git commit: " + testBuildCommit,
+		"built: " + testBuildDate + " by makefile",
+	} {
+		if !strings.Contains(agmOutput, want) {
+			t.Errorf("installed AGM version output is missing %q:\n%s", want, agmOutput)
+		}
+	}
 
-			runtimeEnv := map[string]string{"HOME": home}
-			agmOutput, runErr := runCommandAt(t, buildRoot, runtimeEnv, filepath.Join(installDir, "agm"), "version")
-			if runErr != nil {
-				t.Fatalf("run installed AGM version: %v\n%s", runErr, agmOutput)
-			}
-			for _, want := range []string{
-				"agm version " + testBuildVersion,
-				"git commit: " + testBuildCommit,
-				"built: " + testBuildDate + " by makefile",
-			} {
-				if !strings.Contains(agmOutput, want) {
-					t.Errorf("installed AGM version output is missing %q:\n%s", want, agmOutput)
-				}
-			}
-
-			reaperOutput, runErr := runCommandAt(t, buildRoot, runtimeEnv,
-				filepath.Join(installDir, "agm-reaper"),
-				"--check-revision="+testBuildCommit,
-			)
-			if runErr != nil {
-				t.Fatalf("installed AGM reaper rejected its protected revision: %v\n%s", runErr, reaperOutput)
-			}
-		})
+	reaperOutput, runErr := runCommandAt(t, buildRoot, runtimeEnv,
+		filepath.Join(installDir, "agm-reaper"),
+		"--check-revision="+testBuildCommit,
+	)
+	if runErr != nil {
+		t.Fatalf("installed AGM reaper rejected its protected revision: %v\n%s", runErr, reaperOutput)
 	}
 }
 

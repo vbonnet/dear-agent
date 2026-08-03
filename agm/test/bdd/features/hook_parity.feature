@@ -104,5 +104,5 @@ Feature: Hook harness parity
     Then a mixed revision or missing startup acknowledgement should fail before async success
 
   Scenario: Canonical AGM installation preserves companion coherence
-    When AGM runs the canonical AGM companion install regression
-    Then the root AGM install target should build and install the companion pair
+    When AGM renders the canonical AGM companion install plan
+    Then the root AGM install plan should build and install the companion pair

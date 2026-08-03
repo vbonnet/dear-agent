@@ -34,6 +34,8 @@
 
 **BUILDSTAMP-13** When whitespace-only direct GOFLAGS accompanies persisted GOENV linker flags, the system shall treat the direct value as effective and retain protected provenance.
 
+**BUILDSTAMP-14** When BDD verifies the canonical AGM installation topology, the system shall render a non-executing plan that includes the build-stamp guard, both stamped companion builds, and both companion installations.
+
 ## Test Traceability
 
 - Package tests: `tests/buildstamp/*_test.go`
