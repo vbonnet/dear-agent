@@ -879,8 +879,10 @@ func parseBDDFeature(path string, blob []byte) (bddFeatureEvidence, error) {
 		if child == nil {
 			continue
 		}
-		if err := appendScenario("", child.Scenario); child.Scenario != nil && err != nil {
-			return bddFeatureEvidence{}, err
+		if child.Scenario != nil {
+			if err := appendScenario("", child.Scenario); err != nil {
+				return bddFeatureEvidence{}, err
+			}
 		}
 		if child.Rule == nil {
 			continue

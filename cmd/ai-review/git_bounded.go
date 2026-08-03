@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -132,15 +133,11 @@ func gitRegularTextBlobsBounded(parent context.Context, revision string, paths [
 }
 
 func bytesSplitNUL(out []byte) [][]byte {
-	fields := strings.Split(string(out), "\x00")
-	if len(fields) > 0 && fields[len(fields)-1] == "" {
+	fields := bytes.Split(out, []byte{0})
+	if len(fields) > 0 && len(fields[len(fields)-1]) == 0 {
 		fields = fields[:len(fields)-1]
 	}
-	result := make([][]byte, len(fields))
-	for i := range fields {
-		result[i] = []byte(fields[i])
-	}
-	return result
+	return fields
 }
 
 type gitBlobRequest struct {
