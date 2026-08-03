@@ -33,6 +33,10 @@
 
 **WFCMD-13** While a rewind transition is in progress for a project, the system shall reject a concurrent rewind before parsing or mutating that project's lifecycle state.
 
+**WFCMD-14** When a rewind transition lock is created, the system shall place it in the project's owned internal metadata namespace so home, cache, profile, temporary-directory, symlink, and case aliases cannot select a second lock namespace.
+
+**WFCMD-15** When `.wayfinder`, its lock directory, or its rewind lock file is a symbolic link, reparse point, non-directory parent, non-regular file, or multiply linked file, the system shall reject lock admission rather than open or create a lock outside the owned project namespace.
+
 ## Traceability
 
 - Command tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`

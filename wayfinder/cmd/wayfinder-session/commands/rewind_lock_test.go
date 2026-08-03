@@ -41,27 +41,187 @@ func TestRewindTransitionLockHelper(t *testing.T) {
 	}
 }
 
-func TestRewindLockPathUsesFilesystemIdentityAcrossCaseAlias(t *testing.T) {
+func TestRewindTransitionLockUsesOneNamespaceAcrossProjectAliases(t *testing.T) {
 	projectDir := t.TempDir()
-	alias := caseAliasForTest(projectDir)
-	if alias == projectDir {
-		t.Skip("filesystem does not expose a case-insensitive path alias")
+	aliases := make([]string, 0, 2)
+	symlinkAlias := filepath.Join(t.TempDir(), "project-alias")
+	if err := os.Symlink(projectDir, symlinkAlias); err == nil {
+		aliases = append(aliases, symlinkAlias)
 	}
-	originalLock, err := rewindLockFilePath(projectDir)
+	if caseAlias := caseAliasForTest(projectDir); caseAlias != projectDir {
+		aliases = append(aliases, caseAlias)
+	}
+	if len(aliases) == 0 {
+		t.Skip("filesystem does not expose a project path alias")
+	}
+
+	cleanupRewindLockFile(t, projectDir)
+	lock, err := acquireRewindTransitionLock(projectDir)
 	if err != nil {
-		t.Fatalf("resolve original lock path: %v", err)
+		t.Fatalf("acquire original lock: %v", err)
 	}
-	aliasLock, err := rewindLockFilePath(alias)
-	if err != nil {
-		t.Fatalf("resolve alias lock path: %v", err)
+	t.Cleanup(func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("release original lock: %v", err)
+		}
+	})
+
+	for _, alias := range aliases {
+		aliasLock, err := acquireRewindTransitionLock(alias)
+		if err == nil {
+			if closeErr := aliasLock.Close(); closeErr != nil {
+				t.Errorf("release unexpectedly acquired alias lock: %v", closeErr)
+			}
+			t.Fatalf("acquire lock through alias %q succeeded, want in-progress error", alias)
+		}
+		if !errors.Is(err, errRewindTransitionInProgress) {
+			t.Fatalf("acquire lock through alias %q = %v, want in-progress error", alias, err)
+		}
 	}
-	if aliasLock != originalLock {
-		t.Fatalf("same directory identity produced different locks: %q != %q", aliasLock, originalLock)
-	}
-	t.Cleanup(func() { _ = os.Remove(originalLock) })
 }
 
-func TestRewindTransitionLockRejectsConcurrentProcessBeforeMutation(t *testing.T) {
+func TestRewindTransitionLockUsesProjectStorageWithoutWritableHome(t *testing.T) {
+	t.Run("missing home", func(t *testing.T) {
+		homeDir := filepath.Join(t.TempDir(), "missing-home")
+		assertProjectLocalRewindLock(t, homeDir)
+	})
+
+	t.Run("read-only home", func(t *testing.T) {
+		homeDir := filepath.Join(t.TempDir(), "read-only-home")
+		if err := os.Mkdir(homeDir, 0o500); err != nil {
+			t.Fatalf("create read-only home: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chmod(homeDir, 0o700); err != nil {
+				t.Errorf("restore test home permissions: %v", err)
+			}
+		})
+		assertProjectLocalRewindLock(t, homeDir)
+	})
+}
+
+func assertProjectLocalRewindLock(t *testing.T, homeDir string) {
+	t.Helper()
+	projectDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+
+	lockPath, err := rewindLockFilePath(projectDir)
+	if err != nil {
+		t.Fatalf("resolve project-local lock path: %v", err)
+	}
+	wantPath := filepath.Join(projectDir, ".wayfinder", "locks", rewindLockFilename)
+	if lockPath != wantPath {
+		t.Fatalf("lock path = %q, want project-owned path %q", lockPath, wantPath)
+	}
+
+	lock, err := acquireRewindTransitionLock(projectDir)
+	if err != nil {
+		t.Fatalf("acquire project-local lock: %v", err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatalf("release project-local lock: %v", err)
+	}
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("remove project-local lock: %v", err)
+	}
+}
+
+func TestRewindTransitionLockRejectsLinkedMetadataComponents(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, projectDir, externalDir string) (linkPath, escapedLockPath string)
+	}{
+		{
+			name: "wayfinder metadata",
+			setup: func(t *testing.T, projectDir, externalDir string) (string, string) {
+				t.Helper()
+				return filepath.Join(projectDir, ".wayfinder"), filepath.Join(externalDir, "locks", rewindLockFilename)
+			},
+		},
+		{
+			name: "lock directory",
+			setup: func(t *testing.T, projectDir, externalDir string) (string, string) {
+				t.Helper()
+				wayfinderDir := filepath.Join(projectDir, ".wayfinder")
+				if err := os.Mkdir(wayfinderDir, 0o700); err != nil {
+					t.Fatalf("create Wayfinder metadata directory: %v", err)
+				}
+				return filepath.Join(wayfinderDir, "locks"), filepath.Join(externalDir, rewindLockFilename)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			externalDir := t.TempDir()
+			linkPath, escapedLockPath := test.setup(t, projectDir, externalDir)
+			if err := os.Symlink(externalDir, linkPath); err != nil {
+				t.Skipf("filesystem does not permit directory symlinks: %v", err)
+			}
+
+			lock, err := acquireRewindTransitionLock(projectDir)
+			if err == nil {
+				if closeErr := lock.Close(); closeErr != nil {
+					t.Errorf("release unexpectedly acquired redirected lock: %v", closeErr)
+				}
+				t.Fatal("acquire rewind lock succeeded through linked metadata")
+			}
+			if _, statErr := os.Stat(escapedLockPath); !os.IsNotExist(statErr) {
+				t.Fatalf("redirected lock exists outside project: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestRewindTransitionLockRejectsLinkedLockFile(t *testing.T) {
+	tests := []struct {
+		name       string
+		createLink func(oldPath, newPath string) error
+	}{
+		{name: "symbolic link", createLink: os.Symlink},
+		{name: "multiple hard links", createLink: os.Link},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			lockPath, err := rewindLockFilePath(projectDir)
+			if err != nil {
+				t.Fatalf("prepare project lock path: %v", err)
+			}
+			externalPath := filepath.Join(t.TempDir(), "external.txt")
+			wantContent := []byte("must remain an unrelated file\n")
+			if err := os.WriteFile(externalPath, wantContent, 0o600); err != nil {
+				t.Fatalf("write external file: %v", err)
+			}
+			if err := test.createLink(externalPath, lockPath); err != nil {
+				t.Skipf("filesystem does not permit %s: %v", test.name, err)
+			}
+
+			lock, err := acquireRewindTransitionLock(projectDir)
+			if err == nil {
+				if closeErr := lock.Close(); closeErr != nil {
+					t.Errorf("release unexpectedly acquired linked lock: %v", closeErr)
+				}
+				t.Fatal("acquire rewind lock succeeded through linked lock file")
+			}
+			gotContent, readErr := os.ReadFile(externalPath)
+			if readErr != nil {
+				t.Fatalf("read external file: %v", readErr)
+			}
+			if !bytes.Equal(gotContent, wantContent) {
+				t.Fatalf("external file changed: got %q, want %q", gotContent, wantContent)
+			}
+		})
+	}
+}
+
+func TestRewindTransitionLockRejectsConcurrentEnvironmentAliasBeforeMutation(t *testing.T) {
 	projectDir := setupRewindCommandProject(t, "concurrent-rewind", status.WaypointV2Retro)
 	statusPath := filepath.Join(projectDir, status.StatusFilename)
 	historyPath := filepath.Join(projectDir, history.HistoryFilename)
@@ -80,15 +240,31 @@ func TestRewindTransitionLockRejectsConcurrentProcessBeforeMutation(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRewindTransitionLockHelper$")
-	childTemp := t.TempDir()
+	parentRoot := t.TempDir()
+	parentCache := t.TempDir()
+	t.Setenv("HOME", filepath.Join(parentRoot, "missing-home"))
+	t.Setenv("USERPROFILE", filepath.Join(parentRoot, "missing-profile"))
+	t.Setenv("XDG_CACHE_HOME", parentCache)
+	t.Setenv("LOCALAPPDATA", parentCache)
+	t.Setenv("TMPDIR", filepath.Join(parentRoot, "tmp"))
+
+	childRoot := t.TempDir()
+	childHome := filepath.Join(childRoot, "read-only-home")
+	if err := os.Mkdir(childHome, 0o500); err != nil {
+		t.Fatalf("create child read-only home: %v", err)
+	}
+	childCache := t.TempDir()
 	helperProjectDir := caseAliasForTest(projectDir)
-	cmd.Env = append(environmentWithoutTempOverrides(),
+	cmd.Env = append(environmentWithoutRewindLockLocationOverrides(),
 		"GO_WANT_REWIND_LOCK_HELPER="+helperProjectDir,
-		"TMPDIR="+childTemp,
-		"TMP="+childTemp,
-		"TEMP="+childTemp,
-		"HOME="+childTemp,
-		"USERPROFILE="+childTemp,
+		"TMPDIR="+childRoot,
+		"TMP="+childRoot,
+		"TEMP="+childRoot,
+		"HOME="+childHome,
+		"USERPROFILE="+childHome,
+		"XDG_CACHE_HOME="+childCache,
+		"LOCALAPPDATA="+childCache,
+		"APPDATA="+childCache,
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -171,11 +347,16 @@ func readEntryNames(t *testing.T, directory string) []string {
 	return names
 }
 
-func environmentWithoutTempOverrides() []string {
+func environmentWithoutRewindLockLocationOverrides() []string {
 	environment := os.Environ()
 	return slices.DeleteFunc(environment, func(assignment string) bool {
 		key, _, _ := strings.Cut(assignment, "=")
-		return key == "TMPDIR" || key == "TMP" || key == "TEMP" || key == "HOME" || key == "USERPROFILE" || key == "GO_WANT_REWIND_LOCK_HELPER"
+		switch key {
+		case "TMPDIR", "TMP", "TEMP", "HOME", "USERPROFILE", "XDG_CACHE_HOME", "LOCALAPPDATA", "APPDATA", "GO_WANT_REWIND_LOCK_HELPER":
+			return true
+		default:
+			return false
+		}
 	})
 }
 

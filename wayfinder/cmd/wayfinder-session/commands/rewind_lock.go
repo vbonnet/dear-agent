@@ -1,37 +1,64 @@
 package commands
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"os/user"
+	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 )
 
 var errRewindTransitionInProgress = errors.New("another rewind transition is already in progress")
+
+const rewindLockFilename = "rewind.lock"
 
 type rewindTransitionLock interface {
 	Close() error
 }
 
-func rewindLockFilenameForIdentity(identity string) string {
-	digest := sha256.Sum256([]byte(identity))
-	return fmt.Sprintf("rewind-%x.lock", digest[:16])
+func rewindLockFilePath(projectDir string) (string, error) {
+	absoluteProjectDir, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve rewind project directory: %w", err)
+	}
+	projectDir = absoluteProjectDir
+	// #nosec G703 -- projectDir is the explicit Wayfinder project target; Stat validates it before the owned path is joined.
+	info, err := os.Stat(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("inspect rewind project directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("rewind project path is not a directory: %s", projectDir)
+	}
+
+	wayfinderDir := filepath.Join(projectDir, ".wayfinder")
+	if err := ensureRewindDirectory(wayfinderDir, "metadata"); err != nil {
+		return "", err
+	}
+	if err := validateRewindMetadataDirectory(wayfinderDir); err != nil {
+		return "", err
+	}
+	lockDir := filepath.Join(wayfinderDir, "locks")
+	if err := ensureRewindDirectory(lockDir, "lock"); err != nil {
+		return "", err
+	}
+	if err := validatePrivateRewindLockDirectories(wayfinderDir, lockDir); err != nil {
+		return "", err
+	}
+	return filepath.Join(lockDir, rewindLockFilename), nil
 }
 
-func rewindLockDirectory() (string, error) {
-	currentUser, err := user.Current()
+func ensureRewindDirectory(path, description string) error {
+	// #nosec G703 -- path is the explicit project target joined only with fixed internal metadata components.
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create rewind %s directory: %w", description, err)
+	}
+	// #nosec G703 -- inspect the exact directory just created or found; symbolic links are rejected.
+	info, err := os.Lstat(path)
 	if err != nil {
-		return "", fmt.Errorf("resolve current OS user: %w", err)
+		return fmt.Errorf("inspect rewind %s directory: %w", description, err)
 	}
-	if strings.TrimSpace(currentUser.HomeDir) == "" {
-		return "", fmt.Errorf("current OS user has no home directory")
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("rewind %s path is not an owned directory: %s", description, path)
 	}
-	cacheRoot := filepath.Join(currentUser.HomeDir, ".cache")
-	if runtime.GOOS == "darwin" {
-		cacheRoot = filepath.Join(currentUser.HomeDir, "Library", "Caches")
-	}
-	return filepath.Join(cacheRoot, "wayfinder-session", "locks"), nil
+	return nil
 }

@@ -35,14 +35,19 @@ Validation and admission errors are actionable and leave the prior status
 intact. Forceful operations require the command's explicit justification flag.
 Persistence errors follow each transition's documented ordering contract.
 
-Rewind takes a per-project interprocess lock before parsing status and holds it
-through the scoped commit. A concurrent rewind is rejected before project
-mutation. Within that serialized boundary, rewind is ordered rather than
-transactionally atomic: it publishes a complete archive, persists status and
-trace evidence, then commits the exact archive and canonical markers. If a
-required later step fails, the command returns an error without a success claim;
-earlier filesystem writes remain inspectable for recovery rather than being
-represented as rolled back.
+Rewind takes an interprocess lock at the project's owned
+`.wayfinder/locks/rewind.lock` before parsing status and holds it through the
+scoped commit. Keeping one fixed lock with the project makes project-root
+symlink, case, home, cache, profile, and temporary-directory aliases converge on
+the same underlying file; lock admission does not depend on a writable
+OS-account home. Links or reparse points in `.wayfinder`, `locks`, or the lock
+file itself are rejected rather than followed outside the project. A concurrent
+rewind is rejected before lifecycle mutation. Within that serialized boundary,
+rewind is ordered rather than transactionally atomic: it publishes a complete
+archive, persists status and trace evidence, then commits the exact archive and
+canonical markers. If a required later step fails, the command returns an error
+without a success claim; earlier filesystem writes remain inspectable for
+recovery rather than being represented as rolled back.
 
 ## Verification
 

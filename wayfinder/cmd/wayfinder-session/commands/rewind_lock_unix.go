@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
 )
 
@@ -19,10 +18,9 @@ func acquireRewindTransitionLock(projectDir string) (rewindTransitionLock, error
 	if err != nil {
 		return nil, err
 	}
-	// #nosec G703 -- lockPath is a SHA-256 filename inside the verified private per-user lock directory.
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := openRewindLockFile(lockPath)
 	if err != nil {
-		return nil, fmt.Errorf("open rewind lock: %w", err)
+		return nil, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		closeErr := file.Close()
@@ -34,48 +32,53 @@ func acquireRewindTransitionLock(projectDir string) (rewindTransitionLock, error
 	return &unixRewindTransitionLock{file: file}, nil
 }
 
-func rewindLockFilePath(projectDir string) (string, error) {
-	// #nosec G703 -- projectDir is the explicit Wayfinder project target; Stat reads only its stable filesystem identity.
-	info, err := os.Stat(projectDir)
+func openRewindLockFile(path string) (*os.File, error) {
+	// #nosec G703 -- path is a fixed filename beneath the validated project metadata directories; O_NOFOLLOW rejects replacement links.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
-		return "", fmt.Errorf("inspect rewind project directory: %w", err)
+		return nil, fmt.Errorf("open rewind lock: %w", err)
 	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("rewind project path is not a directory: %s", projectDir)
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect open rewind lock: %w", errors.Join(err, file.Close()))
+	}
+	// #nosec G703 -- compare the opened object with the fixed project-local path to reject replacement races.
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect rewind lock path: %w", errors.Join(err, file.Close()))
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "", fmt.Errorf("rewind project directory has unsupported identity metadata: %s", projectDir)
+	// #nosec G115 -- effective Unix user IDs are non-negative and Stat_t.Uid is uint32.
+	if !info.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, pathInfo) || !ok || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || info.Mode().Perm()&0o077 != 0 {
+		validationErr := fmt.Errorf("rewind lock is not a private project-owned regular file: %s", path)
+		return nil, errors.Join(validationErr, file.Close())
 	}
-	identity := fmt.Sprintf("unix:%d:%d", stat.Dev, stat.Ino)
-	filename := rewindLockFilenameForIdentity(identity)
-	lockDir, err := rewindLockDirectory()
-	if err != nil {
-		return "", err
-	}
-	if err := ensurePrivateRewindLockDirectory(lockDir); err != nil {
-		return "", err
-	}
-	return filepath.Join(lockDir, filename), nil
+	return file, nil
 }
 
-func ensurePrivateRewindLockDirectory(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return fmt.Errorf("create rewind lock directory: %w", err)
+func validatePrivateRewindLockDirectories(wayfinderDir, lockDir string) error {
+	if err := validateRewindMetadataDirectory(wayfinderDir); err != nil {
+		return err
 	}
+	return validateOwnedRewindDirectory(lockDir, 0o077)
+}
+
+func validateRewindMetadataDirectory(path string) error {
+	return validateOwnedRewindDirectory(path, 0o022)
+}
+
+func validateOwnedRewindDirectory(path string, prohibitedPermissions os.FileMode) error {
+	// #nosec G703 -- revalidate the fixed project metadata component after creation to reject link replacement.
 	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("inspect rewind lock directory: %w", err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("rewind lock path is not an owned directory: %s", path)
-	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	// #nosec G115 -- effective Unix user IDs are non-negative and Stat_t.Uid is uint32.
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !ok || stat.Uid != uint32(os.Geteuid()) {
 		return fmt.Errorf("rewind lock directory is not owned by the current user: %s", path)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if info.Mode().Perm()&prohibitedPermissions != 0 {
 		return fmt.Errorf("rewind lock directory permissions are too broad: %s", path)
 	}
 	return nil

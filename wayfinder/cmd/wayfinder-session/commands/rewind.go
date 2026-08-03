@@ -95,9 +95,10 @@ func runRewind(cmd *cobra.Command, args []string) (runErr error) {
 	}
 
 	// Migrate a legacy history filename only after every rewind precondition
-	// holds. A rejected rewind must leave the project byte-for-byte unchanged;
-	// renaming first strands an uncommitted rename that the next start-phase
-	// refuses to migrate because its dirty-worktree check runs first.
+	// holds. A rejected rewind must leave lifecycle and trace evidence
+	// byte-for-byte unchanged; renaming first strands an uncommitted rename that
+	// the next start-phase refuses to migrate because its dirty-worktree check
+	// runs first. Project-internal lock metadata may already exist by this point.
 	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
 		return fmt.Errorf("prepare history for rewind: %w", err)
 	}
