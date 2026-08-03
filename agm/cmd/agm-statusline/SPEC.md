@@ -40,7 +40,7 @@ provider is missing, slow, or broken.
 
 **STATUSLINE-12** When composed output is empty for a session, the system shall cache the empty output to avoid repeated provider execution during the cache TTL.
 
-**STATUSLINE-13** When a provider deadline expires, the system shall return after bounded cancellation cleanup even if a descendant retains inherited I/O.
+**STATUSLINE-13** When a provider deadline expires, the system shall prioritize that deadline over ready completion signals and return after bounded cancellation cleanup even if a descendant retains inherited I/O.
 
 **STATUSLINE-14** When a provider exits successfully before its deadline, the system shall accept its output until inherited stdout reaches EOF or the configured deadline expires.
 

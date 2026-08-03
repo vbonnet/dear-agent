@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 )
 
-func TestProviderCommandRunContextFailureDoesNotWaitForWorkers(t *testing.T) {
+func newProviderCommandRunForTest(t *testing.T, output string) *providerCommandRun {
+	t.Helper()
 	stdinReader, stdinWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create stdin pipe: %v", err)
@@ -28,15 +30,18 @@ func TestProviderCommandRunContextFailureDoesNotWaitForWorkers(t *testing.T) {
 			}
 		}
 	})
-
-	run := &providerCommandRun{
+	return &providerCommandRun{
 		stdinWriter:  stdinWriter,
 		stdoutReader: stdoutReader,
-		outputBuffer: *bytes.NewBufferString("partial"),
+		outputBuffer: *bytes.NewBufferString(output),
 		inputDone:    make(chan error, 1),
 		readDone:     make(chan error, 1),
 		waitDone:     make(chan error, 1),
 	}
+}
+
+func TestProviderCommandRunContextFailureDoesNotWaitForWorkers(t *testing.T) {
+	run := newProviderCommandRunForTest(t, "partial")
 	type result struct {
 		output []byte
 		err    error
@@ -57,5 +62,43 @@ func TestProviderCommandRunContextFailureDoesNotWaitForWorkers(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("context failure waited for worker completion channels")
+	}
+}
+
+func TestProviderCommandRunPrioritizesExpiredContextOverReadyWorkers(t *testing.T) {
+	for i := range 64 {
+		t.Run(fmt.Sprintf("ready-workers-%02d", i), func(t *testing.T) {
+			run := newProviderCommandRunForTest(t, "late output")
+			run.inputDone <- nil
+			run.readDone <- nil
+			run.waitDone <- nil
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			defer cancel()
+
+			output, runErr := run.output(ctx)
+			if output != nil {
+				t.Fatalf("expired-context output = %q, want nil", output)
+			}
+			if !errors.Is(runErr, context.DeadlineExceeded) {
+				t.Fatalf("expired-context error = %v, want deadline exceeded", runErr)
+			}
+		})
+	}
+}
+
+func TestProviderCommandRunChecksDeadlineBeforeFinalSuccess(t *testing.T) {
+	run := newProviderCommandRunForTest(t, "late output")
+	run.inputDone = nil
+	run.readDone = nil
+	run.waitDone = nil
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	output, runErr := run.output(ctx)
+	if output != nil {
+		t.Fatalf("expired-context output = %q, want nil", output)
+	}
+	if !errors.Is(runErr, context.DeadlineExceeded) {
+		t.Fatalf("expired-context error = %v, want deadline exceeded", runErr)
 	}
 }

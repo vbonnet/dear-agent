@@ -92,10 +92,16 @@ func startProviderCommand(cmd *exec.Cmd, input []byte) (*providerCommandRun, err
 
 func (run *providerCommandRun) output(ctx context.Context) ([]byte, error) {
 	for run.active() {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return run.contextFailure(contextErr)
+		}
 		select {
 		case waitErr := <-run.waitDone:
 			run.waitDone = nil
 			if waitErr != nil {
+				if contextErr := ctx.Err(); contextErr != nil {
+					return run.contextFailure(contextErr)
+				}
 				return run.waitFailure(waitErr)
 			}
 		case <-run.inputDone:
@@ -109,9 +115,15 @@ func (run *providerCommandRun) output(ctx context.Context) ([]byte, error) {
 		case <-ctx.Done():
 			return run.contextFailure(ctx.Err())
 		}
+		if contextErr := ctx.Err(); contextErr != nil {
+			return run.contextFailure(contextErr)
+		}
 		if err := run.finishInputAfterOutput(); err != nil {
 			return run.outputBuffer.Bytes(), err
 		}
+	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		return run.contextFailure(contextErr)
 	}
 	return run.finish()
 }
