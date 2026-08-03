@@ -4727,6 +4727,9 @@ func validateSharedContractFeature(f finding, features map[string]featureFile, s
 	if selected.Kind != "scenario-outline" || len(selected.Outcomes) == 0 || (selected.MemberColumn != "harness" && selected.MemberColumn != "member") || !selected.UsesMemberPlaceholder {
 		return fmt.Errorf("finding %q shared BDD scenario must be an observable outline that uses its harness/member examples column", f.ID)
 	}
+	if f.ApplicabilityBasis == "implementation-only" && selected.MemberColumn != "member" {
+		return fmt.Errorf("finding %q with implementation-only applicability must use a member examples column, not a harness column", f.ID)
+	}
 	expectedMembers := map[string]bool{}
 	for _, item := range f.Applicability {
 		if item.Disposition != "not-applicable" {
@@ -5044,13 +5047,20 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool, adapt
 			if len(seenMembers) < 2 {
 				return fmt.Errorf("positive finding %q with implementation-only applicability must cover at least two implementations", f.ID)
 			}
+			for member := range seenMembers {
+				if isActiveHarnessMemberName(member, adapterScopes) {
+					return fmt.Errorf("positive finding %q names active harness member %q in an implementation-only matrix; use active-members applicability", f.ID, member)
+				}
+			}
 			for _, owner := range f.CurrentOwners {
 				if isHarnessSurfacePath(owner.Path, adapterScopes) {
 					return fmt.Errorf("positive finding %q with harness-surface owner %q requires active-members applicability", f.ID, owner.Path)
 				}
 			}
-			if !sameStringSet(ownerPaths(f.CurrentOwners), mapKeys(applicabilityEvidenceOwners)) {
-				return fmt.Errorf("positive finding %q with implementation-only applicability must cite every current owner across its implementation matrix", f.ID)
+			for _, owner := range ownerPaths(f.CurrentOwners) {
+				if !applicabilityEvidenceOwners[owner] {
+					return fmt.Errorf("positive finding %q with implementation-only applicability must cite every current owner across its implementation matrix", f.ID)
+				}
 			}
 		default:
 			return fmt.Errorf("positive finding %q requires active-members or implementation-only applicability", f.ID)
@@ -5208,6 +5218,22 @@ func isHarnessSurfacePath(path string, scopes []adapterScope) bool {
 		}
 	}
 	return false
+}
+
+// isActiveHarnessMemberName closes the semantic-label escape hatch left by
+// neutral-looking owner paths. An implementation-only matrix may name concrete
+// implementations, but it cannot relabel a catalogued active harness (or one
+// of its aliases) to avoid proving the full active-member contract.
+func isActiveHarnessMemberName(member string, scopes []adapterScope) bool {
+	activeHarnesses := make([]adapterScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.Kind == "harness" && scope.Lifecycle == "active" {
+			activeHarnesses = append(activeHarnesses, scope)
+		}
+	}
+	exact, normalized := adapterSurfaceSegments(activeHarnesses)
+	lower := strings.ToLower(strings.TrimSpace(member))
+	return exact[lower] || normalized[normalizeHarnessAlias(member)]
 }
 
 func adapterSurfaceSegments(scopes []adapterScope) (map[string]bool, map[string]bool) {

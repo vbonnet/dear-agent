@@ -73,7 +73,10 @@ report.
    whose cases cover the applicable members. Use `active-members` for harness
    contracts and cover the full pinned active set. Use `implementation-only`
    only for a bounded matrix of at least two concrete implementations whose
-   evidence spans every current owner; it is not a bypass for harness scope.
+   evidence spans every current owner; additional pinned applicability evidence
+   is allowed. Its member names cannot be active-harness IDs or aliases, and
+   its shared outline uses `member`, not `harness`. It is not a bypass for
+   harness scope.
    Every positive finding must also include a pending-maintainer-approval
    ownership plan. For every retired owner, map each pinned source requirement
    to the proposed neutral owner, preserve every pinned reciprocal BDD feature

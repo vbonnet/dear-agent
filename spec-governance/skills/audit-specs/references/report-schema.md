@@ -418,9 +418,11 @@ runtime behavior, or authorize changes.
 - Require every positive finding to use one bounded applicability basis.
   `active-members` covers each pinned active member with evidence.
   `implementation-only` covers at least two named implementations and cites
-  every current owner across that matrix. A classification label cannot weaken
-  either requirement or turn a harness contract into an implementation-only
-  exception.
+  every current owner across that matrix; it may carry additional pinned
+  applicability evidence. It cannot name an active-harness ID or alias, and
+  its selected shared outline uses `member`, not `harness`. A classification
+  label cannot weaken either requirement or turn a harness contract into an
+  implementation-only exception.
 - Require `merge-now` to use `same-observable` and
   `extract-neutral-contract` to use `same-observable` or
   `overlapping-observables`; require

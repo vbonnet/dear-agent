@@ -3165,11 +3165,12 @@ func TestPositiveFindingApplicabilityPreservesSharedProofAcrossClassifications(t
 		inventory := cloneReport(t, inventoryReport)
 		report := cloneReport(t, semanticReport)
 		finding := &report.Candidates[0]
+		additionalContext := inventoryRequirement(t, inventory, "three/SPEC.md")
 		finding.Classification = "implementation-detail"
 		finding.ApplicabilityBasis = "implementation-only"
 		finding.ApplicabilityRationale = "The two pinned packages are the complete implementation set for this observable."
 		finding.Applicability = []applicability{
-			{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+			{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0], evidenceForRequirement("three/SPEC.md", additionalContext)}},
 			{Member: "two-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[1]}},
 		}
 		finding.OwnershipPlan.CurrentOwners[1].Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
@@ -3186,6 +3187,44 @@ func TestPositiveFindingApplicabilityPreservesSharedProofAcrossClassifications(t
 		}
 		if err := validateAgainstInventory(report, inventory); err != nil {
 			t.Fatalf("validateAgainstInventory() implementation-only positive error=%v", err)
+		}
+	})
+
+	t.Run("implementation-only matrix cannot relabel active harnesses", func(t *testing.T) {
+		report := cloneReport(t, semanticReport)
+		finding := &report.Candidates[0]
+		finding.ApplicabilityBasis = "implementation-only"
+		finding.Applicability = []applicability{
+			{Member: "codex-cli", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+			{Member: "pi-cli", Disposition: "supported", Evidence: []evidence{finding.Evidence[1]}},
+		}
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.Applicability = finding.Applicability
+
+		err := validateReport(report)
+		if err == nil || !strings.Contains(err.Error(), "active harness member") {
+			t.Fatalf("validateReport() error=%v, want active-harness relabeling rejection", err)
+		}
+	})
+
+	t.Run("implementation-only shared proof cannot use a harness column", func(t *testing.T) {
+		inventory := cloneReport(t, inventoryReport)
+		report := cloneReport(t, semanticReport)
+		finding := &report.Candidates[0]
+		finding.ApplicabilityBasis = "implementation-only"
+		finding.Applicability = []applicability{
+			{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+			{Member: "two-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[1]}},
+		}
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.Applicability = finding.Applicability
+
+		if err := validateReport(report); err != nil {
+			t.Fatalf("validateReport() should reach pinned shared-proof validation: %v", err)
+		}
+		err := validateAgainstInventory(report, inventory)
+		if err == nil || !strings.Contains(err.Error(), "member examples column") {
+			t.Fatalf("validateAgainstInventory() error=%v, want harness-column rejection", err)
 		}
 	})
 
@@ -3350,6 +3389,16 @@ func TestHarnessSurfaceClassifierIsBoundedAndIncludesKnownAliases(t *testing.T) 
 	for _, path := range []string{"internal/domain/SPEC.md", "pkg/contracts/SPEC.md", "internal/pipeline/SPEC.md"} {
 		if isHarnessSurfacePath(path, scopes) {
 			t.Fatalf("ordinary implementation path %q was incorrectly classified as a harness surface", path)
+		}
+	}
+	for _, member := range []string{"codex-cli", "codex", ".codex", "pi", ".pi", "claude-hooks"} {
+		if !isActiveHarnessMemberName(member, scopes) {
+			t.Fatalf("active harness member or alias %q was accepted as an implementation label", member)
+		}
+	}
+	for _, member := range []string{"one-package", "two-package", "openai"} {
+		if isActiveHarnessMemberName(member, scopes) {
+			t.Fatalf("ordinary implementation label %q was classified as an active harness", member)
 		}
 	}
 	if !isStrictDescendantOfCurrentOwner("one/nested/SPEC.md", []string{"one/SPEC.md", "two/SPEC.md"}) {

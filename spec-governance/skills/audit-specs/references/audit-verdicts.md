@@ -70,8 +70,11 @@ research or a product decision.
 7. For every positive verdict regardless of classification, select one bounded
    applicability basis. `active-members` covers the full pinned active set and
    its unsupported cases. `implementation-only` names at least two concrete
-   implementations and its evidence spans every current owner. Do not use an
-   implementation matrix to bypass a harness contract's active-member scope.
+   implementations and its evidence spans every current owner; additional
+   pinned applicability evidence is allowed. It cannot name an active-harness
+   ID or alias, and its selected shared outline uses `member`, not `harness`.
+   Do not use an implementation matrix to bypass a harness contract's
+   active-member scope.
 8. Existing BDD features or lower-level tests and the migration consequence.
    Every positive finding, regardless of classification, selects one reciprocal
    shared feature that names every current owner and one exact observable
