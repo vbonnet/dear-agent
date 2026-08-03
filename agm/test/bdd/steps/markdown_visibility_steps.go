@@ -85,7 +85,7 @@ func hiddenExamplesAreExcludedWithoutShiftingVisibleProse(ctx context.Context) e
 func getMarkdownVisibilityState(ctx context.Context) (*markdownVisibilityState, error) {
 	state, ok := ctx.Value(markdownVisibilityStateKey{}).(*markdownVisibilityState)
 	if !ok || state == nil {
-		return nil, fmt.Errorf("Markdown visibility scenario state is unavailable")
+		return nil, fmt.Errorf("markdown visibility scenario state is unavailable")
 	}
 	return state, nil
 }
