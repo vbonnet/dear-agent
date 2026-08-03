@@ -48,8 +48,7 @@ bin/
 *.png
 *.zip
 
-# Database files
-beads.db
+# Database sidecars
 *.db-shm
 *.db-wal
 
