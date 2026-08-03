@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,9 +52,9 @@ type sessionData struct {
 
 // config holds compositor configuration from config.yaml.
 type config struct {
-	Separator  string   `yaml:"separator"`
-	TimeoutMs  int      `yaml:"timeout_ms"`
-	Disable    []string `yaml:"disable"`
+	Separator string   `yaml:"separator"`
+	TimeoutMs int      `yaml:"timeout_ms"`
+	Disable   []string `yaml:"disable"`
 }
 
 func defaultProvidersDir() string {
@@ -243,6 +242,12 @@ func runProviders(cfg config, raw []byte, sd sessionData) []string {
 	if dir == "" {
 		dir = defaultProvidersDir()
 	}
+	return runProvidersInDir(dir, providerTimeout, cfg, raw, sd)
+}
+
+// runProvidersInDir discovers and executes provider scripts in parallel using
+// the supplied directory and timeout.
+func runProvidersInDir(dir string, timeout time.Duration, cfg config, raw []byte, sd sessionData) []string {
 
 	disabled := make(map[string]bool, len(cfg.Disable))
 	for _, d := range cfg.Disable {
@@ -261,18 +266,17 @@ func runProviders(cfg config, raw []byte, sd sessionData) []string {
 	for i, p := range providers {
 		go func(idx int, p providerEntry) {
 			defer func() { done <- idx }()
-			ctx, cancel := context.WithTimeout(context.Background(), providerTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
 			cmd := exec.CommandContext(ctx, p.path)
-			cmd.Stdin = bytes.NewReader(raw)
 			cmd.Env = append(os.Environ(),
 				"AGM_SESSION_NAME="+sd.SessionName,
 				"AGM_SESSION_ID="+sd.SessionID,
 				"AGM_WORKSPACE="+sd.Workspace.CurrentDir,
 			)
 
-			out, err := cmd.Output()
+			out, err := outputProviderCommand(ctx, cmd, raw)
 			if err != nil {
 				return
 			}
