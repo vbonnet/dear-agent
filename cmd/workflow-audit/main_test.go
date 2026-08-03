@@ -33,9 +33,23 @@ func TestRun_UnknownSubcommand_ReturnsError(t *testing.T) {
 }
 
 func TestRunAudit_DryRunFlagIsNotExposed(t *testing.T) {
-	code := run([]string{"run", "--dry-run"}, os.Stdout, os.Stderr)
+	output, err := os.CreateTemp(t.TempDir(), "output")
+	if err != nil {
+		t.Fatalf("CreateTemp output: %v", err)
+	}
+	code := run([]string{"run", "--dry-run"}, output, output)
+	if err := output.Close(); err != nil {
+		t.Fatalf("close output: %v", err)
+	}
 	if code != 2 {
 		t.Errorf("run with removed --dry-run flag = %d, want usage error 2", code)
+	}
+	outputBytes, err := os.ReadFile(output.Name())
+	if err != nil {
+		t.Fatalf("ReadFile output: %v", err)
+	}
+	if !strings.Contains(string(outputBytes), "flag provided but not defined: -dry-run") {
+		t.Fatalf("parse error not routed to supplied stderr: %s", outputBytes)
 	}
 }
 
@@ -45,6 +59,7 @@ func TestRunShow_RendersEveryRemediationField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSQLiteStore: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	findings := []struct {
 		fingerprint string
 		suggested   audit.Remediation
@@ -91,6 +106,8 @@ func TestRunShow_RendersEveryRemediationField(t *testing.T) {
 		}
 		storedIDs[i] = stored.FindingID
 	}
+	// Close the fixture connection before runShow opens the same database. The
+	// cleanup remains registered so early test failures also release it.
 	if err := store.Close(); err != nil {
 		t.Fatalf("close fixture store: %v", err)
 	}

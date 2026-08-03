@@ -104,8 +104,14 @@ func openStore(stderr *os.File, path string) (*audit.SQLiteStore, bool) {
 	return store, true
 }
 
+func newFlagSet(name string, stderr *os.File) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	return fs
+}
+
 func runAudit(args []string, stdout, stderr *os.File) int {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs := newFlagSet("run", stderr)
 	var common commonStoreFlags
 	common.bind(fs)
 	cadence := fs.String("cadence", "daily", "cadence to run: daily|weekly|monthly|on-demand")
@@ -187,7 +193,7 @@ func printReport(w *os.File, r *audit.RunReport) {
 }
 
 func runList(args []string, stdout, stderr *os.File) int {
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs := newFlagSet("list", stderr)
 	var common commonStoreFlags
 	common.bind(fs)
 	state := fs.String("state", "open", "filter by state: open|acknowledged|resolved|reopened|all")
@@ -245,7 +251,7 @@ func truncateTitle(s string, n int) string {
 }
 
 func runShow(args []string, stdout, stderr *os.File) int {
-	fs := flag.NewFlagSet("show", flag.ContinueOnError)
+	fs := newFlagSet("show", stderr)
 	var common commonStoreFlags
 	common.bind(fs)
 	if err := fs.Parse(args); err != nil {
@@ -306,7 +312,7 @@ func runResolve(args []string, stdout, stderr *os.File) int {
 }
 
 func runStateChange(name string, target audit.FindingState, args []string, stdout, stderr *os.File) int {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs := newFlagSet(name, stderr)
 	var common commonStoreFlags
 	common.bind(fs)
 	note := fs.String("note", "", "free-form note")

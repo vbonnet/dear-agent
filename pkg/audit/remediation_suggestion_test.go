@@ -3,11 +3,12 @@ package audit
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestRunnerAutoSuggestionRemainsInertData(t *testing.T) {
-	marker := t.TempDir() + "/must-not-exist"
+	marker := filepath.Join(t.TempDir(), "must-not-exist")
 	suggestion := Remediation{
 		Strategy: StrategyAuto,
 		Command:  "touch " + marker,
