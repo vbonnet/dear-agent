@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 )
 
 // pkgFixture returns a small synthetic module: three packages
@@ -199,6 +206,73 @@ func TestSelectPackages_ExcludesThirdPartyAndStdlib(t *testing.T) {
 	want := []string{"example.com/m/b", "example.com/m/c"}
 	if !sliceEqual(got, want) {
 		t.Fatalf("selectPackages must exclude third-party and stdlib: got %v, want %v", got, want)
+	}
+}
+
+func TestGoTestArgs_BoundsNativeTestBinary(t *testing.T) {
+	got := goTestArgs(
+		options{tags: "integration"},
+		[]string{"example.com/m/a", "example.com/m/b"},
+	)
+	want := []string{
+		"test",
+		"-race",
+		"-count=1",
+		"-timeout=20m0s",
+		"-tags=integration",
+		"example.com/m/a",
+		"example.com/m/b",
+	}
+	if !sliceEqual(got, want) {
+		t.Fatalf("goTestArgs: got %v, want %v", got, want)
+	}
+}
+
+func TestRunTestsPassesNativeTimeoutToGo(t *testing.T) {
+	binDir := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "go-args")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_AFFECTED_GO_ARGS_FILE\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_AFFECTED_GO_ARGS_FILE", argsFile)
+
+	var stderr bytes.Buffer
+	code := runTests(
+		options{base: "origin/main", root: t.TempDir(), tags: "integration"},
+		[]string{"example.com/m/a"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != 0 {
+		t.Fatalf("runTests returned %d: %s", code, stderr.String())
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(string(raw))
+	want := []string{"test", "-race", "-count=1", "-timeout=20m0s", "-tags=integration", "example.com/m/a"}
+	if !sliceEqual(got, want) {
+		t.Fatalf("captured go args: got %v, want %v", got, want)
+	}
+}
+
+func TestProtectGoTestCommandIsGroupCancelable(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "true")
+	protectGoTestCommand(cmd)
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatal("go test child must run in an isolated process group")
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("go test child must cancel its process group")
+	}
+	if cmd.WaitDelay != time.Second {
+		t.Fatalf("go test child WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
+	}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel before start = %v", err)
 	}
 }
 

@@ -44,12 +44,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const (
 	gitCommandTimeout = 30 * time.Second
-	goCommandTimeout  = 20 * time.Minute
+	goTestTimeout     = 20 * time.Minute
+	goCommandTimeout  = 25 * time.Minute
 )
 
 func main() {
@@ -176,7 +178,7 @@ func resolveOptions(opts *options, stderr io.Writer) int {
 	return 0
 }
 
-// runTests shells out to `go test -race -count=1` on the selected
+// runTests shells out to `go test -race -count=1 -timeout=<required CI timeout>` on the selected
 // packages. Empty selection is a clean pass — there are no affected
 // tests, and that is a valid CI outcome, not an error.
 func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
@@ -185,17 +187,14 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
-	args := []string{"test", "-race", "-count=1"}
-	if opts.tags != "" {
-		args = append(args, "-tags="+opts.tags)
-	}
-	args = append(args, pkgs...)
+	args := goTestArgs(opts, pkgs)
 	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = opts.root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	protectGoTestCommand(cmd)
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -205,6 +204,29 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return 0
+}
+
+func goTestArgs(opts options, pkgs []string) []string {
+	args := []string{"test", "-race", "-count=1", "-timeout=" + goTestTimeout.String()}
+	if opts.tags != "" {
+		args = append(args, "-tags="+opts.tags)
+	}
+	return append(args, pkgs...)
+}
+
+func protectGoTestCommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	cmd.WaitDelay = time.Second
 }
 
 // goListPackage mirrors the subset of `go list -json` we use. Fields

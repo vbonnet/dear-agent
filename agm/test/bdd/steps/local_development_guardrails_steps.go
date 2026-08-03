@@ -515,9 +515,21 @@ func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if len(ciMatch) != 2 {
 		return fmt.Errorf("required CI Go test timeout declaration not found")
 	}
-	affectedMatch := regexp.MustCompile(`(?m)^\s*goCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	affectedMatch := regexp.MustCompile(`(?m)^\s*goTestTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
 	if len(affectedMatch) != 2 {
 		return fmt.Errorf("affected integration Go test timeout declaration not found")
+	}
+	commandMatch := regexp.MustCompile(`(?m)^\s*goCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(commandMatch) != 2 {
+		return fmt.Errorf("affected integration process timeout declaration not found")
+	}
+	nativeMinutes, _ := strconv.Atoi(string(affectedMatch[1]))
+	commandMinutes, _ := strconv.Atoi(string(commandMatch[1]))
+	if commandMinutes <= nativeMinutes {
+		return fmt.Errorf("affected integration process timeout lacks cleanup headroom")
+	}
+	if !strings.Contains(string(affected), `"-timeout=" + goTestTimeout.String()`) {
+		return fmt.Errorf("affected integration runner does not pass its timeout to the Go test binary")
 	}
 	state.localTestTimeout = string(localMatch[1])
 	state.affectedTestTimeout = string(affectedMatch[1]) + "m"
