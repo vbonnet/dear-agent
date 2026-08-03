@@ -3,7 +3,7 @@
 //
 // Subcommands:
 //
-//	workflow-audit run    [--cadence daily|weekly|monthly] [--db PATH] [--dry-run]
+//	workflow-audit run    [--cadence daily|weekly|monthly] [--db PATH]
 //	workflow-audit list   [--state open|all] [--severity P0..P3] [--check ID]
 //	workflow-audit show   <finding-id>
 //	workflow-audit ack    <finding-id> [--note "..."]
@@ -109,7 +109,6 @@ func runAudit(args []string, stdout, stderr *os.File) int {
 	var common commonStoreFlags
 	common.bind(fs)
 	cadence := fs.String("cadence", "daily", "cadence to run: daily|weekly|monthly|on-demand")
-	dryRun := fs.Bool("dry-run", false, "execute checks but skip remediation side effects")
 	repoRoot := fs.String("repo", ".", "repository root (defaults to cwd)")
 	verbose := fs.Bool("verbose", false, "debug logging")
 	if err := fs.Parse(args); err != nil {
@@ -139,8 +138,6 @@ func runAudit(args []string, stdout, stderr *os.File) int {
 		_, _ = fmt.Fprintf(stderr, "workflow-audit: build plan: %v\n", err)
 		return 1
 	}
-	plan.DryRun = *dryRun
-
 	store, ok := openStore(stderr, common.dbPath)
 	if !ok {
 		return 1
@@ -282,7 +279,20 @@ func runShow(args []string, stdout, stderr *os.File) int {
 		_, _ = fmt.Fprintf(stdout, "  %s\n", ln)
 	}
 	if f.Suggested.Strategy != audit.StrategyUnspecified {
-		_, _ = fmt.Fprintf(stdout, "suggested:   strategy=%s command=%q\n", f.Suggested.Strategy, f.Suggested.Command)
+		_, _ = fmt.Fprintf(stdout, "suggested:   strategy=%s", f.Suggested.Strategy)
+		if f.Suggested.Command != "" {
+			_, _ = fmt.Fprintf(stdout, " command=%q", f.Suggested.Command)
+		}
+		_, _ = fmt.Fprintln(stdout)
+		if f.Suggested.Patch != "" {
+			_, _ = fmt.Fprintf(stdout, "suggested_patch: %q\n", f.Suggested.Patch)
+		}
+		if f.Suggested.Title != "" {
+			_, _ = fmt.Fprintf(stdout, "suggested_title: %q\n", f.Suggested.Title)
+		}
+		if f.Suggested.Body != "" {
+			_, _ = fmt.Fprintf(stdout, "suggested_body:  %q\n", f.Suggested.Body)
+		}
 	}
 	return 0
 }
