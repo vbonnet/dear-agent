@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
@@ -46,6 +47,23 @@ func TestRunCleanupGitHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestRunCleanupGitBoundsDescendantHeldPipes(t *testing.T) {
+	fakeGit := filepath.Join(t.TempDir(), "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\n(sleep 30) &\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(fakeGit)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	started := time.Now()
+	_, err := runCleanupGit(context.Background(), "", "version")
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("runCleanupGit error = %v, want exec.ErrWaitDelay", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*cleanupCommandWaitDelay {
+		t.Fatalf("runCleanupGit waited %s for descendant-held pipes", elapsed)
+	}
+}
+
 func TestCleanupWorktreeUsesPrimaryAfterRemovingCallerDirectory(t *testing.T) {
 	fixture := newCleanupFixture(t)
 	output := runCleanupHelper(t, fixture)
@@ -69,6 +87,21 @@ func TestCleanupWorktreeUsesPrimaryAfterRemovingCallerDirectory(t *testing.T) {
 		if strings.Contains(strings.ToLower(output), diagnostic) {
 			t.Fatalf("cleanup emitted stale-cwd diagnostic %q:\n%s", diagnostic, output)
 		}
+	}
+}
+
+func TestCleanupWorktreePreservesPrimaryPathWhitespace(t *testing.T) {
+	fixture := newCleanupFixtureWithPrimaryName(t, "primary\ncheckout \t")
+	output := runCleanupHelper(t, fixture)
+
+	if _, err := os.Stat(fixture.linked); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("linked worktree path still exists after cleanup: %v", err)
+	}
+	assertWorktreeRegistration(t, fixture, false)
+	assertBranchRef(t, fixture, false)
+	assertPrimaryUsable(t, fixture.primary)
+	if !strings.Contains(output, "removed local branch "+fixture.branch) {
+		t.Fatalf("cleanup did not preserve the primary worktree path:\n%s", output)
 	}
 }
 
@@ -99,13 +132,17 @@ func TestCleanupWorktreeWarnsWhenDirtyWorktreeCannotBeRemoved(t *testing.T) {
 }
 
 func newCleanupFixture(t *testing.T) cleanupFixture {
+	return newCleanupFixtureWithPrimaryName(t, "primary")
+}
+
+func newCleanupFixtureWithPrimaryName(t *testing.T, primaryName string) cleanupFixture {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture := cleanupFixture{
-		primary: filepath.Join(root, "primary"),
+		primary: filepath.Join(root, primaryName),
 		linked:  filepath.Join(root, "linked-topic"),
 		branch:  "cleanup-topic",
 	}
