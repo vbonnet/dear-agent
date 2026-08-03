@@ -17,6 +17,27 @@ import (
 // accepted until EOF or ctx; CommandContext still terminates only the direct
 // process, so this does not claim descendant cleanup.
 func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]byte, error) {
+	run, err := startProviderCommand(cmd, input)
+	if err != nil {
+		return nil, err
+	}
+	return run.output(ctx)
+}
+
+type providerCommandRun struct {
+	stdinWriter  *os.File
+	stdoutReader *os.File
+	outputBuffer bytes.Buffer
+	inputDone    chan error
+	readDone     chan error
+	waitDone     chan error
+	readErr      error
+
+	stdinCloseOnce sync.Once
+	stdinCloseErr  error
+}
+
+func startProviderCommand(cmd *exec.Cmd, input []byte) (*providerCommandRun, error) {
 	stdinReader, stdinWriter, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("create provider stdin pipe: %w", err)
@@ -50,84 +71,103 @@ func outputProviderCommand(ctx context.Context, cmd *exec.Cmd, input []byte) ([]
 		)
 	}
 
-	var (
-		stdinCloseOnce sync.Once
-		stdinCloseErr  error
-	)
-	closeStdin := func() error {
-		stdinCloseOnce.Do(func() { stdinCloseErr = stdinWriter.Close() })
-		return stdinCloseErr
+	run := &providerCommandRun{
+		stdinWriter:  stdinWriter,
+		stdoutReader: stdoutReader,
+		inputDone:    make(chan error, 1),
+		readDone:     make(chan error, 1),
+		waitDone:     make(chan error, 1),
 	}
-	inputDone := make(chan error, 1)
 	go func() {
 		_, copyErr := io.Copy(stdinWriter, bytes.NewReader(input))
-		inputDone <- errors.Join(copyErr, closeStdin())
+		run.inputDone <- errors.Join(copyErr, run.closeStdin())
 	}()
-
-	var output bytes.Buffer
-	readDone := make(chan error, 1)
 	go func() {
-		_, copyErr := io.Copy(&output, stdoutReader)
-		readDone <- copyErr
+		_, copyErr := io.Copy(&run.outputBuffer, stdoutReader)
+		run.readDone <- copyErr
 	}()
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- cmd.Wait() }()
+	go func() { run.waitDone <- cmd.Wait() }()
+	return run, nil
+}
 
-	var readErr error
-	for waitDone != nil || readDone != nil || inputDone != nil {
+func (run *providerCommandRun) output(ctx context.Context) ([]byte, error) {
+	for run.active() {
 		select {
-		case waitErr := <-waitDone:
-			waitDone = nil
+		case waitErr := <-run.waitDone:
+			run.waitDone = nil
 			if waitErr != nil {
-				inputCloseErr := closeStdin()
-				if inputDone != nil {
-					<-inputDone
-					inputDone = nil
-				}
-				closeErr := stdoutReader.Close()
-				if readDone != nil {
-					readErr = <-readDone
-				}
-				return output.Bytes(), errors.Join(waitErr, inputCloseErr, closeErr, readErr)
+				return run.waitFailure(waitErr)
 			}
-		case <-inputDone:
+		case <-run.inputDone:
 			// A successful provider may deliberately close or ignore stdin.
 			// Treat its side of the pipe closing like os/exec does: input came
 			// from an infallible byte reader, so the copy error is not a
 			// provider failure.
-			inputDone = nil
-		case readErr = <-readDone:
-			readDone = nil
+			run.inputDone = nil
+		case run.readErr = <-run.readDone:
+			run.readDone = nil
 		case <-ctx.Done():
-			closeErr := errors.Join(closeStdin(), stdoutReader.Close())
-			if inputDone != nil {
-				<-inputDone
-				inputDone = nil
-			}
-			if waitDone != nil {
-				<-waitDone
-			}
-			if readDone != nil {
-				<-readDone
-			}
-			return output.Bytes(), errors.Join(ctx.Err(), closeErr)
+			return run.contextFailure(ctx.Err())
 		}
-		if waitDone == nil && readDone == nil && inputDone != nil {
-			closeErr := closeStdin()
-			<-inputDone
-			inputDone = nil
-			if closeErr != nil {
-				return output.Bytes(), closeErr
-			}
+		if err := run.finishInputAfterOutput(); err != nil {
+			return run.outputBuffer.Bytes(), err
 		}
 	}
+	return run.finish()
+}
 
-	closeErr := stdoutReader.Close()
-	if readErr != nil {
-		readErr = fmt.Errorf("read provider stdout: %w", readErr)
+func (run *providerCommandRun) active() bool {
+	return run.waitDone != nil || run.readDone != nil || run.inputDone != nil
+}
+
+func (run *providerCommandRun) closeStdin() error {
+	run.stdinCloseOnce.Do(func() { run.stdinCloseErr = run.stdinWriter.Close() })
+	return run.stdinCloseErr
+}
+
+func (run *providerCommandRun) waitFailure(waitErr error) ([]byte, error) {
+	inputCloseErr := run.closeStdin()
+	if run.inputDone != nil {
+		<-run.inputDone
 	}
-	if readErr != nil {
-		return output.Bytes(), errors.Join(readErr, closeErr)
+	closeErr := run.stdoutReader.Close()
+	if run.readDone != nil {
+		run.readErr = <-run.readDone
 	}
-	return output.Bytes(), closeErr
+	return run.outputBuffer.Bytes(), errors.Join(waitErr, inputCloseErr, closeErr, run.readErr)
+}
+
+func (run *providerCommandRun) contextFailure(contextErr error) ([]byte, error) {
+	closeErr := errors.Join(run.closeStdin(), run.stdoutReader.Close())
+	if run.inputDone != nil {
+		<-run.inputDone
+	}
+	if run.waitDone != nil {
+		<-run.waitDone
+	}
+	if run.readDone != nil {
+		<-run.readDone
+	}
+	return run.outputBuffer.Bytes(), errors.Join(contextErr, closeErr)
+}
+
+func (run *providerCommandRun) finishInputAfterOutput() error {
+	if run.waitDone != nil || run.readDone != nil || run.inputDone == nil {
+		return nil
+	}
+	closeErr := run.closeStdin()
+	<-run.inputDone
+	run.inputDone = nil
+	return closeErr
+}
+
+func (run *providerCommandRun) finish() ([]byte, error) {
+	closeErr := run.stdoutReader.Close()
+	if run.readErr == nil {
+		return run.outputBuffer.Bytes(), closeErr
+	}
+	return run.outputBuffer.Bytes(), errors.Join(
+		fmt.Errorf("read provider stdout: %w", run.readErr),
+		closeErr,
+	)
 }
