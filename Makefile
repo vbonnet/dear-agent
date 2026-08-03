@@ -46,7 +46,7 @@ override _BUILD_STAMP_CR := $(shell printf '\r')
 override _BUILD_STAMP_SQUOTE := '
 override _BUILD_STAMP_DQUOTE := "
 override _EFFECTIVE_GOFLAGS = $(if $(strip $(_CALLER_GOFLAGS)),$(_CALLER_GOFLAGS),$(shell GOFLAGS= go env GOFLAGS))
-override _NORMALIZED_EFFECTIVE_GOFLAGS = $(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst ",,$(subst ',,$(_EFFECTIVE_GOFLAGS)))))
+override _NORMALIZED_EFFECTIVE_GOFLAGS = $(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst $(_BUILD_STAMP_DQUOTE),,$(subst $(_BUILD_STAMP_SQUOTE),,$(_EFFECTIVE_GOFLAGS)))))
 override _GOFLAGS_LDFLAGS = $(filter -ldflags% --ldflags%,$(_NORMALIZED_EFFECTIVE_GOFLAGS))
 override _NORMALIZED_EXTRA_GO_LDFLAGS = $(strip $(_BUILD_STAMP_EXTRA_LDFLAGS))
 override _INVALID_EXTRA_GO_LDFLAGS = $(if $(_NORMALIZED_EXTRA_GO_LDFLAGS),$(if $(filter -%,$(firstword $(_NORMALIZED_EXTRA_GO_LDFLAGS))),,yes),)
