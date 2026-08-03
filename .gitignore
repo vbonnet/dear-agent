@@ -31,6 +31,22 @@ vendor/
 
 # Binaries
 bin/
+/agm/agm-daemon
+/agm/scripts/hooks/posttool-context-monitor
+/agm/scripts/hooks/pretool-test-session-guard
+/chezmoi-deploy
+/mergeloop
+/otel-local
+/safe-pr
+
+# Opaque generated artifacts. Source diagrams remain tracked as D2/SVG text.
+*.db
+*.gif
+*.jpeg
+*.jpg
+*.pdf
+*.png
+*.zip
 
 # Database files
 beads.db
