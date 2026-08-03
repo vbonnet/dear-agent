@@ -17,11 +17,9 @@ not-applicable when the contract is not universal. Do not invent parity.}
 
 ## EARS requirements
 
-**{DOMAIN-01}** When {observable trigger}, the system shall {observable
-outcome}.
+**{DOMAIN-01}** When {observable trigger}, the system shall {observable outcome}.
 
-**{DOMAIN-02}** Where {explicit applicability predicate}, the system shall
-{observable native variation or failure outcome}.
+**{DOMAIN-02}** Where {explicit applicability predicate}, the system shall {observable native variation or failure outcome}.
 
 ## BDD traceability
 
@@ -30,6 +28,8 @@ outcome}.
 ## Authoring notes
 
 - Keep one independently testable observable per stable requirement ID.
+- Keep each requirement ID and its complete EARS sentence on one physical line;
+  repository lint and audit tooling extract requirements line by line.
 - Put replaceable wiring, private symbols, and present-tense file layout in
   architecture, code, or lower-level tests rather than this contract.
 - Before moving or retiring an existing owner, preserve IDs, reciprocal BDD
