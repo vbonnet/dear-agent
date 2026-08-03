@@ -12,7 +12,7 @@
 
 **BUILDSTAMP-02** When ordinary effective `GOFLAGS` are supplied through Make, the process, or persisted GOENV configuration, the system shall preserve their behavior while retaining all protected provenance values.
 
-**BUILDSTAMP-03** When effective `GOFLAGS` contains `-ldflags` or `--ldflags`, the system shall reject the competing ingress before creating the requested artifact.
+**BUILDSTAMP-03** When a top-level effective `GOFLAGS` field has the exact flag name `-ldflags` or `--ldflags`, the system shall reject the competing ingress before creating the requested artifact.
 
 **BUILDSTAMP-04** When unpatterned optional linker flags conflict with Version, GitCommit, BuildDate, or BuiltBy, the system shall retain every Make-owned protected value.
 
@@ -24,9 +24,15 @@
 
 **BUILDSTAMP-08** When callers attempt to override private Make variables, the system shall retain the protected package identity, flag policy, and runtime values.
 
-**BUILDSTAMP-09** When the root Makefile is inspected, the system shall require every explicit `go build -o` recipe to use the shared `BUILD_STAMP_FLAGS` seam.
+**BUILDSTAMP-09** When the root Makefile is inspected, the system shall require every explicit `go build -o` recipe to use the shared `BUILD_STAMP_FLAGS` seam and require its owning target to register the GOFLAGS guard prerequisite.
 
 **BUILDSTAMP-10** When the canonical AGM installation target is executed with ordinary caller `GOFLAGS`, the system shall install both companion binaries, expose all protected stamps from their build metadata, and pass the installed AGM version and reaper revision runtime checks.
+
+**BUILDSTAMP-11** When a quoted `-toolexec` GOFLAGS field contains an argument beginning with `-ldflags-helper`, the system shall build and execute the probe and prove the requested tool wrapper ran.
+
+**BUILDSTAMP-12** When a leading quoted GOFLAGS field is malformed, the system shall reject it before creating the requested artifact without misclassifying an inner wrapper argument as linker ingress.
+
+**BUILDSTAMP-13** When whitespace-only direct GOFLAGS accompanies persisted GOENV linker flags, the system shall treat the direct value as effective and retain protected provenance.
 
 ## Test Traceability
 

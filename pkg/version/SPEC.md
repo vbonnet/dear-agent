@@ -22,11 +22,13 @@
 
 **VERSION-09** When a governed Make build receives ordinary effective `GOFLAGS`, the system shall preserve those Go settings while injecting Version, GitCommit, BuildDate, and BuiltBy provenance.
 
-**VERSION-10** When effective `GOFLAGS` contains `-ldflags` or `--ldflags`, the governed Make build shall fail before invoking Go and direct linker customization to `EXTRA_GO_LDFLAGS`.
+**VERSION-10** When a top-level effective `GOFLAGS` field has the exact flag name `-ldflags` or `--ldflags`, the governed Make build shall fail before invoking the product build and direct linker customization to `EXTRA_GO_LDFLAGS`.
 
 **VERSION-11** When `EXTRA_GO_LDFLAGS` supplies an unpatterned linker argument list beginning with a hyphen, the governed Make build shall treat caller text as opaque data and compose one linker value with protected provenance assignments last; when it supplies Go's package-pattern form, the build shall reject it before invoking Go.
 
 **VERSION-12** When caller provenance contains a Go linker whitespace separator or quote delimiter, the governed Make build shall reject it before invoking Go so metadata cannot reshape or inject linker tokens.
+
+**VERSION-13** When linker-shaped text appears only inside a different quoted GOFLAGS field or a longer flag name, the governed Make build shall preserve it for normal Go toolchain validation.
 
 ## BDD Traceability
 

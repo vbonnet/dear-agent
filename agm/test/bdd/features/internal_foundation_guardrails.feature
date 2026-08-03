@@ -1,6 +1,7 @@
 # SPEC: internal/override/SPEC.md
 # RELATED-SPEC: internal/baseline/SPEC.md
 # RELATED-SPEC: internal/benchmark/SPEC.md
+# RELATED-SPEC: internal/buildstamp/SPEC.md
 # RELATED-SPEC: internal/ci/act/SPEC.md
 # RELATED-SPEC: internal/common/SPEC.md
 # RELATED-SPEC: internal/drift/SPEC.md
@@ -24,6 +25,7 @@ Feature: Internal foundation guardrails
       | package            |
       | internal/baseline  |
       | internal/benchmark |
+      | internal/buildstamp |
       | internal/ci/act    |
       | internal/common    |
       | internal/drift     |

@@ -28,13 +28,14 @@ override _BUILD_STAMP_VERSION := $(if $(filter file,$(origin VERSION)),$(VERSION
 override _BUILD_STAMP_GIT_COMMIT := $(if $(filter file,$(origin GIT_COMMIT)),$(GIT_COMMIT),$(value GIT_COMMIT))
 override _BUILD_STAMP_DATE := $(if $(filter file,$(origin BUILD_DATE)),$(BUILD_DATE),$(value BUILD_DATE))
 override _BUILD_STAMP_TEST_OUTPUT := $(value BUILD_STAMP_TEST_OUTPUT)
-override _CALLER_GOFLAGS := $(value GOFLAGS)
+override _BUILD_STAMP_RAW_GOFLAGS := $(value GOFLAGS)
+override _BUILD_STAMP_RAW_GOENV := $(value GOENV)
 unexport EXTRA_GO_LDFLAGS VERSION GIT_COMMIT BUILD_DATE BUILD_STAMP_TEST_OUTPUT
-override GOFLAGS := $(_CALLER_GOFLAGS)
-export GOFLAGS _BUILD_STAMP_EXTRA_LDFLAGS _BUILD_STAMP_VERSION _BUILD_STAMP_GIT_COMMIT _BUILD_STAMP_DATE _BUILD_STAMP_TEST_OUTPUT
+override GOFLAGS := $(_BUILD_STAMP_RAW_GOFLAGS)
+export GOFLAGS _BUILD_STAMP_RAW_GOFLAGS _BUILD_STAMP_RAW_GOENV _BUILD_STAMP_EXTRA_LDFLAGS _BUILD_STAMP_VERSION _BUILD_STAMP_GIT_COMMIT _BUILD_STAMP_DATE _BUILD_STAMP_TEST_OUTPUT
 
-# GNU Make word functions do not treat every separator accepted by GOFLAGS as
-# whitespace. Normalize newline and carriage return explicitly before matching.
+# Protected stamp metadata must remain one Go linker token. Name each parser
+# delimiter explicitly so the Make-side rejection below cannot be overridden.
 override define _BUILD_STAMP_NEWLINE
 
 
@@ -45,9 +46,6 @@ override _BUILD_STAMP_TAB := $(shell printf '\t')
 override _BUILD_STAMP_CR := $(shell printf '\r')
 override _BUILD_STAMP_SQUOTE := '
 override _BUILD_STAMP_DQUOTE := "
-override _EFFECTIVE_GOFLAGS = $(if $(strip $(_CALLER_GOFLAGS)),$(_CALLER_GOFLAGS),$(shell GOFLAGS= go env GOFLAGS))
-override _NORMALIZED_EFFECTIVE_GOFLAGS = $(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst $(_BUILD_STAMP_DQUOTE),,$(subst $(_BUILD_STAMP_SQUOTE),,$(_EFFECTIVE_GOFLAGS)))))
-override _GOFLAGS_LDFLAGS = $(filter -ldflags% --ldflags%,$(_NORMALIZED_EFFECTIVE_GOFLAGS))
 override _NORMALIZED_EXTRA_GO_LDFLAGS = $(strip $(_BUILD_STAMP_EXTRA_LDFLAGS))
 override _INVALID_EXTRA_GO_LDFLAGS = $(if $(_NORMALIZED_EXTRA_GO_LDFLAGS),$(if $(filter -%,$(firstword $(_NORMALIZED_EXTRA_GO_LDFLAGS))),,yes),)
 override _NORMALIZED_STAMP_VERSION = $(subst $(_BUILD_STAMP_DQUOTE), ,$(subst $(_BUILD_STAMP_SQUOTE), ,$(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst $(_BUILD_STAMP_TAB), ,$(_BUILD_STAMP_VERSION))))))
@@ -61,7 +59,55 @@ override _MANDATORY_VERSION_LDFLAGS = \
 	-X $(_BUILD_STAMP_PACKAGE).BuildDate=$${_BUILD_STAMP_DATE} \
 	-X $(_BUILD_STAMP_PACKAGE).BuiltBy=makefile
 override _BUILD_STAMP_LDFLAGS = $${_BUILD_STAMP_EXTRA_LDFLAGS} $(_MANDATORY_VERSION_LDFLAGS)
-override BUILD_STAMP_FLAGS = $(if $(_INVALID_EXTRA_GO_LDFLAGS),$(error EXTRA_GO_LDFLAGS must be an unpatterned linker arg list beginning with '-'; Go package-pattern forms are unsupported),)$(if $(strip $(_GOFLAGS_LDFLAGS)),$(error GOFLAGS must not contain -ldflags or --ldflags for governed builds; use EXTRA_GO_LDFLAGS),)-ldflags "$(_BUILD_STAMP_LDFLAGS)"
+override BUILD_STAMP_FLAGS = $(if $(_INVALID_EXTRA_GO_LDFLAGS),$(error EXTRA_GO_LDFLAGS must be an unpatterned linker arg list beginning with '-'; Go package-pattern forms are unsupported),)-ldflags "$(_BUILD_STAMP_LDFLAGS)"
+
+# Every target that owns a literal root-Makefile `go build -o` recipe is
+# admitted through the Go-compatible GOFLAGS guard. tests/buildstamp compares
+# this registry with the recipes so a new governed build cannot bypass it.
+override _GOVERNED_BUILD_TARGETS := \
+	health-check \
+	build-routing-guard \
+	build-stamp-test-probe \
+	build-configure-settings \
+	build-safe-push \
+	build-safe-merge \
+	build-safe-rebase \
+	build-token-refresher \
+	build-safe-pr \
+	build-src-recovery \
+	build-safe-unlock \
+	build-jaeger-health \
+	build-otel-local \
+	build-bead-pr-sync \
+	build-bead-pr-guard \
+	build-codex-hook-json \
+	build-bead-close-guard \
+	build-drift-check \
+	build-babysit-prs \
+	build-mergeloop \
+	build-resolve-review-threads \
+	build-merge-audit \
+	build-dear-deploy \
+	build-write-guards \
+	build-bumblebee \
+	build-pr-linkify \
+	build-fd-pressure \
+	build-gopls-watchdog \
+	build-disk-watchdog \
+	build-override-ledger-helper \
+	build-override-audit-launchdaemon-installer \
+	build-override-audit-systemd-installer \
+	build-vroom-dispatch \
+	build-vroom-mesh \
+	build-vroom-prompt-gen \
+	build-agm-job \
+	build-src-health \
+	build-burndown-maint \
+	build-vroom-governor \
+	build-agm \
+	build-agm-mcp-server \
+	build-engram-mcp \
+	build-session-skill-extractor
 #
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
@@ -1486,3 +1532,12 @@ build-session-skill-extractor:
 
 install-session-skill-extractor: build-session-skill-extractor
 	$(call install-go-bin,bin/session-skill-extractor)
+
+# Classify effective GOFLAGS once per governed dependency graph before any
+# product recipe runs. The bootstrap ignores caller/persisted Go flags,
+# workspace selection, and cross-compilation dimensions; the guard restores
+# captured GOENV only inside its shell-free fallback query.
+.PHONY: build-stamp-goflags-guard
+$(_GOVERNED_BUILD_TARGETS): | build-stamp-goflags-guard
+build-stamp-goflags-guard:
+	@GOFLAGS= GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp

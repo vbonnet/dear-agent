@@ -63,6 +63,51 @@ func TestGovernedBuildPreservesPersistedOrdinaryGOFLAGS(t *testing.T) {
 	assertBuildStamp(t, got, "unset", "enabled")
 }
 
+func TestGovernedBuildPreservesQuotedTOOLEXECField(t *testing.T) {
+	requireMake(t)
+	tempDir := t.TempDir()
+	wrapperPath := filepath.Join(tempDir, "toolexec-wrapper")
+	markerPath := filepath.Join(tempDir, "toolexec-invocations")
+	wrapper := `#!/bin/sh
+set -eu
+if test "$#" -lt 2 || test "$1" != "-ldflags-helper"; then
+	echo "unexpected toolexec wrapper arguments" >&2
+	exit 2
+fi
+shift
+printf '%s\n' "$1" >> "$BUILDSTAMP_TOOLEXEC_MARKER"
+exec "$@"
+`
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	goflags := "'-toolexec=" + wrapperPath + " -ldflags-helper'"
+	got := buildProbe(t, map[string]string{
+		"BUILDSTAMP_TOOLEXEC_MARKER": markerPath,
+		"GOCACHE":                    filepath.Join(tempDir, "gocache"),
+	}, "GOFLAGS="+goflags)
+	assertBuildStamp(t, got, "unset", "disabled")
+
+	invocations, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read toolexec liveness marker: %v", err)
+	}
+	if len(strings.TrimSpace(string(invocations))) == 0 {
+		t.Fatal("quoted GOFLAGS build succeeded without invoking the requested toolexec wrapper")
+	}
+}
+
+func TestWhitespaceOnlyDirectGOFLAGSShadowsPersistedGOENV(t *testing.T) {
+	requireMake(t)
+	goenv := writeGOENV(t, "-ldflags=-s")
+	got := buildProbe(t, map[string]string{
+		"GOENV":   goenv,
+		"GOFLAGS": " \t\r\n",
+	})
+	assertBuildStamp(t, got, "unset", "disabled")
+}
+
 func TestGovernedBuildComposesOptionalAndProtectedLinkerFlags(t *testing.T) {
 	requireMake(t)
 	extra := "-s -X 'main.extra=caller  value'" +
@@ -117,13 +162,11 @@ func TestCallerGOFLAGSAreOpaqueToMake(t *testing.T) {
 	requireMake(t)
 	const marker = "MAKE_MUST_NOT_EXPAND_GOFLAGS"
 	output, err := runMake(t, nil,
-		"-n",
-		"build-stamp-test-probe",
-		"BUILD_STAMP_TEST_OUTPUT="+filepath.Join(t.TempDir(), "unused"),
+		"build-stamp-goflags-guard",
 		"GOFLAGS=$(info "+marker+")-p=2",
 	)
 	if err != nil {
-		t.Fatalf("opaque GOFLAGS dry run failed: %v\n%s", err, output)
+		t.Fatalf("opaque GOFLAGS guard failed: %v\n%s", err, output)
 	}
 	if strings.Contains(output, marker) {
 		t.Fatalf("Make evaluated caller GOFLAGS as Make syntax:\n%s", output)
@@ -140,14 +183,13 @@ func TestGovernedBuildProtectsInternalMakeVariables(t *testing.T) {
 		"_BUILD_STAMP_GIT_COMMIT=caller",
 		"_BUILD_STAMP_DATE=caller",
 		"_BUILD_STAMP_TEST_OUTPUT="+filepath.Join(t.TempDir(), "hijacked"),
-		"_CALLER_GOFLAGS=-ldflags=-s",
+		"_BUILD_STAMP_RAW_GOFLAGS=-ldflags=-s",
+		"_BUILD_STAMP_RAW_GOENV="+filepath.Join(t.TempDir(), "hijacked-goenv"),
 		"_MANDATORY_VERSION_LDFLAGS=-s",
-		"_EFFECTIVE_GOFLAGS=-ldflags=-s",
-		"_NORMALIZED_EFFECTIVE_GOFLAGS=-ldflags=-s",
-		"_GOFLAGS_LDFLAGS=-ldflags=-s",
 		"_NORMALIZED_EXTRA_GO_LDFLAGS=example.invalid=-s",
 		"_INVALID_EXTRA_GO_LDFLAGS=yes",
 		"_BUILD_STAMP_LDFLAGS=-s",
+		"_GOVERNED_BUILD_TARGETS=",
 		"BUILD_STAMP_FLAGS=-ldflags=-s",
 	)
 	assertBuildStamp(t, got, "unset", "disabled")
@@ -165,6 +207,8 @@ func TestGovernedBuildRejectsCompetingGOFLAGSBeforeBuilding(t *testing.T) {
 		{name: "make double dash", arg: "GOFLAGS=--ldflags=-s"},
 		{name: "make single quoted", arg: "GOFLAGS='-ldflags=-s'"},
 		{name: "make double quoted", arg: `GOFLAGS="--ldflags=-s"`},
+		{name: "make adjacent quoted fields", arg: "GOFLAGS='-p=2''--ldflags=-s'"},
+		{name: "make adjacent quoted and plain fields", arg: "GOFLAGS='-p=2'--ldflags=-s"},
 		{name: "make package pattern", arg: "GOFLAGS=-ldflags=github.com/vbonnet/dear-agent/...=-s"},
 		{name: "make carriage return", arg: "GOFLAGS=-p=2\r--ldflags=-s"},
 		{name: "process environment", env: map[string]string{"GOFLAGS": "--ldflags -s"}},
@@ -179,6 +223,32 @@ func TestGovernedBuildRejectsCompetingGOFLAGSBeforeBuilding(t *testing.T) {
 	t.Run("persisted GOENV", func(t *testing.T) {
 		assertRejectedBeforeBuild(t, map[string]string{"GOENV": writeGOENV(t, "-ldflags=-s")}, "")
 	})
+}
+
+func TestGovernedBuildRejectsMalformedGOFLAGSBeforeBuilding(t *testing.T) {
+	requireMake(t)
+	outputPath := filepath.Join(t.TempDir(), "malformed-goflags-probe")
+	output, err := runMake(t, map[string]string{
+		"GOFLAGS": "'-toolexec=/tmp/wrapper -ldflags-helper",
+	},
+		"build-stamp-test-probe",
+		"BUILD_STAMP_TEST_OUTPUT="+outputPath,
+		"VERSION="+testBuildVersion,
+		"GIT_COMMIT="+testBuildCommit,
+		"BUILD_DATE="+testBuildDate,
+	)
+	if err == nil {
+		t.Fatalf("malformed GOFLAGS unexpectedly built probe:\n%s", output)
+	}
+	if !strings.Contains(output, "GOFLAGS uses invalid Go quoted-field syntax") {
+		t.Fatalf("malformed GOFLAGS rejection is not actionable:\n%s", output)
+	}
+	if strings.Contains(output, "GOFLAGS must not contain -ldflags") {
+		t.Fatalf("malformed wrapper argument was misclassified as linker ingress:\n%s", output)
+	}
+	if _, statErr := os.Stat(outputPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("malformed GOFLAGS created output %s (stat error %v)", outputPath, statErr)
+	}
 }
 
 func TestGovernedBuildRejectsUnsafeProtectedMetadataBeforeBuilding(t *testing.T) {
@@ -261,14 +331,45 @@ func TestGovernedBuildRecipesUseSharedStampSeam(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	const registryPrefix = "override _GOVERNED_BUILD_TARGETS :="
+	declaredTargets := map[string]bool{}
+	recipeOwners := map[string]bool{}
 	governedBuilds := 0
+	readingRegistry := false
+	var currentTargets []string
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, registryPrefix) {
+			readingRegistry = true
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, registryPrefix))
+		}
+		if readingRegistry {
+			continued := strings.HasSuffix(trimmed, "\\")
+			trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "\\"))
+			for target := range strings.FieldsSeq(trimmed) {
+				declaredTargets[target] = true
+			}
+			readingRegistry = continued
+			continue
+		}
+		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmed, "#") {
+			beforeColon, afterColon, found := strings.Cut(line, ":")
+			if found && !strings.HasPrefix(afterColon, "=") && !strings.Contains(beforeColon, "=") {
+				currentTargets = strings.Fields(strings.TrimSpace(beforeColon))
+			}
+		}
 		if !strings.HasPrefix(line, "\t") || !strings.Contains(line, "go build") || !strings.Contains(line, "-o ") {
 			continue
 		}
 		governedBuilds++
+		if len(currentTargets) == 0 {
+			t.Errorf("governed build has no parseable owning target: %s", strings.TrimSpace(line))
+		}
+		for _, target := range currentTargets {
+			recipeOwners[target] = true
+		}
 		if !strings.Contains(line, "$(BUILD_STAMP_FLAGS)") {
 			t.Errorf("governed build bypasses shared stamp seam: %s", strings.TrimSpace(line))
 		}
@@ -281,6 +382,18 @@ func TestGovernedBuildRecipesUseSharedStampSeam(t *testing.T) {
 	}
 	if governedBuilds == 0 {
 		t.Fatal("Makefile scanner found no governed Go builds")
+	}
+	if missing := sortedSetDifference(recipeOwners, declaredTargets); len(missing) > 0 {
+		t.Errorf("governed build targets missing from _GOVERNED_BUILD_TARGETS: %v", missing)
+	}
+	if stale := sortedSetDifference(declaredTargets, recipeOwners); len(stale) > 0 {
+		t.Errorf("_GOVERNED_BUILD_TARGETS entries without a governed build recipe: %v", stale)
+	}
+	if !strings.Contains(string(data), "$(_GOVERNED_BUILD_TARGETS): | build-stamp-goflags-guard") {
+		t.Error("governed target registry is not attached to build-stamp-goflags-guard")
+	}
+	if !strings.Contains(string(data), "GOFLAGS= GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp") {
+		t.Error("build-stamp GOFLAGS guard bootstrap does not isolate caller Go configuration")
 	}
 }
 
@@ -411,6 +524,9 @@ func isolatedEnvironment(overrides map[string]string) []string {
 		"GOENV": true, "GOFLAGS": true, "GOWORK": true,
 		"MAKEFLAGS": true, "MFLAGS": true, "MAKEOVERRIDES": true,
 	}
+	for key := range overrides {
+		blocked[key] = true
+	}
 	env := make([]string, 0, len(os.Environ())+len(values))
 	for _, entry := range os.Environ() {
 		key, _, found := strings.Cut(entry, "=")
@@ -427,6 +543,17 @@ func isolatedEnvironment(overrides map[string]string) []string {
 		env = append(env, key+"="+values[key])
 	}
 	return env
+}
+
+func sortedSetDifference(left, right map[string]bool) []string {
+	var difference []string
+	for value := range left {
+		if !right[value] {
+			difference = append(difference, value)
+		}
+	}
+	sort.Strings(difference)
+	return difference
 }
 
 func sourceRoot(t *testing.T) string {
