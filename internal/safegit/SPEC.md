@@ -40,6 +40,8 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-12** When configured flaky checks fail for the first allowed occurrence, the system shall request the sanctioned rerun before treating the check as a hard block.
 
+**SAFEGIT-13** When post-merge cleanup attempts linked-worktree removal and local branch deletion, the system shall preserve the primary worktree path from NUL-delimited porcelain output, execute both Git operations from that stable worktree with caller cancellation, a bounded per-command deadline, and bounded pipe draining, attempt worktree removal before conservative branch deletion, and report cleanup failures as warnings without changing the completed provider merge result.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
