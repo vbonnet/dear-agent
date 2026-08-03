@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -52,7 +53,7 @@ func init() {
 }
 
 //nolint:gocyclo // reason: linear CLI driver covering many rewind targets
-func runRewind(cmd *cobra.Command, args []string) error {
+func runRewind(cmd *cobra.Command, args []string) (runErr error) {
 	targetPhase := args[0]
 
 	// Get project directory
@@ -61,7 +62,11 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("acquire rewind transition lock: %w", err)
 	}
-	defer func() { _ = transitionLock.Close() }()
+	defer func() {
+		if closeErr := transitionLock.Close(); closeErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("release rewind transition lock: %w", closeErr))
+		}
+	}()
 
 	// Read existing canonical status from the project directory.
 	st, err := status.ParseV2FromDir(projectDir)

@@ -25,11 +25,11 @@ func acquireRewindTransitionLock(projectDir string) (rewindTransitionLock, error
 		return nil, fmt.Errorf("open rewind lock: %w", err)
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = file.Close()
+		closeErr := file.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return nil, errRewindTransitionInProgress
+			return nil, errors.Join(errRewindTransitionInProgress, closeErr)
 		}
-		return nil, fmt.Errorf("acquire rewind lock: %w", err)
+		return nil, fmt.Errorf("acquire rewind lock: %w", errors.Join(err, closeErr))
 	}
 	return &unixRewindTransitionLock{file: file}, nil
 }

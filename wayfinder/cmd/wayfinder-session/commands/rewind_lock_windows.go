@@ -28,21 +28,25 @@ func acquireRewindTransitionLock(projectDir string) (rewindTransitionLock, error
 	lock := &windowsRewindTransitionLock{file: file}
 	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)
 	if err := windows.LockFileEx(windows.Handle(file.Fd()), flags, 0, 1, 0, &lock.overlapped); err != nil {
-		_ = file.Close()
+		closeErr := file.Close()
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-			return nil, errRewindTransitionInProgress
+			return nil, errors.Join(errRewindTransitionInProgress, closeErr)
 		}
-		return nil, fmt.Errorf("acquire rewind lock: %w", err)
+		return nil, fmt.Errorf("acquire rewind lock: %w", errors.Join(err, closeErr))
 	}
 	return lock, nil
 }
 
-func rewindLockFilePath(projectDir string) (string, error) {
+func rewindLockFilePath(projectDir string) (lockPath string, returnErr error) {
 	project, err := os.Open(projectDir)
 	if err != nil {
 		return "", fmt.Errorf("open rewind project directory: %w", err)
 	}
-	defer func() { _ = project.Close() }()
+	defer func() {
+		if closeErr := project.Close(); closeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rewind project directory: %w", closeErr))
+		}
+	}()
 	info, err := project.Stat()
 	if err != nil {
 		return "", fmt.Errorf("inspect rewind project directory: %w", err)
