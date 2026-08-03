@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 )
 
 // GitIntegrator handles git operations for wayfinder sessions
@@ -82,16 +84,22 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 
 // CommitRewind commits the status and retrospective markers produced by a
 // rewind so the documented next start-phase command sees a clean project.
-func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string) error {
+func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error {
 	if !g.IsGitRepo() {
 		return fmt.Errorf("project directory is not a git repository")
+	}
+	archivePath := archiveRef.RelativePath()
+	cleanArchivePath := filepath.ToSlash(filepath.Clean(archivePath))
+	if archivePath == "" || filepath.IsAbs(archivePath) || archivePath != cleanArchivePath || !strings.HasPrefix(cleanArchivePath, ".wayfinder/archives/") {
+		return fmt.Errorf("invalid rewind archive reference %q", archivePath)
 	}
 	message := fmt.Sprintf("wayfinder: rewind %s to %s\n\nWayfinder-Event: rewind", fromPhase, toPhase)
 	return g.commitScoped(message, []string{
 		"WAYFINDER-STATUS.md",
 		history.HistoryFilename,
 		history.LegacyHistoryFilename,
-		"RETRO-retrospective.md",
+		retrospective.RetroFilename,
+		archivePath,
 	})
 }
 
@@ -224,10 +232,10 @@ func (g *GitIntegrator) gitAdd(file string) error {
 
 func isCanonicalMarker(file string) bool {
 	switch file {
-	case "WAYFINDER-STATUS.md", history.HistoryFilename, history.LegacyHistoryFilename:
+	case "WAYFINDER-STATUS.md", history.HistoryFilename, history.LegacyHistoryFilename, retrospective.RetroFilename:
 		return true
 	default:
-		return false
+		return strings.HasPrefix(filepath.ToSlash(filepath.Clean(file)), ".wayfinder/archives/")
 	}
 }
 

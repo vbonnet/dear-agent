@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
 )
 
 func setupGitRepo(t *testing.T) string {
@@ -283,7 +284,7 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 	}
 }
 
-func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
+func TestCommitRewindCommitsCanonicalMarkersAndExactArchive(t *testing.T) {
 	repoDir := setupGitRepo(t)
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -295,6 +296,7 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
+		".gitignore":              "*.jsonl\n.wayfinder/archives/\nRETRO-retrospective.md\n",
 		"WAYFINDER-STATUS.md":     "status: in-progress\n",
 		"WAYFINDER-HISTORY.jsonl": "{}\n",
 		"RETRO-retrospective.md":  "# Retro\n",
@@ -304,10 +306,24 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := gittest.Command(t, repoDir, "add", ".gitignore").Run(); err != nil {
+		t.Fatal(err)
+	}
 	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := New(repoDir).CommitRewind("BUILD", "DESIGN"); err != nil {
+	archiveRef, err := archive.New(repoDir).ArchivePhase("BUILD")
+	if err != nil {
+		t.Fatalf("create rewind archive: %v", err)
+	}
+	sibling := filepath.Join(repoDir, ".wayfinder", "archives", "BUILD-sibling")
+	if err := os.MkdirAll(sibling, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sibling, "unrelated.txt"), []byte("private\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(repoDir).CommitRewind("BUILD", "DESIGN", archiveRef); err != nil {
 		t.Fatalf("CommitRewind: %v", err)
 	}
 	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
@@ -315,13 +331,16 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	committed := string(showOutput)
-	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl", "RETRO-retrospective.md"} {
+	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl", "RETRO-retrospective.md", archiveRef.RelativePath() + "/WAYFINDER-STATUS.md"} {
 		if !strings.Contains(committed, name) {
 			t.Errorf("rewind commit missing %s:\n%s", name, committed)
 		}
 	}
 	if strings.Contains(committed, "user-notes.md") {
 		t.Errorf("rewind swept unrelated staged file:\n%s", committed)
+	}
+	if strings.Contains(committed, "BUILD-sibling") {
+		t.Errorf("rewind committed sibling archive:\n%s", committed)
 	}
 }
 
@@ -502,7 +521,11 @@ func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(g.projectDir, "RETRO-retrospective.md"), []byte("# Retro\n"), 0o644); err != nil {
 				return err
 			}
-			return g.CommitRewind("BUILD", "DESIGN")
+			archiveRef, err := archive.New(g.projectDir).ArchivePhase("BUILD")
+			if err != nil {
+				return err
+			}
+			return g.CommitRewind("BUILD", "DESIGN", archiveRef)
 		},
 	}
 

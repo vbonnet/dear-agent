@@ -25,9 +25,13 @@
 
 **WFCMD-09** When SETUP starts, or when BUILD starts after SETUP was skipped, the system shall create a tracking bead if none exists and shall preserve the phase transition when tracker creation is unavailable.
 
-**WFCMD-10** When a rewind has been persisted and its Git commit fails, the system shall report a warning without reporting the rewind operation as failed.
+**WFCMD-10** When required archive, trace, or Git commit persistence for a rewind fails, the system shall return an explicit error and shall not report the rewind operation as successful.
 
 **WFCMD-11** When `session start` receives a project directory outside a Git work tree, the system shall reject the request before creating any lifecycle artifact.
+
+**WFCMD-12** When a deterministic pre-rewind archive input is invalid, the system shall reject the rewind before mutating canonical status or appending rewind trace evidence.
+
+**WFCMD-13** While a rewind transition is in progress for a project, the system shall reject a concurrent rewind before parsing or mutating that project's lifecycle state.
 
 ## Traceability
 

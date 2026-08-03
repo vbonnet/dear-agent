@@ -57,6 +57,11 @@ func runRewind(cmd *cobra.Command, args []string) error {
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
+	transitionLock, err := acquireRewindTransitionLock(projectDir)
+	if err != nil {
+		return fmt.Errorf("acquire rewind transition lock: %w", err)
+	}
+	defer func() { _ = transitionLock.Close() }()
 
 	// Read existing canonical status from the project directory.
 	st, err := status.ParseV2FromDir(projectDir)
@@ -92,13 +97,14 @@ func runRewind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("prepare history for rewind: %w", err)
 	}
 
-	// Archive current state before rewinding
+	// Archive current state before rewinding. Archive publication is required so
+	// a reset status never exists without its pre-rewind snapshot.
 	archiver := archive.New(projectDir)
-	if err := archiver.ArchivePhase(st.CurrentWaypoint); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to archive current state: %v\n", err)
-	} else {
-		fmt.Println("📦 Current state archived")
+	archiveRef, err := archiver.ArchivePhase(st.CurrentWaypoint)
+	if err != nil {
+		return fmt.Errorf("archive current state: %w", err)
 	}
+	fmt.Println("📦 Current state archived")
 
 	// Capture fromPhase BEFORE updating (needed for retrospective logging)
 	fromPhase := st.CurrentWaypoint
@@ -114,18 +120,21 @@ func runRewind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
 
-	// Log rewind event to retrospective (dual logging: JSON + markdown)
-	// Errors are non-blocking (logged to stderr)
+	// Log rewind event to retrospective (dual logging: JSON + markdown). These
+	// writes are required evidence for every accepted rewind, including a
+	// same-phase replay with magnitude zero.
 	flags := retrospective.RewindFlags{
 		NoPrompt:  rewindNoPrompt,
 		Reason:    rewindReason,
 		Learnings: rewindLearnings,
 	}
 	if err := retrospective.LogRewindEvent(projectDir, fromPhase, targetPhase, flags); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: retrospective logging failed: %v\n", err)
+		return fmt.Errorf("persist rewind trace: %w", err)
 	}
 	gitIntegrator := git.New(projectDir)
-	commitRewindState(gitIntegrator, fromPhase, targetPhase, os.Stdout, os.Stderr)
+	if err := commitRewindState(gitIntegrator, fromPhase, targetPhase, archiveRef, os.Stdout); err != nil {
+		return err
+	}
 
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
@@ -134,18 +143,18 @@ func runRewind(cmd *cobra.Command, args []string) error {
 
 type rewindCommitter interface {
 	IsGitRepo() bool
-	CommitRewind(fromPhase, toPhase string) error
+	CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error
 }
 
-func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, stdout, stderr io.Writer) {
+func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, archiveRef archive.ArchiveRef, stdout io.Writer) error {
 	if !integrator.IsGitRepo() {
-		return
+		return nil
 	}
-	if err := integrator.CommitRewind(fromPhase, targetPhase); err != nil {
-		fmt.Fprintf(stderr, "Warning: rewind persisted, but its Git commit failed: %v\n", err)
-		return
+	if err := integrator.CommitRewind(fromPhase, targetPhase, archiveRef); err != nil {
+		return fmt.Errorf("commit rewind trace: %w", err)
 	}
 	fmt.Fprintln(stdout, "📝 Rewind state committed")
+	return nil
 }
 
 func validateRewindTarget(st *status.StatusV2, targetPhase string) error {

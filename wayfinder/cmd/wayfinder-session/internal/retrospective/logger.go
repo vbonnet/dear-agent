@@ -2,9 +2,7 @@ package retrospective
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
@@ -14,51 +12,46 @@ import (
 // LogRewindEvent is the main entry point for rewind retrospective logging
 //
 // Orchestrates:
-// 1. Magnitude calculation (skip if magnitude 0)
+// 1. Magnitude calculation
 // 2. User prompting (if needed)
 // 3. Context capture (parallel)
 // 4. Dual logging: WAYFINDER-HISTORY.jsonl (JSON Lines) + RETRO-retrospective.md (markdown)
 //
-// Errors are logged to stderr but don't block rewind operation (fail-gracefully).
-func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
-	// Wrap in defer/recover to ensure rewind never fails due to logger crash
+// Required history and retrospective writes return an error to the rewind
+// command so it cannot claim a trace-complete transition without its evidence.
+func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "Error: retrospective logger panic: %v\n", r)
+			err = fmt.Errorf("retrospective logger panic: %v", r)
 		}
 	}()
+	return logRewindEvent(projectDir, fromPhase, toPhase, flags)
+}
 
+func logRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
 	// Calculate magnitude (number of phases between from and to)
 	magnitude, err := CalculateMagnitude(fromPhase, toPhase)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to calculate magnitude: %v\n", err)
-		return nil // Non-blocking error
-	}
-
-	// Skip logging for magnitude 0 (no-op rewind)
-	if magnitude == 0 {
-		return nil
+		return fmt.Errorf("calculate rewind magnitude: %w", err)
 	}
 
 	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
-		if errors.Is(err, history.ErrAmbiguousHistory) {
-			return fmt.Errorf("refuse rewind logging with ambiguous history: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Warning: failed to prepare history: %v\n", err)
+		return fmt.Errorf("prepare rewind history: %w", err)
 	}
 
 	// Read status for context capture
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to read status: %v\n", err)
-		return nil // Non-blocking error
+		return fmt.Errorf("read rewind status: %w", err)
 	}
 
 	// Prompt user for context (if needed)
 	userCtx, err := PromptUserForContext(magnitude, flags)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to prompt user: %v\n", err)
-		userCtx = &UserProvidedContext{} // Continue with empty context
+		return fmt.Errorf("collect rewind context: %w", err)
+	}
+	if userCtx == nil {
+		userCtx = &UserProvidedContext{}
 	}
 
 	// Capture context snapshot (parallel git/deliverables/phase)
@@ -79,13 +72,12 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 
 	// Dual logging: History (JSON) + canonical RETRO deliverable (markdown)
 	if err := LogToHistory(projectDir, data); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to log to history: %v\n", err)
+		return fmt.Errorf("append rewind history: %w", err)
 	}
 
 	if err := AppendToRetro(projectDir, data); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to append to RETRO: %v\n", err)
+		return fmt.Errorf("append rewind retrospective: %w", err)
 	}
-
 	return nil
 }
 
