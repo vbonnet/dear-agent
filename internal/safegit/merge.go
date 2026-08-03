@@ -2,7 +2,8 @@
 // principle 9: an atomic, vetted wrapper for PR merges that cannot be bypassed.
 //
 // Required before any merge:
-//   - ALL CI checks pass (no red, no pending — not just required checks)
+//   - All effective required CI checks pass (discovery failure gates every
+//     reported check rather than weakening the boundary)
 //   - No unresolved review threads exist
 //   - Minimum soak: head commit is at least 5 minutes old
 //
@@ -16,9 +17,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -476,43 +479,224 @@ type checkRun struct {
 }
 
 type requiredStatusChecksResponse struct {
-	Checks []struct {
+	Contexts []string `json:"contexts"`
+	Checks   []struct {
 		Context string `json:"context"`
+		AppID   *int64 `json:"app_id"`
 	} `json:"checks"`
 }
 
-// fetchRequiredChecks returns the set of required status check names for the
-// main branch. If the API call fails, an empty set is returned so the caller
-// falls back to validating all checks (fail-strict).
-func fetchRequiredChecks(repo string) map[string]bool {
+type appliedBranchRule struct {
+	Type       string `json:"type"`
+	Parameters struct {
+		RequiredStatusChecks []struct {
+			Context       string `json:"context"`
+			IntegrationID *int64 `json:"integration_id"`
+		} `json:"required_status_checks"`
+	} `json:"parameters"`
+}
+
+type requiredCheckIdentity struct {
+	Context       string
+	IntegrationID int64
+	Scoped        bool
+}
+
+type requiredCheckPolicy struct {
+	Identities           map[requiredCheckIdentity]bool
+	HasRequiredWorkflows bool
+}
+
+type prBaseResult struct {
+	BaseRefName string `json:"baseRefName"`
+}
+
+// discoverRequiredChecks returns the complete layered CI policy for the PR's
+// base branch. Applied rulesets and classic branch protection are independent
+// sources that GitHub layers, so both must be fetched successfully before any
+// subset of checks can be trusted. A classic 404 is authoritative known-empty;
+// every other discovery or parse failure blocks the merge.
+func discoverRequiredChecks(repo, branch string) (requiredCheckPolicy, error) {
 	parts := strings.SplitN(repo, "/", 2)
-	if len(parts) != 2 {
-		return nil
+	if len(parts) != 2 || branch == "" {
+		return requiredCheckPolicy{}, fmt.Errorf("invalid required-check target %q branch %q", repo, branch)
 	}
-	out, err := runCommand(exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/%s/branches/main/protection/required_status_checks", parts[0], parts[1]),
+
+	// --paginate --slurp makes omission impossible when more than one API page
+	// of rules applies. The parser expects one nested array per returned page.
+	rulesOut, rulesErr := runCommand(exec.Command("gh", "api", "--paginate", "--slurp",
+		rulesBranchEndpoint(repo, branch),
+	))
+	var rulesPolicy requiredCheckPolicy
+	if rulesErr == nil {
+		var parseErr error
+		rulesPolicy, parseErr = parseAppliedRulesRequiredChecks(rulesOut)
+		if parseErr != nil {
+			rulesErr = parseErr
+		}
+	}
+
+	classicOut, classicErr := runCommand(exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/%s/branches/%s/protection/required_status_checks", parts[0], parts[1], url.PathEscape(branch)),
+	))
+	var classicPolicy requiredCheckPolicy
+	if classicErr != nil {
+		if isHTTPNotFound(classicErr) {
+			classicErr = nil
+		}
+	} else {
+		classicPolicy, classicErr = parseClassicRequiredChecks(classicOut)
+	}
+	if err := errors.Join(rulesErr, classicErr); err != nil {
+		return requiredCheckPolicy{}, fmt.Errorf("discovering effective required checks: %w", err)
+	}
+	return mergeRequiredCheckPolicies(rulesPolicy, classicPolicy), nil
+}
+
+func rulesBranchEndpoint(repo, branch string) string {
+	return fmt.Sprintf("repos/%s/rules/branches/%s?per_page=100", repo, url.PathEscape(branch))
+}
+
+func isHTTPNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "HTTP 404")
+}
+
+func parseClassicRequiredChecks(data []byte) (requiredCheckPolicy, error) {
+	var resp requiredStatusChecksResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return requiredCheckPolicy{}, fmt.Errorf("parsing classic required checks: %w", err)
+	}
+	policy := newRequiredCheckPolicy()
+	for _, context := range resp.Contexts {
+		policy.add(context, nil)
+	}
+	for _, c := range resp.Checks {
+		policy.add(c.Context, c.AppID)
+	}
+	return policy, nil
+}
+
+func parseAppliedRulesRequiredChecks(data []byte) (requiredCheckPolicy, error) {
+	var pages [][]appliedBranchRule
+	if err := json.Unmarshal(data, &pages); err != nil {
+		return requiredCheckPolicy{}, fmt.Errorf("parsing applied branch rules: %w", err)
+	}
+	policy := newRequiredCheckPolicy()
+	for _, rules := range pages {
+		for _, rule := range rules {
+			switch rule.Type {
+			case "required_status_checks":
+				for _, check := range rule.Parameters.RequiredStatusChecks {
+					policy.add(check.Context, check.IntegrationID)
+				}
+			case "workflows", "required_workflows":
+				policy.HasRequiredWorkflows = true
+			}
+		}
+	}
+	return policy, nil
+}
+
+func newRequiredCheckPolicy() requiredCheckPolicy {
+	return requiredCheckPolicy{
+		Identities: make(map[requiredCheckIdentity]bool),
+	}
+}
+
+func (p *requiredCheckPolicy) add(context string, integrationID *int64) {
+	if context == "" {
+		return
+	}
+	identity := requiredCheckIdentity{Context: context}
+	if integrationID != nil {
+		identity.Scoped = true
+		identity.IntegrationID = *integrationID
+	}
+	p.Identities[identity] = true
+}
+
+func (p requiredCheckPolicy) contexts() map[string]bool {
+	contexts := make(map[string]bool, len(p.Identities))
+	for identity := range p.Identities {
+		contexts[identity.Context] = true
+	}
+	return contexts
+}
+
+func (p requiredCheckPolicy) ambiguousContexts() []string {
+	counts := make(map[string]int, len(p.Identities))
+	for identity := range p.Identities {
+		counts[identity.Context]++
+	}
+	var ambiguous []string
+	for context, count := range counts {
+		if count > 1 {
+			ambiguous = append(ambiguous, context)
+		}
+	}
+	sort.Strings(ambiguous)
+	return ambiguous
+}
+
+func mergeRequiredCheckPolicies(policies ...requiredCheckPolicy) requiredCheckPolicy {
+	merged := newRequiredCheckPolicy()
+	for _, policy := range policies {
+		merged.HasRequiredWorkflows = merged.HasRequiredWorkflows || policy.HasRequiredWorkflows
+		for identity := range policy.Identities {
+			merged.Identities[identity] = true
+		}
+	}
+	return merged
+}
+
+func fetchPRBaseBranch(prNum int, repo string) (string, error) {
+	out, err := runCommand(exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "baseRefName",
 	))
 	if err != nil {
-		return nil
+		return "", fmt.Errorf("gh pr view base branch failed: %w", err)
 	}
-	var resp requiredStatusChecksResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil
+	var result prBaseResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return "", fmt.Errorf("parsing PR base branch: %w", err)
 	}
-	required := make(map[string]bool, len(resp.Checks))
-	for _, c := range resp.Checks {
-		required[c.Context] = true
+	if result.BaseRefName == "" {
+		return "", fmt.Errorf("PR #%d has no baseRefName", prNum)
 	}
-	return required
+	return result.BaseRefName, nil
+}
+
+func classifyProviderRequiredChecks(providerRequired []checkRun, policy requiredCheckPolicy) ([]checkRun, error) {
+	if ambiguous := policy.ambiguousContexts(); len(ambiguous) > 0 {
+		return nil, fmt.Errorf("multiple required integration identities share context text and cannot be proven independently: %s", strings.Join(ambiguous, ", "))
+	}
+	expected := policy.contexts()
+	classified := append([]checkRun(nil), providerRequired...)
+	seen := make(map[string]bool, len(providerRequired))
+	for _, check := range providerRequired {
+		if !expected[check.Name] {
+			return nil, fmt.Errorf("provider reports required check %q absent from discovered branch policy", check.Name)
+		}
+		seen[check.Name] = true
+	}
+	for context := range expected {
+		if !seen[context] {
+			classified = append(classified, checkRun{Name: context, State: "pending"})
+		}
+	}
+	return classified, nil
 }
 
 // checkAllCI verifies that all required CI checks on the PR have passed.
-// It fetches the branch-protection required check list and only gates on those,
-// so non-required checks that fail fleet-wide (e.g. Doc Proximity Check) do
-// not block merges. If the required check list cannot be fetched, all checks
-// are validated (fail-strict fallback).
+// It fetches the effective required check list for the PR's base branch and
+// only gates on those, so advisory checks that fail fleet-wide do not block
+// merges. Discovery failures and unsupported required-workflow rules block;
+// a branch that is authoritatively known to require no CI contexts retains the
+// conservative repository policy of validating every reported check.
 func checkAllCI(prNum int, repo string) error {
-	out, err := runCommand(exec.Command("gh", "pr", "checks",
+	allOut, err := runCommand(exec.Command("gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--json", "name,state",
@@ -520,32 +704,69 @@ func checkAllCI(prNum int, repo string) error {
 	if err != nil {
 		return fmt.Errorf("gh pr checks failed: %w", err)
 	}
-
-	required := fetchRequiredChecks(repo)
-	if len(required) > 0 {
-		// Filter to only required checks before validating.
-		var allChecks []checkRun
-		if err := json.Unmarshal(out, &allChecks); err != nil {
-			return fmt.Errorf("parsing check output: %w", err)
-		}
-		var requiredOnly []checkRun
-		seen := make(map[string]bool)
-		for _, c := range allChecks {
-			if required[c.Name] {
-				requiredOnly = append(requiredOnly, c)
-				seen[c.Name] = true
-			}
-		}
-		// Required checks not yet reported count as pending (fail-safe).
-		for req := range required {
-			if !seen[req] {
-				requiredOnly = append(requiredOnly, checkRun{Name: req, State: "pending"})
-			}
-		}
-		b, _ := json.Marshal(requiredOnly)
-		return parseCheckRuns(b)
+	var allChecks []checkRun
+	if err := json.Unmarshal(allOut, &allChecks); err != nil {
+		return fmt.Errorf("parsing all-check output: %w", err)
 	}
-	return parseCheckRuns(out)
+
+	baseBranch, err := fetchPRBaseBranch(prNum, repo)
+	if err != nil {
+		return err
+	}
+	policy, err := discoverRequiredChecks(repo, baseBranch)
+	if err != nil {
+		return err
+	}
+	if policy.HasRequiredWorkflows {
+		return fmt.Errorf("required workflow rules apply to %s; safe-merge cannot yet prove missing workflow runs", baseBranch)
+	}
+
+	requiredOut, requiredErr := runCommand(exec.Command("gh", "pr", "checks",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--required",
+		"--json", "name,state",
+	))
+	if requiredErr != nil {
+		if len(policy.Identities) > 0 {
+			return fmt.Errorf("provider required-check projection unavailable for %d configured identity requirement(s): %w", len(policy.Identities), requiredErr)
+		}
+		fmt.Fprintln(os.Stderr, "safe-merge: base branch has no required CI contexts; validating all reported checks (conservative policy)")
+		return parseCheckRuns(allOut)
+	}
+
+	var providerRequired []checkRun
+	if err := json.Unmarshal(requiredOut, &providerRequired); err != nil {
+		return fmt.Errorf("parsing provider-required check output: %w", err)
+	}
+	if len(providerRequired) == 0 && len(policy.Identities) == 0 {
+		fmt.Fprintln(os.Stderr, "safe-merge: base branch has no required CI contexts; validating all reported checks (conservative policy)")
+		return parseCheckRuns(allOut)
+	}
+	requiredOnly, err := classifyProviderRequiredChecks(providerRequired, policy)
+	if err != nil {
+		return fmt.Errorf("reconciling provider-required checks with discovered policy: %w", err)
+	}
+	requiredNames := make([]string, 0, len(requiredOnly))
+	requiredByName := make(map[string]bool, len(requiredOnly))
+	for _, check := range requiredOnly {
+		requiredNames = append(requiredNames, check.Name)
+		requiredByName[check.Name] = true
+	}
+	var informational []string
+	for _, check := range allChecks {
+		if !requiredByName[check.Name] {
+			informational = append(informational, fmt.Sprintf("%s (%s)", check.Name, check.State))
+		}
+	}
+	sort.Strings(requiredNames)
+	sort.Strings(informational)
+	fmt.Fprintf(os.Stderr, "safe-merge: provider-effective required checks: %s\n", strings.Join(requiredNames, ", "))
+	if len(informational) > 0 {
+		fmt.Fprintf(os.Stderr, "safe-merge: informational checks (not merge-gating): %s\n", strings.Join(informational, ", "))
+	}
+	b, _ := json.Marshal(requiredOnly)
+	return parseCheckRuns(b)
 }
 
 // parseCheckRuns validates that every check in the JSON input has passed.

@@ -124,6 +124,10 @@ Feature: Local development guardrails
     When AGM runs the safe-pr final transaction audit regression
     Then each safe-pr transaction should have one accurate audit record
 
+  Scenario: Safe merge distinguishes required checks from advisory history
+    When AGM runs the effective required-check regressions
+    Then safe-merge should enforce complete provider-required CI without advisory drift
+
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured
     When AGM validates Go test timeout parity

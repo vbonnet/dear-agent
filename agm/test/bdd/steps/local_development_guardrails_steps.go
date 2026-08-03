@@ -53,6 +53,8 @@ type localDevGuardrailState struct {
 	childRegressionErr   error
 	auditRegression      string
 	auditRegressionErr   error
+	requiredCIRegression string
+	requiredCIError      error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -104,6 +106,8 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
 	ctx.Step(`^AGM runs the safe-pr final transaction audit regression$`, agmRunsSafePRFinalTransactionAuditRegression)
 	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
+	ctx.Step(`^AGM runs the effective required-check regressions$`, agmRunsEffectiveRequiredCheckRegressions)
+	ctx.Step(`^safe-merge should enforce complete provider-required CI without advisory drift$`, safeMergeShouldEnforceProviderRequiredCI)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
@@ -291,6 +295,29 @@ func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) 
 	}
 	if state.auditRegressionErr != nil {
 		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
+	}
+	return nil
+}
+
+func agmRunsEffectiveRequiredCheckRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.requiredCIRegression, state.requiredCIError = runLocalGuardrailGoTest(ctx,
+		`^Test(ParseAppliedRulesRequiredChecks|ParseAppliedRulesRequiredChecksKnownEmpty|ParseAppliedRulesRequiredChecksFlagsRequiredWorkflows|ParseClassicRequiredChecksPreservesIntegrationScope|MergeRequiredCheckPoliciesUnionsLayeredSources|DiscoverRequiredChecksAcceptsAuthoritativeEmpty|DiscoverRequiredChecksRejectsPartialPolicyOnSourceError|DiscoverRequiredChecksUsesPaginatedSlurp|RulesBranchEndpointEscapesSlashBase|ProviderRequiredClassificationIgnoresAdvisoryFailure|ProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing|ProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity|ProviderRequiredClassificationRejectsDiscoveryDisagreement|CheckAllCIIgnoresFailedAdvisoryCheck)$`,
+		"./internal/safegit",
+	)
+	return nil
+}
+
+func safeMergeShouldEnforceProviderRequiredCI(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.requiredCIError != nil {
+		return fmt.Errorf("effective required-check regressions: %w: %s", state.requiredCIError, state.requiredCIRegression)
 	}
 	return nil
 }

@@ -104,6 +104,251 @@ func TestParseCheckRuns_Empty(t *testing.T) {
 	}
 }
 
+func TestParseAppliedRulesRequiredChecks(t *testing.T) {
+	data := []byte(`[[
+		{"type":"pull_request","parameters":{"required_approving_review_count":0}},
+		{"type":"required_status_checks","parameters":{"required_status_checks":[
+			{"context":"Build"},{"context":"Lint","integration_id":42},{"context":""}
+		]}}
+	],[
+		{"type":"required_status_checks","parameters":{"required_status_checks":[
+			{"context":"Build"},{"context":"Security"}
+		]}}
+	]]`)
+	policy, err := parseAppliedRulesRequiredChecks(data)
+	if err != nil {
+		t.Fatalf("parseAppliedRulesRequiredChecks() error = %v", err)
+	}
+	contexts := policy.contexts()
+	for _, name := range []string{"Build", "Lint", "Security"} {
+		if !contexts[name] {
+			t.Errorf("required check %q missing from %#v", name, policy.Identities)
+		}
+	}
+	if len(contexts) != 3 {
+		t.Fatalf("required check count = %d, want 3: %#v", len(contexts), policy.Identities)
+	}
+	if !policy.Identities[requiredCheckIdentity{Context: "Lint", IntegrationID: 42, Scoped: true}] {
+		t.Fatal("integration-scoped required check identity was discarded")
+	}
+}
+
+func TestParseAppliedRulesRequiredChecksRejectsMalformedJSON(t *testing.T) {
+	if _, err := parseAppliedRulesRequiredChecks([]byte(`{"type":`)); err == nil {
+		t.Fatal("expected malformed applied-rules JSON to fail closed")
+	}
+}
+
+func TestParseAppliedRulesRequiredChecksKnownEmpty(t *testing.T) {
+	policy, err := parseAppliedRulesRequiredChecks([]byte(`[[]]`))
+	if err != nil {
+		t.Fatalf("known-empty applied rules error = %v", err)
+	}
+	if len(policy.Identities) != 0 || policy.HasRequiredWorkflows {
+		t.Fatalf("known-empty policy = %#v", policy)
+	}
+}
+
+func TestParseAppliedRulesRequiredChecksFlagsRequiredWorkflows(t *testing.T) {
+	policy, err := parseAppliedRulesRequiredChecks([]byte(`[[{"type":"workflows","parameters":{}}]]`))
+	if err != nil {
+		t.Fatalf("required workflow parse error = %v", err)
+	}
+	if !policy.HasRequiredWorkflows {
+		t.Fatal("required workflow rule must block until missing runs can be proven")
+	}
+}
+
+func TestParseClassicRequiredChecksPreservesIntegrationScope(t *testing.T) {
+	policy, err := parseClassicRequiredChecks([]byte(`{
+		"contexts":["Legacy"],
+		"checks":[{"context":"Build","app_id":99}]
+	}`))
+	if err != nil {
+		t.Fatalf("classic required check parse error = %v", err)
+	}
+	contexts := policy.contexts()
+	if !contexts["Legacy"] || !contexts["Build"] {
+		t.Fatalf("classic contexts = %#v", policy.Identities)
+	}
+	if !policy.Identities[requiredCheckIdentity{Context: "Build", IntegrationID: 99, Scoped: true}] {
+		t.Fatal("classic app-scoped identity was discarded")
+	}
+}
+
+func TestMergeRequiredCheckPoliciesUnionsLayeredSources(t *testing.T) {
+	ruleset := newRequiredCheckPolicy()
+	ruleset.add("Ruleset", nil)
+	classic := newRequiredCheckPolicy()
+	integrationID := int64(7)
+	classic.add("Classic", &integrationID)
+	merged := mergeRequiredCheckPolicies(ruleset, classic)
+	if !merged.contexts()["Ruleset"] || !merged.Identities[requiredCheckIdentity{Context: "Classic", IntegrationID: 7, Scoped: true}] {
+		t.Fatalf("layered policy was not unioned: %#v", merged)
+	}
+}
+
+func TestDiscoverRequiredChecksAcceptsAuthoritativeEmpty(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  *rules/branches*) printf '%s\n' '[[]]' ;;
+  *protection/required_status_checks*) printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  *) printf '%s\n' 'unexpected gh invocation' >&2; exit 2 ;;
+esac
+`)
+	policy, err := discoverRequiredChecks("owner/repo", "feature/base")
+	if err != nil {
+		t.Fatalf("authoritative empty policy error = %v", err)
+	}
+	if len(policy.Identities) != 0 || policy.HasRequiredWorkflows {
+		t.Fatalf("authoritative empty policy = %#v", policy)
+	}
+}
+
+func TestDiscoverRequiredChecksRejectsPartialPolicyOnSourceError(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  *rules/branches*) printf '%s\n' 'gh: provider unavailable (HTTP 500)' >&2; exit 1 ;;
+  *protection/required_status_checks*) printf '%s\n' '{"contexts":["Classic"]}' ;;
+  *) printf '%s\n' 'unexpected gh invocation' >&2; exit 2 ;;
+esac
+`)
+	if _, err := discoverRequiredChecks("owner/repo", "main"); err == nil {
+		t.Fatal("partial classic policy must not be accepted when ruleset discovery fails")
+	}
+}
+
+func installRequiredCheckFakeGH(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gh")
+	script := "#!/bin/sh\nset -eu\n" + body
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestRulesBranchEndpointEscapesSlashBase(t *testing.T) {
+	got := rulesBranchEndpoint("owner/repo", "release/v1")
+	want := "repos/owner/repo/rules/branches/release%2Fv1?per_page=100"
+	if got != want {
+		t.Fatalf("rules endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestDiscoverRequiredChecksUsesPaginatedSlurp(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+if [ "$1" = api ] && [ "$2" = --paginate ] && [ "$3" = --slurp ]; then
+  printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]'
+elif [ "$1" = api ] && printf '%s' "$2" | grep -q 'protection/required_status_checks'; then
+  printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2
+  exit 1
+else
+  printf '%s\n' "unexpected gh invocation: $*" >&2
+  exit 2
+fi
+`)
+	policy, err := discoverRequiredChecks("owner/repo", "main")
+	if err != nil {
+		t.Fatalf("paginated discovery error = %v", err)
+	}
+	if !policy.contexts()["Build"] {
+		t.Fatalf("paginated discovery policy = %#v", policy)
+	}
+}
+
+func TestProviderRequiredClassificationIgnoresAdvisoryFailure(t *testing.T) {
+	policy := newRequiredCheckPolicy()
+	policy.add("Build", nil)
+	provider := []checkRun{{Name: "Build", State: "success"}}
+	classified, err := classifyProviderRequiredChecks(provider, policy)
+	if err != nil {
+		t.Fatalf("classify provider-required checks: %v", err)
+	}
+	if err := parseCheckRuns(marshalJSON(classified)); err != nil {
+		t.Fatalf("green provider-required check should pass despite an advisory failure outside the provider projection: %v", err)
+	}
+}
+
+func TestProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider []checkRun
+		expected map[string]bool
+		want     string
+	}{
+		{name: "failed", provider: []checkRun{{Name: "Build", State: "failure"}}, expected: map[string]bool{"Build": true}, want: "Build"},
+		{name: "pending", provider: []checkRun{{Name: "Build", State: "pending"}}, expected: map[string]bool{"Build": true}, want: "pending"},
+		{name: "missing", provider: nil, expected: map[string]bool{"Build": true}, want: "pending"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := newRequiredCheckPolicy()
+			for context := range tc.expected {
+				policy.add(context, nil)
+			}
+			classified, classifyErr := classifyProviderRequiredChecks(tc.provider, policy)
+			if classifyErr != nil {
+				t.Fatalf("classification error = %v", classifyErr)
+			}
+			err := parseCheckRuns(marshalJSON(classified))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity(t *testing.T) {
+	policy := newRequiredCheckPolicy()
+	first, second := int64(1), int64(2)
+	policy.add("Build", &first)
+	policy.add("Build", &second)
+	_, err := classifyProviderRequiredChecks([]checkRun{{Name: "Build", State: "success"}}, policy)
+	if err == nil || !strings.Contains(err.Error(), "multiple required integration identities") {
+		t.Fatalf("one present and one missing integration identity error = %v", err)
+	}
+}
+
+func TestProviderRequiredClassificationRejectsDiscoveryDisagreement(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy requiredCheckPolicy
+	}{
+		{name: "configured policy", policy: func() requiredCheckPolicy {
+			policy := newRequiredCheckPolicy()
+			policy.add("Build", nil)
+			return policy
+		}()},
+		{name: "empty policy", policy: newRequiredCheckPolicy()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := classifyProviderRequiredChecks([]checkRun{{Name: "Undiscovered", State: "success"}}, tc.policy)
+			if err == nil || !strings.Contains(err.Error(), "absent from discovered branch policy") {
+				t.Fatalf("discovery disagreement error = %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckAllCIIgnoresFailedAdvisoryCheck(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr checks 7 --repo owner/repo --json name,state") printf '%s\n' '[{"name":"Build","state":"success"},{"name":"Advisory","state":"failure"}]' ;;
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' '[{"name":"Build","state":"success"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	if err := checkAllCI(7, "owner/repo"); err != nil {
+		t.Fatalf("green required check with red advisory check should pass: %v", err)
+	}
+}
+
 // --- parseReviewThreads ---
 
 type reviewThreadNode struct {

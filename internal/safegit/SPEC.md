@@ -1,8 +1,8 @@
 # Safe Git Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-08-03 -->
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Baseline
 **Scope:** `internal/safegit`.
 
@@ -28,7 +28,7 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-06** When safe merge is invoked without a positive PR number or owner/repo, the system shall reject the request.
 
-**SAFEGIT-07** When safe merge gates run, the system shall require all CI checks to pass.
+**SAFEGIT-07** When safe merge gates run on a branch with required CI checks, the system shall require every provider-effective required check to pass and shall not block on failed informational checks.
 
 **SAFEGIT-08** When unresolved review threads exist and review checks are not skipped, the system shall block the merge.
 
@@ -39,6 +39,18 @@ used by agents instead of raw git or raw GitHub merge commands.
 **SAFEGIT-11** When repo safe-merge configuration is malformed, the system shall fail loudly before running merge gates.
 
 **SAFEGIT-12** When configured flaky checks fail for the first allowed occurrence, the system shall request the sanctioned rerun before treating the check as a hard block.
+
+**SAFEGIT-13** When the effective required-check policy cannot be completely discovered, the system shall block the merge before classifying CI results.
+
+**SAFEGIT-14** When the effective base-branch policy is authoritatively known to require no CI checks, the system shall require every reported CI check to pass.
+
+**SAFEGIT-15** When multiple branch policies apply, the system shall enforce the union of their required CI contexts and shall treat an unreported required context as pending.
+
+**SAFEGIT-16** When a required CI context is scoped to a provider integration, the system shall use the provider's integration-aware required-check classification rather than context text alone, and shall block when multiple integration identities sharing one context cannot be proven independently.
+
+**SAFEGIT-17** When an applicable required workflow cannot be proven complete, the system shall block the merge.
+
+**SAFEGIT-18** When the provider's effective required-check projection contains a context absent from the discovered branch policy, the system shall block the merge as an incomplete-policy disagreement.
 
 ## BDD Traceability
 
