@@ -787,7 +787,7 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 // then deletes the local branch. This mirrors the post-merge cleanup in
 // AGENTS.md §5. Failures are printed as warnings, not returned as errors.
 func cleanupWorktree(branch string) {
-	// List worktrees in JSON format.
+	// List worktrees in porcelain format.
 	out, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: git worktree list: %v\n", err)
@@ -813,16 +813,24 @@ func cleanupWorktree(branch string) {
 			currentPath = ""
 		}
 	}
+	if mainWorktree == "" {
+		fmt.Fprintln(os.Stderr, "safe-merge: cleanup: git worktree list returned no primary worktree")
+		return
+	}
 
 	for _, path := range toRemove {
 		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removing worktree %s\n", path)
-		if out, err := exec.Command("git", "worktree", "remove", path).CombinedOutput(); err != nil {
+		removeCmd := exec.Command("git", "worktree", "remove", path)
+		removeCmd.Dir = mainWorktree
+		if out, err := removeCmd.CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: worktree remove %s: %v: %s\n", path, err, out)
 		}
 	}
 
 	// Delete the local branch if it exists.
-	if out, err := exec.Command("git", "branch", "-d", branch).CombinedOutput(); err != nil {
+	deleteCmd := exec.Command("git", "branch", "-d", branch)
+	deleteCmd.Dir = mainWorktree
+	if out, err := deleteCmd.CombinedOutput(); err != nil {
 		// -d refuses to delete if unmerged; that's fine — we already merged.
 		// Suppress the error if it's just "branch not found".
 		if !strings.Contains(string(out), "not found") {
