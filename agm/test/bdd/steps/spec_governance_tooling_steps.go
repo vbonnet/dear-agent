@@ -1,3 +1,5 @@
+//go:build darwin || linux
+
 package steps
 
 import (
@@ -107,13 +109,13 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 		state := &specGovernanceToolingState{repoRoot: packageSpecBDDRepoRoot()}
 		return context.WithValue(ctx, specGovernanceToolingStateKey{}, state), nil
 	})
-	ctx.Step(`^AGM runs the focused pinned SPEC inventory unit check$`, exercisePinnedSPECInventory)
-	ctx.Step(`^AGM runs the focused non-verdict SPEC audit lead unit check$`, exerciseNonVerdictSPECAuditLeads)
-	ctx.Step(`^AGM runs the focused reciprocal SPEC and BDD diagnostic unit check$`, exerciseReciprocalSPECBDDDiagnostics)
-	ctx.Step(`^AGM runs the focused pinned finding validation unit check$`, exercisePinnedSPECFindingValidation)
-	ctx.Step(`^AGM runs the focused bounded offline rendering unit check$`, exerciseBoundedOfflineSPECAuditRendering)
-	ctx.Step(`^AGM runs the focused read-only audit boundary unit check$`, exerciseReadOnlySPECAuditBoundary)
-	ctx.Step(`^the focused SPEC audit unit check should pass$`, specGovernanceBehaviorShouldPass)
+	ctx.Step(specGovernancePinnedInventoryStep, exercisePinnedSPECInventory)
+	ctx.Step(specGovernanceNonVerdictLeadStep, exerciseNonVerdictSPECAuditLeads)
+	ctx.Step(specGovernanceReciprocalDiagnosticStep, exerciseReciprocalSPECBDDDiagnostics)
+	ctx.Step(specGovernanceFindingValidationStep, exercisePinnedSPECFindingValidation)
+	ctx.Step(specGovernanceOfflineRenderingStep, exerciseBoundedOfflineSPECAuditRendering)
+	ctx.Step(specGovernanceReadOnlyBoundaryStep, exerciseReadOnlySPECAuditBoundary)
+	ctx.Step(specGovernanceResultStep, specGovernanceBehaviorShouldPass)
 }
 
 func exercisePinnedSPECInventory(ctx context.Context) error {
