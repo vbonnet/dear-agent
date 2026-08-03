@@ -523,8 +523,14 @@ func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if len(commandMatch) != 2 {
 		return fmt.Errorf("affected integration process timeout declaration not found")
 	}
-	nativeMinutes, _ := strconv.Atoi(string(affectedMatch[1]))
-	commandMinutes, _ := strconv.Atoi(string(commandMatch[1]))
+	nativeMinutes, err := strconv.Atoi(string(affectedMatch[1]))
+	if err != nil {
+		return fmt.Errorf("parse affected integration native timeout: %w", err)
+	}
+	commandMinutes, err := strconv.Atoi(string(commandMatch[1]))
+	if err != nil {
+		return fmt.Errorf("parse affected integration process timeout: %w", err)
+	}
 	if commandMinutes <= nativeMinutes {
 		return fmt.Errorf("affected integration process timeout lacks cleanup headroom")
 	}

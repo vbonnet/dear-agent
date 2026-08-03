@@ -274,6 +274,10 @@ func TestProtectGoTestCommandIsGroupCancelable(t *testing.T) {
 	if err := cmd.Cancel(); err != nil {
 		t.Fatalf("cancel before start = %v", err)
 	}
+	cmd.Process = &os.Process{Pid: 0}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel with invalid pid = %v", err)
+	}
 }
 
 func TestIsForceFullPath(t *testing.T) {

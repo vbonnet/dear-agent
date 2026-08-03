@@ -217,7 +217,7 @@ func goTestArgs(opts options, pkgs []string) []string {
 func protectGoTestCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		if cmd.Process == nil {
+		if cmd.Process == nil || cmd.Process.Pid <= 0 {
 			return nil
 		}
 		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
