@@ -1,6 +1,7 @@
 package safegit
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -31,9 +32,18 @@ func TestCleanupWorktreeHelper(t *testing.T) {
 		t.Fatal("cleanup helper requires a branch")
 	}
 
-	cleanupWorktree(branch)
+	cleanupWorktree(context.Background(), branch)
 	// Exit without asking the test runner to inspect the helper's removed cwd.
 	os.Exit(0)
+}
+
+func TestRunCleanupGitHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := runCleanupGit(ctx, "", "version"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("runCleanupGit error = %v, want context.Canceled", err)
+	}
 }
 
 func TestCleanupWorktreeUsesPrimaryAfterRemovingCallerDirectory(t *testing.T) {
