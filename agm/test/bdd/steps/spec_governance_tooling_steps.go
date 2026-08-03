@@ -196,13 +196,13 @@ func runSpecAuditGoTests(ctx context.Context, names ...string) error {
 		return nil
 	}
 
-	command, err := newSpecAuditGoTestCommand(testCtx, state.repoRoot, childRuntime, names...)
+	command, err := newSpecAuditGoTestCommand(state.repoRoot, childRuntime, names...)
 	if err != nil {
 		state.err = err
 		return nil
 	}
 	state.command = strings.Join(command.Args, " ")
-	output, commandErr := runBoundedSpecAuditCommand(command, specAuditGoTestOutputLimit)
+	output, commandErr := runBoundedSpecAuditCommand(testCtx, command, specAuditGoTestOutputLimit)
 	state.output = output.String()
 	switch {
 	case testCtx.Err() != nil:
@@ -239,7 +239,7 @@ func runSpecAuditGoTests(ctx context.Context, names ...string) error {
 	return nil
 }
 
-func newSpecAuditGoTestCommand(ctx context.Context, repoRoot string, childRuntime specAuditGoChildRuntime, names ...string) (*exec.Cmd, error) {
+func newSpecAuditGoTestCommand(repoRoot string, childRuntime specAuditGoChildRuntime, names ...string) (*exec.Cmd, error) {
 	pattern, err := buildExactGoTestRunPattern(names)
 	if err != nil {
 		return nil, err
@@ -248,18 +248,18 @@ func newSpecAuditGoTestCommand(ctx context.Context, repoRoot string, childRuntim
 		return nil, err
 	}
 	arguments := []string{"test", "-json", "-mod=readonly", "-count=1", "-timeout=" + specAuditGoTestTimeout, "-run", pattern, "./tools/specaudit"}
-	command := exec.CommandContext(ctx, childRuntime.goExecutable.path, arguments...)
+	command := exec.Command(childRuntime.goExecutable.path, arguments...)
 	command.Dir = repoRoot
 	command.Env = slices.Clone(childRuntime.environment)
 	configureSpecAuditChildCommand(command)
 	return command, nil
 }
 
-func newSpecAuditGoListCommand(ctx context.Context, repoRoot, packagePattern string, childRuntime specAuditGoChildRuntime) (*exec.Cmd, error) {
+func newSpecAuditGoListCommand(repoRoot, packagePattern string, childRuntime specAuditGoChildRuntime) (*exec.Cmd, error) {
 	if err := childRuntime.revalidateExecutables(); err != nil {
 		return nil, err
 	}
-	command := exec.CommandContext(ctx, childRuntime.goExecutable.path, "list", "-mod=readonly", "-find", "-json", packagePattern)
+	command := exec.Command(childRuntime.goExecutable.path, "list", "-mod=readonly", "-find", "-json", packagePattern)
 	command.Dir = repoRoot
 	command.Env = slices.Clone(childRuntime.environment)
 	configureSpecAuditChildCommand(command)
@@ -268,71 +268,166 @@ func newSpecAuditGoListCommand(ctx context.Context, repoRoot, packagePattern str
 
 func configureSpecAuditChildCommand(command *exec.Cmd) {
 	command.SysProcAttr = procguard.ProcessGroupAttr()
-	command.Cancel = func() error {
-		if command.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-	}
 	command.WaitDelay = time.Second
 }
 
 // runBoundedSpecAuditCommand keeps only a bounded diagnostic prefix and kills
-// the entire isolated process group as soon as that bound is exceeded. Waiting
-// for a misbehaving nested test after its output cap is reached would let it
-// retain CPU, descendants, or a blocked pipe until the outer deadline.
-func runBoundedSpecAuditCommand(command *exec.Cmd, limit int) (*boundedSpecAuditOutput, error) {
+// the entire isolated process group as soon as that bound is exceeded. It also
+// keeps the direct child unreaped after exit until the group has been killed.
+// The unreaped child pins its PID, which is also the process-group ID, so group
+// cleanup cannot target an unrelated process after numeric ID reuse.
+func runBoundedSpecAuditCommand(ctx context.Context, command *exec.Cmd, limit int) (*boundedSpecAuditOutput, error) {
 	output := &boundedSpecAuditOutput{limit: limit}
+	if ctx == nil {
+		return output, fmt.Errorf("trusted SPEC audit Go command requires a non-nil context")
+	}
 	if !specAuditProcessGroupsSupported() {
 		return output, fmt.Errorf("trusted SPEC audit Go commands require process-group cleanup on darwin or linux")
 	}
-	if command.SysProcAttr == nil || !command.SysProcAttr.Setpgid || command.Cancel == nil {
+	if command.SysProcAttr == nil || !command.SysProcAttr.Setpgid {
 		return output, fmt.Errorf("trusted SPEC audit Go command is missing isolated process-group configuration")
 	}
+	if command.Cancel != nil {
+		return output, fmt.Errorf("trusted SPEC audit Go command must delegate cancellation to the bounded runner")
+	}
+	processGroup := newSpecAuditProcessGroupLifecycle(command)
 	output.onLimit = func() {
-		if err := command.Cancel(); err != nil {
+		if err := processGroup.cancel(); err != nil {
 			// The child can win the race to exit after writing its final bytes.
 			return
 		}
 	}
 	command.Stdout = output
 	command.Stderr = output
-	commandErr := command.Run()
-	cleanupErr := terminateSpecAuditProcessGroup(command)
-	return output, errors.Join(commandErr, cleanupErr)
+	if err := command.Start(); err != nil {
+		processGroup.disable()
+		return output, err
+	}
+	lifecycleDone := make(chan struct{})
+	contextResult := make(chan specAuditContextCancellationResult, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+			err := processGroup.cancel()
+			contextResult <- specAuditContextCancellationResult{
+				contextErr: ctx.Err(),
+				signaled:   err == nil,
+				signalErr:  err,
+			}
+		case <-lifecycleDone:
+			contextResult <- specAuditContextCancellationResult{}
+		}
+	}()
+
+	observedExitErr := waitForSpecAuditCommandExitWithoutReaping(command.Process.Pid)
+	// waitid errors other than ECHILD do not reap the process, so the PID is
+	// still pinned and a fail-closed group kill remains safe. ECHILD means
+	// another waiter may already have reaped it; disable cancellation without
+	// risking a reused PGID. complete waits for any in-flight Cancel call and
+	// disables all later calls before Cmd.Wait releases the pinned PID.
+	cleanupErr := processGroup.complete(
+		observedExitErr == nil,
+		errors.Is(observedExitErr, syscall.ECHILD),
+	)
+	close(lifecycleDone)
+	cancellation := <-contextResult
+	commandErr := command.Wait()
+	if observedExitErr != nil {
+		observedExitErr = fmt.Errorf("observe SPEC audit child exit without reaping: %w", observedExitErr)
+	}
+	var cancellationErr error
+	if cancellation.signaled {
+		cancellationErr = cancellation.contextErr
+	} else if cancellation.signalErr != nil && !errors.Is(cancellation.signalErr, os.ErrProcessDone) {
+		cancellationErr = fmt.Errorf("cancel SPEC audit process group: %w", cancellation.signalErr)
+	}
+	return output, errors.Join(commandErr, observedExitErr, cleanupErr, cancellationErr)
+}
+
+type specAuditContextCancellationResult struct {
+	contextErr error
+	signalErr  error
+	signaled   bool
 }
 
 func specAuditProcessGroupsSupported() bool {
 	return runtime.GOOS == "darwin" || runtime.GOOS == "linux"
 }
 
-// terminateSpecAuditProcessGroup runs after Cmd.Run has reaped the direct
-// child. It kills descendants that remain in the child's process group and
-// waits until the kernel no longer reports that group. Descendants that leave
-// the group are outside this lifecycle cleanup. This is not a sandbox or a
-// claim that trusted test code lacked ambient filesystem access.
-func terminateSpecAuditProcessGroup(command *exec.Cmd) error {
-	if command.Process == nil {
+// specAuditProcessGroupLifecycle serializes every process-group signal with
+// final cleanup. complete disables the signal path while the direct child's
+// unreaped PID still pins its numeric process-group ID, so neither the context
+// watcher nor the output-limit callback can signal a reused group after Wait.
+type specAuditProcessGroupLifecycle struct {
+	mu                      sync.Mutex
+	command                 *exec.Cmd
+	enabled                 bool
+	directChildExitObserved bool
+}
+
+func newSpecAuditProcessGroupLifecycle(command *exec.Cmd) *specAuditProcessGroupLifecycle {
+	return &specAuditProcessGroupLifecycle{command: command, enabled: true}
+}
+
+func (lifecycle *specAuditProcessGroupLifecycle) cancel() error {
+	lifecycle.mu.Lock()
+	defer lifecycle.mu.Unlock()
+	if !lifecycle.enabled || lifecycle.command.Process == nil {
+		return os.ErrProcessDone
+	}
+	err := syscall.Kill(-lifecycle.command.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return os.ErrProcessDone
+	}
+	return err
+}
+
+// complete kills the isolated group while the direct child still pins its
+// PID, then disables every later signal before Cmd.Wait reaps that child.
+// skipKill is reserved for ECHILD, which can mean another waiter already
+// reaped the child and released its PID for reuse.
+func (lifecycle *specAuditProcessGroupLifecycle) complete(directChildExitObserved, skipKill bool) error {
+	lifecycle.mu.Lock()
+	defer lifecycle.mu.Unlock()
+	if !lifecycle.enabled {
 		return nil
 	}
-	processGroupID := command.Process.Pid
-	if err := syscall.Kill(-processGroupID, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("terminate SPEC audit process group %d: %w", processGroupID, err)
+	lifecycle.directChildExitObserved = directChildExitObserved
+	var err error
+	if !skipKill {
+		err = lifecycle.terminateLocked()
 	}
-	deadline := time.Now().Add(specAuditProcessGroupWait)
-	for {
-		err := syscall.Kill(-processGroupID, 0)
-		if errors.Is(err, syscall.ESRCH) {
+	lifecycle.enabled = false
+	return err
+}
+
+func (lifecycle *specAuditProcessGroupLifecycle) disable() {
+	lifecycle.mu.Lock()
+	lifecycle.enabled = false
+	lifecycle.mu.Unlock()
+}
+
+func (lifecycle *specAuditProcessGroupLifecycle) terminateLocked() error {
+	if lifecycle.command.Process == nil {
+		return nil
+	}
+	processGroupID := lifecycle.command.Process.Pid
+	if err := syscall.Kill(-processGroupID, syscall.SIGKILL); errors.Is(err, syscall.ESRCH) {
+		// No process remains in the isolated group.
+		return nil
+	} else if errors.Is(err, syscall.EPERM) {
+		complete, classificationErr := specAuditProcessGroupEPERMComplete(processGroupID, lifecycle.directChildExitObserved)
+		if classificationErr != nil {
+			return fmt.Errorf("classify EPERM for SPEC audit process group %d: %w", processGroupID, classificationErr)
+		}
+		if complete {
 			return nil
 		}
-		if err != nil {
-			return fmt.Errorf("probe SPEC audit process group %d: %w", processGroupID, err)
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("SPEC audit process group %d remained alive after %s", processGroupID, specAuditProcessGroupWait)
-		}
-		time.Sleep(10 * time.Millisecond)
+		return fmt.Errorf("terminate SPEC audit process group %d: %w", processGroupID, err)
+	} else if err != nil {
+		return fmt.Errorf("terminate SPEC audit process group %d: %w", processGroupID, err)
 	}
+	return nil
 }
 
 // boundedSpecAuditOutput caps nested go-test output and invokes onLimit once
@@ -426,11 +521,11 @@ func resolveBuildSelectedGoTestPackage(
 	expectedPackageDir string,
 	childRuntime specAuditGoChildRuntime,
 ) (goListTestPackage, *exec.Cmd, *boundedSpecAuditOutput, error) {
-	command, err := newSpecAuditGoListCommand(ctx, repoRoot, packagePattern, childRuntime)
+	command, err := newSpecAuditGoListCommand(repoRoot, packagePattern, childRuntime)
 	if err != nil {
 		return goListTestPackage{}, &exec.Cmd{}, &boundedSpecAuditOutput{limit: specAuditGoTestOutputLimit}, err
 	}
-	output, commandErr := runBoundedSpecAuditCommand(command, specAuditGoTestOutputLimit)
+	output, commandErr := runBoundedSpecAuditCommand(ctx, command, specAuditGoTestOutputLimit)
 	if ctx.Err() != nil {
 		return goListTestPackage{}, command, output, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), ctx.Err())
 	}

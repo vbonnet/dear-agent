@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,11 +19,9 @@ import (
 )
 
 func TestSpecAuditGoTestCommandIsBoundedAndGroupCancelable(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), specAuditGoTestDeadline)
-	defer cancel()
 	t.Setenv("GOFLAGS", "-race")
 	childRuntime := newSpecAuditRunnerTestRuntime(t)
-	command, err := newSpecAuditGoTestCommand(ctx, packageSpecBDDRepoRoot(), childRuntime, "TestExample")
+	command, err := newSpecAuditGoTestCommand(packageSpecBDDRepoRoot(), childRuntime, "TestExample")
 	if err != nil {
 		t.Fatalf("newSpecAuditGoTestCommand() error = %v", err)
 	}
@@ -30,8 +29,8 @@ func TestSpecAuditGoTestCommandIsBoundedAndGroupCancelable(t *testing.T) {
 	if command.SysProcAttr == nil || !command.SysProcAttr.Setpgid {
 		t.Fatal("nested SPEC audit test must run in an isolated process group")
 	}
-	if command.Cancel == nil {
-		t.Fatal("nested SPEC audit test must cancel its process group")
+	if command.Cancel != nil {
+		t.Fatal("nested SPEC audit test must delegate cancellation to the bounded runner")
 	}
 	if command.WaitDelay != time.Second {
 		t.Fatalf("nested SPEC audit test WaitDelay = %v, want %v", command.WaitDelay, time.Second)
@@ -50,9 +49,6 @@ func TestSpecAuditGoTestCommandIsBoundedAndGroupCancelable(t *testing.T) {
 	}
 	if !slices.Contains(command.Env, "GOFLAGS=") || slices.Contains(command.Env, "GOFLAGS=-race") {
 		t.Fatalf("nested SPEC audit test environment did not clear inherited GOFLAGS: %q", command.Env)
-	}
-	if err := command.Cancel(); err != nil {
-		t.Fatalf("cancel before start = %v", err)
 	}
 }
 
@@ -174,12 +170,12 @@ func TestBoundedSpecAuditOutputCapEdges(t *testing.T) {
 func TestBoundedSpecAuditOutputCancelsNoisyChildPromptly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSpecAuditGoTestRunnerNoisyHelper$")
+	command := exec.Command(os.Args[0], "-test.run=^TestSpecAuditGoTestRunnerNoisyHelper$")
 	command.Env = append(os.Environ(), "DEAR_AGENT_SPECAUDIT_NOISY_HELPER=1")
 	configureSpecAuditChildCommand(command)
 
 	started := time.Now()
-	output, err := runBoundedSpecAuditCommand(command, 256)
+	output, err := runBoundedSpecAuditCommand(ctx, command, 256)
 	elapsed := time.Since(started)
 	if err == nil {
 		t.Fatal("noisy child unexpectedly completed without process-group cancellation")
@@ -214,13 +210,13 @@ func TestSuccessfulCommandCleansSilentDescendant(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSpecAuditSuccessfulDescendantHelper$")
+	command := exec.Command(os.Args[0], "-test.run=^TestSpecAuditSuccessfulDescendantHelper$")
 	command.Env = append(os.Environ(),
 		"DEAR_AGENT_SPECAUDIT_DESCENDANT_HELPER=1",
 		"DEAR_AGENT_SPECAUDIT_DESCENDANT_PID_FILE="+pidFile,
 	)
 	configureSpecAuditChildCommand(command)
-	output, err := runBoundedSpecAuditCommand(command, 4096)
+	output, err := runBoundedSpecAuditCommand(ctx, command, 4096)
 	if err != nil {
 		t.Fatalf("successful descendant helper failed: %v\n%s", err, output.String())
 	}
@@ -232,9 +228,104 @@ func TestSuccessfulCommandCleansSilentDescendant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse descendant PID %q: %v", payload, err)
 	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("silent background descendant %d remains after successful command cleanup: %v", pid, err)
+	deadline := time.Now().Add(specAuditProcessGroupWait)
+	for {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) || (errors.Is(err, syscall.EPERM) && runtime.GOOS == "darwin") {
+			break
+		}
+		if err != nil {
+			t.Fatalf("probe silent background descendant %d: %v", pid, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("silent background descendant %d remains after successful command cleanup", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestBoundedSpecAuditCommandPreservesDirectChildExitStatus(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.Command(os.Args[0], "-test.run=^TestSpecAuditExitStatusHelper$")
+	command.Env = append(os.Environ(), "DEAR_AGENT_SPECAUDIT_EXIT_STATUS_HELPER=1")
+	configureSpecAuditChildCommand(command)
+
+	output, err := runBoundedSpecAuditCommand(ctx, command, 4096)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("runBoundedSpecAuditCommand() error = %v, want *exec.ExitError\n%s", err, output.String())
+	}
+	if got := exitErr.ExitCode(); got != 23 {
+		t.Fatalf("direct child exit code = %d, want 23", got)
+	}
+}
+
+func TestBoundedSpecAuditCommandAcceptsSuccessfulChildWithoutDescendants(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.Command("/bin/sh", "-c", "exit 0")
+	configureSpecAuditChildCommand(command)
+
+	output, err := runBoundedSpecAuditCommand(ctx, command, 4096)
+	if err != nil {
+		t.Fatalf("runBoundedSpecAuditCommand() error = %v\n%s", err, output.String())
+	}
+	if command.Cancel != nil {
+		t.Fatal("bounded runner installed exec.Cmd cancellation outside its owned lifecycle")
+	}
+}
+
+func TestSpecAuditProcessGroupLifecycleRejectsLateCancellation(t *testing.T) {
+	lifecycle := newSpecAuditProcessGroupLifecycle(&exec.Cmd{})
+	if err := lifecycle.complete(false, true); err != nil {
+		t.Fatalf("complete sealed lifecycle: %v", err)
+	}
+	var cancellations sync.WaitGroup
+	for range 64 {
+		cancellations.Go(func() {
+			for range 100 {
+				if err := lifecycle.cancel(); !errors.Is(err, os.ErrProcessDone) {
+					t.Errorf("late lifecycle cancel error = %v, want os.ErrProcessDone", err)
+				}
+			}
+		})
+	}
+	cancellations.Wait()
+}
+
+func TestBoundedSpecAuditCommandCancelsOnContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	command := exec.Command(os.Args[0], "-test.run=^TestSpecAuditSilentGrandchild$")
+	command.Env = append(os.Environ(), "DEAR_AGENT_SPECAUDIT_SILENT_GRANDCHILD=1")
+	configureSpecAuditChildCommand(command)
+
+	started := time.Now()
+	_, err := runBoundedSpecAuditCommand(ctx, command, 4096)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("context-canceled command error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("context cancellation took %v, want prompt process-group termination", elapsed)
+	}
+}
+
+func TestBoundedSpecAuditCommandRejectsNilContext(t *testing.T) {
+	command := exec.Command("/bin/sh", "-c", "exit 0")
+	configureSpecAuditChildCommand(command)
+	var nilContext context.Context
+	_, err := runBoundedSpecAuditCommand(nilContext, command, 4096)
+	if err == nil || !strings.Contains(err.Error(), "non-nil context") {
+		t.Fatalf("nil-context error = %v, want explicit rejection", err)
+	}
+}
+
+func TestSpecAuditExitStatusHelper(t *testing.T) {
+	if os.Getenv("DEAR_AGENT_SPECAUDIT_EXIT_STATUS_HELPER") != "1" {
+		return
+	}
+	os.Exit(23)
 }
 
 func TestSpecAuditSuccessfulDescendantHelper(t *testing.T) {
