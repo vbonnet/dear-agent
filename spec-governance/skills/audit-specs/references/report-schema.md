@@ -415,9 +415,12 @@ runtime behavior, or authorize changes.
   every additional Examples table must also carry a harness/member column;
   mixed member and non-member tables are a structural diagnostic. A finding
   without selected BDD uses non-positive consequence `none`.
-- Require every positive finding to use `active-members` and cover each pinned
-  member with evidence. `implementation-only` is non-positive only; a
-  classification label cannot bypass the active-member or shared-scenario gate.
+- Require every positive finding to use one bounded applicability basis.
+  `active-members` covers each pinned active member with evidence.
+  `implementation-only` covers at least two named implementations and cites
+  every current owner across that matrix. A classification label cannot weaken
+  either requirement or turn a harness contract into an implementation-only
+  exception.
 - Require `merge-now` to use `same-observable` and
   `extract-neutral-contract` to use `same-observable` or
   `overlapping-observables`; require

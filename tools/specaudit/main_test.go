@@ -3158,22 +3158,98 @@ func TestSharedContractScenarioProofIsExactAndCrossMember(t *testing.T) {
 	}
 }
 
-func TestPositiveFindingCannotBypassSharedProofOrActiveMembersByClassification(t *testing.T) {
+func TestPositiveFindingApplicabilityPreservesSharedProofAcrossClassifications(t *testing.T) {
 	_, inventoryReport, semanticReport := auditFixture(t)
 
-	t.Run("compound implementation-only split-feature bypass", func(t *testing.T) {
+	t.Run("implementation-only matrix uses pinned owners and shared proof", func(t *testing.T) {
+		inventory := cloneReport(t, inventoryReport)
 		report := cloneReport(t, semanticReport)
 		finding := &report.Candidates[0]
 		finding.Classification = "implementation-detail"
 		finding.ApplicabilityBasis = "implementation-only"
-		finding.Applicability = nil
-		finding.BDD.Features = []string{"agm/test/bdd/features/one-only.feature", "agm/test/bdd/features/two-only.feature"}
-		finding.BDD.SharedContractFeature = ""
-		finding.BDD.SharedContractScenario = nil
+		finding.ApplicabilityRationale = "The two pinned packages are the complete implementation set for this observable."
+		finding.Applicability = []applicability{
+			{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+			{Member: "two-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[1]}},
+		}
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.Applicability = finding.Applicability
+		feature := inventoryFeaturePointer(t, &inventory, finding.BDD.SharedContractFeature)
+		feature.Scenarios[0].MemberColumn = "member"
+		feature.Scenarios[0].MemberCases = []scenarioMemberCase{
+			{Line: 12, Member: "one-package", Source: "examples-member"},
+			{Line: 13, Member: "two-package", Source: "examples-member"},
+		}
+
+		if err := validateReport(report); err != nil {
+			t.Fatalf("validateReport() implementation-only positive error=%v", err)
+		}
+		if err := validateAgainstInventory(report, inventory); err != nil {
+			t.Fatalf("validateAgainstInventory() implementation-only positive error=%v", err)
+		}
+	})
+
+	t.Run("implementation-only matrix requires two implementations", func(t *testing.T) {
+		report := cloneReport(t, semanticReport)
+		finding := &report.Candidates[0]
+		finding.ApplicabilityBasis = "implementation-only"
+		finding.Applicability = []applicability{{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}}}
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.Applicability = finding.Applicability
 
 		err := validateReport(report)
-		if err == nil || !strings.Contains(err.Error(), "requires active-members applicability") {
-			t.Fatalf("validateReport() error=%v, want compound classification/applicability bypass rejection", err)
+		if err == nil || !strings.Contains(err.Error(), "at least two implementations") {
+			t.Fatalf("validateReport() error=%v, want bounded implementation-matrix rejection", err)
+		}
+	})
+
+	t.Run("implementation-only matrix cites every current owner", func(t *testing.T) {
+		report := cloneReport(t, semanticReport)
+		finding := &report.Candidates[0]
+		finding.ApplicabilityBasis = "implementation-only"
+		finding.Applicability = []applicability{
+			{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+			{Member: "two-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+		}
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
+		finding.OwnershipPlan.CurrentOwners[1].Preservation.Applicability = finding.Applicability
+
+		err := validateReport(report)
+		if err == nil || !strings.Contains(err.Error(), "cite every current owner") {
+			t.Fatalf("validateReport() error=%v, want implementation-owner evidence rejection", err)
+		}
+	})
+
+	t.Run("harness-surface owner cannot use implementation-only matrix", func(t *testing.T) {
+		report := cloneReport(t, semanticReport)
+		finding := &report.Candidates[0]
+		const oldOwner = "two/SPEC.md"
+		const harnessOwner = ".codex/SPEC.md"
+		finding.CurrentOwners[1].Path = harnessOwner
+		for index := range finding.Evidence {
+			if finding.Evidence[index].Path == oldOwner {
+				finding.Evidence[index].Path = harnessOwner
+			}
+		}
+		retired := &finding.OwnershipPlan.CurrentOwners[1]
+		retired.Path = harnessOwner
+		for index := range retired.Preservation.Requirements {
+			retired.Preservation.Requirements[index].Source.Path = harnessOwner
+		}
+		for index := range retired.Preservation.BDD {
+			retired.Preservation.BDD[index].SourceOwner = harnessOwner
+		}
+		finding.ApplicabilityBasis = "implementation-only"
+		finding.Applicability = []applicability{
+			{Member: "one-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[0]}},
+			{Member: "codex-package", Disposition: "supported", Evidence: []evidence{finding.Evidence[1]}},
+		}
+		retired.Preservation.ApplicabilityBasis = finding.ApplicabilityBasis
+		retired.Preservation.Applicability = finding.Applicability
+
+		err := validateReport(report)
+		if err == nil || !strings.Contains(err.Error(), "harness-surface owner") {
+			t.Fatalf("validateReport() error=%v, want harness-surface applicability rejection", err)
 		}
 	})
 

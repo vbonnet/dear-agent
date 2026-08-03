@@ -4972,6 +4972,7 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool, adapt
 		}
 	}
 	seenMembers := map[string]bool{}
+	applicabilityEvidenceOwners := map[string]bool{}
 	for _, entry := range f.Applicability {
 		if strings.TrimSpace(entry.Member) == "" || !dispositions[entry.Disposition] || len(entry.Evidence) == 0 || seenMembers[entry.Member] {
 			return fmt.Errorf("finding %q has invalid applicability", f.ID)
@@ -4979,8 +4980,11 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool, adapt
 		if err := validateEvidence(entry.Evidence); err != nil {
 			return fmt.Errorf("finding %q applicability for %q: %w", f.ID, entry.Member, err)
 		}
-		if len(active) > 0 && !active[entry.Member] {
+		if f.ApplicabilityBasis == "active-members" && len(active) > 0 && !active[entry.Member] {
 			return fmt.Errorf("finding %q names unknown active member %q", f.ID, entry.Member)
+		}
+		for _, item := range entry.Evidence {
+			applicabilityEvidenceOwners[item.Path] = true
 		}
 		seenMembers[entry.Member] = true
 	}
@@ -5023,19 +5027,33 @@ func validateFinding(f finding, nonCandidate bool, active map[string]bool, adapt
 		if f.Classification == "fixture" || f.Relationship == "fixture-or-generated-copy" {
 			return fmt.Errorf("positive finding %q cannot treat a fixture or generated copy as a normative owner", f.ID)
 		}
-		if f.ApplicabilityBasis != "active-members" {
-			return fmt.Errorf("positive finding %q requires active-members applicability; implementation-only is non-positive", f.ID)
-		}
 		if strings.TrimSpace(f.ApplicabilityRationale) == "" {
 			return fmt.Errorf("positive finding %q requires applicability rationale", f.ID)
 		}
 		for _, entry := range f.Applicability {
 			if entry.Disposition == "unknown" {
-				return fmt.Errorf("positive finding %q has unresolved applicability for active member %q", f.ID, entry.Member)
+				return fmt.Errorf("positive finding %q has unresolved applicability for member %q", f.ID, entry.Member)
 			}
 		}
-		if len(active) == 0 || len(seenMembers) != len(active) {
-			return fmt.Errorf("positive finding %q must cover every pinned active member", f.ID)
+		switch f.ApplicabilityBasis {
+		case "active-members":
+			if len(active) == 0 || len(seenMembers) != len(active) {
+				return fmt.Errorf("positive finding %q must cover every pinned active member", f.ID)
+			}
+		case "implementation-only":
+			if len(seenMembers) < 2 {
+				return fmt.Errorf("positive finding %q with implementation-only applicability must cover at least two implementations", f.ID)
+			}
+			for _, owner := range f.CurrentOwners {
+				if isHarnessSurfacePath(owner.Path, adapterScopes) {
+					return fmt.Errorf("positive finding %q with harness-surface owner %q requires active-members applicability", f.ID, owner.Path)
+				}
+			}
+			if !sameStringSet(ownerPaths(f.CurrentOwners), mapKeys(applicabilityEvidenceOwners)) {
+				return fmt.Errorf("positive finding %q with implementation-only applicability must cite every current owner across its implementation matrix", f.ID)
+			}
+		default:
+			return fmt.Errorf("positive finding %q requires active-members or implementation-only applicability", f.ID)
 		}
 		if strings.TrimSpace(f.BDD.SharedContractFeature) == "" || f.BDD.SharedContractScenario == nil {
 			return fmt.Errorf("positive finding %q requires bdd.shared_contract_feature and bdd.shared_contract_scenario regardless of classification", f.ID)

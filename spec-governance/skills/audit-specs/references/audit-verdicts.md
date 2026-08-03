@@ -67,9 +67,11 @@ research or a product decision.
    owner rather than laundering an unrelated SPEC into the topology. Use only
    canonical repository-relative path spellings; `./` and cleaned path aliases
    never identify a distinct new owner.
-7. For every positive verdict regardless of classification, `active-members`
-   applicability covering the full pinned active set and its unsupported cases.
-   `implementation-only` is available only to non-positive findings.
+7. For every positive verdict regardless of classification, select one bounded
+   applicability basis. `active-members` covers the full pinned active set and
+   its unsupported cases. `implementation-only` names at least two concrete
+   implementations and its evidence spans every current owner. Do not use an
+   implementation matrix to bypass a harness contract's active-member scope.
 8. Existing BDD features or lower-level tests and the migration consequence.
    Every positive finding, regardless of classification, selects one reciprocal
    shared feature that names every current owner and one exact observable

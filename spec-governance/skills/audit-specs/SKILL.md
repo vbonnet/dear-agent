@@ -68,10 +68,12 @@ report.
    exact paths, lines, IDs, short excerpts, relationship, shared outcome,
    material differences, current and proposed owner, applicability, BDD
    consequence, confidence, limitations, and the maintainer decision required.
-   Every positive finding, regardless of classification, must use
-   `active-members`, cover the full pinned active set, select one reciprocal
-   all-owner feature, and cite one exact observable Scenario Outline whose cases
-   cover the applicable members. `implementation-only` is non-positive only.
+   Every positive finding, regardless of classification, must select one
+   reciprocal all-owner feature and cite one exact observable Scenario Outline
+   whose cases cover the applicable members. Use `active-members` for harness
+   contracts and cover the full pinned active set. Use `implementation-only`
+   only for a bounded matrix of at least two concrete implementations whose
+   evidence spans every current owner; it is not a bypass for harness scope.
    Every positive finding must also include a pending-maintainer-approval
    ownership plan. For every retired owner, map each pinned source requirement
    to the proposed neutral owner, preserve every pinned reciprocal BDD feature
