@@ -52,6 +52,12 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-18** When the provider's effective required-check projection contains a context absent from the discovered branch policy, the system shall block the merge as an incomplete-policy disagreement.
 
+**SAFEGIT-19** When the provider returns valid check JSON with a documented failed-check or pending-check status exit, the system shall classify the returned checks rather than treating the status exit as a query failure.
+
+**SAFEGIT-20** When classic branch protection repeats an app-scoped required context in both its legacy contexts and canonical checks fields, the system shall preserve only the canonical app-scoped identity.
+
+**SAFEGIT-21** When another repository component needs required-check classification, the system shall expose and reuse one context-aware effective-policy projection with normalized passing, pending, and failing statuses.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

@@ -24,10 +24,9 @@ const (
 )
 
 // Check is a normalized status check on a PR head commit. The adapter that
-// builds it is responsible for setting Required correctly (by cross-referencing
-// branch-protection required-check names); the classifier only ever considers
-// required checks, so a non-required red (e.g. the non-blocking Doc Proximity
-// Check) never triggers an agent spawn or blocks the loop.
+// builds it is responsible for setting Required from safegit's shared effective
+// required-check projection; the classifier only ever considers required
+// checks, so an advisory red never triggers an agent spawn or blocks the loop.
 type Check struct {
 	Name     string
 	Verdict  CheckVerdict

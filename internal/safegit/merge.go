@@ -202,8 +202,8 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
-	// Gate 1: ALL CI checks must pass (not just required ones).
-	if err := runGate(ctx, "ci", func() error { return checkAllCI(cfg.PRNumber, cfg.Repo) }); err != nil {
+	// Gate 1: every provider-effective required CI check must pass.
+	if err := runGate(ctx, "ci", func() error { return checkAllCIContext(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 		// P4 flake valve: when flaky_checks are configured, give a failing
 		// flaky check one sanctioned rerun before treating it as a real block.
 		// The valve has the final say only when it actually finds a failing
@@ -222,7 +222,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
 		return fmt.Errorf("CI gate: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all CI checks pass")
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all provider-required CI checks pass")
 
 	// Gate 2: no unresolved review threads.
 	if cfg.SkipReviewCheck {
@@ -439,10 +439,25 @@ func auditLogDir() string {
 // runCommand executes cmd, capturing stdout. On failure, stderr is appended to
 // the error so callers get actionable context instead of a bare exit-code.
 func runCommand(cmd *exec.Cmd) ([]byte, error) {
+	return runCommandAllowExitCodes(cmd, nil)
+}
+
+// runCheckCommand accepts gh's documented check-status exits while still
+// requiring a valid JSON response. gh pr checks exits 1 for failed checks and
+// 8 for pending checks; neither means the query itself failed.
+func runCheckCommand(cmd *exec.Cmd) ([]byte, error) {
+	return runCommandAllowExitCodes(cmd, map[int]bool{1: true, 8: true})
+}
+
+func runCommandAllowExitCodes(cmd *exec.Cmd, allowed map[int]bool) ([]byte, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && allowed[exitErr.ExitCode()] && json.Valid(out) {
+			return out, nil
+		}
 		if se := strings.TrimSpace(stderr.String()); se != "" {
 			return nil, fmt.Errorf("%w\nstderr: %s", err, se)
 		}
@@ -476,6 +491,31 @@ func BuildMergeArgs(prNum int, repo, headSHA string) []string {
 type checkRun struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
+}
+
+// RequiredCheckStatus is the normalized state of a provider-required check.
+type RequiredCheckStatus uint8
+
+const (
+	// RequiredCheckPending means a required check has not reached a terminal state.
+	RequiredCheckPending RequiredCheckStatus = iota
+	// RequiredCheckPassing means a required check completed acceptably.
+	RequiredCheckPassing
+	// RequiredCheckFailing means a required check completed unsuccessfully.
+	RequiredCheckFailing
+)
+
+// RequiredCheck is a provider check after shared effective-policy
+// reconciliation. It intentionally excludes advisory rollup history.
+type RequiredCheck struct {
+	Name   string
+	Status RequiredCheckStatus
+}
+
+type requiredCheckProjection struct {
+	Runs               []checkRun
+	ProviderRuns       []checkRun
+	AuthoritativeEmpty bool
 }
 
 type requiredStatusChecksResponse struct {
@@ -517,6 +557,10 @@ type prBaseResult struct {
 // subset of checks can be trusted. A classic 404 is authoritative known-empty;
 // every other discovery or parse failure blocks the merge.
 func discoverRequiredChecks(repo, branch string) (requiredCheckPolicy, error) {
+	return discoverRequiredChecksContext(context.Background(), repo, branch)
+}
+
+func discoverRequiredChecksContext(ctx context.Context, repo, branch string) (requiredCheckPolicy, error) {
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 || branch == "" {
 		return requiredCheckPolicy{}, fmt.Errorf("invalid required-check target %q branch %q", repo, branch)
@@ -524,7 +568,7 @@ func discoverRequiredChecks(repo, branch string) (requiredCheckPolicy, error) {
 
 	// --paginate --slurp makes omission impossible when more than one API page
 	// of rules applies. The parser expects one nested array per returned page.
-	rulesOut, rulesErr := runCommand(exec.Command("gh", "api", "--paginate", "--slurp",
+	rulesOut, rulesErr := runCommand(exec.CommandContext(ctx, "gh", "api", "--paginate", "--slurp",
 		rulesBranchEndpoint(repo, branch),
 	))
 	var rulesPolicy requiredCheckPolicy
@@ -536,7 +580,7 @@ func discoverRequiredChecks(repo, branch string) (requiredCheckPolicy, error) {
 		}
 	}
 
-	classicOut, classicErr := runCommand(exec.Command("gh", "api",
+	classicOut, classicErr := runCommand(exec.CommandContext(ctx, "gh", "api",
 		fmt.Sprintf("repos/%s/%s/branches/%s/protection/required_status_checks", parts[0], parts[1], url.PathEscape(branch)),
 	))
 	var classicPolicy requiredCheckPolicy
@@ -567,11 +611,17 @@ func parseClassicRequiredChecks(data []byte) (requiredCheckPolicy, error) {
 		return requiredCheckPolicy{}, fmt.Errorf("parsing classic required checks: %w", err)
 	}
 	policy := newRequiredCheckPolicy()
-	for _, context := range resp.Contexts {
-		policy.add(context, nil)
-	}
+	canonicalContexts := make(map[string]bool, len(resp.Checks))
 	for _, c := range resp.Checks {
 		policy.add(c.Context, c.AppID)
+		if c.Context != "" {
+			canonicalContexts[c.Context] = true
+		}
+	}
+	for _, context := range resp.Contexts {
+		if !canonicalContexts[context] {
+			policy.add(context, nil)
+		}
 	}
 	return policy, nil
 }
@@ -649,8 +699,8 @@ func mergeRequiredCheckPolicies(policies ...requiredCheckPolicy) requiredCheckPo
 	return merged
 }
 
-func fetchPRBaseBranch(prNum int, repo string) (string, error) {
-	out, err := runCommand(exec.Command("gh", "pr", "view",
+func fetchPRBaseBranchContext(ctx context.Context, prNum int, repo string) (string, error) {
+	out, err := runCommand(exec.CommandContext(ctx, "gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--json", "baseRefName",
@@ -689,14 +739,104 @@ func classifyProviderRequiredChecks(providerRequired []checkRun, policy required
 	return classified, nil
 }
 
-// checkAllCI verifies that all required CI checks on the PR have passed.
-// It fetches the effective required check list for the PR's base branch and
-// only gates on those, so advisory checks that fail fleet-wide do not block
-// merges. Discovery failures and unsupported required-workflow rules block;
-// a branch that is authoritatively known to require no CI contexts retains the
-// conservative repository policy of validating every reported check.
+func projectRequiredCheckRuns(ctx context.Context, prNum int, repo string) (requiredCheckProjection, error) {
+	baseBranch, err := fetchPRBaseBranchContext(ctx, prNum, repo)
+	if err != nil {
+		return requiredCheckProjection{}, err
+	}
+	policy, err := discoverRequiredChecksContext(ctx, repo, baseBranch)
+	if err != nil {
+		return requiredCheckProjection{}, err
+	}
+	if policy.HasRequiredWorkflows {
+		return requiredCheckProjection{}, fmt.Errorf("required workflow rules apply to %s; safe-merge cannot yet prove missing workflow runs", baseBranch)
+	}
+
+	requiredOut, requiredErr := runCheckCommand(exec.CommandContext(ctx, "gh", "pr", "checks",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--required",
+		"--json", "name,state",
+	))
+	if requiredErr != nil {
+		return requiredCheckProjection{}, fmt.Errorf("provider required-check projection unavailable for %d configured identity requirement(s): %w", len(policy.Identities), requiredErr)
+	}
+
+	var providerRequired []checkRun
+	if err := json.Unmarshal(requiredOut, &providerRequired); err != nil {
+		return requiredCheckProjection{}, fmt.Errorf("parsing provider-required check output: %w", err)
+	}
+	if len(providerRequired) == 0 && len(policy.Identities) == 0 {
+		return requiredCheckProjection{AuthoritativeEmpty: true}, nil
+	}
+	requiredOnly, err := classifyProviderRequiredChecks(providerRequired, policy)
+	if err != nil {
+		return requiredCheckProjection{}, fmt.Errorf("reconciling provider-required checks with discovered policy: %w", err)
+	}
+	return requiredCheckProjection{Runs: requiredOnly, ProviderRuns: providerRequired}, nil
+}
+
+// ProjectRequiredChecks resolves the complete layered branch policy, reconciles
+// it with GitHub's integration-aware PR projection, and returns only the
+// normalized checks that mergeloop may use for repair classification.
+func ProjectRequiredChecks(ctx context.Context, prNum int, repo string) ([]RequiredCheck, error) {
+	projection, err := projectRequiredCheckRuns(ctx, prNum, repo)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeRequiredChecks(projection.Runs), nil
+}
+
+func normalizeRequiredChecks(checks []checkRun) []RequiredCheck {
+	normalized := make([]RequiredCheck, 0, len(checks))
+	for _, check := range checks {
+		normalized = append(normalized, RequiredCheck{
+			Name:   check.Name,
+			Status: requiredCheckStatus(check.State),
+		})
+	}
+	return normalized
+}
+
+func informationalCheckRuns(allChecks, providerRequired []checkRun) []checkRun {
+	requiredOccurrences := make(map[string]int, len(providerRequired))
+	for _, check := range providerRequired {
+		requiredOccurrences[check.Name+"\x00"+strings.ToUpper(check.State)]++
+	}
+	var informational []checkRun
+	for _, check := range allChecks {
+		key := check.Name + "\x00" + strings.ToUpper(check.State)
+		if requiredOccurrences[key] > 0 {
+			requiredOccurrences[key]--
+			continue
+		}
+		informational = append(informational, check)
+	}
+	return informational
+}
+
+func requiredCheckStatus(state string) RequiredCheckStatus {
+	switch strings.ToLower(state) {
+	case "success", "pass", "neutral", "skipping", "skipped":
+		return RequiredCheckPassing
+	case "pending", "queued", "in_progress", "waiting", "requested", "expected":
+		return RequiredCheckPending
+	default:
+		return RequiredCheckFailing
+	}
+}
+
+// checkAllCI verifies that every effective required CI check has passed.
 func checkAllCI(prNum int, repo string) error {
-	allOut, err := runCommand(exec.Command("gh", "pr", "checks",
+	return checkAllCIContext(context.Background(), prNum, repo)
+}
+
+func checkAllCIContext(ctx context.Context, prNum int, repo string) error {
+	projection, err := projectRequiredCheckRuns(ctx, prNum, repo)
+	if err != nil {
+		return err
+	}
+	allOut, err := runCheckCommand(exec.CommandContext(ctx, "gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--json", "name,state",
@@ -709,64 +849,49 @@ func checkAllCI(prNum int, repo string) error {
 		return fmt.Errorf("parsing all-check output: %w", err)
 	}
 
-	baseBranch, err := fetchPRBaseBranch(prNum, repo)
-	if err != nil {
-		return err
-	}
-	policy, err := discoverRequiredChecks(repo, baseBranch)
-	if err != nil {
-		return err
-	}
-	if policy.HasRequiredWorkflows {
-		return fmt.Errorf("required workflow rules apply to %s; safe-merge cannot yet prove missing workflow runs", baseBranch)
-	}
-
-	requiredOut, requiredErr := runCommand(exec.Command("gh", "pr", "checks",
-		fmt.Sprintf("%d", prNum),
-		"--repo", repo,
-		"--required",
-		"--json", "name,state",
-	))
-	if requiredErr != nil {
-		if len(policy.Identities) > 0 {
-			return fmt.Errorf("provider required-check projection unavailable for %d configured identity requirement(s): %w", len(policy.Identities), requiredErr)
+	required := projection.Runs
+	if projection.AuthoritativeEmpty {
+		required = allChecks
+		fmt.Fprintln(os.Stderr, "safe-merge: base branch has no required CI contexts; validating all reported checks (conservative policy)")
+	} else {
+		requiredNames := make([]string, 0, len(required))
+		for _, check := range required {
+			requiredNames = append(requiredNames, check.Name)
 		}
-		fmt.Fprintln(os.Stderr, "safe-merge: base branch has no required CI contexts; validating all reported checks (conservative policy)")
-		return parseCheckRuns(allOut)
-	}
-
-	var providerRequired []checkRun
-	if err := json.Unmarshal(requiredOut, &providerRequired); err != nil {
-		return fmt.Errorf("parsing provider-required check output: %w", err)
-	}
-	if len(providerRequired) == 0 && len(policy.Identities) == 0 {
-		fmt.Fprintln(os.Stderr, "safe-merge: base branch has no required CI contexts; validating all reported checks (conservative policy)")
-		return parseCheckRuns(allOut)
-	}
-	requiredOnly, err := classifyProviderRequiredChecks(providerRequired, policy)
-	if err != nil {
-		return fmt.Errorf("reconciling provider-required checks with discovered policy: %w", err)
-	}
-	requiredNames := make([]string, 0, len(requiredOnly))
-	requiredByName := make(map[string]bool, len(requiredOnly))
-	for _, check := range requiredOnly {
-		requiredNames = append(requiredNames, check.Name)
-		requiredByName[check.Name] = true
-	}
-	var informational []string
-	for _, check := range allChecks {
-		if !requiredByName[check.Name] {
+		informationalRuns := informationalCheckRuns(allChecks, projection.ProviderRuns)
+		informational := make([]string, 0, len(informationalRuns))
+		for _, check := range informationalRuns {
 			informational = append(informational, fmt.Sprintf("%s (%s)", check.Name, check.State))
 		}
+		sort.Strings(requiredNames)
+		sort.Strings(informational)
+		fmt.Fprintf(os.Stderr, "safe-merge: provider-effective required checks: %s\n", strings.Join(requiredNames, ", "))
+		if len(informational) > 0 {
+			fmt.Fprintf(os.Stderr, "safe-merge: informational checks (not merge-gating): %s\n", strings.Join(informational, ", "))
+		}
 	}
-	sort.Strings(requiredNames)
-	sort.Strings(informational)
-	fmt.Fprintf(os.Stderr, "safe-merge: provider-effective required checks: %s\n", strings.Join(requiredNames, ", "))
-	if len(informational) > 0 {
-		fmt.Fprintf(os.Stderr, "safe-merge: informational checks (not merge-gating): %s\n", strings.Join(informational, ", "))
+	return validateCheckRuns(required)
+}
+
+func validateCheckRuns(checks []checkRun) error {
+	var failing []string
+	var pending []string
+	for _, check := range checks {
+		switch requiredCheckStatus(check.State) {
+		case RequiredCheckPassing:
+		case RequiredCheckPending:
+			pending = append(pending, check.Name)
+		case RequiredCheckFailing:
+			failing = append(failing, fmt.Sprintf("%s (%s)", check.Name, check.State))
+		}
 	}
-	b, _ := json.Marshal(requiredOnly)
-	return parseCheckRuns(b)
+	if len(failing) > 0 {
+		return fmt.Errorf("checks failed: %s", strings.Join(failing, ", "))
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("checks still pending: %s", strings.Join(pending, ", "))
+	}
+	return nil
 }
 
 // parseCheckRuns validates that every check in the JSON input has passed.
@@ -777,26 +902,7 @@ func parseCheckRuns(data []byte) error {
 	if err := json.Unmarshal(data, &checks); err != nil {
 		return fmt.Errorf("parsing check output: %w", err)
 	}
-
-	var failing []string
-	var pending []string
-	for _, c := range checks {
-		switch strings.ToLower(c.State) {
-		case "success", "pass", "neutral", "skipping", "skipped":
-			// acceptable
-		case "pending", "queued", "in_progress", "waiting", "requested":
-			pending = append(pending, c.Name)
-		default:
-			failing = append(failing, fmt.Sprintf("%s (%s)", c.Name, c.State))
-		}
-	}
-	if len(failing) > 0 {
-		return fmt.Errorf("checks failed: %s", strings.Join(failing, ", "))
-	}
-	if len(pending) > 0 {
-		return fmt.Errorf("checks still pending: %s", strings.Join(pending, ", "))
-	}
-	return nil
+	return validateCheckRuns(checks)
 }
 
 const reviewThreadsQuery = `

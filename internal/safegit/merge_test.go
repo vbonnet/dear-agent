@@ -161,7 +161,7 @@ func TestParseAppliedRulesRequiredChecksFlagsRequiredWorkflows(t *testing.T) {
 
 func TestParseClassicRequiredChecksPreservesIntegrationScope(t *testing.T) {
 	policy, err := parseClassicRequiredChecks([]byte(`{
-		"contexts":["Legacy"],
+		"contexts":["Legacy", "Build"],
 		"checks":[{"context":"Build","app_id":99}]
 	}`))
 	if err != nil {
@@ -173,6 +173,12 @@ func TestParseClassicRequiredChecksPreservesIntegrationScope(t *testing.T) {
 	}
 	if !policy.Identities[requiredCheckIdentity{Context: "Build", IntegrationID: 99, Scoped: true}] {
 		t.Fatal("classic app-scoped identity was discarded")
+	}
+	if policy.Identities[requiredCheckIdentity{Context: "Build"}] {
+		t.Fatal("duplicate unscoped identity should be ignored when a canonical check entry exists")
+	}
+	if ambiguous := policy.ambiguousContexts(); len(ambiguous) > 0 {
+		t.Fatalf("classic API duplicates created ambiguous identities: %v", ambiguous)
 	}
 }
 
@@ -234,6 +240,85 @@ func TestRulesBranchEndpointEscapesSlashBase(t *testing.T) {
 	want := "repos/owner/repo/rules/branches/release%2Fv1?per_page=100"
 	if got != want {
 		t.Fatalf("rules endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestProjectRequiredChecksReconcilesEffectivePolicy(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build","integration_id":42}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' '[{"name":"Build","state":"SUCCESS"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+	if err != nil {
+		t.Fatalf("ProjectRequiredChecks() error = %v", err)
+	}
+	if len(checks) != 1 || checks[0].Name != "Build" || checks[0].Status != RequiredCheckPassing {
+		t.Fatalf("effective projection = %#v", checks)
+	}
+}
+
+func TestProjectRequiredChecksSynthesizesMissingContext(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"},{"context":"Lint"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' '[{"name":"Build","state":"SUCCESS"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+	if err != nil {
+		t.Fatalf("ProjectRequiredChecks() error = %v", err)
+	}
+	status := make(map[string]RequiredCheckStatus, len(checks))
+	for _, check := range checks {
+		status[check.Name] = check.Status
+	}
+	if len(checks) != 2 {
+		t.Fatalf("missing-context projection count = %d, want 2: %#v", len(checks), checks)
+	}
+	buildStatus, hasBuild := status["Build"]
+	lintStatus, hasLint := status["Lint"]
+	if !hasBuild || buildStatus != RequiredCheckPassing || !hasLint || lintStatus != RequiredCheckPending {
+		t.Fatalf("missing-context projection = %#v", checks)
+	}
+}
+
+func TestProjectRequiredChecksAcceptsStatusExits(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    string
+		exitCode int
+		want     RequiredCheckStatus
+	}{
+		{name: "failed", state: "FAILURE", exitCode: 1, want: RequiredCheckFailing},
+		{name: "pending", state: "PENDING", exitCode: 8, want: RequiredCheckPending},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' '[{"name":"Build","state":"%s"}]'; exit %d ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, tc.state, tc.exitCode))
+			checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+			if err != nil {
+				t.Fatalf("ProjectRequiredChecks() error = %v", err)
+			}
+			if len(checks) != 1 || checks[0].Status != tc.want {
+				t.Fatalf("status-exit projection = %#v", checks)
+			}
+		})
 	}
 }
 
@@ -333,19 +418,31 @@ func TestProviderRequiredClassificationRejectsDiscoveryDisagreement(t *testing.T
 	}
 }
 
-func TestCheckAllCIIgnoresFailedAdvisoryCheck(t *testing.T) {
-	installRequiredCheckFakeGH(t, `
+func TestCheckAllCIIgnoresNonzeroAdvisoryCheckStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    string
+		exitCode int
+	}{
+		{name: "failed", state: "failure", exitCode: 1},
+		{name: "pending", state: "pending", exitCode: 8},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
 case "$*" in
-  "pr checks 7 --repo owner/repo --json name,state") printf '%s\n' '[{"name":"Build","state":"success"},{"name":"Advisory","state":"failure"}]' ;;
-  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
-  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
-  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
-  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' '[{"name":"Build","state":"success"}]' ;;
-  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' '[{"name":"Build","state":"success"},{"name":"Advisory","state":"%s"}]'; exit %d ;;
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' '[{"name":"Build","state":"success"}]' ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
-`)
-	if err := checkAllCI(7, "owner/repo"); err != nil {
-		t.Fatalf("green required check with red advisory check should pass: %v", err)
+			`, tc.state, tc.exitCode))
+			if err := checkAllCI(7, "owner/repo"); err != nil {
+				t.Fatalf("green required check with %s advisory check should pass: %v", tc.state, err)
+			}
+		})
 	}
 }
 
