@@ -392,6 +392,25 @@ maybe_rebuild_agm_pair() {
   return 0
 }
 
+# resolve_agm_pair_provenance derives one complete development profile from the
+# pinned source. It publishes no partial profile when either source fact is
+# unavailable.
+resolve_agm_pair_provenance() {
+  local _resolved_revision _resolved_build_date
+
+  _resolved_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
+  [ "${#_resolved_revision}" -eq 12 ] || return 1
+  case "${_resolved_revision}" in *[!0-9a-f]*) return 1 ;; esac
+
+  _resolved_build_date="$(
+    TZ=UTC git -C "${build_dir}" show -s --format=%cd \
+      --date=format-local:%Y-%m-%dT%H:%M:%SZ HEAD 2>/dev/null || true
+  )"
+  [ -n "${_resolved_build_date}" ] || return 1
+
+  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.Version=dev-${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_resolved_build_date} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=post-merge-hook"
+}
+
 # maybe_rebuild_agm_pair_locked stages the CLI and detached archive companion
 # while the shared install lock is held. Neither installed binary is touched
 # unless both builds succeed.
@@ -409,7 +428,15 @@ maybe_rebuild_agm_pair_locked() {
   # after acquiring the lock so the last contender cannot reinstall an older
   # ancestor over a newer coherent pair.
   fetch_trunk_commit
-  ensure_build_dir
+  if ! ensure_agm_pair_build_dir; then
+    echo "[post-merge:rebuild] ✗ cannot create an immutable detached AGM pair source — check source HEAD and git worktree availability; installed pair unchanged." >&2
+    return 0
+  fi
+
+  if ! resolve_agm_pair_provenance; then
+    echo "[post-merge:rebuild] ✗ cannot resolve complete AGM pair provenance from pinned source — check its revision and commit timestamp; installed pair unchanged." >&2
+    return 0
+  fi
 
   _gobin="${GOBIN:-${HOME}/go/bin}"
   mkdir -p "${_gobin}" 2>/dev/null || true
@@ -421,13 +448,6 @@ maybe_rebuild_agm_pair_locked() {
   _reaper_backup="${_gobin}/.agm-reaper.rollback.$$.pair"
   _had_agm=0
   _had_reaper=0
-
-  _pair_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
-  if [ -z "${_pair_revision}" ]; then
-    echo "[post-merge:rebuild] ✗ cannot resolve AGM pair revision — installed pair unchanged." >&2
-    return 0
-  fi
-  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_pair_revision}"
 
   echo "[post-merge:rebuild] Staging agm + agm-reaper (source changed in ${_trigger})..." >&2
   if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_agm_tmp}" ./agm/cmd/agm ); then
@@ -521,11 +541,11 @@ _pick_timeout() {
 }
 
 # fetch_trunk_commit: best-effort fetch of origin/<default_branch> and resolve
-# its commit into build_commit. The freshly-fetched trunk HEAD is the ONLY
-# legitimate source for the binary that gets run — see the Jun-18 incident
-# (ce-11u3 / retro B2). Never fatal: no origin remote (local-only repos and
-# this hook's tests) or an offline fetch simply leaves build_commit empty, and
-# the build falls back to the working tree in place.
+# its commit into build_commit. Freshly resolved trunk is preferred for every
+# build — see the Jun-18 incident (ce-11u3 / retro B2). Never fatal: no origin
+# remote or unresolved remote ref leaves build_commit empty. Generic targets
+# may then use their historical in-place fallback; the AGM pair separately
+# pins local HEAD into an immutable detached checkout.
 fetch_trunk_commit() {
   build_commit=""
   git -C "${repo_root}" remote get-url origin >/dev/null 2>&1 || return 0
@@ -540,31 +560,58 @@ fetch_trunk_commit() {
   build_commit="$(git -C "${repo_root}" rev-parse --verify --quiet "origin/${default_branch}^{commit}" 2>/dev/null || true)"
 }
 
-# ensure_build_dir: lazily resolve build_dir — the directory `go install` runs
-# in. Preference: a throwaway detached worktree checked out at build_commit
-# (origin/<default_branch>), so the binary's vcs.revision is provably trunk
-# regardless of this checkout's ref. Falls back to the in-place working tree
-# when build_commit is empty or the worktree cannot be created. Idempotent:
-# resolves once, the worktree (if any) is reaped by cleanup_build_dir.
+# create_detached_build_dir checks out build_commit into a disposable worktree.
+# Callers choose whether failure may fall back to mutable source.
+create_detached_build_dir() {
+  local _source_label="$1" _tmp_parent _wt
+
+  [ -n "${build_commit}" ] || return 1
+  _tmp_parent="$(mktemp -d 2>/dev/null || true)"
+  [ -n "${_tmp_parent}" ] || return 1
+  _wt="${_tmp_parent}/build"
+  if ! git -C "${repo_root}" worktree add --quiet --detach "${_wt}" "${build_commit}" 2>/dev/null; then
+    rm -rf "${_tmp_parent}" 2>/dev/null || true
+    return 1
+  fi
+
+  build_dir="${_wt}"
+  build_worktree="${_wt}"
+  echo "[post-merge:rebuild] Building from ${_source_label} @ $(git -C "${repo_root}" rev-parse --short "${build_commit}" 2>/dev/null)" >&2 || true
+  return 0
+}
+
+# ensure_build_dir lazily resolves the directory a generic build runs in.
+# Generic targets retain the historical in-place fallback when canonical trunk
+# is unavailable or a disposable worktree cannot be created.
 ensure_build_dir() {
   [ -n "${build_dir}" ] && return 0
 
   if [ -n "${build_commit}" ]; then
-    _tmp_parent="$(mktemp -d 2>/dev/null || true)"
-    if [ -n "${_tmp_parent}" ]; then
-      _wt="${_tmp_parent}/build"
-      if git -C "${repo_root}" worktree add --quiet --detach "${_wt}" "${build_commit}" 2>/dev/null; then
-        build_dir="${_wt}"
-        build_worktree="${_wt}"
-        echo "[post-merge:rebuild] Building from origin/${default_branch} @ $(git -C "${repo_root}" rev-parse --short "${build_commit}" 2>/dev/null)" >&2
-        return 0
-      fi
-      rm -rf "${_tmp_parent}" 2>/dev/null || true
+    if create_detached_build_dir "origin/${default_branch}"; then
+      return 0
     fi
     echo "[post-merge:rebuild] could not check out origin/${default_branch}; building working tree in place" >&2
   fi
 
   build_dir="${repo_root}"
+}
+
+# ensure_agm_pair_build_dir makes immutability an admission requirement for
+# the coherent pair. Without origin trunk it pins local HEAD once, but it never
+# builds either artifact from the mutable in-place checkout.
+ensure_agm_pair_build_dir() {
+  local _pair_source_label
+
+  [ -n "${build_dir}" ] && [ -n "${build_worktree}" ] && return 0
+  [ -z "${build_dir}" ] || return 1
+
+  _pair_source_label="origin/${default_branch}"
+  if [ -z "${build_commit}" ]; then
+    build_commit="$(git -C "${repo_root}" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"
+    [ -n "${build_commit}" ] || return 1
+    _pair_source_label="local HEAD"
+  fi
+  create_detached_build_dir "${_pair_source_label}"
 }
 
 # cleanup_build_dir: remove the throwaway build worktree (if one was created).
