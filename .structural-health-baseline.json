@@ -83,24 +83,24 @@
     ],
     "file-size": [
       "agm/cmd/agm-mcp-server/tools_test.go (1025 lines)",
-      "agm/cmd/agm/archive_test.go (1523 lines)",
+      "agm/cmd/agm/archive_test.go (1579 lines)",
       "agm/cmd/agm/new.go (1097 lines)",
       "agm/cmd/agm/send_msg.go (1191 lines)",
       "agm/cmd/agm/supervisor.go (1056 lines)",
       "agm/cmd/agm/supervisor_test.go (1004 lines)",
-      "agm/internal/agent/agy_adapter_test.go (1381 lines)",
+      "agm/internal/agent/agy_adapter_test.go (1376 lines)",
       "agm/internal/agent/openai_adapter_test.go (2405 lines)",
       "agm/internal/codexhooks/verify.go (2881 lines)",
       "agm/internal/dolt/adapter_test.go (1032 lines)",
       "agm/internal/dolt/sessions.go (1665 lines)",
       "agm/internal/dolt/sessions_sqlite_test.go (1955 lines)",
-      "agm/internal/harnessexec/exec.go (1097 lines)",
-      "agm/internal/harnessexec/handoff.go (1672 lines)",
+      "agm/internal/harnessexec/exec.go (1291 lines)",
+      "agm/internal/harnessexec/handoff.go (1733 lines)",
       "agm/internal/harnessexec/handoff_test.go (2194 lines)",
       "agm/internal/ops/session_create.go (1207 lines)",
-      "agm/internal/ops/session_create_test.go (1933 lines)",
+      "agm/internal/ops/session_create_test.go (1962 lines)",
       "agm/internal/ops/session_mutation_test.go (1143 lines)",
-      "agm/internal/ops/session_resume_test.go (1321 lines)",
+      "agm/internal/ops/session_resume_test.go (1323 lines)",
       "agm/internal/sentinel/daemon/monitor.go (1036 lines)",
       "agm/internal/session/context_detector_test.go (1432 lines)",
       "agm/internal/tmux/liveness.go (1018 lines)",
@@ -113,10 +113,11 @@
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1061 lines)",
       "cmd/vroom-dispatch-direct/main.go (1173 lines)",
-      "cmd/vroom-dispatch/main.go (1327 lines)",
-      "cmd/vroom-dispatch/main_test.go (1126 lines)",
+      "cmd/vroom-dispatch/main.go (1618 lines)",
+      "cmd/vroom-dispatch/main_test.go (1240 lines)",
       "engram/hooks-bin/internal/validator/validator_bdd_test.go (1009 lines)",
       "engram/internal/health/checks.go (1461 lines)",
+      "internal/safegit/merge.go (1228 lines)",
       "pkg/headerlint/headerlint_test.go (1334 lines)",
       "pkg/instructionlint/instructionlint_test.go (1817 lines)",
       "pkg/instructionlint/segments.go (1988 lines)",
@@ -134,7 +135,7 @@
       "agm/cmd/agm-bus/main.go:329",
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
-      "agm/cmd/agm/archive.go:896",
+      "agm/cmd/agm/archive.go:902",
       "agm/cmd/agm/watch.go:110",
       "agm/cmd/agm/watch.go:111",
       "agm/cmd/agm/watch.go:112",
@@ -147,8 +148,8 @@
       "agm/internal/bus/server.go:147",
       "agm/internal/circuitbreaker/providers.go:161",
       "agm/internal/harnessexec/handoff.go:42",
-      "agm/internal/harnessexec/handoff.go:759",
-      "agm/internal/harnessexec/handoff.go:818",
+      "agm/internal/harnessexec/handoff.go:815",
+      "agm/internal/harnessexec/handoff.go:874",
       "agm/internal/monitor/opencode/publisher.go:91",
       "agm/internal/monitor/opencode/sse_adapter.go:118",
       "agm/internal/monitor/opencode/sse_adapter.go:93",
@@ -500,6 +501,56 @@
       },
       "reason": "Accept line count growth in spec_governance_tooling_steps.go and post_merge_test.go",
       "reference": "https://github.com/vbonnet/dear-agent/actions/runs/30936013599"
+    },
+    {
+      "previous_baseline_sha256": "9af6a147e0a88ae5714c7cd261d9c2e36597462a633df48a919e0268104cf821",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1579 lines)",
+          "agm/internal/agent/agy_adapter_test.go (1376 lines)",
+          "agm/internal/harnessexec/exec.go (1291 lines)",
+          "agm/internal/harnessexec/handoff.go (1733 lines)",
+          "agm/internal/ops/session_create_test.go (1962 lines)",
+          "agm/internal/ops/session_resume_test.go (1323 lines)",
+          "cmd/vroom-dispatch/main.go (1618 lines)",
+          "cmd/vroom-dispatch/main_test.go (1240 lines)",
+          "internal/safegit/merge.go (1228 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:902",
+          "agm/internal/harnessexec/handoff.go:815",
+          "agm/internal/harnessexec/handoff.go:874"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1523 lines)",
+          "agm/internal/agent/agy_adapter_test.go (1381 lines)",
+          "agm/internal/harnessexec/exec.go (1097 lines)",
+          "agm/internal/harnessexec/handoff.go (1672 lines)",
+          "agm/internal/ops/session_create_test.go (1933 lines)",
+          "agm/internal/ops/session_resume_test.go (1321 lines)",
+          "cmd/vroom-dispatch/main.go (1327 lines)",
+          "cmd/vroom-dispatch/main_test.go (1126 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:896",
+          "agm/internal/harnessexec/handoff.go:759",
+          "agm/internal/harnessexec/handoff.go:818"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Accept line count growth and goroutine-recover changes from PR #1101",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1101"
     }
   ]
 }
