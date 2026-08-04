@@ -84,6 +84,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
 	changed, err := changedFiles(opts.root, opts.base, opts.head)
 	if err != nil {
 		fmt.Fprintf(stderr, "test-affected: git diff failed: %v\n", err)
@@ -93,7 +96,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "test-affected: %d changed files between %s and %s\n", len(changed), opts.base, opts.head)
 	}
 
-	pkgs, err := listPackages(opts.root, opts.tags)
+	pkgs, err := listPackagesWithContext(ctx, opts.root, opts.tags)
 	if err != nil {
 		fmt.Fprintf(stderr, "test-affected: go list failed: %v\n", err)
 		return 2
@@ -111,7 +114,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	sort.Strings(out)
 
 	if opts.run {
-		return runTests(opts, out, stdout, stderr)
+		return runTests(ctx, opts, out, stdout, stderr)
 	}
 
 	w := bufio.NewWriter(stdout)
@@ -184,15 +187,13 @@ func resolveOptions(opts *options, stderr io.Writer) int {
 // runTests shells out to `go test -race -count=1 -timeout=<required CI timeout>` on the selected
 // packages. Empty selection is a clean pass — there are no affected
 // tests, and that is a valid CI outcome, not an error.
-func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
+func runTests(parent context.Context, opts options, pkgs []string, stdout, stderr io.Writer) int {
 	if len(pkgs) == 0 {
 		fmt.Fprintf(stderr, "test-affected: no packages affected (base=%s tags=%s)\n", opts.base, opts.tags)
 		return 0
 	}
 	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
-	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
-	ctx, cancel := context.WithTimeout(ctx, goCommandTimeout)
+	ctx, cancel := context.WithTimeout(parent, goCommandTimeout)
 	defer cancel()
 	return runGoTestCommand(ctx, goCommandTimeout, opts, pkgs, stdout, stderr)
 }

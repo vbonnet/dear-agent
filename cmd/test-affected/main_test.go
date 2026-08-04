@@ -256,6 +256,7 @@ func TestRunTestsPassesNativeTimeoutToGo(t *testing.T) {
 
 	var stderr bytes.Buffer
 	code := runTests(
+		context.Background(),
 		options{base: "origin/main", root: t.TempDir(), tags: "integration"},
 		[]string{"example.com/m/a"},
 		&bytes.Buffer{},
