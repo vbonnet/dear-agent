@@ -265,6 +265,11 @@ func runProvidersInDir(dir string, timeout time.Duration, cfg config, raw []byte
 
 	for i, p := range providers {
 		go func(idx int, p providerEntry) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: provider %s panicked: %v\n", p.name, recovered)
+				}
+			}()
 			defer func() { done <- idx }()
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
