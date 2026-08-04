@@ -45,6 +45,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -75,6 +76,44 @@ type options struct {
 	run bool
 }
 
+type signalStatus struct {
+	code atomic.Int32
+}
+
+type signalStatusKey struct{}
+
+func newSignalContext() (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	status := &signalStatus{}
+	ctx = context.WithValue(ctx, signalStatusKey{}, status)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case sig := <-signals:
+			if sig == syscall.SIGTERM {
+				status.code.Store(143)
+			} else {
+				status.code.Store(130)
+			}
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(signals)
+		cancel()
+	}
+}
+
+func signalExitCode(ctx context.Context) int {
+	status, _ := ctx.Value(signalStatusKey{}).(*signalStatus)
+	if status == nil {
+		return 0
+	}
+	return int(status.code.Load())
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	opts, code := parseFlags(args, stderr)
 	if code != 0 {
@@ -84,7 +123,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 
-	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stopSignals := newSignalContext()
 	defer stopSignals()
 
 	changed, err := changedFiles(opts.root, opts.base, opts.head)
@@ -96,8 +135,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "test-affected: %d changed files between %s and %s\n", len(changed), opts.base, opts.head)
 	}
 
-	pkgs, err := listPackagesWithContext(ctx, opts.root, opts.tags)
+	discoveryCtx, cancelDiscovery := context.WithTimeout(ctx, goListCommandTimeout)
+	defer cancelDiscovery()
+	pkgs, err := listPackagesWithContext(discoveryCtx, opts.root, opts.tags)
 	if err != nil {
+		if code := signalExitCode(ctx); code != 0 {
+			return code
+		}
 		fmt.Fprintf(stderr, "test-affected: go list failed: %v\n", err)
 		return 2
 	}
@@ -209,6 +253,9 @@ func runGoTestCommand(ctx context.Context, timeout time.Duration, opts options, 
 		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 			fmt.Fprintf(stderr, "test-affected: go test timed out after %s\n", timeout)
 			return goCommandTimeoutExitCode
+		}
+		if code := signalExitCode(ctx); code != 0 {
+			return code
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
