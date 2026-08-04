@@ -109,6 +109,8 @@
       "agm/internal/tmux/tmux_test.go",
       "agm/internal/ui/table.go",
       "agm/test/bdd/steps/harness_parity_steps.go",
+      "agm/test/bdd/steps/spec_governance_tooling_steps.go",
+      "agm/test/bdd/steps/spec_governance_tooling_steps_test.go",
       "agm/test/performance/eventbus_load_test.go",
       "cmd/vroom-dispatch-direct/main.go",
       "cmd/vroom-dispatch/main.go",
@@ -122,6 +124,8 @@
       "pkg/override/override.go",
       "pkg/workflow/runner.go",
       "tests/githooks/post_merge_test.go",
+      "tools/specaudit/main.go",
+      "tools/specaudit/main_test.go",
       "wayfinder/cmd/wayfinder-session/internal/git/git_test.go"
     ],
     "goroutine-recover": [
@@ -130,7 +134,6 @@
       "agm/cmd/agm-bus/main.go:329",
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
-      "agm/cmd/agm-statusline/main.go:262",
       "agm/cmd/agm/archive.go:896",
       "agm/cmd/agm/watch.go:110",
       "agm/cmd/agm/watch.go:111",
@@ -323,6 +326,36 @@
         "raw-mem-gate": [],
         "zero-test": []
       }
+    },
+    {
+      "previous_baseline_sha256": "2fb93827e5e67f40319e24261712dc1b6c68b71f20905fd08bb97f3010c5121d",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go",
+          "agm/test/bdd/steps/spec_governance_tooling_steps_test.go",
+          "tools/specaudit/main.go",
+          "tools/specaudit/main_test.go"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/cmd/agm-statusline/main.go:262"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "The harness-neutral SPEC governance audit intentionally adds four large bounded corpus and audit files; retain their explicit baseline admission while future growth remains ratcheted.",
+      "reference": "PR-1114"
     }
   ]
 }

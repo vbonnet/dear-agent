@@ -308,6 +308,7 @@ func runBoundedSpecAuditCommand(ctx context.Context, command *exec.Cmd, limit in
 	lifecycleDone := make(chan struct{})
 	contextResult := make(chan specAuditContextCancellationResult, 1)
 	go func() {
+		defer func() { _ = recover() }()
 		select {
 		case <-ctx.Done():
 			err := processGroup.cancel()
