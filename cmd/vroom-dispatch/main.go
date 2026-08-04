@@ -690,12 +690,12 @@ var runArchiveSupervisor = func(sup supervisor) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), spawnCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "agm", sessionArchiveArgs(sup)...)
-	cmd.Env = scrubAPIKey(os.Environ())
+	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_DISPATCHER_SUPERVISOR_REAP=1")
 	return cmd.CombinedOutput()
 }
 
 func sessionArchiveArgs(sup supervisor) []string {
-	return []string{"session", "archive", "--async", "--allow-supervisor-reap", "--outcome", "crashed", sup.Name}
+	return []string{"session", "archive", "--async", "--outcome", "crashed", sup.Name}
 }
 
 // sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package

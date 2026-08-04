@@ -38,6 +38,11 @@ const (
 	// tmux commands. The executor commits launch-bound override proofs
 	// immediately before replacing itself with the validated shell command.
 	HarnessProtocol = "__exec-harness"
+	// AgyProtocol is the launch protocol token intercepted by agm before Cobra,
+	// configuration, telemetry, or debug logging starts. It carries only
+	// non-secret AGY metadata; Google/Gemini authentication is captured inside
+	// the executor environment handoff.
+	AgyProtocol = "__exec-agy"
 	// ExpiryProtocol is the private cleanup protocol used by a detached,
 	// credential-free helper to expire an unconsumed launch handoff.
 	ExpiryProtocol = "__expire-harness-handoff"
@@ -210,6 +215,21 @@ var codexAllowedEnvironment = []string{
 	"WORKSPACE",
 }
 
+var agyAllowedEnvironment = []string{
+	"HOME", "PATH", "PWD", "SHELL", "USER", "LOGNAME",
+	"TMPDIR", "TMP", "TEMP",
+	"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "NO_COLOR",
+	"LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+	"TMUX", "TMUX_PANE",
+	"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "all_proxy", "no_proxy",
+	"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "GCP_PROJECT",
+	"CLOUDSDK_CONFIG", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+	"AGM_HOME", "AGM_CONFIG_DIR", "AGM_DB_PATH", "AGM_SESSIONS_DIR",
+	"AGM_STATE_DIR", "AGM_TMUX_SOCKET", "AGM_BUS_SOCKET", "AGM_TEAM",
+	"WORKSPACE",
+}
+
 // paneRuntimeEnvironment names terminal state that belongs to the target pane,
 // not the process that prepared a private handoff. In particular, a non-TTY
 // caller can report TERM=dumb even though tmux has created a fully capable
@@ -275,10 +295,26 @@ type ClaudeLaunch struct {
 	DeferUntilProducerExit bool
 }
 
+// AgyLaunch contains the non-secret metadata AGM may place in a tmux launch
+// command. Google and Gemini authentication values are transported through the
+// private child environment rather than shell text.
+type AgyLaunch struct {
+	Executable             string
+	HandoffPath            string
+	SessionName            string
+	Model                  string
+	WorkDir                string
+	Permission             string
+	AddDirs                []string
+	ConversationID         string
+	Persistent             bool
+	DeferUntilProducerExit bool
+}
+
 // IsProtocol reports whether arg names one of the private launch protocols.
 func IsProtocol(arg string) bool {
 	return arg == CodexProtocol || arg == ClaudeProtocol ||
-		arg == HarnessProtocol || arg == ExpiryProtocol
+		arg == HarnessProtocol || arg == AgyProtocol || arg == ExpiryProtocol
 }
 
 // BuildCodexCommand returns the token-free shell command pasted into tmux.
@@ -427,6 +463,31 @@ func BuildHarnessCommand(
 	return b.String()
 }
 
+// BuildAgyCommand returns the token-free shell command pasted into tmux.
+func BuildAgyCommand(launch AgyLaunch) string {
+	var b strings.Builder
+	b.WriteString(privateCommandPrefix(launch.Executable, AgyProtocol))
+	if launch.HandoffPath != "" {
+		appendShellFlag(&b, "--handoff", launch.HandoffPath)
+	}
+	appendShellFlag(&b, "--session", launch.SessionName)
+	appendShellFlag(&b, "--model", launch.Model)
+	appendShellFlag(&b, "--workdir", launch.WorkDir)
+	if launch.Permission != "" {
+		appendShellFlag(&b, "--permission", launch.Permission)
+	}
+	if launch.ConversationID != "" {
+		appendShellFlag(&b, "--conversation", launch.ConversationID)
+	}
+	for _, dir := range launch.AddDirs {
+		appendShellFlag(&b, "--add-dir", dir)
+	}
+	if !launch.Persistent {
+		b.WriteString(" && exit")
+	}
+	return b.String()
+}
+
 func appendShellFlag(b *strings.Builder, name, value string) {
 	b.WriteByte(' ')
 	b.WriteString(name)
@@ -452,6 +513,8 @@ func Run(protocol string, args []string) error {
 		return runClaude(args)
 	case HarnessProtocol:
 		return runHarness(args)
+	case AgyProtocol:
+		return runAgy(args)
 	case ExpiryProtocol:
 		return runExpiry(args)
 	default:
@@ -697,6 +760,35 @@ func parseHarness(args []string) (harnessRequest, error) {
 		return harnessRequest{}, err
 	}
 	return request, nil
+}
+
+func runAgy(args []string) error {
+	request, err := parseAgy(args)
+	if err != nil {
+		return err
+	}
+	environ := AgyEnvironment(os.Environ(), request.SessionName)
+	if request.HandoffPath != "" {
+		handoff, handoffErr := consumeHandoff(request.HandoffPath, AgyProtocol, "")
+		if handoffErr != nil {
+			return handoffErr
+		}
+		environ = AgyEnvironment(handoff.Environment, request.SessionName)
+		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
+	}
+	if err := changeDirectory(request.WorkDir); err != nil {
+		return fmt.Errorf("enter AGY working directory: %w", err)
+	}
+	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
+	path, err := lookPathInEnvironment("agy", environ)
+	if err != nil {
+		return fmt.Errorf("resolve agy executable: %w", err)
+	}
+	argv := append([]string{"agy"}, request.argv()...)
+	if err := replaceProcess(path, argv, environ); err != nil {
+		return fmt.Errorf("execute agy: %w", err)
+	}
+	return errors.New("agy executor returned unexpectedly")
 }
 
 type stringList []string
@@ -979,6 +1071,80 @@ func (r claudeRequest) launch() ClaudeLaunch {
 	}
 }
 
+type agyRequest struct {
+	HandoffPath    string
+	SessionName    string
+	Model          string
+	WorkDir        string
+	Permission     string
+	AddDirs        stringList
+	ConversationID string
+}
+
+func parseAgy(args []string) (agyRequest, error) {
+	var request agyRequest
+	set := flag.NewFlagSet(AgyProtocol, flag.ContinueOnError)
+	set.SetOutput(io.Discard)
+	set.StringVar(&request.HandoffPath, "handoff", "", "")
+	set.StringVar(&request.SessionName, "session", "", "")
+	set.StringVar(&request.Model, "model", "", "")
+	set.StringVar(&request.WorkDir, "workdir", "", "")
+	set.StringVar(&request.Permission, "permission", "", "")
+	set.StringVar(&request.ConversationID, "conversation", "", "")
+	set.Var(&request.AddDirs, "add-dir", "")
+	if err := set.Parse(args); err != nil {
+		return agyRequest{}, fmt.Errorf("invalid AGY launch request: %w", err)
+	}
+	if set.NArg() != 0 {
+		return agyRequest{}, errors.New("invalid AGY launch request: positional arguments are not allowed")
+	}
+	if err := validateAgyRequest(request); err != nil {
+		return agyRequest{}, err
+	}
+	return request, nil
+}
+
+func validateAgyRequest(request agyRequest) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", request.SessionName}, {"model", request.Model}, {"workdir", request.WorkDir},
+	} {
+		if err := validateText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	if request.Permission != "" && !oneOf(request.Permission, "auto", "default", "dangerously-skip-permissions") {
+		return fmt.Errorf("invalid AGY permission mode %q", request.Permission)
+	}
+	if err := validateTextList("add-dir", request.AddDirs); err != nil {
+		return err
+	}
+	for _, field := range []struct{ name, value string }{
+		{"handoff", request.HandoffPath}, {"conversation", request.ConversationID},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r agyRequest) argv() []string {
+	args := make([]string, 0, 8+len(r.AddDirs)*2)
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
+	if r.Permission == "auto" || r.Permission == "dangerously-skip-permissions" {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+	if r.ConversationID != "" {
+		args = append(args, "--conversation", r.ConversationID)
+	}
+	for _, dir := range r.AddDirs {
+		args = append(args, "--add-dir", dir)
+	}
+	return args
+}
+
 func validateText(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("invalid harness launch request: %s is required", name)
@@ -1071,6 +1237,21 @@ func ClaudeEnvironment(parent []string, launch ClaudeLaunch, oauthToken string) 
 			}
 		}
 	}
+	return env
+}
+
+// AgyEnvironment applies the deny-by-default environment contract for AGY.
+// Google and Gemini authentication are caller-scoped, so a restarted AGY
+// supervisor cannot inherit a stale long-lived tmux server environment.
+func AgyEnvironment(parent []string, sessionName string) []string {
+	values := environmentMap(parent)
+	env := make([]string, 0, len(agyAllowedEnvironment)+1)
+	for _, name := range agyAllowedEnvironment {
+		if value, ok := values[name]; ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	env = append(env, "AGM_SESSION_NAME="+sessionName)
 	return env
 }
 

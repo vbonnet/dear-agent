@@ -36,7 +36,7 @@ var (
 	archiveReason       string // Justification for --force, recorded in override audit log
 	keepSandbox         bool   // Preserve sandbox directory for debugging
 	includeSupervisors  bool   // Include supervisor sessions in bulk archive
-	allowSupervisorReap bool   // Internal typed supervisor archive authorization
+	allowSupervisorReap bool   // Dispatcher-inherited internal recovery capability
 	archiveOutcome      string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
 	archiveTestEnv      string // Named isolated test environment used for cross-process archive validation
 	spawnReaperFn       = spawnReaper
@@ -976,9 +976,9 @@ func init() {
 		"Preserve sandbox directory for debugging instead of removing it")
 	archiveCmd.Flags().BoolVar(&includeSupervisors, "include-supervisors", false,
 		"Include supervisor sessions (orchestrator, overseer, meta-*) in bulk archive")
-	archiveCmd.Flags().BoolVar(&allowSupervisorReap, "allow-supervisor-reap", false,
-		"Allow typed supervisor recovery archive without --force")
-	_ = archiveCmd.Flags().MarkHidden("allow-supervisor-reap")
+	// Keep the protected-session bypass out of the public CLI. Only the
+	// dispatcher-owned recovery child receives this inherited capability.
+	allowSupervisorReap = os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1"
 	archiveCmd.Flags().StringVar(&archiveOutcome, "outcome", "",
 		"Outcome to stamp on the archived record: completed (default), crashed, killed, gc-stale")
 	archiveCmd.Flags().StringVar(&archiveTestEnv, "test-env", "", "Use named test environment created via agm test-env create")

@@ -704,7 +704,6 @@ func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
 	for _, want := range []string{
 		"session archive",
 		"--async",
-		"--allow-supervisor-reap",
 		"--outcome crashed",
 		"vroom-orchestrator",
 	} {
