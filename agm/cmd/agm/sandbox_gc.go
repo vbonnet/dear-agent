@@ -29,7 +29,14 @@ type sandboxGCSessionStore interface {
 var (
 	sandboxGCStoreConfigs = configuredSandboxGCStoreConfigs
 	openSandboxGCStore    = func(config *dolt.Config) (sandboxGCSessionStore, error) {
-		return dolt.NewWithoutAutoStart(config)
+		store, err := dolt.NewWithoutAutoStart(config)
+		if err == nil || isMissingDoltDatabaseError(err, config.Database) {
+			return store, err
+		}
+		// The endpoint was not reachable, so preserve the configured recovery
+		// behavior for an offline Dolt server. A reachable endpoint reporting a
+		// missing database never reaches this auto-start path.
+		return dolt.New(config)
 	}
 	logSandboxGCEntry = logSandboxGCEntryDefault
 )
