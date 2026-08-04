@@ -41,6 +41,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -189,7 +190,9 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
-	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancel := context.WithTimeout(ctx, goCommandTimeout)
 	defer cancel()
 	return runGoTestCommand(ctx, goCommandTimeout, opts, pkgs, stdout, stderr)
 }

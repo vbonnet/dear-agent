@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -423,9 +424,21 @@ func waitForProcessGone(t *testing.T, pid int) {
 		if errors.Is(err, syscall.ESRCH) {
 			return
 		}
+		if err == nil && processIsZombie(pid) {
+			return
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("process %d still exists after process-group cancellation", pid)
+}
+
+func processIsZombie(pid int) bool {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(raw))
+	return len(fields) > 2 && fields[2] == "Z"
 }
 
 func TestIsForceFullPath(t *testing.T) {

@@ -132,6 +132,7 @@ Feature: Local development guardrails
     Given local, affected integration, and required CI Go test timeouts are configured
     When AGM validates Go test timeout parity
     Then all repository Go test timeouts should match
+    And affected integration deadline layers should preserve their nested budgets
 
   Scenario: Local and required CI vulnerability policy stay aligned
     Given local and required CI govulncheck allowlists are configured
