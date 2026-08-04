@@ -519,6 +519,7 @@ func planBaselineUpdate(
 	if err != nil {
 		return baselineUpdatePlan{}, err
 	}
+	currentKeys = preserveFileSizeBudgets(previous.Findings, currentKeys)
 	change := compareKeyMaps(previous.Findings, currentKeys)
 	previousScannerVersion := effectiveScannerVersion(previous)
 	reason, reference, err := validateUpdateAuthorization(
@@ -560,6 +561,37 @@ func planBaselineUpdate(
 		return baselineUpdatePlan{}, fmt.Errorf("validate planned baseline: %w", err)
 	}
 	return baselineUpdatePlan{Baseline: planned, Change: change, Write: true}, nil
+}
+
+// preserveFileSizeBudgets keeps the previously admitted key when a tracked
+// file gets smaller. The baseline is a maximum budget: reductions are safe and
+// should not become artificial "new findings" that require --accept-new.
+// Growth keeps the current count in the key so compareKeyMaps records an
+// explicit transition and CI rejects it until it is intentionally admitted.
+func preserveFileSizeBudgets(previous, current map[string][]string) map[string][]string {
+	out := cloneKeyMap(current)
+	previousByPath := make(map[string]string, len(previous["file-size"]))
+	for _, key := range previous["file-size"] {
+		if path, _, ok := parseFileSizeKey(key); ok {
+			previousByPath[path] = key
+		}
+	}
+	for i, key := range out["file-size"] {
+		path, currentLines, ok := parseFileSizeKey(key)
+		if !ok {
+			continue
+		}
+		previousKey, exists := previousByPath[path]
+		if !exists {
+			continue
+		}
+		_, previousLines, _ := parseFileSizeKey(previousKey)
+		if currentLines <= previousLines {
+			out["file-size"][i] = previousKey
+		}
+	}
+	sort.Strings(out["file-size"])
+	return out
 }
 
 func validateUpdateAuthorization(

@@ -62,6 +62,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -193,8 +194,9 @@ func bootstrapCommand(root, baselinePath string, acceptNew bool) string {
 		quoteShellWord(root),
 		quoteShellWord(baselinePath),
 	)
+	command += " --accept-scanner-change"
 	if !acceptNew {
-		return command
+		return command + " \\\n+    --reason '<why>' --reference '<bead-or-pr>'"
 	}
 	return command + " --accept-new \\\n    --reason '<why>' --reference '<bead-or-pr>'"
 }
@@ -382,6 +384,27 @@ func scanFileSize(root string) ([]finding, error) {
 		return nil
 	})
 	return out, err
+}
+
+// parseFileSizeKey splits a size finding into its stable file identity and
+// the admitted line-count budget. The count is part of the persisted key
+// because the baseline stores findings as strings; callers that compare
+// budgets use the path portion rather than treating every count change as a
+// new file.
+func parseFileSizeKey(key string) (string, int, bool) {
+	const suffix = " lines)"
+	if !strings.HasSuffix(key, suffix) {
+		return "", 0, false
+	}
+	open := strings.LastIndex(key, " (")
+	if open <= 0 {
+		return "", 0, false
+	}
+	lines, err := strconv.Atoi(key[open+2 : len(key)-len(suffix)])
+	if err != nil || lines <= fileSizeThreshold {
+		return "", 0, false
+	}
+	return key[:open], lines, true
 }
 
 // countLines returns the number of newline-delimited lines in a file.
@@ -693,6 +716,10 @@ func diff(current map[string][]finding, bl baseline) report {
 	var rep report
 	for _, name := range scanNames {
 		findings := current[name]
+		if name == "file-size" {
+			rep.Scans = append(rep.Scans, diffFileSize(findings, bl.Findings[name]))
+			continue
+		}
 		base := map[string]bool{}
 		for _, k := range bl.Findings[name] {
 			base[k] = true
@@ -726,6 +753,56 @@ func diff(current map[string][]finding, bl baseline) report {
 		})
 	}
 	return rep
+}
+
+func diffFileSize(findings []finding, baselineKeys []string) scanReport {
+	currentByPath := make(map[string]finding, len(findings))
+	for _, finding := range findings {
+		if path, _, ok := parseFileSizeKey(finding.Key); ok {
+			currentByPath[path] = finding
+		}
+	}
+	baselineByPath := make(map[string]string, len(baselineKeys))
+	for _, key := range baselineKeys {
+		if path, _, ok := parseFileSizeKey(key); ok {
+			baselineByPath[path] = key
+		}
+	}
+
+	regressions := make([]string, 0)
+	for path, finding := range currentByPath {
+		baselineKey, exists := baselineByPath[path]
+		if !exists {
+			regressions = append(regressions, finding.Key)
+			continue
+		}
+		_, currentLines, _ := parseFileSizeKey(finding.Key)
+		_, baselineLines, _ := parseFileSizeKey(baselineKey)
+		if currentLines > baselineLines {
+			regressions = append(regressions, finding.Key)
+		}
+	}
+
+	fixed := make([]string, 0)
+	for path, key := range baselineByPath {
+		if _, exists := currentByPath[path]; !exists {
+			fixed = append(fixed, key)
+		}
+	}
+	sort.Strings(regressions)
+	sort.Strings(fixed)
+	details := make(map[string]string, len(findings))
+	for _, finding := range findings {
+		details[finding.Key] = finding.Detail
+	}
+	return scanReport{
+		Scan:        "file-size",
+		Regressions: regressions,
+		Fixed:       fixed,
+		Current:     len(findings),
+		Baseline:    len(baselineKeys),
+		details:     details,
+	}
 }
 
 // emitText prints a human-readable report and a final verdict.
