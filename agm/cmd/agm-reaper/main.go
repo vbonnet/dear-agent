@@ -29,6 +29,7 @@ func run() error {
 	sessionsDir := flag.String("sessions-dir", "", "Sessions directory")
 	force := flag.Bool("force", false, "Override archive verification guards (propagated from agm session archive --force)")
 	keepSandbox := flag.Bool("keep-sandbox", false, "Preserve the session sandbox")
+	allowSupervisorReap := flag.Bool("allow-supervisor-reap", false, "Allow typed supervisor recovery archive without --force")
 	outcome := flag.String("outcome", "", "Archive outcome: completed, crashed, killed, or gc-stale")
 	expectedRevision := flag.String("expected-revision", "", "Expected AGM VCS revision for detached archive execution")
 	checkRevision := flag.String("check-revision", "", "Verify this binary revision and exit")
@@ -73,11 +74,13 @@ func run() error {
 	}
 
 	// Create and run reaper
+	reapAllowed := *allowSupervisorReap && os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1"
 	r := reaper.NewWithOptions(*sessionName, *sessionsDir, reaper.ArchiveOptions{
-		SessionID:   *sessionID,
-		Force:       *force,
-		KeepSandbox: *keepSandbox,
-		Outcome:     manifest.SessionOutcome(*outcome),
+		SessionID:           *sessionID,
+		Force:               *force,
+		KeepSandbox:         *keepSandbox,
+		Outcome:             manifest.SessionOutcome(*outcome),
+		AllowSupervisorReap: reapAllowed,
 	})
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("reaper failed: %w", err)

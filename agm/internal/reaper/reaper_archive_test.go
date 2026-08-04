@@ -79,6 +79,56 @@ func TestRun_ArchivePreflightBlocksProtectedSupervisorBeforeTmux(t *testing.T) {
 	}
 }
 
+func TestArchiveRequestAllowsAuthorizedSupervisorReapWithoutForce(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	sessionsDir := t.TempDir()
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "authorized-supervisor-reap-id",
+		Name:          "vroom-orchestrator",
+		Harness:       "codex-cli",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "vroom-orchestrator"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	r := NewWithOptions(m.Name, sessionsDir, ArchiveOptions{
+		SessionID:           m.SessionID,
+		AllowSupervisorReap: true,
+		Outcome:             manifest.OutcomeCrashed,
+	})
+	req := r.archiveRequest()
+	if req.Force {
+		t.Fatal("archiveRequest unexpectedly set Force")
+	}
+	if !req.AllowSupervisorReap {
+		t.Fatal("archiveRequest did not preserve typed supervisor-reap authorization")
+	}
+	if err := r.archiveSession(); err != nil {
+		t.Fatalf("archiveSession() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived || stored.Outcome != manifest.OutcomeCrashed {
+		t.Fatalf("stored lifecycle/outcome = (%q, %q), want (%q, %q)",
+			stored.Lifecycle, stored.Outcome, manifest.LifecycleArchived, manifest.OutcomeCrashed)
+	}
+}
+
 func TestArchiveSession_SharedOperationPreservesOutcomeAndLegacyMove(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agm.db")
 	sessionsDir := t.TempDir()

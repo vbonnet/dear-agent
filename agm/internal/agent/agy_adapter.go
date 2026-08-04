@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -156,10 +157,27 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		ConversationID: conversationID,
 		ExtraAddDirs:   ctx.AuthorizedDirs,
 	}
-	agyCmd := launchparity.BuildAgyCommand(agySpec).Command
+	harnessexecLaunch := harnessexec.AgyLaunch{
+		SessionName:    tmuxName,
+		Model:          resolvedModel,
+		WorkDir:        workDir,
+		Permission:     permissionMode,
+		AddDirs:        ctx.AuthorizedDirs,
+		ConversationID: conversationID,
+	}
+	prepared, err := harnessexec.PrepareAgyCommand(harnessexecLaunch, os.Environ())
+	if err != nil {
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to prepare AGY launch: %w", err))
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		_ = prepared.Cancel()
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("finalize AGY launch: %w", err))
+	}
+	agyCmd := prepared.Command
 
 	// Start Agy in the tmux session
 	if err := sendPastedShellCommandWith(agySendCommand, tmuxName, agyCmd, agyPastedShellValues(agySpec)...); err != nil {
+		_, _ = harnessexec.ResolveSubmission(err, prepared.Cancel)
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to start Agy in tmux session: %w", err))
 	}
 
@@ -287,9 +305,34 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		ConversationID: metadata.UUID,
 		ExtraAddDirs:   metadata.AuthorizedDirs,
 	}
-	fullCmd := launchparity.BuildAgyCommand(agySpec).Command
+	harnessexecLaunch := harnessexec.AgyLaunch{
+		SessionName:    metadata.TmuxName,
+		Model:          resolvedModel,
+		WorkDir:        workDir,
+		Permission:     metadata.PermissionMode,
+		AddDirs:        metadata.AuthorizedDirs,
+		ConversationID: metadata.UUID,
+	}
+	prepared, err := harnessexec.PrepareAgyCommand(harnessexecLaunch, os.Environ())
+	if err != nil {
+		primaryErr := fmt.Errorf("failed to prepare AGY resume launch: %w", err)
+		if created {
+			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
+		}
+		return primaryErr
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		_ = prepared.Cancel()
+		primaryErr := fmt.Errorf("finalize AGY resume launch: %w", err)
+		if created {
+			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
+		}
+		return primaryErr
+	}
+	fullCmd := prepared.Command
 
 	if err := sendPastedShellCommandWith(agySendCommand, metadata.TmuxName, fullCmd, agyPastedShellValues(agySpec)...); err != nil {
+		_, _ = harnessexec.ResolveSubmission(err, prepared.Cancel)
 		primaryErr := fmt.Errorf("failed to send resume command: %w", err)
 		if created {
 			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)

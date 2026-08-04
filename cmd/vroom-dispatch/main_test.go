@@ -621,6 +621,120 @@ func TestRestartTracker_ShouldEscalate(t *testing.T) {
 	}
 }
 
+func TestSupervisorHealthStringIncludesAuthFailed(t *testing.T) {
+	if got := healthAuthFailed.String(); got != "auth_failed" {
+		t.Fatalf("healthAuthFailed.String() = %q, want auth_failed", got)
+	}
+}
+
+func TestSupervisorPaneAuthFailed(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		want    bool
+	}{
+		{
+			name:    "Claude login loop",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login",
+			want:    true,
+		},
+		{
+			name:    "Codex login prompt",
+			harness: "codex-cli",
+			content: "No OpenAI credentials found. Run `codex login` to continue.",
+			want:    true,
+		},
+		{
+			name:    "AGY Google application default credentials",
+			harness: "agy",
+			content: "Application Default Credentials unavailable; run gcloud auth application-default login",
+			want:    true,
+		},
+		{
+			name:    "ordinary auth task output",
+			harness: "codex-cli",
+			content: "Please fix the authentication module and update tests.\n›",
+			want:    false,
+		},
+		{
+			name:    "ordinary HTTP discussion",
+			harness: "agy",
+			content: "The API should return 401 Unauthorized for bad user credentials.\n>",
+			want:    false,
+		},
+		{
+			name:    "Claude auth phrase with healthy prompt",
+			harness: "claude-code",
+			content: "We need to handle a \"Please run /login\" response after token rotation.\n>",
+			want:    false,
+		},
+		{
+			name:    "Claude auth phrase in current explanation",
+			harness: "claude-code",
+			content: "The recovery code should detect Please run /login when Claude Code is blocked.",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by prompt",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login\n>",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by Claude composer",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login\n❯\n? for shortcuts",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by Codex footer composer",
+			harness: "codex-cli",
+			content: "codex login required\n›\n\ngpt-5.6 xhigh · ~/src/project",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by AGY composer",
+			harness: "agy",
+			content: "Application Default Credentials unavailable; run gcloud auth application-default login\n>\n? for shortcuts",
+			want:    false,
+		},
+		{
+			name:    "generic auth phrase without harness evidence",
+			harness: "codex-cli",
+			content: "authentication failed in the mocked dependency; continue with the implementation",
+			want:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := supervisorPaneAuthFailed(tt.content, tt.harness); got != tt.want {
+				t.Fatalf("supervisorPaneAuthFailed() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
+	args := sessionArchiveArgs(supervisor{Name: "vroom-orchestrator"})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"session archive",
+		"--async",
+		"--workspace=oss",
+		"--outcome crashed",
+		"vroom-orchestrator",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("sessionArchiveArgs missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "--force") {
+		t.Fatalf("sessionArchiveArgs must not force supervisor archive: %v", args)
+	}
+}
+
 func TestReadHeartbeatTime(t *testing.T) {
 	dir := t.TempDir()
 	hbDir := filepath.Join(dir, ".agm", "vroom", "heartbeat")
