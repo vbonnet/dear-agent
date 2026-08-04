@@ -79,14 +79,34 @@ func startProviderCommand(cmd *exec.Cmd, input []byte) (*providerCommandRun, err
 		waitDone:     make(chan error, 1),
 	}
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: stdin writer panicked: %v\n", recovered)
+				run.inputDone <- fmt.Errorf("provider stdin writer panicked: %v", recovered)
+			}
+		}()
 		_, copyErr := io.Copy(stdinWriter, bytes.NewReader(input))
 		run.inputDone <- errors.Join(copyErr, run.closeStdin())
 	}()
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: stdout reader panicked: %v\n", recovered)
+				run.readDone <- fmt.Errorf("provider stdout reader panicked: %v", recovered)
+			}
+		}()
 		_, copyErr := io.Copy(&run.outputBuffer, stdoutReader)
 		run.readDone <- copyErr
 	}()
-	go func() { run.waitDone <- cmd.Wait() }()
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: provider wait panicked: %v\n", recovered)
+				run.waitDone <- fmt.Errorf("provider wait panicked: %v", recovered)
+			}
+		}()
+		run.waitDone <- cmd.Wait()
+	}()
 	return run, nil
 }
 
