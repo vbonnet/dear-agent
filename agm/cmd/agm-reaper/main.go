@@ -74,12 +74,13 @@ func run() error {
 	}
 
 	// Create and run reaper
+	reapAllowed := *allowSupervisorReap && os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1"
 	r := reaper.NewWithOptions(*sessionName, *sessionsDir, reaper.ArchiveOptions{
 		SessionID:           *sessionID,
 		Force:               *force,
 		KeepSandbox:         *keepSandbox,
 		Outcome:             manifest.SessionOutcome(*outcome),
-		AllowSupervisorReap: *allowSupervisorReap,
+		AllowSupervisorReap: reapAllowed,
 	})
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("reaper failed: %w", err)

@@ -343,6 +343,9 @@ func supervisorPaneAuthFailed(content, harness string) bool {
 		}
 		return codexPaneAuthFailed(lower)
 	case "agy":
+		if agyPaneReady(lines) {
+			return false
+		}
 		return agyPaneAuthFailed(lower)
 	default:
 		return false
@@ -353,8 +356,8 @@ func supervisorPaneAuthFailed(content, harness string) bool {
 // the idle cursor is followed by the structured model/workdir footer. Stale
 // auth text above that current composer must not trigger recovery.
 func codexPaneReady(lines []string) bool {
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
+	for i, line := range slices.Backward(lines) {
+		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "gpt-") || !strings.Contains(line, " · ") {
 			continue
 		}
@@ -370,6 +373,33 @@ func codexPaneReady(lines []string) bool {
 		}
 	}
 	return false
+}
+
+// agyPaneReady mirrors the shared AGY composer contract: a current > composer
+// owns input, and normal idle chrome (e.g. ? for shortcuts, sandbox status)
+// may follow it. Historical auth text above that composer must not trigger recovery.
+func agyPaneReady(lines []string) bool {
+	composer := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == ">" {
+			composer = i
+		}
+	}
+	if composer < 0 {
+		return false
+	}
+	for _, line := range lines[composer+1:] {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" || strings.Trim(lower, "─━┄┈╌╍═│┃┆┊╎⏏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" ||
+			strings.Contains(lower, "? for shortcuts") ||
+			strings.Contains(lower, "shift+tab to") ||
+			strings.Contains(lower, "accept edits") ||
+			(strings.Contains(lower, "sandbox") && strings.Contains(lower, "gemini-")) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func claudePaneAuthFailed(lines []string, lower string) bool {
@@ -751,7 +781,7 @@ var runArchiveSupervisor = func(sup supervisor) ([]byte, error) {
 }
 
 func sessionArchiveArgs(sup supervisor) []string {
-	return []string{"session", "archive", "--async", "--outcome", "crashed", sup.Name}
+	return []string{"session", "archive", "--async", "--workspace=oss", "--outcome", "crashed", sup.Name}
 }
 
 // sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package
@@ -811,7 +841,7 @@ func archiveAuthFailedSupervisor(sup supervisor) error {
 func isSessionArchived(parent context.Context, name string, timeout time.Duration) bool {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--json", "--fields", "name,status")
+	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--workspace=oss", "--json", "--fields", "name,status")
 	out, err := cmd.Output()
 	if err != nil {
 		return false

@@ -695,6 +695,12 @@ func TestSupervisorPaneAuthFailed(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "stale auth block followed by AGY composer",
+			harness: "agy",
+			content: "Application Default Credentials unavailable; run gcloud auth application-default login\n>\n? for shortcuts",
+			want:    false,
+		},
+		{
 			name:    "generic auth phrase without harness evidence",
 			harness: "codex-cli",
 			content: "authentication failed in the mocked dependency; continue with the implementation",
@@ -716,6 +722,7 @@ func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
 	for _, want := range []string{
 		"session archive",
 		"--async",
+		"--workspace=oss",
 		"--outcome crashed",
 		"vroom-orchestrator",
 	} {
