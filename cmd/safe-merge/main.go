@@ -4,7 +4,7 @@
 // Raw `gh pr merge` is denied by a PreToolUse hook that redirects here.
 //
 // Gates (all must pass before merge executes):
-//  1. ALL CI checks pass — no reds, no pending (required only).
+//  1. All provider-required CI checks pass — no reds, no pending.
 //  2. No unresolved review threads (security-* threads need a written verdict).
 //  3. Head commit is ≥ 5 minutes old (soak time).
 //

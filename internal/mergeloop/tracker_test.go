@@ -73,3 +73,22 @@ func TestForgetDropsRecord(t *testing.T) {
 		t.Errorf("attempts after forget = %d, want 0", got)
 	}
 }
+
+func TestTrackerResetAttemptsIfPassing(t *testing.T) {
+	tr, _ := LoadTracker("owner/repo", filepath.Join(t.TempDir(), "s.json"))
+	now := time.Now()
+	tr.RecordAgentSpawn(1, "sigA", "s", now)
+	tr.RecordAgentSpawn(1, "sigA", "s", now)
+	if got := tr.Attempts(1); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+	tr.ResetAttemptsIfPassing(1)
+	if got := tr.Attempts(1); got != 0 {
+		t.Errorf("attempts after ResetAttemptsIfPassing = %d, want 0", got)
+	}
+	// Subsequent failure with same signature sigA starts at attempt 1 because failure sig was cleared
+	tr.ResetAttemptsIfSigChanged(1, "sigA")
+	if got := tr.Attempts(1); got != 0 {
+		t.Errorf("attempts = %d, want 0", got)
+	}
+}
