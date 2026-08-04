@@ -62,8 +62,9 @@ var canonicalBaselineJSONMemberNames = [...]string{
 }
 
 type baselineChange struct {
-	Added   map[string][]string
-	Removed map[string][]string
+	Added                    map[string][]string
+	Removed                  map[string][]string
+	safeFileSizeReplacements int
 }
 
 func (c baselineChange) addedCount() int {
@@ -83,6 +84,7 @@ type updateRequest struct {
 	AcceptScannerChange bool
 	Reason              string
 	Reference           string
+	bootstrap           bool
 }
 
 type baselineUpdatePlan struct {
@@ -97,7 +99,7 @@ func readBaseline(path string) (baseline, error) {
 	bl, _, err := readBaselineFile(path)
 	if err == nil && effectiveScannerVersion(bl) != scannerKeyVersion {
 		return baseline{}, fmt.Errorf(
-			"baseline scanner version %d is not current version %d; migrate with --update-baseline --accept-scanner-change",
+			"baseline scanner version %d is not current version %d; migrate with --update-baseline --accept-scanner-change --reason '<why>' --reference '<bead-or-pr>'",
 			effectiveScannerVersion(bl), scannerKeyVersion,
 		)
 	}
@@ -401,10 +403,17 @@ func validateDisjointTransitionKeys(transition baselineTransition) error {
 }
 
 func validateTransitionProvenance(transition baselineTransition) error {
-	requiresAuthorization := keyMapCount(transition.Added) > 0 ||
+	requiresAuthorization := (keyMapCount(transition.Added) > 0 &&
+		!isFileSizeBudgetTightening(transition)) ||
 		transition.PreviousScannerVersion != transition.ScannerVersion
 	reason := strings.TrimSpace(transition.Reason)
 	reference := strings.TrimSpace(transition.Reference)
+	if requiresAuthorization && keyMapCount(transition.Added) == 0 &&
+		transition.PreviousScannerVersion == legacyKeyVersion &&
+		transition.PreviousBaselineSHA256 == fmt.Sprintf("%x", sha256.Sum256(nil)) &&
+		reason == "" && reference == "" {
+		return nil
+	}
 	if requiresAuthorization && (reason == "" || reference == "") {
 		return errors.New("added keys and scanner changes require non-blank reason and reference")
 	}
@@ -418,6 +427,38 @@ func validateTransitionProvenance(transition baselineTransition) error {
 		return errors.New("reference must contain a tracker ID, PR reference, HTTPS URL, or commit ID")
 	}
 	return nil
+}
+
+func isFileSizeBudgetTightening(transition baselineTransition) bool {
+	for _, scan := range scanNames {
+		if scan != "file-size" &&
+			(len(transition.Added[scan]) > 0 || len(transition.Removed[scan]) > 0) {
+			return false
+		}
+	}
+	if len(transition.Added["file-size"]) == 0 || len(transition.Added["file-size"]) != len(transition.Removed["file-size"]) {
+		return false
+	}
+	removedByPath := make(map[string]int, len(transition.Removed["file-size"]))
+	for _, key := range transition.Removed["file-size"] {
+		path, lines, ok := parseFileSizeKey(key)
+		if !ok {
+			return false
+		}
+		removedByPath[path] = lines
+	}
+	for _, key := range transition.Added["file-size"] {
+		path, lines, ok := parseFileSizeKey(key)
+		if !ok {
+			return false
+		}
+		previousLines, exists := removedByPath[path]
+		if !exists || lines > previousLines {
+			return false
+		}
+		delete(removedByPath, path)
+	}
+	return len(removedByPath) == 0
 }
 
 func supportedHistoricalScannerVersion(version int) bool {
@@ -519,8 +560,11 @@ func planBaselineUpdate(
 	if err != nil {
 		return baselineUpdatePlan{}, err
 	}
-	currentKeys = preserveFileSizeBudgets(previous.Findings, currentKeys)
-	change := compareKeyMaps(previous.Findings, currentKeys)
+	change := normalizeFileSizeBudgetChanges(
+		previous.Findings,
+		currentKeys,
+		compareKeyMaps(previous.Findings, currentKeys),
+	)
 	previousScannerVersion := effectiveScannerVersion(previous)
 	reason, reference, err := validateUpdateAuthorization(
 		change,
@@ -563,35 +607,45 @@ func planBaselineUpdate(
 	return baselineUpdatePlan{Baseline: planned, Change: change, Write: true}, nil
 }
 
-// preserveFileSizeBudgets keeps the previously admitted key when a tracked
-// file gets smaller. The baseline is a maximum budget: reductions are safe and
-// should not become artificial "new findings" that require --accept-new.
-// Growth keeps the current count in the key so compareKeyMaps records an
-// explicit transition and CI rejects it until it is intentionally admitted.
-func preserveFileSizeBudgets(previous, current map[string][]string) map[string][]string {
-	out := cloneKeyMap(current)
-	previousByPath := make(map[string]string, len(previous["file-size"]))
+// normalizeFileSizeBudgetChanges keeps same-path budget reductions in the
+// transition history without treating them as newly admitted findings. The
+// exact added/removed pair remains recorded so the predecessor can be
+// reconstructed, while only growth requires --accept-new.
+func normalizeFileSizeBudgetChanges(
+	previous, current map[string][]string,
+	change baselineChange,
+) baselineChange {
+	previousByPath := make(map[string]struct {
+		key   string
+		lines int
+	}, len(previous["file-size"]))
 	for _, key := range previous["file-size"] {
-		if path, _, ok := parseFileSizeKey(key); ok {
-			previousByPath[path] = key
+		if path, lines, ok := parseFileSizeKey(key); ok {
+			previousByPath[path] = struct {
+				key   string
+				lines int
+			}{key: key, lines: lines}
 		}
 	}
-	for i, key := range out["file-size"] {
-		path, currentLines, ok := parseFileSizeKey(key)
-		if !ok {
-			continue
-		}
-		previousKey, exists := previousByPath[path]
-		if !exists {
-			continue
-		}
-		_, previousLines, _ := parseFileSizeKey(previousKey)
-		if currentLines <= previousLines {
-			out["file-size"][i] = previousKey
+	currentByPath := make(map[string]struct {
+		key   string
+		lines int
+	}, len(current["file-size"]))
+	for _, key := range current["file-size"] {
+		if path, lines, ok := parseFileSizeKey(key); ok {
+			currentByPath[path] = struct {
+				key   string
+				lines int
+			}{key: key, lines: lines}
 		}
 	}
-	sort.Strings(out["file-size"])
-	return out
+	for path, prior := range previousByPath {
+		now, exists := currentByPath[path]
+		if exists && now.key != prior.key && now.lines <= prior.lines {
+			change.safeFileSizeReplacements++
+		}
+	}
+	return change
 }
 
 func validateUpdateAuthorization(
@@ -605,20 +659,26 @@ func validateUpdateAuthorization(
 	if err := validateUnboundAdmissionMetadata(request, reason, reference); err != nil {
 		return "", "", err
 	}
-	if err := validateAddedKeyAuthorization(change.addedCount(), request.AcceptNew); err != nil {
+	if err := validateAddedKeyAuthorization(change.admissionAddedCount(), request.AcceptNew); err != nil {
 		return "", "", err
 	}
-	if err := validateScannerChangeAuthorization(
-		previousScannerVersion,
-		targetScannerVersion,
-		request.AcceptScannerChange,
-	); err != nil {
-		return "", "", err
+	if !(request.bootstrap && change.admissionAddedCount() == 0 && !request.AcceptScannerChange) {
+		if err := validateScannerChangeAuthorization(
+			previousScannerVersion,
+			targetScannerVersion,
+			request.AcceptScannerChange,
+		); err != nil {
+			return "", "", err
+		}
 	}
 	if err := validateAdmissionProvenance(request, reason, reference); err != nil {
 		return "", "", err
 	}
 	return reason, reference, nil
+}
+
+func (c baselineChange) admissionAddedCount() int {
+	return c.addedCount() - c.safeFileSizeReplacements
 }
 
 func validateUnboundAdmissionMetadata(request updateRequest, reason, reference string) error {
@@ -725,6 +785,7 @@ func updateBaselineFile(
 		}
 		previous = baseline{Version: baselineSchemaV1, Findings: emptyKeyMap()}
 		previousBytes = nil
+		request.bootstrap = true
 	}
 	digest, err := transitionPredecessorSHA256(previous, previousBytes)
 	if err != nil {

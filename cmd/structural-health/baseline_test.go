@@ -807,13 +807,9 @@ func TestUpdateBaselineFileBootstrapRequiresAdmission(t *testing.T) {
 	}
 }
 
-func TestUpdateBaselineFileEmptyBootstrapNeedsScannerMigrationAdmission(t *testing.T) {
+func TestUpdateBaselineFileEmptyBootstrapNeedsNoAdmission(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
-	plan, err := updateBaselineFile(path, findingSet(nil), updateRequest{
-		AcceptScannerChange: true,
-		Reason:              "migrate stable-key semantics",
-		Reference:           "ce-test",
-	})
+	plan, err := updateBaselineFile(path, findingSet(nil), updateRequest{})
 	if err != nil {
 		t.Fatalf("empty bootstrap: %v", err)
 	}
@@ -822,6 +818,35 @@ func TestUpdateBaselineFileEmptyBootstrapNeedsScannerMigrationAdmission(t *testi
 	}
 	if _, err := readBaseline(path); err != nil {
 		t.Fatalf("read empty bootstrap: %v", err)
+	}
+}
+
+func TestUpdateBaselineFileTightensFileSizeBudgetWithoutAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	prior := validV2Baseline(keySet(map[string][]string{
+		"file-size": {"pkg/big.go (1300 lines)"},
+	}))
+	if err := os.WriteFile(path, mustMarshalBaseline(t, prior), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := updateBaselineFile(path, findingSet(map[string][]string{
+		"file-size": {"pkg/big.go (1200 lines)"},
+	}), updateRequest{})
+	if err != nil {
+		t.Fatalf("tighten file-size budget: %v", err)
+	}
+	if !plan.Write || plan.Change.addedCount() != 1 || plan.Change.removedCount() != 1 {
+		t.Fatalf("tightening plan = %+v, want one replacement", plan)
+	}
+	if plan.Change.admissionAddedCount() != 0 {
+		t.Fatalf("tightening plan admission additions = %d, want 0", plan.Change.admissionAddedCount())
+	}
+	if got := plan.Baseline.Findings["file-size"]; !reflect.DeepEqual(got, []string{"pkg/big.go (1200 lines)"}) {
+		t.Fatalf("tightened file-size budget = %v", got)
+	}
+	if _, err := readBaseline(path); err != nil {
+		t.Fatalf("read tightened baseline: %v", err)
 	}
 }
 

@@ -83,19 +83,10 @@ func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
 
 func TestBootstrapCommandCarriesScannerAdmissionForEmptyScan(t *testing.T) {
 	got := bootstrapCommand("repo", "empty.json", false)
-	for _, want := range []string{"--accept-scanner-change", "--reason", "--reference"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("empty-scan bootstrap command %q does not contain %q", got, want)
+	for _, unwanted := range []string{"--accept-new", "--accept-scanner-change", "--reason", "--reference", "\n+"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("empty-scan bootstrap command %q unexpectedly contains %q", got, unwanted)
 		}
-	}
-	if strings.Contains(got, "--accept-new") {
-		t.Fatalf("empty-scan bootstrap command %q unexpectedly contains --accept-new", got)
-	}
-	if err := validateScannerChangeAuthorization(1, scannerKeyVersion, true); err != nil {
-		t.Fatalf("empty-scan bootstrap command is rejected: %v", err)
-	}
-	if err := validateAddedKeyAuthorization(0, strings.Contains(got, "--accept-new")); err != nil {
-		t.Fatalf("empty-scan bootstrap command is rejected: %v", err)
 	}
 }
 

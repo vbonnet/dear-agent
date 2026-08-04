@@ -21,7 +21,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-02** When scanning repository files, the system shall skip generated, vendored, build, dependency, worktree, and VCS directories.
 
-**STRUCT-HEALTH-03** When baseline update mode is requested without expansion authorization and no current finding key is absent from the prior baseline, the system shall write only current finding keys already present in the prior baseline and shall exit successfully.
+**STRUCT-HEALTH-03** When baseline update mode is requested without expansion authorization and no current finding key is absent from the prior baseline, the system shall write current finding keys already present in the prior baseline, or replace a file-size key with a same-path key whose line-count budget is no larger, and shall exit successfully.
 
 **STRUCT-HEALTH-04** When a current finding key is absent from the baseline, the system shall classify it as a regression.
 
@@ -39,7 +39,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-12** When an update is rejected, the system shall leave the destination baseline byte-identical.
 
-**STRUCT-HEALTH-13** When a prior key is replaced by a different current key, the system shall classify the transition as one addition and one removal regardless of total count.
+**STRUCT-HEALTH-13** When a prior non-file-size key is replaced by a different current key, the system shall classify the transition as one addition and one removal regardless of total count; a same-path file-size budget reduction shall also record one addition and one removal while remaining an ordinary tightening rather than a new-finding admission.
 
 **STRUCT-HEALTH-14** When the caller uses `--accept-new`, the system shall require baseline-update mode, at least one added key, a non-blank reason, and a non-blank durable reference.
 

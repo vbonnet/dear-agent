@@ -310,7 +310,7 @@ func runBoundedSpecAuditCommand(ctx context.Context, command *exec.Cmd, limit in
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				return
+				contextResult <- specAuditContextCancellationResult{signalErr: fmt.Errorf("SPEC audit context watcher panicked: %v", recovered)}
 			}
 		}()
 		select {

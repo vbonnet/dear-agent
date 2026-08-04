@@ -194,11 +194,10 @@ func bootstrapCommand(root, baselinePath string, acceptNew bool) string {
 		quoteShellWord(root),
 		quoteShellWord(baselinePath),
 	)
-	command += " --accept-scanner-change"
 	if !acceptNew {
-		return command + " \\\n+    --reason '<why>' --reference '<bead-or-pr>'"
+		return command
 	}
-	return command + " --accept-new \\\n    --reason '<why>' --reference '<bead-or-pr>'"
+	return command + " --accept-new --accept-scanner-change \\\n    --reason '<why>' --reference '<bead-or-pr>'"
 }
 
 func quoteShellWord(value string) string {
