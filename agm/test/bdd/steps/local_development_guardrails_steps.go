@@ -111,6 +111,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
+	ctx.Step(`^affected integration deadline layers should preserve their nested budgets$`, affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets)
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
@@ -648,6 +649,28 @@ func repositoryGoTestTimeoutsShouldMatch(ctx context.Context) error {
 			state.affectedTestTimeout,
 			state.ciTestTimeout,
 		)
+	}
+	return nil
+}
+
+func affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.affectedTestTimeout == "" || state.ciTestTimeout == "" {
+		return fmt.Errorf("affected integration timeout state is not initialized")
+	}
+	affected, err := os.ReadFile(filepath.Join(localDevBDDRepoRoot(), "cmd", "test-affected", "main.go"))
+	if err != nil {
+		return fmt.Errorf("read affected integration runner: %w", err)
+	}
+	source := string(affected)
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx),\s*goCommandTimeout\)`).MatchString(source) {
+		return fmt.Errorf("affected test command timeout is not wired through context.WithTimeout")
+	}
+	if !regexp.MustCompile(`context\.WithTimeout\(context\.Background\(\),\s*goListCommandTimeout\)`).MatchString(source) {
+		return fmt.Errorf("affected package discovery timeout is not wired through context.WithTimeout")
 	}
 	return nil
 }

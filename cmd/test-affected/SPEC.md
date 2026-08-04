@@ -1,6 +1,6 @@
 # Affected Tests Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-31 -->
 
 ## Overview
 

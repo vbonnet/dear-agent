@@ -24,7 +24,7 @@
 // Output is newline-separated import paths on stdout, suitable for piping:
 //
 //	pkgs=$(go run ./cmd/test-affected --tags=integration)
-//	[ -n "$pkgs" ] && go test -tags=integration -race -count=1 $pkgs
+//	[ -n "$pkgs" ] && go test -tags=integration -race -count=1 -timeout=20m $pkgs
 //
 // Empty output means "no integration tests are affected by this PR" —
 // that is a valid, fast pass, not an error.
