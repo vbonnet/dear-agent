@@ -22,7 +22,11 @@ func TestUpdateBaselineFilePreservesSymlinkAndUpdatesTarget(t *testing.T) {
 		t.Skipf("create baseline symlink: %v", err)
 	}
 
-	plan, err := updateBaselineFile(link, findingSet(nil), updateRequest{})
+	plan, err := updateBaselineFile(link, findingSet(nil), updateRequest{
+		AcceptScannerChange: true,
+		Reason:              "migrate stable-key semantics",
+		Reference:           "ce-test",
+	})
 	if err != nil {
 		t.Fatalf("update through symlink: %v", err)
 	}
@@ -59,7 +63,11 @@ func TestUpdateBaselineFileRejectsBrokenSymlinkWithoutReplacingIt(t *testing.T) 
 		t.Skipf("create broken baseline symlink: %v", err)
 	}
 
-	_, err := updateBaselineFile(link, findingSet(nil), updateRequest{})
+	_, err := updateBaselineFile(link, findingSet(nil), updateRequest{
+		AcceptScannerChange: true,
+		Reason:              "migrate stable-key semantics",
+		Reference:           "ce-test",
+	})
 	if err == nil || !strings.Contains(err.Error(), "resolve baseline symlink") {
 		t.Fatalf("broken symlink update error = %v, want resolution failure", err)
 	}

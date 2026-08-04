@@ -466,18 +466,55 @@ func TestCheckRepositoryDetectsNormalizedSkillDuplicates(t *testing.T) {
 	assertReasons(t, violations, []string{"content-equivalent to first/SKILL.md"})
 }
 
+func TestCheckRepositoryRejectsDivergentRegularFilesWithSameSkillName(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	first := validSkill("shared-skill")
+	second := strings.Replace(first, "2. Apply the change.", "2. Report the result.", 1)
+	writeFile(t, repo, "first/SKILL.md", first)
+	writeFile(t, repo, "second/SKILL.md", second)
+	runGit(t, repo, "add", ".")
+
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReasons(t, violations, []string{`skill name "shared-skill" already has regular-file owner first/SKILL.md`})
+}
+
+func TestCheckRepositoryRejectsFrontmatterOnlyDivergenceForSameSkillName(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	first := validSkill("shared-skill")
+	second := strings.Replace(
+		first,
+		"description:",
+		"model: haiku\neffort: low\ndescription:",
+		1,
+	)
+	writeFile(t, repo, "first/SKILL.md", first)
+	writeFile(t, repo, "second/SKILL.md", second)
+	runGit(t, repo, "add", ".")
+
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReasons(t, violations, []string{`skill name "shared-skill" already has regular-file owner first/SKILL.md`})
+}
+
 func TestCheckRepositoryDoesNotTreatSymlinkAliasAsDuplicate(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
 	writeFile(t, repo, "canonical/SKILL.md", validSkill("canonical"))
-	aliasDir := filepath.Join(repo, "plugin", "skills", "canonical")
+	aliasDir := filepath.Join(repo, ".agents", "skills", "canonical")
 	if err := os.MkdirAll(aliasDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join("..", "..", "..", "canonical", "SKILL.md"), filepath.Join(aliasDir, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, repo, "add", "canonical/SKILL.md", "plugin/skills/canonical/SKILL.md")
+	runGit(t, repo, "add", "canonical/SKILL.md", ".agents/skills/canonical/SKILL.md")
 	violations, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
@@ -485,6 +522,47 @@ func TestCheckRepositoryDoesNotTreatSymlinkAliasAsDuplicate(t *testing.T) {
 	if len(violations) != 0 {
 		t.Fatalf("symlink alias produced violations: %v", violations)
 	}
+}
+
+func TestCheckRepositoryRejectsUntrackedSkillSymlinkTarget(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeFile(t, repo, "untracked/SKILL.md", validSkill("canonical"))
+	aliasDir := filepath.Join(repo, "plugin", "skills", "canonical")
+	if err := os.MkdirAll(aliasDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "..", "untracked", "SKILL.md"), filepath.Join(aliasDir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "plugin/skills/canonical/SKILL.md")
+
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReasons(t, violations, []string{`skill symlink for name "canonical" does not resolve to a tracked regular-file canonical SKILL.md owner`})
+}
+
+func TestCheckRepositoryRejectsTrackedNonSkillSymlinkTarget(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeFile(t, repo, "canonical/SKILL.md", validSkill("canonical"))
+	writeFile(t, repo, "sources/canonical.md", validSkill("canonical"))
+	aliasDir := filepath.Join(repo, "plugin", "skills", "canonical")
+	if err := os.MkdirAll(aliasDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "..", "sources", "canonical.md"), filepath.Join(aliasDir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "canonical/SKILL.md", "sources/canonical.md", "plugin/skills/canonical/SKILL.md")
+
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReasons(t, violations, []string{`skill symlink for name "canonical" resolves to a noncanonical target; expected canonical/SKILL.md`})
 }
 
 func TestCheckRepositoryRejectsSymlinkOutsideRoot(t *testing.T) {

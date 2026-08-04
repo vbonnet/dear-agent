@@ -24,14 +24,16 @@
 //	                   it protects. See docs/policies/harness-hygiene and the
 //	                   ce-xj1b over-fit class (re-embedded three times).
 //
-// Each scan emits a set of stable "finding keys". The baseline file records
-// accepted keys and append-only provenance for changes to that set. On every
-// run the tool diffs current findings against the baseline:
+// Each scan emits a set of finding keys. The baseline file records accepted
+// keys and append-only provenance for changes to that set. File-size findings
+// include a line-count budget; their stable identity is the path, so a
+// same-path reduction is accepted while growth is a regression. On every run
+// the tool diffs current findings against the baseline:
 //
-//   - A key present now but absent from the baseline is a REGRESSION and
-//     fails the build (exit 1).
-//   - A key in the baseline but no longer present is FIXED — informational,
-//     and a nudge to re-baseline so the ratchet tightens.
+//   - A non-file-size key present now but absent from the baseline is a
+//     REGRESSION and fails the build (exit 1).
+//   - A non-file-size key in the baseline but no longer present is FIXED —
+//     informational, and a nudge to re-baseline so the ratchet tightens.
 //
 // Usage:
 //
@@ -62,6 +64,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -196,7 +199,7 @@ func bootstrapCommand(root, baselinePath string, acceptNew bool) string {
 	if !acceptNew {
 		return command
 	}
-	return command + " --accept-new \\\n    --reason '<why>' --reference '<bead-or-pr>'"
+	return command + " --accept-new --accept-scanner-change \\\n    --reason '<why>' --reference '<bead-or-pr>'"
 }
 
 func quoteShellWord(value string) string {
@@ -364,7 +367,8 @@ func isUnderCmd(importPath string) bool {
 }
 
 // scanFileSize walks the tree and flags .go files longer than the threshold.
-// Keys are repo-relative paths so the baseline is location-independent.
+// Keys include the observed line count so an admitted file cannot grow without
+// producing a new finding and an explicit baseline transition.
 func scanFileSize(root string) ([]finding, error) {
 	var out []finding
 	err := walkGoFiles(root, func(path, rel string) error {
@@ -373,11 +377,35 @@ func scanFileSize(root string) ([]finding, error) {
 			return err
 		}
 		if n > fileSizeThreshold {
-			out = append(out, finding{Key: rel, Detail: fmt.Sprintf("%d lines", n)})
+			out = append(out, finding{
+				Key:    fmt.Sprintf("%s (%d lines)", rel, n),
+				Detail: fmt.Sprintf("%d lines", n),
+			})
 		}
 		return nil
 	})
 	return out, err
+}
+
+// parseFileSizeKey splits a size finding into its stable file identity and
+// the admitted line-count budget. The count is part of the persisted key
+// because the baseline stores findings as strings; callers that compare
+// budgets use the path portion rather than treating every count change as a
+// new file.
+func parseFileSizeKey(key string) (string, int, bool) {
+	const suffix = " lines)"
+	if !strings.HasSuffix(key, suffix) {
+		return "", 0, false
+	}
+	open := strings.LastIndex(key, " (")
+	if open <= 0 {
+		return "", 0, false
+	}
+	lines, err := strconv.Atoi(key[open+2 : len(key)-len(suffix)])
+	if err != nil || lines <= fileSizeThreshold {
+		return "", 0, false
+	}
+	return key[:open], lines, true
 }
 
 // countLines returns the number of newline-delimited lines in a file.
@@ -689,6 +717,10 @@ func diff(current map[string][]finding, bl baseline) report {
 	var rep report
 	for _, name := range scanNames {
 		findings := current[name]
+		if name == "file-size" {
+			rep.Scans = append(rep.Scans, diffFileSize(findings, bl.Findings[name]))
+			continue
+		}
 		base := map[string]bool{}
 		for _, k := range bl.Findings[name] {
 			base[k] = true
@@ -722,6 +754,56 @@ func diff(current map[string][]finding, bl baseline) report {
 		})
 	}
 	return rep
+}
+
+func diffFileSize(findings []finding, baselineKeys []string) scanReport {
+	currentByPath := make(map[string]finding, len(findings))
+	for _, finding := range findings {
+		if path, _, ok := parseFileSizeKey(finding.Key); ok {
+			currentByPath[path] = finding
+		}
+	}
+	baselineByPath := make(map[string]string, len(baselineKeys))
+	for _, key := range baselineKeys {
+		if path, _, ok := parseFileSizeKey(key); ok {
+			baselineByPath[path] = key
+		}
+	}
+
+	regressions := make([]string, 0)
+	for path, finding := range currentByPath {
+		baselineKey, exists := baselineByPath[path]
+		if !exists {
+			regressions = append(regressions, finding.Key)
+			continue
+		}
+		_, currentLines, _ := parseFileSizeKey(finding.Key)
+		_, baselineLines, _ := parseFileSizeKey(baselineKey)
+		if currentLines > baselineLines {
+			regressions = append(regressions, finding.Key)
+		}
+	}
+
+	fixed := make([]string, 0)
+	for path, key := range baselineByPath {
+		if _, exists := currentByPath[path]; !exists {
+			fixed = append(fixed, key)
+		}
+	}
+	sort.Strings(regressions)
+	sort.Strings(fixed)
+	details := make(map[string]string, len(findings))
+	for _, finding := range findings {
+		details[finding.Key] = finding.Detail
+	}
+	return scanReport{
+		Scan:        "file-size",
+		Regressions: regressions,
+		Fixed:       fixed,
+		Current:     len(findings),
+		Baseline:    len(baselineKeys),
+		details:     details,
+	}
 }
 
 // emitText prints a human-readable report and a final verdict.

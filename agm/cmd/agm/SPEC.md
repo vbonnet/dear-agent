@@ -135,6 +135,8 @@ Provide a production-ready CLI that:
 
 **CLI-52** When AGM launches a Codex worker, the AGM CLI shall fail closed before harness startup unless the host-authenticated system-managed worker write-boundary guard is an executable regular file, while non-worker and non-Codex sessions shall remain unaffected.
 
+**CLI-55** The `agm sandbox gc` command shall implement the canonical sandbox-inventory contract defined by SGC-14, aggregating non-archived sessions from every configured workspace store and preserving its warning and fail-closed behavior.
+
 **CLI-53** When `agm supervisor run --skip-oauth-check` is requested, the CLI shall reserve the shared supervisor OAuth-check override after preflight, repeat final live admission, commit the privileged use immediately before process launch, and refuse without launching when any authorization gate fails.
 
 **CLI-54** When `agm supervisor run` reaches its launch boundary, the CLI shall repeat final live admission, seal any supervisor OAuth-check and admission-brake reservations plus the spawn-recording obligation into a one-shot private Claude executor, re-resolve the configured Claude executable there, and commit those effects immediately before exec so a confirmed executor-start or executable-resolution failure consumes neither quota nor spawn stagger.

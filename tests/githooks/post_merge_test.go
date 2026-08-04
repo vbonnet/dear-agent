@@ -295,26 +295,25 @@ func TestPostMerge_NoAGM_NoOp(t *testing.T) {
 // ── Stage 1 (binary rebuild) ────────────────────────────────────────────────
 
 // stubGo writes a fake `go` that records each `go build -o <tmp> <pkg>`
-// invocation into recordFile as "<pkg>|<HEAD-of-cwd>" (one per line) and returns
-// the dir holding it. Capturing the cwd's HEAD lets tests assert WHICH commit the
-// hook built from — the whole point of the origin/main fix: the build must run in
-// a checkout pinned to trunk, not in whatever ref the local working tree sits on.
-// It also writes a fake binary to the `-o` path so the hook's atomic rename into
-// GOBIN succeeds (the hook now build-to-temp + mv instead of `go install`).
+// invocation into recordFile as "<pkg>|<HEAD-of-cwd>|<ldflags>" (one per line)
+// and returns the dir holding it. Capturing the cwd's HEAD and the single value
+// following -ldflags lets tests assert which commit and provenance profile the
+// hook built. It also writes a fake binary to the `-o` path so the hook's atomic
+// rename into GOBIN succeeds.
 func stubGo(t *testing.T, recordFile string) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = build ]; then\n" +
-		"  out=\"\"; pkg=\"\"; prev=\"\"\n" +
-		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
+		"  out=\"\"; pkg=\"\"; ldflags=\"\"; prev=\"\"\n" +
+		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; [ \"$prev\" = -ldflags ] && ldflags=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
 		"  [ -n \"$STUB_GO_FAIL_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_FAIL_PKG\" ] && exit 1\n" +
 		"  if [ -n \"$STUB_GO_BLOCK_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_BLOCK_PKG\" ]; then\n" +
 		"    : > \"$STUB_GO_BLOCK_READY\"\n" +
 		"    while [ ! -e \"$STUB_GO_BLOCK_RELEASE\" ]; do sleep 0.01; done\n" +
 		"  fi\n" +
 		"  [ -n \"$out\" ] && printf 'fakebin\\n' > \"$out\"\n" +
-		"  echo \"$pkg|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"\n" +
+		"  printf '%s|%s|%s\\n' \"$pkg\" \"$(git rev-parse HEAD 2>/dev/null)\" \"$ldflags\" >> \"" + recordFile + "\"\n" +
 		"fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
@@ -343,11 +342,12 @@ func stubLockf(t *testing.T, recordFile string) string {
 	return dir
 }
 
-// installRecord is one captured `go install` invocation: the package and the
-// HEAD commit of the directory the build actually ran in.
+// installRecord is one captured `go build` invocation: the package, the HEAD
+// commit of the build directory, and the single value following -ldflags.
 type installRecord struct {
-	pkg    string
-	commit string
+	pkg     string
+	commit  string
+	ldflags string
 }
 
 // installRecords parses the stub's record into structured invocations.
@@ -362,8 +362,9 @@ func installRecords(t *testing.T, recordFile string) []installRecord {
 		if l == "" {
 			continue
 		}
-		pkg, commit, _ := strings.Cut(l, "|")
-		out = append(out, installRecord{pkg: pkg, commit: commit})
+		pkg, rest, _ := strings.Cut(l, "|")
+		commit, ldflags, _ := strings.Cut(rest, "|")
+		out = append(out, installRecord{pkg: pkg, commit: commit, ldflags: ldflags})
 	}
 	return out
 }

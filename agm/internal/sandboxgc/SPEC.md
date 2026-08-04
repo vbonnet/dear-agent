@@ -35,6 +35,8 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 **SGC-05** When the archive flow reaps the sandbox of a session it has just archived, the system shall allow the live-session gate to be omitted while keeping all other gates mandatory.
 
+**SGC-14** When the periodic sandbox sweep builds its live-session source from the configured workspace registry and one configured Dolt database does not exist, the system shall record a visible warning and continue with the remaining reachable configured stores; if no configured store is reachable or all reachable stores return zero sessions, the system shall fail closed and refuse the sweep.
+
 ### Live-Process Gate
 
 **SGC-06** When any process holds a working directory or an open file descriptor at or under the sandbox, the system shall refuse the reap before attempting any unmount.
@@ -60,4 +62,4 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
-- Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, store-down, path escapes) and `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage).
+- Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, store-down, path escapes), `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage), and `agm/cmd/agm/sandbox_gc_test.go` (configured workspace missing-database degradation).

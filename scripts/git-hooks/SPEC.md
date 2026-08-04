@@ -27,7 +27,7 @@ that triggered it.
 
 **GITHOOK-05** When rebuilding a managed Go binary after a merge, the system shall build from freshly resolved `origin/<default_branch>` when that trunk ref is available.
 
-**GITHOOK-06** When no origin trunk ref is available during a rebuild, the system shall fall back to building the local working tree.
+**GITHOOK-06** When no origin trunk ref is available during a non-pair rebuild, the system shall fall back to building the local working tree, while a locked AGM pair rebuild shall instead pin local HEAD and require a detached worktree at that commit.
 
 **GITHOOK-07** When installing a rebuilt Go binary, the system shall build to a temporary file and atomically rename that file over the target binary.
 
@@ -54,6 +54,8 @@ that triggered it.
 **GITHOOK-18** If a post-merge hook runs in a repository outside every managed root, then the system shall perform no maintenance stage, because a globally installed hook otherwise acts in throwaway repositories a test suite created.
 
 **GITHOOK-19** When the system decides whether a repository is managed, the system shall resolve symlinks and compare whole path components, so that a temporary directory reached through a symlinked parent and a sibling sharing a textual prefix are both treated as unmanaged.
+
+**GITHOOK-20** When build-relevant AGM source triggers a pair rebuild, the system shall require an immutable detached checkout at freshly resolved origin trunk or pinned local HEAD, derive Version as `dev-<revision>`, GitCommit as the pinned exact 12-character lowercase hexadecimal revision without truncating an overlength uniqueness abbreviation, BuildDate as the pinned commit time in UTC RFC3339 form, and BuiltBy as `post-merge-hook` before either build, pass the same complete profile as one argument following `-ldflags` to both builds, and preserve the installed pair if the checkout, revision, or commit time cannot be resolved.
 
 ## BDD Traceability
 

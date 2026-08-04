@@ -53,9 +53,10 @@ func TestPlanBaselineUpdateRecordsExplicitAdmission(t *testing.T) {
 		"dead-package": {"pkg/keep", "pkg/new"},
 	})
 	request := updateRequest{
-		AcceptNew: true,
-		Reason:    "restore audited green reference",
-		Reference: "ce-3knl.13.1 / engram-research#250",
+		AcceptNew:           true,
+		AcceptScannerChange: true,
+		Reason:              "restore audited green reference",
+		Reference:           "ce-3knl.13.1 / engram-research#250",
 	}
 
 	plan, err := planBaselineUpdate(prior, current, strings.Repeat("c", 64), request)
@@ -72,8 +73,8 @@ func TestPlanBaselineUpdateRecordsExplicitAdmission(t *testing.T) {
 		t.Fatalf("transitions = %d, want 1", len(plan.Baseline.Transitions))
 	}
 	transition := plan.Baseline.Transitions[0]
-	if transition.PreviousScannerVersion != scannerKeyVersion {
-		t.Errorf("previous scanner version = %d, want %d", transition.PreviousScannerVersion, scannerKeyVersion)
+	if transition.PreviousScannerVersion != legacyKeyVersion {
+		t.Errorf("previous scanner version = %d, want %d", transition.PreviousScannerVersion, legacyKeyVersion)
 	}
 	if got := transition.Added["dead-package"]; !reflect.DeepEqual(got, []string{"pkg/new"}) {
 		t.Errorf("added = %v, want [pkg/new]", got)
@@ -308,7 +309,11 @@ func TestV1NoopMigratesAndV2NoopDoesNotWrite(t *testing.T) {
 		"dead-package": {"pkg/a"},
 	})}
 
-	v1Plan, err := planBaselineUpdate(v1, current, strings.Repeat("f", 64), updateRequest{})
+	v1Plan, err := planBaselineUpdate(v1, current, strings.Repeat("f", 64), updateRequest{
+		AcceptScannerChange: true,
+		Reason:              "migrate stable-key semantics",
+		Reference:           "ce-test",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,6 +345,7 @@ func TestReadBaselineValidation(t *testing.T) {
 		{name: "unknown scan", data: baselineJSONWithExtraScan(t)},
 		{name: "nil list", data: baselineJSONWithNilScan(t)},
 		{name: "duplicate key", data: baselineJSONWithDuplicate(t)},
+		{name: "duplicate file-size path", data: baselineJSONWithDuplicateFileSizePath(t)},
 		{name: "unknown field", data: baselineJSONWithUnknownField(t)},
 	}
 
@@ -541,9 +547,10 @@ func TestReadBaselineValidatesEveryReconstructableTransitionDigest(t *testing.T)
 		findingSet(map[string][]string{"dead-package": {"pkg/a", "pkg/b"}}),
 		fmt.Sprintf("%x", sha256.Sum256(initialBytes)),
 		updateRequest{
-			AcceptNew: true,
-			Reason:    "admit audited test finding",
-			Reference: "ce-test",
+			AcceptNew:           true,
+			AcceptScannerChange: true,
+			Reason:              "admit audited test finding",
+			Reference:           "ce-test",
 		},
 	)
 	if err != nil {
@@ -633,7 +640,11 @@ func TestUpdateBaselineFileRejectionPreservesBytes(t *testing.T) {
 		"dead-package": {"pkg/keep", "pkg/new"},
 	})
 
-	if _, err := updateBaselineFile(path, current, updateRequest{}); err == nil {
+	if _, err := updateBaselineFile(path, current, updateRequest{
+		AcceptScannerChange: true,
+		Reason:              "migrate stable-key semantics",
+		Reference:           "ce-test",
+	}); err == nil {
 		t.Fatal("updateBaselineFile accepted expansion")
 	}
 	got, err := os.ReadFile(path)
@@ -653,7 +664,12 @@ func TestUpdateBaselineFileRecordsLiteralPriorDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	current := findingSet(map[string][]string{"zero-test": {"pkg/new"}})
-	request := updateRequest{AcceptNew: true, Reason: "audited", Reference: "ce-test"}
+	request := updateRequest{
+		AcceptNew:           true,
+		AcceptScannerChange: true,
+		Reason:              "audited",
+		Reference:           "ce-test",
+	}
 
 	plan, err := updateBaselineFile(path, current, request)
 	if err != nil {
@@ -683,7 +699,11 @@ func TestUpdateBaselineFileMigratesV1NoopAndThenPreservesBytes(t *testing.T) {
 	}
 	current := findingSet(map[string][]string{"dead-package": {"pkg/a"}})
 
-	plan, err := updateBaselineFile(path, current, updateRequest{})
+	plan, err := updateBaselineFile(path, current, updateRequest{
+		AcceptScannerChange: true,
+		Reason:              "migrate stable-key semantics",
+		Reference:           "ce-test",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,7 +753,11 @@ func TestUpdateBaselineFileCanonicalizesV2PredecessorDigest(t *testing.T) {
 	migrated, err := updateBaselineFile(
 		path,
 		findingSet(map[string][]string{"dead-package": {"pkg/a", "pkg/b"}}),
-		updateRequest{},
+		updateRequest{
+			AcceptScannerChange: true,
+			Reason:              "migrate stable-key semantics",
+			Reference:           "ce-test",
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -795,6 +819,35 @@ func TestUpdateBaselineFileEmptyBootstrapNeedsNoAdmission(t *testing.T) {
 	}
 	if _, err := readBaseline(path); err != nil {
 		t.Fatalf("read empty bootstrap: %v", err)
+	}
+}
+func TestUpdateBaselineFileTightensFileSizeBudgetWithoutAdmission(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	prior := validV2Baseline(keySet(map[string][]string{
+		"dead-package": {"pkg/old"},
+		"file-size":    {"pkg/big.go (1300 lines)"},
+	}))
+	if err := os.WriteFile(path, mustMarshalBaseline(t, prior), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := updateBaselineFile(path, findingSet(map[string][]string{
+		"file-size": {"pkg/big.go (1200 lines)"},
+	}), updateRequest{})
+	if err != nil {
+		t.Fatalf("tighten file-size budget: %v", err)
+	}
+	if !plan.Write || plan.Change.addedCount() != 1 || plan.Change.removedCount() != 2 {
+		t.Fatalf("tightening plan = %+v, want one replacement", plan)
+	}
+	if plan.Change.admissionAddedCount() != 0 {
+		t.Fatalf("tightening plan admission additions = %d, want 0", plan.Change.admissionAddedCount())
+	}
+	if got := plan.Baseline.Findings["file-size"]; !reflect.DeepEqual(got, []string{"pkg/big.go (1200 lines)"}) {
+		t.Fatalf("tightened file-size budget = %v", got)
+	}
+	if _, err := readBaseline(path); err != nil {
+		t.Fatalf("read tightened baseline: %v", err)
 	}
 }
 
@@ -868,10 +921,12 @@ func validV2Baseline(findings map[string][]string) baseline {
 		Findings:       findings,
 		Transitions: []baselineTransition{{
 			PreviousBaselineSHA256: strings.Repeat("0", 64),
-			PreviousScannerVersion: scannerKeyVersion,
+			PreviousScannerVersion: legacyKeyVersion,
 			ScannerVersion:         scannerKeyVersion,
 			Added:                  empty,
 			Removed:                keySet(nil),
+			Reason:                 "migrate stable-key semantics",
+			Reference:              "ce-test",
 		}},
 	}
 }
@@ -913,6 +968,14 @@ func baselineJSONWithDuplicate(t *testing.T) string {
 	bl := baseline{Version: baselineSchemaV1, Findings: keySet(map[string][]string{
 		"zero-test": {"pkg/a", "pkg/a"},
 	})}
+	return string(mustMarshalBaseline(t, bl))
+}
+
+func baselineJSONWithDuplicateFileSizePath(t *testing.T) string {
+	t.Helper()
+	bl := validV2Baseline(keySet(map[string][]string{
+		"file-size": {"pkg/big.go (1200 lines)", "pkg/big.go (1300 lines)"},
+	}))
 	return string(mustMarshalBaseline(t, bl))
 }
 

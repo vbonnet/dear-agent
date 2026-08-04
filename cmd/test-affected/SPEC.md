@@ -1,6 +1,6 @@
 # Affected Tests Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-31 -->
 
 ## Overview
 
@@ -24,7 +24,7 @@ prints or runs the affected test-bearing packages.
 
 **TEST-AFFECTED-07** When `--all` is provided, the system shall include affected non-test-bearing packages in output.
 
-**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages bounded by a timeout that matches required CI and local preflight.
+**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages with a per-package timeout that matches required CI and local preflight, keep the aggregate command bounded by a timeout that reserves at least ten minutes of scheduling headroom so delayed package starts can receive that full timeout, and reserve at least five additional workflow minutes around bounded selection and test execution.
 
 ## BDD Traceability
 

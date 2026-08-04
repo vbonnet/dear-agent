@@ -24,7 +24,7 @@
 // Output is newline-separated import paths on stdout, suitable for piping:
 //
 //	pkgs=$(go run ./cmd/test-affected --tags=integration)
-//	[ -n "$pkgs" ] && go test -tags=integration -race -count=1 $pkgs
+//	[ -n "$pkgs" ] && go test -tags=integration -race -count=1 -timeout=20m $pkgs
 //
 // Empty output means "no integration tests are affected by this PR" —
 // that is a valid, fast pass, not an error.
@@ -48,8 +48,11 @@ import (
 )
 
 const (
-	gitCommandTimeout = 30 * time.Second
-	goCommandTimeout  = 20 * time.Minute
+	gitCommandTimeout    = 30 * time.Second
+	goListCommandTimeout = 5 * time.Minute
+	goTestPackageTimeout = 20 * time.Minute
+	goTestStartupGrace   = 10 * time.Minute
+	goTestCommandTimeout = goTestPackageTimeout + goTestStartupGrace
 )
 
 func main() {
@@ -136,7 +139,7 @@ func parseFlags(args []string, stderr io.Writer) (options, int) {
 	fs.StringVar(&opts.root, "root", "", "repo root (default: git rev-parse --show-toplevel)")
 	fs.BoolVar(&opts.verbose, "verbose", false, "log decisions to stderr")
 	fs.BoolVar(&opts.emitAll, "all", false, "emit all affected packages, not just test-bearing ones")
-	fs.BoolVar(&opts.run, "run", false, "exec `go test -race -count=1` on the selected packages instead of printing them")
+	fs.BoolVar(&opts.run, "run", false, "exec `go test -race -count=1 -timeout=20m` on the selected packages instead of printing them")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return opts, 0
@@ -176,7 +179,7 @@ func resolveOptions(opts *options, stderr io.Writer) int {
 	return 0
 }
 
-// runTests shells out to `go test -race -count=1` on the selected
+// runTests shells out to `go test -race -count=1 -timeout=<required CI timeout>` on the selected
 // packages. Empty selection is a clean pass — there are no affected
 // tests, and that is a valid CI outcome, not an error.
 func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
@@ -185,12 +188,10 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
-	args := []string{"test", "-race", "-count=1"}
-	if opts.tags != "" {
-		args = append(args, "-tags="+opts.tags)
-	}
-	args = append(args, pkgs...)
-	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	args := goTestArgs(opts, pkgs)
+	// A package may not start until several minutes after the command does, so
+	// the aggregate command budget must exceed Go's per-package deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), goTestCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = opts.root
@@ -205,6 +206,14 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return 0
+}
+
+func goTestArgs(opts options, pkgs []string) []string {
+	args := []string{"test", "-race", "-count=1", "-timeout=" + goTestPackageTimeout.String()}
+	if opts.tags != "" {
+		args = append(args, "-tags="+opts.tags)
+	}
+	return append(args, pkgs...)
 }
 
 // goListPackage mirrors the subset of `go list -json` we use. Fields
@@ -256,7 +265,7 @@ func listPackages(root, tags string) ([]*goListPackage, error) {
 		args = append(args, "-tags", tags)
 	}
 	args = append(args, "./...")
-	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), goListCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root

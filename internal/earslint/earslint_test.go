@@ -63,6 +63,25 @@ func TestLint_MarkdownListAndEmphasis(t *testing.T) {
 	}
 }
 
+func TestNormalizeRequirementLine(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "bold list", raw: "- **REQ-01** When a request arrives, the system shall respond.", want: "REQ-01 When a request arrives, the system shall respond."},
+		{name: "numbered code", raw: "2) `REQ-02` The system shall retain user_id and a * b.", want: "REQ-02 The system shall retain user_id and a * b."},
+		{name: "heading emphasis", raw: "### __REQ-03__ While a job runs, the system shall report progress.", want: "REQ-03 While a job runs, the system shall report progress."},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := NormalizeRequirementLine(test.raw); got != test.want {
+				t.Fatalf("NormalizeRequirementLine() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestLint_SingleEmphasisAndBackticks(t *testing.T) {
 	l := newDefault(t)
 	doc := strings.Join([]string{
@@ -101,8 +120,8 @@ func TestLint_OptionWithoutThen(t *testing.T) {
 func TestLint_NonConforming(t *testing.T) {
 	l := newDefault(t)
 	doc := strings.Join([]string{
-		"The system shall log requests.",            // valid ubiquitous
-		"Eventually the thing shall work somehow.",  // non-conforming (no "the X shall")
+		"The system shall log requests.",           // valid ubiquitous
+		"Eventually the thing shall work somehow.", // non-conforming (no "the X shall")
 	}, "\n")
 	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
 	if err != nil {
@@ -134,7 +153,7 @@ func TestLint_NonConforming(t *testing.T) {
 	}
 }
 
-// TestLint_PreservesSnakeCaseAndMath guards against stripMarkdown corrupting
+// TestLint_PreservesSnakeCaseAndMath guards against normalization corrupting
 // intra-word underscores (snake_case identifiers) or spaced asterisks (math /
 // wildcards) when removing markdown emphasis. The reported finding text must
 // match the source requirement verbatim.
@@ -151,7 +170,7 @@ func TestLint_PreservesSnakeCaseAndMath(t *testing.T) {
 	got := res.Findings[0].Text
 	want := "Eventually the system shall update the user_id when count > a * b."
 	if got != want {
-		t.Errorf("stripMarkdown corrupted snake_case/math: got %q, want %q", got, want)
+		t.Errorf("normalization corrupted snake_case/math: got %q, want %q", got, want)
 	}
 }
 

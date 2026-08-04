@@ -1,8 +1,10 @@
 package main
 
 import (
+	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 // pkgFixture returns a small synthetic module: three packages
@@ -221,6 +223,41 @@ func TestIsForceFullPath(t *testing.T) {
 		if got := isForceFullPath(tc.path); got != tc.want {
 			t.Errorf("isForceFullPath(%q) = %v, want %v", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestGoTestArgsPassesRequiredTimeout(t *testing.T) {
+	got := goTestArgs(options{tags: "integration,contract"}, []string{"example.com/m/b", "example.com/m/c"})
+	want := []string{
+		"test",
+		"-race",
+		"-count=1",
+		"-timeout=20m0s",
+		"-tags=integration,contract",
+		"example.com/m/b",
+		"example.com/m/c",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("goTestArgs() = %v, want %v", got, want)
+	}
+}
+
+func TestGoTestCommandBudgetPreservesStartupGrace(t *testing.T) {
+	const minimumStartupGrace = 10 * time.Minute
+	if goTestStartupGrace < minimumStartupGrace {
+		t.Fatalf(
+			"go test startup grace %s must be at least %s",
+			goTestStartupGrace,
+			minimumStartupGrace,
+		)
+	}
+	if goTestCommandTimeout != goTestPackageTimeout+goTestStartupGrace {
+		t.Fatalf(
+			"aggregate go test timeout %s must equal package timeout %s plus startup grace %s",
+			goTestCommandTimeout,
+			goTestPackageTimeout,
+			goTestStartupGrace,
+		)
 	}
 }
 
