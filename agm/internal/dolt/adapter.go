@@ -636,6 +636,18 @@ func New(config *Config) (*Adapter, error) {
 	return adapter, nil
 }
 
+// NewWithoutAutoStart opens a Dolt adapter without invoking a configured
+// startup script or retrying after the initial connection failure. It is used
+// by read-only inventory probes where a missing database is expected.
+func NewWithoutAutoStart(config *Config) (*Adapter, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	withoutStart := *config
+	withoutStart.StartScript = ""
+	return New(&withoutStart)
+}
+
 // expandTilde expands ~ prefix to user home directory
 func expandTilde(path string) string {
 	if !strings.HasPrefix(path, "~/") {

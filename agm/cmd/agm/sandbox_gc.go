@@ -29,7 +29,7 @@ type sandboxGCSessionStore interface {
 var (
 	sandboxGCStoreConfigs = configuredSandboxGCStoreConfigs
 	openSandboxGCStore    = func(config *dolt.Config) (sandboxGCSessionStore, error) {
-		return dolt.New(config)
+		return dolt.NewWithoutAutoStart(config)
 	}
 	logSandboxGCEntry = logSandboxGCEntryDefault
 )
@@ -194,29 +194,31 @@ func constantLiveSessionIDs(live map[string]bool) func() (map[string]bool, error
 
 func sandboxGCLiveSessionIDs() (map[string]bool, []string, error) {
 	if os.Getenv("AGM_DB_PATH") != "" {
-		store, err := getStorage()
-		if err != nil {
-			return nil, nil, err
-		}
-		sessions, listErr := store.ListSessions(nil)
-		closeErr := store.Close()
-		if listErr != nil {
-			return nil, nil, fmt.Errorf("list sessions from SQLite store: %w", listErr)
-		}
-		if closeErr != nil {
-			return nil, nil, fmt.Errorf("close SQLite session store: %w", closeErr)
-		}
-		if len(sessions) == 0 {
-			return nil, nil, fmt.Errorf("SQLite session store returned zero sessions — refusing to treat all sandboxes as orphaned")
-		}
-		live := make(map[string]bool)
-		for _, session := range sessions {
-			if session.Lifecycle != manifest.LifecycleArchived {
-				live[session.SessionID] = true
-			}
-		}
-		return live, nil, nil
+		return sandboxGCLiveSessionIDsFromSQLite()
 	}
+	return sandboxGCLiveSessionIDsFromDolt()
+}
+
+func sandboxGCLiveSessionIDsFromSQLite() (map[string]bool, []string, error) {
+	store, err := getStorage()
+	if err != nil {
+		return nil, nil, err
+	}
+	sessions, listErr := store.ListSessions(nil)
+	closeErr := store.Close()
+	if listErr != nil {
+		return nil, nil, fmt.Errorf("list sessions from SQLite store: %w", listErr)
+	}
+	if closeErr != nil {
+		return nil, nil, fmt.Errorf("close SQLite session store: %w", closeErr)
+	}
+	if len(sessions) == 0 {
+		return nil, nil, fmt.Errorf("SQLite session store returned zero sessions — refusing to treat all sandboxes as orphaned")
+	}
+	return liveSessionIDsFromManifests(sessions), nil, nil
+}
+
+func sandboxGCLiveSessionIDsFromDolt() (map[string]bool, []string, error) {
 	configs, err := sandboxGCStoreConfigs()
 	if err != nil {
 		return nil, nil, err
@@ -247,10 +249,8 @@ func sandboxGCLiveSessionIDs() (map[string]bool, []string, error) {
 		}
 		reachableStores++
 		totalSessions += len(sessions)
-		for _, session := range sessions {
-			if session.Lifecycle != manifest.LifecycleArchived {
-				live[session.SessionID] = true
-			}
+		for sessionID := range liveSessionIDsFromManifests(sessions) {
+			live[sessionID] = true
 		}
 	}
 	if reachableStores == 0 {
@@ -260,6 +260,16 @@ func sandboxGCLiveSessionIDs() (map[string]bool, []string, error) {
 		return nil, warnings, fmt.Errorf("configured Dolt session stores returned zero sessions — refusing to treat all sandboxes as orphaned")
 	}
 	return live, warnings, nil
+}
+
+func liveSessionIDsFromManifests(sessions []*manifest.Manifest) map[string]bool {
+	live := make(map[string]bool)
+	for _, session := range sessions {
+		if session.Lifecycle != manifest.LifecycleArchived {
+			live[session.SessionID] = true
+		}
+	}
+	return live
 }
 
 func isMissingDoltDatabaseError(err error, database string) bool {
