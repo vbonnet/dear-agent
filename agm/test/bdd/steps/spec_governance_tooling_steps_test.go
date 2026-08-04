@@ -94,7 +94,7 @@ func TestSpecAuditGoTestRunnerAcceptsGroupedCurrentSelection(t *testing.T) {
 
 func TestSpecAuditGoTestRunnerEndToEnd(t *testing.T) {
 	state := &specGovernanceToolingState{repoRoot: packageSpecBDDRepoRoot()}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	ctx = context.WithValue(ctx, specGovernanceToolingStateKey{}, state)
 	if err := runSpecAuditGoTests(ctx, "TestGitOutputIsBounded"); err != nil {

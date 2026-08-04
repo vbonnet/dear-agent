@@ -32,8 +32,11 @@ import (
 )
 
 const (
-	specAuditGoTestDeadline    = 2 * time.Minute
-	specAuditGoTestTimeout     = "90s"
+	// Nested Go test compilation is substantially slower on GitHub's macOS
+	// arm64 runners; retain a bounded command while allowing the package to
+	// compile before the inner test timeout expires.
+	specAuditGoTestDeadline    = 4 * time.Minute
+	specAuditGoTestTimeout     = "3m"
 	specAuditGoTestOutputLimit = 1 << 20
 	specAuditGoTestFileLimit   = 512
 	specAuditGoTestFileBytes   = 4 << 20

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -84,6 +85,17 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 
 	liveSessionIDs, warnings, err := sandboxGCLiveSessionIDs()
 	if err != nil {
+		for _, warning := range warnings {
+			logSandboxGCEntry(gclog.Entry{
+				Operation: "sandbox_gc_warning",
+				Reason:    "workspace_store_skipped",
+				Error:     warning,
+				DryRun:    !sandboxGCReap,
+			})
+			if !sandboxGCJSON {
+				ui.PrintWarning(warning)
+			}
+		}
 		logSandboxGCEntry(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "live_session_inventory_failed",
@@ -171,7 +183,7 @@ func configuredSandboxGCStoreConfigs() ([]*dolt.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve AGM workspace config path: %w", err)
 	}
-	return dolt.ConfiguredWorkspaceConfigsAt(path)
+	return dolt.ConfiguredWorkspaceConfigsIncludingDisabledAt(path)
 }
 
 func constantLiveSessionIDs(live map[string]bool) func() (map[string]bool, error) {
@@ -181,6 +193,30 @@ func constantLiveSessionIDs(live map[string]bool) func() (map[string]bool, error
 }
 
 func sandboxGCLiveSessionIDs() (map[string]bool, []string, error) {
+	if os.Getenv("AGM_DB_PATH") != "" {
+		store, err := getStorage()
+		if err != nil {
+			return nil, nil, err
+		}
+		sessions, listErr := store.ListSessions(nil)
+		closeErr := store.Close()
+		if listErr != nil {
+			return nil, nil, fmt.Errorf("list sessions from SQLite store: %w", listErr)
+		}
+		if closeErr != nil {
+			return nil, nil, fmt.Errorf("close SQLite session store: %w", closeErr)
+		}
+		if len(sessions) == 0 {
+			return nil, nil, fmt.Errorf("SQLite session store returned zero sessions — refusing to treat all sandboxes as orphaned")
+		}
+		live := make(map[string]bool)
+		for _, session := range sessions {
+			if session.Lifecycle != manifest.LifecycleArchived {
+				live[session.SessionID] = true
+			}
+		}
+		return live, nil, nil
+	}
 	configs, err := sandboxGCStoreConfigs()
 	if err != nil {
 		return nil, nil, err
