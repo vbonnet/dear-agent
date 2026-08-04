@@ -759,6 +759,9 @@ func projectRequiredCheckRuns(ctx context.Context, prNum int, repo string) (requ
 		"--json", "name,state",
 	))
 	if requiredErr != nil {
+		if len(policy.Identities) == 0 && isNoRequiredChecksReported(requiredErr) {
+			return requiredCheckProjection{AuthoritativeEmpty: true}, nil
+		}
 		return requiredCheckProjection{}, fmt.Errorf("provider required-check projection unavailable for %d configured identity requirement(s): %w", len(policy.Identities), requiredErr)
 	}
 
@@ -774,6 +777,21 @@ func projectRequiredCheckRuns(ctx context.Context, prNum int, repo string) (requ
 		return requiredCheckProjection{}, fmt.Errorf("reconciling provider-required checks with discovered policy: %w", err)
 	}
 	return requiredCheckProjection{Runs: requiredOnly, ProviderRuns: providerRequired}, nil
+}
+
+func isNoRequiredChecksReported(err error) bool {
+	if err == nil {
+		return false
+	}
+	for line := range strings.SplitSeq(err.Error(), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "stderr:"))
+		if strings.HasSuffix(line, "' branch") &&
+			(strings.HasPrefix(line, "no checks reported on the '") ||
+				strings.HasPrefix(line, "no required checks reported on the '")) {
+			return true
+		}
+	}
+	return false
 }
 
 // ProjectRequiredChecks resolves the complete layered branch policy, reconciles
@@ -842,7 +860,11 @@ func checkAllCIContext(ctx context.Context, prNum int, repo string) error {
 		"--json", "name,state",
 	))
 	if err != nil {
-		return fmt.Errorf("gh pr checks failed: %w", err)
+		if projection.AuthoritativeEmpty && isNoRequiredChecksReported(err) {
+			allOut = []byte("[]")
+		} else {
+			return fmt.Errorf("gh pr checks failed: %w", err)
+		}
 	}
 	var allChecks []checkRun
 	if err := json.Unmarshal(allOut, &allChecks); err != nil {

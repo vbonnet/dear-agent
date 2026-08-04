@@ -127,6 +127,10 @@ func (p Policy) Classify(pr PR, attempts int, agentActive bool) Classification {
 		return Classification{StateBehind, "behind base; rebase (re-runs CI)"}
 	}
 
+	if pr.CheckProjectionError != "" {
+		return Classification{StateCIPending, "required-check projection unavailable: " + pr.CheckProjectionError}
+	}
+
 	// CI verdict on an up-to-date head.
 	switch pr.requiredVerdict() {
 	case CheckFail:

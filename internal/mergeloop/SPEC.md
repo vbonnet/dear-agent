@@ -33,6 +33,8 @@ per pass, tracks bounded repair attempts, and records durable audit evidence.
 
 **MLP-12** When a pass completes, the system shall report open, merged, rebased, spawned, escalated, stalled, skipped, and per-state action counts.
 
+**MLP-13** When effective required-check projection is unavailable for one pull request, the classifier shall keep that pull request pending without preventing later independent pull requests from being driven.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

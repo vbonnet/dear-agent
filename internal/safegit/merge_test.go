@@ -322,6 +322,92 @@ esac
 	}
 }
 
+func TestProjectRequiredChecksAcceptsAuthoritativeEmptyProviderError(t *testing.T) {
+	for _, message := range []string{
+		"no checks reported on the 'feature' branch",
+		"no required checks reported on the 'feature' branch",
+	} {
+		t.Run(message, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "%s" >&2; exit 1 ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, message))
+			checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+			if err != nil {
+				t.Fatalf("ProjectRequiredChecks() error = %v", err)
+			}
+			if len(checks) != 0 {
+				t.Fatalf("authoritatively empty projection = %#v", checks)
+			}
+		})
+	}
+}
+
+func TestProjectRequiredChecksRejectsNoChecksWhenPolicyNonempty(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	if _, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo"); err == nil {
+		t.Fatal("nonempty discovered policy must reject an empty provider projection")
+	}
+}
+
+func TestCheckAllCIAcceptsNoChecksWhenPolicyEmpty(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' "no checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%s\n' "no checks reported on the 'feature' branch" >&2; exit 1 ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	if err := checkAllCI(7, "owner/repo"); err != nil {
+		t.Fatalf("authoritatively checkless PR should pass the all-reported-check gate: %v", err)
+	}
+}
+
+func TestCheckAllCIValidatesAllWhenPolicyEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		exitCode int
+		want     string
+	}{
+		{name: "failed advisory", state: "failure", exitCode: 1, want: "checks failed"},
+		{name: "pending advisory", state: "pending", exitCode: 8, want: "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' '[{"name":"Advisory","state":"%s"}]'; exit %d ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, tc.state, tc.exitCode))
+			err := checkAllCI(7, "owner/repo")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("empty-policy all-check validation error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestDiscoverRequiredChecksUsesPaginatedSlurp(t *testing.T) {
 	installRequiredCheckFakeGH(t, `
 if [ "$1" = api ] && [ "$2" = --paginate ] && [ "$3" = --slurp ]; then

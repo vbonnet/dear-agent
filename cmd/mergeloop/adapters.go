@@ -70,17 +70,26 @@ func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]me
 		project = safegit.ProjectRequiredChecks
 	}
 	for _, r := range raw {
+		pr := toPR(r, nil)
 		projectionCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		required, err := project(projectionCtx, r.Number, repo)
 		cancel()
 		if err != nil {
-			return nil, fmt.Errorf("resolving effective required checks for PR #%d: %w", r.Number, err)
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("resolving effective required checks for PR #%d: %w", r.Number, ctx.Err())
+			}
+			pr.CheckProjectionError = fmt.Sprintf("resolving effective required checks: %v", err)
+			prs = append(prs, pr)
+			continue
 		}
 		checks, err := mergeLoopChecks(required)
 		if err != nil {
-			return nil, fmt.Errorf("normalizing effective required checks for PR #%d: %w", r.Number, err)
+			pr.CheckProjectionError = fmt.Sprintf("normalizing effective required checks: %v", err)
+			prs = append(prs, pr)
+			continue
 		}
-		prs = append(prs, toPR(r, checks))
+		pr.Checks = checks
+		prs = append(prs, pr)
 	}
 	return prs, nil
 }

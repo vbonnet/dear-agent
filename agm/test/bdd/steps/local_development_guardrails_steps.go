@@ -23,38 +23,40 @@ import (
 )
 
 type localDevGuardrailState struct {
-	command              string
-	commandSpec          string
-	library              string
-	librarySpec          string
-	traceDir             string
-	trace                safepr.Session
-	harness              string
-	family               string
-	preflightMinutes     int
-	localTestTimeout     string
-	affectedTestTimeout  string
-	ciTestTimeout        string
-	localVulnAllowlist   []string
-	ciVulnAllowlist      []string
-	worktreeBase         string
-	worktreeRepo         string
-	worktreePath         string
-	initialLockReason    string
-	transactionOutcome   string
-	transactionErr       error
-	lockedInPreflight    bool
-	lockedInPRCreate     bool
-	wayfinderCleanupErr  error
-	worktreePreserved    bool
-	cleanupRegression    string
-	cleanupRegressionErr error
-	childRegression      string
-	childRegressionErr   error
-	auditRegression      string
-	auditRegressionErr   error
-	requiredCIRegression string
-	requiredCIError      error
+	command               string
+	commandSpec           string
+	library               string
+	librarySpec           string
+	traceDir              string
+	trace                 safepr.Session
+	harness               string
+	family                string
+	preflightMinutes      int
+	localTestTimeout      string
+	affectedTestTimeout   string
+	ciTestTimeout         string
+	localVulnAllowlist    []string
+	ciVulnAllowlist       []string
+	worktreeBase          string
+	worktreeRepo          string
+	worktreePath          string
+	initialLockReason     string
+	transactionOutcome    string
+	transactionErr        error
+	lockedInPreflight     bool
+	lockedInPRCreate      bool
+	wayfinderCleanupErr   error
+	worktreePreserved     bool
+	cleanupRegression     string
+	cleanupRegressionErr  error
+	childRegression       string
+	childRegressionErr    error
+	auditRegression       string
+	auditRegressionErr    error
+	requiredCIRegression  string
+	requiredCIError       error
+	mergeLoopCIRegression string
+	mergeLoopCIError      error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -305,8 +307,12 @@ func agmRunsEffectiveRequiredCheckRegressions(ctx context.Context) error {
 		return err
 	}
 	state.requiredCIRegression, state.requiredCIError = runLocalGuardrailGoTest(ctx,
-		`^Test(ParseAppliedRulesRequiredChecks|ParseAppliedRulesRequiredChecksKnownEmpty|ParseAppliedRulesRequiredChecksFlagsRequiredWorkflows|ParseClassicRequiredChecksPreservesIntegrationScope|MergeRequiredCheckPoliciesUnionsLayeredSources|DiscoverRequiredChecksAcceptsAuthoritativeEmpty|DiscoverRequiredChecksRejectsPartialPolicyOnSourceError|DiscoverRequiredChecksUsesPaginatedSlurp|RulesBranchEndpointEscapesSlashBase|ProviderRequiredClassificationIgnoresAdvisoryFailure|ProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing|ProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity|ProviderRequiredClassificationRejectsDiscoveryDisagreement|ProjectRequiredChecksReconcilesEffectivePolicy|ProjectRequiredChecksSynthesizesMissingContext|ProjectRequiredChecksAcceptsStatusExits|CheckAllCIIgnoresNonzeroAdvisoryCheckStatus|MergeLoopUsesSharedRequiredProjection|MergeLoopMapsProjectedRequiredStatuses|MergeLoopFailsClosedWhenRequiredProjectionUnavailable)$`,
-		"./internal/safegit", "./cmd/mergeloop",
+		`^Test(ParseAppliedRulesRequiredChecks|ParseAppliedRulesRequiredChecksKnownEmpty|ParseAppliedRulesRequiredChecksFlagsRequiredWorkflows|ParseClassicRequiredChecksPreservesIntegrationScope|MergeRequiredCheckPoliciesUnionsLayeredSources|DiscoverRequiredChecksAcceptsAuthoritativeEmpty|DiscoverRequiredChecksRejectsPartialPolicyOnSourceError|DiscoverRequiredChecksUsesPaginatedSlurp|RulesBranchEndpointEscapesSlashBase|ProviderRequiredClassificationIgnoresAdvisoryFailure|ProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing|ProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity|ProviderRequiredClassificationRejectsDiscoveryDisagreement|ProjectRequiredChecksReconcilesEffectivePolicy|ProjectRequiredChecksSynthesizesMissingContext|ProjectRequiredChecksAcceptsStatusExits|ProjectRequiredChecksAcceptsAuthoritativeEmptyProviderError|ProjectRequiredChecksRejectsNoChecksWhenPolicyNonempty|CheckAllCIAcceptsNoChecksWhenPolicyEmpty|CheckAllCIValidatesAllWhenPolicyEmpty|CheckAllCIIgnoresNonzeroAdvisoryCheckStatus)$`,
+		"./internal/safegit",
+	)
+	state.mergeLoopCIRegression, state.mergeLoopCIError = runLocalGuardrailGoTest(ctx,
+		`^Test(MergeLoopUsesSharedRequiredProjection|MergeLoopMapsProjectedRequiredStatuses|MergeLoopDefersOnlyUnavailableProjection|MergeLoopDefersOnlyUnknownProjectedStatus|MergeLoopAbortsWhenParentContextCanceled|MergeLoopSkipsProjectionWhenOpenPRsExceedCap)$`,
+		"./cmd/mergeloop",
 	)
 	return nil
 }
@@ -317,7 +323,10 @@ func safeMergeShouldEnforceProviderRequiredCI(ctx context.Context) error {
 		return err
 	}
 	if state.requiredCIError != nil {
-		return fmt.Errorf("effective required-check regressions: %w: %s", state.requiredCIError, state.requiredCIRegression)
+		return fmt.Errorf("safegit effective required-check regressions: %w: %s", state.requiredCIError, state.requiredCIRegression)
+	}
+	if state.mergeLoopCIError != nil {
+		return fmt.Errorf("mergeloop effective required-check regressions: %w: %s", state.mergeLoopCIError, state.mergeLoopCIRegression)
 	}
 	return nil
 }

@@ -51,9 +51,13 @@ type PR struct {
 	// ReviewDecision is "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "".
 	ReviewDecision string
 
-	Labels       []string
-	Checks       []Check
-	ChangedFiles []string // best-effort; empty if not fetched
+	Labels []string
+	Checks []Check
+	// CheckProjectionError records why effective required checks could not be
+	// resolved for this PR. The classifier defers only this PR and retries on a
+	// later tick; other independent PRs continue through the same listing pass.
+	CheckProjectionError string
+	ChangedFiles         []string // best-effort; empty if not fetched
 
 	UpdatedAt time.Time
 }

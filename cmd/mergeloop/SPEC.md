@@ -11,7 +11,7 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-01** When `tick` mode is selected, the command shall perform one idempotent policy pass; when `run` mode is selected, it shall repeat until cancellation.
 
-**MLC-02** When pull-request checks are normalized, the command shall consume the shared safegit effective required-check projection, shall exclude advisory rollup history from repair classification, and shall stop the listing pass when that projection cannot be produced.
+**MLC-02** When pull-request checks are normalized, the command shall consume the shared safegit effective required-check projection and shall exclude advisory rollup history from repair classification.
 
 **MLC-03** When a pull request is behind, the command shall prefer `safe-rebase` and use GitHub update-branch only as a compatibility fallback.
 
@@ -30,6 +30,10 @@ session operations to the persistent merge-loop policy engine.
 **MLC-10** When a child command exceeds its operation timeout, the command shall terminate it and return a contextual timeout error.
 
 **MLC-11** When safegit returns a normalized required-check status, the command shall map each known status one-to-one into the merge-loop verdict model and shall reject an unknown status.
+
+**MLC-12** When one pull request's effective required-check projection cannot be produced, the command shall mark only that pull request as pending and shall continue normalizing later independent pull requests.
+
+**MLC-13** When the open pull-request count exceeds the configured cap, the command shall return metadata for backpressure detection without running any per-pull-request required-check projection.
 
 ## BDD Traceability
 

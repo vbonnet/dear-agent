@@ -83,6 +83,11 @@ func TestClassify(t *testing.T) {
 			want: StateCIPending,
 		},
 		{
+			name: "unavailable required-check projection waits",
+			pr:   PR{Number: 18, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE", CheckProjectionError: "provider timeout"},
+			want: StateCIPending,
+		},
+		{
 			name: "all required pass and mergeable is green",
 			pr:   PR{Number: 13, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE", Checks: []Check{reqCheck("ci", CheckPass)}},
 			want: StateGreen,

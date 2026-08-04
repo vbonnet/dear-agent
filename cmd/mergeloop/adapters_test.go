@@ -59,20 +59,79 @@ func TestMergeLoopMapsProjectedRequiredStatuses(t *testing.T) {
 	}
 }
 
-func TestMergeLoopFailsClosedWhenRequiredProjectionUnavailable(t *testing.T) {
+func TestMergeLoopDefersOnlyUnavailableProjection(t *testing.T) {
 	sentinel := errors.New("required projection unavailable")
 	installMergeLoopFakeGH(t, `
 case "$*" in
-  "pr list"*) printf '%s\n' '[{"number":42,"title":"test","headRefName":"feature","headRefOid":"abc","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","labels":[],"files":[]}]' ;;
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"blocked"},{"number":42,"title":"ready"}]' ;;
   *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 `)
-	lister := &ghLister{project: func(context.Context, int, string) ([]safegit.RequiredCheck, error) {
-		return nil, sentinel
+	lister := &ghLister{project: func(_ context.Context, pr int, _ string) ([]safegit.RequiredCheck, error) {
+		if pr == 41 {
+			return nil, sentinel
+		}
+		return []safegit.RequiredCheck{{Name: "Build", Status: safegit.RequiredCheckPassing}}, nil
 	}}
-	_, err := lister.ListOpen(context.Background(), "owner/repo", 50)
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("required projection error = %v", err)
+	prs, err := lister.ListOpen(context.Background(), "owner/repo", 50)
+	if err != nil {
+		t.Fatalf("ListOpen() error = %v", err)
+	}
+	if len(prs) != 2 {
+		t.Fatalf("PR count = %d, want 2: %#v", len(prs), prs)
+	}
+	if prs[0].CheckProjectionError == "" || len(prs[0].Checks) != 0 {
+		t.Fatalf("unavailable projection PR = %#v", prs[0])
+	}
+	if prs[1].CheckProjectionError != "" || len(prs[1].Checks) != 1 || prs[1].Checks[0].Verdict != mergeloop.CheckPass {
+		t.Fatalf("later independent PR = %#v", prs[1])
+	}
+	policy := mergeloop.NewPolicy()
+	if got := policy.Classify(prs[0], 0, false).State; got != mergeloop.StateCIPending {
+		t.Fatalf("unavailable projection state = %s, want %s", got, mergeloop.StateCIPending)
+	}
+	if got := policy.Classify(prs[1], 0, false).State; got != mergeloop.StateGreen {
+		t.Fatalf("later independent PR state = %s, want %s", got, mergeloop.StateGreen)
+	}
+}
+
+func TestMergeLoopDefersOnlyUnknownProjectedStatus(t *testing.T) {
+	installMergeLoopFakeGH(t, `
+case "$*" in
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"unknown"},{"number":42,"title":"ready"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	lister := &ghLister{project: func(_ context.Context, pr int, _ string) ([]safegit.RequiredCheck, error) {
+		if pr == 41 {
+			return []safegit.RequiredCheck{{Name: "Build", Status: 255}}, nil
+		}
+		return []safegit.RequiredCheck{{Name: "Build", Status: safegit.RequiredCheckPassing}}, nil
+	}}
+	prs, err := lister.ListOpen(context.Background(), "owner/repo", 50)
+	if err != nil {
+		t.Fatalf("ListOpen() error = %v", err)
+	}
+	if len(prs) != 2 || prs[0].CheckProjectionError == "" || prs[1].CheckProjectionError != "" {
+		t.Fatalf("normalization isolation = %#v", prs)
+	}
+}
+
+func TestMergeLoopAbortsWhenParentContextCanceled(t *testing.T) {
+	installMergeLoopFakeGH(t, `
+case "$*" in
+  "pr list"*) printf '%s\n' '[{"number":41,"title":"canceled"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	lister := &ghLister{project: func(context.Context, int, string) ([]safegit.RequiredCheck, error) {
+		cancel()
+		return nil, context.Canceled
+	}}
+	_, err := lister.ListOpen(ctx, "owner/repo", 50)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("parent cancellation error = %v, want context.Canceled", err)
 	}
 }
 

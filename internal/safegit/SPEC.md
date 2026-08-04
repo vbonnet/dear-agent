@@ -58,6 +58,8 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-21** When another repository component needs required-check classification, the system shall expose and reuse one context-aware effective-policy projection with normalized passing, pending, and failing statuses.
 
+**SAFEGIT-22** When the discovered policy is authoritatively empty and the provider reports that no required checks exist, the system shall accept the empty projection and shall preserve conservative validation of every reported check at the merge gate.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
