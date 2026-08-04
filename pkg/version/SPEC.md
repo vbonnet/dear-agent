@@ -30,6 +30,12 @@
 
 **VERSION-13** When linker-shaped text appears only inside a different quoted GOFLAGS field or a longer flag name, the governed Make build shall preserve it for normal Go toolchain validation.
 
+**VERSION-14** When no caller supplies `GIT_COMMIT`, the governed Make build shall derive a bounded HEAD revision and append `-dirty` when tracked or untracked worktree state exists.
+
+**VERSION-15** When default revision or worktree status evidence is unavailable, the governed Make build shall stamp `unknown` instead of claiming a clean revision.
+
+**VERSION-16** When a caller supplies `GIT_COMMIT`, the governed Make build shall preserve that opaque override without depending on default Git discovery.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/validation_workspace_parity.feature`

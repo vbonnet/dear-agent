@@ -12,13 +12,16 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 const (
-	testBuildVersion = "9.9.9"
-	testBuildCommit  = "0123456789ab"
-	testBuildDate    = "2026-08-01T00:00:00Z"
-	versionPackage   = "github.com/vbonnet/dear-agent/pkg/version"
+	testBuildVersion        = "9.9.9"
+	testBuildCommit         = "0123456789ab"
+	testBuildDate           = "2026-08-01T00:00:00Z"
+	unknownGitCommitForTest = "unknown"
+	versionPackage          = "github.com/vbonnet/dear-agent/pkg/version"
 )
 
 type buildStamp struct {
@@ -170,6 +173,124 @@ func TestCallerGOFLAGSAreOpaqueToMake(t *testing.T) {
 	}
 	if strings.Contains(output, marker) {
 		t.Fatalf("Make evaluated caller GOFLAGS as Make syntax:\n%s", output)
+	}
+}
+
+func TestCallerGitCommitOverrideBypassesDefaultGitDiscovery(t *testing.T) {
+	requireMake(t)
+	tempDir := t.TempDir()
+	marker := filepath.Join(tempDir, "git-was-invoked")
+	fakeGit := filepath.Join(tempDir, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\n: > \"$BUILDSTAMP_GIT_MARKER\"\nexit 97\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buildProbe(t, map[string]string{
+		"BUILDSTAMP_GIT_MARKER": marker,
+		"PATH":                  tempDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, "GOFLAGS=-buildvcs=false")
+	assertBuildStamp(t, got, "unset", "disabled")
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("caller GIT_COMMIT override invoked default Git discovery (stat error %v)", err)
+	}
+}
+
+func TestDefaultGitCommitFlowsThroughGovernedMakeBuild(t *testing.T) {
+	requireMake(t)
+
+	tests := []struct {
+		name       string
+		mutateRepo func(t *testing.T, sandbox *gittest.Sandbox, repo string)
+		buildEnv   func(t *testing.T) map[string]string
+		wantCommit func(revision string) string
+	}{
+		{
+			name:       "clean branch",
+			wantCommit: func(revision string) string { return revision },
+		},
+		{
+			name: "tracked modification",
+			mutateRepo: func(t *testing.T, _ *gittest.Sandbox, repo string) {
+				t.Helper()
+				path := filepath.Join(repo, "pkg", "version", "version.go")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(data, []byte("\n// tracked build input change\n")...), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantCommit: func(revision string) string { return revision + "-dirty" },
+		},
+		{
+			name: "untracked Go input",
+			mutateRepo: func(t *testing.T, _ *gittest.Sandbox, repo string) {
+				t.Helper()
+				path := filepath.Join(repo, "tests", "buildstamp", "testdata", "probe", "untracked_default.go")
+				if err := os.WriteFile(path, []byte("package main\n\nconst untrackedBuildInput = true\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantCommit: func(revision string) string { return revision + "-dirty" },
+		},
+		{
+			name: "detached HEAD",
+			mutateRepo: func(t *testing.T, sandbox *gittest.Sandbox, repo string) {
+				t.Helper()
+				sandbox.Run(t, repo, "checkout", "--detach", "HEAD")
+			},
+			wantCommit: func(revision string) string { return revision },
+		},
+		{
+			name: "status failure",
+			buildEnv: func(t *testing.T) map[string]string {
+				t.Helper()
+				realGit, err := exec.LookPath("git")
+				if err != nil {
+					t.Fatal(err)
+				}
+				shimDir := t.TempDir()
+				shim := filepath.Join(shimDir, "git")
+				const script = "#!/bin/sh\nif [ \"$1\" = status ]; then\n\texit 97\nfi\nexec \"$BUILDSTAMP_REAL_GIT\" \"$@\"\n"
+				if err := os.WriteFile(shim, []byte(script), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				return map[string]string{
+					"BUILDSTAMP_REAL_GIT": realGit,
+					"PATH":                shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+				}
+			},
+			wantCommit: func(string) string { return unknownGitCommitForTest },
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sandbox := gittest.New(t)
+			repo := newMinimalBuildStampRepo(t, sandbox)
+			revision := strings.TrimSpace(sandbox.Run(t, repo, "rev-parse", "--short=12", "HEAD"))
+			if tc.mutateRepo != nil {
+				tc.mutateRepo(t, sandbox, repo)
+			}
+			var env map[string]string
+			if tc.buildEnv != nil {
+				env = tc.buildEnv(t)
+			}
+
+			got := buildDefaultGitProbe(t, repo, env)
+			want := buildStamp{
+				Version:       testBuildVersion,
+				GitCommit:     tc.wantCommit(revision),
+				BuildDate:     testBuildDate,
+				BuiltBy:       "makefile",
+				Extra:         "unset",
+				GOFLAGSMarker: "disabled",
+			}
+			if got != want {
+				t.Fatalf("default Git build stamp = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
 
@@ -392,23 +513,43 @@ func TestGovernedBuildRecipesUseSharedStampSeam(t *testing.T) {
 	if !strings.Contains(string(data), "$(_GOVERNED_BUILD_TARGETS): | build-stamp-goflags-guard") {
 		t.Error("governed target registry is not attached to build-stamp-goflags-guard")
 	}
-	if !strings.Contains(string(data), "GOFLAGS= GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp") {
+	if !strings.Contains(string(data), "GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp") {
 		t.Error("build-stamp GOFLAGS guard bootstrap does not isolate caller Go configuration")
+	}
+	if !strings.Contains(string(data), "go run ./internal/buildstamp git-commit") {
+		t.Error("default Git commit does not use the internal shell-free provenance adapter")
 	}
 }
 
 func buildProbe(t *testing.T, env map[string]string, extraArgs ...string) buildStamp {
 	t.Helper()
-	outputPath := filepath.Join(t.TempDir(), "build-stamp-probe")
 	args := []string{
-		"build-stamp-test-probe",
-		"BUILD_STAMP_TEST_OUTPUT=" + outputPath,
 		"VERSION=" + testBuildVersion,
 		"GIT_COMMIT=" + testBuildCommit,
 		"BUILD_DATE=" + testBuildDate,
 	}
 	args = append(args, extraArgs...)
-	output, err := runMake(t, env, args...)
+	return buildProbeAt(t, sourceRoot(t), env, args...)
+}
+
+func buildDefaultGitProbe(t *testing.T, repo string, env map[string]string) buildStamp {
+	t.Helper()
+	return buildProbeAt(t, repo, env,
+		"VERSION="+testBuildVersion,
+		"BUILD_DATE="+testBuildDate,
+		"GOFLAGS=-buildvcs=false",
+	)
+}
+
+func buildProbeAt(t *testing.T, repo string, env map[string]string, args ...string) buildStamp {
+	t.Helper()
+	outputPath := filepath.Join(t.TempDir(), "build-stamp-probe")
+	makeArgs := []string{
+		"build-stamp-test-probe",
+		"BUILD_STAMP_TEST_OUTPUT=" + outputPath,
+	}
+	makeArgs = append(makeArgs, args...)
+	output, err := runMakeAt(t, repo, env, makeArgs...)
 	if err != nil {
 		t.Fatalf("build stamp probe failed: %v\n%s", err, output)
 	}
@@ -422,6 +563,30 @@ func buildProbe(t *testing.T, env map[string]string, extraArgs ...string) buildS
 		t.Fatalf("decode build stamp probe %q: %v", raw, err)
 	}
 	return got
+}
+
+func newMinimalBuildStampRepo(t *testing.T, sandbox *gittest.Sandbox) string {
+	t.Helper()
+	repo := sandbox.NewRepo(t)
+	source := sourceRoot(t)
+	for _, path := range []string{
+		"Makefile",
+		"go.mod",
+		"go.sum",
+		"mk/install-go-bin.mk",
+		"internal/buildstamp/git.go",
+		"internal/buildstamp/main.go",
+		"pkg/version/staleness.go",
+		"pkg/version/version.go",
+		"tests/buildstamp/testdata/probe/goflags_disabled.go",
+		"tests/buildstamp/testdata/probe/goflags_enabled.go",
+		"tests/buildstamp/testdata/probe/main.go",
+	} {
+		copyBuildSandboxEntry(t, filepath.Join(source, filepath.FromSlash(path)), filepath.Join(repo, filepath.FromSlash(path)))
+	}
+	sandbox.Run(t, repo, "add", ".")
+	sandbox.Run(t, repo, "commit", "-m", "build stamp fixture")
+	return repo
 }
 
 func assertRejectedBeforeBuild(t *testing.T, env map[string]string, goflagsArg string) {

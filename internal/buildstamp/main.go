@@ -1,5 +1,5 @@
-// Package main provides the non-shipped GOFLAGS admission guard for governed
-// root-Makefile builds.
+// Package main provides non-shipped GOFLAGS admission and default Git
+// provenance helpers for governed root-Makefile builds.
 package main
 
 import (
@@ -17,6 +17,14 @@ const (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "git-commit" {
+		fmt.Fprintln(os.Stdout, defaultGitCommit(".", runGit))
+		return
+	}
+	if len(os.Args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: buildstamp [git-commit]")
+		os.Exit(2)
+	}
 	if err := guard(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

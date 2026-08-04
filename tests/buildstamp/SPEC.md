@@ -36,6 +36,10 @@
 
 **BUILDSTAMP-14** When BDD verifies the canonical AGM installation topology, the system shall render a non-executing plan that includes the build-stamp guard, both stamped companion builds, and both companion installations.
 
+**BUILDSTAMP-15** When default provenance is tested, the system shall distinguish clean and detached HEADs from tracked or untracked dirty worktrees and shall represent Git or status failure as `unknown`.
+
+**BUILDSTAMP-16** When a caller supplies `GIT_COMMIT`, the governed build shall preserve the supplied value even when default Git discovery is unavailable.
+
 ## Test Traceability
 
 - Package tests: `tests/buildstamp/*_test.go`

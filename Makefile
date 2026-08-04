@@ -13,7 +13,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 # -ldflags so that version-aware binaries report the actual build provenance.
 # Override on the CLI: make build-safe-pr VERSION=1.2.3
 VERSION    ?= dev
-GIT_COMMIT ?= $(shell commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); if [ "$$commit" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then printf '%s-dirty' "$$commit"; else printf '%s' "$$commit"; fi)
+GIT_COMMIT ?= $(or $(shell GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp git-commit 2>/dev/null),unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # GOFLAGS is caller-owned. Governed builds leave ordinary flags to the Go
@@ -1540,4 +1540,4 @@ install-session-skill-extractor: build-session-skill-extractor
 .PHONY: build-stamp-goflags-guard
 $(_GOVERNED_BUILD_TARGETS): | build-stamp-goflags-guard
 build-stamp-goflags-guard:
-	@GOFLAGS= GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp
+	@GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp
