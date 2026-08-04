@@ -363,7 +363,7 @@ func runLocalGuardrailNamedGoTests(parent context.Context, packagePath string, t
 
 func missingNamedGoTestRuns(output string, testNames ...string) []string {
 	ran := make(map[string]struct{}, len(testNames))
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if testName, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), "=== RUN   "); ok {
 			ran[testName] = struct{}{}
 		}
