@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -228,6 +231,18 @@ func TestGoTestArgs_BoundsNativeTestBinary(t *testing.T) {
 	}
 }
 
+func TestGoCommandTimeoutPreservesNativeAndBuildBudgets(t *testing.T) {
+	if goCommandTimeout != 55*time.Minute {
+		t.Fatalf("goCommandTimeout = %v, want 55m", goCommandTimeout)
+	}
+	if goListCommandTimeout != goTestTimeout {
+		t.Fatalf("goListCommandTimeout = %v, want native timeout %v", goListCommandTimeout, goTestTimeout)
+	}
+	if goCommandTimeout < 2*goTestTimeout {
+		t.Fatalf("goCommandTimeout = %v, want at least two native intervals", goCommandTimeout)
+	}
+}
+
 func TestRunTestsPassesNativeTimeoutToGo(t *testing.T) {
 	binDir := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "go-args")
@@ -278,6 +293,97 @@ func TestProtectGoTestCommandIsGroupCancelable(t *testing.T) {
 	if err := cmd.Cancel(); err != nil {
 		t.Fatalf("cancel with invalid pid = %v", err)
 	}
+}
+
+func TestRunGoTestCommandTimeoutKillsProcessGroup(t *testing.T) {
+	binDir := t.TempDir()
+	pidFile := filepath.Join(t.TempDir(), "go-pids")
+	stub := "#!/bin/sh\nsleep 30 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_PID_FILE\"\nwait \"$child\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_AFFECTED_GO_PID_FILE", pidFile)
+
+	const reportedTimeout = time.Second
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(context.Canceled) })
+	root := t.TempDir()
+	var stderr bytes.Buffer
+	result := make(chan int, 1)
+	go func() {
+		result <- runGoTestCommand(
+			ctx,
+			reportedTimeout,
+			options{root: root},
+			[]string{"example.com/m/a"},
+			&bytes.Buffer{},
+			&stderr,
+		)
+	}()
+
+	raw := waitForFileContents(t, pidFile)
+	fields := strings.Fields(string(raw))
+	if len(fields) != 2 {
+		t.Fatalf("captured process IDs = %q, want leader and descendant", raw)
+	}
+	leaderPID := mustPID(t, fields[0])
+	childPID := mustPID(t, fields[1])
+	t.Cleanup(func() {
+		_ = syscall.Kill(-leaderPID, syscall.SIGKILL)
+	})
+
+	cancel(context.DeadlineExceeded)
+	var code int
+	select {
+	case code = <-result:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runGoTestCommand did not return after deadline cancellation")
+	}
+	if code != goCommandTimeoutExitCode {
+		t.Fatalf("runGoTestCommand returned %d, want %d: %s", code, goCommandTimeoutExitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "timed out after 1s") {
+		t.Fatalf("timeout diagnostic missing from stderr: %q", stderr.String())
+	}
+	waitForProcessGone(t, leaderPID)
+	waitForProcessGone(t, childPID)
+}
+
+func waitForFileContents(t *testing.T, path string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(path)
+		if err == nil && len(raw) > 0 {
+			return raw
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for process readiness file %s", path)
+	return nil
+}
+
+func mustPID(t *testing.T, raw string) int {
+	t.Helper()
+	pid, err := strconv.Atoi(raw)
+	if err != nil || pid <= 0 {
+		t.Fatalf("invalid process ID %q: %v", raw, err)
+	}
+	return pid
+}
+
+func waitForProcessGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("process %d still exists after process-group cancellation", pid)
 }
 
 func TestIsForceFullPath(t *testing.T) {

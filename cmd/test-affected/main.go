@@ -49,9 +49,11 @@ import (
 )
 
 const (
-	gitCommandTimeout = 30 * time.Second
-	goTestTimeout     = 20 * time.Minute
-	goCommandTimeout  = 25 * time.Minute
+	gitCommandTimeout        = 30 * time.Second
+	goTestTimeout            = 20 * time.Minute
+	goCommandTimeout         = 55 * time.Minute
+	goListCommandTimeout     = 20 * time.Minute
+	goCommandTimeoutExitCode = 124
 )
 
 func main() {
@@ -187,15 +189,23 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
-	args := goTestArgs(opts, pkgs)
 	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
 	defer cancel()
+	return runGoTestCommand(ctx, goCommandTimeout, opts, pkgs, stdout, stderr)
+}
+
+func runGoTestCommand(ctx context.Context, timeout time.Duration, opts options, pkgs []string, stdout, stderr io.Writer) int {
+	args := goTestArgs(opts, pkgs)
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = opts.root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	protectGoTestCommand(cmd)
 	if err := cmd.Run(); err != nil {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			fmt.Fprintf(stderr, "test-affected: go test timed out after %s\n", timeout)
+			return goCommandTimeoutExitCode
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
@@ -278,7 +288,7 @@ func listPackages(root, tags string) ([]*goListPackage, error) {
 		args = append(args, "-tags", tags)
 	}
 	args = append(args, "./...")
-	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), goListCommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root

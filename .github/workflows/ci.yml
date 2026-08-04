@@ -143,6 +143,10 @@ jobs:
   integration-tests:
     name: Integration Tests (affected)
     runs-on: ubuntu-latest
+    # The sequential runner bounds are 20m for go list plus 55m for go test.
+    # This 100m ultimate backstop leaves 25m around those phases; the BDD gate
+    # requires at least one 20m native interval for setup, cleanup, and reports.
+    timeout-minutes: 100
     # Only meaningful on PRs — we need a base ref to diff against. For
     # pushes to main/develop, the unit-test matrix above is the gate;
     # full integration sweeps belong in a scheduled or release workflow,

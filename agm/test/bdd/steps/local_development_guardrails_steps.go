@@ -523,6 +523,14 @@ func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if len(commandMatch) != 2 {
 		return fmt.Errorf("affected integration process timeout declaration not found")
 	}
+	listMatch := regexp.MustCompile(`(?m)^\s*goListCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(listMatch) != 2 {
+		return fmt.Errorf("affected integration package-discovery timeout declaration not found")
+	}
+	jobMinutes, err := workflowJobTimeoutMinutes(ci, "integration-tests")
+	if err != nil {
+		return fmt.Errorf("affected integration CI job timeout: %w", err)
+	}
 	nativeMinutes, err := strconv.Atoi(string(affectedMatch[1]))
 	if err != nil {
 		return fmt.Errorf("parse affected integration native timeout: %w", err)
@@ -531,16 +539,63 @@ func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("parse affected integration process timeout: %w", err)
 	}
-	if commandMinutes <= nativeMinutes {
-		return fmt.Errorf("affected integration process timeout lacks cleanup headroom")
+	listMinutes, err := strconv.Atoi(string(listMatch[1]))
+	if err != nil {
+		return fmt.Errorf("parse affected integration package-discovery timeout: %w", err)
+	}
+	if commandMinutes < 2*nativeMinutes {
+		return fmt.Errorf("affected integration process timeout lacks one native interval of build headroom")
+	}
+	if jobMinutes < listMinutes+commandMinutes+nativeMinutes {
+		return fmt.Errorf("affected integration CI job timeout lacks one native interval beyond all bounded runner phases")
 	}
 	if !strings.Contains(string(affected), `"-timeout=" + goTestTimeout.String()`) {
 		return fmt.Errorf("affected integration runner does not pass its timeout to the Go test binary")
+	}
+	if !strings.Contains(string(affected), `goCommandTimeoutExitCode = 124`) {
+		return fmt.Errorf("affected integration runner does not preserve the timeout exit-code contract")
 	}
 	state.localTestTimeout = string(localMatch[1])
 	state.affectedTestTimeout = string(affectedMatch[1]) + "m"
 	state.ciTestTimeout = string(ciMatch[1])
 	return nil
+}
+
+func workflowJobTimeoutMinutes(workflow []byte, jobName string) (int, error) {
+	lines := strings.Split(string(workflow), "\n")
+	header := "  " + jobName + ":"
+	start := -1
+	for i, line := range lines {
+		if line == header {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return 0, fmt.Errorf("workflow job %q not found", jobName)
+	}
+
+	end := len(lines)
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") &&
+			strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "#") {
+			end = i
+			break
+		}
+	}
+
+	block := strings.Join(lines[start:end], "\n")
+	match := regexp.MustCompile(`(?m)^    timeout-minutes:\s*(\d+)\s*$`).FindStringSubmatch(block)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("workflow job %q has no explicit timeout-minutes", jobName)
+	}
+	minutes, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse workflow job %q timeout: %w", jobName, err)
+	}
+	return minutes, nil
 }
 
 func agmValidatesGoTestTimeoutParity(ctx context.Context) error {
