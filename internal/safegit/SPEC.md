@@ -40,25 +40,27 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-12** When configured flaky checks fail for the first allowed occurrence, the system shall request the sanctioned rerun before treating the check as a hard block.
 
-**SAFEGIT-13** When the effective required-check policy cannot be completely discovered, the system shall block the merge before classifying CI results.
+**SAFEGIT-13** When post-merge cleanup attempts linked-worktree removal and local branch deletion, the system shall preserve the primary worktree path from NUL-delimited porcelain output, execute both Git operations from that stable worktree with caller cancellation, a bounded per-command deadline, and bounded pipe draining, attempt worktree removal before conservative branch deletion, and report cleanup failures as warnings without changing the completed provider merge result.
 
-**SAFEGIT-14** When the effective base-branch policy is authoritatively known to require no CI checks, the system shall require every reported CI check to pass.
+**SAFEGIT-14** When the effective required-check policy cannot be completely discovered, the system shall block the merge before classifying CI results.
 
-**SAFEGIT-15** When multiple branch policies apply, the system shall enforce the union of their required CI contexts and shall treat an unreported required context as pending.
+**SAFEGIT-15** When the effective base-branch policy is authoritatively known to require no CI checks, the system shall require every reported CI check to pass.
 
-**SAFEGIT-16** When a required CI context is scoped to a provider integration, the system shall use the provider's integration-aware required-check classification rather than context text alone, and shall block when multiple integration identities sharing one context cannot be proven independently.
+**SAFEGIT-16** When multiple branch policies apply, the system shall enforce the union of their required CI contexts and shall treat an unreported required context as pending.
 
-**SAFEGIT-17** When an applicable required workflow cannot be proven complete, the system shall block the merge.
+**SAFEGIT-17** When a required CI context is scoped to a provider integration, the system shall use the provider's integration-aware required-check classification rather than context text alone, and shall block when multiple integration identities sharing one context cannot be proven independently.
 
-**SAFEGIT-18** When the provider's effective required-check projection contains a context absent from the discovered branch policy, the system shall block the merge as an incomplete-policy disagreement.
+**SAFEGIT-18** When an applicable required workflow cannot be proven complete, the system shall block the merge.
 
-**SAFEGIT-19** When the provider returns valid check JSON with a documented failed-check or pending-check status exit, the system shall classify the returned checks rather than treating the status exit as a query failure.
+**SAFEGIT-19** When the provider's effective required-check projection contains a context absent from the discovered branch policy, the system shall block the merge as an incomplete-policy disagreement.
 
-**SAFEGIT-20** When classic branch protection repeats an app-scoped required context in both its legacy contexts and canonical checks fields, the system shall preserve only the canonical app-scoped identity.
+**SAFEGIT-20** When the provider returns valid check JSON with a documented failed-check or pending-check status exit, the system shall classify the returned checks rather than treating the status exit as a query failure.
 
-**SAFEGIT-21** When another repository component needs required-check classification, the system shall expose and reuse one context-aware effective-policy projection with normalized passing, pending, and failing statuses.
+**SAFEGIT-21** When classic branch protection repeats an app-scoped required context in both its legacy contexts and canonical checks fields, the system shall preserve only the canonical app-scoped identity.
 
-**SAFEGIT-22** When the discovered policy is authoritatively empty and the provider reports that no required checks exist, the system shall accept the empty projection and shall preserve conservative validation of every reported check at the merge gate.
+**SAFEGIT-22** When another repository component needs required-check classification, the system shall expose and reuse one context-aware effective-policy projection with normalized passing, pending, and failing statuses.
+
+**SAFEGIT-23** When the discovered policy is authoritatively empty and the provider reports that no required checks exist, the system shall accept the empty projection and shall preserve conservative validation of every reported check at the merge gate.
 
 ## BDD Traceability
 

@@ -40,6 +40,16 @@ const tracerName = "safe-merge"
 // MinSoak is the minimum age the head commit must be before merging.
 const MinSoak = 5 * time.Minute
 
+const (
+	// cleanupCommandTimeout bounds each best-effort local Git cleanup operation.
+	// Cleanup runs after provider merge success, so it must never hold the caller
+	// indefinitely even when a local worktree or Git process is unhealthy.
+	cleanupCommandTimeout = 30 * time.Second
+	// cleanupCommandWaitDelay bounds pipe draining when a Git descendant keeps
+	// stdout or stderr open after the direct Git process exits.
+	cleanupCommandWaitDelay = time.Second
+)
+
 // DefaultWatchTimeout is the default time limit for watch mode.
 const DefaultWatchTimeout = 45 * time.Minute
 
@@ -315,7 +325,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	// Post-merge cleanup (best-effort, non-fatal).
 	if headInfo.Branch != "" {
-		cleanupWorktree(headInfo.Branch)
+		cleanupWorktree(ctx, headInfo.Branch)
 	}
 	return nil
 }
@@ -1135,43 +1145,46 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 // cleanupWorktree removes any local worktrees tracking the given branch and
 // then deletes the local branch. This mirrors the post-merge cleanup in
 // AGENTS.md §5. Failures are printed as warnings, not returned as errors.
-func cleanupWorktree(branch string) {
-	// List worktrees in JSON format.
-	out, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
+func cleanupWorktree(ctx context.Context, branch string) {
+	// NUL-delimited porcelain preserves every valid worktree path byte verbatim.
+	out, err := runCleanupGit(ctx, "", "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: git worktree list: %v\n", err)
 		return
 	}
 
-	// Parse porcelain output: blocks separated by blank lines.
-	// Each block has "worktree <path>", optionally "branch refs/heads/<branch>".
+	// Parse NUL-delimited porcelain fields. Each block has "worktree <path>",
+	// optionally "branch refs/heads/<branch>", followed by an empty field.
 	// The very first worktree block is always the main worktree — never remove it.
 	var toRemove []string
 	var mainWorktree, currentPath string
-	for line := range strings.SplitSeq(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if after, ok := strings.CutPrefix(line, "worktree "); ok {
-			currentPath = after
+	for field := range bytes.SplitSeq(out, []byte{0}) {
+		if after, ok := bytes.CutPrefix(field, []byte("worktree ")); ok {
+			currentPath = string(after)
 			if mainWorktree == "" {
 				mainWorktree = currentPath
 			}
-		} else if line == "branch refs/heads/"+branch && currentPath != "" {
+		} else if bytes.Equal(field, []byte("branch refs/heads/"+branch)) && currentPath != "" {
 			if currentPath != mainWorktree {
 				toRemove = append(toRemove, currentPath)
 			}
 			currentPath = ""
 		}
 	}
+	if mainWorktree == "" {
+		fmt.Fprintln(os.Stderr, "safe-merge: cleanup: git worktree list returned no primary worktree")
+		return
+	}
 
 	for _, path := range toRemove {
 		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removing worktree %s\n", path)
-		if out, err := exec.Command("git", "worktree", "remove", path).CombinedOutput(); err != nil {
+		if out, err := runCleanupGit(ctx, mainWorktree, "worktree", "remove", "--", path); err != nil {
 			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: worktree remove %s: %v: %s\n", path, err, out)
 		}
 	}
 
 	// Delete the local branch if it exists.
-	if out, err := exec.Command("git", "branch", "-d", branch).CombinedOutput(); err != nil {
+	if out, err := runCleanupGit(ctx, mainWorktree, "branch", "-d", "--", branch); err != nil {
 		// -d refuses to delete if unmerged; that's fine — we already merged.
 		// Suppress the error if it's just "branch not found".
 		if !strings.Contains(string(out), "not found") {
@@ -1180,4 +1193,20 @@ func cleanupWorktree(branch string) {
 	} else {
 		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removed local branch %s\n", branch)
 	}
+}
+
+func runCleanupGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, cleanupCommandTimeout)
+	defer cancel()
+
+	// #nosec G204,G702 -- executable name is fixed; internal Git argv uses
+	// explicit option terminators before provider- or repository-derived values.
+	cmd := exec.CommandContext(commandCtx, "git", args...)
+	cmd.Dir = dir
+	cmd.WaitDelay = cleanupCommandWaitDelay
+	out, err := cmd.CombinedOutput()
+	if err != nil && commandCtx.Err() != nil {
+		return out, fmt.Errorf("git cleanup command: %w", commandCtx.Err())
+	}
+	return out, err
 }
