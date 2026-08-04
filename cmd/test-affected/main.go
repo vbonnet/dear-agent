@@ -200,7 +200,7 @@ func runGoTestCommand(ctx context.Context, timeout time.Duration, opts options, 
 	cmd.Dir = opts.root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	protectGoTestCommand(cmd)
+	protectGoCommandProcessTree(cmd)
 	if err := cmd.Run(); err != nil {
 		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 			fmt.Fprintf(stderr, "test-affected: go test timed out after %s\n", timeout)
@@ -224,7 +224,7 @@ func goTestArgs(opts options, pkgs []string) []string {
 	return append(args, pkgs...)
 }
 
-func protectGoTestCommand(cmd *exec.Cmd) {
+func protectGoCommandProcessTree(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil || cmd.Process.Pid <= 0 {
@@ -283,18 +283,23 @@ func isMainModulePkg(p *goListPackage) bool {
 // package that is only reachable through an _test.go import would look
 // dependency-free.
 func listPackages(root, tags string) ([]*goListPackage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), goListCommandTimeout)
+	defer cancel()
+	return listPackagesWithContext(ctx, root, tags)
+}
+
+func listPackagesWithContext(ctx context.Context, root, tags string) ([]*goListPackage, error) {
 	args := []string{"list", "-deps", "-test", "-json"}
 	if tags != "" {
 		args = append(args, "-tags", tags)
 	}
 	args = append(args, "./...")
-	ctx, cancel := context.WithTimeout(context.Background(), goListCommandTimeout)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	protectGoCommandProcessTree(cmd)
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
 	}

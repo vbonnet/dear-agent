@@ -124,6 +124,10 @@ Feature: Local development guardrails
     When AGM runs the safe-pr final transaction audit regression
     Then each safe-pr transaction should have one accurate audit record
 
+  Scenario: Bounded affected runner commands own their complete process trees
+    When AGM runs the affected runner process-tree regressions
+    Then bounded affected runner commands should terminate their descendants
+
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured
     When AGM validates Go test timeout parity

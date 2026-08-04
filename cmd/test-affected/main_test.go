@@ -274,17 +274,17 @@ func TestRunTestsPassesNativeTimeoutToGo(t *testing.T) {
 	}
 }
 
-func TestProtectGoTestCommandIsGroupCancelable(t *testing.T) {
+func TestProtectGoCommandProcessTreeIsGroupCancelable(t *testing.T) {
 	cmd := exec.CommandContext(context.Background(), "true")
-	protectGoTestCommand(cmd)
+	protectGoCommandProcessTree(cmd)
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
-		t.Fatal("go test child must run in an isolated process group")
+		t.Fatal("bounded Go child must run in an isolated process group")
 	}
 	if cmd.Cancel == nil {
-		t.Fatal("go test child must cancel its process group")
+		t.Fatal("bounded Go child must cancel its process group")
 	}
 	if cmd.WaitDelay != time.Second {
-		t.Fatalf("go test child WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
+		t.Fatalf("bounded Go child WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
 	}
 	if err := cmd.Cancel(); err != nil {
 		t.Fatalf("cancel before start = %v", err)
@@ -345,6 +345,48 @@ func TestRunGoTestCommandTimeoutKillsProcessGroup(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "timed out after 1s") {
 		t.Fatalf("timeout diagnostic missing from stderr: %q", stderr.String())
+	}
+	waitForProcessGone(t, leaderPID)
+	waitForProcessGone(t, childPID)
+}
+
+func TestListPackagesContextCancellationKillsProcessGroup(t *testing.T) {
+	binDir := t.TempDir()
+	pidFile := filepath.Join(t.TempDir(), "go-list-pids")
+	stub := "#!/bin/sh\nsleep 30 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_LIST_PID_FILE\"\nwait \"$child\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_AFFECTED_GO_LIST_PID_FILE", pidFile)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	result := make(chan error, 1)
+	go func() {
+		_, err := listPackagesWithContext(ctx, t.TempDir(), "")
+		result <- err
+	}()
+
+	raw := waitForFileContents(t, pidFile)
+	fields := strings.Fields(string(raw))
+	if len(fields) != 2 {
+		t.Fatalf("captured process IDs = %q, want leader and descendant", raw)
+	}
+	leaderPID := mustPID(t, fields[0])
+	childPID := mustPID(t, fields[1])
+	t.Cleanup(func() {
+		_ = syscall.Kill(-leaderPID, syscall.SIGKILL)
+	})
+
+	cancel()
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("listPackagesWithContext returned nil after cancellation")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("listPackagesWithContext did not return after cancellation")
 	}
 	waitForProcessGone(t, leaderPID)
 	waitForProcessGone(t, childPID)
