@@ -24,14 +24,16 @@
 //	                   it protects. See docs/policies/harness-hygiene and the
 //	                   ce-xj1b over-fit class (re-embedded three times).
 //
-// Each scan emits a set of stable "finding keys". The baseline file records
-// accepted keys and append-only provenance for changes to that set. On every
-// run the tool diffs current findings against the baseline:
+// Each scan emits a set of finding keys. The baseline file records accepted
+// keys and append-only provenance for changes to that set. File-size findings
+// include a line-count budget; their stable identity is the path, so a
+// same-path reduction is accepted while growth is a regression. On every run
+// the tool diffs current findings against the baseline:
 //
-//   - A key present now but absent from the baseline is a REGRESSION and
-//     fails the build (exit 1).
-//   - A key in the baseline but no longer present is FIXED — informational,
-//     and a nudge to re-baseline so the ratchet tightens.
+//   - A non-file-size key present now but absent from the baseline is a
+//     REGRESSION and fails the build (exit 1).
+//   - A non-file-size key in the baseline but no longer present is FIXED —
+//     informational, and a nudge to re-baseline so the ratchet tightens.
 //
 // Usage:
 //
