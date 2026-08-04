@@ -689,6 +689,12 @@ func TestSupervisorPaneAuthFailed(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "stale auth block followed by Codex footer composer",
+			harness: "codex-cli",
+			content: "codex login required\n›\n\ngpt-5.6 xhigh · ~/src/project",
+			want:    false,
+		},
+		{
 			name:    "generic auth phrase without harness evidence",
 			harness: "codex-cli",
 			content: "authentication failed in the mocked dependency; continue with the implementation",

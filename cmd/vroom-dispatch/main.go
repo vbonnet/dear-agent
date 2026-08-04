@@ -338,12 +338,38 @@ func supervisorPaneAuthFailed(content, harness string) bool {
 	case "claude-code":
 		return claudePaneAuthFailed(lines, lower)
 	case "codex-cli":
+		if codexPaneReady(lines) {
+			return false
+		}
 		return codexPaneAuthFailed(lower)
 	case "agy":
 		return agyPaneAuthFailed(lower)
 	default:
 		return false
 	}
+}
+
+// codexPaneReady mirrors the shared Codex readiness contract: after a turn,
+// the idle cursor is followed by the structured model/workdir footer. Stale
+// auth text above that current composer must not trigger recovery.
+func codexPaneReady(lines []string) bool {
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "gpt-") || !strings.Contains(line, " · ") {
+			continue
+		}
+		for j := i - 1; j >= 0 && j >= i-3; j-- {
+			candidate := strings.TrimSpace(lines[j])
+			if candidate == "" {
+				continue
+			}
+			if candidate == "›" || candidate == "»" {
+				return true
+			}
+			break
+		}
+	}
+	return false
 }
 
 func claudePaneAuthFailed(lines []string, lower string) bool {
