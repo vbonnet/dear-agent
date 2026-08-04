@@ -334,6 +334,7 @@ case "$*" in
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
   "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
   "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "%s" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' "no checks reported on the 'feature' branch" >&2; exit 1 ;;
   *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
 esac
 `, message))
@@ -343,6 +344,39 @@ esac
 			}
 			if len(checks) != 0 {
 				t.Fatalf("authoritatively empty projection = %#v", checks)
+			}
+		})
+	}
+}
+
+func TestProjectRequiredChecksPreservesAuthoritativeEmptyFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		exitCode int
+		want     RequiredCheckStatus
+	}{
+		{name: "failed", state: "FAILURE", exitCode: 1, want: RequiredCheckFailing},
+		{name: "pending", state: "PENDING", exitCode: 8, want: RequiredCheckPending},
+		{name: "passing", state: "SUCCESS", exitCode: 0, want: RequiredCheckPassing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' '[{"name":"Advisory","state":"%s"}]'; exit %d ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, tc.state, tc.exitCode))
+			checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+			if err != nil {
+				t.Fatalf("ProjectRequiredChecks() error = %v", err)
+			}
+			if len(checks) != 1 || checks[0].Name != "Advisory" || checks[0].Status != tc.want {
+				t.Fatalf("authoritative-empty fallback = %#v", checks)
 			}
 		})
 	}

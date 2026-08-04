@@ -62,6 +62,8 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-23** When the discovered policy is authoritatively empty and the provider reports that no required checks exist, the system shall accept the empty projection and shall preserve conservative validation of every reported check at the merge gate.
 
+**SAFEGIT-24** When a shared required-check consumer classifies a pull request whose effective policy is authoritatively empty, the system shall project every reported check so repair classification and the merge gate apply the same conservative verdict.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

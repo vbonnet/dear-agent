@@ -805,14 +805,42 @@ func isNoRequiredChecksReported(err error) bool {
 }
 
 // ProjectRequiredChecks resolves the complete layered branch policy, reconciles
-// it with GitHub's integration-aware PR projection, and returns only the
-// normalized checks that mergeloop may use for repair classification.
+// it with GitHub's integration-aware PR projection, and returns the normalized
+// checks that mergeloop may use for repair classification. When policy is
+// authoritatively empty, it preserves the merge gate's conservative fallback
+// by returning every reported check.
 func ProjectRequiredChecks(ctx context.Context, prNum int, repo string) ([]RequiredCheck, error) {
 	projection, err := projectRequiredCheckRuns(ctx, prNum, repo)
 	if err != nil {
 		return nil, err
 	}
-	return normalizeRequiredChecks(projection.Runs), nil
+	runs := projection.Runs
+	if projection.AuthoritativeEmpty {
+		runs, err = fetchAllCheckRuns(ctx, prNum, repo, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return normalizeRequiredChecks(runs), nil
+}
+
+func fetchAllCheckRuns(ctx context.Context, prNum int, repo string, allowNoChecks bool) ([]checkRun, error) {
+	out, err := runCheckCommand(exec.CommandContext(ctx, "gh", "pr", "checks",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "name,state",
+	))
+	if err != nil {
+		if allowNoChecks && isNoRequiredChecksReported(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("gh pr checks failed: %w", err)
+	}
+	var checks []checkRun
+	if err := json.Unmarshal(out, &checks); err != nil {
+		return nil, fmt.Errorf("parsing all-check output: %w", err)
+	}
+	return checks, nil
 }
 
 func normalizeRequiredChecks(checks []checkRun) []RequiredCheck {
@@ -864,21 +892,9 @@ func checkAllCIContext(ctx context.Context, prNum int, repo string) error {
 	if err != nil {
 		return err
 	}
-	allOut, err := runCheckCommand(exec.CommandContext(ctx, "gh", "pr", "checks",
-		fmt.Sprintf("%d", prNum),
-		"--repo", repo,
-		"--json", "name,state",
-	))
+	allChecks, err := fetchAllCheckRuns(ctx, prNum, repo, projection.AuthoritativeEmpty)
 	if err != nil {
-		if projection.AuthoritativeEmpty && isNoRequiredChecksReported(err) {
-			allOut = []byte("[]")
-		} else {
-			return fmt.Errorf("gh pr checks failed: %w", err)
-		}
-	}
-	var allChecks []checkRun
-	if err := json.Unmarshal(allOut, &allChecks); err != nil {
-		return fmt.Errorf("parsing all-check output: %w", err)
+		return err
 	}
 
 	required := projection.Runs

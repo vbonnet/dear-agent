@@ -35,6 +35,8 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-13** When the open pull-request count exceeds the configured cap, the command shall return metadata for backpressure detection without running any per-pull-request required-check projection.
 
+**MLC-14** When the shared effective required-check policy is authoritatively empty, the command shall classify every reported check instead of treating the pull request as green.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

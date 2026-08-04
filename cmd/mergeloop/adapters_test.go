@@ -39,6 +39,34 @@ esac
 	}
 }
 
+func TestMergeLoopPreservesAuthoritativeEmptyFallback(t *testing.T) {
+	installMergeLoopFakeGH(t, `
+case "$*" in
+  "pr list"*) printf '%s\n' '[{"number":42,"title":"test","headRefName":"feature","headRefOid":"abc","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE","reviewDecision":"","labels":[],"files":[]}]' ;;
+  "pr view 42 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 42 --repo owner/repo --required --json name,state") printf '%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 42 --repo owner/repo --json name,state") printf '%s\n' '[{"name":"Advisory","state":"FAILURE"}]'; exit 1 ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	prs, err := (&ghLister{}).ListOpen(context.Background(), "owner/repo", 50)
+	if err != nil {
+		t.Fatalf("ListOpen() error = %v", err)
+	}
+	if len(prs) != 1 || len(prs[0].Checks) != 1 {
+		t.Fatalf("authoritative-empty fallback checks = %#v", prs)
+	}
+	check := prs[0].Checks[0]
+	if check.Name != "Advisory" || !check.Required || check.Verdict != mergeloop.CheckFail {
+		t.Fatalf("normalized fallback check = %#v", check)
+	}
+	if got := mergeloop.NewPolicy().Classify(prs[0], 0, false); got.State != mergeloop.StateCIFailing {
+		t.Fatalf("failed fallback check classification = %#v", got)
+	}
+}
+
 func TestMergeLoopMapsProjectedRequiredStatuses(t *testing.T) {
 	checks, err := mergeLoopChecks([]safegit.RequiredCheck{
 		{Name: "pass", Status: safegit.RequiredCheckPassing},
