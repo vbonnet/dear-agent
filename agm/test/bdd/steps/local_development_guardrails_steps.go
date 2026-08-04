@@ -666,10 +666,10 @@ func affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets(ctx conte
 		return fmt.Errorf("read affected integration runner: %w", err)
 	}
 	source := string(affected)
-	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx),\s*goCommandTimeout\)`).MatchString(source) {
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx|parent),\s*goCommandTimeout\)`).MatchString(source) {
 		return fmt.Errorf("affected test command timeout is not wired through context.WithTimeout")
 	}
-	if !regexp.MustCompile(`context\.WithTimeout\(context\.Background\(\),\s*goListCommandTimeout\)`).MatchString(source) {
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx|parent),\s*goListCommandTimeout\)`).MatchString(source) {
 		return fmt.Errorf("affected package discovery timeout is not wired through context.WithTimeout")
 	}
 	return nil
