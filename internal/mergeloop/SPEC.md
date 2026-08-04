@@ -35,7 +35,7 @@ per pass, tracks bounded repair attempts, and records durable audit evidence.
 
 **MLP-13** When effective required-check projection is unavailable for one pull request, the classifier shall keep that pull request pending without preventing later independent pull requests from being driven.
 
-**MLP-14** When effective required-check projection is unavailable, the driver shall preserve the existing repair-attempt budget until a complete projection establishes the current failure signature.
+**MLP-14** When effective required-check projection is unavailable or contains no failing check, the driver shall preserve the existing repair-attempt budget until a failing projection establishes the current failure signature.
 
 ## BDD Traceability
 

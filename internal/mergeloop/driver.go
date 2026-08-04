@@ -203,10 +203,11 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	// which holds the only other reset) is never reached again, so a human's
 	// fresh push or a completely different failure can never be retried. We
 	// reset before Classify so the new attempt budget feeds the decision.
-	// A projection error is absence of evidence, not evidence that the
-	// previously failing check set changed. Preserve the existing attempt
-	// budget until a complete projection can establish a new signature.
-	if pr.CheckProjectionError == "" {
+	// Projection errors and non-failing verdicts do not establish a current
+	// failure signature. Preserve the existing attempt budget through provider
+	// outages and ordinary pending reruns; reset it only when an actual failing
+	// check set proves that a different failure is now actionable.
+	if pr.CheckProjectionError == "" && pr.requiredVerdict() == CheckFail {
 		d.Tracker.ResetAttemptsIfSigChanged(pr.Number, failureSignature(pr))
 	}
 

@@ -311,8 +311,9 @@ func agmRunsEffectiveRequiredCheckRegressions(ctx context.Context) error {
 		"./internal/safegit",
 	)
 	state.mergeLoopCIRegression, state.mergeLoopCIError = runLocalGuardrailGoTest(ctx,
-		`^Test(MergeLoopUsesSharedRequiredProjection|MergeLoopPreservesAuthoritativeEmptyFallback|MergeLoopMapsProjectedRequiredStatuses|MergeLoopDefersOnlyUnavailableProjection|MergeLoopDefersOnlyUnknownProjectedStatus|MergeLoopAbortsWhenParentContextCanceled|MergeLoopSkipsProjectionWhenOpenPRsExceedCap)$`,
+		`^Test(MergeLoopUsesSharedRequiredProjection|MergeLoopPreservesAuthoritativeEmptyFallback|MergeLoopMapsProjectedRequiredStatuses|MergeLoopDefersOnlyUnavailableProjection|MergeLoopDefersOnlyUnknownProjectedStatus|MergeLoopAbortsWhenParentContextCanceled|MergeLoopSkipsProjectionWhenOpenPRsExceedCap|ProjectionErrorPreservesAttemptBudget)$`,
 		"./cmd/mergeloop",
+		"./internal/mergeloop",
 	)
 	return nil
 }
