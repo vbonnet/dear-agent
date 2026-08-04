@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,18 +28,19 @@ import (
 )
 
 var (
-	asyncArchive       bool // Spawn background reaper for async archival
-	archiveAll         bool
-	olderThan          string
-	dryRun             bool
-	cleanupWorktrees   bool
-	forceArchive       bool   // Skip pre-archive verification checks
-	archiveReason      string // Justification for --force, recorded in override audit log
-	keepSandbox        bool   // Preserve sandbox directory for debugging
-	includeSupervisors bool   // Include supervisor sessions in bulk archive
-	archiveOutcome     string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
-	archiveTestEnv     string // Named isolated test environment used for cross-process archive validation
-	spawnReaperFn      = spawnReaper
+	asyncArchive        bool // Spawn background reaper for async archival
+	archiveAll          bool
+	olderThan           string
+	dryRun              bool
+	cleanupWorktrees    bool
+	forceArchive        bool   // Skip pre-archive verification checks
+	archiveReason       string // Justification for --force, recorded in override audit log
+	keepSandbox         bool   // Preserve sandbox directory for debugging
+	includeSupervisors  bool   // Include supervisor sessions in bulk archive
+	allowSupervisorReap bool   // Dispatcher-inherited internal recovery capability
+	archiveOutcome      string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
+	archiveTestEnv      string // Named isolated test environment used for cross-process archive validation
+	spawnReaperFn       = spawnReaper
 )
 
 // validArchiveOutcomes lists the outcome values accepted by --outcome. Kept in
@@ -381,7 +383,7 @@ func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getR
 		if tmuxSession == "" {
 			tmuxSession = getResult.Session.Name
 		}
-		return true, spawnReaperFn(getResult.Session.ID, tmuxSession, getResult.Session.Harness, outcome)
+		return true, spawnReaperFn(getResult.Session.ID, tmuxSession, getResult.Session.Harness, outcome, allowSupervisorReap)
 	}
 	return false, nil
 }
@@ -398,11 +400,12 @@ func validateSingleSessionArchiveMode(sessionName string, isActive, async bool) 
 
 func newSingleSessionArchiveRequest(sessionID string, outcome manifest.SessionOutcome, allowActiveTmux bool) *ops.ArchiveSessionRequest {
 	return &ops.ArchiveSessionRequest{
-		Identifier:      sessionID,
-		Force:           forceArchive,
-		KeepSandbox:     keepSandbox,
-		Outcome:         outcome,
-		AllowActiveTmux: allowActiveTmux,
+		Identifier:          sessionID,
+		Force:               forceArchive,
+		KeepSandbox:         keepSandbox,
+		Outcome:             outcome,
+		AllowSupervisorReap: allowSupervisorReap,
+		AllowActiveTmux:     allowActiveTmux,
 	}
 }
 
@@ -742,7 +745,7 @@ func reportExternalArchives(outcomes []ops.ExternalArchiveOutcome) {
 // spawnReaper spawns a detached agm-reaper process for async archival.
 // The reaper waits for the harness prompt, sends its native graceful-exit
 // command, and archives the session.
-func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.SessionOutcome) error {
+func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.SessionOutcome, allowSupervisorReap bool) error {
 	// Find agm-reaper binary (should be in same directory as agm)
 	agmPath, err := os.Executable()
 	if err != nil {
@@ -799,7 +802,7 @@ func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.Sessio
 	}
 
 	// Build command with detachment
-	reaperArgs := buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision, forceArchive, keepSandbox, outcome)
+	reaperArgs := buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision, forceArchive, keepSandbox, allowSupervisorReap, outcome)
 	cmd := exec.Command(reaperPath, reaperArgs...)
 
 	// Detach process from parent using setsid
@@ -877,13 +880,16 @@ func reaperLogPath(tmuxSession string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", filepath.Base(sanitized)))
 }
 
-func buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision string, force, keepSandbox bool, outcome manifest.SessionOutcome) []string {
+func buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision string, force, keepSandbox, allowSupervisorReap bool, outcome manifest.SessionOutcome) []string {
 	args := []string{"--session-id", sessionID, "--session", tmuxSession, "--log-file", logFile, "--sessions-dir", sessionsDir, "--expected-revision", expectedRevision, "--startup-fd", "3"}
 	if force {
 		args = append(args, "--force")
 	}
 	if keepSandbox {
 		args = append(args, "--keep-sandbox")
+	}
+	if allowSupervisorReap {
+		args = append(args, "--allow-supervisor-reap")
 	}
 	if outcome != manifest.OutcomeUnknown {
 		args = append(args, "--outcome", string(outcome))
@@ -971,8 +977,23 @@ func init() {
 		"Preserve sandbox directory for debugging instead of removing it")
 	archiveCmd.Flags().BoolVar(&includeSupervisors, "include-supervisors", false,
 		"Include supervisor sessions (orchestrator, overseer, meta-*) in bulk archive")
+	// Keep the protected-session bypass out of the public CLI. Only the
+	// dispatcher-owned recovery child receives this inherited capability.
+	allowSupervisorReap = os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1" && dispatcherParentAuthenticated()
 	archiveCmd.Flags().StringVar(&archiveOutcome, "outcome", "",
 		"Outcome to stamp on the archived record: completed (default), crashed, killed, gc-stale")
 	archiveCmd.Flags().StringVar(&archiveTestEnv, "test-env", "", "Use named test environment created via agm test-env create")
 	sessionCmd.AddCommand(archiveCmd)
+}
+
+// dispatcherParentAuthenticated keeps the protected-session bypass scoped to
+// the dispatcher process boundary. The environment marker alone is not an
+// authorization because any local caller can set it.
+func dispatcherParentAuthenticated() bool {
+	parent := exec.Command("ps", "-p", strconv.Itoa(os.Getppid()), "-o", "comm=")
+	out, err := parent.Output()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(strings.TrimSpace(string(out))) == "vroom-dispatch"
 }

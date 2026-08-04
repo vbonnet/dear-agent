@@ -251,10 +251,12 @@ func configureSingleArchiveDryRun(t *testing.T) {
 	oldCleanupWorktrees := cleanupWorktrees
 	oldArchiveOutcome := archiveOutcome
 	oldArchiveReason := archiveReason
+	oldAllowSupervisorReap := allowSupervisorReap
 	dryRun = true
 	asyncArchive = false
 	archiveAll = false
 	forceArchive = false
+	allowSupervisorReap = false
 	keepSandbox = false
 	cleanupWorktrees = false
 	archiveOutcome = ""
@@ -268,6 +270,7 @@ func configureSingleArchiveDryRun(t *testing.T) {
 		cleanupWorktrees = oldCleanupWorktrees
 		archiveOutcome = oldArchiveOutcome
 		archiveReason = oldArchiveReason
+		allowSupervisorReap = oldAllowSupervisorReap
 	})
 }
 
@@ -1015,7 +1018,7 @@ func TestArchiveSession_AsyncClaudeUUIDUsesResolvedIdentities(t *testing.T) {
 
 	oldSpawnReaper := spawnReaperFn
 	var gotSessionID, gotTmuxSession, gotHarness string
-	spawnReaperFn = func(stableID, resolvedTmux, harness string, _ manifest.SessionOutcome) error {
+	spawnReaperFn = func(stableID, resolvedTmux, harness string, _ manifest.SessionOutcome, _ bool) error {
 		gotSessionID = stableID
 		gotTmuxSession = resolvedTmux
 		gotHarness = harness
@@ -1033,6 +1036,57 @@ func TestArchiveSession_AsyncClaudeUUIDUsesResolvedIdentities(t *testing.T) {
 	after := readSessionFromDolt(t, sessionID)
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("async preflight changed durable session before reaper:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
+func TestArchiveSession_AsyncAllowsAuthorizedSupervisorReap(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
+	defer cleanup()
+	setHumanText(t)
+
+	const sessionID = "async-supervisor-reap-id"
+	const sessionName = "vroom-orchestrator"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, sessionName, "")
+	setArchiveTestProject(t, sessionID, t.TempDir())
+	setArchiveTestHarness(t, sessionID, "codex-cli")
+
+	oldAsync := asyncArchive
+	oldForce := forceArchive
+	oldAllow := allowSupervisorReap
+	asyncArchive = true
+	forceArchive = false
+	allowSupervisorReap = true
+	t.Cleanup(func() {
+		asyncArchive = oldAsync
+		forceArchive = oldForce
+		allowSupervisorReap = oldAllow
+	})
+
+	oldTmuxClient := tmuxClient
+	tmuxClient = &session.MockTmux{Sessions: map[string]bool{sessionName: true}}
+	t.Cleanup(func() { tmuxClient = oldTmuxClient })
+
+	oldSpawnReaper := spawnReaperFn
+	var gotAllow bool
+	spawnReaperFn = func(stableID, resolvedTmux, harness string, _ manifest.SessionOutcome, allow bool) error {
+		if stableID != sessionID || resolvedTmux != sessionName || harness != "codex-cli" {
+			t.Fatalf("spawnReaper identities = (%q, %q, %q), want (%q, %q, %q)",
+				stableID, resolvedTmux, harness, sessionID, sessionName, "codex-cli")
+		}
+		gotAllow = allow
+		return nil
+	}
+	t.Cleanup(func() { spawnReaperFn = oldSpawnReaper })
+
+	if err := archiveSession(nil, []string{sessionName}); err != nil {
+		t.Fatalf("archiveSession() error: %v", err)
+	}
+	if !gotAllow {
+		t.Fatal("spawnReaper did not receive typed supervisor-reap authorization")
+	}
+	after := readSessionFromDolt(t, sessionID)
+	if after.Lifecycle != "" {
+		t.Fatalf("async supervisor preflight changed durable lifecycle to %q", after.Lifecycle)
 	}
 }
 
@@ -1311,7 +1365,7 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Note: spawnReaper() will fail because agm-reaper binary doesn't exist
 			// in test environment. We're testing the path sanitization logic.
-			err := spawnReaper("stable-session-id", tc.sessionName, "codex-cli", manifest.OutcomeUnknown)
+			err := spawnReaper("stable-session-id", tc.sessionName, "codex-cli", manifest.OutcomeUnknown, false)
 
 			// Should get error about missing binary (expected in tests)
 			if err == nil {
@@ -1342,6 +1396,7 @@ func TestBuildReaperArgsSeparatesStableAndTmuxIdentities(t *testing.T) {
 		"0123456789ab",
 		true,
 		true,
+		true,
 		manifest.OutcomeKilled,
 	)
 	got := strings.Join(args, " ")
@@ -1350,6 +1405,7 @@ func TestBuildReaperArgsSeparatesStableAndTmuxIdentities(t *testing.T) {
 		"--session resolved-tmux",
 		"--force",
 		"--keep-sandbox",
+		"--allow-supervisor-reap",
 		"--outcome killed",
 	} {
 		if !strings.Contains(got, want) {

@@ -328,6 +328,44 @@ func PrepareHarnessCommand(
 	}, nil
 }
 
+// PrepareAgyCommand snapshots only AGY's documented allowlist from the caller
+// and writes it to an owner-only, one-shot handoff. This keeps Google/Gemini
+// authentication authoritative when a long-lived tmux server is stale.
+func PrepareAgyCommand(launch AgyLaunch, parent []string) (PreparedCommand, error) {
+	if err := validateAgyPastedValues(launch); err != nil {
+		return PreparedCommand{}, err
+	}
+	executable, err := resolvePrivateExecutable()
+	if err != nil {
+		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
+	}
+	if err := validateText("private executable", executable); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate AGY pane command: %w", err)
+	}
+	snapshot := removeEnvironment(AgyEnvironment(parent, launch.SessionName), paneRuntimeEnvironment)
+	handoffPath, err := stageHandoff(AgyProtocol, snapshot, launch.DeferUntilProducerExit, "")
+	if err != nil {
+		return PreparedCommand{}, err
+	}
+	if err := validateText("private handoff", handoffPath); err != nil {
+		return PreparedCommand{}, cleanupInvalidHandoff(handoffPath, fmt.Errorf("validate AGY pane command: %w", err))
+	}
+	lease, err := scheduleHandoffExpiry(
+		executable, handoffPath, time.Now().Add(handoffMaxAge), launch.DeferUntilProducerExit,
+	)
+	if err != nil {
+		return PreparedCommand{}, cleanupFailedHandoff(handoffPath, err)
+	}
+	launch.Executable = executable
+	launch.HandoffPath = handoffPath
+	return PreparedCommand{
+		Command: BuildAgyCommand(launch), path: handoffPath, lease: lease,
+		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
+			return bindHandoffOverrideReservations(handoffPath, AgyProtocol, false, recordSpawn, reservations...)
+		},
+	}, nil
+}
+
 func validateCodexPastedValues(launch CodexLaunch) error {
 	for _, field := range []struct{ name, value string }{
 		{"session", launch.SessionName},
@@ -590,6 +628,24 @@ func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
 		binding.Remote == other.Remote &&
 		binding.RemoteResume == other.RemoteResume &&
 		binding.HookRoot == other.HookRoot
+}
+
+func validateAgyPastedValues(launch AgyLaunch) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", launch.SessionName},
+		{"model", launch.Model},
+		{"workdir", launch.WorkDir},
+		{"permission", launch.Permission},
+		{"conversation", launch.ConversationID},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate AGY pane command: %w", err)
+		}
+	}
+	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
+		return fmt.Errorf("validate AGY pane command: %w", err)
+	}
+	return nil
 }
 
 func validateClaudePastedValues(launch ClaudeLaunch) error {
@@ -1526,6 +1582,11 @@ func handoffEnvironmentAllowlist(protocol string) map[string]bool {
 	switch protocol {
 	case CodexProtocol:
 		for _, name := range codexAllowedEnvironment {
+			allowed[name] = true
+		}
+		allowed["AGM_SESSION_NAME"] = true
+	case AgyProtocol:
+		for _, name := range agyAllowedEnvironment {
 			allowed[name] = true
 		}
 		allowed["AGM_SESSION_NAME"] = true

@@ -399,11 +399,16 @@ func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLa
 	if err != nil {
 		return ops.CreateSessionLaunchResult{}, fmt.Errorf("prepare harness launch: %w", err)
 	}
-	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
-	if submissionErr := r.tmux.SendKeys(spec.SessionName, launch.Command); submissionErr != nil {
-		if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
-			return result, err
+	if launch.BindOverrideReservations != nil {
+		if err := launch.FinalizeLaunch(true); err != nil {
+			_ = launch.CancelUndelivered()
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("finalize harness launch: %w", err)
 		}
+	}
+	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
+	submissionErr := r.tmux.SendKeys(spec.SessionName, launch.Command)
+	if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
+		return result, err
 	}
 	if spec.Harness != "agy" {
 		return result, nil
