@@ -227,7 +227,7 @@ var agyAllowedEnvironment = []string{
 	"CLOUDSDK_CONFIG", "GEMINI_API_KEY", "GOOGLE_API_KEY",
 	"AGM_HOME", "AGM_CONFIG_DIR", "AGM_DB_PATH", "AGM_SESSIONS_DIR",
 	"AGM_STATE_DIR", "AGM_TMUX_SOCKET", "AGM_BUS_SOCKET", "AGM_TEAM",
-	"WORKSPACE",
+	"WORKSPACE", "AGM_AUTONOMOUS",
 }
 
 // paneRuntimeEnvironment names terminal state that belongs to the target pane,
@@ -325,7 +325,9 @@ func BuildCodexCommand(launch CodexLaunch) string {
 		appendShellFlag(&b, "--handoff", launch.HandoffPath)
 	}
 	appendShellFlag(&b, "--session", launch.SessionName)
-	appendShellFlag(&b, "--model", launch.Model)
+	if launch.Model != "" {
+		appendShellFlag(&b, "--model", launch.Model)
+	}
 	appendShellFlag(&b, "--workdir", launch.WorkDir)
 	appendShellFlag(&b, "--sandbox", launch.Sandbox)
 	if launch.Approval != "" {
@@ -471,7 +473,9 @@ func BuildAgyCommand(launch AgyLaunch) string {
 		appendShellFlag(&b, "--handoff", launch.HandoffPath)
 	}
 	appendShellFlag(&b, "--session", launch.SessionName)
-	appendShellFlag(&b, "--model", launch.Model)
+	if launch.Model != "" {
+		appendShellFlag(&b, "--model", launch.Model)
+	}
 	appendShellFlag(&b, "--workdir", launch.WorkDir)
 	if launch.Permission != "" {
 		appendShellFlag(&b, "--permission", launch.Permission)
@@ -1106,13 +1110,13 @@ func parseAgy(args []string) (agyRequest, error) {
 
 func validateAgyRequest(request agyRequest) error {
 	for _, field := range []struct{ name, value string }{
-		{"session", request.SessionName}, {"model", request.Model}, {"workdir", request.WorkDir},
+		{"session", request.SessionName}, {"workdir", request.WorkDir},
 	} {
 		if err := validateText(field.name, field.value); err != nil {
 			return err
 		}
 	}
-	if request.Permission != "" && !oneOf(request.Permission, "auto", "default", "dangerously-skip-permissions") {
+	if request.Permission != "" && !oneOf(request.Permission, "auto", "default", "plan", "dangerously-skip-permissions") {
 		return fmt.Errorf("invalid AGY permission mode %q", request.Permission)
 	}
 	if err := validateTextList("add-dir", request.AddDirs); err != nil {
@@ -1135,6 +1139,8 @@ func (r agyRequest) argv() []string {
 	}
 	if r.Permission == "auto" || r.Permission == "dangerously-skip-permissions" {
 		args = append(args, "--dangerously-skip-permissions")
+	} else if r.Permission == "plan" {
+		args = append(args, "--mode", "plan")
 	}
 	if r.ConversationID != "" {
 		args = append(args, "--conversation", r.ConversationID)

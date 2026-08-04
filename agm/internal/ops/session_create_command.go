@@ -194,6 +194,7 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 		}
 		return HarnessLaunchCommand{
 			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
 	default:
 		launch := BuildHarnessLaunchCommand(spec)

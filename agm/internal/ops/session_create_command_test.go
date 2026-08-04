@@ -166,7 +166,7 @@ func TestPrepareNonCodexLaunchWithAdmissionUsesPrivateExecutor(t *testing.T) {
 		t.Fatalf("PrepareHarnessLaunchCommand() error = %v", err)
 	}
 	t.Cleanup(func() { _ = launch.CancelUndelivered() })
-	if !strings.Contains(launch.Command, harnessexec.HarnessProtocol) {
+	if !strings.Contains(launch.Command, harnessexec.AgyProtocol) {
 		t.Fatalf("prepared launch = %q, want private harness executor", launch.Command)
 	}
 	if launch.BindOverrideReservations == nil || launch.Cancel == nil {

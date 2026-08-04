@@ -358,7 +358,12 @@ func PrepareAgyCommand(launch AgyLaunch, parent []string) (PreparedCommand, erro
 	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
-	return PreparedCommand{Command: BuildAgyCommand(launch), path: handoffPath, lease: lease}, nil
+	return PreparedCommand{
+		Command: BuildAgyCommand(launch), path: handoffPath, lease: lease,
+		bindOverrides: func(recordSpawn bool, reservations ...*override.Reservation) error {
+			return bindHandoffOverrideReservations(handoffPath, AgyProtocol, false, recordSpawn, reservations...)
+		},
+	}, nil
 }
 
 func validateCodexPastedValues(launch CodexLaunch) error {

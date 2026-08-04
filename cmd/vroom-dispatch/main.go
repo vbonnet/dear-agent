@@ -737,12 +737,38 @@ func archiveAuthFailedSupervisor(sup supervisor) error {
 	}
 	deadline := time.Now().Add(spawnCommandTimeout)
 	for time.Now().Before(deadline) {
-		if !isSessionAlive(sup.Name) {
+		if isSessionArchived(sup.Name) {
 			return nil
 		}
 		sleepFor(2 * time.Second)
 	}
 	return fmt.Errorf("auth-failed supervisor %s remained active after archive", sup.Name)
+}
+
+// isSessionArchived waits on the durable lifecycle state, not merely tmux
+// disappearance. The detached reaper closes tmux before it commits archive
+// cleanup, so liveness alone can race duplicate-name admission.
+func isSessionArchived(name string) bool {
+	cmd := exec.Command("agm", "session", "list", "--all", "--json", "--fields", "name,status")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	var result struct {
+		Sessions []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return false
+	}
+	for _, session := range result.Sessions {
+		if session.Name == name {
+			return session.Status == "archived"
+		}
+	}
+	return false
 }
 
 // createAndBootSession spawns one supervisor session and walks it through the
