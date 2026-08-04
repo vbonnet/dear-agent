@@ -13,10 +13,10 @@
 // The mental model is a fleet of named Checks ("build", "test",
 // "lint.go", "vuln.govulncheck", ...) registered in a Registry and
 // invoked by a Runner against a per-call Env. A Check finds and a Refiner
-// proposes amendments. The exported Remediator is a dormant compatibility
-// seam whose only production implementation is a side-effect-free no-op; its
-// outcome is not durable evidence. These stages remain separate so checks stay
-// pure and trivial to test.
+// proposes amendments. Remediation fields are suggestions only: this package
+// records them but never dispatches commands, pull requests, issues, or other
+// side effects. These stages remain separate so checks stay pure and trivial to
+// test.
 //
 // Higher-level surfaces — the workflow-audit CLI, the .dear-agent.yml
 // > audits: config loader, and workflow YAML wrappers that invoke the

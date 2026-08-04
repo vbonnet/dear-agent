@@ -1,6 +1,6 @@
 # Workflow Audit Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-08-02 -->
 
 ## Overview
 
@@ -25,6 +25,8 @@ acknowledge, and resolve operations to the audit package.
 **WORKFLOW-AUDIT-07** When no database path is provided, the system shall use `.dear-agent/audit.db` as the audit database.
 
 **WORKFLOW-AUDIT-08** When audit configuration is requested, the system shall load audit config before running checks or mutating finding state.
+
+**WORKFLOW-AUDIT-09** When the `run` subcommand records remediation suggestions, the system shall not expose a flag that implies those suggestions are dispatched by this command.
 
 ## BDD Traceability
 
