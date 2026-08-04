@@ -347,10 +347,40 @@ func supervisorPaneAuthFailed(content, harness string) bool {
 }
 
 func claudePaneAuthFailed(lines []string, lower string) bool {
+	if claudePaneReady(lines) {
+		return false
+	}
 	return hasExactLine(lines, "please run /login") ||
 		(strings.Contains(lower, "claude") &&
 			(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth")) &&
 			hasAny(lower, "401", "unauthorized", "authentication", "session expired", "token expired", "not authenticated"))
+}
+
+// claudePaneReady mirrors the shared Claude composer contract: a current
+// composer glyph owns input, and the normal footer may follow it. Historical
+// auth text above that composer is not evidence of a current auth block.
+func claudePaneReady(lines []string) bool {
+	composer := -1
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "❯" || strings.HasPrefix(line, "❯ ") {
+			composer = i
+		}
+	}
+	if composer < 0 {
+		return false
+	}
+	for _, line := range lines[composer+1:] {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" || strings.Trim(lower, "─━┄┈╌╍ ") == "" ||
+			strings.Contains(lower, "? for shortcuts") ||
+			strings.Contains(lower, "shift+tab to cycle") ||
+			strings.Contains(lower, "plan mode on") {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func codexPaneAuthFailed(lower string) bool {
@@ -731,16 +761,20 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 }
 
 func archiveAuthFailedSupervisor(sup supervisor) error {
+	deadline := time.Now().Add(spawnCommandTimeout)
 	output, err := runArchiveSupervisor(sup)
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
-	deadline := time.Now().Add(spawnCommandTimeout)
 	for time.Now().Before(deadline) {
-		if isSessionArchived(sup.Name) {
+		remaining := time.Until(deadline)
+		if isSessionArchived(context.Background(), sup.Name, remaining) {
 			return nil
 		}
-		sleepFor(2 * time.Second)
+		if remaining <= 0 {
+			break
+		}
+		sleepFor(minDuration(2*time.Second, remaining))
 	}
 	return fmt.Errorf("auth-failed supervisor %s remained active after archive", sup.Name)
 }
@@ -748,8 +782,10 @@ func archiveAuthFailedSupervisor(sup supervisor) error {
 // isSessionArchived waits on the durable lifecycle state, not merely tmux
 // disappearance. The detached reaper closes tmux before it commits archive
 // cleanup, so liveness alone can race duplicate-name admission.
-func isSessionArchived(name string) bool {
-	cmd := exec.Command("agm", "session", "list", "--all", "--json", "--fields", "name,status")
+func isSessionArchived(parent context.Context, name string, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--json", "--fields", "name,status")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -769,6 +805,13 @@ func isSessionArchived(name string) bool {
 		}
 	}
 	return false
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // createAndBootSession spawns one supervisor session and walks it through the

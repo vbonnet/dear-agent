@@ -683,6 +683,12 @@ func TestSupervisorPaneAuthFailed(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "stale auth block followed by Claude composer",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login\n❯\n? for shortcuts",
+			want:    false,
+		},
+		{
 			name:    "generic auth phrase without harness evidence",
 			harness: "codex-cli",
 			content: "authentication failed in the mocked dependency; continue with the implementation",

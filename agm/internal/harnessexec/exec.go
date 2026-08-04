@@ -772,11 +772,13 @@ func runAgy(args []string) error {
 		return err
 	}
 	environ := AgyEnvironment(os.Environ(), request.SessionName)
+	var handoff launchHandoff
 	if request.HandoffPath != "" {
-		handoff, handoffErr := consumeHandoff(request.HandoffPath, AgyProtocol, "")
+		consumed, handoffErr := consumeHandoff(request.HandoffPath, AgyProtocol, "")
 		if handoffErr != nil {
 			return handoffErr
 		}
+		handoff = consumed
 		environ = AgyEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
 	}
@@ -789,6 +791,14 @@ func runAgy(args []string) error {
 		return fmt.Errorf("resolve agy executable: %w", err)
 	}
 	argv := append([]string{"agy"}, request.argv()...)
+	if err := commitLaunchOverrideProofs(request.SessionName, handoff.OverrideProofs...); err != nil {
+		return fmt.Errorf("commit AGY launch override transaction: %w", err)
+	}
+	if handoff.RecordSpawn {
+		if err := recordLaunchSpawn(); err != nil {
+			return fmt.Errorf("record AGY launch: %w", err)
+		}
+	}
 	if err := replaceProcess(path, argv, environ); err != nil {
 		return fmt.Errorf("execute agy: %w", err)
 	}
@@ -1137,9 +1147,10 @@ func (r agyRequest) argv() []string {
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}
-	if r.Permission == "auto" || r.Permission == "dangerously-skip-permissions" {
+	switch r.Permission {
+	case "auto", "dangerously-skip-permissions":
 		args = append(args, "--dangerously-skip-permissions")
-	} else if r.Permission == "plan" {
+	case "plan":
 		args = append(args, "--mode", "plan")
 	}
 	if r.ConversationID != "" {
