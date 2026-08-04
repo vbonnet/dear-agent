@@ -37,6 +37,10 @@ per pass, tracks bounded repair attempts, and records durable audit evidence.
 
 **MLP-14** When effective required-check projection is unavailable or contains no failing check, the driver shall preserve the existing repair-attempt budget until a failing projection establishes the current failure signature.
 
+**MLP-15** When a passing projection establishes that a prior failure episode concluded, the tracker shall reset the repair-attempt budget and clear the failure signature.
+
+**MLP-16** When effective required-check projection fails deterministically due to policy constraints, the classifier shall block and escalate the pull request rather than leaving it in pending.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
