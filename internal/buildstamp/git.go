@@ -22,14 +22,43 @@ func defaultGitCommit(dir string, output gitOutput) string {
 		return unknownGitCommit
 	}
 
-	status, err := output(dir, "status", "--porcelain=v1", "--untracked-files=normal", "--ignore-submodules=none")
+	status, err := output(dir, "status", "--porcelain=v1", "--ignored=matching", "--untracked-files=normal", "--ignore-submodules=none")
 	if err != nil {
 		return unknownGitCommit
 	}
-	if len(status) != 0 {
+	if isWorktreeDirty(string(status)) {
 		return revision + "-dirty"
 	}
 	return revision
+}
+
+func isWorktreeDirty(status string) bool {
+	lines := strings.Split(status, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		if strings.HasPrefix(line, "!! ") {
+			path := strings.TrimSpace(line[3:])
+			if isCompilableSource(path) {
+				return true
+			}
+		} else {
+			return true
+		}
+	}
+	return false
+}
+
+func isCompilableSource(path string) bool {
+	exts := []string{".go", ".mod", ".sum", ".c", ".h", ".s", ".cc", ".cpp", ".proto"}
+	for _, ext := range exts {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func runGit(dir string, args ...string) ([]byte, error) {

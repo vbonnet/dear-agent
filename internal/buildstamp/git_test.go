@@ -41,6 +41,37 @@ func TestDefaultGitCommitClassifiesRepositoryState(t *testing.T) {
 			dirty: true,
 		},
 		{
+			name: "ignored Go source input",
+			mutate: func(t *testing.T, _ *gittest.Sandbox, repo string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("check-*.go\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(repo, "check-local.go"), []byte("package main\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			dirty: true,
+		},
+		{
+			name: "ignored build output directory",
+			mutate: func(t *testing.T, sandbox *gittest.Sandbox, repo string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("bin/\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				sandbox.Run(t, repo, "add", ".gitignore")
+				sandbox.Run(t, repo, "commit", "-m", "ignore bin")
+				if err := os.MkdirAll(filepath.Join(repo, "bin"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(repo, "bin", "agm"), []byte("binary"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			dirty: false,
+		},
+		{
 			name: "detached HEAD",
 			mutate: func(t *testing.T, sandbox *gittest.Sandbox, repo string) {
 				t.Helper()

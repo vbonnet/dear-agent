@@ -264,7 +264,7 @@ func validateCanonicalAGMInstallPlan(output string) error {
 	stampFragments := []string{
 		"-ldflags",
 		"-X github.com/vbonnet/dear-agent/pkg/version.Version=${_BUILD_STAMP_VERSION}",
-		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=$(_BUILD_STAMP_GIT_COMMIT)",
+		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_BUILD_STAMP_GIT_COMMIT}",
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_BUILD_STAMP_DATE}",
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=makefile",
 	}
@@ -278,7 +278,7 @@ func validateCanonicalAGMInstallPlan(output string) error {
 		{label: "reaper stamped build", marker: "-o bin/agm-reaper ./agm/cmd/agm-reaper/", fragments: stampFragments},
 		{
 			label:  "AGM atomic install",
-			marker: "dest='.bdd-install-plan/go/bin/agm'",
+			marker: `dest="$dir/agm"`,
 			fragments: []string{
 				"cp 'bin/agm' \"$stage\"",
 				"mv -f \"$stage\" \"$dest\"",
@@ -287,7 +287,7 @@ func validateCanonicalAGMInstallPlan(output string) error {
 		},
 		{
 			label:  "reaper atomic install",
-			marker: "dest='.bdd-install-plan/go/bin/agm-reaper'",
+			marker: `dest="$dir/agm-reaper"`,
 			fragments: []string{
 				"cp 'bin/agm-reaper' \"$stage\"",
 				"mv -f \"$stage\" \"$dest\"",

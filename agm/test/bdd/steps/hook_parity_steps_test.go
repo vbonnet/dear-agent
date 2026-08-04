@@ -20,7 +20,7 @@ func TestValidateCanonicalAGMInstallPlan(t *testing.T) {
 	stampFlags := strings.Join([]string{
 		"-ldflags",
 		"-X github.com/vbonnet/dear-agent/pkg/version.Version=${_BUILD_STAMP_VERSION}",
-		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=$(_BUILD_STAMP_GIT_COMMIT)",
+		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_BUILD_STAMP_GIT_COMMIT}",
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_BUILD_STAMP_DATE}",
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=makefile",
 	}, " ")
@@ -28,8 +28,8 @@ func TestValidateCanonicalAGMInstallPlan(t *testing.T) {
 		"GOFLAGS= GOENV=off GOWORK=off go run ./internal/buildstamp",
 		"go build " + stampFlags + " -o bin/agm ./agm/cmd/agm/",
 		"go build " + stampFlags + " -o bin/agm-reaper ./agm/cmd/agm-reaper/",
-		`set -e; dest='.bdd-install-plan/go/bin/agm'; cp 'bin/agm' "$stage"; mv -f "$stage" "$dest"; echo "Installed: $dest"`,
-		`set -e; dest='.bdd-install-plan/go/bin/agm-reaper'; cp 'bin/agm-reaper' "$stage"; mv -f "$stage" "$dest"; echo "Installed: $dest"`,
+		`set -e; dir='.bdd-install-plan/go/bin'; mkdir -p "$dir"; dest="$dir/agm"; stage="$(mktemp "$dest.XXXXXX")"; trap 'rm -f "$stage"' EXIT; cp 'bin/agm' "$stage"; chmod 755 "$stage"; codesign -f -s - "$stage" 2>/dev/null || true; mv -f "$stage" "$dest"; echo "Installed: $dest"`,
+		`set -e; dir='.bdd-install-plan/go/bin'; mkdir -p "$dir"; dest="$dir/agm-reaper"; stage="$(mktemp "$dest.XXXXXX")"; trap 'rm -f "$stage"' EXIT; cp 'bin/agm-reaper' "$stage"; chmod 755 "$stage"; codesign -f -s - "$stage" 2>/dev/null || true; mv -f "$stage" "$dest"; echo "Installed: $dest"`,
 	}, "\n")
 	if err := validateCanonicalAGMInstallPlan(valid); err != nil {
 		t.Fatalf("valid install plan rejected: %v", err)
@@ -48,8 +48,8 @@ func TestValidateCanonicalAGMInstallPlan(t *testing.T) {
 		{
 			name: "missing reaper promotion",
 			plan: strings.Replace(valid,
-				`cp 'bin/agm-reaper' "$stage"; mv -f "$stage" "$dest"`,
-				`cp 'bin/agm-reaper' "$stage"`, 1),
+				`mv -f "$stage" "$dest"`,
+				`echo "no mv"`, 2),
 			wantDetail: "mv -f",
 		},
 	}
