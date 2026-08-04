@@ -131,6 +131,33 @@ func TestRun_OversizeDiffFailsClosed(t *testing.T) {
 	}
 }
 
+func TestGitDiff_OversizeReturnsNoTruncatedPrefix(t *testing.T) {
+	big := strings.Repeat("x", 2000) + "\n"
+	dir, base, head := initRepo(t, big)
+	chdir(t, dir)
+
+	diff, tooLarge, err := gitDiff(base, head, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tooLarge {
+		t.Fatal("gitDiff oversized diff was not reported as too large")
+	}
+	if diff != "" {
+		t.Fatalf("gitDiff returned %d bytes of a truncated, non-reviewable diff", len(diff))
+	}
+}
+
+func TestOversizeCommentReportsOnlyVerifiedLimit(t *testing.T) {
+	comment := oversizeComment(500)
+	if !strings.Contains(comment, "exceeds the 500-byte auto-review limit") {
+		t.Fatalf("oversize comment does not report the verified limit: %q", comment)
+	}
+	if strings.Contains(comment, "501 bytes") {
+		t.Fatalf("oversize comment reports the bounded sentinel as the actual diff size: %q", comment)
+	}
+}
+
 func TestRun_OversizeDiffWithOverridePasses(t *testing.T) {
 	big := make([]byte, 2000)
 	for i := range big {

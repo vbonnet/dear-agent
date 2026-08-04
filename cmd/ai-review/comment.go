@@ -73,11 +73,11 @@ func overrideComment(reason string) string {
 }
 
 // oversizeComment is posted when the diff exceeds the auto-review size limit.
-func oversizeComment(size, limit int) string {
+func oversizeComment(limit int) string {
 	return fmt.Sprintf(commentMarker+"\n## ⚠️ AI Code Review — diff too large\n\n"+
-		"> The diff is %d bytes, over the %d-byte auto-review limit, so it was **not** reviewed (the gate refuses to review a truncated diff).\n\n"+
+		"> The diff exceeds the %d-byte auto-review limit, so it was **not** reviewed (the gate refuses to review a truncated diff).\n\n"+
 		"Split this PR into smaller reviewable changes, or apply the `ai-review:override` label after a human review.\n\n"+
-		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n", size, limit)
+		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n", limit)
 }
 
 // postComment upserts the sticky comment and reports whether the result was

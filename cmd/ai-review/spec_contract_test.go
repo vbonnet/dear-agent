@@ -343,6 +343,58 @@ func TestSpecReviewPromptsRejectsStaleProtectedBaseEvidence(t *testing.T) {
 	}
 }
 
+func TestMinimumSpecVerdictSizeFitsOrdinaryCompleteGrid(t *testing.T) {
+	plan := reviewPlan{
+		Version:      specContractVersion,
+		BaseSHA:      strings.Repeat("a", 40),
+		MergeBaseSHA: strings.Repeat("a", 40),
+		HeadSHA:      strings.Repeat("b", 40),
+		Changes:      []specChange{{Path: "module/SPEC.md", Status: "modified"}},
+	}
+	for requirement := range 20 {
+		for _, harness := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"} {
+			plan.Applicability = append(plan.Applicability, specApplicabilityEvidence{
+				Path:          "module/SPEC.md",
+				RequirementID: fmt.Sprintf("MOD-%02d", requirement),
+				Harness:       harness,
+			})
+		}
+	}
+	size, err := minimumSpecVerdictSize(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size > maxSpecVerdictBytes {
+		t.Fatalf("minimum ordinary verdict size = %d, exceeds %d", size, maxSpecVerdictBytes)
+	}
+}
+
+func TestBuildReviewPlan_EscalatesBeforeImpossibleVerdictCall(t *testing.T) {
+	repo := newReviewRepo(t)
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	var contract strings.Builder
+	contract.WriteString("# Contract\n\n")
+	for requirement := range 80 {
+		fmt.Fprintf(&contract, "**MOD-%03d** When case %03d is checked, the system shall report result %03d.\n\n", requirement, requirement, requirement)
+	}
+	contract.WriteString("## BDD traceability\n\n- `features/module.feature`\n")
+	writeReviewFile(t, repo, "module/SPEC.md", contract.String())
+	writeReviewFile(t, repo, "features/module.feature", featureDocument("# SPEC: module/SPEC.md\n", "large contract"))
+	gittest.Run(t, repo, "add", "module/SPEC.md", "features/module.feature")
+	gittest.Run(t, repo, "commit", "-m", "add large contract")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := strings.Join(plan.HumanReasons, "\n")
+	if !plan.needsHuman() || !plan.CandidateSearchComplete || !strings.Contains(reasons, "minimum complete SPEC verdict") {
+		t.Fatalf("impossible output plan did not fail closed before model review: complete=%t reasons=%v applicability=%d", plan.CandidateSearchComplete, plan.HumanReasons, len(plan.Applicability))
+	}
+}
+
 func TestBuildReviewPlan_FailsClosedWithoutProtectedBasePolicy(t *testing.T) {
 	repo := gittest.NewRepo(t)
 	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
@@ -509,6 +561,13 @@ func TestMarkdownContractParsing_UsesCanonicalTraceabilityAndSkipsFences(t *test
 		"**FAKE-01** When copied, the system shall ignore this example.",
 		"```",
 		"",
+		"    **INDENTED-01** When copied, the system shall ignore this example.",
+		"",
+		"> ```markdown",
+		"> **NESTED-01** When copied, the system shall ignore this example.",
+		"> - Feature: `features/nested.feature`",
+		"> ```",
+		"",
 		"**REAL-01** When checked, the system shall report it.",
 		"",
 		"## Notes",
@@ -542,6 +601,68 @@ func TestMarkdownContractParsing_UsesCanonicalTraceabilityAndSkipsFences(t *test
 	}
 }
 
+func TestExactTraceability_AcceptsRepositoryTemplateWithoutBroadeningGrammar(t *testing.T) {
+	templateBytes, err := os.ReadFile(filepath.Join("..", "..", "docs", "templates", "SPEC.md.tmpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const featurePath = "agm/test/bdd/features/template-contract.feature"
+	document := strings.ReplaceAll(string(templateBytes), "{repository-relative-path-to-feature.feature}", featurePath)
+	if got := exactFeaturePaths(document); !slices.Equal(got, []string{featurePath}) {
+		t.Fatalf("template feature paths = %v, want [%s]", got, featurePath)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		document string
+		want     []string
+	}{
+		{name: "established labeled form", document: "## BDD Traceability\n\n- Feature: `features/established.feature`\n", want: []string{"features/established.feature"}},
+		{name: "canonical bare form", document: "## BDD traceability\n\n- `features/canonical.feature`\n", want: []string{"features/canonical.feature"}},
+		{name: "unregistered heading case", document: "## bdd traceability\n\n- `features/broad.feature`\n"},
+		{name: "unregistered label case", document: "## BDD Traceability\n\n- feature: `features/broad.feature`\n"},
+		{name: "bare path under established heading", document: "## BDD Traceability\n\n- `features/broad.feature`\n"},
+		{name: "label under canonical heading", document: "## BDD traceability\n\n- Feature: `features/broad.feature`\n"},
+		{name: "unquoted bare path", document: "## BDD traceability\n\n- features/broad.feature\n"},
+		{name: "trailing annotation", document: "## BDD traceability\n\n- `features/broad.feature` canonical\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := exactFeaturePaths(tc.document); !slices.Equal(got, tc.want) {
+				t.Fatalf("feature paths = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestVisibleMarkdown_PreservesLinesWhileBlankingHiddenEARSProse(t *testing.T) {
+	document := strings.Join([]string{
+		"# Contract",
+		"<!--",
+		"A commented sentence shall remain hidden.",
+		"-->",
+		"",
+		"    An indented sentence shall remain hidden.",
+		"",
+		"> ```text",
+		"> A nested sentence shall remain hidden.",
+		"> ```",
+		"A visible sentence shall remain on its original line.",
+	}, "\n")
+	got := strings.Split(visibleMarkdown(markdownLines(document)), "\n")
+	wantLines := strings.Split(document, "\n")
+	if len(got) != len(wantLines) {
+		t.Fatalf("visible view has %d lines, want %d", len(got), len(wantLines))
+	}
+	for _, hidden := range []string{"commented sentence", "indented sentence", "nested sentence"} {
+		if strings.Contains(strings.Join(got, "\n"), hidden) {
+			t.Fatalf("visible view retained hidden prose %q: %q", hidden, got)
+		}
+	}
+	if got[10] != wantLines[10] {
+		t.Fatalf("visible line moved or changed: line 11 = %q, want %q", got[10], wantLines[10])
+	}
+}
+
 func TestBuildReviewPlan_UsesStrictEARSLintAndIgnoresFencedExamples(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -551,6 +672,9 @@ func TestBuildReviewPlan_UsesStrictEARSLintAndIgnoresFencedExamples(t *testing.T
 		{name: "invalid prose outside fence", extra: "A malformed sentence shall not match strict EARS.\n", wantHuman: true},
 		{name: "stable requirement without EARS keyword", extra: "**MOD-02** When checked, the system must report it.\n", wantHuman: true},
 		{name: "invalid prose inside fence", extra: "```text\nA malformed sentence shall not match strict EARS.\n```\n"},
+		{name: "invalid prose inside HTML comment", extra: "<!--\nA malformed sentence shall not match strict EARS.\n-->\n"},
+		{name: "invalid prose inside indented code", extra: "    A malformed sentence shall not match strict EARS.\n"},
+		{name: "invalid prose inside container nested fence", extra: "> ```text\n> A malformed sentence shall not match strict EARS.\n> ```\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newReviewRepo(t)
@@ -605,8 +729,9 @@ func TestBuildReviewPlan_ProvidesCompleteChangedContractAndSemanticCandidates(t 
 	for _, candidate := range plan.Candidates {
 		candidates[candidate.Path] = strings.Join(candidate.Signals, "\n")
 	}
-	if len(candidates) != 2 || !strings.Contains(candidates["shared/SPEC.md"], "shared BDD backlink") || !strings.Contains(candidates["contracts/archive/SPEC.md"], "contract term") || candidates["unrelated/SPEC.md"] != "" {
-		t.Fatalf("semantic candidates = %#v, want complete BDD and lexical unchanged-corpus evidence", plan.Candidates)
+	_, unrelatedIncluded := candidates["unrelated/SPEC.md"]
+	if len(candidates) != 3 || !strings.Contains(candidates["shared/SPEC.md"], "shared BDD backlink") || !strings.Contains(candidates["contracts/archive/SPEC.md"], "contract term") || !unrelatedIncluded {
+		t.Fatalf("semantic candidates = %#v, want every unchanged contract with BDD and lexical ranking signals", plan.Candidates)
 	}
 	if !plan.CandidateSearchComplete || plan.ActiveHarnessInventory.Revision != base || len(plan.ActiveHarnessInventory.Members) != 5 || len(plan.Applicability) != 5 {
 		t.Fatalf("authenticated active-member applicability evidence is incomplete: inventory=%#v applicability=%#v complete=%t", plan.ActiveHarnessInventory, plan.Applicability, plan.CandidateSearchComplete)
@@ -720,11 +845,30 @@ func TestSemanticCandidatesEscalatesInsteadOfTruncatingOwnerSearch(t *testing.T)
 	}
 }
 
+func TestSemanticCandidatesIncludesZeroOverlapOwnerEvidence(t *testing.T) {
+	changed := specWithoutTrace("OWN-01", "When a session ends, the system shall keep its final result.")
+	owner := specWithoutTrace("TERM-01", "While execution terminates, observers shall persist completion evidence.")
+	contracts := []changedSpecContract{{Path: "domains/session/SPEC.md", Content: changed}}
+	changes := []specChange{{Path: "domains/session/SPEC.md", Status: "modified"}}
+	corpus := map[string][]byte{
+		"domains/session/SPEC.md": []byte(changed),
+		"domains/outcome/SPEC.md": []byte(owner),
+	}
+
+	candidates, reasons, err := semanticCandidates(contracts, changes, corpus, map[string]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 0 || len(candidates) != 1 || candidates[0].Path != "domains/outcome/SPEC.md" || len(candidates[0].Signals) != 0 {
+		t.Fatalf("zero-overlap owner evidence candidates=%#v reasons=%v", candidates, reasons)
+	}
+}
+
 func TestBuildReviewPlan_EscalatesIncompleteOwnerCandidateSearch(t *testing.T) {
 	repo := newReviewRepo(t)
 	for index := range maxSemanticCandidates + 1 {
 		path := fmt.Sprintf("domains/candidate-%02d/SPEC.md", index)
-		body := fmt.Sprintf("When session archival component %03d completes, the system shall record the terminal outcome.", index)
+		body := fmt.Sprintf("When storage bucket %03d fills, the system shall reject a new upload.", index)
 		writeReviewFile(t, repo, path, specWithoutTrace(fmt.Sprintf("CAND-%03d", index), body))
 	}
 	baseline := specDocument("SESSION-01", "When session archival starts, the system shall record the initial state.", "features/session.feature")

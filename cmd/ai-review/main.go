@@ -78,11 +78,12 @@ func gitMergeBase(base, head string) (string, error) {
 	return resolveMergeBase(context.Background(), base, head)
 }
 
-// gitDiff returns the full diff between merge base and head. No truncation.
+// gitDiff returns either the complete diff or an overflow signal. A bounded
+// prefix is never returned as though it were a reviewable complete diff.
 func gitDiff(mergeBase, head string, limit int) (string, bool, error) {
 	out, err := gitOutputBounded(context.Background(), limit, "diff", "--no-ext-diff", "--no-textconv", mergeBase, head)
 	if errors.Is(err, errGitOutputLimit) {
-		return string(out), true, nil
+		return "", true, nil
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("git diff %s %s: %w", mergeBase, head, err)
@@ -340,7 +341,7 @@ func run(c config) int {
 	if tooLarge {
 		msg := fmt.Sprintf("diff is over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.", c.maxDiff)
 		fmt.Printf("::error::%s\n", msg)
-		logCommentErr(postComment(c, oversizeComment(len(diff), c.maxDiff)))
+		logCommentErr(postComment(c, oversizeComment(c.maxDiff)))
 		return failClosed(c, "the diff exceeded the auto-review size limit")
 	}
 

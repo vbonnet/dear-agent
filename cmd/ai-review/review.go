@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -83,14 +85,29 @@ type dimensionReport struct {
 	text string
 }
 
+const (
+	defaultReviewMaxTokens int64 = 2048
+	// Adaptive thinking consumes the same output budget as the visible JSON.
+	// SPEC reviews therefore reserve enough room for both reasoning and the
+	// complete bounded applicability/deletion verdict.
+	specReviewMaxTokens int64 = 64 * 1024
+	// The SDK requires streaming for large output budgets unless the caller
+	// supplies an explicit request timeout. Keep it below run's 20-minute
+	// context deadline so cancellation and retries remain bounded.
+	reviewRequestTimeout = 19 * time.Minute
+)
+
 // callClaude issues a single Messages API request with adaptive thinking and
 // the configured effort. Any error is returned to the caller so the run can
 // fail closed (SPEC R5/R6); it never substitutes a placeholder success.
-func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, system, user string) (string, error) {
+func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, maxTokens int64, system, user string) (string, error) {
+	if maxTokens <= 0 {
+		return "", fmt.Errorf("model output budget must be positive")
+	}
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     model,
-		MaxTokens: 2048,
+		MaxTokens: maxTokens,
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
 		OutputConfig: anthropic.OutputConfigParam{
@@ -99,9 +116,12 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
 		},
-	})
+	}, option.WithRequestTimeout(reviewRequestTimeout))
 	if err != nil {
 		return "", err
+	}
+	if resp.StopReason != anthropic.StopReasonEndTurn {
+		return "", fmt.Errorf("model response stopped before end_turn: %s", resp.StopReason)
 	}
 	var b strings.Builder
 	for _, block := range resp.Content {
@@ -126,7 +146,7 @@ func runDimensions(ctx context.Context, client anthropic.Client, model anthropic
 	user := "Review this PR diff and report your findings per your persona instructions:\n\n```diff\n" + diff + "\n```"
 	for i, d := range dims {
 		g.Go(func() error {
-			text, err := callClaude(ctx, client, model, effort, d.system, user)
+			text, err := callClaude(ctx, client, model, effort, defaultReviewMaxTokens, d.system, user)
 			if err != nil {
 				return fmt.Errorf("dimension %s: %w", d.key, err)
 			}
@@ -170,7 +190,7 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 		"outcome word (approved/needs-work/rejected/needs-human-review) and nothing else; " +
 		"start the brief summary on the second line."
 
-	text, err := callClaude(ctx, client, model, effort, synthSystem, sb.String())
+	text, err := callClaude(ctx, client, model, effort, defaultReviewMaxTokens, synthSystem, sb.String())
 	if err != nil {
 		return NeedsHumanReview, "", err
 	}
