@@ -13,7 +13,6 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 # -ldflags so that version-aware binaries report the actual build provenance.
 # Override on the CLI: make build-safe-pr VERSION=1.2.3
 VERSION    ?= dev
-GIT_COMMIT ?= $(or $(shell GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp git-commit 2>/dev/null),unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # GOFLAGS is caller-owned. Governed builds leave ordinary flags to the Go
@@ -25,7 +24,7 @@ EXTRA_GO_LDFLAGS ?=
 override _BUILD_STAMP_PACKAGE := github.com/vbonnet/dear-agent/pkg/version
 override _BUILD_STAMP_EXTRA_LDFLAGS := $(value EXTRA_GO_LDFLAGS)
 override _BUILD_STAMP_VERSION := $(if $(filter file,$(origin VERSION)),$(VERSION),$(value VERSION))
-override _BUILD_STAMP_GIT_COMMIT := $(if $(filter file,$(origin GIT_COMMIT)),$(GIT_COMMIT),$(value GIT_COMMIT))
+override _BUILD_STAMP_GIT_COMMIT = $(if $(strip $(value GIT_COMMIT)),$(value GIT_COMMIT),$(or $(shell GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp git-commit 2>/dev/null),unknown))
 override _BUILD_STAMP_DATE := $(if $(filter file,$(origin BUILD_DATE)),$(BUILD_DATE),$(value BUILD_DATE))
 override _BUILD_STAMP_TEST_OUTPUT := $(value BUILD_STAMP_TEST_OUTPUT)
 override _BUILD_STAMP_RAW_GOFLAGS := $(value GOFLAGS)

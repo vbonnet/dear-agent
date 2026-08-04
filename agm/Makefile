@@ -2,35 +2,11 @@ include ../mk/install-go-bin.mk
 
 .PHONY: build test lint install clean test-unit test-coverage coverage test-e2e-docker test-all install-skills init test-hooks test-bdd verify-contracts
 
-# Version information
-VERSION ?= 2.0.0-dev
-GIT_COMMIT ?= $(shell commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); if [ "$$commit" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then printf '%s-dirty' "$$commit"; else printf '%s' "$$commit"; fi)
-BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-BUILT_BY ?= $(shell whoami)
-
-# Ldflags for version injection
-LDFLAGS_AGM_COMPAT = -s -w \
-	-X main.Version=$(VERSION) \
-	-X main.GitCommit=$(GIT_COMMIT) \
-	-X main.BuildDate=$(BUILD_DATE) \
-	-X main.BuiltBy=$(BUILT_BY)
-
-LDFLAGS_REAPER = -s -w \
-	-X main.Version=$(VERSION) \
-	-X main.GitCommit=$(GIT_COMMIT) \
-	-X main.BuildDate=$(BUILD_DATE) \
-	-X main.BuiltBy=$(BUILT_BY)
-
-LDFLAGS_AGM = -s -w \
-	-X main.Version=$(VERSION) \
-	-X main.GitCommit=$(GIT_COMMIT) \
-	-X main.BuildDate=$(BUILD_DATE) \
-	-X main.BuiltBy=$(BUILT_BY)
-
+# The root Makefile is the sole AGM build/install owner. Keep this wrapper for
+# callers of the historical `make -C agm` entry point, but delegate immediately
+# so binaries use the governed root recipes and shared pkg/version stamps.
 build:
-	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm ./cmd/agm
-	go build -ldflags="$(LDFLAGS_REAPER)" -o bin/agm-reaper ./cmd/agm-reaper
-	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm-mcp-server ./cmd/agm-mcp-server
+	$(MAKE) -C .. build-agm build-agm-mcp-server
 
 test:
 	CGO_ENABLED=1 go test -tags="fts5" -v -cover ./...
@@ -38,7 +14,13 @@ test:
 lint:
 	golangci-lint run ./...
 
-install: build
+install:
+	$(MAKE) -C .. install-agm install-agm-mcp-server
+
+# Retained only as an explicit migration aid; normal install no longer uses
+# this legacy recipe, which writes binaries from the agm subdirectory.
+legacy-install: build
+	$(MAKE) -C .. install-agm install-agm-mcp-server
 	@# Clean up old binaries from incorrect locations to prevent confusion
 	@rm -f $(HOME)/bin/agm $(HOME)/.local/bin/agm 2>/dev/null || true
 	@rm -f $(HOME)/bin/csm $(HOME)/.local/bin/csm 2>/dev/null || true  # Remove legacy csm binaries

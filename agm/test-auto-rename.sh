@@ -131,7 +131,7 @@ if [[ "$answer1" == "y" && "$answer2" == "y" && "$answer3" == "y" && \
     echo "Next steps:"
     echo "  1. Clean up: rm agm-test"
     echo "  2. Commit: git add cmd/agm/new.go && git commit -m '...'"
-    echo "  3. Deploy: make -C agm install"
+    echo "  3. Deploy: make install-agm install-agm-mcp-server"
     exit 0
 else
     echo "❌ SOME TESTS FAILED - DO NOT COMMIT!"
