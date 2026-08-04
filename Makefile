@@ -106,7 +106,8 @@ override _GOVERNED_BUILD_TARGETS := \
 	build-agm \
 	build-agm-mcp-server \
 	build-engram-mcp \
-	build-session-skill-extractor
+	build-session-skill-extractor \
+	test-affected
 #
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
@@ -385,7 +386,7 @@ build-stamp-test-probe:
 # .github/workflows / the selector itself fall back to a full run, so
 # this target is safe to default to locally before pushing.
 test-affected:
-	@tmp_bin=$$(mktemp); trap 'rm -f "$$tmp_bin"' EXIT; go build -o "$$tmp_bin" ./cmd/test-affected; "$$tmp_bin" --base=origin/main --tags=integration --run
+	@tmp_bin=$$(mktemp); trap 'rm -f "$$tmp_bin"' EXIT; go build $(BUILD_STAMP_FLAGS) -o "$$tmp_bin" ./cmd/test-affected; "$$tmp_bin" --base=origin/main --tags=integration --run
 
 # Print the affected package list without running anything. Useful for
 # debugging "why did CI run/skip this suite?"
