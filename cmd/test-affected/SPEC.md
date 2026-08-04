@@ -24,7 +24,7 @@ prints or runs the affected test-bearing packages.
 
 **TEST-AFFECTED-07** When `--all` is provided, the system shall include affected non-test-bearing packages in output.
 
-**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages, pass every test binary a native timeout that matches required CI and local preflight, allow the test command at least one additional native-timeout interval for aggregate build and scheduling work, bound package discovery separately, configure the affected-integration CI job at least one native-timeout interval beyond the sum of the discovery and test-command bounds as the ultimate backstop, and when the test command's own bound expires cancel its complete process group and report exit code 124.
+**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages, pass every test binary a native timeout that matches required CI and local preflight, allow the test command at least one additional native-timeout interval for aggregate build and scheduling work, keep package discovery separately bounded by a timeout, configure the affected-integration CI job at least one native-timeout interval beyond the sum of the discovery and test-command bounds as the ultimate backstop, and when the test command's own bound expires cancel its complete process group and report exit code 124.
 
 ## BDD Traceability
 
