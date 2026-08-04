@@ -345,6 +345,7 @@ func TestReadBaselineValidation(t *testing.T) {
 		{name: "unknown scan", data: baselineJSONWithExtraScan(t)},
 		{name: "nil list", data: baselineJSONWithNilScan(t)},
 		{name: "duplicate key", data: baselineJSONWithDuplicate(t)},
+		{name: "duplicate file-size path", data: baselineJSONWithDuplicateFileSizePath(t)},
 		{name: "unknown field", data: baselineJSONWithUnknownField(t)},
 	}
 
@@ -820,11 +821,11 @@ func TestUpdateBaselineFileEmptyBootstrapNeedsNoAdmission(t *testing.T) {
 		t.Fatalf("read empty bootstrap: %v", err)
 	}
 }
-
 func TestUpdateBaselineFileTightensFileSizeBudgetWithoutAdmission(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "baseline.json")
 	prior := validV2Baseline(keySet(map[string][]string{
-		"file-size": {"pkg/big.go (1300 lines)"},
+		"dead-package": {"pkg/old"},
+		"file-size":    {"pkg/big.go (1300 lines)"},
 	}))
 	if err := os.WriteFile(path, mustMarshalBaseline(t, prior), 0o644); err != nil {
 		t.Fatal(err)
@@ -836,7 +837,7 @@ func TestUpdateBaselineFileTightensFileSizeBudgetWithoutAdmission(t *testing.T) 
 	if err != nil {
 		t.Fatalf("tighten file-size budget: %v", err)
 	}
-	if !plan.Write || plan.Change.addedCount() != 1 || plan.Change.removedCount() != 1 {
+	if !plan.Write || plan.Change.addedCount() != 1 || plan.Change.removedCount() != 2 {
 		t.Fatalf("tightening plan = %+v, want one replacement", plan)
 	}
 	if plan.Change.admissionAddedCount() != 0 {
@@ -967,6 +968,14 @@ func baselineJSONWithDuplicate(t *testing.T) string {
 	bl := baseline{Version: baselineSchemaV1, Findings: keySet(map[string][]string{
 		"zero-test": {"pkg/a", "pkg/a"},
 	})}
+	return string(mustMarshalBaseline(t, bl))
+}
+
+func baselineJSONWithDuplicateFileSizePath(t *testing.T) string {
+	t.Helper()
+	bl := validV2Baseline(keySet(map[string][]string{
+		"file-size": {"pkg/big.go (1200 lines)", "pkg/big.go (1300 lines)"},
+	}))
 	return string(mustMarshalBaseline(t, bl))
 }
 

@@ -81,7 +81,7 @@ func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
 	}
 }
 
-func TestBootstrapCommandCarriesScannerAdmissionForEmptyScan(t *testing.T) {
+func TestBootstrapCommandOmitsAdmissionForEmptyScan(t *testing.T) {
 	got := bootstrapCommand("repo", "empty.json", false)
 	for _, unwanted := range []string{"--accept-new", "--accept-scanner-change", "--reason", "--reference", "\n+"} {
 		if strings.Contains(got, unwanted) {

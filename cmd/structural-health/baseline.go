@@ -411,6 +411,7 @@ func validateTransitionProvenance(transition baselineTransition) error {
 	if requiresAuthorization && keyMapCount(transition.Added) == 0 &&
 		transition.PreviousScannerVersion == legacyKeyVersion &&
 		transition.PreviousBaselineSHA256 == fmt.Sprintf("%x", sha256.Sum256(nil)) &&
+		keyMapCount(transition.Removed) == 0 &&
 		reason == "" && reference == "" {
 		return nil
 	}
@@ -431,8 +432,7 @@ func validateTransitionProvenance(transition baselineTransition) error {
 
 func isFileSizeBudgetTightening(transition baselineTransition) bool {
 	for _, scan := range scanNames {
-		if scan != "file-size" &&
-			(len(transition.Added[scan]) > 0 || len(transition.Removed[scan]) > 0) {
+		if scan != "file-size" && len(transition.Added[scan]) > 0 {
 			return false
 		}
 	}
@@ -502,6 +502,18 @@ func validateKeyMap(label string, keysByScan map[string][]string) error {
 			}
 			if i > 0 && keys[i-1] >= key {
 				return fmt.Errorf("%s scan %q keys must be sorted and unique", label, scan)
+			}
+		}
+		if scan == "file-size" {
+			paths := make(map[string]bool)
+			for _, key := range keys {
+				path, _, ok := parseFileSizeKey(key)
+				if ok && paths[path] {
+					return fmt.Errorf("%s scan %q contains duplicate file-size path %q", label, scan, path)
+				}
+				if ok {
+					paths[path] = true
+				}
 			}
 		}
 	}

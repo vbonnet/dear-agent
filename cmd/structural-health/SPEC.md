@@ -23,9 +23,9 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-03** When baseline update mode is requested without expansion authorization and no current finding key is absent from the prior baseline, the system shall write current finding keys already present in the prior baseline, or replace a file-size key with a same-path key whose line-count budget is no larger, and shall exit successfully.
 
-**STRUCT-HEALTH-04** When a current finding key is absent from the baseline, the system shall classify it as a regression.
+**STRUCT-HEALTH-04** When a current non-file-size finding key is absent from the baseline, the system shall classify it as a regression; file-size findings shall compare the current line-count budget with the admitted budget for the same path.
 
-**STRUCT-HEALTH-05** When a baseline finding key is absent from current findings, the system shall classify it as fixed.
+**STRUCT-HEALTH-05** When a non-file-size baseline finding key is absent from current findings, the system shall classify it as fixed; file-size findings shall report a path as fixed only when no current budget exists for that path.
 
 **STRUCT-HEALTH-06** When JSON output is requested, the system shall emit a machine-readable report.
 
