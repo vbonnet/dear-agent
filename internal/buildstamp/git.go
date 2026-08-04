@@ -33,8 +33,7 @@ func defaultGitCommit(dir string, output gitOutput) string {
 }
 
 func isWorktreeDirty(status string) bool {
-	lines := strings.Split(status, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(status, "\n") {
 		line = strings.TrimSpace(line)
 		if len(line) == 0 {
 			continue
