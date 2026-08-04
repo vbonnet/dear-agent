@@ -16,6 +16,8 @@ The system shall not <prohibited behavior>.
 
 Name a more precise system actor only when the repository linter accepts it and
 the actor is the stable contract owner. Avoid pronouns whose referent can drift.
+Keep the stable ID and complete EARS sentence on one physical line because the
+repository lint, BDD, and audit tools extract requirements line by line.
 
 ## Requirement quality
 
@@ -33,8 +35,7 @@ they form one atomic observation or one invariant record.
 For example, an archival success gate can be one atomic requirement:
 
 ```text
-When an active session is archived, the system shall stop its runtime and
-persist its durable archived state before reporting successful archival.
+When an active session is archived, the system shall stop its runtime and persist its durable archived state before reporting successful archival.
 ```
 
 The ordering and success gate are one observable promise. By contrast, a
