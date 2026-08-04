@@ -203,7 +203,12 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	// which holds the only other reset) is never reached again, so a human's
 	// fresh push or a completely different failure can never be retried. We
 	// reset before Classify so the new attempt budget feeds the decision.
-	d.Tracker.ResetAttemptsIfSigChanged(pr.Number, failureSignature(pr))
+	// A projection error is absence of evidence, not evidence that the
+	// previously failing check set changed. Preserve the existing attempt
+	// budget until a complete projection can establish a new signature.
+	if pr.CheckProjectionError == "" {
+		d.Tracker.ResetAttemptsIfSigChanged(pr.Number, failureSignature(pr))
+	}
 
 	cls := d.Policy.Classify(pr, rec.AgentAttempts, agentActive)
 
