@@ -310,11 +310,20 @@ func agmRunsEffectiveRequiredCheckRegressions(ctx context.Context) error {
 		`^Test(ParseAppliedRulesRequiredChecks|ParseAppliedRulesRequiredChecksKnownEmpty|ParseAppliedRulesRequiredChecksFlagsRequiredWorkflows|ParseClassicRequiredChecksPreservesIntegrationScope|MergeRequiredCheckPoliciesUnionsLayeredSources|DiscoverRequiredChecksAcceptsAuthoritativeEmpty|DiscoverRequiredChecksRejectsPartialPolicyOnSourceError|DiscoverRequiredChecksUsesPaginatedSlurp|RulesBranchEndpointEscapesSlashBase|ProviderRequiredClassificationIgnoresAdvisoryFailure|ProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing|ProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity|ProviderRequiredClassificationRejectsDiscoveryDisagreement|ProjectRequiredChecksReconcilesEffectivePolicy|ProjectRequiredChecksSynthesizesMissingContext|ProjectRequiredChecksAcceptsStatusExits|ProjectRequiredChecksAcceptsAuthoritativeEmptyProviderError|ProjectRequiredChecksPreservesAuthoritativeEmptyFallback|ProjectRequiredChecksRejectsNoChecksWhenPolicyNonempty|CheckAllCIAcceptsNoChecksWhenPolicyEmpty|CheckAllCIValidatesAllWhenPolicyEmpty|CheckAllCIIgnoresNonzeroAdvisoryCheckStatus)$`,
 		"./internal/safegit",
 	)
-	state.mergeLoopCIRegression, state.mergeLoopCIError = runLocalGuardrailGoTest(ctx,
-		`^Test(MergeLoopUsesSharedRequiredProjection|MergeLoopPreservesAuthoritativeEmptyFallback|MergeLoopMapsProjectedRequiredStatuses|MergeLoopDefersOnlyUnavailableProjection|MergeLoopDefersOnlyUnknownProjectedStatus|MergeLoopAbortsWhenParentContextCanceled|MergeLoopSkipsProjectionWhenOpenPRsExceedCap|ProjectionErrorPreservesAttemptBudget)$`,
-		"./cmd/mergeloop",
-		"./internal/mergeloop",
+	cmdOutput, cmdErr := runLocalGuardrailNamedGoTests(ctx, "./cmd/mergeloop",
+		"TestMergeLoopUsesSharedRequiredProjection",
+		"TestMergeLoopPreservesAuthoritativeEmptyFallback",
+		"TestMergeLoopMapsProjectedRequiredStatuses",
+		"TestMergeLoopDefersOnlyUnavailableProjection",
+		"TestMergeLoopDefersOnlyUnknownProjectedStatus",
+		"TestMergeLoopAbortsWhenParentContextCanceled",
+		"TestMergeLoopSkipsProjectionWhenOpenPRsExceedCap",
 	)
+	internalOutput, internalErr := runLocalGuardrailNamedGoTests(ctx, "./internal/mergeloop",
+		"TestProjectionErrorPreservesAttemptBudget",
+	)
+	state.mergeLoopCIRegression = strings.Join([]string{cmdOutput, internalOutput}, "\n")
+	state.mergeLoopCIError = errors.Join(cmdErr, internalErr)
 	return nil
 }
 
@@ -334,6 +343,39 @@ func safeMergeShouldEnforceProviderRequiredCI(ctx context.Context) error {
 
 func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
 	return runLocalGuardrailGoTestWith(parent, nil, pattern, packages...)
+}
+
+func runLocalGuardrailNamedGoTests(parent context.Context, packagePath string, testNames ...string) (string, error) {
+	patterns := make([]string, 0, len(testNames))
+	for _, testName := range testNames {
+		patterns = append(patterns, regexp.QuoteMeta(testName))
+	}
+	pattern := "^(" + strings.Join(patterns, "|") + ")$"
+	output, err := runLocalGuardrailGoTest(parent, pattern, packagePath)
+	if err != nil {
+		return output, err
+	}
+	if missing := missingNamedGoTestRuns(output, testNames...); len(missing) > 0 {
+		return output, fmt.Errorf("go test package %q did not run named regressions: %s", packagePath, strings.Join(missing, ", "))
+	}
+	return output, nil
+}
+
+func missingNamedGoTestRuns(output string, testNames ...string) []string {
+	ran := make(map[string]struct{}, len(testNames))
+	for _, line := range strings.Split(output, "\n") {
+		if testName, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), "=== RUN   "); ok {
+			ran[testName] = struct{}{}
+		}
+	}
+
+	missing := make([]string, 0, len(testNames))
+	for _, testName := range testNames {
+		if _, ok := ran[testName]; !ok {
+			missing = append(missing, testName)
+		}
+	}
+	return missing
 }
 
 // runLocalGuardrailGoTestWith is runLocalGuardrailGoTest with extra `go test`
