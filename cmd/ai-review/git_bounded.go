@@ -202,11 +202,11 @@ func gitTextBlobsBounded(parent context.Context, requests []gitBlobRequest, perB
 		if len(fields) != 3 || fields[0] != request.ObjectID || fields[1] != "blob" {
 			return nil, fail(fmt.Errorf("git cat-file returned unauthenticated metadata for %s", request.Path))
 		}
-		size, err := strconv.ParseInt(fields[2], 10, 64)
-		if err != nil || size < 0 || size > int64(perBlobLimit) || int64(total)+size > int64(totalLimit) {
+		size, err := strconv.Atoi(fields[2])
+		if err != nil || size < 0 || size > perBlobLimit || size > totalLimit-total {
 			return nil, fail(fmt.Errorf("git blob exceeds the review limit (%s)", request.Path))
 		}
-		blob := make([]byte, int(size))
+		blob := make([]byte, size)
 		if _, err := io.ReadFull(reader, blob); err != nil {
 			return nil, fail(fmt.Errorf("read git blob %s: %w", request.Path, err))
 		}
