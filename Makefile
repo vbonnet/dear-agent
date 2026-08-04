@@ -9,23 +9,104 @@
 -include env/go-baseline.env
 export GOMEMLIMIT GOMAXPROCS GOGC
 
-# Version stamping (ce-wy1q). Injected into every binary via -ldflags so that
-# `<binary> --version` reports the actual build provenance.
+# Version stamping (ce-wy1q). Injected into every root-Makefile binary build via
+# -ldflags so that version-aware binaries report the actual build provenance.
 # Override on the CLI: make build-safe-pr VERSION=1.2.3
 VERSION    ?= dev
-GIT_COMMIT ?= $(shell commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); if [ "$$commit" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then printf '%s-dirty' "$$commit"; else printf '%s' "$$commit"; fi)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-PKG_VERSION := github.com/vbonnet/dear-agent/pkg/version
-VERSION_LDFLAGS := \
-	-X '$(PKG_VERSION).Version=$(VERSION)' \
-	-X '$(PKG_VERSION).GitCommit=$(GIT_COMMIT)' \
-	-X '$(PKG_VERSION).BuildDate=$(BUILD_DATE)' \
-	-X '$(PKG_VERSION).BuiltBy=makefile'
+# GOFLAGS is caller-owned. Governed builds leave ordinary flags to the Go
+# command's environment inheritance and reject only competing linker flags.
+# Optional unpatterned linker customization has one explicit ingress; protected
+# provenance assignments are appended last so callers cannot replace them.
+EXTRA_GO_LDFLAGS ?=
 
-# GOFLAGS is passed to every `go build $(GOFLAGS)` call in this Makefile.
-# Setting it here injects version info into all binaries at once.
-GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
+override _BUILD_STAMP_PACKAGE := github.com/vbonnet/dear-agent/pkg/version
+override _BUILD_STAMP_EXTRA_LDFLAGS := $(value EXTRA_GO_LDFLAGS)
+override _BUILD_STAMP_VERSION := $(if $(filter file,$(origin VERSION)),$(VERSION),$(value VERSION))
+override _BUILD_STAMP_GIT_COMMIT = $(if $(strip $(value GIT_COMMIT)),$(value GIT_COMMIT),$(or $(shell GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp git-commit 2>/dev/null),unknown))
+override _BUILD_STAMP_DATE := $(if $(filter file,$(origin BUILD_DATE)),$(BUILD_DATE),$(value BUILD_DATE))
+override _BUILD_STAMP_TEST_OUTPUT := $(value BUILD_STAMP_TEST_OUTPUT)
+override _BUILD_STAMP_RAW_GOFLAGS := $(value GOFLAGS)
+override _BUILD_STAMP_RAW_GOENV := $(value GOENV)
+unexport EXTRA_GO_LDFLAGS VERSION GIT_COMMIT BUILD_DATE BUILD_STAMP_TEST_OUTPUT
+override GOFLAGS := $(_BUILD_STAMP_RAW_GOFLAGS)
+export GOFLAGS _BUILD_STAMP_RAW_GOFLAGS _BUILD_STAMP_RAW_GOENV _BUILD_STAMP_EXTRA_LDFLAGS _BUILD_STAMP_VERSION _BUILD_STAMP_GIT_COMMIT _BUILD_STAMP_DATE _BUILD_STAMP_TEST_OUTPUT
+
+# Protected stamp metadata must remain one Go linker token. Name each parser
+# delimiter explicitly so the Make-side rejection below cannot be overridden.
+override define _BUILD_STAMP_NEWLINE
+
+
+endef
+override _BUILD_STAMP_EMPTY :=
+override _BUILD_STAMP_SPACE := $(_BUILD_STAMP_EMPTY) $(_BUILD_STAMP_EMPTY)
+override _BUILD_STAMP_TAB := $(shell printf '\t')
+override _BUILD_STAMP_CR := $(shell printf '\r')
+override _BUILD_STAMP_SQUOTE := '
+override _BUILD_STAMP_DQUOTE := "
+override _NORMALIZED_EXTRA_GO_LDFLAGS = $(strip $(_BUILD_STAMP_EXTRA_LDFLAGS))
+override _INVALID_EXTRA_GO_LDFLAGS = $(if $(_NORMALIZED_EXTRA_GO_LDFLAGS),$(if $(filter -%,$(firstword $(_NORMALIZED_EXTRA_GO_LDFLAGS))),,yes),)
+override _NORMALIZED_STAMP_VERSION = $(subst $(_BUILD_STAMP_DQUOTE), ,$(subst $(_BUILD_STAMP_SQUOTE), ,$(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst $(_BUILD_STAMP_TAB), ,$(_BUILD_STAMP_VERSION))))))
+override _NORMALIZED_STAMP_GIT_COMMIT = $(subst $(_BUILD_STAMP_DQUOTE), ,$(subst $(_BUILD_STAMP_SQUOTE), ,$(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst $(_BUILD_STAMP_TAB), ,$(_BUILD_STAMP_GIT_COMMIT))))))
+override _NORMALIZED_STAMP_DATE = $(subst $(_BUILD_STAMP_DQUOTE), ,$(subst $(_BUILD_STAMP_SQUOTE), ,$(subst $(_BUILD_STAMP_CR), ,$(subst $(_BUILD_STAMP_NEWLINE), ,$(subst $(_BUILD_STAMP_TAB), ,$(_BUILD_STAMP_DATE))))))
+override _UNSAFE_STAMP_FIELDS = $(if $(findstring $(_BUILD_STAMP_SPACE),$(_NORMALIZED_STAMP_VERSION)),VERSION) $(if $(findstring $(_BUILD_STAMP_SPACE),$(_NORMALIZED_STAMP_GIT_COMMIT)),GIT_COMMIT) $(if $(findstring $(_BUILD_STAMP_SPACE),$(_NORMALIZED_STAMP_DATE)),BUILD_DATE)
+override _MANDATORY_VERSION_LDFLAGS = \
+	$(if $(strip $(_UNSAFE_STAMP_FIELDS)),$(error build stamp metadata $(strip $(_UNSAFE_STAMP_FIELDS)) must not contain space tab newline carriage return or quote),) \
+	-X $(_BUILD_STAMP_PACKAGE).Version=$${_BUILD_STAMP_VERSION} \
+	-X $(_BUILD_STAMP_PACKAGE).GitCommit=$${_BUILD_STAMP_GIT_COMMIT} \
+	-X $(_BUILD_STAMP_PACKAGE).BuildDate=$${_BUILD_STAMP_DATE} \
+	-X $(_BUILD_STAMP_PACKAGE).BuiltBy=makefile
+override _BUILD_STAMP_LDFLAGS = $${_BUILD_STAMP_EXTRA_LDFLAGS} $(_MANDATORY_VERSION_LDFLAGS)
+override BUILD_STAMP_FLAGS = $(if $(_INVALID_EXTRA_GO_LDFLAGS),$(error EXTRA_GO_LDFLAGS must be an unpatterned linker arg list beginning with '-'; Go package-pattern forms are unsupported),)-ldflags "$(_BUILD_STAMP_LDFLAGS)"
+
+# Every target that owns a literal root-Makefile `go build -o` recipe is
+# admitted through the Go-compatible GOFLAGS guard. tests/buildstamp compares
+# this registry with the recipes so a new governed build cannot bypass it.
+override _GOVERNED_BUILD_TARGETS := \
+	health-check \
+	build-routing-guard \
+	build-stamp-test-probe \
+	build-configure-settings \
+	build-safe-push \
+	build-safe-merge \
+	build-safe-rebase \
+	build-token-refresher \
+	build-safe-pr \
+	build-src-recovery \
+	build-safe-unlock \
+	build-jaeger-health \
+	build-otel-local \
+	build-bead-pr-sync \
+	build-bead-pr-guard \
+	build-codex-hook-json \
+	build-bead-close-guard \
+	build-drift-check \
+	build-babysit-prs \
+	build-mergeloop \
+	build-resolve-review-threads \
+	build-merge-audit \
+	build-dear-deploy \
+	build-write-guards \
+	build-bumblebee \
+	build-pr-linkify \
+	build-fd-pressure \
+	build-gopls-watchdog \
+	build-disk-watchdog \
+	build-override-ledger-helper \
+	build-override-audit-launchdaemon-installer \
+	build-override-audit-systemd-installer \
+	build-vroom-dispatch \
+	build-vroom-mesh \
+	build-vroom-prompt-gen \
+	build-agm-job \
+	build-src-health \
+	build-burndown-maint \
+	build-vroom-governor \
+	build-agm \
+	build-agm-mcp-server \
+	build-engram-mcp \
+	build-session-skill-extractor
 #
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
@@ -132,6 +213,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: lint-adrs
 .PHONY: lint-headers
 .PHONY: build-override-ledger-helper install-override-ledger-helper install-override-ledger-helper-locked
+.PHONY: build-stamp-test-probe
 
 include mk/install-go-bin.mk
 
@@ -211,7 +293,7 @@ preflight-full:
 # The scheduled .github/workflows/health-check.yml runs the same binary.
 health-check:
 	@mkdir -p build
-	@GOWORK=off go build -o build/repo-health ./cmd/repo-health
+	@GOWORK=off go build $(BUILD_STAMP_FLAGS) -o build/repo-health ./cmd/repo-health
 	@./build/repo-health --root . $(ARGS)
 
 # NOTE: there is intentionally no `install-preflight-hook` target. On this host
@@ -232,7 +314,7 @@ install-post-merge-hook:
 # Build the routing-guard binary into ./build (used by the pre-commit hook and
 # for local `routing-guard --all` audits).
 build-routing-guard:
-	@mkdir -p build && go build -o build/routing-guard ./cmd/routing-guard && \
+	@mkdir -p build && go build $(BUILD_STAMP_FLAGS) -o build/routing-guard ./cmd/routing-guard && \
 		echo "Built: build/routing-guard"
 
 # Install the routing-guard pre-commit hook. It blocks temporal artifacts
@@ -289,6 +371,12 @@ act-test:
 test:
 	go test -race -count=1 ./...
 
+# Test-only executable seam for proving the runtime values injected by the
+# governed Make build path. Callers must choose an output outside the repo.
+build-stamp-test-probe:
+	@test -n "$${_BUILD_STAMP_TEST_OUTPUT}" || { echo "BUILD_STAMP_TEST_OUTPUT is required" >&2; exit 2; }
+	go build $(BUILD_STAMP_FLAGS) -o "$${_BUILD_STAMP_TEST_OUTPUT}" ./tests/buildstamp/testdata/probe/
+
 # Run only the integration tests whose packages (or their transitive
 # dependencies) changed vs. origin/main. See cmd/test-affected and
 # docs/adr/ADR-024 for the algorithm and trust boundaries.
@@ -339,7 +427,7 @@ install-hooks:
 # Build configure-claude-settings tool
 build-configure-settings:
 	@echo "Building configure-claude-settings..."
-	go build $(GOFLAGS) -o bin/configure-claude-settings ./cmd/configure-claude-settings/
+	go build $(BUILD_STAMP_FLAGS) -o bin/configure-claude-settings ./cmd/configure-claude-settings/
 	@echo "Built: bin/configure-claude-settings"
 
 # Install configure-claude-settings to GOPATH/bin
@@ -352,7 +440,7 @@ install-configure-settings: build-configure-settings
 # retrospectives/2026-06-08-git-push-credential-hang.md.
 build-safe-push:
 	@echo "Building safe-push..."
-	go build $(GOFLAGS) -o bin/safe-push ./cmd/safe-push/
+	go build $(BUILD_STAMP_FLAGS) -o bin/safe-push ./cmd/safe-push/
 	@echo "Built: bin/safe-push"
 
 # Install safe-push to GOPATH/bin so it is on PATH for every agent session.
@@ -365,7 +453,7 @@ install-safe-push: build-safe-push
 # PreToolUse hook pointing at this binary (see docs/design/safe-merge.md).
 build-safe-merge:
 	@echo "Building safe-merge..."
-	go build $(GOFLAGS) -o bin/safe-merge ./cmd/safe-merge/
+	go build $(BUILD_STAMP_FLAGS) -o bin/safe-merge ./cmd/safe-merge/
 	@echo "Built: bin/safe-merge"
 
 # Install safe-merge to GOPATH/bin so it is on PATH for every agent session.
@@ -377,7 +465,7 @@ install-safe-merge: build-safe-merge
 # + runs preflight in --auto mode.
 build-safe-rebase:
 	@echo "Building safe-rebase..."
-	go build $(GOFLAGS) -o bin/safe-rebase ./cmd/safe-rebase/
+	go build $(BUILD_STAMP_FLAGS) -o bin/safe-rebase ./cmd/safe-rebase/
 	@echo "Built: bin/safe-rebase"
 
 # Install safe-rebase to GOPATH/bin.
@@ -389,7 +477,7 @@ install-safe-rebase: build-safe-rebase
 # expired access tokens stop killing the mesh (ce-rnpt / ce-f3e3).
 build-token-refresher:
 	@echo "Building token-refresher..."
-	go build $(GOFLAGS) -o bin/token-refresher ./cmd/token-refresher/
+	go build $(BUILD_STAMP_FLAGS) -o bin/token-refresher ./cmd/token-refresher/
 	@echo "Built: bin/token-refresher"
 
 # Install token-refresher to GOPATH/bin.
@@ -441,7 +529,7 @@ uninstall-token-refresher-launchagent:
 # Build safe-pr: wayfinder-traced wrapper for gh pr create/close.
 build-safe-pr:
 	@echo "Building safe-pr..."
-	go build $(GOFLAGS) -o bin/safe-pr ./cmd/safe-pr/
+	go build $(BUILD_STAMP_FLAGS) -o bin/safe-pr ./cmd/safe-pr/
 	@echo "Built: bin/safe-pr"
 
 # Install safe-pr to GOPATH/bin.
@@ -455,7 +543,7 @@ install-safe-pr: build-safe-pr
 # vbonnet/engram-research retrospectives/2026-06-11-src-violations-and-burndown.md.
 build-src-recovery:
 	@echo "Building src-recovery..."
-	go build $(GOFLAGS) -o bin/src-recovery ./cmd/src-recovery/
+	go build $(BUILD_STAMP_FLAGS) -o bin/src-recovery ./cmd/src-recovery/
 	@echo "Built: bin/src-recovery"
 
 # Install src-recovery to GOPATH/bin so it is on PATH for every agent session.
@@ -473,7 +561,7 @@ install-src-recovery: build-src-recovery
 # internal/safeunlock.
 build-safe-unlock:
 	@echo "Building safe-unlock..."
-	go build $(GOFLAGS) -o bin/safe-unlock ./cmd/safe-unlock/
+	go build $(BUILD_STAMP_FLAGS) -o bin/safe-unlock ./cmd/safe-unlock/
 	@echo "Built: bin/safe-unlock"
 
 # Install safe-unlock to GOPATH/bin so it is on PATH for every agent session.
@@ -490,7 +578,7 @@ install-safe-unlock: build-safe-unlock
 build-jaeger-health:
 	@echo "Building jaeger-health..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/jaeger-health ./cmd/jaeger-health/
+	go build $(BUILD_STAMP_FLAGS) -o bin/jaeger-health ./cmd/jaeger-health/
 	@echo "Built: bin/jaeger-health"
 
 install-jaeger-health: build-jaeger-health
@@ -503,7 +591,7 @@ install-jaeger-health: build-jaeger-health
 build-otel-local:
 	@echo "Building otel-local..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/otel-local ./cmd/otel-local/
+	go build $(BUILD_STAMP_FLAGS) -o bin/otel-local ./cmd/otel-local/
 	@echo "Built: bin/otel-local"
 
 install-otel-local: build-otel-local
@@ -520,7 +608,7 @@ otel-up: install-otel-local
 # reopens them to in_progress. See cmd/bead-pr-sync and ce-vqju.
 build-bead-pr-sync:
 	@echo "Building bead-pr-sync..."
-	go build $(GOFLAGS) -o bin/bead-pr-sync ./cmd/bead-pr-sync/
+	go build $(BUILD_STAMP_FLAGS) -o bin/bead-pr-sync ./cmd/bead-pr-sync/
 	@echo "Built: bin/bead-pr-sync"
 
 install-bead-pr-sync: build-bead-pr-sync
@@ -549,7 +637,7 @@ uninstall-bead-pr-sync-launchagent:
 build-bead-pr-guard:
 	@echo "Building bead-pr-guard..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/bead-pr-guard ./cmd/bead-pr-guard/
+	go build $(BUILD_STAMP_FLAGS) -o bin/bead-pr-guard ./cmd/bead-pr-guard/
 	@echo "Built: bin/bead-pr-guard"
 
 install-bead-pr-guard: build-bead-pr-guard
@@ -561,7 +649,7 @@ install-bead-pr-guard: build-bead-pr-guard
 build-codex-hook-json:
 	@echo "Building codex-hook-json..."
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/codex-hook-json ./cmd/codex-hook-json/
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/codex-hook-json ./cmd/codex-hook-json/
 	@echo "Built: bin/codex-hook-json"
 
 install-codex-hook-json: build-codex-hook-json
@@ -603,7 +691,7 @@ install-codex-hook-json: build-codex-hook-json
 build-bead-close-guard:
 	@echo "Building bead-close-guard..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/bead-close-guard ./cmd/bead-close-guard/
+	go build $(BUILD_STAMP_FLAGS) -o bin/bead-close-guard ./cmd/bead-close-guard/
 	@echo "Built: bin/bead-close-guard"
 
 install-bead-close-guard: build-bead-close-guard
@@ -647,7 +735,7 @@ install-bead-close-guard: build-bead-close-guard
 build-drift-check:
 	@echo "Building drift-check..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/drift-check ./cmd/drift-check/
+	go build $(BUILD_STAMP_FLAGS) -o bin/drift-check ./cmd/drift-check/
 	@echo "Built: bin/drift-check"
 
 install-drift-check: build-drift-check
@@ -679,7 +767,7 @@ drift-check: deploy-status
 build-babysit-prs:
 	@echo "Building babysit-prs..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/babysit-prs ./cmd/babysit-prs/
+	go build $(BUILD_STAMP_FLAGS) -o bin/babysit-prs ./cmd/babysit-prs/
 	@echo "Built: bin/babysit-prs"
 
 install-babysit-prs: build-babysit-prs
@@ -693,7 +781,7 @@ install-babysit-prs: build-babysit-prs
 build-mergeloop:
 	@echo "Building mergeloop..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/mergeloop ./cmd/mergeloop/
+	go build $(BUILD_STAMP_FLAGS) -o bin/mergeloop ./cmd/mergeloop/
 	@echo "Built: bin/mergeloop"
 
 install-mergeloop: build-mergeloop
@@ -725,7 +813,7 @@ uninstall-mergeloop-launchagent:
 # Usage: resolve-review-threads resolve-all <owner> <repo> <pr> [author]
 build-resolve-review-threads:
 	@echo "Building resolve-review-threads..."
-	go build $(GOFLAGS) -o bin/resolve-review-threads ./cmd/resolve-review-threads/
+	go build $(BUILD_STAMP_FLAGS) -o bin/resolve-review-threads ./cmd/resolve-review-threads/
 	@echo "Built: bin/resolve-review-threads"
 
 install-resolve-review-threads: build-resolve-review-threads
@@ -736,7 +824,7 @@ install-resolve-review-threads: build-resolve-review-threads
 # break-glass overrides, and ruleset drift. Files a P1 bead per violation.
 build-merge-audit:
 	@echo "Building merge-audit..."
-	go build $(GOFLAGS) -o bin/merge-audit ./cmd/merge-audit/
+	go build $(BUILD_STAMP_FLAGS) -o bin/merge-audit ./cmd/merge-audit/
 	@echo "Built: bin/merge-audit"
 
 install-merge-audit: build-merge-audit
@@ -749,7 +837,7 @@ install-merge-audit: build-merge-audit
 build-dear-deploy:
 	@echo "Building dear-deploy..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/dear-deploy ./cmd/dear-deploy/
+	go build $(BUILD_STAMP_FLAGS) -o bin/dear-deploy ./cmd/dear-deploy/
 	@echo "Built: bin/dear-deploy"
 
 install-dear-deploy: build-dear-deploy
@@ -786,8 +874,8 @@ uninstall-fd-limit-launchdaemon:
 # the Go replacements for the lost ai-tools Python stopgaps.
 build-write-guards:
 	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard..."
-	go build $(GOFLAGS) -o bin/pretool-fs-write-guard ./cmd/pretool-fs-write-guard/
-	go build $(GOFLAGS) -o bin/pretool-bash-write-guard ./cmd/pretool-bash-write-guard/
+	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-fs-write-guard ./cmd/pretool-fs-write-guard/
+	go build $(BUILD_STAMP_FLAGS) -o bin/pretool-bash-write-guard ./cmd/pretool-bash-write-guard/
 	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard"
 
 # Install the write-guard hooks where settings.json references them
@@ -859,7 +947,7 @@ uninstall-deepsec-hook:
 # PATH is preferable for the scheduled case.
 build-bumblebee:
 	@echo "Building dear-agent-bumblebee..."
-	go build $(GOFLAGS) -o bin/dear-agent-bumblebee ./cmd/dear-agent-bumblebee/
+	go build $(BUILD_STAMP_FLAGS) -o bin/dear-agent-bumblebee ./cmd/dear-agent-bumblebee/
 	@echo "Built: bin/dear-agent-bumblebee"
 
 # Install a pinned, checksum-verified Bumblebee binary into ~/.local/bin
@@ -888,7 +976,7 @@ uninstall-bumblebee-launchagent: build-bumblebee
 
 build-pr-linkify:
 	@echo "Building pr-linkify..."
-	go build $(GOFLAGS) -o bin/pr-linkify ./cmd/pr-linkify/
+	go build $(BUILD_STAMP_FLAGS) -o bin/pr-linkify ./cmd/pr-linkify/
 	@echo "Built: bin/pr-linkify"
 
 install-pr-linkify: build-pr-linkify
@@ -901,7 +989,7 @@ install-pr-linkify: build-pr-linkify
 build-fd-pressure:
 	@echo "Building fd-pressure..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/fd-pressure ./cmd/fd-pressure/
+	go build $(BUILD_STAMP_FLAGS) -o bin/fd-pressure ./cmd/fd-pressure/
 	@echo "Built: bin/fd-pressure"
 
 install-fd-pressure: build-fd-pressure
@@ -910,7 +998,7 @@ install-fd-pressure: build-fd-pressure
 build-gopls-watchdog:
 	@echo "Building gopls-watchdog..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/gopls-watchdog ./cmd/gopls-watchdog/
+	go build $(BUILD_STAMP_FLAGS) -o bin/gopls-watchdog ./cmd/gopls-watchdog/
 	@echo "Built: bin/gopls-watchdog"
 
 install-gopls-watchdog: build-gopls-watchdog
@@ -950,7 +1038,7 @@ uninstall-sandbox-gc-launchagent:
 build-disk-watchdog:
 	@echo "Building disk-watchdog..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/disk-watchdog ./cmd/disk-watchdog/
+	go build $(BUILD_STAMP_FLAGS) -o bin/disk-watchdog ./cmd/disk-watchdog/
 	@echo "Built: bin/disk-watchdog"
 
 install-disk-watchdog: build-disk-watchdog
@@ -977,7 +1065,7 @@ uninstall-disk-watchdog-launchagent:
 # destination.
 build-override-ledger-helper:
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
+	go build $(BUILD_STAMP_FLAGS) -o bin/dear-agent-override-ledger-append ./cmd/override-ledger-append/
 
 install-override-ledger-helper: build-override-ledger-helper build-agm build-agm-mcp-server
 	@set -eu; \
@@ -1109,7 +1197,7 @@ install-override-ledger-helper-locked:
 # Installation is an explicit, freshly authenticated operator action.
 build-override-audit-launchdaemon-installer:
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/dear-agent-override-audit-launchdaemon-installer ./agm/cmd/override-audit-launchdaemon-installer/
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/dear-agent-override-audit-launchdaemon-installer ./agm/cmd/override-audit-launchdaemon-installer/
 
 install-override-audit-launchdaemon: build-agm build-override-audit-launchdaemon-installer
 	@set -eu; \
@@ -1190,7 +1278,7 @@ uninstall-override-audit-launchdaemon:
 # authenticated operator action.
 build-override-audit-systemd-installer:
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/dear-agent-override-audit-systemd-installer ./agm/cmd/override-audit-systemd-installer/
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/dear-agent-override-audit-systemd-installer ./agm/cmd/override-audit-systemd-installer/
 
 install-override-audit-systemd: build-agm build-override-audit-systemd-installer
 	@set -eu; \
@@ -1310,7 +1398,7 @@ uninstall-gobin-guard-launchagent:
 build-vroom-dispatch:
 	@echo "Building vroom-dispatch..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/vroom-dispatch ./cmd/vroom-dispatch/
+	go build $(BUILD_STAMP_FLAGS) -o bin/vroom-dispatch ./cmd/vroom-dispatch/
 	@echo "Built: bin/vroom-dispatch"
 
 install-vroom-dispatch: build-vroom-dispatch
@@ -1323,7 +1411,7 @@ install-vroom-dispatch: build-vroom-dispatch
 build-vroom-mesh:
 	@echo "Building vroom-mesh..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/vroom-mesh ./cmd/vroom-mesh/
+	go build $(BUILD_STAMP_FLAGS) -o bin/vroom-mesh ./cmd/vroom-mesh/
 	@echo "Built: bin/vroom-mesh"
 
 install-vroom-mesh: build-vroom-mesh
@@ -1341,7 +1429,7 @@ build-agm-bus:
 build-vroom-prompt-gen:
 	@echo "Building vroom-prompt-gen..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/vroom-prompt-gen ./cmd/vroom-prompt-gen/
+	go build $(BUILD_STAMP_FLAGS) -o bin/vroom-prompt-gen ./cmd/vroom-prompt-gen/
 	@echo "Built: bin/vroom-prompt-gen"
 
 install-vroom-prompt-gen: build-vroom-prompt-gen
@@ -1354,7 +1442,7 @@ install-vroom-prompt-gen: build-vroom-prompt-gen
 build-agm-job:
 	@echo "Building agm-job..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/agm-job ./cmd/agm-job/
+	go build $(BUILD_STAMP_FLAGS) -o bin/agm-job ./cmd/agm-job/
 	@echo "Built: bin/agm-job"
 
 install-agm-job: build-agm-job
@@ -1366,7 +1454,7 @@ install-agm-job: build-agm-job
 build-src-health:
 	@echo "Building src-health..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/src-health ./cmd/src-health/
+	go build $(BUILD_STAMP_FLAGS) -o bin/src-health ./cmd/src-health/
 	@echo "Built: bin/src-health"
 
 install-src-health: build-src-health
@@ -1378,7 +1466,7 @@ install-src-health: build-src-health
 build-burndown-maint:
 	@echo "Building burndown-maint..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/burndown-maint ./cmd/burndown-maint/
+	go build $(BUILD_STAMP_FLAGS) -o bin/burndown-maint ./cmd/burndown-maint/
 	@echo "Built: bin/burndown-maint"
 
 install-burndown-maint: build-burndown-maint
@@ -1390,7 +1478,7 @@ install-burndown-maint: build-burndown-maint
 build-vroom-governor:
 	@echo "Building vroom-governor..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/vroom-governor ./cmd/vroom-governor/
+	go build $(BUILD_STAMP_FLAGS) -o bin/vroom-governor ./cmd/vroom-governor/
 	@echo "Built: bin/vroom-governor"
 
 install-vroom-governor: build-vroom-governor
@@ -1402,18 +1490,21 @@ install-vroom-governor: build-vroom-governor
 build-agm:
 	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm ./agm/cmd/agm/
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
 
 install-agm: build-agm
 	$(call install-go-bin,bin/agm)
 	$(call install-go-bin,bin/agm-reaper)
+	@mkdir -p $(HOME)/.claude/hooks/session-start
+	@install -m 755 agm/docs/hooks/session-start-agm.sh $(HOME)/.claude/hooks/session-start/agm-ready-signal
+	@$(HOME)/go/bin/agm admin install-hooks
 
 build-agm-mcp-server:
 	@echo "Building agm-mcp-server..."
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/agm-mcp-server ./agm/cmd/agm-mcp-server/
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-mcp-server ./agm/cmd/agm-mcp-server/
 	@echo "Built: bin/agm-mcp-server"
 
 install-agm-mcp-server: build-agm-mcp-server
@@ -1425,7 +1516,7 @@ install-agm-mcp-server: build-agm-mcp-server
 build-engram-mcp:
 	@echo "Building engram-mcp..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/engram-mcp ./engram/cmd/engram-mcp/
+	go build $(BUILD_STAMP_FLAGS) -o bin/engram-mcp ./engram/cmd/engram-mcp/
 	@echo "Built: bin/engram-mcp"
 
 install-engram-mcp: build-engram-mcp
@@ -1438,8 +1529,17 @@ install-engram-mcp: build-engram-mcp
 build-session-skill-extractor:
 	@echo "Building session-skill-extractor..."
 	@mkdir -p bin
-	go build $(GOFLAGS) -o bin/session-skill-extractor ./cmd/session-skill-extractor/
+	go build $(BUILD_STAMP_FLAGS) -o bin/session-skill-extractor ./cmd/session-skill-extractor/
 	@echo "Built: bin/session-skill-extractor"
 
 install-session-skill-extractor: build-session-skill-extractor
 	$(call install-go-bin,bin/session-skill-extractor)
+
+# Classify effective GOFLAGS once per governed dependency graph before any
+# product recipe runs. The bootstrap ignores caller/persisted Go flags,
+# workspace selection, and cross-compilation dimensions; the guard restores
+# captured GOENV only inside its shell-free fallback query.
+.PHONY: build-stamp-goflags-guard
+$(_GOVERNED_BUILD_TARGETS): | build-stamp-goflags-guard
+build-stamp-goflags-guard:
+	@GOFLAGS=-buildvcs=false GOENV=off GOWORK=off GOOS= GOARCH= go run ./internal/buildstamp

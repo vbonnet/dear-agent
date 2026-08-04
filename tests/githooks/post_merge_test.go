@@ -807,27 +807,6 @@ func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
 	}
 }
 
-func TestCanonicalAGMInstallBuildsCompanionPair(t *testing.T) {
-	cmd := exec.Command("make", "-n", "install-agm", "GIT_COMMIT=0123456789ab", "HOME="+t.TempDir())
-	cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(hookPath(t)), "..", ".."))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("make -n install-agm failed: %v\n%s", err, output)
-	}
-	text := string(output)
-	for _, want := range []string{
-		"-o bin/agm ./agm/cmd/agm/",
-		"-o bin/agm-reaper ./agm/cmd/agm-reaper/",
-		"bin/agm'",
-		"bin/agm-reaper'",
-		"GitCommit=0123456789ab",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("canonical install output missing %q:\n%s", want, text)
-		}
-	}
-}
-
 // A change confined to cmd/vroom-dispatch/ rebuilds ONLY vroom-dispatch.
 func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	repo := newRebuildRepo(t)

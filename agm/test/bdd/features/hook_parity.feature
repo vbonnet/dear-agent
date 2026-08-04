@@ -20,6 +20,7 @@
 # RELATED-SPEC: cmd/pretool-bash-write-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-fs-write-guard/SPEC.md
 # RELATED-SPEC: pkg/version/SPEC.md
+# RELATED-SPEC: tests/buildstamp/SPEC.md
 Feature: Hook harness parity
   Active interactive harnesses should receive the same repository guardrails
   through their native hook configuration surfaces.
@@ -103,5 +104,5 @@ Feature: Hook harness parity
     Then a mixed revision or missing startup acknowledgement should fail before async success
 
   Scenario: Canonical AGM installation preserves companion coherence
-    When AGM runs the canonical AGM companion install regression
-    Then the root AGM install target should build and install the companion pair
+    When AGM renders the canonical AGM companion install plan
+    Then the root AGM install plan should build and install the companion pair

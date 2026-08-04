@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -49,8 +50,8 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the repository post-merge hook should include lifecycle safeguard "([^"]*)"$`, repositoryPostMergeHookShouldIncludeLifecycleSafeguard)
 	ctx.Step(`^AGM runs detached archive companion startup regressions$`, agmRunsDetachedArchiveCompanionStartupRegressions)
 	ctx.Step(`^a mixed revision or missing startup acknowledgement should fail before async success$`, mixedRevisionOrMissingStartupAcknowledgementShouldFailBeforeAsyncSuccess)
-	ctx.Step(`^AGM runs the canonical AGM companion install regression$`, agmRunsCanonicalAGMCompanionInstallRegression)
-	ctx.Step(`^the root AGM install target should build and install the companion pair$`, rootAGMInstallTargetShouldBuildAndInstallCompanionPair)
+	ctx.Step(`^AGM renders the canonical AGM companion install plan$`, agmRendersCanonicalAGMCompanionInstallPlan)
+	ctx.Step(`^the root AGM install plan should build and install the companion pair$`, rootAGMInstallPlanShouldBuildAndInstallCompanionPair)
 }
 
 func hookHarnessIsConfigured(ctx context.Context, harness string) error {
@@ -229,30 +230,106 @@ func mixedRevisionOrMissingStartupAcknowledgementShouldFailBeforeAsyncSuccess(ct
 	return nil
 }
 
-func agmRunsCanonicalAGMCompanionInstallRegression(ctx context.Context) error {
+func agmRendersCanonicalAGMCompanionInstallPlan(ctx context.Context) error {
 	state, err := getHookParityState(ctx)
 	if err != nil {
 		return err
 	}
-	state.companionOutput, state.companionRegression = runLocalGuardrailGoTest(ctx,
-		`^TestCanonicalAGMInstallBuildsCompanionPair$`,
-		"./tests/githooks",
+	cmd := exec.CommandContext(ctx,
+		"make", "--no-print-directory", "-n", "install-agm",
+		"GOFLAGS=", "GOENV=off", "GOWORK=off", "EXTRA_GO_LDFLAGS=",
+		"VERSION=bdd-version", "GIT_COMMIT=bdd-commit", "BUILD_DATE=2026-08-03T00:00:00Z",
+		"HOME=.bdd-install-plan",
 	)
+	cmd.Dir = hookBDDRepoRoot()
+	cmd.Env = canonicalAGMInstallPlanEnvironment()
+	output, runErr := cmd.CombinedOutput()
+	state.companionOutput = string(output)
+	state.companionRegression = runErr
 	return nil
 }
 
-func rootAGMInstallTargetShouldBuildAndInstallCompanionPair(ctx context.Context) error {
+func rootAGMInstallPlanShouldBuildAndInstallCompanionPair(ctx context.Context) error {
 	state, err := getHookParityState(ctx)
 	if err != nil {
 		return err
 	}
 	if state.companionRegression != nil {
-		return fmt.Errorf("canonical AGM companion install regression: %w: %s", state.companionRegression, state.companionOutput)
+		return fmt.Errorf("render canonical AGM companion install plan: %w: %s", state.companionRegression, state.companionOutput)
 	}
-	if !strings.Contains(state.companionOutput, "--- PASS: TestCanonicalAGMInstallBuildsCompanionPair") {
-		return fmt.Errorf("canonical AGM companion install output missing passing regression: %s", state.companionOutput)
+	return validateCanonicalAGMInstallPlan(state.companionOutput)
+}
+
+func validateCanonicalAGMInstallPlan(output string) error {
+	stampFragments := []string{
+		"-ldflags",
+		"-X github.com/vbonnet/dear-agent/pkg/version.Version=${_BUILD_STAMP_VERSION}",
+		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_BUILD_STAMP_GIT_COMMIT}",
+		"-X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_BUILD_STAMP_DATE}",
+		"-X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=makefile",
+	}
+	checks := []struct {
+		label     string
+		marker    string
+		fragments []string
+	}{
+		{label: "build-stamp guard", marker: "go run ./internal/buildstamp"},
+		{label: "AGM stamped build", marker: "-o bin/agm ./agm/cmd/agm/", fragments: stampFragments},
+		{label: "reaper stamped build", marker: "-o bin/agm-reaper ./agm/cmd/agm-reaper/", fragments: stampFragments},
+		{
+			label:  "AGM atomic install",
+			marker: `dest="$dir/agm"`,
+			fragments: []string{
+				"cp 'bin/agm' \"$stage\"",
+				"mv -f \"$stage\" \"$dest\"",
+				"echo \"Installed: $dest\"",
+			},
+		},
+		{
+			label:  "reaper atomic install",
+			marker: `dest="$dir/agm-reaper"`,
+			fragments: []string{
+				"cp 'bin/agm-reaper' \"$stage\"",
+				"mv -f \"$stage\" \"$dest\"",
+				"echo \"Installed: $dest\"",
+			},
+		},
+	}
+	for _, check := range checks {
+		if err := requireInstallPlanLine(output, check.label, check.marker, check.fragments...); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func requireInstallPlanLine(output, label, marker string, fragments ...string) error {
+	for line := range strings.SplitSeq(output, "\n") {
+		if !strings.Contains(line, marker) {
+			continue
+		}
+		for _, fragment := range fragments {
+			if !strings.Contains(line, fragment) {
+				return fmt.Errorf("canonical AGM companion install plan %s missing %q: %s", label, fragment, line)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("canonical AGM companion install plan missing %s marker %q: %s", label, marker, output)
+}
+
+func canonicalAGMInstallPlanEnvironment() []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=.bdd-install-plan",
+		"GOFLAGS=",
+		"GOENV=off",
+		"GOWORK=off",
+		"MAKEFLAGS=",
+		"MFLAGS=",
+		"MAKEOVERRIDES=",
+		"MAKEFILES=",
+	}
 }
 
 func postMergeSafeguardNeedles(safeguard string) []string {
