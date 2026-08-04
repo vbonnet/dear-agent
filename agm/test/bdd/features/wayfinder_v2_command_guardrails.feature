@@ -10,7 +10,6 @@
 # RELATED-SPEC: wayfinder/hooks/cmd/stop-wayfinder-guard/SPEC.md
 # RELATED-SPEC: wayfinder/coordinator/SPEC.md
 # RELATED-SPEC: wayfinder/internal/analytics/SPEC.md
-# RELATED-SPEC: wayfinder/internal/corpus/SPEC.md
 Feature: Canonical Wayfinder command guardrails
   Wayfinder schema 2.0 is the only executable workflow model. Unsupported
   historical state must fail closed and stay outside the installed runtime.
@@ -32,7 +31,6 @@ Feature: Canonical Wayfinder command guardrails
       | wayfinder/hooks/cmd/stop-wayfinder-guard                   |
       | wayfinder/coordinator                                      |
       | wayfinder/internal/analytics                               |
-      | wayfinder/internal/corpus                                  |
 
   Scenario: Root help exposes only the canonical workflow surface
     When AGM inspects the Wayfinder root help contract

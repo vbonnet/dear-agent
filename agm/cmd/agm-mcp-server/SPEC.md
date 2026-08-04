@@ -6,6 +6,11 @@
 
 The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations without accessing conversation content.
 
+One private production registration seam owns the exact compiled tool set.
+The logical-registry-to-compiled-wire relationship and its finite compatibility
+matrix are defined in `agm/internal/surface/SPEC.md` and exercised through the
+actual SDK registration path.
+
 ## Objectives
 
 1. **Discoverability**: Enable MCP clients to discover and query AGM sessions
@@ -36,6 +41,16 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 **MCS-10** When `agm_kill_session` receives a request, the MCP adapter shall propagate the request context and the explicit `force` and `confirmed_stuck` safety controls to the shared kill operation; cancellation observed before mutation shall leave tmux unchanged.
 
 **MCS-11** When `agm_send_message` resolves a pure API manifest while the MCP operation context also carries tmux, the MCP adapter shall delegate to shared operations, which shall perform the stable-ID lifecycle, adapter-readiness, and context-aware provider transaction before any tmux probe or delivery.
+
+**MCS-12** When `agm_create_session` receives a title that matches a non-archived session record, including when another creator commits that title concurrently, the shared creation lifecycle shall reject the request, roll back any owned launch state, and return the same duplicate-name guidance as the CLI.
+
+**MCS-13** When provider-visible tools are registered, the system shall route production and contract tests through the same private function containing the exact compiled tool set; SDK discovery order shall not be treated as a wire contract.
+
+**MCS-14** When list, search, get, archive, or kill input reaches a shared operation, the system shall use production-called private adapters that preserve every request value, list field mask, and mutation dry-run state.
+
+**MCS-15** When the compiled tool surface is audited, the system shall enumerate the production SDK registration through an in-memory MCP client, preserve exact wire schema values before generic client decoding, reconcile every client-visible pagination cursor with that wire response, reject repeated non-terminal cursors before issuing another request, and reject every registry, complete property-constraint or nested array-item schema, mapping, or discovery difference not consumed by one exact compatibility record, including absent versus explicitly empty enum keywords and lossless enum member boundaries.
+
+**MCS-16** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 
 ## BDD Traceability
 
@@ -178,7 +193,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 **Input Schema**:
 ```json
 {
-  "session_id": "uuid (required)"
+  "identifier": "session ID, name, or UUID prefix (required)"
 }
 ```
 
@@ -198,7 +213,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 ```
 
 **Constraints**:
-- `session_id` is required
+- `identifier` is required
 - Returns error if session not found
 - No caching (relies on list cache)
 
@@ -221,6 +236,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 - `cwd` must be an existing absolute directory
 - `prompt` is required
 - `title`, when present, must be safe for tmux
+- the resolved session name must not match any non-archived session record
 - harness and model validation use the shared agent registry
 - lifecycle ownership, rollback, and Codex setup remain in `internal/ops`
 
@@ -273,8 +289,8 @@ mcp_server:
     - agm_create_session
     - agm_send_message
     - agm_list_ops
-    - agm_list_wayfinder_sessions
-    - agm_get_wayfinder_session
+    - engram_list_wayfinder_sessions
+    - engram_get_wayfinder_session
   auto_register: true
   claude_config_path: ~/.config/claude/mcp_servers.json
   sessions_dir: ~/.config/agm/sessions
@@ -448,6 +464,8 @@ var (
 - Supported MCP client integration
 - End-to-end tool invocation
 - Error handling
+- Compiled registration, semantic schema, request mapping, and discovery
+  compatibility against the logical operation registry
 
 ### Performance Tests
 

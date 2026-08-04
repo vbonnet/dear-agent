@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
@@ -29,15 +30,24 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
 var checkExpectedHarnessInputAndSend = tmux.CheckExpectedHarnessInputAndSend
 
 type cliCreateSessionRuntime struct {
+	prepare              func(context.Context, ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error)
 	launch               func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
 	bootstrapAgyIdentity func(context.Context, ops.AgyCreateIdentityBootstrap) error
 	complete             func(context.Context, ops.CreateSessionCompletion) error
+}
+
+func (r *cliCreateSessionRuntime) Prepare(ctx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+	if r.prepare == nil {
+		return input, nil
+	}
+	return r.prepare(ctx, input)
 }
 
 type cliCreateFinalizationRuntime struct {
@@ -61,9 +71,17 @@ func (r *cliCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context
 	return r.bootstrapAgyIdentity(ctx, input)
 }
 
-func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool) *cliCreateSessionRuntime {
+func newCLICreateSessionRuntime(
+	sessionName string,
+	existed, trustPreConfigured bool,
+	admission *circuitBreakerAdmission,
+) *cliCreateSessionRuntime {
 	return &cliCreateSessionRuntime{
 		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			if admission != nil {
+				spec.BeforeSpawn = admission.beforeSpawn
+				spec.AfterAuthorization = admission.afterAuthorization
+			}
 			return launchCLICreateSession(ctx, spec, existed, trustPreConfigured)
 		},
 		bootstrapAgyIdentity: func(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
@@ -144,7 +162,8 @@ func finalizeCLICreateSession(ctx context.Context, sessionName string, runtime c
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (retErr error) {
-	if err := preflight(sessionName); err != nil {
+	admission, err := preflight(sessionName)
+	if err != nil {
 		return err
 	}
 
@@ -156,31 +175,7 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 	announceFrameworkGuardrails(workDir)
 	announceAcceptanceCriteria(workDir)
 
-	sessionID := uuid.New().String() // Generate session ID early for sandbox
-	var sandboxInfo *manifest.SandboxConfig
-	defer func() {
-		if retErr != nil && sandboxInfo != nil {
-			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
-		}
-	}()
-
-	sandboxInfo, workDir, err = maybeProvisionSandbox(ctx, sessionID, workDir)
-	if err != nil {
-		return err
-	}
-
-	trustedAddDirs, guardPath, err := trustedAddDirsForSession(sessionName, roleName)
-	if err != nil {
-		return err
-	}
-	extraAddDirs, trustPreConfigured := collectExtraAddDirs(sandboxInfo, trustedAddDirs)
-	if err := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); err != nil {
-		return err
-	}
-	if err := configureProjectPermissions(workDir); err != nil {
-		return err
-	}
-
+	sessionID := uuid.New().String()
 	exists, retry, err := resolveTmuxSession(sessionName)
 	if err != nil {
 		return err
@@ -189,12 +184,17 @@ func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (r
 		return createTmuxSessionAndStartClaude(ctx, retry)
 	}
 
-	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
+	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, admission)
 }
 
 // runCreateSessionLifecycle adapts CLI presentation and readiness behavior to
 // the shared ops lifecycle. Business ordering and rollback stay in ops.
-func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) error {
+func runCreateSessionLifecycle(
+	ctx context.Context,
+	sessionName, sessionID, workDir string,
+	exists bool,
+	admission *circuitBreakerAdmission,
+) (retErr error) {
 	if harnessName == "codex-cli" {
 		if err := validateCodexCredentials(); err != nil {
 			return err
@@ -205,7 +205,47 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 	if err != nil {
 		return err
 	}
-	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
+	var sandboxInfo *manifest.SandboxConfig
+	var extraAddDirs []string
+	var trustPreConfigured bool
+	var bypassCodexHookTrust bool
+	runtime := newCLICreateSessionRuntime(sessionName, exists, false, admission)
+	runtime.launch = func(launchCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+		return launchCLICreateSession(launchCtx, spec, exists, trustPreConfigured)
+	}
+	runtime.prepare = func(prepareCtx context.Context, input ops.CreateSessionPreparation) (ops.CreateSessionPreparation, error) {
+		trustedAddDirs, guardPath, prepareErr := trustedAddDirsForSession(sessionName, roleName)
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		preparedSandbox, preparedWorkDir, prepareErr := maybeProvisionSandbox(prepareCtx, input.SessionID, input.Cwd)
+		sandboxInfo = preparedSandbox
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		extraAddDirs, trustPreConfigured = collectExtraAddDirs(preparedSandbox, trustedAddDirs)
+		if prepareErr := configureWorkerWriteBoundary(harnessName, roleName, guardPath, extraAddDirs); prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		if prepareErr := configureProjectPermissions(preparedWorkDir); prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		bypassCodexHookTrust, prepareErr = prepareCodexHookTrustBypass(prepareCtx, preparedSandbox)
+		if prepareErr != nil {
+			return ops.CreateSessionPreparation{}, prepareErr
+		}
+		return ops.CreateSessionPreparation{
+			SessionID: input.SessionID, SessionName: input.SessionName,
+			Cwd: preparedWorkDir, ExtraAddDirs: extraAddDirs,
+			PermissionPolicy: resolvedSessionPermissionPolicy, Sandbox: preparedSandbox,
+			BypassCodexHookTrust: bypassCodexHookTrust,
+		}, nil
+	}
+	defer func() {
+		if retErr != nil && sandboxInfo != nil {
+			cleanupSandbox(ctx, sandboxInfo.ID, sandboxInfo.Provider)
+		}
+	}()
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
 		CreationRuntime: runtime,
@@ -218,26 +258,27 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		},
 	}
 	_, err = ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
-		Cwd:                 workDir,
-		Prompt:              createPrompt,
-		Title:               sessionName,
-		Model:               modelName,
-		Harness:             harnessName,
-		Persistent:          persistent,
-		SessionID:           sessionID,
-		Caller:              ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
-		PermissionMode:      modeFlagValue,
-		DisableAutoMode:     noAutoMode,
-		MaxBudgetUSD:        maxBudgetUsd,
-		ExtraAddDirs:        extraAddDirs,
-		ForwardTelemetry:    true,
-		ForwardClaudeOAuth:  true,
-		AllowEmptyPrompt:    true,
-		AllowUnsafeTitle:    true,
-		ReuseExistingTmux:   exists,
-		RequireStorage:      true,
-		ManifestDir:         manifestDir,
-		ManifestDirOptional: true,
+		Cwd:                  workDir,
+		Prompt:               createPrompt,
+		Title:                sessionName,
+		Model:                modelName,
+		Harness:              harnessName,
+		Persistent:           persistent,
+		SessionID:            sessionID,
+		Caller:               ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
+		PermissionMode:       modeFlagValue,
+		DisableAutoMode:      noAutoMode,
+		MaxBudgetUSD:         maxBudgetUsd,
+		ExtraAddDirs:         extraAddDirs,
+		BypassCodexHookTrust: bypassCodexHookTrust,
+		ForwardTelemetry:     true,
+		ForwardClaudeOAuth:   true,
+		AllowEmptyPrompt:     true,
+		AllowUnsafeTitle:     true,
+		ReuseExistingTmux:    exists,
+		RequireStorage:       true,
+		ManifestDir:          manifestDir,
+		ManifestDirOptional:  true,
 		Metadata: ops.CreateSessionMetadata{
 			Workspace:        cfg.Workspace,
 			ModelTier:        modelTierFlag,
@@ -252,6 +293,52 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		},
 	})
 	return err
+}
+
+// prepareCodexHookTrustBypass validates and attests a requested hook-trust
+// override. Command preparation reserves authorization for this exact source
+// identity; the launch callback seals it atomically with any admission-brake
+// claim into the private handoff, and the executor revalidates and commits the
+// complete transaction only after every other fallible launch check.
+func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig) (bool, error) {
+	reason := codexHookTrustBypassReason
+	if reason == "" {
+		reason = cfg.Sandbox.BypassCodexHookTrustReason
+	}
+	if harnessName != "codex-cli" || reason == "" {
+		return false, nil
+	}
+	normalizedReason, err := override.ValidateReason(reason)
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	reason = normalizedReason
+	if sandboxInfo == nil || !sandboxInfo.Enabled {
+		// Outside a sandbox the hooks sit at their reviewed golden path, so the
+		// override buys nothing and would only widen what runs unreviewed.
+		return false, nil
+	}
+	if len(cfg.Sandbox.Repos) == 0 || sandboxInfo.CodexHookSourceRepo == "" {
+		return false, fmt.Errorf("the Codex hook-trust override requires an explicit sandbox.repos source")
+	}
+	storeBase, err := codexhooks.DefaultStoreBase()
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	writableRoots := append([]string{sandboxInfo.WorkingDir, sandboxInfo.MergedPath}, cfg.Sandbox.WritableDirs...)
+	attestation, err := codexhooks.Attest(
+		ctx, sandboxInfo.CodexHookSourceRepo, sandboxInfo.WorkingDir, storeBase, writableRoots,
+	)
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	sandboxInfo.CodexHookSourceRepo = attestation.SourceRepo
+	sandboxInfo.CodexHookSourceCommit = attestation.SourceCommit
+	sandboxInfo.CodexHookDigest = attestation.Digest
+	sandboxInfo.CodexHookRoot = attestation.HookRoot
+	sandboxInfo.BypassCodexHookTrustReason = reason
+	ui.PrintSuccess("Codex hook-trust override attested; exact-source authorization will be recorded at launch")
+	return true, nil
 }
 
 func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (string, error) {
@@ -272,17 +359,21 @@ func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (strin
 // preflight runs the per-session checks that must succeed before we start
 // touching tmux: test-environment setup, duplicate-name check, and circuit
 // breakers.
-func preflight(sessionName string) error {
+func preflight(sessionName string) (*circuitBreakerAdmission, error) {
 	if err := setupTestEnvironment(); err != nil {
-		return err
+		return nil, err
 	}
 	if testMode {
-		return nil
+		return nil, nil
 	}
 	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
-		return dupErr
+		return nil, dupErr
 	}
-	return enforceCircuitBreakers()
+	admission, err := enforceCircuitBreakers(sessionName)
+	if err != nil {
+		return nil, err
+	}
+	return admission, nil
 }
 
 // resolveTmuxSession checks for an existing tmux session and either prompts to
@@ -435,9 +526,15 @@ func getWorkDir() (string, error) {
 	return wd, nil
 }
 
-// collectExtraAddDirs returns the per-session --add-dir entries needed to
-// re-authorize sandbox source-repo paths and a flag indicating whether trust
-// was pre-configured (always true today via --add-dir).
+// collectExtraAddDirs returns the explicitly configured host paths that Codex
+// may modify outside its sandbox workspace. Source repositories are lower
+// layers inside the sandbox and must never be forwarded as writable add-dirs.
+// The second return value reports that trust was pre-configured.
+// codexHookTrustBypassReason is the CLI-supplied justification. The flag takes
+// a reason rather than being a bool: the caller must say why, and that text is
+// what the recurring override audit reads.
+var codexHookTrustBypassReason string
+
 func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig, requested []string) ([]string, bool) {
 	return collectExtraAddDirsForHarness(sandboxInfo, harnessName, roleName, requested), true
 }

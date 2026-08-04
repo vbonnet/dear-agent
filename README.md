@@ -29,6 +29,16 @@ something breaks you open a terminal, not a dashboard.
 | **Engram** | `engram/` | Persistent memory with cue-based retrieval |
 | **Wayfinder** | `wayfinder/` | 9-phase SDLC workflow plugin with validation gates |
 
+## Writing specifications
+
+Behavioral `SPEC.md` contracts are authored through the canonical
+[`write-spec` workflow](spec-governance/skills/write-spec/SKILL.md). Start with
+[the repository router](docs/spec-authoring.md): shared observable behavior has
+one harness- and implementation-neutral owner, while real member differences
+are applicability-scoped in that same contract. The repository authors each
+SPEC-governance workflow once under `spec-governance/skills/`; it does not
+maintain harness-specific policy copies or claim runtime discovery.
+
 ## Quick Start
 
 ### Prerequisites

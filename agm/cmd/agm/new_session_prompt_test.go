@@ -141,6 +141,27 @@ func TestConfigureWorkerWriteBoundaryRejectsEmptyWorkerRoots(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexHookTrustBypassRequiresExplicitReviewedRepo(t *testing.T) {
+	originalCfg := cfg
+	originalHarness := harnessName
+	t.Cleanup(func() {
+		cfg = originalCfg
+		harnessName = originalHarness
+	})
+	cfg = &config.Config{Sandbox: config.SandboxConfig{
+		BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+	}}
+	harnessName = "codex-cli"
+
+	enabled, err := prepareCodexHookTrustBypass(t.Context(), &manifest.SandboxConfig{
+		Enabled:             true,
+		CodexHookSourceRepo: "/dynamic/unreviewed",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires an explicit sandbox.repos source") {
+		t.Fatalf("prepareCodexHookTrustBypass() = %v, %v; want explicit-source rejection", enabled, err)
+	}
+}
+
 func TestResolveCreateLifecyclePromptLoadsAgyPromptFileBeforeMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt.txt")
 	if err := os.WriteFile(path, []byte("prompt from file\nwith another line"), 0o600); err != nil {
@@ -208,7 +229,7 @@ func TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste(t *testing.T) {
 		}
 		return tmux.HarnessInputReadiness{Ready: true, State: tmux.HarnessInputReady, TargetPane: "%7"}, nil
 	}
-	runtime := newCLICreateSessionRuntime("agy-bootstrap", false, true)
+	runtime := newCLICreateSessionRuntime("agy-bootstrap", false, true, nil)
 	if err := runtime.BootstrapAgyCreateIdentity(t.Context(), ops.AgyCreateIdentityBootstrap{
 		SessionName: "agy-bootstrap",
 		Prompt:      "first line\nsecond line",

@@ -1,20 +1,22 @@
 # Private Harness Executor Specification
 
-<!-- Last audited at: 2026-07-22 -->
+<!-- Last audited at: 2026-07-30 -->
 
 ## Overview
 
 `agm/internal/harnessexec` is the private process boundary between token-free
-tmux commands and interactive Codex or Claude processes. The protocol is
-intercepted before normal AGM startup and is not a user-facing command surface.
+tmux commands and interactive harness processes. The protocol is intercepted
+before normal AGM startup and is not a user-facing command surface.
 
 ## Security Boundary
 
 For Codex, the executor prevents ambient cross-harness credential inheritance
 with a deny-by-default child environment. For Claude, it treats authentication
 and OpenTelemetry state as a complete caller snapshot, but otherwise preserves
-the harness environment. For both harnesses, it protects transported values
-from shell command, process-argument, pane-scrollback, and debug-log exposure.
+the harness environment. For other harnesses, it binds the exact submitted
+command and launch-admission effects to a one-shot executor handoff. It
+protects transported values from shell command, process-argument,
+pane-scrollback, and debug-log exposure.
 It assumes the installed AGM and harness executables, the user's environment,
 and the user's configuration and credential files are trusted. It does not
 sandbox the harness beyond the native permission mode requested by AGM.
@@ -50,6 +52,18 @@ sandbox the harness beyond the native permission mode requested by AGM.
 **HEXEC-14** When tmux accepts a private launch submission but its acknowledgement is lost, the system shall require every current-pane, detached CLI, MCP, shared operations, agent adapter, legacy resume, and resumability-validation surface to treat the launch as potentially delivered, preserve its handoff and producer lease, and continue the lifecycle without retrying or compensating the possibly queued command.
 
 **HEXEC-15** When AGM resolves an executable or stages a private handoff path that will be interpolated into a pasted pane command, the system shall reject invalid UTF-8 and terminal control characters in that generated value before building or delivering the command.
+
+**HEXEC-16** When the private Codex executor consumes a hook-trust handoff, the system shall require the handoff to bind the exact source repository, full commit, hook digest, hook-trust claim, and every other launch override claim; re-run persisted Git attestation, hook configuration, helper validation, executable resolution, and every live circuit-breaker gate before and after reauthorization whether or not the handoff carries an admission-brake claim; treat every carried proof as a non-authoritative claim; require and re-reserve a current exact admission-brake grant whenever either live check reports the brake as the sole refusal; re-reserve every other current exact grant with a fresh authorization ID; and append the complete override transaction as the final userspace action before executing Codex.
+
+**HEXEC-17** When a non-Codex tmux or foreground launch carries launch-admission reservations or a successful-spawn recording obligation, the system shall bind its exact session and command plus those effects into a cancellable one-shot handoff before submission; the private executor shall revalidate and commit every bound override immediately before recording the spawn and replacing itself with the submitted command, refuse execution if commit fails, remove the handoff after a definite pre-delivery failure, and preserve it when delivery is uncertain. A foreground Claude supervisor launch shall use the same one-shot boundary, bind its exact executable and argument request, re-resolve the executable before commitment, and leave every bound effect unconsumed when the executor or Claude executable cannot start.
+
+**HEXEC-18** When a foreground Claude launcher carries launch-admission effects, the system shall expose a direct invocation of the same prepared one-shot Claude executor, bind only Claude-compatible override claims and the successful-spawn obligation before starting that executor, re-resolve the configured Claude executable inside it, and consume no bound effect when executor delivery or executable resolution is confirmed to have failed.
+
+**HEXEC-19** When a private Codex, Claude, or generic harness handoff carries any override proof, the authenticated parent AGM process, or the separately attested co-installed AGM MCP companion that prepares MCP launches directly, shall obtain a root-owned capability for the exact protocol, path, handoff digest, proofs, and accompanying successful-spawn obligation before submission; the AGM executor shall require the matching capability and atomically consume it under the AGM-only caller policy before accepting those claims, rejecting self-generated, mutated, and replayed same-user handoffs.
+
+**HEXEC-20** When a trusted AGM launch prepares a Codex worker with host-authorized write roots, the system shall carry the derived `AGM_WORKER_WRITE_ROOTS_JSON` value through the owner-only private handoff into the Codex child environment, independent of long-lived tmux server state; when the caller omits the value, stale pane or tmux state shall not recreate it.
+
+**HEXEC-21** When the private executor receives the cold-remote-resume marker from AGM's Codex resume lifecycle, the system shall pass the documented `model_reasoning_effort="xhigh"` configuration override so a persisted unsupported effort value cannot prevent the resumed worker from receiving its first provider turn; fresh remote controller attachments and local Codex launches shall not receive that override.
 
 ## BDD Traceability
 

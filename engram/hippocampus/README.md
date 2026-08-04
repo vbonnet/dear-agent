@@ -26,7 +26,7 @@ Hippocampus consolidates session memories from short-term (working context) to l
 
 ## Architecture Diagram
 
-![Hippocampus Component Diagram](diagrams/rendered/c4-component-ecphory.png)
+![Hippocampus Component Diagram](diagrams/rendered/c4-component-ecphory.svg)
 
 **C4 Component Diagram** showing the internal architecture of the Hippocampus memory consolidation pipeline. The diagram illustrates:
 

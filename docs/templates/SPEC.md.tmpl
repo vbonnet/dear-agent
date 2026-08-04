@@ -1,19 +1,36 @@
-# {Package Path} — Specification
+# {Product or domain contract} — Specification
 
-<!-- Last audited at: YYYY-MM-DD -->
+<!-- Start with docs/spec-authoring.md and the canonical write-spec skill. -->
+<!-- Do not place a shared observable contract beside a harness or adapter. -->
 
-**Version:** X.Y.Z
 **Status:** Draft | Proposed | Production-ready | Deprecated
-**Pattern:** Library | Service | CLI | Tool | Internal
+**Scope:** {observable product or domain boundary, not current file layout}
 
 ## Purpose
-{1-2 sentences}
 
-## Public API
-{Exported types, functions, interfaces}
+{One or two sentences describing the externally observable contract.}
 
-## Invariants
-{What is always true about this package's behavior}
+## Applicability
 
-## Dependencies
-{Notable dependencies and why}
+{For each active member, state supported, adapted, unsupported, or
+not-applicable when the contract is not universal. Do not invent parity.}
+
+## EARS requirements
+
+**{DOMAIN-01}** When {observable trigger}, the system shall {observable outcome}.
+
+**{DOMAIN-02}** Where {explicit applicability predicate}, the system shall {observable native variation or failure outcome}.
+
+## BDD traceability
+
+- `{repository-relative-path-to-feature.feature}`
+
+## Authoring notes
+
+- Keep one independently testable observable per stable requirement ID.
+- Keep each requirement ID and its complete EARS sentence on one physical line;
+  repository lint and audit tooling extract requirements line by line.
+- Put replaceable wiring, private symbols, and present-tense file layout in
+  architecture, code, or lower-level tests rather than this contract.
+- Before moving or retiring an existing owner, preserve IDs, reciprocal BDD
+  links, applicability, and source/test evidence; obtain maintainer approval.

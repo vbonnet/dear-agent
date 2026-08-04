@@ -122,25 +122,7 @@ func main() {
 		Version: "1.0.0",
 	}, nil)
 
-	// Register MCP tools (v1.2.0 API)
-	addListSessionsTool(server, cfg)
-	addSearchSessionsTool(server, cfg)
-	addGetSessionMetadataTool(server, cfg)
-
-	// Register mutation tools
-	addArchiveSessionTool(server, cfg)
-	addKillSessionTool(server, cfg)
-
-	// Register session lifecycle tools
-	addCreateSessionTool(server, cfg)
-	addSendMessageTool(server, cfg)
-
-	// Register schema introspection tool
-	addListOpsTool(server, cfg)
-
-	// Register Wayfinder forwarding tools (Phase 7.1)
-	addListWayfinderSessionsTool(server, cfg)
-	addGetWayfinderSessionTool(server, cfg)
+	registerMCPTools(server, cfg)
 
 	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_archive_session, agm_kill_session, agm_create_session, agm_send_message, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
 	logger.Info("Wayfinder forwarding enabled", "engram_mcp_url", cfg.EngramMCPURL)
@@ -208,6 +190,23 @@ func main() {
 			logger.Error("A2A HTTP shutdown error", "error", err)
 		}
 	}
+}
+
+// registerMCPTools owns the provider-visible AGM MCP registration set. Tests
+// call this exact seam so registry compatibility is checked against the tools
+// compiled into the production server. The SDK sorts tool identifiers during
+// discovery, so call order is deliberately not part of the wire contract.
+func registerMCPTools(server *mcp.Server, cfg *Config) {
+	addListSessionsTool(server, cfg)
+	addSearchSessionsTool(server, cfg)
+	addGetSessionMetadataTool(server, cfg)
+	addArchiveSessionTool(server, cfg)
+	addKillSessionTool(server, cfg)
+	addCreateSessionTool(server, cfg)
+	addSendMessageTool(server, cfg)
+	addListOpsTool(server, cfg)
+	addListWayfinderSessionsTool(server, cfg)
+	addGetWayfinderSessionTool(server, cfg)
 }
 
 // installGateway installs the MCP gateway middleware unless disabled by flag.

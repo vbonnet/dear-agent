@@ -26,6 +26,10 @@
 
 **DOLTR-12** When AGM stores a sandboxed session, the storage adapter shall round-trip the complete non-secret sandbox ownership record across create, read, and update so a later archive reload retains the exact sandbox ID, provider, cleanup boundary, mapped working directory, enabled state, and creation time required for owned cleanup; if any ownership field or boundary invariant is invalid, the adapter shall not install the record as cleanup authority.
 
+**DOLTR-13** When AGM admits a new session name, renames a non-archived session, restores an archived session to the non-archived set through any route including administrative reconciliation, or links a non-archived child to a parent while inheriting a new name, the operation shall use the dedicated reservation table as the sole workspace-scoped collision owner before any launch, live tmux move, or identity-write side effect; reservation and registration commits shall re-read their exact durable owner or identity after an ambiguous commit response, and failed reservation inspection shall propagate uncertain ownership so direct registration compensates only a lease that call created or may have created; registration shall consume its creation lease in the durable transaction; rename, restore, and inherited-name parent linking shall retain their leases through the durable update, predicate the identity write on the reservation's current exact owner so expiration or reclamation cannot authorize a stale operation, and fence the exact observed identity revision before releasing a lease after an ambiguous write response, retaining that lease through its TTL when neither the write nor its fence can be proved; restore shall compare-and-swap the exact archived identity so an archived parent link fences stale reactivation, and shall distinguish a committed lifecycle update from a later reservation-cleanup failure; a nested storage mutation shall not release a caller-owned rename lease; every completed operation and every failure whose write or fence is proved shall release any remaining operation-owned lease, while unresolved mutation uncertainty shall retain it through TTL or explicit recovery; unavailable reservation storage shall fail closed; and installing this mechanism shall preserve every legacy duplicate session row unchanged.
+
+**DOLTR-14** When AGM creates or updates a session, the Dolt adapter shall reject lifecycle and outcome values outside the manifest-owned closed vocabulary. When it decodes a persisted session status or metadata outcome, it shall accept legacy empty status and `active` as the empty lifecycle, but shall return an error for every other unknown nonempty status or outcome instead of coercing or erasing it.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
@@ -35,7 +39,7 @@
 
 **Version**: 2.0
 **Status**: Phase 6 Complete - Dolt-Only Architecture (YAML Backend Removed)
-**Last Updated**: 2026-03-18
+**Last Updated**: 2026-08-01
 
 ## Overview
 
@@ -328,6 +332,7 @@ stats, err := adapter.GetToolCallStats(sessionID)
 - Session count matches: `find ~/.agm/sessions -name manifest.yaml | wc -l`
 - All sessions have workspace: `SELECT COUNT(*) FROM agm_sessions WHERE workspace IS NULL` = 0
 - No duplicate IDs: `SELECT id, COUNT(*) FROM agm_sessions GROUP BY id HAVING COUNT(*) > 1` = 0
+- Baseline legacy duplicate non-archived names with `SELECT workspace, name, COUNT(*) FROM agm_sessions WHERE status != 'archived' GROUP BY workspace, name HAVING COUNT(*) > 1`; migration 019 preserves those rows, so report the baseline and require that it does not increase rather than requiring zero. Every post-adoption name mutation must reject a new duplicate.
 - Timestamps preserved: Spot-check 5-10 random sessions
 
 ## Testing Strategy

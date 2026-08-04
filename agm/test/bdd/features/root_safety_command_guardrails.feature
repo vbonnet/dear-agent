@@ -1,5 +1,6 @@
 # SPEC: cmd/drift-check/SPEC.md
 # RELATED-SPEC: cmd/configure-claude-settings/SPEC.md
+# RELATED-SPEC: cmd/codex-hook-json/SPEC.md
 # RELATED-SPEC: cmd/credential-monitor/SPEC.md
 # RELATED-SPEC: cmd/gopls-watchdog/SPEC.md
 # RELATED-SPEC: cmd/log-rotate/SPEC.md
@@ -18,6 +19,7 @@ Feature: Root safety command guardrails
     Examples:
       | package                          |
       | cmd/configure-claude-settings    |
+      | cmd/codex-hook-json              |
       | cmd/credential-monitor           |
       | cmd/drift-check                  |
       | cmd/gopls-watchdog               |

@@ -35,9 +35,6 @@ var allowedUnsandboxedGitTests = map[string]map[int]string{
 	"internal/deploy/launchd_install_test.go": {526: "read-only `git ls-files` inventories the repository under test; it creates " +
 		"nothing and cannot execute a Git hook",
 	},
-	"pkg/instructionlint/instructionlint_test.go": {1750: "read-only `git rev-parse --show-toplevel` locates the checked-out fixture root; " +
-		"it creates nothing and cannot execute a Git hook",
-	},
 }
 
 // TestNoUnsandboxedGitInTests is the ce-3knl.1 ratchet. A test that shells out

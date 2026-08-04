@@ -5,10 +5,14 @@
 ## Overview
 
 `pkg/skilllint` owns discovery and deterministic validation of Dear Agent's
-tracked `SKILL.md` and provider command Markdown. Skills have a harness-neutral
-procedural core; provider loader or execution extensions require an actionable
-harness-neutral fallback. Command prompts retain Claude model/effort and
-tool-declaration policy.
+tracked `SKILL.md` and provider command Markdown. Each skill name has one
+regular-file content owner; repository-local discovery aliases are contained
+symlinks to that tracked canonical `SKILL.md`, never separately authored
+copies. Skills have a harness-neutral procedural core; provider loader or
+execution extensions require an actionable harness-neutral fallback. Command
+prompts retain Claude model/effort and tool-declaration policy.
+Optional `content-hash` metadata is accepted as opaque input; this package does
+not attest it or use it to distinguish separately authored skill owners.
 Content defects are `Violation` values, while Git and file failures are Go
 errors.
 
@@ -44,11 +48,13 @@ errors.
 
 **SKILLLINT-PKG-15** When checking a repository, the system shall ignore untracked files and return repository-relative violation paths.
 
-**SKILLLINT-PKG-16** When two tracked regular-file skills have equivalent normalized frontmatter and Markdown bodies, the system shall report the later path and the first tracked owner; a contained tracked symlink to a canonical skill shall remain a validated discovery alias rather than count as a copy.
+**SKILLLINT-PKG-16** When more than one tracked regular-file skill declares the same skill name, the system shall report the later path and first tracked owner whether their normalized content is equivalent or divergent.
 
 **SKILLLINT-PKG-17** When checking one file or a directory, the system shall route recognized surfaces through the same validators used by repository checks.
 
 **SKILLLINT-PKG-18** When a tracked skill or command symlink resolves outside the validation root, the system shall report a containment violation without reading the external target.
+
+**SKILLLINT-PKG-19** When a contained tracked skill symlink is checked, the system shall allow it as a discovery alias only when its resolved target is the one tracked regular-file canonical `SKILL.md` owner for that skill name; an untracked target, a tracked non-`SKILL.md` target, or a different owner shall produce an alias-target violation.
 
 ## BDD Traceability
 

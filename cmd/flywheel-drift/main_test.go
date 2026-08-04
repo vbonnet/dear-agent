@@ -1,10 +1,110 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+
+	healthchecker "github.com/vbonnet/dear-agent/pkg/health-checker"
 )
+
+type malformedStatusCheck struct{}
+
+func (malformedStatusCheck) Name() string     { return "malformed" }
+func (malformedStatusCheck) Category() string { return "compatibility" }
+func (malformedStatusCheck) Run(context.Context) healthchecker.Result {
+	return healthchecker.Result{
+		Name:     "untrusted-name",
+		Category: "untrusted-category",
+		Status:   healthchecker.Status("future"),
+		Message:  "producer diagnostic",
+		Fixable:  true,
+		Fix: &healthchecker.Fix{
+			Apply: func(context.Context) error { return nil },
+		},
+	}
+}
+
+func TestToJSONResultsPreservesValidStatusWireValues(t *testing.T) {
+	wantStatuses := []healthchecker.Status{
+		healthchecker.StatusOK,
+		healthchecker.StatusInfo,
+		healthchecker.StatusWarning,
+		healthchecker.StatusError,
+	}
+	results := make([]healthchecker.Result, len(wantStatuses))
+	for i, status := range wantStatuses {
+		results[i] = healthchecker.Result{
+			Name:     "check-" + string(rune('a'+i)),
+			Category: "wire",
+			Status:   status,
+			Message:  "message",
+			Fixable:  i == 2,
+		}
+	}
+
+	var output bytes.Buffer
+	exitCode, err := writeJSONReport(&output, results)
+	if err != nil {
+		t.Fatalf("writeJSONReport() error = %v", err)
+	}
+	if exitCode != 2 {
+		t.Errorf("writeJSONReport() exit code = %d, want 2", exitCode)
+	}
+	var wire []struct {
+		Name     string `json:"name"`
+		Category string `json:"category"`
+		Status   string `json:"status"`
+		Message  string `json:"message"`
+		Fixable  bool   `json:"fixable"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &wire); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(wire) != len(wantStatuses) {
+		t.Fatalf("writeJSONReport() length = %d, want %d", len(wire), len(wantStatuses))
+	}
+
+	for i, wantStatus := range wantStatuses {
+		if wire[i].Status != string(wantStatus) {
+			t.Errorf("wire[%d].Status = %q, want %q", i, wire[i].Status, wantStatus)
+		}
+		if wire[i].Name != results[i].Name || wire[i].Category != results[i].Category || wire[i].Message != results[i].Message {
+			t.Errorf("wire[%d] fields = %+v, want source fields preserved", i, wire[i])
+		}
+		if wire[i].Fixable != results[i].Fixable {
+			t.Errorf("wire[%d].Fixable = %v, want %v", i, wire[i].Fixable, results[i].Fixable)
+		}
+	}
+}
+
+func TestRunnerMalformedResultSerializesAsError(t *testing.T) {
+	results, err := healthchecker.NewRunner(malformedStatusCheck{}).RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("RunAll() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("RunAll() returned %d results, want 1", len(results))
+	}
+	if results[0].Fixable || results[0].Fix != nil {
+		t.Fatalf("RunAll() retained executable malformed metadata: %+v", results[0])
+	}
+
+	var output bytes.Buffer
+	exitCode, err := writeJSONReport(&output, results)
+	if err != nil {
+		t.Fatalf("writeJSONReport() error = %v", err)
+	}
+	if !strings.Contains(output.String(), `"status": "error"`) {
+		t.Errorf("serialized result = %s, want error status", output.String())
+	}
+	if exitCode != 2 {
+		t.Errorf("writeJSONReport() exit code = %d, want 2", exitCode)
+	}
+}
 
 func TestParseBeads(t *testing.T) {
 	raw := `[

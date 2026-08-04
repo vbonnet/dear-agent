@@ -91,6 +91,21 @@ func addOpenAISessionMetadata(metadata map[string]any, openAI *manifest.OpenAI) 
 	}
 }
 
+// SessionRegistrationCommitUncertainError means the registration commit may
+// have succeeded but a durable re-read could not prove the installed identity.
+// Creation callers must compensate as though the row may exist.
+type SessionRegistrationCommitUncertainError struct {
+	Err error
+}
+
+func (e *SessionRegistrationCommitUncertainError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *SessionRegistrationCommitUncertainError) Unwrap() error {
+	return e.Err
+}
+
 // marshalCreateSessionJSON serializes the JSON-typed fields needed by the
 // agm_sessions INSERT (context tags, engram metadata, monitors).
 func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, any, error) {
@@ -114,12 +129,15 @@ func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, any, 
 }
 
 // CreateSession inserts a new session into the database
-func (a *Adapter) CreateSession(session *manifest.Manifest) error {
+func (a *Adapter) CreateSession(session *manifest.Manifest) (retErr error) {
 	if session == nil {
 		return fmt.Errorf("session cannot be nil")
 	}
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
+	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
 	}
 
 	// Ensure migrations are applied
@@ -127,12 +145,42 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
+	reservationHeld := session.Name != "" && session.Lifecycle != manifest.LifecycleArchived
+	releaseReservation := false
+	if reservationHeld {
+		reservationCreated, err := a.reserveSessionName(session.SessionID, session.Name)
+		releaseReservation = reservationCreated
+		if releaseReservation {
+			defer func() {
+				if !releaseReservation {
+					return
+				}
+				if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
+					retErr = errors.Join(retErr, err)
+				}
+			}()
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if err := a.insertSessionRegistration(session, reservationHeld); err != nil {
+		return err
+	}
+	releaseReservation = false
+	return nil
+}
+
+func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservationHeld bool) error {
 	contextTags, metadataJSON, monitorsJSON, err := marshalCreateSessionJSON(session)
 	if err != nil {
 		return err
 	}
 	harness := defaultIfEmpty(session.Harness, "claude-code")
-	status := lifecycleStorageStatus(session.Lifecycle)
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
+	}
 	permissionMode := defaultIfEmpty(session.PermissionMode, "default")
 	permissionModeSource := defaultIfEmpty(session.PermissionModeSource, "init")
 
@@ -172,7 +220,18 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		model = "claude-sonnet-4-5"
 	}
 
-	_, err = a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
+	if err != nil {
+		return fmt.Errorf("begin session registration: %w", err)
+	}
+	defer tx.Rollback()
+	if reservationHeld {
+		if err := reservationOwnedBy(tx, a.workspace, session.SessionID, session.Name); err != nil {
+			return err
+		}
+	}
+
+	_, err = tx.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.SessionID,
 		session.CreatedAt,
 		session.UpdatedAt,
@@ -203,7 +262,58 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to insert session: %w", err)
 	}
 
+	if reservationHeld {
+		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+			`DELETE FROM agm_session_name_reservations
+			 WHERE workspace = ? AND session_id = ?`,
+			a.workspace,
+			session.SessionID,
+		); err != nil {
+			return fmt.Errorf("finalize session-name reservation: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		commitErr := fmt.Errorf("commit session registration: %w", err)
+		committed, inspectErr := a.sessionRegistrationCommitted(session, status, harness)
+		if inspectErr != nil {
+			return &SessionRegistrationCommitUncertainError{
+				Err: errors.Join(commitErr, inspectErr),
+			}
+		}
+		if committed {
+			return nil
+		}
+		return commitErr
+	}
 	return nil
+}
+
+func (a *Adapter) sessionRegistrationCommitted(session *manifest.Manifest, expectedStatus, expectedHarness string) (bool, error) {
+	var name, status, harness, tmuxSessionName string
+	err := a.conn.QueryRow( //nolint:noctx // commit reconciliation must outlive the transaction response
+		`SELECT name, status, harness, tmux_session_name
+		 FROM agm_sessions
+		 WHERE id = ? AND workspace = ?`,
+		session.SessionID,
+		a.workspace,
+	).Scan(&name, &status, &harness, &tmuxSessionName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect session registration after commit error: %w", err)
+	}
+	if name != session.Name || status != expectedStatus || harness != expectedHarness || tmuxSessionName != session.Tmux.SessionName {
+		return false, fmt.Errorf(
+			"session registration identity after commit error does not match request: id=%s name=%q status=%q harness=%q tmux=%q",
+			session.SessionID,
+			name,
+			status,
+			harness,
+			tmuxSessionName,
+		)
+	}
+	return true, nil
 }
 
 // GetSession retrieves a session by ID
@@ -241,10 +351,16 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Ensure migrations are applied
 	if err := a.ApplyMigrations(); err != nil {
 		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	if err := a.validateStoredSessionLifecycleAndOutcome(session.SessionID); err != nil {
+		return err
 	}
 
 	// Marshal context tags to JSON
@@ -267,7 +383,10 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 
 	// Preserve transitional lifecycle values such as "reaping" so detached
 	// reapers can recover across processes in an isolated SQLite test store.
-	status := lifecycleStorageStatus(session.Lifecycle)
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
+	}
 
 	// Update timestamp
 	session.UpdatedAt = time.Now()
@@ -303,7 +422,8 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	// comparison, so any other stale snapshot remains unable to reopen the CAS.
 	query := `
 		UPDATE agm_sessions
-		SET updated_at = ?, status = ?,
+		SET updated_at = ?, status = CASE
+			WHEN status = 'archived' AND ? <> 'archived' THEN status ELSE ? END,
 			name = CASE
 				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
 				THEN ? ELSE name END,
@@ -324,6 +444,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 
 	result, err := a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.UpdatedAt,
+		status,
 		status,
 		observedTmuxRevision,
 		observedTmuxRevision,
@@ -434,13 +555,14 @@ func (a *Adapter) TouchSessionActivity(ctx context.Context, sessionID string) er
 // moved tmux session is safe when the storage mutation returns an error.
 type RenameSessionIdentityResult struct {
 	TmuxRollbackSafe bool
+	StorageCommitted bool
 }
 
 // RenameSessionIdentity atomically changes both user-visible and tmux names
 // from the exact identity revision observed by the caller. Unlike a broad
 // UpdateSession, an authoritative rename must report a concurrent change
 // instead of silently preserving the old tmux name after the live pane moved.
-func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (RenameSessionIdentityResult, error) {
+func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (result RenameSessionIdentityResult, retErr error) {
 	if sessionID == "" {
 		return RenameSessionIdentityResult{}, fmt.Errorf("session_id cannot be empty")
 	}
@@ -450,6 +572,49 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	if err := a.ApplyMigrations(); err != nil {
 		return RenameSessionIdentityResult{}, fmt.Errorf("failed to apply migrations: %w", err)
 	}
+	reservationHeld := newName != previousName
+	releaseReservation := false
+	if reservationHeld {
+		reservationCreated, err := a.reserveSessionName(sessionID, newName)
+		releaseReservation = reservationCreated
+		if releaseReservation {
+			defer func() {
+				if !releaseReservation {
+					return
+				}
+				if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
+					retErr = errors.Join(retErr, err)
+				}
+			}()
+		}
+		if err != nil {
+			return RenameSessionIdentityResult{}, err
+		}
+	}
+	reservationName := ""
+	if reservationHeld {
+		reservationName = newName
+	}
+	result, retErr = a.renameSessionIdentityReserved(
+		ctx,
+		sessionID,
+		previousName,
+		previousTmuxName,
+		observedRevision,
+		newName,
+		reservationName,
+	)
+	var uncertain *SessionIdentityMutationCommitUncertainError
+	if errors.As(retErr, &uncertain) {
+		releaseReservation = false
+	}
+	if retErr == nil {
+		result.StorageCommitted = true
+	}
+	return result, retErr
+}
+
+func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName, reservationName string) (RenameSessionIdentityResult, error) {
 	observedRevisionValue := nullableStringValue(sql.NullString{
 		String: observedRevision,
 		Valid:  observedRevision != "",
@@ -461,8 +626,13 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 		WHERE id = ? AND workspace = ?
 		  AND name = ? AND tmux_session_name = ?
 		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+		  AND (? = '' OR EXISTS (
+			  SELECT 1 FROM agm_session_name_reservations
+			  WHERE workspace = ? AND name = ? AND session_id = ?
+		  ))
 	`, time.Now(), newName, newName, nextRevision, sessionID, a.workspace,
-		previousName, previousTmuxName, observedRevisionValue, observedRevisionValue)
+		previousName, previousTmuxName, observedRevisionValue, observedRevisionValue,
+		reservationName, a.workspace, reservationName, sessionID)
 	if err == nil {
 		rowsAffected, rowsErr := result.RowsAffected()
 		if rowsErr == nil && rowsAffected == 1 {
@@ -476,6 +646,14 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	} else {
 		err = fmt.Errorf("rename session identity: %w", err)
 	}
+	if reservationName != "" {
+		owned, ownershipErr := a.sessionNameReservationOwned(sessionID, reservationName)
+		if ownershipErr != nil {
+			err = errors.Join(err, ownershipErr)
+		} else if !owned {
+			err = &SessionNameConflictError{Name: reservationName}
+		}
+	}
 
 	// ExecContext can lose its reply before the server finishes autocommit. A
 	// re-read of the unchanged snapshot is not yet proof that the write will not
@@ -484,14 +662,23 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	fenceRevision := uuid.NewString()
-	if fenceErr := a.fenceSessionIdentityRename(inspectCtx, sessionID, previousName, previousTmuxName, observedRevisionValue, fenceRevision); fenceErr != nil {
+	fenceErr := a.fenceSessionIdentityRename(inspectCtx, sessionID, previousName, previousTmuxName, observedRevisionValue, fenceRevision)
+	if fenceErr != nil {
 		err = errors.Join(err, fenceErr)
 	}
 	currentName, currentTmuxName, currentRevision, inspectErr := a.inspectSessionIdentity(inspectCtx, sessionID)
 	if inspectErr != nil {
-		return RenameSessionIdentityResult{}, errors.Join(err, inspectErr)
+		err = errors.Join(err, inspectErr)
+		return RenameSessionIdentityResult{}, sessionIdentityRenameInspectionError(err, fenceErr)
 	}
 	return classifySessionIdentityRenameAfterError(previousName, previousTmuxName, observedRevision, newName, nextRevision, fenceRevision, currentName, currentTmuxName, currentRevision, err)
+}
+
+func sessionIdentityRenameInspectionError(primaryErr, fenceErr error) error {
+	if fenceErr != nil {
+		return &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
+	}
+	return primaryErr
 }
 
 func (a *Adapter) fenceSessionIdentityRename(ctx context.Context, sessionID, previousName, previousTmuxName string, observedRevisionValue any, fenceRevision string) error {
@@ -532,6 +719,11 @@ func classifySessionIdentityRenameAfterError(previousName, previousTmuxName, obs
 	// original autocommit may still be in flight.
 	fenced := currentRevision == fenceRevision || currentRevision != observedRevision
 	rollbackSafe := previousIdentity && fenced
+	if previousIdentity && !fenced {
+		return RenameSessionIdentityResult{}, &SessionIdentityMutationCommitUncertainError{
+			Err: primaryErr,
+		}
+	}
 	return RenameSessionIdentityResult{TmuxRollbackSafe: rollbackSafe}, primaryErr
 }
 
@@ -772,7 +964,7 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 	if err := a.ApplyMigrations(); err != nil {
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
-	query := `SELECT name FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
+	query := `SELECT name, status FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
 	rows, err := a.conn.QueryContext(ctx, query, a.workspace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active sessions: %w", err)
@@ -781,9 +973,12 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 
 	var names []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, status string
+		if err := rows.Scan(&name, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan session name: %w", err)
+		}
+		if _, err := lifecycleFromStorageStatus(status); err != nil {
+			return nil, fmt.Errorf("validate listed session lifecycle: %w", err)
 		}
 		names = append(names, name)
 	}
@@ -1068,14 +1263,14 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}
 
-	// Set lifecycle from status. Runtime active/stopped state remains outside the
-	// durable lifecycle field; terminal/transitional lifecycle values round-trip.
-	switch status {
-	case manifest.LifecycleArchived, manifest.LifecycleReaping:
-		session.Lifecycle = status
-	default:
-		session.Lifecycle = ""
+	// Runtime active/stopped state remains outside the durable lifecycle field.
+	// Decode every stored status through the closed manifest vocabulary so an
+	// unknown nonempty durable value cannot masquerade as an active session.
+	lifecycle, err := lifecycleFromStorageStatus(status)
+	if err != nil {
+		return nil, err
 	}
+	session.Lifecycle = lifecycle
 
 	// Set workspace and model
 	session.Workspace = workspace
@@ -1103,13 +1298,76 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	return &session, nil
 }
 
-func lifecycleStorageStatus(lifecycle string) string {
-	switch lifecycle {
-	case manifest.LifecycleArchived, manifest.LifecycleReaping:
-		return lifecycle
-	default:
-		return "active"
+func validateSessionLifecycleAndOutcome(session *manifest.Manifest) error {
+	if _, err := manifest.ParseSessionLifecycle(session.Lifecycle); err != nil {
+		return fmt.Errorf("validate persisted lifecycle: %w", err)
 	}
+	if _, err := manifest.ParseSessionOutcome(string(session.Outcome)); err != nil {
+		return fmt.Errorf("validate persisted outcome: %w", err)
+	}
+	return nil
+}
+
+// validateStoredSessionLifecycleAndOutcome prevents a valid caller snapshot
+// from overwriting an invalid durable value that has not been decoded first.
+func (a *Adapter) validateStoredSessionLifecycleAndOutcome(sessionID string) error {
+	var status string
+	var metadataJSON []byte
+	err := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT status, metadata FROM agm_sessions WHERE id = ? AND workspace = ?`,
+		sessionID,
+		a.workspace,
+	).Scan(&status, &metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect stored lifecycle and outcome before update: %w", err)
+	}
+	if _, err := lifecycleFromStorageStatus(status); err != nil {
+		return fmt.Errorf("validate stored lifecycle before update: %w", err)
+	}
+	if len(metadataJSON) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return fmt.Errorf("inspect stored metadata before update: %w", err)
+	}
+	if _, _, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return fmt.Errorf("validate stored metadata outcome before update: %w", err)
+	}
+	return nil
+}
+
+// lifecycleStorageStatus converts the manifest's legacy empty lifecycle into
+// the established Dolt "active" spelling. All nonempty values must be part of
+// the closed manifest vocabulary.
+func lifecycleStorageStatus(lifecycle string) (string, error) {
+	parsed, err := manifest.ParseSessionLifecycle(lifecycle)
+	if err != nil {
+		return "", err
+	}
+	switch parsed {
+	case manifest.LifecycleReaping, manifest.LifecycleArchived:
+		return string(parsed), nil
+	default:
+		return "active", nil
+	}
+}
+
+// lifecycleFromStorageStatus preserves both legacy storage spellings for the
+// empty manifest lifecycle and rejects any unknown nonempty stored status.
+func lifecycleFromStorageStatus(status string) (string, error) {
+	switch status {
+	case "", "active":
+		return "", nil
+	}
+	parsed, err := manifest.ParseSessionLifecycle(status)
+	if err != nil {
+		return "", fmt.Errorf("invalid stored lifecycle status %q: %w", status, err)
+	}
+	return string(parsed), nil
 }
 
 // applyNullableScanFields copies the nullable sql.Null* values from a Scan call
@@ -1171,8 +1429,10 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	}
 	// Outcome lives alongside engram fields but is independent of them — read it
 	// before the engram early-return so it round-trips even when engram is off.
-	if outcome, ok := metadata["outcome"].(string); ok {
-		session.Outcome = manifest.SessionOutcome(outcome)
+	if outcome, present, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return err
+	} else if present {
+		session.Outcome = outcome
 	}
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory
@@ -1188,6 +1448,22 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	applyPiMetadata(session, metadata)
 	applyEngramMetadata(session, metadata)
 	return nil
+}
+
+func parseSessionMetadataOutcome(metadata map[string]any) (manifest.SessionOutcome, bool, error) {
+	rawOutcome, present := metadata["outcome"]
+	if !present {
+		return manifest.OutcomeUnknown, false, nil
+	}
+	outcome, ok := rawOutcome.(string)
+	if !ok {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome type %T", rawOutcome)
+	}
+	parsed, err := manifest.ParseSessionOutcome(outcome)
+	if err != nil {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome: %w", err)
+	}
+	return parsed, true, nil
 }
 
 func applyCodexMetadata(session *manifest.Manifest, metadata map[string]any) {

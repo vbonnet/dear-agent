@@ -137,6 +137,10 @@ Provide a production-ready CLI that:
 
 **CLI-53** When `agm sandbox gc` builds the live-session set for the global sandbox pool, the CLI shall aggregate non-archived sessions from every configured workspace store rather than opening only the default workspace database. If a configured workspace Dolt database does not exist, the command shall record a visible GC warning and continue with the remaining reachable stores; if no configured store is reachable or all reachable stores return zero sessions, the command shall fail closed before removing any sandbox.
 
+**CLI-53** When `agm supervisor run --skip-oauth-check` is requested, the CLI shall reserve the shared supervisor OAuth-check override after preflight, repeat final live admission, commit the privileged use immediately before process launch, and refuse without launching when any authorization gate fails.
+
+**CLI-54** When `agm supervisor run` reaches its launch boundary, the CLI shall repeat final live admission, seal any supervisor OAuth-check and admission-brake reservations plus the spawn-recording obligation into a one-shot private Claude executor, re-resolve the configured Claude executable there, and commit those effects immediately before exec so a confirmed executor-start or executable-resolution failure consumes neither quota nor spawn stagger.
+
 ## Requirements
 
 ### Functional Requirements

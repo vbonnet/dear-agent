@@ -3,24 +3,307 @@ package harnessexec
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
+
+var (
+	testCodexHookSourceRepo   = "/reviewed/dear-agent"
+	testCodexHookSourceCommit = strings.Repeat("a", 40)
+	testCodexHookDigest       = strings.Repeat("b", 64)
+	testCodexHookSubject      = func() string {
+		subject, err := override.CodexHookTrustSubject(
+			testCodexHookSourceRepo,
+			testCodexHookSourceCommit,
+			testCodexHookDigest,
+		)
+		if err != nil {
+			panic(err)
+		}
+		return subject
+	}()
+	testCapabilityMu    sync.Mutex
+	testCapabilityNext  uint64
+	testCapabilityStore = map[string]override.LaunchCapability{}
+)
+
+func testCodexHookProof(session, reason, actor string) override.AuthorizationProof {
+	return override.AuthorizationProof{
+		Kind:            override.KindCodexHookTrust,
+		Reason:          reason,
+		Actor:           actor,
+		Session:         session,
+		Subject:         testCodexHookSubject,
+		AuthorizationID: "0123456789abcdef0123456789abcdef",
+	}
+}
+
+func TestReserveExecutorLaunchOverridesReauthenticatesClaimsAtLiveBrake(t *testing.T) {
+	brakeClaim := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator verified host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "worker-one",
+		AuthorizationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	onlyBrake := circuitbreaker.CheckResult{
+		Gates: []circuitbreaker.GateResult{{
+			Gate: "admission_brake", RequiresOverride: true,
+		}},
+	}
+	checks := 0
+	check := func() circuitbreaker.CheckResult {
+		checks++
+		return onlyBrake
+	}
+	fresh := &override.Reservation{}
+	var reserved override.Request
+	reservations, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{brakeClaim},
+		check,
+		func(request override.Request) (*override.Reservation, error) {
+			reserved = request
+			return fresh, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("reserve executor overrides: %v", err)
+	}
+	if checks != 2 {
+		t.Fatalf("live admission checks = %d, want 2", checks)
+	}
+	if len(reservations) != 1 || reservations[0] != fresh {
+		t.Fatalf("authenticated reservations = %v, want fresh reservation", reservations)
+	}
+	if reserved.Kind != brakeClaim.Kind ||
+		reserved.Reason != brakeClaim.Reason ||
+		reserved.Actor != brakeClaim.Actor ||
+		reserved.Session != brakeClaim.Session {
+		t.Fatalf("fresh reservation request = %+v, want exact launch claim", reserved)
+	}
+}
+
+func TestReserveExecutorLaunchOverridesDropsBrakeClaimWhenBrakeClears(t *testing.T) {
+	onlyBrake := circuitbreaker.CheckResult{
+		Gates: []circuitbreaker.GateResult{{
+			Gate: "admission_brake", RequiresOverride: true,
+		}},
+	}
+	results := []circuitbreaker.CheckResult{onlyBrake, {Allowed: true}}
+	reservations, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{{
+			Kind:            override.KindAdmissionBrake,
+			Reason:          "operator verified host recovery before this launch",
+			Actor:           "dispatcher-test",
+			Session:         "worker-one",
+			AuthorizationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		func() circuitbreaker.CheckResult {
+			result := results[0]
+			results = results[1:]
+			return result
+		},
+		func(override.Request) (*override.Reservation, error) {
+			return &override.Reservation{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("reserve executor overrides: %v", err)
+	}
+	if len(reservations) != 0 {
+		t.Fatalf("cleared brake retained %d authorization reservations", len(reservations))
+	}
+}
+
+func TestReserveExecutorLaunchOverridesRejectsOtherLiveGate(t *testing.T) {
+	reserveCalls := 0
+	_, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{{
+			Kind:            override.KindAdmissionBrake,
+			Reason:          "operator verified host recovery before this launch",
+			Actor:           "dispatcher-test",
+			Session:         "worker-one",
+			AuthorizationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		func() circuitbreaker.CheckResult {
+			return circuitbreaker.CheckResult{
+				Gates: []circuitbreaker.GateResult{{Gate: "disk"}},
+			}
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "live circuit breakers") {
+		t.Fatalf("other-gate error = %v", err)
+	}
+	if reserveCalls != 0 {
+		t.Fatalf("other-gate refusal made %d override reservations", reserveCalls)
+	}
+}
+
+func TestReserveExecutorLaunchOverridesLeavesOrdinaryLaunchAdmissionToParent(t *testing.T) {
+	checkCalls := 0
+	reserveCalls := 0
+	reservations, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		nil,
+		func() circuitbreaker.CheckResult {
+			checkCalls++
+			return circuitbreaker.CheckResult{
+				Gates: []circuitbreaker.GateResult{{Gate: "spawn_stagger"}},
+			}
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("ordinary launch override reservation error = %v", err)
+	}
+	if len(reservations) != 0 {
+		t.Fatalf("ordinary launch retained %d override reservations", len(reservations))
+	}
+	if checkCalls != 0 || reserveCalls != 0 {
+		t.Fatalf("ordinary launch made %d admission checks and %d reservations", checkCalls, reserveCalls)
+	}
+}
+
+func TestReserveExecutorLaunchOverridesRejectsOmittedBrakeClaim(t *testing.T) {
+	reserveCalls := 0
+	_, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{testCodexHookProof("worker-one", "reviewed hooks", "dispatcher-test")},
+		func() circuitbreaker.CheckResult {
+			return circuitbreaker.CheckResult{
+				Gates: []circuitbreaker.GateResult{{
+					Gate: "admission_brake", RequiresOverride: true,
+				}},
+			}
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires an admission-brake authorization claim") {
+		t.Fatalf("omitted-brake error = %v", err)
+	}
+	if reserveCalls != 0 {
+		t.Fatalf("omitted brake claim made %d override reservations", reserveCalls)
+	}
+}
+
+func TestReserveExecutorLaunchOverridesRejectsBrakeEngagedAfterReservation(t *testing.T) {
+	results := []circuitbreaker.CheckResult{
+		{Allowed: true},
+		{Gates: []circuitbreaker.GateResult{{
+			Gate: "admission_brake", RequiresOverride: true,
+		}}},
+	}
+	reserveCalls := 0
+	_, err := reserveExecutorLaunchOverrides(
+		"worker-one",
+		[]override.AuthorizationProof{testCodexHookProof("worker-one", "reviewed hooks", "dispatcher-test")},
+		func() circuitbreaker.CheckResult {
+			result := results[0]
+			results = results[1:]
+			return result
+		},
+		func(override.Request) (*override.Reservation, error) {
+			reserveCalls++
+			return &override.Reservation{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires an admission-brake authorization claim") {
+		t.Fatalf("late-brake error = %v", err)
+	}
+	if reserveCalls != 1 {
+		t.Fatalf("late brake made %d override reservations, want hook claim reauthorization before final check", reserveCalls)
+	}
+}
 
 func TestMain(m *testing.M) {
 	original := scheduleHandoffExpiry
+	originalAdmission := currentLaunchAdmission
+	originalIssueCapability := issueLaunchCapability
+	originalLoadCapability := loadLaunchCapability
+	originalConsumeCapability := consumeLaunchCapability
 	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) { return nil, nil }
+	currentLaunchAdmission = func() circuitbreaker.CheckResult {
+		return circuitbreaker.CheckResult{Allowed: true}
+	}
+	issueLaunchCapability = func(
+		claim override.LaunchCapabilityClaim,
+	) (override.LaunchCapability, error) {
+		testCapabilityMu.Lock()
+		defer testCapabilityMu.Unlock()
+		testCapabilityNext++
+		capability := override.LaunchCapability{
+			Version:               override.LaunchCapabilityVersion,
+			ID:                    fmt.Sprintf("%032x", testCapabilityNext),
+			LaunchCapabilityClaim: claim,
+			IssuedUTC:             time.Now().UTC(),
+		}
+		testCapabilityStore[capability.ID] = capability
+		return capability, nil
+	}
+	loadLaunchCapability = func(id string) (override.LaunchCapability, error) {
+		testCapabilityMu.Lock()
+		defer testCapabilityMu.Unlock()
+		capability, ok := testCapabilityStore[id]
+		if !ok {
+			return override.LaunchCapability{}, os.ErrNotExist
+		}
+		return capability, nil
+	}
+	consumeLaunchCapability = func(capability override.LaunchCapability) error {
+		testCapabilityMu.Lock()
+		defer testCapabilityMu.Unlock()
+		stored, ok := testCapabilityStore[capability.ID]
+		if !ok {
+			return os.ErrNotExist
+		}
+		storedJSON, err := override.EncodeLaunchCapability(stored)
+		if err != nil {
+			return err
+		}
+		consumeJSON, err := override.EncodeLaunchCapability(capability)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(storedJSON, consumeJSON) {
+			return errors.New("launch capability consume mismatch")
+		}
+		delete(testCapabilityStore, capability.ID)
+		return nil
+	}
 	code := m.Run()
 	scheduleHandoffExpiry = original
+	currentLaunchAdmission = originalAdmission
+	issueLaunchCapability = originalIssueCapability
+	loadLaunchCapability = originalLoadCapability
+	consumeLaunchCapability = originalConsumeCapability
 	os.Exit(code)
 }
 
@@ -61,6 +344,305 @@ func TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testin
 				t.Fatalf("cancelled = %v, want %v", cancelled, tc.wantCancelled)
 			}
 		})
+	}
+}
+
+func TestPreparedHarnessCommandCommitsBeforeExec(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalScheduleExpiry := scheduleHandoffExpiry
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalRecordSpawn := recordLaunchSpawn
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduleExpiry
+		commitLaunchOverrideProofs = originalCommitProofs
+		recordLaunchSpawn = originalRecordSpawn
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) {
+		return nil, nil
+	}
+
+	const command = "cd '/tmp/agy work' && agy --model fixture"
+	prepared, err := PrepareHarnessCommand("agy-worker", command, false, false)
+	if err != nil {
+		t.Fatalf("PrepareHarnessCommand() error = %v", err)
+	}
+	if !strings.HasPrefix(prepared.Command, "'/opt/agm/bin/agm' "+HarnessProtocol) ||
+		!strings.HasSuffix(prepared.Command, " && exit") {
+		t.Fatalf("prepared harness command = %q", prepared.Command)
+	}
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		t.Fatalf("direct harness invocation: %v", err)
+	}
+	if executable != "/opt/agm/bin/agm" || !slices.Equal(arguments, []string{
+		HarnessProtocol,
+		"--handoff", prepared.path,
+		"--session", "agy-worker",
+	}) {
+		t.Fatalf("direct harness invocation = %q %q", executable, arguments)
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		t.Fatalf("bind harness launch effects: %v", err)
+	}
+
+	var events []string
+	commitLaunchOverrideProofs = func(sessionName string, proofs ...override.AuthorizationProof) error {
+		if sessionName != "agy-worker" || len(proofs) != 0 {
+			t.Fatalf("commit launch = (%q, %v)", sessionName, proofs)
+		}
+		events = append(events, "commit")
+		return nil
+	}
+	recordLaunchSpawn = func() error {
+		events = append(events, "record-spawn")
+		return nil
+	}
+	replaceProcess = func(path string, argv, _ []string) error {
+		if path != "/bin/sh" || !slices.Equal(argv, []string{"sh", "-c", command}) {
+			t.Fatalf("replace process = (%q, %v)", path, argv)
+		}
+		events = append(events, "exec")
+		return errors.New("fixture exec returned")
+	}
+	err = Run(arguments[0], arguments[1:])
+	if err == nil || !strings.Contains(err.Error(), "fixture exec returned") {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "commit,record-spawn,exec"; got != want {
+		t.Fatalf("executor events = %q, want %q", got, want)
+	}
+}
+
+func TestGenericHandoffRejectsSelfGeneratedOverrideProof(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		commitLaunchOverrideProofs = originalCommitProofs
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	prepared, err := PrepareHarnessCommand(
+		"forged-generic",
+		"printf harmless",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("prepare generic handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+
+	data, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read generic handoff: %v", err)
+	}
+	var handoff launchHandoff
+	if err := json.Unmarshal(data, &handoff); err != nil {
+		t.Fatalf("decode generic handoff: %v", err)
+	}
+	handoff.OverrideProofs = []override.AuthorizationProof{{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "forged-actor",
+		Session:         "forged-generic",
+		AuthorizationID: "ffffffffffffffffffffffffffffffff",
+	}}
+	handoff.LaunchCapabilityID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	encoded, err := encodeBoundHandoff(handoff)
+	if err != nil {
+		t.Fatalf("encode forged generic handoff: %v", err)
+	}
+	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
+		t.Fatalf("write forged generic handoff: %v", err)
+	}
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		t.Fatal("self-generated proof reached override reauthorization")
+		return nil
+	}
+	replaceProcess = func(string, []string, []string) error {
+		t.Fatal("self-generated proof reached harness execution")
+		return nil
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "forged-generic",
+	})
+	if err == nil || !strings.Contains(err.Error(), "root-attested private launch capability") {
+		t.Fatalf("forged generic handoff error = %v", err)
+	}
+}
+
+func TestGenericHandoffCapabilityRejectsPostIssueMutation(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		commitLaunchOverrideProofs = originalCommitProofs
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	prepared, err := PrepareHarnessCommand(
+		"mutated-generic",
+		"agy --model reviewed",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("prepare generic handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	proof := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "mutated-generic",
+		AuthorizationID: "dddddddddddddddddddddddddddddddd",
+	}
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		HarnessProtocol,
+		false,
+		true,
+		[]override.AuthorizationProof{proof},
+	); err != nil {
+		t.Fatalf("bind root-attested generic handoff: %v", err)
+	}
+	data, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read bound generic handoff: %v", err)
+	}
+	var handoff launchHandoff
+	if err := json.Unmarshal(data, &handoff); err != nil {
+		t.Fatalf("decode bound generic handoff: %v", err)
+	}
+	handoff.HarnessCommand = "agy --model substituted"
+	encoded, err := encodeBoundHandoff(handoff)
+	if err != nil {
+		t.Fatalf("encode mutated generic handoff: %v", err)
+	}
+	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
+		t.Fatalf("write mutated generic handoff: %v", err)
+	}
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		t.Fatal("mutated handoff reached override reauthorization")
+		return nil
+	}
+	replaceProcess = func(string, []string, []string) error {
+		t.Fatal("mutated handoff reached harness execution")
+		return nil
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "mutated-generic",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match the private handoff") {
+		t.Fatalf("mutated generic handoff error = %v", err)
+	}
+}
+
+func TestGenericHandoffCapabilityIsOneShot(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	prepared, err := PrepareHarnessCommand(
+		"replayed-generic",
+		"printf harmless",
+		true,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("prepare generic handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	proof := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator reviewed host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "replayed-generic",
+		AuthorizationID: "abababababababababababababababab",
+	}
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		HarnessProtocol,
+		false,
+		false,
+		[]override.AuthorizationProof{proof},
+	); err != nil {
+		t.Fatalf("bind root-attested generic handoff: %v", err)
+	}
+	encoded, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read bound generic handoff: %v", err)
+	}
+	if _, err := consumeHandoff(prepared.path, HarnessProtocol, ""); err != nil {
+		t.Fatalf("consume first generic handoff: %v", err)
+	}
+	if err := os.WriteFile(prepared.path, encoded, 0o600); err != nil {
+		t.Fatalf("restore copied generic handoff: %v", err)
+	}
+	if _, err := consumeHandoff(prepared.path, HarnessProtocol, ""); err == nil ||
+		!strings.Contains(err.Error(), "root-attested private launch capability") {
+		t.Fatalf("replayed generic handoff error = %v", err)
+	}
+}
+
+func TestPreparedHarnessCommandRefusesExecWhenCommitFails(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalScheduleExpiry := scheduleHandoffExpiry
+	originalCommitProofs := commitLaunchOverrideProofs
+	originalRecordSpawn := recordLaunchSpawn
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduleExpiry
+		commitLaunchOverrideProofs = originalCommitProofs
+		recordLaunchSpawn = originalRecordSpawn
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) {
+		return nil, nil
+	}
+	prepared, err := PrepareHarnessCommand("agy-denied", "agy --model fixture", true, false)
+	if err != nil {
+		t.Fatalf("PrepareHarnessCommand() error = %v", err)
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		t.Fatalf("bind harness launch effects: %v", err)
+	}
+
+	refusal := errors.New("override ledger unavailable")
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		return refusal
+	}
+	recordLaunchSpawn = func() error {
+		t.Fatal("spawn recorded after override commit failed")
+		return nil
+	}
+	replaceProcess = func(string, []string, []string) error {
+		t.Fatal("harness executed after override commit failed")
+		return nil
+	}
+	err = Run(HarnessProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "agy-denied",
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("Run() error = %v, want %v", err, refusal)
 	}
 }
 
@@ -137,6 +719,139 @@ func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	}
 }
 
+func TestPreparedClaudeDirectInvocationDoesNotCommitWhenBinaryDisappears(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	originalRecordLaunchSpawn := recordLaunchSpawn
+	originalResolveClaudeOAuth := resolveClaudeOAuth
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		lookPathInEnvironment = originalLookPathInEnvironment
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+		recordLaunchSpawn = originalRecordLaunchSpawn
+		resolveClaudeOAuth = originalResolveClaudeOAuth
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	resolveClaudeOAuth = func() string { return "fresh-supervisor-oauth" }
+
+	prepared, err := PrepareClaudeCommand(ClaudeLaunch{
+		Binary:      "/opt/claude/bin/claude",
+		SessionName: "supervisor-s1",
+		Model:       "claude-test",
+		AutoMode:    true,
+		Permission:  "auto",
+		ExtraArgs:   []string{"--verbose"},
+		Persistent:  true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare direct Claude command: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	supervisorProof := override.AuthorizationProof{
+		Kind:            override.KindSupervisorOAuthCheck,
+		Reason:          "development supervisor has no stored OAuth credentials",
+		Actor:           "operator-test",
+		Session:         "supervisor-s1",
+		AuthorizationID: "0123456789abcdef0123456789abcdef",
+	}
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		ClaudeProtocol,
+		false,
+		true,
+		[]override.AuthorizationProof{supervisorProof},
+	); err != nil {
+		t.Fatalf("bind direct Claude launch effects: %v", err)
+	}
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		t.Fatalf("direct Claude invocation: %v", err)
+	}
+	if executable != "/opt/agm/bin/agm" ||
+		len(arguments) == 0 ||
+		arguments[0] != ClaudeProtocol ||
+		!slices.Contains(arguments, "/opt/claude/bin/claude") ||
+		!slices.Contains(arguments, "--verbose") {
+		t.Fatalf("direct Claude invocation = %q %q", executable, arguments)
+	}
+
+	lookPathInEnvironment = func(name string, _ []string) (string, error) {
+		if name != "/opt/claude/bin/claude" {
+			t.Fatalf("resolved Claude binary = %q", name)
+		}
+		return "", errors.New("claude disappeared")
+	}
+	commits := 0
+	recordedSpawns := 0
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		commits++
+		return nil
+	}
+	recordLaunchSpawn = func() error {
+		recordedSpawns++
+		return nil
+	}
+	err = Run(arguments[0], arguments[1:])
+	if err == nil || !strings.Contains(err.Error(), "resolve claude executable") {
+		t.Fatalf("missing direct Claude binary error = %v", err)
+	}
+	if commits != 0 || recordedSpawns != 0 {
+		t.Fatalf("missing Claude binary committed %d transactions and recorded %d spawns", commits, recordedSpawns)
+	}
+}
+
+func TestPreparedClaudeDirectInvocationRejectsRequestSubstitution(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		lookPathInEnvironment = originalLookPathInEnvironment
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	prepared, err := PrepareClaudeCommand(ClaudeLaunch{
+		Binary:      "/opt/claude/bin/claude",
+		SessionName: "supervisor-bound",
+		Model:       "claude-test",
+		ExtraArgs:   []string{"--verbose"},
+		Persistent:  true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare direct Claude command: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		t.Fatalf("bind direct Claude launch effects: %v", err)
+	}
+	_, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		t.Fatalf("direct Claude invocation: %v", err)
+	}
+	for index := range arguments {
+		if arguments[index] == "--binary" && index+1 < len(arguments) {
+			arguments[index+1] = "/opt/unreviewed/bin/claude"
+			break
+		}
+	}
+	lookPathInEnvironment = func(string, []string) (string, error) {
+		t.Fatal("substituted Claude request reached executable resolution")
+		return "", nil
+	}
+	commitLaunchOverrideProofs = func(string, ...override.AuthorizationProof) error {
+		t.Fatal("substituted Claude request committed launch effects")
+		return nil
+	}
+	err = Run(arguments[0], arguments[1:])
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested launch") {
+		t.Fatalf("substituted direct Claude request error = %v", err)
+	}
+}
+
 func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "stale-pane-openai")
@@ -166,6 +881,7 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *te
 		"TERM=dumb", "COLORTERM=stale-caller-color",
 		"TERM_PROGRAM=CodexDesktop", "TERM_PROGRAM_VERSION=0.0",
 		"OPENAI_API_KEY=caller-openai", "CODEX_ACCESS_TOKEN=caller-codex",
+		CodexWorkerWriteRootsEnv + `=["/caller/worktree","/caller/satellite.git"]`,
 		"ANTHROPIC_API_KEY=rejected-anthropic",
 	})
 	if err != nil {
@@ -193,15 +909,16 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *te
 	}
 	values := environmentMap(childEnvironment)
 	for name, want := range map[string]string{
-		"OPENAI_API_KEY":       "caller-openai",
-		"CODEX_ACCESS_TOKEN":   "caller-codex",
-		"TMUX":                 "live-pane-tmux",
-		"TMUX_PANE":            "%9",
-		"TERM":                 "tmux-256color",
-		"COLORTERM":            "truecolor",
-		"TERM_PROGRAM":         "tmux",
-		"TERM_PROGRAM_VERSION": "3.6a",
-		"PWD":                  "/tmp/work",
+		"OPENAI_API_KEY":         "caller-openai",
+		"CODEX_ACCESS_TOKEN":     "caller-codex",
+		"TMUX":                   "live-pane-tmux",
+		"TMUX_PANE":              "%9",
+		"TERM":                   "tmux-256color",
+		"COLORTERM":              "truecolor",
+		"TERM_PROGRAM":           "tmux",
+		"TERM_PROGRAM_VERSION":   "3.6a",
+		"PWD":                    "/tmp/work",
+		CodexWorkerWriteRootsEnv: `["/caller/worktree","/caller/satellite.git"]`,
 	} {
 		if got := values[name]; got != want {
 			t.Errorf("Codex child %s = %q, want %q", name, got, want)
@@ -215,6 +932,451 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *te
 	}
 	if _, err := os.Stat(prepared.path); !os.IsNotExist(err) {
 		t.Fatalf("consumed Codex handoff still exists: %v", err)
+	}
+}
+
+func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalReplaceProcess := replaceProcess
+	originalCodexHookOverrides := codexHookOverrides
+	originalVerifyCodexHookTrustAttestation := verifyCodexHookTrustAttestation
+	originalCommitLaunchOverrideProofs := commitLaunchOverrideProofs
+	originalRecordLaunchSpawn := recordLaunchSpawn
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		lookPathInEnvironment = originalLookPathInEnvironment
+		replaceProcess = originalReplaceProcess
+		codexHookOverrides = originalCodexHookOverrides
+		verifyCodexHookTrustAttestation = originalVerifyCodexHookTrustAttestation
+		commitLaunchOverrideProofs = originalCommitLaunchOverrideProofs
+		recordLaunchSpawn = originalRecordLaunchSpawn
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	hookConfigurationPrepared := false
+	executableResolved := false
+	lookPathInEnvironment = func(string, []string) (string, error) {
+		executableResolved = true
+		return "/fixed/codex", nil
+	}
+	codexHookOverrides = func(root, digest, workDir string) ([]string, error) {
+		hookConfigurationPrepared = true
+		if digest != testCodexHookDigest {
+			t.Fatalf("hook digest = %q, want %q", digest, testCodexHookDigest)
+		}
+		return []string{
+			`projects={"` + workDir + `"={trust_level="untrusted"}}`,
+			`hooks={"PreToolUse":[]}`,
+		}, nil
+	}
+
+	const hookRoot = "/trusted/hooks/0123456789abcdef"
+	const hookTrustReason = "sandbox path rotates per spawn so hooks cannot be pre-trusted"
+	const hookTrustActor = "dispatcher-test"
+	brakeProof := override.AuthorizationProof{
+		Kind:            override.KindAdmissionBrake,
+		Reason:          "operator verified host recovery before this launch",
+		Actor:           "dispatcher-test",
+		Session:         "bypass-codex",
+		AuthorizationID: "fedcba9876543210fedcba9876543210",
+	}
+	hookProof := testCodexHookProof("bypass-codex", hookTrustReason, hookTrustActor)
+	verifyCodexHookTrustAttestation = func(attestation codexhooks.Attestation, workDir string) error {
+		if attestation.SourceRepo != testCodexHookSourceRepo ||
+			attestation.SourceCommit != testCodexHookSourceCommit ||
+			attestation.Digest != testCodexHookDigest ||
+			attestation.HookRoot != hookRoot ||
+			workDir != "/tmp/work" {
+			t.Fatalf("hook attestation = %#v, workdir %q", attestation, workDir)
+		}
+		return nil
+	}
+	authorizedUses := 0
+	recordedSpawns := 0
+	commitLaunchOverrideProofs = func(sessionName string, proofs ...override.AuthorizationProof) error {
+		if !hookConfigurationPrepared || !executableResolved {
+			t.Fatal("hook-trust use recorded before launch preparation completed")
+		}
+		if sessionName != "bypass-codex" {
+			t.Fatalf("override session = %q, want bypass-codex", sessionName)
+		}
+		want := []override.AuthorizationProof{brakeProof, hookProof}
+		if !slices.Equal(proofs, want) {
+			t.Fatalf("committed override proofs = %+v, want complete transaction %+v", proofs, want)
+		}
+		authorizedUses++
+		return nil
+	}
+	recordLaunchSpawn = func() error {
+		if authorizedUses != 1 {
+			t.Fatalf("spawn recorded after %d authorization calls, want 1", authorizedUses)
+		}
+		recordedSpawns++
+		return nil
+	}
+	bindProof := func(prepared PreparedCommand, proofs ...override.AuthorizationProof) {
+		t.Helper()
+		if err := bindHandoffOverrideProofs(
+			prepared.path, CodexProtocol, true, true, proofs,
+		); err != nil {
+			t.Fatalf("bind override proof into trusted Codex handoff: %v", err)
+		}
+	}
+	prepared, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "bypass-codex",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bypass-codex", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare trusted Codex bypass: %v", err)
+	}
+	trustedRoot, err := trustedHandoffRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(prepared.path) != trustedRoot {
+		t.Fatalf("bypass handoff directory = %q, want %q", filepath.Dir(prepared.path), trustedRoot)
+	}
+	misboundBrakeProof := brakeProof
+	misboundBrakeProof.Session = "different-worker"
+	if err := bindHandoffOverrideProofs(
+		prepared.path,
+		CodexProtocol,
+		true,
+		true,
+		[]override.AuthorizationProof{misboundBrakeProof, hookProof},
+	); err == nil || !strings.Contains(err.Error(), "unrelated admission-brake proof") {
+		t.Fatalf("misbound admission-brake proof error = %v", err)
+	}
+	bindProof(prepared, brakeProof, hookProof)
+
+	var childArguments, childEnvironment []string
+	replaceProcess = func(_ string, argv, env []string) error {
+		if authorizedUses != 1 {
+			t.Fatalf("Codex replacement began after %d authorization calls, want 1", authorizedUses)
+		}
+		if recordedSpawns != 1 {
+			t.Fatalf("Codex replacement began after %d spawn records, want 1", recordedSpawns)
+		}
+		childArguments = append([]string(nil), argv...)
+		childEnvironment = append([]string(nil), env...)
+		return nil
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "bypass-codex",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
+		t.Fatalf("run prepared Codex bypass: %v", err)
+	}
+	if got := environmentMap(childEnvironment)["AGM_CODEX_HOOK_ROOT"]; got != hookRoot {
+		t.Fatalf("Codex hook root environment = %q, want %q", got, hookRoot)
+	}
+	if !slices.Contains(childArguments, `hooks={"PreToolUse":[]}`) {
+		t.Fatalf("Codex argv does not carry immutable hook configuration: %q", childArguments)
+	}
+
+	bound, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "bound-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare bound Codex bypass: %v", err)
+	}
+	bindProof(bound, testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor))
+	err = Run(CodexProtocol, []string{
+		"--handoff", bound.path,
+		"--session", "bound-bypass",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", "/trusted/hooks/different",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize") {
+		t.Fatalf("mismatched Codex hook root error = %v", err)
+	}
+
+	bound, err = PrepareCodexCommand(CodexLaunch{
+		SessionName:           "bound-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare launch-bound Codex bypass: %v", err)
+	}
+	bindProof(bound, testCodexHookProof("bound-bypass", hookTrustReason, hookTrustActor))
+	err = Run(CodexProtocol, []string{
+		"--handoff", bound.path,
+		"--session", "bound-bypass",
+		"--model", "gpt-test",
+		"--workdir", "/tmp",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested Codex launch") {
+		t.Fatalf("mismatched Codex launch error = %v", err)
+	}
+
+	bound, err = PrepareCodexCommand(CodexLaunch{
+		SessionName:           "bound-cold-remote-resume",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		ResumeID:              "thread-123",
+		Remote:                true,
+		RemoteResume:          true,
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("bound-cold-remote-resume", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare cold remote resume Codex bypass: %v", err)
+	}
+	bindProof(bound, testCodexHookProof("bound-cold-remote-resume", hookTrustReason, hookTrustActor))
+	err = Run(CodexProtocol, []string{
+		"--handoff", bound.path,
+		"--session", "bound-cold-remote-resume",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--resume-id", "thread-123",
+		"--remote",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested Codex launch") {
+		t.Fatalf("cold remote resume marker mutation error = %v", err)
+	}
+
+	err = Run(CodexProtocol, []string{
+		"--session", "forged-bypass",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires a prepared private handoff") {
+		t.Fatalf("direct Codex bypass error = %v, want prepared-handoff refusal", err)
+	}
+
+	ordinary, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "ordinary-handoff",
+		Model:       "gpt-test",
+		WorkDir:     "/tmp/work",
+		Sandbox:     "workspace-write",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare ordinary Codex handoff: %v", err)
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", ordinary.path,
+		"--session", "ordinary-handoff",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside the expected staging directory") {
+		t.Fatalf("ordinary handoff bypass error = %v", err)
+	}
+	if err := ordinary.Cancel(); err != nil {
+		t.Fatalf("cancel rejected ordinary handoff: %v", err)
+	}
+
+	configFailure, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "config-failure",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("config-failure", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare config-failure Codex bypass: %v", err)
+	}
+	bindProof(configFailure, testCodexHookProof("config-failure", hookTrustReason, hookTrustActor))
+	codexHookOverrides = func(string, string, string) ([]string, error) {
+		return nil, errors.New("configuration failed")
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", configFailure.path,
+		"--session", "config-failure",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "prepare immutable Codex hook configuration") {
+		t.Fatalf("hook configuration failure = %v", err)
+	}
+
+	resolveFailure, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "resolve-failure",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("resolve-failure", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare resolve-failure Codex bypass: %v", err)
+	}
+	bindProof(resolveFailure, testCodexHookProof("resolve-failure", hookTrustReason, hookTrustActor))
+	codexHookOverrides = func(string, string, string) ([]string, error) { return nil, nil }
+	lookPathInEnvironment = func(string, []string) (string, error) {
+		return "", errors.New("codex missing")
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", resolveFailure.path,
+		"--session", "resolve-failure",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve codex executable") {
+		t.Fatalf("Codex resolution failure = %v", err)
+	}
+
+	if _, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "overlapping-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               filepath.Dir(trustedRoot),
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("overlapping-bypass", hookTrustReason, hookTrustActor),
+	}, nil); err == nil || !strings.Contains(err.Error(), "overlaps agent-writable root") {
+		t.Fatalf("overlapping trusted handoff error = %v", err)
+	}
+
+	symlinkedRoot := filepath.Join(t.TempDir(), "trusted-via-symlink")
+	if err := os.Symlink(trustedRoot, symlinkedRoot); err != nil {
+		t.Fatalf("symlink trusted handoff root: %v", err)
+	}
+	if _, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "symlink-overlapping-bypass",
+		Model:                 "gpt-test",
+		WorkDir:               symlinkedRoot,
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("symlink-overlapping-bypass", hookTrustReason, hookTrustActor),
+	}, nil); err == nil || !strings.Contains(err.Error(), "overlaps agent-writable root") {
+		t.Fatalf("symlink-overlapping trusted handoff error = %v", err)
+	}
+
+	attestationFailure, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:           "attestation-failure",
+		Model:                 "gpt-test",
+		WorkDir:               "/tmp/work",
+		Sandbox:               "workspace-write",
+		BypassHookTrust:       true,
+		HookRoot:              hookRoot,
+		HookTrustReason:       hookTrustReason,
+		HookTrustActor:        hookTrustActor,
+		HookTrustSubject:      testCodexHookSubject,
+		HookTrustSourceRepo:   testCodexHookSourceRepo,
+		HookTrustSourceCommit: testCodexHookSourceCommit,
+		HookTrustDigest:       testCodexHookDigest,
+		HookTrustProof:        testCodexHookProof("attestation-failure", hookTrustReason, hookTrustActor),
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare attestation-failure Codex bypass: %v", err)
+	}
+	bindProof(attestationFailure, testCodexHookProof("attestation-failure", hookTrustReason, hookTrustActor))
+	verifyCodexHookTrustAttestation = func(codexhooks.Attestation, string) error {
+		return errors.New("persisted Git attestation changed")
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", attestationFailure.path,
+		"--session", "attestation-failure",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "revalidate approved Codex hook source") {
+		t.Fatalf("changed attestation error = %v", err)
+	}
+	if authorizedUses != 1 {
+		t.Fatalf("failed or ordinary launches recorded %d hook-trust uses, want only the real launch", authorizedUses)
 	}
 }
 
@@ -321,6 +1483,7 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "stale-pane-openai")
 	t.Setenv("CODEX_ACCESS_TOKEN", "stale-pane-codex")
+	t.Setenv(CodexWorkerWriteRootsEnv, `["/stale/pane"]`)
 
 	originalExecutablePath := executablePath
 	originalLookPathInEnvironment := lookPathInEnvironment
@@ -351,7 +1514,7 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 		t.Fatalf("run prepared Codex command: %v", err)
 	}
 	values := environmentMap(childEnvironment)
-	for _, name := range []string{"OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"} {
+	for _, name := range []string{"OPENAI_API_KEY", "CODEX_ACCESS_TOKEN", CodexWorkerWriteRootsEnv} {
 		if value, ok := values[name]; ok {
 			t.Errorf("Codex child retained caller-absent %s=%q from stale pane", name, value)
 		}
@@ -596,7 +1759,7 @@ func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing
 
 func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true)
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true, "")
 	if err != nil {
 		t.Fatalf("stage deferred handoff: %v", err)
 	}
@@ -651,7 +1814,7 @@ func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
 
 func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false)
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false, "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -669,7 +1832,7 @@ func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 
 func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, nil, false)
+	path, err := stageHandoff(CodexProtocol, nil, false, "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -696,7 +1859,7 @@ func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
 
 func TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false)
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false, "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -728,7 +1891,7 @@ func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing
 		"deferred": true,
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil, deferred)
+			path, err := stageHandoff(CodexProtocol, nil, deferred, "")
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}
@@ -749,7 +1912,7 @@ func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing
 				t.Fatalf("rewrite handoff timestamp: %v", err)
 			}
 
-			_, consumeErr := consumeHandoff(path, CodexProtocol)
+			_, consumeErr := consumeHandoff(path, CodexProtocol, "")
 			if deferred && consumeErr != nil {
 				t.Fatalf("deferred handoff rejected recent producer lease freshness: %v", consumeErr)
 			}
@@ -908,29 +2071,29 @@ func TestExecutorConsumesHandoffBeforeHarnessLookup(t *testing.T) {
 func TestConsumeHandoffRejectsCrossHarnessAndPublicState(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 
-	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false); err == nil {
+	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false, ""); err == nil {
 		t.Fatal("Codex staging accepted an Anthropic credential")
 	}
 
-	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false)
+	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false, "")
 	if err != nil {
 		t.Fatalf("stage wrong-protocol handoff: %v", err)
 	}
-	if _, err := consumeHandoff(wrongProtocol, CodexProtocol); err == nil {
+	if _, err := consumeHandoff(wrongProtocol, CodexProtocol, ""); err == nil {
 		t.Fatal("Codex executor accepted a Claude handoff")
 	}
 	if _, err := os.Stat(wrongProtocol); !os.IsNotExist(err) {
 		t.Fatalf("rejected wrong-protocol handoff still exists: %v", err)
 	}
 
-	public, err := stageHandoff(CodexProtocol, nil, false)
+	public, err := stageHandoff(CodexProtocol, nil, false, "")
 	if err != nil {
 		t.Fatalf("stage public-mode handoff: %v", err)
 	}
 	if err := os.Chmod(public, 0644); err != nil {
 		t.Fatalf("make handoff public: %v", err)
 	}
-	if _, err := consumeHandoff(public, CodexProtocol); err == nil {
+	if _, err := consumeHandoff(public, CodexProtocol, ""); err == nil {
 		t.Fatal("executor accepted a group/world-readable handoff")
 	}
 	if err := os.Remove(public); err != nil {
@@ -956,7 +2119,7 @@ func TestConsumeHandoffPreservesFilesOutsidePrivateStagingNamespace(t *testing.T
 			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 				t.Fatalf("write protected test file: %v", err)
 			}
-			if _, err := consumeHandoff(path, CodexProtocol); err == nil {
+			if _, err := consumeHandoff(path, CodexProtocol, ""); err == nil {
 				t.Fatal("executor accepted a file outside the private staging namespace")
 			}
 			got, err := os.ReadFile(path)
@@ -978,7 +2141,7 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 		"oversized":     strings.Repeat(" ", handoffMaxSize),
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil, false)
+			path, err := stageHandoff(CodexProtocol, nil, false, "")
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}
@@ -993,7 +2156,7 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatalf("close corrupted handoff: %v", err)
 			}
-			if _, err := consumeHandoff(path, CodexProtocol); err == nil {
+			if _, err := consumeHandoff(path, CodexProtocol, ""); err == nil {
 				t.Fatal("executor accepted a corrupted handoff")
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {

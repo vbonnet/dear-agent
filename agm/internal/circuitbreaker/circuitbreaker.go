@@ -269,9 +269,10 @@ type ProcCounter interface {
 
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake"
-	Passed  bool
-	Message string
+	Gate             string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake"
+	Passed           bool
+	RequiresOverride bool // true only when this exact refusal may be crossed by its scoped override
+	Message          string
 }
 
 // CheckResult aggregates all gate outcomes.
@@ -280,6 +281,25 @@ type CheckResult struct {
 	Gates   []GateResult
 	Load    float64
 	Level   DEARLevel
+}
+
+// RequiresAdmissionBrakeOverride reports whether the admission brake is the
+// only refusing gate. Launch surfaces use this shared classification both
+// before staging a process and in the private executor that authenticates a
+// deferred override claim.
+func RequiresAdmissionBrakeOverride(result CheckResult) bool {
+	engagedBrake := false
+	for _, gate := range result.Gates {
+		if gate.Passed {
+			continue
+		}
+		if gate.Gate == "admission_brake" && gate.RequiresOverride {
+			engagedBrake = true
+			continue
+		}
+		return false
+	}
+	return engagedBrake
 }
 
 // checkOptions carries the optional disk, process, and brake readers injected
@@ -647,10 +667,11 @@ func checkAdmissionBrake(br BrakeReader) GateResult {
 	}
 
 	return GateResult{
-		Gate:   "admission_brake",
-		Passed: false,
+		Gate:             "admission_brake",
+		Passed:           false,
+		RequiresOverride: true,
 		Message: fmt.Sprintf(
-			"admission brake engaged by %s: %s (set %s ago, expires %s). Spawns resume when the watchdog sees a healthy host, or delete %s to clear it.",
+			"admission brake engaged by %s: %s (set %s ago, expires %s). Spawns resume when the watchdog sees a healthy host; cross it once with an audited override (agm override approve admission-brake, then --brake-override=\"<reason>\"), or delete %s to clear it.",
 			brake.Source,
 			brake.Reason,
 			formatDuration(brake.Age(time.Now().UTC())),

@@ -79,7 +79,8 @@
       "Enabled": true,
       "TemplatePath": ""
     },
-    "WritableDirs": null
+    "WritableDirs": null,
+    "BypassCodexHookTrustReason": ""
   },
   "Budget": {
     "Enabled": false,

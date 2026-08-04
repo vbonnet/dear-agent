@@ -141,6 +141,42 @@ type SandboxConfig struct {
 	// host paths, which is what lets a worker commit to a real worktree or close
 	// a bead in the real Beads DB. Empty by default.
 	WritableDirs []string `yaml:"writable_dirs,omitempty"`
+
+	// BypassCodexHookTrustReason requests the audited Codex hook-trust override
+	// and states why. It is a reason rather than a bool on purpose: a bool is
+	// exactly the switch an unattended agent flips and nobody reviews.
+	//
+	// Codex persists hook trust keyed by the ABSOLUTE path of hooks.json. A
+	// sandboxed session runs from a fresh per-session workspace, so the hooks
+	// reflinked into it always present at a never-before-seen path and Codex
+	// blocks startup on "Hooks need review" — every time, unrecoverably, because
+	// the path is different on the next spawn too.
+	//
+	// Two independent controls both have to pass, because they answer different
+	// questions. Attestation asks whether the hooks are the reviewed ones:
+	// enabling this requires an explicit Repos entry for the reviewed golden
+	// checkout, and AGM pins the source commit, reads hooks.json and every
+	// project-referenced hook from immutable Git objects, verifies their
+	// SHA-256 digest against the sandbox copy, and materializes those exact
+	// objects in a content-addressed, read-only host directory outside every
+	// agent-writable root. Bypassed sessions execute project hooks only from
+	// that immutable root for their full lifetime. AGM repeats verification
+	// immediately before each launch and cold resume. The reviewed checkout is
+	// never forwarded as a writable Codex add-dir. Any missing, uncommitted,
+	// symlinked, changed, writable, or overlapping asset fails closed.
+	//
+	// Governance asks whether anyone agreed to run them unreviewed. Setting this
+	// is a request, not a grant: the launch still refuses unless a human has
+	// approved override kind "codex-hook-trust" through an interactive terminal
+	// into root-owned storage (`agm override approve`), and every authorized launch is recorded to the
+	// override ledger. See pkg/override.
+	//
+	// It is a reason rather than a bool on purpose: a bool is exactly the switch
+	// an unattended agent flips and nobody reviews. Attested hooks are still
+	// hooks running without per-path review, so this does not honour per-hook
+	// "enabled = false" decisions recorded against the golden path. Empty by
+	// default.
+	BypassCodexHookTrustReason string `yaml:"bypass_codex_hook_trust_reason,omitempty"`
 }
 
 // OnboardingConfig controls CLAUDE.md injection into sandboxed sessions
