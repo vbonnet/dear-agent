@@ -19,6 +19,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -1147,12 +1148,7 @@ func (r agyRequest) argv() []string {
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}
-	switch r.Permission {
-	case "auto", "dangerously-skip-permissions":
-		args = append(args, "--dangerously-skip-permissions")
-	case "plan":
-		args = append(args, "--mode", "plan")
-	}
+	args = append(args, launchparity.AgyPermissionModeArgs(r.Permission)...)
 	if r.ConversationID != "" {
 		args = append(args, "--conversation", r.ConversationID)
 	}

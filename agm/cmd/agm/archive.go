@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -978,9 +979,21 @@ func init() {
 		"Include supervisor sessions (orchestrator, overseer, meta-*) in bulk archive")
 	// Keep the protected-session bypass out of the public CLI. Only the
 	// dispatcher-owned recovery child receives this inherited capability.
-	allowSupervisorReap = os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1"
+	allowSupervisorReap = os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1" && dispatcherParentAuthenticated()
 	archiveCmd.Flags().StringVar(&archiveOutcome, "outcome", "",
 		"Outcome to stamp on the archived record: completed (default), crashed, killed, gc-stale")
 	archiveCmd.Flags().StringVar(&archiveTestEnv, "test-env", "", "Use named test environment created via agm test-env create")
 	sessionCmd.AddCommand(archiveCmd)
+}
+
+// dispatcherParentAuthenticated keeps the protected-session bypass scoped to
+// the dispatcher process boundary. The environment marker alone is not an
+// authorization because any local caller can set it.
+func dispatcherParentAuthenticated() bool {
+	parent := exec.Command("ps", "-p", strconv.Itoa(os.Getppid()), "-o", "comm=")
+	out, err := parent.Output()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(strings.TrimSpace(string(out))) == "vroom-dispatch"
 }
