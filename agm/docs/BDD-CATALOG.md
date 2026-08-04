@@ -1346,6 +1346,75 @@ diff-based package guard gives fast changed-package diagnostics, and the
 actual-checkout gate prevents any implementation directory from remaining
 outside strict SPEC and executable BDD enforcement.
 
+### SPEC Audit Tooling Evidence Boundary
+
+**File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)
+
+**Drives:** focused `tools/specaudit` unit tests for the root-module command's
+pinned inventory, validation, and offline HTML rendering behavior. It does not
+exercise skill discovery, skill invocation, provider behavior, or maintainer
+decisions.
+
+The runner compares only build-selected `TestGoFiles` and `XTestGoFiles` at its
+pre-test and post-test observation points to validate exact selected test
+declarations. This check does not cover or make immutable production Go files,
+module files, embed inputs, or dependencies. It also cannot detect a
+mid-run swap that is restored before the post-test observation. The
+implementation test source must already be trusted; the runner's bounded
+process, environment, and cleanup controls reduce accidental leakage and
+residue but are not a filesystem, network, or syscall sandbox.
+
+Each nested selection uses bounded `go test -json` output and is accepted only
+when every requested exact top-level name has exactly one `run` event and one
+terminal `pass`, followed by a package pass. Missing, duplicate, malformed,
+skipped, failed, out-of-order, or unrequested test events fail the BDD step even
+if the child process exits zero. Before each launch, the runner revalidates the
+captured Go and Git executable identities, ownership, and canonical ancestry.
+The default contract rejects world-writable executables and ancestors plus
+group-writable ancestors owned by another user; current-user-owned
+group-writable ancestors remain admissible for standard package-manager
+layouts. Git always uses that strict contract.
+
+GitHub-hosted Ubuntu is one explicit compatibility boundary because its image
+deliberately makes `/opt/hostedtoolcache` writable. The Go executable may use a
+runner-context fallback only when GitHub-defined runner variables name
+the `github-hosted` Linux/X64 environment, the image metadata is well formed,
+`RUNNER_TOOL_CACHE` resolves to exactly `/opt/hostedtoolcache`, no `GOROOT`
+override is present, and the compiled runtime version and GOROOT select exactly
+that tool cache's matching `go/<version>/x64/bin/go`. The runner retains the Go
+file and GOROOT identities, hashes the bounded Go executable, and revalidates
+the complete context, identities, and digest before every launch. This is a
+runner-context compatibility gate, not provider attestation: the writable
+GOROOT toolchain remains a trusted input and ordinary in-place and pre-exec
+races remain. Its task root is canonical, absolute, current-user-owned, and
+identity-bound; cleanup refuses a missing, replaced, wrong-owner, or wrong-mode
+root. None of these controls sandbox trusted test code.
+
+**Key scenarios:**
+- Exact pinned Git-object inventory ignores dirty worktree content.
+- Duplicate IDs, exact bodies, shared BDD paths, identical files, and harness
+  terminology remain deterministic review leads rather than semantic verdicts.
+- Missing and nonreciprocal SPEC/BDD links remain visible diagnostics.
+- Positive findings must match pinned Git-resolved evidence, identify one
+  shared reciprocal feature across current owners, and carry a structurally
+  complete ownership-preservation proposal that remains pending maintainer
+  approval; forged evidence and unsafe positive verdicts fail validation.
+- Offline HTML remains escaped, self-contained, and bounded.
+- The runner observes exact selected test declarations before and after their
+  execution without claiming complete build-input integrity or immutability.
+- The runner requires machine-readable evidence that every requested exact
+  top-level test ran once and passed; process exit status alone is insufficient.
+- Successful inventory, validation, and rendering emit their expected stdout
+  while preserving tracked bytes and status, index identity and content,
+  `HEAD`, refs, and relevant SPEC and feature bytes in the target repository.
+
+**Why this matters:** The audit command cannot credibly supply review evidence
+if dirty bytes can alter pinned evidence, lexical similarity becomes a merge
+verdict, reciprocal BDD drift is hidden, or a report mutates product state
+before maintainer review. The focused checks are not evidence that a skill is
+discoverable, that a maintainer accepted a recommendation, or that every Go
+build input remained unchanged while the selected tests ran.
+
 ### VROOM Runtime Guardrails
 
 **File:** [`vroom_runtime_guardrails.feature`](../test/bdd/features/vroom_runtime_guardrails.feature)

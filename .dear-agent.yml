@@ -117,6 +117,18 @@ instruction-policy:
       owner: wayfinder
     - match: wayfinder/skills/wayfinder/SKILL.md
       owner: wayfinder-plugin
+    - match: spec-governance/skills/write-spec/SKILL.md
+      owner: spec-governance
+    - match: spec-governance/skills/write-spec/references/contract-model.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/write-spec/references/ears-and-bdd.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/references/audit-verdicts.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/references/report-schema.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/SKILL.md
+      owner: spec-governance
     - match: wayfinder/PHASES.md
       owner: wayfinder
     - match: wayfinder/SPEC.md

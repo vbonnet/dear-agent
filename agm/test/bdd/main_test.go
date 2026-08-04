@@ -104,6 +104,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterSessionProtocolGuardrailSteps(ctx)
 	steps.RegisterAGMSupervisionRecoveryGuardrailSteps(ctx)
 	steps.RegisterSpecCoverageSteps(ctx)
+	steps.RegisterSpecGovernanceToolingSteps(ctx)
 	steps.RegisterSourceKnowledgePackageGuardrailSteps(ctx)
 	steps.RegisterWorkflowCommandGuardrailSteps(ctx)
 	steps.RegisterWorkflowPackageGuardrailSteps(ctx)
