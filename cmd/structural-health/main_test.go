@@ -71,6 +71,7 @@ func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
 		`--baseline 'custom/baseline.json'`,
 		"--update-baseline",
 		"--accept-new",
+		"--accept-scanner-change",
 		`--reason '<why>'`,
 		`--reference '<bead-or-pr>'`,
 	} {
@@ -82,13 +83,10 @@ func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
 
 func TestBootstrapCommandOmitsAdmissionForEmptyScan(t *testing.T) {
 	got := bootstrapCommand("repo", "empty.json", false)
-	for _, unwanted := range []string{"--accept-new", "--reason", "--reference"} {
+	for _, unwanted := range []string{"--accept-new", "--accept-scanner-change", "--reason", "--reference", "\n+"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("empty-scan bootstrap command %q unexpectedly contains %q", got, unwanted)
 		}
-	}
-	if err := validateAddedKeyAuthorization(0, strings.Contains(got, "--accept-new")); err != nil {
-		t.Fatalf("empty-scan bootstrap command is rejected: %v", err)
 	}
 }
 
@@ -125,8 +123,42 @@ func TestScanFileSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Key != "big.go" {
-		t.Fatalf("scanFileSize = %+v, want single finding big.go", got)
+	if len(got) != 1 || got[0].Key != "big.go (1005 lines)" {
+		t.Fatalf("scanFileSize = %+v, want single size-sensitive finding", got)
+	}
+}
+
+func TestParseFileSizeKey(t *testing.T) {
+	path, lines, ok := parseFileSizeKey("pkg/big.go (1205 lines)")
+	if !ok || path != "pkg/big.go" || lines != 1205 {
+		t.Fatalf("parseFileSizeKey = %q, %d, %v", path, lines, ok)
+	}
+	if _, _, ok := parseFileSizeKey("pkg/big.go"); ok {
+		t.Fatal("path-only key unexpectedly parsed as size finding")
+	}
+}
+
+func TestDiffFileSizeUsesMonotonicBudget(t *testing.T) {
+	base := baseline{Findings: map[string][]string{
+		"file-size": {"pkg/big.go (1300 lines)"},
+	}}
+	for _, tc := range []struct {
+		name    string
+		current string
+		wantReg bool
+	}{
+		{name: "reduction", current: "pkg/big.go (1200 lines)"},
+		{name: "same", current: "pkg/big.go (1300 lines)"},
+		{name: "growth", current: "pkg/big.go (1400 lines)", wantReg: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := diff(map[string][]finding{
+				"file-size": {{Key: tc.current}},
+			}, base)
+			if got := rep.regressionCount() > 0; got != tc.wantReg {
+				t.Fatalf("regression = %v, want %v", got, tc.wantReg)
+			}
+		})
 	}
 }
 

@@ -308,6 +308,11 @@ func runBoundedSpecAuditCommand(ctx context.Context, command *exec.Cmd, limit in
 	lifecycleDone := make(chan struct{})
 	contextResult := make(chan specAuditContextCancellationResult, 1)
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				contextResult <- specAuditContextCancellationResult{signalErr: fmt.Errorf("SPEC audit context watcher panicked: %v", recovered)}
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			err := processGroup.cancel()
