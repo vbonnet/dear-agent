@@ -48,8 +48,9 @@ func (s FindingState) IsTerminal() bool {
 //     conceptual finding across runs; the FindingID is the row id
 //     (assigned by the store) for one occurrence in one repo.
 //   - description: Title / Detail / Path / Line are what humans read.
-//   - lifecycle / metadata: Severity, Suggested, Evidence drive the
-//     remediation pipeline.
+//   - classification / metadata: Severity and Evidence drive policy and
+//     diagnostics; Suggested is inert input for operators or external
+//     automation.
 //
 // A Check builds Findings and returns them in Result.Findings; it
 // never sets FindingID, FirstSeen, LastSeen, ResolvedAt, or State —

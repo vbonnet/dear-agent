@@ -23,13 +23,6 @@ type Runner struct {
 	Store    Store
 	Logger   *slog.Logger
 
-	// Remediator is the dormant StrategyAuto compatibility seam. Runner drops
-	// Status and Reference, and drops Note unless State changes.
-	//
-	// Deprecated: Do not configure an in-repository side-effecting adapter before
-	// ce-1hu9.13 supplies an idempotent remediation-event persistence contract.
-	Remediator Remediator
-
 	// Now is overridable in tests. Production callers leave it nil
 	// and the runner uses time.Now.
 	Now func() time.Time
@@ -45,25 +38,23 @@ type Runner struct {
 	CheckTimeout time.Duration
 }
 
-// NewRunner constructs a Runner with sensible defaults: Default
-// registry, slog.Default logger, NoopRemediator, time.Now,
-// uuid.NewString. The caller MUST set Store before calling Run; the
-// runner panics on a nil store rather than silently dropping
-// findings.
+// NewRunner constructs a Runner with sensible defaults: Default registry,
+// slog.Default logger, time.Now, and uuid.NewString. The caller MUST set Store
+// before calling Run; the runner panics on a nil store rather than silently
+// dropping findings.
 func NewRunner() *Runner {
 	return &Runner{
-		Registry:   Default,
-		Logger:     slog.Default(),
-		Remediator: NewNoopRemediator(),
-		Now:        time.Now,
-		IDGen:      uuid.NewString,
+		Registry: Default,
+		Logger:   slog.Default(),
+		Now:      time.Now,
+		IDGen:    uuid.NewString,
 	}
 }
 
 // Plan describes one audit invocation: which checks to run, what
-// inputs they receive, what cadence label to record on the audit_runs
-// row, and how to remediate. A Plan is the data shape produced by
-// the .dear-agent.yml config loader and consumed by Runner.Run.
+// inputs they receive, what cadence label to record on the audit_runs row, and
+// which severity policy to apply. A Plan is the data shape produced by the
+// .dear-agent.yml config loader and consumed by Runner.Run.
 type Plan struct {
 	Repo     string
 	Cadence  Cadence
@@ -77,9 +68,6 @@ type Plan struct {
 	// SeverityPolicy maps each Severity to a per-severity policy.
 	// nil falls back to the package default in DefaultSeverityPolicy.
 	SeverityPolicy map[Severity]SeverityRule
-	// DryRun, when true, records findings but does not invoke the
-	// Remediator. Used by workflow-audit run --dry-run.
-	DryRun bool
 }
 
 // TreePlan describes one subtree of a Plan. Each tree has its own
@@ -488,9 +476,8 @@ func (r *Runner) preflight(plan Plan) error {
 	return preflightPlan(plan, r.Registry)
 }
 
-// preflightRunner validates the runner's own wiring. Side effect:
-// populates Remediator and Logger with safe defaults when callers
-// left them nil.
+// preflightRunner validates the runner's own wiring. It installs the default
+// logger when callers leave Logger nil.
 func (r *Runner) preflightRunner() error {
 	if r.Store == nil {
 		return errors.New("audit: Runner.Store is nil")
@@ -503,9 +490,6 @@ func (r *Runner) preflightRunner() error {
 	}
 	if r.Now == nil {
 		return errors.New("audit: Runner.Now is nil")
-	}
-	if r.Remediator == nil {
-		r.Remediator = NewNoopRemediator()
 	}
 	if r.Logger == nil {
 		r.Logger = slog.Default()
@@ -590,7 +574,7 @@ func (r *Runner) runOneCheck(
 	// Persist findings via the store. Apply the per-check severity
 	// ceiling and resolve unspecified strategies via policy.
 	for i := range result.Findings {
-		stored, ok := r.persistFinding(ctx, result.Findings[i], plan, meta, policy, env, logger)
+		stored, ok := r.persistFinding(ctx, result.Findings[i], plan, meta, policy, logger)
 		if !ok {
 			continue
 		}
@@ -605,16 +589,15 @@ func (r *Runner) runOneCheck(
 }
 
 // persistFinding handles the per-finding pipeline pulled out of
-// runOneCheck: stamp metadata, clamp severity, validate, upsert, and
-// (optionally) trigger inline auto-remediation. Returns the stored
-// finding plus an ok=false signal when the finding was dropped.
+// runOneCheck: stamp metadata, clamp severity, validate, and upsert. Suggested
+// remediation remains inert data. Returns the stored finding plus an ok=false
+// signal when the finding was dropped.
 func (r *Runner) persistFinding(
 	ctx context.Context,
 	f Finding,
 	plan Plan,
 	meta CheckMeta,
 	policy map[Severity]SeverityRule,
-	env Env,
 	logger *slog.Logger,
 ) (Finding, bool) {
 	f.Repo = plan.Repo
@@ -634,40 +617,5 @@ func (r *Runner) persistFinding(
 		logger.Warn("audit: UpsertFinding failed", "err", upErr, "fp", f.Fingerprint)
 		return Finding{}, false
 	}
-	if !plan.DryRun && stored.Suggested.Strategy == StrategyAuto && r.Remediator != nil {
-		stored = r.applyInlineRemediation(ctx, stored, env, logger)
-	}
 	return stored, true
-}
-
-// applyInlineRemediation runs the dormant remediator seam and, when it reports
-// a valid state change, passes only the state and note to the store. Status and
-// Reference are ignored; Note is also ignored for an invalid or unchanged
-// state. The outcome is therefore not durable evidence. Errors are logged;
-// nothing here is allowed to fail the audit run because the finding is already
-// persisted.
-func (r *Runner) applyInlineRemediation(
-	ctx context.Context,
-	stored Finding,
-	env Env,
-	logger *slog.Logger,
-) Finding {
-	if remErr := stored.Suggested.Validate(); remErr != nil {
-		logger.Warn("audit: remediation invalid; skipping", "err", remErr)
-		return stored
-	}
-	out, applyErr := r.Remediator.Apply(ctx, stored, env)
-	if applyErr != nil {
-		logger.Warn("audit: remediation failed", "err", applyErr)
-		return stored
-	}
-	if !out.State.IsValid() || out.State == stored.State {
-		return stored
-	}
-	updated, err := r.Store.SetFindingState(ctx, stored.FindingID, out.State, out.Note)
-	if err != nil {
-		logger.Warn("audit: SetFindingState failed", "err", err)
-		return stored
-	}
-	return updated
 }

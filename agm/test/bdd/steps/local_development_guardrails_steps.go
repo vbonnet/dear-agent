@@ -23,38 +23,47 @@ import (
 )
 
 type localDevGuardrailState struct {
-	command              string
-	commandSpec          string
-	library              string
-	librarySpec          string
-	traceDir             string
-	trace                safepr.Session
-	harness              string
-	family               string
-	preflightMinutes     int
-	localTestTimeout     string
-	affectedTestTimeout  string
-	ciTestTimeout        string
-	localVulnAllowlist   []string
-	ciVulnAllowlist      []string
-	worktreeBase         string
-	worktreeRepo         string
-	worktreePath         string
-	initialLockReason    string
-	transactionOutcome   string
-	transactionErr       error
-	lockedInPreflight    bool
-	lockedInPRCreate     bool
-	wayfinderCleanupErr  error
-	worktreePreserved    bool
-	cleanupRegression    string
-	cleanupRegressionErr error
-	childRegression      string
-	childRegressionErr   error
-	auditRegression      string
-	auditRegressionErr   error
-	treeRegression       string
-	treeRegressionErr    error
+	command               string
+	commandSpec           string
+	library               string
+	librarySpec           string
+	traceDir              string
+	trace                 safepr.Session
+	harness               string
+	family                string
+	preflightMinutes      int
+	localTestTimeout      string
+	affectedTestTimeout   string
+	ciTestTimeout         string
+	affectedPackageMins   int
+	affectedListMins      int
+	affectedStartupMins   int
+	affectedCommandMins   int
+	affectedJobMins       int
+	localVulnAllowlist    []string
+	ciVulnAllowlist       []string
+	worktreeBase          string
+	worktreeRepo          string
+	worktreePath          string
+	initialLockReason     string
+	transactionOutcome    string
+	transactionErr        error
+	lockedInPreflight     bool
+	lockedInPRCreate      bool
+	wayfinderCleanupErr   error
+	worktreePreserved     bool
+	cleanupRegression     string
+	cleanupRegressionErr  error
+	childRegression       string
+	childRegressionErr    error
+	auditRegression       string
+	auditRegressionErr    error
+	treeRegression        string
+	treeRegressionErr     error
+	requiredCIRegression  string
+	requiredCIError       error
+	mergeLoopCIRegression string
+	mergeLoopCIError      error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -108,6 +117,8 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
 	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
 	ctx.Step(`^bounded affected runner commands should terminate their descendants$`, boundedAffectedRunnerCommandsShouldTerminateTheirDescendants)
+	ctx.Step(`^AGM runs the effective required-check regressions$`, agmRunsEffectiveRequiredCheckRegressions)
+	ctx.Step(`^safe-merge should enforce complete provider-required CI without advisory drift$`, safeMergeShouldEnforceProviderRequiredCI)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
@@ -323,8 +334,81 @@ func boundedAffectedRunnerCommandsShouldTerminateTheirDescendants(ctx context.Co
 	return nil
 }
 
+func agmRunsEffectiveRequiredCheckRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.requiredCIRegression, state.requiredCIError = runLocalGuardrailGoTest(ctx,
+		`^Test(ParseAppliedRulesRequiredChecks|ParseAppliedRulesRequiredChecksKnownEmpty|ParseAppliedRulesRequiredChecksFlagsRequiredWorkflows|ParseClassicRequiredChecksPreservesIntegrationScope|MergeRequiredCheckPoliciesUnionsLayeredSources|DiscoverRequiredChecksAcceptsAuthoritativeEmpty|DiscoverRequiredChecksRejectsPartialPolicyOnSourceError|DiscoverRequiredChecksUsesPaginatedSlurp|RulesBranchEndpointEscapesSlashBase|ProviderRequiredClassificationIgnoresAdvisoryFailure|ProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing|ProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity|ProviderRequiredClassificationRejectsDiscoveryDisagreement|ProjectRequiredChecksReconcilesEffectivePolicy|ProjectRequiredChecksSynthesizesMissingContext|ProjectRequiredChecksAcceptsStatusExits|ProjectRequiredChecksAcceptsAuthoritativeEmptyProviderError|ProjectRequiredChecksPreservesAuthoritativeEmptyFallback|ProjectRequiredChecksRejectsNoChecksWhenPolicyNonempty|CheckAllCIAcceptsNoChecksWhenPolicyEmpty|CheckAllCIValidatesAllWhenPolicyEmpty|CheckAllCIIgnoresNonzeroAdvisoryCheckStatus)$`,
+		"./internal/safegit",
+	)
+	cmdOutput, cmdErr := runLocalGuardrailNamedGoTests(ctx, "./cmd/mergeloop",
+		"TestMergeLoopUsesSharedRequiredProjection",
+		"TestMergeLoopPreservesAuthoritativeEmptyFallback",
+		"TestMergeLoopMapsProjectedRequiredStatuses",
+		"TestMergeLoopDefersOnlyUnavailableProjection",
+		"TestMergeLoopDefersOnlyUnknownProjectedStatus",
+		"TestMergeLoopAbortsWhenParentContextCanceled",
+		"TestMergeLoopSkipsProjectionWhenOpenPRsExceedCap",
+	)
+	internalOutput, internalErr := runLocalGuardrailNamedGoTests(ctx, "./internal/mergeloop",
+		"TestProjectionErrorPreservesAttemptBudget",
+	)
+	state.mergeLoopCIRegression = strings.Join([]string{cmdOutput, internalOutput}, "\n")
+	state.mergeLoopCIError = errors.Join(cmdErr, internalErr)
+	return nil
+}
+
+func safeMergeShouldEnforceProviderRequiredCI(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.requiredCIError != nil {
+		return fmt.Errorf("safegit effective required-check regressions: %w: %s", state.requiredCIError, state.requiredCIRegression)
+	}
+	if state.mergeLoopCIError != nil {
+		return fmt.Errorf("mergeloop effective required-check regressions: %w: %s", state.mergeLoopCIError, state.mergeLoopCIRegression)
+	}
+	return nil
+}
+
 func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
 	return runLocalGuardrailGoTestWith(parent, nil, pattern, packages...)
+}
+
+func runLocalGuardrailNamedGoTests(parent context.Context, packagePath string, testNames ...string) (string, error) {
+	patterns := make([]string, 0, len(testNames))
+	for _, testName := range testNames {
+		patterns = append(patterns, regexp.QuoteMeta(testName))
+	}
+	pattern := "^(" + strings.Join(patterns, "|") + ")$"
+	output, err := runLocalGuardrailGoTest(parent, pattern, packagePath)
+	if err != nil {
+		return output, err
+	}
+	if missing := missingNamedGoTestRuns(output, testNames...); len(missing) > 0 {
+		return output, fmt.Errorf("go test package %q did not run named regressions: %s", packagePath, strings.Join(missing, ", "))
+	}
+	return output, nil
+}
+
+func missingNamedGoTestRuns(output string, testNames ...string) []string {
+	ran := make(map[string]struct{}, len(testNames))
+	for line := range strings.SplitSeq(output, "\n") {
+		if testName, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), "=== RUN   "); ok {
+			ran[testName] = struct{}{}
+		}
+	}
+
+	missing := make([]string, 0, len(testNames))
+	for _, testName := range testNames {
+		if _, ok := ran[testName]; !ok {
+			missing = append(missing, testName)
+		}
+	}
+	return missing
 }
 
 // runLocalGuardrailGoTestWith is runLocalGuardrailGoTest with extra `go test`
@@ -907,4 +991,17 @@ func getLocalDevGuardrailState(ctx context.Context) (*localDevGuardrailState, er
 
 func localDevBDDRepoRoot() string {
 	return packageSpecBDDRepoRoot()
+}
+
+func minuteConstant(source, name string) (int, error) {
+	pattern := fmt.Sprintf(`(?m)^\s*%s\s*=\s*(\d+)\s*\*\s*time\.Minute$`, regexp.QuoteMeta(name))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(source)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("affected integration %s declaration not found", name)
+	}
+	minutes, err := strconv.Atoi(match[1])
+	if err != nil || minutes <= 0 {
+		return 0, fmt.Errorf("affected integration %s must be positive minutes", name)
+	}
+	return minutes, nil
 }
