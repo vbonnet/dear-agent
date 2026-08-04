@@ -1,6 +1,6 @@
 // Package skilllint validates tracked AI skill and command Markdown surfaces.
 // It keeps portable skill quality, provider command policy, repository
-// discovery, and exact-duplicate detection behind one interface.
+// discovery, and single-owner skill-name enforcement behind one interface.
 package skilllint
 
 import (
@@ -51,6 +51,19 @@ type document struct {
 	displayPath string
 	readPath    string
 	kind        surfaceKind
+}
+
+type checkedDocument struct {
+	document
+	data         []byte
+	mode         os.FileMode
+	resolvedPath string
+	skillName    string
+}
+
+type skillOwner struct {
+	displayPath  string
+	resolvedPath string
 }
 
 var (
@@ -197,13 +210,13 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 
 func checkDocuments(containmentRoot string, documents []document) ([]Violation, error) {
 	var violations []Violation
-	firstByDigest := make(map[[sha256.Size]byte]string)
+	checked := make([]checkedDocument, 0, len(documents))
 	for _, doc := range documents {
 		info, err := os.Lstat(doc.readPath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: stat: %w", doc.displayPath, err)
 		}
-		inside, containmentErr := resolvedInside(containmentRoot, doc.readPath)
+		resolvedPath, inside, containmentErr := resolveInside(containmentRoot, doc.readPath)
 		if containmentErr != nil {
 			return nil, fmt.Errorf("%s: resolve: %w", doc.displayPath, containmentErr)
 		}
@@ -216,38 +229,118 @@ func checkDocuments(containmentRoot string, documents []document) ([]Violation, 
 			return nil, fmt.Errorf("%s: read: %w", doc.displayPath, err)
 		}
 		violations = append(violations, checkData(doc.displayPath, data, doc.kind)...)
-		// A tracked symlink is a discovery alias, not a byte-for-byte copy. Its
-		// target is still validated above, but only regular files own content.
-		if doc.kind != surfaceSkill || info.Mode()&os.ModeSymlink != 0 {
+		if doc.kind != surfaceSkill {
 			continue
 		}
-		digest := semanticSkillDigest(data)
+
+		candidate := checkedDocument{
+			document:     doc,
+			data:         data,
+			mode:         info.Mode(),
+			resolvedPath: resolvedPath,
+		}
+		fm, _, _, present, parseErr := extractDocument(data)
+		if parseErr == nil && present {
+			candidate.skillName = strings.TrimSpace(fm.Name)
+		}
+		checked = append(checked, candidate)
+	}
+
+	firstByDigest := make(map[[sha256.Size]byte]string)
+	ownerByName := make(map[string]skillOwner)
+	for _, doc := range checked {
+		// Symlinks are aliases. Only regular files may own a skill name or
+		// participate in content-copy detection.
+		if doc.mode&os.ModeSymlink != 0 {
+			continue
+		}
+
+		digest := semanticSkillDigest(doc.data)
+		equivalentCopy := false
 		if first, exists := firstByDigest[digest]; exists {
 			violations = append(violations, Violation{
 				Path:   doc.displayPath,
 				Reason: fmt.Sprintf("content-equivalent to %s after frontmatter and whitespace normalization", first),
 			})
+			equivalentCopy = true
+		} else {
+			firstByDigest[digest] = doc.displayPath
+		}
+
+		if doc.skillName == "" {
 			continue
 		}
-		firstByDigest[digest] = doc.displayPath
+		if owner, exists := ownerByName[doc.skillName]; exists {
+			if !equivalentCopy {
+				violations = append(violations, Violation{
+					Path: doc.displayPath,
+					Reason: fmt.Sprintf(
+						"skill name %q already has regular-file owner %s; use a contained symlink to that canonical SKILL.md for discovery",
+						doc.skillName,
+						owner.displayPath,
+					),
+				})
+			}
+			continue
+		}
+		ownerByName[doc.skillName] = skillOwner{
+			displayPath:  doc.displayPath,
+			resolvedPath: doc.resolvedPath,
+		}
+	}
+
+	for _, doc := range checked {
+		if doc.mode&os.ModeSymlink == 0 || doc.skillName == "" {
+			continue
+		}
+		owner, exists := ownerByName[doc.skillName]
+		if !exists {
+			violations = append(violations, Violation{
+				Path: doc.displayPath,
+				Reason: fmt.Sprintf(
+					"skill symlink for name %q does not resolve to a tracked regular-file canonical SKILL.md owner",
+					doc.skillName,
+				),
+			})
+			continue
+		}
+		if doc.resolvedPath != owner.resolvedPath {
+			violations = append(violations, Violation{
+				Path: doc.displayPath,
+				Reason: fmt.Sprintf(
+					"skill symlink for name %q resolves to a noncanonical target; expected %s",
+					doc.skillName,
+					owner.displayPath,
+				),
+			})
+		}
 	}
 	return violations, nil
 }
 
-func resolvedInside(root, path string) (bool, error) {
+func resolveInside(root, path string) (string, bool, error) {
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return false, err
+		return "", false, err
+	}
+	resolvedRoot, err = filepath.Abs(resolvedRoot)
+	if err != nil {
+		return "", false, err
+	}
+	resolvedPath, err = filepath.Abs(resolvedPath)
+	if err != nil {
+		return "", false, err
 	}
 	relative, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)), nil
+	inside := relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	return filepath.Clean(resolvedPath), inside, nil
 }
 
 func semanticSkillDigest(data []byte) [sha256.Size]byte {
@@ -258,8 +351,9 @@ func semanticSkillDigest(data []byte) [sha256.Size]byte {
 		if closing >= 0 {
 			var frontmatter map[string]any
 			if yaml.Unmarshal([]byte(canonical[4:4+closing]), &frontmatter) == nil {
-				// Integrity stamps describe the current bytes; they are not part of
-				// the skill's semantic identity for duplicate detection.
+				// Some producers use content-hash as separately validated metadata.
+				// This package does not attest that value, and it is not part of the
+				// skill's semantic identity for duplicate detection.
 				delete(frontmatter, "content-hash")
 				if encoded, marshalErr := json.Marshal(frontmatter); marshalErr == nil {
 					canonical = string(encoded) + "\n" + normalizeSkillBody(string(body))
