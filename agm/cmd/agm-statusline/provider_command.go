@@ -81,6 +81,7 @@ func startProviderCommand(cmd *exec.Cmd, input []byte) (*providerCommandRun, err
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: stdin writer panicked: %v\n", recovered)
 				run.inputDone <- fmt.Errorf("provider stdin writer panicked: %v", recovered)
 			}
 		}()
@@ -90,6 +91,7 @@ func startProviderCommand(cmd *exec.Cmd, input []byte) (*providerCommandRun, err
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: stdout reader panicked: %v\n", recovered)
 				run.readDone <- fmt.Errorf("provider stdout reader panicked: %v", recovered)
 			}
 		}()
@@ -99,6 +101,7 @@ func startProviderCommand(cmd *exec.Cmd, input []byte) (*providerCommandRun, err
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "agm-statusline: provider wait panicked: %v\n", recovered)
 				run.waitDone <- fmt.Errorf("provider wait panicked: %v", recovered)
 			}
 		}()
