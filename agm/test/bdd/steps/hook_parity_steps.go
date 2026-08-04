@@ -264,7 +264,7 @@ func validateCanonicalAGMInstallPlan(output string) error {
 	stampFragments := []string{
 		"-ldflags",
 		"-X github.com/vbonnet/dear-agent/pkg/version.Version=${_BUILD_STAMP_VERSION}",
-		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_BUILD_STAMP_GIT_COMMIT}",
+		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=$(_BUILD_STAMP_GIT_COMMIT)",
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_BUILD_STAMP_DATE}",
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=makefile",
 	}

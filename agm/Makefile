@@ -17,27 +17,6 @@ lint:
 install:
 	$(MAKE) -C .. install-agm install-agm-mcp-server
 
-# Retained only as an explicit migration aid; normal install no longer uses
-# this legacy recipe, which writes binaries from the agm subdirectory.
-legacy-install: build
-	$(MAKE) -C .. install-agm install-agm-mcp-server
-	@# Clean up old binaries from incorrect locations to prevent confusion
-	@rm -f $(HOME)/bin/agm $(HOME)/.local/bin/agm 2>/dev/null || true
-	@rm -f $(HOME)/bin/csm $(HOME)/.local/bin/csm 2>/dev/null || true  # Remove legacy csm binaries
-	@rm -f $(HOME)/bin/agm-reaper $(HOME)/.local/bin/agm-reaper 2>/dev/null || true
-	@rm -f $(HOME)/bin/agm-mcp-server $(HOME)/.local/bin/agm-mcp-server 2>/dev/null || true
-	@# Install to the standard Go binary location. `install -m` was NOT atomic
-	@# enough: like cp it rewrites the destination inode, so on macOS a rebuilt
-	@# binary fails the cached code-signing check and is SIGKILLed before main()
-	@# runs. install-go-bin stages, signs and renames instead (ce-77ip.8).
-	mkdir -p $(HOME)/go/bin
-	$(call install-go-bin,bin/agm)
-	$(call install-go-bin,bin/agm-reaper)
-	$(call install-go-bin,bin/agm-mcp-server)
-	@echo "✓ agm binary installed to $(HOME)/go/bin/agm"
-	@echo "✓ agm-reaper binary installed to $(HOME)/go/bin/agm-reaper"
-	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"
-	@echo ""
 	@# Install SessionStart hook (auto-discovered from $(HOME)/.claude/hooks/session-start/)
 	@mkdir -p $(HOME)/.claude/hooks/session-start
 	@install -m 755 docs/hooks/session-start-agm.sh $(HOME)/.claude/hooks/session-start/agm-ready-signal
