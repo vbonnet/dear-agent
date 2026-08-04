@@ -55,7 +55,7 @@ that triggered it.
 
 **GITHOOK-19** When the system decides whether a repository is managed, the system shall resolve symlinks and compare whole path components, so that a temporary directory reached through a symlinked parent and a sibling sharing a textual prefix are both treated as unmanaged.
 
-**GITHOOK-20** When build-relevant AGM source triggers a pair rebuild, the system shall require an immutable detached checkout at freshly resolved origin trunk or pinned local HEAD, derive Version as `dev-<revision>`, GitCommit as the pinned 12-character revision, BuildDate as the pinned commit time in UTC RFC3339 form, and BuiltBy as `post-merge-hook` before either build, pass the same complete profile as one argument following `-ldflags` to both builds, and preserve the installed pair if the checkout, revision, or commit time cannot be resolved.
+**GITHOOK-20** When build-relevant AGM source triggers a pair rebuild, the system shall require an immutable detached checkout at freshly resolved origin trunk or pinned local HEAD, derive Version as `dev-<revision>`, GitCommit as the pinned exact 12-character lowercase hexadecimal revision without truncating an overlength uniqueness abbreviation, BuildDate as the pinned commit time in UTC RFC3339 form, and BuiltBy as `post-merge-hook` before either build, pass the same complete profile as one argument following `-ldflags` to both builds, and preserve the installed pair if the checkout, revision, or commit time cannot be resolved.
 
 ## BDD Traceability
 

@@ -101,50 +101,6 @@ func TestRebuild_AGMPairBuildsWithCompletePinnedProvenance(t *testing.T) {
 	}
 }
 
-func TestRebuild_AGMPairNormalizesLongUniqueRevision(t *testing.T) {
-	repo := newRebuildRepo(t)
-	mergeBranchChanging(t, repo, map[string]string{
-		"agm/internal/tmux/prompt.go": "package tmux // long unique revision\n",
-	})
-	wantCommit, wantFlags := pairProvenanceAt(t, repo, "HEAD")
-
-	recordFile := filepath.Join(t.TempDir(), "builds")
-	goDir := stubGo(t, recordFile)
-	gitDir := stubGitArgumentFailure(t)
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git not available")
-	}
-	cmd := exec.Command("bash", hookPath(t))
-	cmd.Dir = repo
-	cmd.Env = append(gittest.Env(t),
-		"HOME="+t.TempDir(),
-		"PATH="+gitDir+string(os.PathListSeparator)+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"REAL_GIT="+realGit,
-		"STUB_GIT_FAIL_ARG=--short=12",
-		"STUB_GIT_OUTPUT="+wantCommit[:12]+"f",
-		"STUB_GIT_STATUS=0",
-		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
-		"AGM_POST_MERGE_SWEEP=0",
-	)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("hook must accept a longer unique prefix, got %v\n%s", err, output)
-	}
-
-	records := installRecords(t, recordFile)
-	if len(records) != 2 {
-		t.Fatalf("long-prefix pair rebuild recorded %d builds, want two: %+v", len(records), records)
-	}
-	for _, record := range records {
-		if record.commit != wantCommit {
-			t.Errorf("%s built from %s, want %s", record.pkg, record.commit, wantCommit)
-		}
-		if record.ldflags != wantFlags {
-			t.Errorf("%s ldflags = %q, want normalized profile %q", record.pkg, record.ldflags, wantFlags)
-		}
-	}
-}
-
 func TestRebuild_DetachedSourceSurvivesClosedStderr(t *testing.T) {
 	origin := newRebuildRepo(t)
 	wantCommit := revParse(t, origin, "HEAD")
@@ -198,6 +154,13 @@ func TestRebuild_AGMPairAdmissionFailurePreservesInstalledPair(t *testing.T) {
 			name:        "malformed revision",
 			failArg:     "--short=12",
 			output:      "zzzzzzzzzzzz",
+			status:      "0",
+			wantWarning: "cannot resolve complete AGM pair provenance",
+		},
+		{
+			name:        "overlength uniqueness revision",
+			failArg:     "--short=12",
+			output:      "0123456789abc",
 			status:      "0",
 			wantWarning: "cannot resolve complete AGM pair provenance",
 		},

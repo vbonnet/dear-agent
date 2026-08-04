@@ -399,9 +399,11 @@ resolve_agm_pair_provenance() {
   local _resolved_revision _resolved_build_date
 
   _resolved_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
-  [ "${#_resolved_revision}" -ge 12 ] || return 1
+  # Git lengthens --short=12 when twelve characters are not unique. Preserve
+  # that signal by rejecting the governed 12-character profile rather than
+  # truncating a unique abbreviation back into ambiguity.
+  [ "${#_resolved_revision}" -eq 12 ] || return 1
   case "${_resolved_revision}" in *[!0-9a-f]*) return 1 ;; esac
-  _resolved_revision="${_resolved_revision:0:12}"
 
   _resolved_build_date="$(
     TZ=UTC git -C "${build_dir}" show -s --format=%cd \
