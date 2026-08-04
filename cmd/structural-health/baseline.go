@@ -25,7 +25,7 @@ const (
 
 	// scannerKeyVersion changes only when a scan's stable-key semantics change.
 	// It is independent from the baseline JSON schema version.
-	scannerKeyVersion = 1
+	scannerKeyVersion = 2
 )
 
 // baseline is the accepted structural-debt snapshot. Version 1 contained only

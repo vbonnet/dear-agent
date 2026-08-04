@@ -364,7 +364,8 @@ func isUnderCmd(importPath string) bool {
 }
 
 // scanFileSize walks the tree and flags .go files longer than the threshold.
-// Keys are repo-relative paths so the baseline is location-independent.
+// Keys include the observed line count so an admitted file cannot grow without
+// producing a new finding and an explicit baseline transition.
 func scanFileSize(root string) ([]finding, error) {
 	var out []finding
 	err := walkGoFiles(root, func(path, rel string) error {
@@ -373,7 +374,10 @@ func scanFileSize(root string) ([]finding, error) {
 			return err
 		}
 		if n > fileSizeThreshold {
-			out = append(out, finding{Key: rel, Detail: fmt.Sprintf("%d lines", n)})
+			out = append(out, finding{
+				Key:    fmt.Sprintf("%s (%d lines)", rel, n),
+				Detail: fmt.Sprintf("%d lines", n),
+			})
 		}
 		return nil
 	})

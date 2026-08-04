@@ -125,8 +125,8 @@ func TestScanFileSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Key != "big.go" {
-		t.Fatalf("scanFileSize = %+v, want single finding big.go", got)
+	if len(got) != 1 || got[0].Key != "big.go (1005 lines)" {
+		t.Fatalf("scanFileSize = %+v, want single size-sensitive finding", got)
 	}
 }
 
