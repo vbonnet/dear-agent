@@ -662,7 +662,7 @@ func validateUpdateAuthorization(
 	if err := validateAddedKeyAuthorization(change.admissionAddedCount(), request.AcceptNew); err != nil {
 		return "", "", err
 	}
-	if !(request.bootstrap && change.admissionAddedCount() == 0 && !request.AcceptScannerChange) {
+	if !request.bootstrap || change.admissionAddedCount() != 0 || request.AcceptScannerChange {
 		if err := validateScannerChangeAuthorization(
 			previousScannerVersion,
 			targetScannerVersion,
