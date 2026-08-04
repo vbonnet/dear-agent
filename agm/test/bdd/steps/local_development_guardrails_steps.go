@@ -58,16 +58,13 @@ type localDevGuardrailState struct {
 	childRegressionErr    error
 	auditRegression       string
 	auditRegressionErr    error
+	treeRegression        string
+	treeRegressionErr     error
 	requiredCIRegression  string
 	requiredCIError       error
 	mergeLoopCIRegression string
 	mergeLoopCIError      error
 }
-
-const (
-	minimumAffectedTestStartupGraceMins = 10
-	minimumAffectedWorkflowHeadroomMins = 5
-)
 
 type localDevGuardrailStateKey struct{}
 
@@ -118,6 +115,8 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
 	ctx.Step(`^AGM runs the safe-pr final transaction audit regression$`, agmRunsSafePRFinalTransactionAuditRegression)
 	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
+	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
+	ctx.Step(`^bounded affected runner commands should terminate their descendants$`, boundedAffectedRunnerCommandsShouldTerminateTheirDescendants)
 	ctx.Step(`^AGM runs the effective required-check regressions$`, agmRunsEffectiveRequiredCheckRegressions)
 	ctx.Step(`^safe-merge should enforce complete provider-required CI without advisory drift$`, safeMergeShouldEnforceProviderRequiredCI)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
@@ -308,6 +307,29 @@ func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) 
 	}
 	if state.auditRegressionErr != nil {
 		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
+	}
+	return nil
+}
+
+func agmRunsAffectedRunnerProcessTreeRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.treeRegression, state.treeRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^(TestRunGoTestCommandTimeoutKillsProcessGroup|TestListPackagesContextCancellationKillsProcessGroup)$`,
+		"./cmd/test-affected",
+	)
+	return nil
+}
+
+func boundedAffectedRunnerCommandsShouldTerminateTheirDescendants(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.treeRegressionErr != nil {
+		return fmt.Errorf("affected runner process-tree regressions: %w: %s", state.treeRegressionErr, state.treeRegression)
 	}
 	return nil
 }
@@ -605,80 +627,87 @@ func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if len(ciMatch) != 2 {
 		return fmt.Errorf("required CI Go test timeout declaration not found")
 	}
-	affectedSource := string(affected)
-	if !regexp.MustCompile(`"-timeout="\s*\+\s*goTestPackageTimeout\.String\(\)`).MatchString(affectedSource) {
-		return fmt.Errorf("affected integration runner does not pass its declared timeout to go test")
+	affectedMatch := regexp.MustCompile(`(?m)^\s*goTestTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(affectedMatch) != 2 {
+		return fmt.Errorf("affected integration Go test timeout declaration not found")
 	}
-	if !strings.Contains(affectedSource, "context.WithTimeout(context.Background(), goListCommandTimeout)") {
-		return fmt.Errorf("affected integration runner does not apply its go list command timeout")
+	commandMatch := regexp.MustCompile(`(?m)^\s*goCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(commandMatch) != 2 {
+		return fmt.Errorf("affected integration process timeout declaration not found")
 	}
-	if !strings.Contains(affectedSource, "context.WithTimeout(context.Background(), goTestCommandTimeout)") {
-		return fmt.Errorf("affected integration runner does not apply its aggregate go test timeout")
+	listMatch := regexp.MustCompile(`(?m)^\s*goListCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(listMatch) != 2 {
+		return fmt.Errorf("affected integration package-discovery timeout declaration not found")
 	}
-	if !strings.Contains(affectedSource, "goTestCommandTimeout = goTestPackageTimeout + goTestStartupGrace") {
-		return fmt.Errorf("affected integration aggregate timeout does not compose package timeout and startup grace")
-	}
-	state.affectedPackageMins, err = minuteConstant(affectedSource, "goTestPackageTimeout")
+	jobMinutes, err := workflowJobTimeoutMinutes(ci, "integration-tests")
 	if err != nil {
-		return err
+		return fmt.Errorf("affected integration CI job timeout: %w", err)
 	}
-	state.affectedListMins, err = minuteConstant(affectedSource, "goListCommandTimeout")
+	nativeMinutes, err := strconv.Atoi(string(affectedMatch[1]))
 	if err != nil {
-		return err
+		return fmt.Errorf("parse affected integration native timeout: %w", err)
 	}
-	state.affectedStartupMins, err = minuteConstant(affectedSource, "goTestStartupGrace")
+	commandMinutes, err := strconv.Atoi(string(commandMatch[1]))
 	if err != nil {
-		return err
+		return fmt.Errorf("parse affected integration process timeout: %w", err)
 	}
-	state.affectedCommandMins = state.affectedPackageMins + state.affectedStartupMins
-	state.affectedJobMins, err = workflowJobTimeoutMinutes(string(ci), "integration-tests")
+	listMinutes, err := strconv.Atoi(string(listMatch[1]))
 	if err != nil {
-		return err
+		return fmt.Errorf("parse affected integration package-discovery timeout: %w", err)
+	}
+	if commandMinutes < 2*nativeMinutes {
+		return fmt.Errorf("affected integration process timeout lacks one native interval of build headroom")
+	}
+	if jobMinutes < listMinutes+commandMinutes+nativeMinutes {
+		return fmt.Errorf("affected integration CI job timeout lacks one native interval beyond all bounded runner phases")
+	}
+	if !strings.Contains(string(affected), `"-timeout=" + goTestTimeout.String()`) {
+		return fmt.Errorf("affected integration runner does not pass its timeout to the Go test binary")
+	}
+	if !strings.Contains(string(affected), `goCommandTimeoutExitCode = 124`) {
+		return fmt.Errorf("affected integration runner does not preserve the timeout exit-code contract")
 	}
 	state.localTestTimeout = string(localMatch[1])
-	state.affectedTestTimeout = strconv.Itoa(state.affectedPackageMins) + "m"
+	state.affectedTestTimeout = string(affectedMatch[1]) + "m"
 	state.ciTestTimeout = string(ciMatch[1])
 	return nil
 }
 
-func minuteConstant(source, name string) (int, error) {
-	pattern := fmt.Sprintf(`(?m)^\s*%s\s*=\s*(\d+)\s*\*\s*time\.Minute$`, regexp.QuoteMeta(name))
-	match := regexp.MustCompile(pattern).FindStringSubmatch(source)
-	if len(match) != 2 {
-		return 0, fmt.Errorf("affected integration %s declaration not found", name)
-	}
-	minutes, err := strconv.Atoi(match[1])
-	if err != nil || minutes <= 0 {
-		return 0, fmt.Errorf("affected integration %s must be positive minutes", name)
-	}
-	return minutes, nil
-}
-
-func workflowJobTimeoutMinutes(source, jobName string) (int, error) {
-	lines := strings.Split(source, "\n")
+func workflowJobTimeoutMinutes(workflow []byte, jobName string) (int, error) {
+	lines := strings.Split(string(workflow), "\n")
 	header := "  " + jobName + ":"
-	inJob := false
-	for _, line := range lines {
-		if !inJob {
-			if line == header {
-				inJob = true
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && strings.TrimSpace(line) != "" {
+	start := -1
+	for i, line := range lines {
+		if line == header {
+			start = i + 1
 			break
 		}
-		match := regexp.MustCompile(`^\s{4}timeout-minutes:\s*(\d+)\s*$`).FindStringSubmatch(line)
-		if len(match) != 2 {
-			continue
-		}
-		minutes, err := strconv.Atoi(match[1])
-		if err != nil || minutes <= 0 {
-			return 0, fmt.Errorf("workflow job %s timeout must be positive minutes", jobName)
-		}
-		return minutes, nil
 	}
-	return 0, fmt.Errorf("workflow job %s timeout-minutes declaration not found", jobName)
+	if start < 0 {
+		return 0, fmt.Errorf("workflow job %q not found", jobName)
+	}
+
+	end := len(lines)
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") &&
+			strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "#") {
+			end = i
+			break
+		}
+	}
+
+	block := strings.Join(lines[start:end], "\n")
+	match := regexp.MustCompile(`(?m)^    timeout-minutes:\s*(\d+)\s*$`).FindStringSubmatch(block)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("workflow job %q has no explicit timeout-minutes", jobName)
+	}
+	minutes, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse workflow job %q timeout: %w", jobName, err)
+	}
+	return minutes, nil
 }
 
 func agmValidatesGoTestTimeoutParity(ctx context.Context) error {
@@ -686,40 +715,8 @@ func agmValidatesGoTestTimeoutParity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if state.localTestTimeout == "" || state.affectedTestTimeout == "" || state.ciTestTimeout == "" ||
-		state.affectedPackageMins <= 0 || state.affectedListMins <= 0 ||
-		state.affectedStartupMins <= 0 || state.affectedCommandMins <= 0 ||
-		state.affectedJobMins <= 0 {
+	if state.localTestTimeout == "" || state.affectedTestTimeout == "" || state.ciTestTimeout == "" {
 		return fmt.Errorf("repository Go test timeouts are not configured")
-	}
-	return nil
-}
-
-func affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.affectedStartupMins < minimumAffectedTestStartupGraceMins {
-		return fmt.Errorf(
-			"affected integration startup grace %dm must be at least %dm",
-			state.affectedStartupMins,
-			minimumAffectedTestStartupGraceMins,
-		)
-	}
-	if state.affectedCommandMins != state.affectedPackageMins+state.affectedStartupMins {
-		return fmt.Errorf("affected integration command timeout does not preserve package timeout plus startup grace")
-	}
-	selectorBudget := state.affectedListMins + state.affectedCommandMins
-	workflowHeadroom := state.affectedJobMins - selectorBudget
-	if workflowHeadroom < minimumAffectedWorkflowHeadroomMins {
-		return fmt.Errorf(
-			"affected integration job timeout %dm leaves %dm headroom; require at least %dm beyond selector budget %dm",
-			state.affectedJobMins,
-			workflowHeadroom,
-			minimumAffectedWorkflowHeadroomMins,
-			selectorBudget,
-		)
 	}
 	return nil
 }
@@ -736,6 +733,28 @@ func repositoryGoTestTimeoutsShouldMatch(ctx context.Context) error {
 			state.affectedTestTimeout,
 			state.ciTestTimeout,
 		)
+	}
+	return nil
+}
+
+func affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.affectedTestTimeout == "" || state.ciTestTimeout == "" {
+		return fmt.Errorf("affected integration timeout state is not initialized")
+	}
+	affected, err := os.ReadFile(filepath.Join(localDevBDDRepoRoot(), "cmd", "test-affected", "main.go"))
+	if err != nil {
+		return fmt.Errorf("read affected integration runner: %w", err)
+	}
+	source := string(affected)
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx|parent),\s*goCommandTimeout\)`).MatchString(source) {
+		return fmt.Errorf("affected test command timeout is not wired through context.WithTimeout")
+	}
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx|parent),\s*goListCommandTimeout\)`).MatchString(source) {
+		return fmt.Errorf("affected package discovery timeout is not wired through context.WithTimeout")
 	}
 	return nil
 }
@@ -972,4 +991,17 @@ func getLocalDevGuardrailState(ctx context.Context) (*localDevGuardrailState, er
 
 func localDevBDDRepoRoot() string {
 	return packageSpecBDDRepoRoot()
+}
+
+func minuteConstant(source, name string) (int, error) {
+	pattern := fmt.Sprintf(`(?m)^\s*%s\s*=\s*(\d+)\s*\*\s*time\.Minute$`, regexp.QuoteMeta(name))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(source)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("affected integration %s declaration not found", name)
+	}
+	minutes, err := strconv.Atoi(match[1])
+	if err != nil || minutes <= 0 {
+		return 0, fmt.Errorf("affected integration %s must be positive minutes", name)
+	}
+	return minutes, nil
 }

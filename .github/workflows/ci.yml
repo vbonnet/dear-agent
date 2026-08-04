@@ -23,9 +23,6 @@ jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The test process has its own 20-minute package deadline. Keep the job
-    # budget larger so checkout, build, vet, and lint can still complete when a
-    # long-running package approaches that deadline.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -146,10 +143,10 @@ jobs:
   integration-tests:
     name: Integration Tests (affected)
     runs-on: ubuntu-latest
-    # test-affected bounds package selection at 5 minutes and its aggregate go
-    # test command at 30 minutes. Leave room for checkout, toolchain setup, and
-    # cleanup around those nested deadlines.
-    timeout-minutes: 40
+    # The sequential runner bounds are 20m for go list plus 55m for go test.
+    # This 100m ultimate backstop leaves 25m around those phases; the BDD gate
+    # requires at least one 20m native interval for setup, cleanup, and reports.
+    timeout-minutes: 100
     # Only meaningful on PRs — we need a base ref to diff against. For
     # pushes to main/develop, the unit-test matrix above is the gate;
     # full integration sweeps belong in a scheduled or release workflow,
@@ -192,7 +189,8 @@ jobs:
           SKIP_E2E: "1"
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
+          go build -o "$RUNNER_TEMP/test-affected" ./cmd/test-affected
+          "$RUNNER_TEMP/test-affected" --base="origin/${BASE_REF}" --tags=integration --run
 
   agm-codex-contracts:
     name: AGM Codex Contracts

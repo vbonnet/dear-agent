@@ -1,7 +1,6 @@
 package steps
 
 import (
-	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -99,50 +98,60 @@ func TestWorkflowJobTimeoutMinutesScopesToNamedJob(t *testing.T) {
   next-job:
     timeout-minutes: 15
 `
-	minutes, err := workflowJobTimeoutMinutes(source, "integration-tests")
+	minutes, err := workflowJobTimeoutMinutes([]byte(source), "integration-tests")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if minutes != 40 {
 		t.Fatalf("workflowJobTimeoutMinutes() = %d, want 40", minutes)
 	}
-	if _, err := workflowJobTimeoutMinutes(source, "missing-job"); err == nil {
+	if _, err := workflowJobTimeoutMinutes([]byte(source), "missing-job"); err == nil {
 		t.Fatal("missing workflow job should fail")
 	}
 }
 
-func TestAffectedIntegrationDeadlineLayersRejectInvalidBudgets(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		state localDevGuardrailState
-		ok    bool
+func TestWorkflowJobTimeoutMinutesStaysWithinNamedJob(t *testing.T) {
+	tests := []struct {
+		name     string
+		workflow string
+		want     int
+		wantErr  bool
 	}{
 		{
-			name:  "valid nesting",
-			state: localDevGuardrailState{affectedPackageMins: 20, affectedListMins: 5, affectedStartupMins: 10, affectedCommandMins: 30, affectedJobMins: 40},
-			ok:    true,
+			name: "reads named job timeout",
+			workflow: "jobs:\n" +
+				"  integration-tests:\n" +
+				"    runs-on: ubuntu-latest\n" +
+				"    timeout-minutes: 100\n" +
+				"  next-job:\n" +
+				"    timeout-minutes: 200\n",
+			want: 100,
 		},
 		{
-			name:  "startup grace is too small",
-			state: localDevGuardrailState{affectedPackageMins: 20, affectedListMins: 5, affectedStartupMins: 1, affectedCommandMins: 21, affectedJobMins: 40},
+			name: "does not borrow next job timeout",
+			workflow: "jobs:\n" +
+				"  integration-tests:\n" +
+				"    runs-on: ubuntu-latest\n" +
+				"  next-job:\n" +
+				"    timeout-minutes: 200\n",
+			wantErr: true,
 		},
-		{
-			name:  "command does not compose package and startup budgets",
-			state: localDevGuardrailState{affectedPackageMins: 20, affectedListMins: 5, affectedStartupMins: 10, affectedCommandMins: 31, affectedJobMins: 41},
-		},
-		{
-			name:  "workflow headroom is too small",
-			state: localDevGuardrailState{affectedPackageMins: 20, affectedListMins: 5, affectedStartupMins: 10, affectedCommandMins: 30, affectedJobMins: 39},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.WithValue(context.Background(), localDevGuardrailStateKey{}, &test.state)
-			err := affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets(ctx)
-			if test.ok && err != nil {
-				t.Fatalf("valid timeout layers failed: %v", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := workflowJobTimeoutMinutes([]byte(tc.workflow), "integration-tests")
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("workflowJobTimeoutMinutes = %d, want missing-timeout error", got)
+				}
+				return
 			}
-			if !test.ok && err == nil {
-				t.Fatal("invalid timeout layers should fail")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("workflowJobTimeoutMinutes = %d, want %d", got, tc.want)
 			}
 		})
 	}
