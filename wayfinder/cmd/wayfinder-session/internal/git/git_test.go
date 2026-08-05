@@ -87,6 +87,22 @@ func TestIsGitRepo(t *testing.T) {
 	}
 }
 
+func TestCheckGitRepo(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	gRepo := New(repoDir)
+	isRepo, err := gRepo.CheckGitRepo()
+	if err != nil || !isRepo {
+		t.Errorf("CheckGitRepo(repoDir) = (%v, %v), want (true, nil)", isRepo, err)
+	}
+
+	nonRepoDir := t.TempDir()
+	gNonRepo := New(nonRepoDir)
+	isRepo, err = gNonRepo.CheckGitRepo()
+	if err != nil || isRepo {
+		t.Errorf("CheckGitRepo(nonRepoDir) = (%v, %v), want (false, nil)", isRepo, err)
+	}
+}
+
 func TestIsGitWorktree(t *testing.T) {
 	tests := []struct {
 		name     string

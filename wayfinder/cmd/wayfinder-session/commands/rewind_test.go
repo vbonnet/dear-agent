@@ -22,7 +22,7 @@ type fakeRewindCommitter struct {
 	called bool
 }
 
-func (f *fakeRewindCommitter) IsGitRepo() bool { return f.isRepo }
+func (f *fakeRewindCommitter) CheckGitRepo() (bool, error) { return f.isRepo, nil }
 
 func (f *fakeRewindCommitter) CommitRewind(_, _ string, _ archive.ArchiveRef) error {
 	f.called = true

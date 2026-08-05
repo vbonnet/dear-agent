@@ -26,13 +26,31 @@ func New(projectDir string) *GitIntegrator {
 	}
 }
 
+// CheckGitRepo returns (true, nil) if projectDir is inside a git repository,
+// (false, nil) if confirmed NOT a git repository (exit 128),
+// or (false, error) if git probe failed due to an error (e.g., missing git, unsafe repo, permissions).
+func (g *GitIntegrator) CheckGitRepo() (bool, error) {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = g.projectDir
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 {
+		outStr := strings.ToLower(string(output))
+		if strings.Contains(outStr, "not a git repository") || strings.Contains(outStr, "must be run in a work tree") {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("git repository check failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+}
+
 // IsGitRepo checks if the project directory is within a git repository
 // Works correctly even when project is a subdirectory of a git repo
 func (g *GitIntegrator) IsGitRepo() bool {
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = g.projectDir
-	err := cmd.Run()
-	return err == nil
+	isRepo, _ := g.CheckGitRepo()
+	return isRepo
 }
 
 // IsGitWorktree reports whether the project directory is inside a Git work

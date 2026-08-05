@@ -64,7 +64,17 @@ func validatePrivateRewindLockDirectories(wayfinderDir, lockDir string) error {
 }
 
 func validateRewindMetadataDirectory(path string) error {
-	return validateOwnedRewindDirectory(path, 0o022)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect rewind metadata directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("rewind metadata path is not an owned directory: %s", path)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("rewind metadata directory permissions are too broad: %s", path)
+	}
+	return nil
 }
 
 func validateOwnedRewindDirectory(path string, prohibitedPermissions os.FileMode) error {

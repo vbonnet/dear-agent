@@ -63,8 +63,10 @@ func runRewind(cmd *cobra.Command, args []string) (runErr error) {
 		return fmt.Errorf("acquire rewind transition lock: %w", err)
 	}
 	defer func() {
-		if closeErr := transitionLock.Close(); closeErr != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("release rewind transition lock: %w", closeErr))
+		if transitionLock != nil {
+			if closeErr := transitionLock.Close(); closeErr != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("release rewind transition lock: %w", closeErr))
+			}
 		}
 	}()
 
@@ -142,18 +144,27 @@ func runRewind(cmd *cobra.Command, args []string) (runErr error) {
 		return err
 	}
 
+	if err := transitionLock.Close(); err != nil {
+		return fmt.Errorf("release rewind transition lock: %w", err)
+	}
+	transitionLock = nil
+
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
 	return nil
 }
 
 type rewindCommitter interface {
-	IsGitRepo() bool
+	CheckGitRepo() (bool, error)
 	CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error
 }
 
 func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, archiveRef archive.ArchiveRef, stdout io.Writer) error {
-	if !integrator.IsGitRepo() {
+	isRepo, err := integrator.CheckGitRepo()
+	if err != nil {
+		return fmt.Errorf("check git repository: %w", err)
+	}
+	if !isRepo {
 		return nil
 	}
 	if err := integrator.CommitRewind(fromPhase, targetPhase, archiveRef); err != nil {

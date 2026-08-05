@@ -40,6 +40,8 @@ func New(projectDir string) *ArchiveManager {
 // ArchivePhase creates a snapshot of the current phase state before rewinding.
 // It publishes the archive only after all required files are copied, returning
 // a project-relative reference suitable for a scoped Git commit.
+//
+//nolint:gocyclo // reason: linear phase archiving workflow
 func (a *ArchiveManager) ArchivePhase(phaseName string) (ArchiveRef, error) {
 	if !slices.Contains(status.AllWaypointsV2Schema(), phaseName) {
 		return ArchiveRef{}, fmt.Errorf("archive phase %q is not canonical", phaseName)
@@ -67,28 +69,43 @@ func (a *ArchiveManager) ArchivePhase(phaseName string) (ArchiveRef, error) {
 	archiveName := phaseName + "-" + timestamp + "-" + randomSuffix
 	archiveDir := filepath.Join(archiveBase, archiveName)
 
-	// Archive STATUS file
+	// Validate all archive inputs before mutating or migrating history
 	statusSrc := filepath.Join(a.projectDir, status.StatusFilename)
-	statusDst := filepath.Join(temporaryDir, status.StatusFilename)
-	if err := copyRequiredRegularFile(statusSrc, statusDst); err != nil {
+	if err := validateRequiredRegularFile(statusSrc); err != nil {
 		return ArchiveRef{}, fmt.Errorf("archive STATUS file: %w", err)
 	}
 
-	// Archive HISTORY file if it exists
+	historySrc := filepath.Join(a.projectDir, history.HistoryFilename)
+	if err := validateOptionalRegularFile(historySrc); err != nil {
+		return ArchiveRef{}, fmt.Errorf("archive HISTORY file: %w", err)
+	}
+
+	legacyHistorySrc := filepath.Join(a.projectDir, history.LegacyHistoryFilename)
+	if err := validateOptionalRegularFile(legacyHistorySrc); err != nil {
+		return ArchiveRef{}, fmt.Errorf("archive HISTORY file: %w", err)
+	}
+
+	retroSrc := filepath.Join(a.projectDir, retrospective.RetroFilename)
+	if err := validateOptionalRegularFile(retroSrc); err != nil {
+		return ArchiveRef{}, fmt.Errorf("archive RETRO file: %w", err)
+	}
+
+	// Archive HISTORY file if it exists (migrate legacy history after validation succeeds)
 	historyLog := history.New(a.projectDir)
 	if err := historyLog.EnsureCurrentFile(); err != nil {
 		return ArchiveRef{}, fmt.Errorf("migrate HISTORY file: %w", err)
 	}
-	historySrc := filepath.Join(a.projectDir, history.HistoryFilename)
+
+	statusDst := filepath.Join(temporaryDir, status.StatusFilename)
+	if err := copyFile(statusSrc, statusDst); err != nil {
+		return ArchiveRef{}, fmt.Errorf("archive STATUS file: %w", err)
+	}
+
 	historyDst := filepath.Join(temporaryDir, history.HistoryFilename)
 	if err := copyOptionalRegularFile(historySrc, historyDst); err != nil {
 		return ArchiveRef{}, fmt.Errorf("archive HISTORY file: %w", err)
 	}
 
-	// Archive the existing retrospective when present. Besides preserving the
-	// pre-rewind trace, this rejects directories and symlinks before status is
-	// mutated, rather than discovering an invalid marker during the late append.
-	retroSrc := filepath.Join(a.projectDir, retrospective.RetroFilename)
 	retroDst := filepath.Join(temporaryDir, retrospective.RetroFilename)
 	if err := copyOptionalRegularFile(retroSrc, retroDst); err != nil {
 		return ArchiveRef{}, fmt.Errorf("archive RETRO file: %w", err)
@@ -187,7 +204,7 @@ func inspectOwnedDirectory(path string) (bool, error) {
 	return true, nil
 }
 
-func copyRequiredRegularFile(src, dst string) error {
+func validateRequiredRegularFile(src string) error {
 	info, err := os.Lstat(src)
 	if err != nil {
 		return err
@@ -195,7 +212,21 @@ func copyRequiredRegularFile(src, dst string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("source is not a regular file: %s", src)
 	}
-	return copyFile(src, dst)
+	return nil
+}
+
+func validateOptionalRegularFile(src string) error {
+	info, err := os.Lstat(src)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("source is not a regular file: %s", src)
+	}
+	return nil
 }
 
 func copyOptionalRegularFile(src, dst string) error {
