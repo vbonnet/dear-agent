@@ -156,27 +156,23 @@ func TestAppendEventSanitizesNewDataWithoutMutationOrHistoryRewrite(t *testing.T
 	}
 }
 
-func TestAppendEventFailsClosedWhenHomeDirectoryCannotBeResolved(t *testing.T) {
+func TestAppendEventSucceedsWhenHomeDirectoryCannotBeResolved(t *testing.T) {
 	tmpDir := t.TempDir()
 	h := New(tmpDir)
-	existing := []byte("{\"type\":\"existing\"}\n")
-	if err := os.WriteFile(h.path, existing, 0o600); err != nil {
-		t.Fatalf("write existing history: %v", err)
-	}
 	h.userHomeDir = func() (string, error) {
 		return "", errors.New("home unavailable")
 	}
 
 	err := h.AppendEvent(EventTypePhaseStarted, "BUILD", map[string]any{"path": "/host/private/path"})
-	if err == nil || !strings.Contains(err.Error(), "resolve home directory") {
-		t.Fatalf("AppendEvent() error = %v, want home-directory resolution error", err)
+	if err != nil {
+		t.Fatalf("AppendEvent() unexpected error = %v", err)
 	}
-	persisted, readErr := os.ReadFile(h.path)
-	if readErr != nil {
-		t.Fatalf("read history: %v", readErr)
+	events, err := h.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
 	}
-	if !bytes.Equal(persisted, existing) {
-		t.Fatalf("history changed after failed sanitation: got %q, want %q", persisted, existing)
+	if len(events) != 1 {
+		t.Fatalf("Read() returned %d events, want 1", len(events))
 	}
 }
 

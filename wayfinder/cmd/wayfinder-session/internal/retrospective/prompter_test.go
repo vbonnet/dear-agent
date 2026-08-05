@@ -5,14 +5,17 @@ import (
 )
 
 func TestPromptUserForContext_Magnitude0(t *testing.T) {
-	// Magnitude 0 should skip prompting entirely
-	flags := RewindFlags{}
+	// Magnitude 0 skips prompting but retains supplied trace metadata.
+	flags := RewindFlags{Reason: "replay phase", Learnings: "keep the trace"}
 	ctx, err := PromptUserForContext(0, flags)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if ctx != nil {
-		t.Errorf("Expected nil context for magnitude 0, got %v", ctx)
+	if ctx == nil {
+		t.Fatal("Expected context for magnitude 0")
+	}
+	if ctx.Reason != flags.Reason || ctx.Learnings != flags.Learnings {
+		t.Errorf("Magnitude 0 context = %#v, want supplied flags", ctx)
 	}
 }
 
