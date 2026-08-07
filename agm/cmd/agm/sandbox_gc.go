@@ -136,6 +136,19 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		return handleError(err)
 	}
 
+	// Heartbeat: a sweep that reaps nothing is still a healthy sweep, and until
+	// now it left no trace at all. Without a record for the reap-nothing case,
+	// "the reaper last ran at T" is indistinguishable from "the reaper has been
+	// dead since T" — which is exactly how the hourly sandbox GC stayed broken
+	// from 2026-07-05 to 2026-08-07 while ~/.agm/sandboxes grew to 239 GB.
+	// disk-watchdog consumes this entry to alarm on a stale reaper.
+	logSandboxGCEntry(gclog.Entry{
+		Operation: "sandbox_gc_completed",
+		Reason: fmt.Sprintf("scanned=%d reaped=%d kept=%d errors=%d",
+			result.Scanned, result.Reaped, result.Kept, result.Errors),
+		DryRun: result.DryRun,
+	})
+
 	if sandboxGCJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")

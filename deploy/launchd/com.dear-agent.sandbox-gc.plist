@@ -56,6 +56,21 @@
     <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin</string>
     <key>HOME</key>
     <string>__HOME__</string>
+    <!--
+      DOLT_PORT is required, not optional. With more than one enabled workspace
+      in the AGM registry and no per-workspace dolt.port, the live-session
+      inventory refuses to guess a port and aborts the whole sweep
+      (agm/internal/dolt.configuredWorkspaceConfigsFromRegistry). That is the
+      correct fail-closed choice for a destructive inventory — reaping a
+      sandbox whose owning session lives in a store we could not read would be
+      data loss — but it means the sweep does nothing at all until a port is
+      supplied. Between 2026-07-05 and 2026-08-07 this job exited non-zero on
+      every hourly tick for that reason and ~/.agm/sandboxes reached 239 GB.
+      With the port set, an individually unreachable workspace degrades to a
+      logged warning and the reachable ones are still swept.
+    -->
+    <key>DOLT_PORT</key>
+    <string>3307</string>
   </dict>
 
   <!-- One tick per hour. Each tick is idempotent; every reap re-verifies all

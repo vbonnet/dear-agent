@@ -34,6 +34,24 @@
 //	disk-watchdog --inode-critical 0.92  # override the inode CRITICAL ceiling
 //	disk-watchdog --brake /path/brake.json  # admission-brake location
 //	disk-watchdog --brake-ttl 45m        # how long an engaged brake blocks spawns
+//	disk-watchdog --gc-max-age 2h        # reaper-staleness window (0 disables)
+//	disk-watchdog --gc-log /path/gc.jsonl   # sandbox-GC log to read liveness from
+//
+// # Reaper liveness
+//
+// Free space is a lagging indicator of a leaked-sandbox problem: by the time it
+// crosses the 20 GiB floor, hundreds of GB have already accumulated. So the
+// watchdog also alarms when the hourly sandbox GC has stopped completing sweeps
+// (--gc-max-age, default 6h), independently of how much space is free.
+//
+// This generalises ce-93lw.18. That fix made *this* watchdog's failed
+// remediation consume-able by latching the admission brake. The same reasoning
+// was never applied to the sandbox GC, so when that job started exiting
+// non-zero on 2026-07-05 it wrote one line an hour to a log with no reader —
+// for a month — while ~/.agm/sandboxes grew to 239 GB across 119 dirs and every
+// tick here still printed "Status: OK". A stale reaper alarms and exits 1 but
+// deliberately does not latch the brake: halting every spawn because a GC is
+// behind would be a worse outage than the leak it warns about.
 //
 // Beyond alarming and remediating, the watchdog drives the cross-process
 // admission brake (pkg/vroom/admission): when its own remediation fails, or
@@ -48,6 +66,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -90,6 +109,8 @@ type config struct {
 	trailPath  string
 	brakePath  string
 	brakeTTL   time.Duration
+	gcLogPath  string
+	gcMaxAge   time.Duration
 	thresholds supervisor.DiskAlertThresholds
 
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
@@ -111,6 +132,10 @@ func run(args []string, out io.Writer) (int, error) {
 		"admission-brake path; engaged when remediation fails, released on a healthy tick")
 	fs.DurationVar(&cfg.brakeTTL, "brake-ttl", admission.DefaultTTL,
 		"how long an engaged admission brake blocks spawns before expiring on its own")
+	fs.StringVar(&cfg.gcLogPath, "gc-log", defaultGCLogPath(),
+		"sandbox-GC JSONL log consulted for reaper liveness; empty disables the check")
+	fs.DurationVar(&cfg.gcMaxAge, "gc-max-age", defaultGCMaxAge,
+		"alarm when the sandbox GC has not completed a sweep within this window (0 disables)")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -136,10 +161,14 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	level, reasons := cfg.thresholds.Classify(snap)
-	breached := level != supervisor.PressureNone
+	// Disk pressure alone drives remediation and the admission brake. The
+	// worktree sweep shells out to gh per worktree and costs minutes, so it must
+	// stay tied to actual space pressure — a stale reaper on a host with 200 GiB
+	// free is a bug to report, not a reason to re-sweep every five minutes.
+	diskBreached := level != supervisor.PressureNone
 
 	var remediation *sweepResult
-	if breached && !cfg.dryRun {
+	if diskBreached && !cfg.dryRun {
 		r, rerr := sweepMergedWorktrees(context.Background(), cfg)
 		if rerr != nil {
 			// Remediation failure must not hide the alarm; record it and keep going.
@@ -148,7 +177,22 @@ func run(args []string, out io.Writer) (int, error) {
 		remediation = r
 	}
 
-	updateAdmissionBrake(cfg, breached, remediation)
+	updateAdmissionBrake(cfg, diskBreached, remediation)
+
+	// A dead reaper is an alarm in its own right, at whatever free space happens
+	// to be. Folding it into the same level/reasons the disk thresholds produce
+	// routes it through the existing trail and exit-code paths instead of adding
+	// a parallel notification channel to keep in sync. It deliberately does not
+	// touch the brake: blocking every spawn because a GC is behind would be a
+	// worse outage than the leak it warns about.
+	gc := checkGCHealth(cfg, time.Now())
+	if gc != nil && gc.Stale {
+		if level == supervisor.PressureNone {
+			level = supervisor.PressureWarn
+		}
+		reasons = append(reasons, gc.Reason)
+	}
+	breached := level != supervisor.PressureNone
 
 	// Logging the alarm to the trail is best-effort: a trail write failure is a
 	// warning, never a reason to suppress the breach exit code — and on a truly
@@ -156,7 +200,7 @@ func run(args []string, out io.Writer) (int, error) {
 	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
 		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
-		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc)
 		logCancel()
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
@@ -164,11 +208,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc)
 	}
 
 	if breached {
@@ -193,6 +237,138 @@ func defaultTrailPath() string {
 		return ".agm/vroom/trail.jsonl"
 	}
 	return filepath.Join(home, ".agm", "vroom", "trail.jsonl")
+}
+
+// defaultGCMaxAge tolerates several missed hourly sweeps before alarming, so a
+// transient Dolt restart does not page, but a genuinely dead reaper surfaces
+// the same day rather than a month later.
+const defaultGCMaxAge = 6 * time.Hour
+
+func defaultGCLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".agm/logs/gc.jsonl"
+	}
+	return filepath.Join(home, ".agm", "logs", "gc.jsonl")
+}
+
+// gcHealth is what a tick concluded about the sandbox reaper itself.
+//
+// Disk-free is a *lagging* indicator of a leaked-sandbox problem: by the time
+// free space crosses the 20 GiB WARN floor, hundreds of GB of sandboxes have
+// already accumulated and the cheap remediations are gone. A reaper that has
+// stopped completing sweeps is the *leading* indicator, and it is independent
+// of how much space happens to be free right now.
+//
+// This is the generalisation of the ce-93lw.18 lesson. That fix made the
+// watchdog's own failed remediation consume-able (it latches the brake). The
+// same reasoning was never applied to the hourly sandbox GC, so when that job
+// began exiting non-zero on 2026-07-05 it wrote one line an hour to a log with
+// no reader, for a month, while ~/.agm/sandboxes grew to 239 GB.
+type gcHealth struct {
+	// Stale is true when no successful sweep is recent enough (or none exists).
+	Stale bool
+	// LastSuccess is the newest completed sweep; zero when none was found.
+	LastSuccess time.Time
+	// Age of LastSuccess at tick time; only meaningful when LastSuccess is set.
+	Age time.Duration
+	// LastError is the newest GC error message, when the log records one after
+	// the last success. It turns "the reaper is stale" into an actionable line.
+	LastError string
+	// Reason is the human-readable summary for the alarm and the report.
+	Reason string
+}
+
+// gcLogEntry is the subset of agm/internal/gclog.Entry this watchdog reads.
+type gcLogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Operation string    `json:"operation"`
+	Error     string    `json:"error,omitempty"`
+}
+
+// The operation emitted once per successful sweep, reap or no reap. A sweep
+// that reaps nothing is still a healthy sweep, so counting reap records alone
+// would call a correctly-idle reaper dead.
+const gcCompletedOperation = "sandbox_gc_completed"
+
+// gcLogSummary is what one pass over the GC log yields.
+type gcLogSummary struct {
+	LastSuccess time.Time
+	LastError   string
+	LastErrorAt time.Time
+}
+
+// scanGCLog reads every record in the GC log and keeps the newest completed
+// sweep and the newest error. Malformed lines are skipped rather than fatal: a
+// truncated final write must not blind the check to the records before it.
+func scanGCLog(path string) (gcLogSummary, error) {
+	var s gcLogSummary
+	f, err := os.Open(path)
+	if err != nil {
+		return s, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	// GC entries are single-line JSON, but a truncated write can leave a long
+	// partial line; a generous cap keeps one bad line from aborting the scan.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		var e gcLogEntry
+		if json.Unmarshal(scanner.Bytes(), &e) != nil {
+			continue
+		}
+		if e.Operation == gcCompletedOperation {
+			if e.Timestamp.After(s.LastSuccess) {
+				s.LastSuccess = e.Timestamp
+			}
+			continue
+		}
+		if e.Error != "" && e.Timestamp.After(s.LastErrorAt) {
+			s.LastErrorAt, s.LastError = e.Timestamp, e.Error
+		}
+	}
+	return s, nil
+}
+
+// checkGCHealth classifies reaper liveness from the GC log. A missing or
+// unreadable log is treated as stale: the check exists precisely for the case
+// where the reaper is not running, and that case often means no log at all.
+func checkGCHealth(cfg config, now time.Time) *gcHealth {
+	if cfg.gcLogPath == "" || cfg.gcMaxAge <= 0 {
+		return nil
+	}
+	summary, err := scanGCLog(cfg.gcLogPath)
+	if err != nil {
+		return &gcHealth{
+			Stale: true,
+			Reason: fmt.Sprintf("sandbox GC log %s is unreadable (%v); reaper liveness cannot be confirmed",
+				cfg.gcLogPath, err),
+		}
+	}
+
+	h := &gcHealth{LastSuccess: summary.LastSuccess}
+	// Only surface an error newer than the last success; an older error that a
+	// later successful sweep superseded is noise.
+	if summary.LastErrorAt.After(summary.LastSuccess) {
+		h.LastError = summary.LastError
+	}
+	switch {
+	case summary.LastSuccess.IsZero():
+		h.Stale = true
+		h.Reason = fmt.Sprintf("sandbox GC has never recorded a completed sweep in %s", cfg.gcLogPath)
+	default:
+		h.Age = now.Sub(summary.LastSuccess)
+		if h.Age > cfg.gcMaxAge {
+			h.Stale = true
+			h.Reason = fmt.Sprintf("sandbox GC last completed a sweep %s ago (max %s)",
+				h.Age.Round(time.Minute), cfg.gcMaxAge)
+		}
+	}
+	if h.Stale && h.LastError != "" {
+		h.Reason += fmt.Sprintf("; last GC error: %s", h.LastError)
+	}
+	return h
 }
 
 // sweepResult is the parsed JSON contract of `agm worktree sweep -o json`
@@ -311,7 +487,7 @@ func applyBrake(cfg config, engage bool, reason string) {
 
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.
 func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult) error {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth) error {
 	trail, err := decisiontrail.OpenJSONL(cfg.trailPath)
 	if err != nil {
 		return err
@@ -347,6 +523,17 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 		}
 		payload["remediation"] = remediation
 	}
+	if gc != nil {
+		sandboxGC := map[string]any{"stale": gc.Stale}
+		if !gc.LastSuccess.IsZero() {
+			sandboxGC["last_success"] = gc.LastSuccess.UTC().Format(time.RFC3339)
+			sandboxGC["age_seconds"] = int64(gc.Age.Seconds())
+		}
+		if gc.LastError != "" {
+			sandboxGC["last_error"] = gc.LastError
+		}
+		payload["sandbox_gc"] = sandboxGC
+	}
 
 	return trail.Append(ctx, decisiontrail.Record{
 		Role:    "watchdog",
@@ -356,7 +543,13 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 }
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config) error {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth) error {
+	type gcReport struct {
+		Stale       bool   `json:"stale"`
+		LastSuccess string `json:"last_success,omitempty"`
+		AgeSeconds  int64  `json:"age_seconds,omitempty"`
+		LastError   string `json:"last_error,omitempty"`
+	}
 	type report struct {
 		Level             string                         `json:"level"`
 		DiskFreeBytes     uint64                         `json:"disk_free_bytes"`
@@ -366,7 +559,16 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Thresholds        supervisor.DiskAlertThresholds `json:"thresholds"`
 		Reasons           []string                       `json:"reasons"`
 		Remediation       *sweepResult                   `json:"remediation,omitempty"`
+		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
 		OK                bool                           `json:"ok"`
+	}
+	var gcr *gcReport
+	if gc != nil {
+		gcr = &gcReport{Stale: gc.Stale, LastError: gc.LastError}
+		if !gc.LastSuccess.IsZero() {
+			gcr.LastSuccess = gc.LastSuccess.UTC().Format(time.RFC3339)
+			gcr.AgeSeconds = int64(gc.Age.Seconds())
+		}
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
@@ -379,12 +581,13 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Thresholds:        cfg.thresholds,
 		Reasons:           reasons,
 		Remediation:       rem,
+		SandboxGC:         gcr,
 		OK:                level == supervisor.PressureNone,
 	})
 }
 
 func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config) {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -394,6 +597,19 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	fmt.Fprintf(out, "  disk used   : %.1f%%\n", snap.DiskUsedFraction*100)
 	fmt.Fprintf(out, "  inode usage : %.1f%%  [warn > %.0f%%, critical > %.0f%%]\n",
 		snap.InodeUsedFraction*100, cfg.thresholds.InodeWarn*100, cfg.thresholds.InodeCritical*100)
+	if gc != nil {
+		switch {
+		case gc.LastSuccess.IsZero():
+			fmt.Fprintf(out, "  sandbox GC  : NEVER completed a sweep  [max age %s]\n", cfg.gcMaxAge)
+		default:
+			state := "ok"
+			if gc.Stale {
+				state = "STALE"
+			}
+			fmt.Fprintf(out, "  sandbox GC  : %s, last sweep %s ago  [max age %s]\n",
+				state, gc.Age.Round(time.Minute), cfg.gcMaxAge)
+		}
+	}
 	fmt.Fprintln(out)
 
 	if level == supervisor.PressureNone {
