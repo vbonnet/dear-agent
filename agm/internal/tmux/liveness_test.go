@@ -167,16 +167,20 @@ func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var paneState string
 	for time.Now().Before(deadline) {
-		output, err := exec.Command("tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_dead}\t#{pane_start_command}").Output()
+		// Space-separated, not tab: tmux >= 3.7 renders a literal tab in
+		// -F/format output as "_", so a tab prefix would never match on the
+		// versions this suite must support. A space is emitted verbatim by
+		// every tmux version, and pane_dead is a single "0"/"1" flag.
+		output, err := exec.Command("tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_dead} #{pane_start_command}").Output()
 		if err == nil {
 			paneState = strings.TrimSpace(string(output))
-			if strings.HasPrefix(paneState, "1\t") {
+			if strings.HasPrefix(paneState, "1 ") {
 				break
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.HasPrefix(paneState, "1\t") || !strings.Contains(paneState, piPath) {
+	if !strings.HasPrefix(paneState, "1 ") || !strings.Contains(paneState, piPath) {
 		t.Fatalf("pane did not retain the dead Pi start command: %q", paneState)
 	}
 	running, err := IsPiProcessInPaneTreeContext(t.Context(), sessionName, socketPath)
