@@ -105,6 +105,41 @@ func TestInspectNodeProcessArgsHonorsCancellationDuringFinalRead(t *testing.T) {
 	}
 }
 
+// TestResolveActivePaneTargetParsesSpaceSeparatedIdentity guards the harness
+// readiness path against the tmux >= 3.7 behavior of rendering a literal tab in
+// -F/format output as "_". A tab-separated "#{pane_id}\t#{pane_pid}" format
+// collapsed "%1<tab>54721" into the single token "%1_54721", so the parse
+// failed with "invalid active tmux pane identity" and every fresh
+// agy/codex/claude session creation aborted with AGM-011. The format now uses a
+// space, which every tmux version emits verbatim.
+func TestResolveActivePaneTargetParsesSpaceSeparatedIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	const sessionName = "resolve-active-pane-identity"
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName, "sleep", "30").CombinedOutput(); err != nil {
+		t.Fatalf("create tmux session: %v: %s", err, output)
+	}
+
+	pane, exists, err := resolveActivePaneTarget(t.Context(), sessionName, socketPath)
+	if err != nil {
+		t.Fatalf("resolveActivePaneTarget returned error (tmux tab-rendering regression?): %v", err)
+	}
+	if !exists {
+		t.Fatalf("resolveActivePaneTarget reported session %q missing", sessionName)
+	}
+	if !isPaneID(pane.ID) {
+		t.Fatalf("resolveActivePaneTarget returned invalid pane id %q", pane.ID)
+	}
+	if pane.RootPID <= 0 {
+		t.Fatalf("resolveActivePaneTarget returned non-positive pane pid %d", pane.RootPID)
+	}
+}
+
 func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping tmux integration test in short mode")
@@ -132,16 +167,20 @@ func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var paneState string
 	for time.Now().Before(deadline) {
-		output, err := exec.Command("tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_dead}\t#{pane_start_command}").Output()
+		// Space-separated, not tab: tmux >= 3.7 renders a literal tab in
+		// -F/format output as "_", so a tab prefix would never match on the
+		// versions this suite must support. A space is emitted verbatim by
+		// every tmux version, and pane_dead is a single "0"/"1" flag.
+		output, err := exec.Command("tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_dead} #{pane_start_command}").Output()
 		if err == nil {
 			paneState = strings.TrimSpace(string(output))
-			if strings.HasPrefix(paneState, "1\t") {
+			if strings.HasPrefix(paneState, "1 ") {
 				break
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.HasPrefix(paneState, "1\t") || !strings.Contains(paneState, piPath) {
+	if !strings.HasPrefix(paneState, "1 ") || !strings.Contains(paneState, piPath) {
 		t.Fatalf("pane did not retain the dead Pi start command: %q", paneState)
 	}
 	running, err := IsPiProcessInPaneTreeContext(t.Context(), sessionName, socketPath)

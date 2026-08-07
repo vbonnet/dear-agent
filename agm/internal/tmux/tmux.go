@@ -137,7 +137,13 @@ func ClaimSessionRenameIdentityContext(ctx context.Context, name string) (Rename
 		return RenameSessionIdentity{}, err
 	}
 	normalizedName := NormalizeTmuxSessionName(name)
-	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	// Fields are space-separated, not tab-separated: tmux >= 3.7 renders a
+	// literal tab in -F/format output as "_", which would collapse the fields
+	// into one token. Every field here is space-free (session_id is "$N",
+	// session names are normalized to alphanumeric/dash/underscore, and the
+	// identity token is a generated hex value), so a space is an unambiguous
+	// separator that survives the format expansion verbatim.
+	format := "#{session_id} #{session_name} #{" + sessionRenameIdentityOption + "}"
 	condition := fmt.Sprintf("#{==:#{session_name},%s}", normalizedName)
 	setCommand := fmt.Sprintf("set-option -t %s %s %s", strconv.Quote(normalizedName), sessionRenameIdentityOption, generated.Token)
 	output, claimErr := RunWithTimeout(ctx, globalTimeout,
@@ -160,7 +166,7 @@ func ClaimSessionRenameIdentityContext(ctx context.Context, name string) (Rename
 }
 
 func parseClaimedSessionRenameIdentity(output []byte, expectedName, token string) (RenameSessionIdentity, error) {
-	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 3)
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), " ", 3)
 	if len(parts) != 3 || NormalizeTmuxSessionName(parts[1]) != expectedName || parts[2] != token {
 		return RenameSessionIdentity{}, fmt.Errorf("tmux returned malformed rename identity")
 	}
@@ -172,7 +178,9 @@ func parseClaimedSessionRenameIdentity(output []byte, expectedName, token string
 }
 
 func findClaimedSessionRenameIdentity(ctx context.Context, expectedName, token string) (RenameSessionIdentity, error) {
-	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in format
+	// output as "_". Every field here is space-free.
+	format := "#{session_id} #{session_name} #{" + sessionRenameIdentityOption + "}"
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "list-sessions", "-F", format)
 	if err != nil {
 		return RenameSessionIdentity{}, tmuxCommandError("find rename identity", token, output, err)
@@ -198,7 +206,10 @@ func InspectSessionRenameIdentityContext(ctx context.Context, identity RenameSes
 	if !identity.Valid() {
 		return "", false, fmt.Errorf("invalid tmux rename identity %q", identity.ID)
 	}
-	format := "#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in format
+	// output as "_". session_name is normalized and the identity token is
+	// space-free.
+	format := "#{session_name} #{" + sessionRenameIdentityOption + "}"
 	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, format)
 	if runErr != nil {
 		if isMissingSessionOutput(output) {
@@ -206,7 +217,7 @@ func InspectSessionRenameIdentityContext(ctx context.Context, identity RenameSes
 		}
 		return "", false, tmuxCommandError("inspect rename identity", identity.ID, output, runErr)
 	}
-	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), " ", 2)
 	if len(parts) != 2 {
 		return "", false, fmt.Errorf("tmux returned malformed rename identity state for %q", identity.ID)
 	}
@@ -261,9 +272,12 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 	if !identity.Valid() {
 		return HasSessionStrict(identity.CreationName)
 	}
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}\t#{session_name}")
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in format
+	// output as "_". The identity token and normalized session name are
+	// space-free.
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity} #{session_name}")
 	if err == nil {
-		parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+		parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), " ", 2)
 		if len(parts) != 2 {
 			return false, fmt.Errorf("tmux returned malformed session identity for %q", identity.ID)
 		}
@@ -1019,8 +1033,13 @@ func GetPaneCommands(sessionName string) ([]string, error) {
 func GetPaneCommandsContext(ctx context.Context, sessionName string) ([]string, error) {
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
+	// The two fields are separated by a single space, and pane_start_command
+	// (a full command line) may itself contain spaces, so the fields are split
+	// on the FIRST space only. A tab separator cannot be used: tmux >= 3.7
+	// renders a literal tab in format output as "_", which would fuse
+	// pane_current_command onto pane_start_command as one token.
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", normalizedName,
-		"-F", "#{pane_current_command}\t#{pane_start_command}")
+		"-F", "#{pane_current_command} #{pane_start_command}")
 	if err != nil {
 		timeoutError := &TimeoutError{}
 		if errors.As(err, &timeoutError) {
@@ -1032,7 +1051,7 @@ func GetPaneCommandsContext(ctx context.Context, sessionName string) ([]string, 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var commands []string
 	for _, line := range lines {
-		for field := range strings.SplitSeq(line, "\t") {
+		for _, field := range strings.SplitN(line, " ", 2) {
 			if cmd := strings.TrimSpace(field); cmd != "" {
 				commands = append(commands, cmd)
 			}
