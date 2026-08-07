@@ -105,6 +105,41 @@ func TestInspectNodeProcessArgsHonorsCancellationDuringFinalRead(t *testing.T) {
 	}
 }
 
+// TestResolveActivePaneTargetParsesSpaceSeparatedIdentity guards the harness
+// readiness path against the tmux >= 3.7 behavior of rendering a literal tab in
+// -F/format output as "_". A tab-separated "#{pane_id}\t#{pane_pid}" format
+// collapsed "%1<tab>54721" into the single token "%1_54721", so the parse
+// failed with "invalid active tmux pane identity" and every fresh
+// agy/codex/claude session creation aborted with AGM-011. The format now uses a
+// space, which every tmux version emits verbatim.
+func TestResolveActivePaneTargetParsesSpaceSeparatedIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	const sessionName = "resolve-active-pane-identity"
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName, "sleep", "30").CombinedOutput(); err != nil {
+		t.Fatalf("create tmux session: %v: %s", err, output)
+	}
+
+	pane, exists, err := resolveActivePaneTarget(t.Context(), sessionName, socketPath)
+	if err != nil {
+		t.Fatalf("resolveActivePaneTarget returned error (tmux tab-rendering regression?): %v", err)
+	}
+	if !exists {
+		t.Fatalf("resolveActivePaneTarget reported session %q missing", sessionName)
+	}
+	if !isPaneID(pane.ID) {
+		t.Fatalf("resolveActivePaneTarget returned invalid pane id %q", pane.ID)
+	}
+	if pane.RootPID <= 0 {
+		t.Fatalf("resolveActivePaneTarget returned non-positive pane pid %d", pane.RootPID)
+	}
+}
+
 func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping tmux integration test in short mode")
