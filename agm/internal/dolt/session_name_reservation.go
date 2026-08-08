@@ -219,16 +219,21 @@ func (a *Adapter) RenewSessionNameReservation(sessionID, name string) error {
 		if !owned {
 			return &SessionNameConflictError{Name: name}
 		}
-		// Best-effort extension by primary key so a long-running caller keeps a
-		// fresh lease. A spurious zero-row result here is deliberately ignored:
-		// ownership and non-expiry are already proven above, and the TTL set at
-		// reservation time (2h) covers the caller's remaining launch/readiness
-		// work by orders of magnitude. Correctness must not depend on this UPDATE.
+		// Best-effort extension so a long-running caller keeps a fresh lease. It
+		// is fenced to the session_id verified just above so that if the lease
+		// changed hands between the read and this write (the original releases it
+		// and another creator reserves the same name), it cannot shorten the
+		// replacement owner's later expiry — it only ever touches the lease we
+		// confirmed we hold. A spurious zero-row result is deliberately ignored:
+		// ownership and non-expiry are already proven, the session_id predicate
+		// can itself trigger the same zero-row anomaly, and the TTL set at
+		// reservation time covers the caller's remaining launch/readiness work by
+		// orders of magnitude. Correctness must not depend on this UPDATE.
 		_, _ = a.conn.Exec( //nolint:noctx // best-effort lease extension; see comment
 			`UPDATE agm_session_name_reservations
 			 SET expires_at = ?
-			 WHERE workspace = ? AND name = ?`,
-			now.Add(sessionNameReservationTTL), a.workspace, name,
+			 WHERE workspace = ? AND name = ? AND session_id = ?`,
+			now.Add(sessionNameReservationTTL), a.workspace, name, sessionID,
 		)
 		return nil
 	}
