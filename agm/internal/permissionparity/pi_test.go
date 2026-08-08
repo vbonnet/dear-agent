@@ -1,11 +1,15 @@
 package permissionparity
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
 )
@@ -248,6 +252,93 @@ try {
 	command.Env = append(os.Environ(), "PI_CHILD_PID_FILE="+childPIDPath)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("TERM-ignoring Pi hook cleanup: %v\n%s", err, output)
+	}
+}
+
+func TestPiTerminalHookTimeoutSettlesWhenEscapedProcessRetainsPipes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX detached-process semantics are required for this regression")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	root := t.TempDir()
+	extensionPath, err := EnsurePiAuthorizationExtension(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	childPIDPath := filepath.Join(t.TempDir(), "escaped-child.pid")
+	t.Cleanup(func() {
+		raw, readErr := os.ReadFile(childPIDPath)
+		if readErr != nil {
+			return
+		}
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if parseErr != nil || pid <= 1 {
+			return
+		}
+		process, findErr := os.FindProcess(pid)
+		if findErr == nil {
+			_ = process.Kill()
+		}
+	})
+	escapeHelperPath := filepath.Join(t.TempDir(), "escape-hook-pipes.mjs")
+	const escapeHelper = `
+import {spawn} from "node:child_process";
+import {writeFileSync} from "node:fs";
+const escaped = spawn(process.execPath, ["--input-type=module", "-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"], {
+  detached: true,
+  stdio: ["ignore", "inherit", "inherit"],
+});
+writeFileSync(process.env.PI_CHILD_PID_FILE, String(escaped.pid));
+escaped.unref();
+await new Promise(() => {});
+`
+	if err := os.WriteFile(escapeHelperPath, []byte(escapeHelper), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"$PI_NODE\" \"$PI_ESCAPE_HELPER\"","timeout":0.2}]}]}}`
+	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+let childPID = 0;
+try {
+  const started = Date.now();
+  const result = await mod.runProjectHooks("Stop", {}, process.argv[2]);
+  const elapsed = Date.now() - started;
+  if (!result?.block || !result.reason.includes("ETIMEDOUT")) throw new Error("escaped-pipe terminal hook did not fail closed: " + JSON.stringify(result));
+  if (elapsed > 1500) throw new Error("escaped-pipe terminal hook exceeded its bounded cleanup window: " + elapsed);
+  childPID = Number(readFileSync(process.argv[3], "utf8"));
+  if (!Number.isSafeInteger(childPID) || childPID <= 1) throw new Error("invalid escaped hook PID: " + childPID);
+  process.kill(childPID, 0);
+} finally {
+  if (childPID > 1) {
+    try {
+      process.kill(childPID, "SIGKILL");
+    } catch (error) {
+      if (error?.code !== "ESRCH") throw error;
+    }
+  }
+}
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project), filepath.Clean(childPIDPath))
+	command.Env = append(os.Environ(), "PI_CHILD_PID_FILE="+childPIDPath, "PI_ESCAPE_HELPER="+escapeHelperPath, "PI_NODE="+node)
+	if output, err := command.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			t.Fatalf("escaped-pipe Pi hook exceeded the test deadline: %v\n%s", ctx.Err(), output)
+		}
+		t.Fatalf("escaped-pipe Pi hook cleanup: %v\n%s", err, output)
 	}
 }
 

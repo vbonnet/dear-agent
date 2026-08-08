@@ -158,14 +158,22 @@ function terminationError(code, message) {
 function signalProcessGroup(child, signal) {
 	if (!child.pid) return;
 	try {
-		// detached creates a new POSIX process group, so a hook cannot leave a
-		// TERM-ignoring child behind when its shell is stopped.
+		// detached creates a new POSIX process group, so ordinary hook
+		// descendants are terminated with their shell. A descendant that starts
+		// a new session can escape that group; forced cleanup below still settles
+		// the caller's finite deadline even when such a process retains stdio.
 		if (process.platform !== "win32") process.kill(-child.pid, signal);
 		else child.kill(signal);
 	} catch (error) {
-		// A completed child races normal cleanup. Other errors are reported by
-		// the child close/error path, which remains the hook result authority.
-		if (error?.code !== "ESRCH") child.kill(signal);
+		// A completed child races normal cleanup. Fall back to the direct child
+		// for other group-signal failures, but cleanup itself must never throw.
+		if (error?.code !== "ESRCH") {
+			try {
+				child.kill(signal);
+			} catch {
+				// The bounded failure result remains authoritative.
+			}
+		}
 	}
 }
 
@@ -199,7 +207,17 @@ function runBoundedHook(command, args, options) {
 		let timedOut = false;
 		let overflowed = false;
 		let settled = false;
+		let timeoutTimer;
 		let forceTimer;
+		const terminationResult = (status = null, signal = null, error) => ({
+			status,
+			signal,
+			error: timedOut
+				? terminationError("ETIMEDOUT", `hook exceeded ${options.timeout}ms`)
+				: overflowed
+					? terminationError("ERR_CHILD_PROCESS_STDIO_MAXBUFFER", "hook output exceeded its capture limit")
+					: error,
+		});
 		const finish = (result) => {
 			if (settled) return;
 			settled = true;
@@ -211,7 +229,24 @@ function runBoundedHook(command, args, options) {
 				stderr: Buffer.concat(stderr).toString("utf8"),
 			});
 		};
-		const forceCleanup = () => signalProcessGroup(child, "SIGKILL");
+		const forceCleanup = () => {
+			signalProcessGroup(child, "SIGKILL");
+			for (const stream of [child.stdin, child.stdout, child.stderr]) {
+				if (!stream) continue;
+				try {
+					stream.on("error", () => {});
+					stream.destroy();
+				} catch {
+					// Forced settlement cannot depend on stream teardown succeeding.
+				}
+			}
+			try {
+				child.unref();
+			} catch {
+				// The bounded failure result remains authoritative.
+			}
+			finish(terminationResult());
+		};
 		const beginTermination = (reason) => {
 			if (timedOut || overflowed) return;
 			if (reason === "timeout") timedOut = true;
@@ -220,7 +255,7 @@ function runBoundedHook(command, args, options) {
 			const aggregateRemaining = options.deadline ? Math.max(0, options.deadline - Date.now()) : Infinity;
 			forceTimer = setTimeout(forceCleanup, Math.max(0, Math.min(HOOK_KILL_GRACE_MS, aggregateRemaining)));
 		};
-		const timeoutTimer = setTimeout(() => beginTermination("timeout"), Math.max(1, options.timeout));
+		timeoutTimer = setTimeout(() => beginTermination("timeout"), Math.max(1, options.timeout));
 		child.stdout.on("data", (chunk) => {
 			const captured = appendOutput(stdout, stdoutSize, chunk, options.maxBuffer);
 			stdoutSize = captured.size;
@@ -233,14 +268,9 @@ function runBoundedHook(command, args, options) {
 		});
 		child.stdin.on("error", () => {});
 		child.stdin.end(options.input);
-		child.on("error", (error) => finish({status: null, error}));
+		child.on("error", (error) => finish(terminationResult(null, null, error)));
 		child.on("close", (status, signal) => {
-			const error = timedOut
-				? terminationError("ETIMEDOUT", `hook exceeded ${options.timeout}ms`)
-				: overflowed
-					? terminationError("ERR_CHILD_PROCESS_STDIO_MAXBUFFER", "hook output exceeded its capture limit")
-					: undefined;
-			finish({status, signal, error});
+			finish(terminationResult(status, signal));
 		});
 	});
 }
