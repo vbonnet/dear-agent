@@ -19,7 +19,7 @@ import (
 
 const reminderLockCrashHelperEnv = "DEAR_AGENT_REMINDER_LOCK_CRASH_HELPER"
 
-func TestRunBlocksInvalidHookInvocation(t *testing.T) {
+func TestRunYieldsInvalidHookInvocationWithoutAStableRetrySignal(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
 	if got := run([]string{"--root", ".", "--event", "PreToolUse"}, bytes.NewReader(nil), &output, &bytes.Buffer{}); got != 0 {
@@ -29,10 +29,10 @@ func TestRunBlocksInvalidHookInvocation(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Decision != "block" || response.Reason == "" {
+	if response.Decision != "" || response.SystemMessage == "" {
 		t.Fatalf("response = %#v", response)
 	}
-	if strings.Contains(response.Reason, "docs/spec-authoring.md") || strings.Contains(response.Reason, "spec-governance/skills/write-spec/SKILL.md") {
+	if strings.Contains(response.SystemMessage, "docs/spec-authoring.md") || strings.Contains(response.SystemMessage, "spec-governance/skills/write-spec/SKILL.md") {
 		t.Fatalf("protocol error falsely routed through staged-change authoring guidance: %#v", response)
 	}
 }
@@ -46,9 +46,9 @@ func TestRunProvidesCooperativeTerminalReminderForValidStagedContract(t *testing
 		wantSystem   bool
 		wantDecision string
 	}{
-		{provider: "claude", input: `{"hook_event_name":"Stop"}`, wantDecision: "block"},
-		{provider: "codex", input: `{"hook_event_name":"Stop"}`, wantSystem: true, wantDecision: "block"},
-		{provider: "pi", input: `{"hook_event_name":"Stop"}`, wantDecision: "block"},
+		{provider: "claude", input: `{"hook_event_name":"Stop","session_id":"claude-reminder","stop_hook_active":false}`, wantDecision: "block"},
+		{provider: "codex", input: `{"hook_event_name":"Stop","session_id":"codex-reminder","turn_id":"codex-turn-reminder","stop_hook_active":false}`, wantSystem: true, wantDecision: "block"},
+		{provider: "pi", input: `{"hook_event_name":"Stop","session_id":"pi-reminder","stop_hook_active":false}`, wantDecision: "block"},
 		{provider: "opencode", input: `{"hook_event_name":"Stop"}`, wantSystem: true, wantDecision: "block"},
 		{provider: "antigravity", input: `{"conversationId":"contract-review","executionNum":1}`, wantDecision: "continue"},
 	} {
@@ -116,7 +116,7 @@ func TestAntigravityReminderClaimIsScopedToConversationAndSnapshot(t *testing.T)
 	}
 }
 
-func TestAntigravityReminderFallbackTreatsExecutionOneAsFirstInvocation(t *testing.T) {
+func TestAntigravityReminderStateFailureYieldsForEitherSequenceOrigin(t *testing.T) {
 	stateFile := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(stateFile, []byte("unavailable"), 0o600); err != nil {
 		t.Fatal(err)
@@ -127,8 +127,8 @@ func TestAntigravityReminderFallbackTreatsExecutionOneAsFirstInvocation(t *testi
 		execution int
 		want      string
 	}{
-		{execution: 1, want: "continue"},
-		{execution: 2, want: "allow"},
+		{execution: 0, want: "allow"},
+		{execution: 1, want: "allow"},
 	} {
 		var output bytes.Buffer
 		body := fmt.Sprintf(`{"conversationId":"fallback","executionNum":%d}`, test.execution)
@@ -332,7 +332,7 @@ func TestUnsafeReminderStateDirectoriesUseBoundedFallback(t *testing.T) {
 			for _, test := range []struct {
 				execution int
 				want      string
-			}{{1, "continue"}, {2, "allow"}} {
+			}{{0, "allow"}, {1, "allow"}} {
 				var output bytes.Buffer
 				body := fmt.Sprintf(`{"conversationId":"fallback-%d","executionNum":%d}`, test.execution, test.execution)
 				if got := run([]string{"--root", root, "--provider", "antigravity", "--event", "Stop"}, strings.NewReader(body), &output, &bytes.Buffer{}); got != 0 {
@@ -346,34 +346,265 @@ func TestUnsafeReminderStateDirectoriesUseBoundedFallback(t *testing.T) {
 	}
 }
 
-func TestRunYieldsAfterOneReminderResponseAttempt(t *testing.T) {
-	t.Parallel()
-	root := stagedContractRepository(t)
-	for _, test := range []struct {
-		provider    string
-		wantSystem  bool
-		wantContext bool
-	}{
-		{provider: "claude", wantSystem: true},
-		{provider: "codex", wantSystem: true},
-		{provider: "pi", wantContext: true},
-	} {
-		t.Run(test.provider, func(t *testing.T) {
-			var output bytes.Buffer
-			if got := run([]string{"--root", root, "--provider", test.provider, "--event", "Stop"}, bytes.NewReader([]byte(`{"stop_hook_active":true}`)), &output, &bytes.Buffer{}); got != 0 {
-				t.Fatalf("run() = %d output=%s", got, output.String())
+func TestTerminalFeedbackClaimDistinguishesSiblingContinuationSnapshotAndTurn(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Setenv(reminderStateEnv, privateStateDirectory(t))
+			root := stagedContractRepository(t)
+			invoke := func(session string, active bool, turnID string) hookResponse {
+				t.Helper()
+				var output bytes.Buffer
+				input := fmt.Sprintf(`{"session_id":%q,"stop_hook_active":%t}`, session, active)
+				if provider == "codex" {
+					input = fmt.Sprintf(`{"session_id":%q,"turn_id":%q,"stop_hook_active":%t}`, session, turnID, active)
+				}
+				if got := run([]string{"--root", root, "--provider", provider, "--event", "Stop"}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+					t.Fatalf("run() = %d output=%s", got, output.String())
+				}
+				return decodeResponse(t, output.Bytes())
 			}
-			response := decodeResponse(t, output.Bytes())
-			if response.Decision != "" {
-				t.Fatalf("response = %#v, want nonblocking retry-loop yield", response)
+
+			if response := invoke("session-a", true, "turn-a"); response.Decision != "block" {
+				t.Fatalf("fresh snapshot during sibling continuation = %#v, want one block", response)
 			}
-			if test.wantSystem && (response.SystemMessage == "" || response.HookSpecificOutput != nil) {
-				t.Fatalf("response = %#v, want one bounded system warning", response)
+			if response := invoke("session-a", true, "turn-a"); response.Decision != "" || response.SystemMessage == "" {
+				t.Fatalf("repeated snapshot = %#v, want advisory yield", response)
 			}
-			if test.wantContext && (response.HookSpecificOutput == nil || response.HookSpecificOutput.AdditionalContext == "") {
-				t.Fatalf("response = %#v, want Pi bridge context without another block", response)
+
+			writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When the staged contract changes, the system shall review the new immutable snapshot.\n\n## BDD Traceability\n\n- Feature: `features/example.feature`\n")
+			gittest.New(t).Run(t, root, "add", "--", "pkg/example/SPEC.md")
+			if response := invoke("session-a", true, "turn-a"); response.Decision != "block" {
+				t.Fatalf("new snapshot during active continuation = %#v, want fresh block", response)
+			}
+			if response := invoke("session-a", true, "turn-a"); response.Decision != "" {
+				t.Fatalf("repeated new snapshot = %#v, want advisory yield", response)
+			}
+			if response := invoke("session-b", true, "turn-b"); response.Decision != "block" {
+				t.Fatalf("new session = %#v, want independent block", response)
+			}
+			if provider == "claude" {
+				var output bytes.Buffer
+				if got := run([]string{"--root", root, "--provider", provider, "--event", "UserPromptSubmit"}, strings.NewReader(`{"session_id":"session-a"}`), &output, &bytes.Buffer{}); got != 0 {
+					t.Fatalf("reset run() = %d output=%s", got, output.String())
+				}
+				if response := decodeResponse(t, output.Bytes()); response.Decision != "" || response.SystemMessage != "" || response.Reason != "" {
+					t.Fatalf("user-turn reset response = %#v, want nonblocking empty envelope", response)
+				}
+			}
+			if response := invoke("session-a", false, "turn-a-next"); response.Decision != "block" {
+				t.Fatalf("new real turn with unchanged snapshot = %#v, want refreshed block", response)
 			}
 		})
+	}
+}
+
+func TestTerminalFeedbackClaimSerializesConcurrentFirstAttempts(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Setenv(reminderStateEnv, privateStateDirectory(t))
+			root := stagedContractRepository(t)
+			const workers = 16
+			start := make(chan struct{})
+			responses := make(chan struct {
+				code int
+				body []byte
+			}, workers)
+			var wait sync.WaitGroup
+			wait.Add(workers)
+			for range workers {
+				go func() {
+					defer wait.Done()
+					<-start
+					var output bytes.Buffer
+					input := `{"session_id":"concurrent-first","stop_hook_active":false}`
+					if provider == "codex" {
+						input = `{"session_id":"concurrent-first","turn_id":"concurrent-turn-1","stop_hook_active":false}`
+					}
+					code := run([]string{"--root", root, "--provider", provider, "--event", "Stop"},
+						strings.NewReader(input), &output, &bytes.Buffer{})
+					responses <- struct {
+						code int
+						body []byte
+					}{code: code, body: bytes.Clone(output.Bytes())}
+				}()
+			}
+			close(start)
+			wait.Wait()
+			close(responses)
+
+			blockers := 0
+			for result := range responses {
+				if result.code != 0 {
+					t.Fatalf("concurrent run() = %d output=%s", result.code, result.body)
+				}
+				response := decodeResponse(t, result.body)
+				if response.Decision == "block" {
+					blockers++
+				} else if response.Decision != "" {
+					t.Fatalf("concurrent response = %#v, want one block and advisory yields", response)
+				}
+			}
+			if blockers != 1 {
+				t.Fatalf("concurrent blockers = %d, want exactly one", blockers)
+			}
+
+			invoke := func(active bool, turnID string) hookResponse {
+				t.Helper()
+				var output bytes.Buffer
+				input := fmt.Sprintf(`{"session_id":"concurrent-first","stop_hook_active":%t}`, active)
+				if provider == "codex" {
+					input = fmt.Sprintf(`{"session_id":"concurrent-first","turn_id":%q,"stop_hook_active":%t}`, turnID, active)
+				}
+				if got := run([]string{"--root", root, "--provider", provider, "--event", "SubagentStop"}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+					t.Fatalf("run() = %d output=%s", got, output.String())
+				}
+				return decodeResponse(t, output.Bytes())
+			}
+			if response := invoke(false, "concurrent-turn-1"); response.Decision != "" {
+				t.Fatalf("same native turn = %#v, want advisory yield", response)
+			}
+			if provider == "claude" {
+				var output bytes.Buffer
+				if got := run([]string{"--root", root, "--provider", provider, "--event", "UserPromptSubmit"}, strings.NewReader(`{"session_id":"concurrent-first"}`), &output, &bytes.Buffer{}); got != 0 {
+					t.Fatalf("reset run() = %d output=%s", got, output.String())
+				}
+			}
+			if response := invoke(false, "concurrent-turn-2"); response.Decision != "block" {
+				t.Fatalf("next native outer turn = %#v, want refreshed one-shot block", response)
+			}
+		})
+	}
+}
+
+func TestCleanTerminalFeedbackDoesNotConsumeCapacityAndClearsClaims(t *testing.T) {
+	requirePersistentReminderState(t)
+	state := privateStateDirectory(t)
+	t.Setenv(reminderStateEnv, state)
+	cleanRoot := baseRepository(t)
+	for index := 0; index <= maxReminderMarkers; index++ {
+		var output, stderr bytes.Buffer
+		input := fmt.Sprintf(`{"session_id":"clean-%03d","turn_id":"clean-turn-%03d","stop_hook_active":false}`, index, index)
+		if got := run([]string{"--root", cleanRoot, "--provider", "codex", "--event", "Stop"}, strings.NewReader(input), &output, &stderr); got != 0 {
+			t.Fatalf("clean session %d run() = %d output=%s stderr=%s", index, got, output.String(), stderr.String())
+		}
+		if response := decodeResponse(t, output.Bytes()); response.Decision == "block" {
+			t.Fatalf("clean session %d response = %#v", index, response)
+		}
+	}
+	if got := reminderMarkerCount(t, state); got != 0 {
+		t.Fatalf("clean session marker count = %d, want 0", got)
+	}
+
+	root := stagedContractRepository(t)
+	invoke := func(session, turnID string) hookResponse {
+		t.Helper()
+		var output bytes.Buffer
+		input := fmt.Sprintf(`{"session_id":%q,"turn_id":%q,"stop_hook_active":false}`, session, turnID)
+		if got := run([]string{"--root", root, "--provider", "codex", "--event", "Stop"}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+			t.Fatalf("run() = %d output=%s", got, output.String())
+		}
+		return decodeResponse(t, output.Bytes())
+	}
+	if response := invoke("claimed-session", "claimed-turn-1"); response.Decision != "block" {
+		t.Fatalf("first governed response = %#v, want block", response)
+	}
+	if got := reminderMarkerCount(t, state); got != 1 {
+		t.Fatalf("claimed marker count = %d, want 1", got)
+	}
+	sandbox := gittest.New(t)
+	sandbox.Run(t, root, "commit", "-m", "commit contract")
+	if response := invoke("claimed-session", "claimed-turn-1"); response.Decision == "block" {
+		t.Fatalf("clean response = %#v, want allow and claim removal", response)
+	}
+	if got := reminderMarkerCount(t, state); got != 0 {
+		t.Fatalf("marker count after clean result = %d, want 0", got)
+	}
+	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When a cleared claim is retried, the system shall admit a new bounded feedback attempt.\n\n## BDD Traceability\n\n- Feature: `features/example.feature`\n")
+	sandbox.Run(t, root, "add", "--", "pkg/example/SPEC.md")
+	if response := invoke("new-session-after-clear", "post-clear-turn"); response.Decision != "block" {
+		t.Fatalf("post-clear fresh response = %#v, want admitted block", response)
+	}
+	if got := reminderMarkerCount(t, state); got != 1 {
+		t.Fatalf("post-clear marker count = %d, want 1", got)
+	}
+}
+
+func TestTerminalFeedbackClaimBoundsDeterministicValidationFailures(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Setenv(reminderStateEnv, privateStateDirectory(t))
+			root, sandbox := committedContractRepository(t)
+			stageInvalid := func(body string) {
+				writeFile(t, root, "pkg/example/SPEC.md", body)
+				sandbox.Run(t, root, "add", "--", "pkg/example/SPEC.md")
+			}
+			invoke := func() hookResponse {
+				t.Helper()
+				var output bytes.Buffer
+				input := `{"session_id":"validation-session","stop_hook_active":true}`
+				if provider == "codex" {
+					input = `{"session_id":"validation-session","turn_id":"validation-turn","stop_hook_active":true}`
+				}
+				if got := run([]string{"--root", root, "--provider", provider, "--event", "Stop"}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+					t.Fatalf("run() = %d output=%s", got, output.String())
+				}
+				return decodeResponse(t, output.Bytes())
+			}
+
+			stageInvalid("invalid contract one\n")
+			if response := invoke(); response.Decision != "block" {
+				t.Fatalf("fresh deterministic failure = %#v, want block", response)
+			}
+			if response := invoke(); response.Decision != "" {
+				t.Fatalf("repeated deterministic failure = %#v, want yield", response)
+			}
+			stageInvalid("invalid contract two\n")
+			if response := invoke(); response.Decision != "block" {
+				t.Fatalf("changed deterministic failure snapshot = %#v, want fresh block", response)
+			}
+			if response := invoke(); response.Decision != "" {
+				t.Fatalf("repeated changed failure = %#v, want yield", response)
+			}
+		})
+	}
+}
+
+func TestPiAdapterReturnsStableFeedbackIdentityForOuterLoop(t *testing.T) {
+	root := stagedContractRepository(t)
+	var previous string
+	for attempt := 1; attempt <= 2; attempt++ {
+		var output bytes.Buffer
+		input := `{"session_id":"pi-feedback","stop_hook_active":true}`
+		if got := run([]string{"--root", root, "--provider", "pi", "--event", "Stop"}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+			t.Fatalf("attempt %d run() = %d output=%s", attempt, got, output.String())
+		}
+		response := decodeResponse(t, output.Bytes())
+		if response.Decision != "block" || !isLowerHexDigest(response.DearAgentSpecFeedbackID) {
+			t.Fatalf("attempt %d response = %#v, want block with bounded feedback identity", attempt, response)
+		}
+		if previous != "" && response.DearAgentSpecFeedbackID != previous {
+			t.Fatalf("feedback identity changed without a snapshot change: %s != %s", response.DearAgentSpecFeedbackID, previous)
+		}
+		previous = response.DearAgentSpecFeedbackID
+	}
+}
+
+func TestAntigravityDeterministicBlockSupportsZeroBasedExecutionSequence(t *testing.T) {
+	t.Setenv(reminderStateEnv, privateStateDirectory(t))
+	root, _ := committedContractRepository(t)
+	writeFile(t, root, "pkg/example/SPEC.md", "unstaged invalid contract\n")
+	for _, test := range []struct {
+		execution int
+		want      string
+	}{{execution: 0, want: "continue"}, {execution: 1, want: "allow"}} {
+		var output bytes.Buffer
+		body := fmt.Sprintf(`{"conversationId":"blocked-contract","executionNum":%d}`, test.execution)
+		if got := run([]string{"--root", root, "--provider", "antigravity", "--event", "Stop"}, strings.NewReader(body), &output, &bytes.Buffer{}); got != 0 {
+			t.Fatalf("execution %d run() = %d output=%s", test.execution, got, output.String())
+		}
+		if response := decodeResponse(t, output.Bytes()); response.Decision != test.want {
+			t.Fatalf("execution %d response = %#v, want %q", test.execution, response, test.want)
+		}
 	}
 }
 
@@ -387,6 +618,8 @@ func TestAntigravityFailurePathsWithoutStableIdentityAllowTermination(t *testing
 		{name: "unsupported event", args: []string{"--provider", "antigravity", "--root", ".", "--event", "SubagentStop"}, input: []byte(`{}`)},
 		{name: "invalid flag", args: []string{"--provider", "antigravity", "--unknown"}, input: []byte(`{}`)},
 		{name: "oversized input", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: bytes.Repeat([]byte("x"), maxHookInputBytes+1)},
+		{name: "malformed bounded input", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: []byte(`{`)},
+		{name: "missing stable identity", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: []byte(`{}`)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -438,7 +671,7 @@ func TestAntigravityWorkspaceRootFailuresContinueOncePerConversation(t *testing.
 			t.Setenv(reminderStateEnv, privateStateDirectory(t))
 			body, err := json.Marshal(antigravityStopInput{
 				ConversationID:  "invalid-root-" + test.name,
-				ExecutionNumber: 1,
+				ExecutionNumber: new(0),
 				WorkspacePaths:  test.paths,
 			})
 			if err != nil {
@@ -460,7 +693,7 @@ func TestAntigravityWorkspaceRootFailuresContinueOncePerConversation(t *testing.
 
 			body, err = json.Marshal(antigravityStopInput{
 				ConversationID:  "invalid-root-later-execution-" + test.name,
-				ExecutionNumber: 2,
+				ExecutionNumber: new(2),
 				WorkspacePaths:  test.paths,
 			})
 			if err != nil {
@@ -470,8 +703,8 @@ func TestAntigravityWorkspaceRootFailuresContinueOncePerConversation(t *testing.
 			if got := run([]string{"--root-from-workspace-stdin", "--provider", "antigravity", "--event", "Stop"}, bytes.NewReader(body), &output, &bytes.Buffer{}); got != 0 {
 				t.Fatalf("later execution run() = %d output=%s", got, output.String())
 			}
-			if response := decodeResponse(t, output.Bytes()); response.Decision != "allow" {
-				t.Fatalf("later execution response = %#v, want termination", response)
+			if response := decodeResponse(t, output.Bytes()); response.Decision != "continue" {
+				t.Fatalf("new conversation at a later native sequence = %#v, want one state-bound continuation", response)
 			}
 		})
 	}
@@ -494,7 +727,7 @@ func TestAntigravityWorkspaceRootFailureAllowsWhenOneShotStateIsUnavailable(t *t
 }
 
 func TestRunBlocksTerminalHookForUntrackedGovernedPath(t *testing.T) {
-	t.Parallel()
+	t.Setenv(reminderStateEnv, privateStateDirectory(t))
 	root := baseRepository(t)
 	writeFile(t, root, "pkg/example/SPEC.md", "untracked mutable contract\n")
 
@@ -503,16 +736,17 @@ func TestRunBlocksTerminalHookForUntrackedGovernedPath(t *testing.T) {
 		event    string
 		decision string
 		system   bool
+		input    string
 	}{
-		{provider: "claude", event: "SubagentStop", decision: "block"},
-		{provider: "codex", event: "SubagentStop", decision: "block", system: true},
-		{provider: "pi", event: "SubagentStop", decision: "block"},
-		{provider: "opencode", event: "Stop", decision: "block", system: true},
-		{provider: "antigravity", event: "Stop", decision: "continue"},
+		{provider: "claude", event: "SubagentStop", decision: "block", input: `{"session_id":"dirty-claude","stop_hook_active":false}`},
+		{provider: "codex", event: "SubagentStop", decision: "block", system: true, input: `{"session_id":"dirty-codex","turn_id":"dirty-codex-turn","stop_hook_active":false}`},
+		{provider: "pi", event: "SubagentStop", decision: "block", input: `{"session_id":"dirty-pi","stop_hook_active":false}`},
+		{provider: "opencode", event: "Stop", decision: "block", system: true, input: `{}`},
+		{provider: "antigravity", event: "Stop", decision: "continue", input: `{"conversationId":"dirty-antigravity","executionNum":0}`},
 	} {
 		t.Run(test.provider, func(t *testing.T) {
 			var output bytes.Buffer
-			if got := run([]string{"--root", root, "--provider", test.provider, "--event", test.event}, bytes.NewReader([]byte(`{}`)), &output, &bytes.Buffer{}); got != 0 {
+			if got := run([]string{"--root", root, "--provider", test.provider, "--event", test.event}, strings.NewReader(test.input), &output, &bytes.Buffer{}); got != 0 {
 				t.Fatalf("run() = %d output=%s", got, output.String())
 			}
 			response := decodeResponse(t, output.Bytes())
@@ -531,7 +765,7 @@ func TestRunBlocksTerminalHookForUntrackedGovernedPath(t *testing.T) {
 	}
 }
 
-func TestRunBlocksOversizedHookInput(t *testing.T) {
+func TestRunYieldsOversizedHookInputWithoutAStableRetrySignal(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
 	input := bytes.Repeat([]byte("x"), maxHookInputBytes+1)
@@ -542,13 +776,62 @@ func TestRunBlocksOversizedHookInput(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Decision != "block" {
+	if response.Decision != "" || response.SystemMessage == "" {
 		t.Fatalf("response = %#v", response)
 	}
 }
 
-func TestRunBlocksGovernedRenameAndBinaryContracts(t *testing.T) {
+func TestRunYieldsMalformedBoundedHookInputWithoutAStableRetrySignal(t *testing.T) {
 	t.Parallel()
+	for _, test := range []struct {
+		name        string
+		provider    string
+		input       string
+		wantSystem  bool
+		wantContext bool
+	}{
+		{name: "claude malformed object", provider: "claude", input: `{`, wantSystem: true},
+		{name: "claude missing retry field", provider: "claude", input: `{"session_id":"missing-signal"}`, wantSystem: true},
+		{name: "codex array", provider: "codex", input: `[]`, wantSystem: true},
+		{name: "codex missing identity", provider: "codex", input: `{}`, wantSystem: true},
+		{name: "pi wrong retry type", provider: "pi", input: `{"session_id":"pi-invalid","stop_hook_active":"true"}`, wantContext: true},
+		{name: "opencode null", provider: "opencode", input: `null`, wantSystem: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for attempt := 1; attempt <= 2; attempt++ {
+				var output bytes.Buffer
+				if got := run([]string{"--root", ".", "--provider", test.provider, "--event", "Stop"}, strings.NewReader(test.input), &output, &bytes.Buffer{}); got != 0 {
+					t.Fatalf("attempt %d run() = %d", attempt, got)
+				}
+				response := decodeResponse(t, output.Bytes())
+				if response.Decision != "" {
+					t.Fatalf("attempt %d response = %#v, want immediate advisory yield", attempt, response)
+				}
+				if test.wantSystem && response.SystemMessage == "" {
+					t.Fatalf("attempt %d response = %#v, want system advisory", attempt, response)
+				}
+				if test.wantContext && (response.HookSpecificOutput == nil || response.HookSpecificOutput.AdditionalContext == "") {
+					t.Fatalf("attempt %d response = %#v, want Pi advisory context", attempt, response)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenCodeAdapterAcceptsPluginEmptyInput(t *testing.T) {
+	root := stagedContractRepository(t)
+	var output bytes.Buffer
+	if got := run([]string{"--root", root, "--provider", "opencode", "--event", "Stop"}, strings.NewReader(""), &output, &bytes.Buffer{}); got != 0 {
+		t.Fatalf("run() = %d output=%s", got, output.String())
+	}
+	response := decodeResponse(t, output.Bytes())
+	if response.Decision != "block" || response.SystemMessage != stagedSPECReminderMessage {
+		t.Fatalf("response = %#v, want bounded plugin reminder", response)
+	}
+}
+
+func TestRunBlocksGovernedRenameAndBinaryContracts(t *testing.T) {
+	t.Setenv(reminderStateEnv, privateStateDirectory(t))
 	for _, test := range []struct {
 		name  string
 		stage func(t *testing.T, root string, sandbox *gittest.Sandbox)
@@ -576,7 +859,8 @@ func TestRunBlocksGovernedRenameAndBinaryContracts(t *testing.T) {
 			root, sandbox := committedContractRepository(t)
 			test.stage(t, root, sandbox)
 			var output bytes.Buffer
-			if got := run([]string{"--root", root, "--provider", "codex", "--event", "Stop"}, bytes.NewReader([]byte(`{}`)), &output, &bytes.Buffer{}); got != 0 {
+			input := fmt.Sprintf(`{"session_id":%q,"turn_id":%q,"stop_hook_active":false}`, "governed-"+test.name, "governed-turn-"+test.name)
+			if got := run([]string{"--root", root, "--provider", "codex", "--event", "Stop"}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
 				t.Fatalf("run() = %d output=%s", got, output.String())
 			}
 			response := decodeResponse(t, output.Bytes())
@@ -609,6 +893,17 @@ func TestEmitJSONBoundsFallbackAndDetectsShortWrite(t *testing.T) {
 		}
 		response := decodeResponse(t, output.Bytes())
 		if response.Decision != "continue" || !strings.Contains(response.Reason, "exceeded its safety limit") {
+			t.Fatalf("fallback response = %#v", response)
+		}
+	})
+	t.Run("oversized Pi response retains its deterministic feedback identity", func(t *testing.T) {
+		var output bytes.Buffer
+		feedbackID := strings.Repeat("a", 64)
+		if got := emitJSON(&output, hookResponse{Decision: "block", Reason: strings.Repeat("x", maxHookOutputBytes), DearAgentSpecFeedbackID: feedbackID}); got != 0 {
+			t.Fatalf("emitJSON() = %d", got)
+		}
+		response := decodeResponse(t, output.Bytes())
+		if response.Decision != "block" || response.DearAgentSpecFeedbackID != feedbackID || !strings.Contains(response.Reason, "exceeded its safety limit") {
 			t.Fatalf("fallback response = %#v", response)
 		}
 	})
@@ -693,4 +988,19 @@ func privateStateDirectory(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return directory
+}
+
+func reminderMarkerCount(t *testing.T, directory string) int {
+	t.Helper()
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), reminderMarkerPrefix) {
+			count++
+		}
+	}
+	return count
 }

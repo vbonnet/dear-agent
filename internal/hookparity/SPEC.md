@@ -1,8 +1,8 @@
 # Hook Harness Parity Specification
 
-<!-- Last audited at: 2026-08-01 -->
+<!-- Last audited at: 2026-08-08 -->
 
-**Version:** 1.1
+**Version:** 1.4
 **Status:** Baseline
 **Scope:** Repository-scoped hook manifests and shared guardrail hook scripts.
 
@@ -43,7 +43,7 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-13** When AGY configures its bounded SPEC review, its source manifest shall name the absolute operator-owned adapter and that adapter shall select exactly one valid absolute Git workspace supplied by the native hook input rather than rely on the hook process current directory.
 
-**HHP-14** When AGY supplies an invalid, missing, or ambiguous workspace root, the adapter shall bound remediation to one continuation on execution one per stable conversation identity, with immediate termination allowed for a repeated identity, missing identity, or later execution number.
+**HHP-14** When AGY supplies an invalid, missing, or ambiguous workspace root, the adapter shall bound remediation to one continuation per stable conversation and failure identity without assuming whether the native execution sequence starts at zero or one; a repeated or missing identity, or unavailable private claim state, shall allow termination.
 
 **HHP-15** When Pi projects Stop or SubagentStop through multiple matching handlers, the Pi adapter shall execute every matching handler admitted by its total count and execution-deadline budgets before returning bounded aggregate blocking reasons and advisory contexts; it shall honor each validated manifest timeout up to 120 seconds without silently shortening the canonical 60-second and 120-second terminal chain, cap captured output, bound feedback while collecting it, and fail closed when a count or aggregate deadline budget is exhausted.
 
@@ -51,6 +51,23 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-17** When AGM launches unattended Codex with a recognizable terminal SPEC adapter, the system shall replace that source adapter with the validated root-owned helper, bind the canonical repository root, disable the mutable project copy, and digest-pin the effective session command.
 
+**HHP-18** When Claude or Codex terminal feedback runs, the adapter shall bind its attempt to the native session and deterministic feedback identity, shall include Codex's bounded native turn identity in the Codex attempt, shall clear Claude's prior session claim on the native `UserPromptSubmit` boundary, shall allow at most one blocker among concurrent invocations of the same attempt, shall block once for a fresh identity even when a sibling hook caused the provider-global active continuation, shall yield a repeated identity without claiming compliance, and shall use the provider-global flag only as a liveness fallback when private claim state is unavailable.
+
+**HHP-19** When the installed SPEC helper status surface rebuilds its expected artifact from unchanged source and provenance, the build shall use stable source-derived stamp input, path-independent compilation, and disabled implicit VCS stamping so separate invocations produce comparable bytes instead of wall-clock drift.
+
+**HHP-20** Where a cooperative terminal adapter cannot establish a stable retry identity because its invocation or bounded input is invalid, the adapter shall yield termination with advisory feedback instead of creating an unbounded fail-closed loop, without weakening the separately enforced changed-SPEC CI decision.
+
+**HHP-21** When a plain Codex source hook runs without an AGM or Claude repository-root environment variable, the adapter command shall resolve the canonical Git worktree root from the native session working directory before invoking repository source.
+
+**HHP-22** When automation needs the installed-helper status exit contract, the system shall provide a directly runnable built status artifact that emits one JSON result and preserves exit 0 for current, 1 for missing, stale, or untrusted, and 2 for inspection or usage failure; a Make convenience target may expose Make's documented recipe-failure translation.
+
+**HHP-23** When Pi aggregates terminal handlers, the SPEC adapter shall return a bounded deterministic feedback identity and the persistent Pi extension shall allow one follow-up for each fresh identity despite sibling continuation state, suppress repeats, retain a finite per-turn continuation budget, and reset that budget on a real interactive or RPC turn.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/hook_parity.feature`
+
+## Package Test Traceability
+
+- `cmd/spec-contract-hook/main_test.go`
+- `tests/buildstamp/buildstamp_test.go`

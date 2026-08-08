@@ -92,6 +92,16 @@ Feature: Hook harness parity
     When AGM exercises the shared reminder across all projected harness adapters
     Then every reminder should route to the canonical authoring page and single-source skill
 
+  Scenario: Sibling continuations preserve fresh bounded SPEC feedback
+    Given terminal SPEC feedback identity is configured
+    When AGM exercises sibling continuations and repeated SPEC identities across native terminal adapters
+    Then fresh SPEC identities should block once while repeats yield without claiming compliance
+
+  Scenario: Installed helper status compares reproducible expected bytes
+    Given installed SPEC helper status is configured
+    When AGM rebuilds the expected helper with distinct wall-clock inputs
+    Then the expected helper bytes should remain identical for unchanged source and provenance
+
   Scenario: Idle-session fallback bounds recursive SPEC feedback
     Given OpenCode idle-session SPEC feedback is configured
     When AGM exercises repeated, synthetic, message-capacity, session-capacity, and deleted-session events

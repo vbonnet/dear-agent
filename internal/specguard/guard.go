@@ -138,6 +138,7 @@ type guardDependencies struct {
 	afterRepositoryAdmission func()
 	afterGitCommand          func()
 	afterDirtyWorktreeRead   func()
+	afterFinalDirtyRead      func()
 	afterIndexRead           func()
 }
 
@@ -184,7 +185,7 @@ func evaluate(ctx context.Context, request Request, limits guardLimits, dependen
 	switch request.Mode {
 	case ModeStaged:
 		result.Source = "Git index object IDs compared with pinned HEAD after bounded dirty-worktree path/status admission"
-		snapshot, failure = git.stagedSnapshot(guardCtx, root, dependencies.afterDirtyWorktreeRead, dependencies.afterIndexRead)
+		snapshot, failure = git.stagedSnapshot(guardCtx, root, dependencies.afterDirtyWorktreeRead, dependencies.afterFinalDirtyRead, dependencies.afterIndexRead)
 	case ModeCommitted:
 		result.Source = "Git commit-tree object IDs from pinned base..HEAD"
 		snapshot, failure = git.committedSnapshot(guardCtx, root, request.Base)
@@ -205,13 +206,6 @@ func evaluate(ctx context.Context, request Request, limits guardLimits, dependen
 		}
 		changedGoverned[changed.path] = changed
 		result.Changed = append(result.Changed, changed.path)
-		if changed.status == "D" {
-			collector.add(Finding{
-				Code:    "governed-file-deleted",
-				Path:    changed.path,
-				Message: "a SPEC, SPEC.owner, or BDD contract edge cannot be deleted without an explicit preservation workflow",
-			})
-		}
 	}
 	sort.Strings(result.Changed)
 	if len(changedGoverned) == 0 {
@@ -229,7 +223,7 @@ func evaluate(ctx context.Context, request Request, limits guardLimits, dependen
 	}
 
 	result.Decision = DecisionReminder
-	result.Reminder = "Deterministic object, dirty-worktree admission, EARS, ownership-path, and reciprocal BDD checks passed; semantic contract consolidation and harness/implementation neutrality still require review. Repository-local hook feedback is cooperative. A separately reviewed changed-SPEC CI and provider rollout is required for mandatory immutable enforcement, which this result does not attest."
+	result.Reminder = "Deterministic object, dirty-worktree admission, EARS, ownership-path, and reciprocal BDD checks passed; semantic contract consolidation, harness/implementation neutrality, and any changed-path retirement or stable-ID migration still require review. Repository-local hook feedback is cooperative. A separately reviewed changed-SPEC CI and provider rollout is required for mandatory immutable enforcement, which this result does not attest."
 	return result
 }
 
@@ -304,8 +298,75 @@ func validateSnapshot(ctx context.Context, snapshot gitSnapshot, changed map[str
 	affectedSpecs := make(map[string]bool)
 	affectedFeatures := make(map[string]bool)
 	ownerAffectedSpecs := make(map[string]bool)
+	requireImplementationOwnership := func(implementationDir, evidencePath string) {
+		localSpecPath := path.Join(implementationDir, "SPEC.md")
+		ownerPath := path.Join(implementationDir, "SPEC.owner")
+		_, localExists := specs[localSpecPath]
+		target, ownerExists := owners[ownerPath]
+		ownerErr, invalidOwnerExists := ownerErrors[ownerPath]
+		switch {
+		case localExists && (ownerExists || invalidOwnerExists):
+			findings.add(Finding{Code: "ambiguous-spec-owner", Path: ownerPath, Message: "implementation directory declares both SPEC.md and SPEC.owner"})
+		case localExists:
+			affectedSpecs[localSpecPath] = true
+			ownerAffectedSpecs[localSpecPath] = true
+		case invalidOwnerExists:
+			findings.add(Finding{Code: "invalid-spec-owner", Path: ownerPath, Message: ownerErr.Error()})
+		case ownerExists:
+			if _, exists := specs[target]; !exists {
+				findings.add(Finding{Code: "missing-spec-owner-target", Path: ownerPath, Message: fmt.Sprintf("canonical shared SPEC %q is absent from the selected Git snapshot", target)})
+				return
+			}
+			affectedSpecs[target] = true
+			ownerAffectedSpecs[target] = true
+		default:
+			findings.add(Finding{
+				Code:    "missing-implementation-spec-owner",
+				Path:    evidencePath,
+				Message: "a surviving changed implementation directory must retain a SPEC.owner edge or permitted local SPEC ownership",
+			})
+		}
+	}
 	for filePath, item := range changed {
 		if item.status == "D" {
+			// Deletions are not an unconditional bypass or failure. Validate every
+			// surviving reciprocal edge that still names the deleted path. A
+			// same-change relocation or deliberate retirement can therefore reach
+			// the mandatory semantic review, while dangling graph edges still
+			// fail deterministically from the selected immutable snapshot.
+			switch {
+			case isSpecPath(filePath):
+				for featurePath, document := range features {
+					if contains(document.relatedSpecs(), filePath) {
+						affectedFeatures[featurePath] = true
+					}
+				}
+				for ownerPath, target := range owners {
+					if target == filePath {
+						findings.add(Finding{Code: "missing-spec-owner-target", Path: ownerPath, Message: fmt.Sprintf("canonical shared SPEC %q is absent from the selected Git snapshot", target)})
+					}
+				}
+			case isFeaturePath(filePath):
+				for specPath, document := range specs {
+					if contains(document.features, filePath) {
+						affectedSpecs[specPath] = true
+					}
+				}
+			case isSpecOwnerPath(filePath):
+				implementationDirs := make(map[string]bool)
+				if implementationDir := path.Dir(filePath); snapshot.implementationDirs[implementationDir] {
+					implementationDirs[implementationDir] = true
+				}
+				for _, implementationChange := range snapshot.changed {
+					if implementationChange.status != "D" && snapshot.implementationPaths[implementationChange.path] {
+						implementationDirs[path.Dir(implementationChange.path)] = true
+					}
+				}
+				for implementationDir := range implementationDirs {
+					evidencePath := path.Join(implementationDir, "SPEC.owner")
+					requireImplementationOwnership(implementationDir, evidencePath)
+				}
+			}
 			continue
 		}
 		switch {
@@ -431,12 +492,26 @@ func validateSnapshot(ctx context.Context, snapshot gitSnapshot, changed map[str
 func implementationDirs(entries []treeEntry) map[string]bool {
 	dirs := make(map[string]bool)
 	for _, entry := range entries {
-		regular := entry.stage == 0 && (entry.objectType == "" || entry.objectType == "blob") && (entry.mode == "100644" || entry.mode == "100755")
-		if repoinventory.IsImplementationSource(entry.path, regular, entry.mode == "100755") {
+		if isImplementationEntry(entry) {
 			dirs[path.Dir(entry.path)] = true
 		}
 	}
 	return dirs
+}
+
+func implementationPaths(entries []treeEntry) map[string]bool {
+	paths := make(map[string]bool)
+	for _, entry := range entries {
+		if isImplementationEntry(entry) {
+			paths[entry.path] = true
+		}
+	}
+	return paths
+}
+
+func isImplementationEntry(entry treeEntry) bool {
+	regular := entry.stage == 0 && (entry.objectType == "" || entry.objectType == "blob") && (entry.mode == "100644" || entry.mode == "100755")
+	return repoinventory.IsImplementationSource(entry.path, regular, entry.mode == "100755")
 }
 
 func buildGraphIndexes(specs map[string]specDocument, features map[string]featureDocument) (map[string][]string, map[string][]string) {

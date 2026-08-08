@@ -358,6 +358,27 @@ func TestStagedSnapshotDetectsIndexRace(t *testing.T) {
 	assertDecisionAndCode(t, result, DecisionBlock, "index-race")
 }
 
+func TestStagedSnapshotRechecksIndexAfterFinalDirtyWorktreeAdmission(t *testing.T) {
+	t.Parallel()
+	fixture := newGuardRepository(t)
+	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
+	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+
+	mutated := false
+	result := evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged}, defaultLimits(), guardDependencies{
+		afterFinalDirtyRead: func() {
+			mutated = true
+			fixture.write("pkg/example/SPEC.md", strings.Replace(validSpec("features/example.feature"), "provider-neutral outcome", "rechecked provider-neutral outcome", 1))
+			fixture.git("add", "--", "pkg/example/SPEC.md")
+		},
+	})
+	if !mutated {
+		t.Fatal("final dirty-worktree mutation hook did not run")
+	}
+	assertDecisionAndCode(t, result, DecisionBlock, "index-race")
+}
+
 func TestCommittedSnapshotValidatesPinnedBaseToHead(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
@@ -758,20 +779,166 @@ func TestRepositoryIdentityDetectsAncestorReplacementDuringGitCommand(t *testing
 	assertDecisionAndCode(t, result, DecisionBlock, "repository-identity-changed")
 }
 
-func TestGovernedDeletionBlocks(t *testing.T) {
+func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *testing.T) {
 	t.Parallel()
-	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
-	fixture.git("commit", "-m", "add contract")
-	if err := os.Remove(filepath.Join(fixture.root, "pkg/example/SPEC.md")); err != nil {
-		t.Fatal(err)
+	newFixture := func(t *testing.T) guardRepository {
+		fixture := newGuardRepository(t)
+		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
+		fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
+		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.git("commit", "-m", "add contract")
+		return fixture
 	}
-	fixture.git("add", "-u", "--", "pkg/example/SPEC.md")
 
-	result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
-	assertDecisionAndCode(t, result, DecisionBlock, "governed-file-deleted")
+	t.Run("deleted SPEC leaves a dangling feature edge", func(t *testing.T) {
+		fixture := newFixture(t)
+		if err := os.Remove(filepath.Join(fixture.root, "pkg/example/SPEC.md")); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("add", "-u", "--", "pkg/example/SPEC.md")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		assertDecisionAndCode(t, result, DecisionBlock, "missing-related-spec")
+	})
+
+	t.Run("deleted feature leaves a dangling SPEC edge", func(t *testing.T) {
+		fixture := newFixture(t)
+		if err := os.Remove(filepath.Join(fixture.root, "features/example.feature")); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("add", "-u", "--", "features/example.feature")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		assertDecisionAndCode(t, result, DecisionBlock, "missing-bdd-feature")
+	})
+
+	t.Run("deleted SPEC leaves a dangling owner edge", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
+		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		for _, relative := range []string{"pkg/example/SPEC.md", "features/example.feature"} {
+			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixture.git("add", "-u", "--", "pkg/example/SPEC.md", "features/example.feature")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		assertDecisionAndCode(t, result, DecisionBlock, "missing-spec-owner-target")
+	})
+
+	t.Run("deleted owner leaves a live implementation unowned", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
+		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		if err := os.Remove(filepath.Join(fixture.root, ".opencode/plugins/SPEC.owner")); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("add", "-u", "--", ".opencode/plugins/SPEC.owner")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		assertDecisionAndCode(t, result, DecisionBlock, "missing-implementation-spec-owner")
+	})
+
+	t.Run("owner and implementation retirement reaches semantic review", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
+		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		for _, relative := range []string{".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs"} {
+			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixture.git("add", "-u", "--", ".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		if result.Decision != DecisionReminder || len(result.Findings) != 0 || strings.Join(result.Changed, "\n") != ".opencode/plugins/SPEC.owner" {
+			t.Fatalf("result = %#v, want reviewed implementation retirement reminder", result)
+		}
+	})
+
+	t.Run("owner deletion cannot hide an unowned implementation relocation", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
+		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		if err := os.MkdirAll(filepath.Join(fixture.root, "internal", "relocated"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("mv", ".opencode/plugins/adapter.mjs", "internal/relocated/adapter.mjs")
+		if err := os.Remove(filepath.Join(fixture.root, ".opencode/plugins/SPEC.owner")); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("add", "-u", "--", ".opencode/plugins/SPEC.owner")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		assertDecisionAndCode(t, result, DecisionBlock, "missing-implementation-spec-owner")
+	})
+
+	t.Run("implementation relocation with its owner reaches semantic review", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
+		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		if err := os.MkdirAll(filepath.Join(fixture.root, "internal", "relocated"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("mv", ".opencode/plugins/adapter.mjs", "internal/relocated/adapter.mjs")
+		fixture.git("mv", ".opencode/plugins/SPEC.owner", "internal/relocated/SPEC.owner")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		if result.Decision != DecisionReminder || len(result.Findings) != 0 || len(result.Changed) != 2 {
+			t.Fatalf("result = %#v, want valid owned implementation relocation reminder", result)
+		}
+	})
+
+	t.Run("owner is replaced by permitted local SPEC ownership", func(t *testing.T) {
+		fixture := newFixture(t)
+		fixture.write("internal/adapter/adapter.go", "package adapter\n")
+		fixture.write("internal/adapter/SPEC.owner", "pkg/example/SPEC.md\n")
+		fixture.git("add", "--", "internal/adapter/adapter.go", "internal/adapter/SPEC.owner")
+		fixture.git("commit", "-m", "add implementation owner edge")
+		if err := os.Remove(filepath.Join(fixture.root, "internal/adapter/SPEC.owner")); err != nil {
+			t.Fatal(err)
+		}
+		fixture.write("internal/adapter/SPEC.md", validSpec("features/adapter.feature"))
+		fixture.write("features/adapter.feature", validFeature("internal/adapter/SPEC.md"))
+		fixture.git("add", "-A", "--", "internal/adapter/SPEC.owner", "internal/adapter/SPEC.md", "features/adapter.feature")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		if result.Decision != DecisionReminder || len(result.Findings) != 0 {
+			t.Fatalf("result = %#v, want valid replacement ownership reminder", result)
+		}
+	})
+
+	t.Run("complete retirement reaches semantic review", func(t *testing.T) {
+		fixture := newFixture(t)
+		for _, relative := range []string{"pkg/example/SPEC.md", "features/example.feature"} {
+			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixture.git("add", "-u", "--", "pkg/example/SPEC.md", "features/example.feature")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		if result.Decision != DecisionReminder || len(result.Findings) != 0 || len(result.Changed) != 2 ||
+			!strings.Contains(result.Reminder, "retirement or stable-ID migration") {
+			t.Fatalf("result = %#v, want reviewed retirement reminder", result)
+		}
+	})
+
+	t.Run("same-change relocation validates replacement graph", func(t *testing.T) {
+		fixture := newFixture(t)
+		if err := os.MkdirAll(filepath.Join(fixture.root, "pkg", "relocated"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fixture.git("mv", "pkg/example/SPEC.md", "pkg/relocated/SPEC.md")
+		fixture.write("features/example.feature", validFeature("pkg/relocated/SPEC.md"))
+		fixture.git("add", "--", "features/example.feature")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		if result.Decision != DecisionReminder || len(result.Findings) != 0 || len(result.Changed) != 3 {
+			t.Fatalf("result = %#v, want valid relocation reminder", result)
+		}
+	})
 }
 
 func TestBoundsFailClosed(t *testing.T) {

@@ -47,6 +47,17 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go run \"${CLAUDE_PROJECT_DIR}/cmd/spec-contract-hook\" --root \"${CLAUDE_PROJECT_DIR}\" --provider claude --event UserPromptSubmit",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

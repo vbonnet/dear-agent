@@ -80,6 +80,7 @@ override _GOVERNED_BUILD_TARGETS := \
 	build-bead-pr-sync \
 	build-bead-pr-guard \
 	build-spec-contract-hook \
+	build-spec-contract-hook-status \
 	build-codex-hook-json \
 	build-bead-close-guard \
 	build-drift-check \
@@ -148,6 +149,7 @@ override _GOVERNED_BUILD_TARGETS := \
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
 #   build-spec-contract-hook Build the portable terminal SPEC contract helper
+#   build-spec-contract-hook-status Build the read-only installed-helper auditor
 #   install-spec-contract-hook Operator-install the digest-bound SPEC contract helper
 #   status-spec-contract-hook Read-only audit of the installed SPEC contract helper
 #   build-codex-hook-json    Build the fixed JSON helper for attested Codex hooks
@@ -213,7 +215,7 @@ override _GOVERNED_BUILD_TARGETS := \
 
 .PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-spec-contract-hook install-spec-contract-hook build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
-.PHONY: status-spec-contract-hook
+.PHONY: build-spec-contract-hook-status status-spec-contract-hook
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
@@ -652,14 +654,30 @@ install-bead-pr-guard: build-bead-pr-guard
 # Builds the provider-neutral staged SPEC adapter as a static Go binary. The
 # privileged install is digest-confirmed and root-staged so an unattended agent
 # cannot replace either the executable or its runtime.
+SPEC_CONTRACT_HOOK_ARTIFACT ?= bin/spec-contract-hook
+SPEC_CONTRACT_HOOK_STATUS_ARTIFACT ?= bin/spec-contract-hook-status
+SPEC_CONTRACT_HOOK_DEPLOYED ?= /usr/local/libexec/dear-agent-spec-contract-hook
 build-spec-contract-hook:
 	@echo "Building spec-contract-hook..."
-	@mkdir -p bin
-	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/spec-contract-hook ./cmd/spec-contract-hook/
-	@echo "Built: bin/spec-contract-hook"
+	@mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_ARTIFACT))"
+	@source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"; \
+		export _BUILD_STAMP_DATE="$$source_date"; \
+		CGO_ENABLED=0 go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)" ./cmd/spec-contract-hook/
+	@echo "Built: $(SPEC_CONTRACT_HOOK_ARTIFACT)"
 
-status-spec-contract-hook: build-spec-contract-hook
-	GOWORK=off go run ./cmd/spec-contract-hook-status --artifact bin/spec-contract-hook --deployed /usr/local/libexec/dear-agent-spec-contract-hook
+build-spec-contract-hook-status:
+	@echo "Building spec-contract-hook-status..."
+	@mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT))"
+	@source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"; \
+		export _BUILD_STAMP_DATE="$$source_date"; \
+		CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT)" ./cmd/spec-contract-hook-status/
+	@echo "Built: $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT)"
+
+# GNU Make intentionally maps any failed recipe to its own exit status 2. Run
+# the built status artifact directly when automation needs the CLI's exact
+# 0=current, 1=missing/stale/untrusted, 2=inspection-error contract.
+status-spec-contract-hook: build-spec-contract-hook build-spec-contract-hook-status
+	@"$(abspath $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT))" --artifact "$(abspath $(SPEC_CONTRACT_HOOK_ARTIFACT))" --deployed "$(SPEC_CONTRACT_HOOK_DEPLOYED)"
 
 # Antigravity source and AGM's unattended Codex materialization invoke this
 # absolute OS-owned helper. Source wiring remains cooperative; this target does
@@ -669,7 +687,7 @@ install-spec-contract-hook: build-spec-contract-hook
 		test -t 0 || { echo "refusing non-interactive privileged Antigravity hook helper installation" >&2; exit 2; }; \
 		root_gid="$$(/usr/bin/id -g 0)"; \
 		repo_root="$$(pwd -P)"; \
-		artifact="$$repo_root/bin/spec-contract-hook"; \
+		artifact="$(abspath $(SPEC_CONTRACT_HOOK_ARTIFACT))"; \
 		helper="/usr/local/libexec/dear-agent-spec-contract-hook"; \
 		root_installer_path="$$repo_root/scripts/install-root-artifact.sh"; \
 		root_installer="$$(/bin/cat "$$root_installer_path")"; \

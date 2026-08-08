@@ -59,14 +59,31 @@ func TestCodexHookJSONHelperUsesDigestBoundOperatorInstall(t *testing.T) {
 	rootInstaller := string(rootInstallerBytes)
 	for _, required := range []string{
 		`test "$mode" != PROBE || exit 42`,
-		`trusted_parent=/private/var/root`,
 		`trusted "$dir"`,
+		`trusted /usr/local/libexec`,
+		`trusted_file "$destination"`,
+		`staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-root-artifact.XXXXXX)`,
 		`test "$staged_hash" = "$expected_hash"`,
+		`staged_identity=$(file_identity "$staging")`,
 		`/bin/mv -f "$staging" "$destination"`,
+		`test "$(file_identity "$destination")" = "$staged_identity"`,
+		`test "$activated_hash" = "$expected_hash"`,
 	} {
 		if !strings.Contains(rootInstaller, required) {
 			t.Errorf("fixed root artifact installer lacks %q", required)
 		}
+	}
+	staging := strings.Index(rootInstaller, `staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-root-artifact.XXXXXX)`)
+	activation := strings.Index(rootInstaller, `/bin/mv -f "$staging" "$destination"`)
+	trustedDestination := strings.Index(rootInstaller, `trusted /usr/local/libexec`)
+	trustedLeaf := strings.Index(rootInstaller, `trusted_file "$destination"`)
+	verifiedLeaf := strings.LastIndex(rootInstaller, `trusted_file "$destination"`)
+	activatedHash := strings.Index(rootInstaller, `test "$activated_hash" = "$expected_hash"`)
+	if trustedDestination < 0 || trustedLeaf <= trustedDestination || staging <= trustedLeaf || activation <= staging || verifiedLeaf <= activation || activatedHash <= verifiedLeaf {
+		t.Fatal("fixed root artifact installer must verify the destination directory, stage inside it, then atomically rename")
+	}
+	if strings.Contains(rootInstaller, `trusted_parent=/private/var/root`) || strings.Contains(rootInstaller, `trusted_parent=/root`) {
+		t.Fatal("fixed root artifact installer still stages on a potentially different filesystem")
 	}
 
 	for _, name := range []string{

@@ -225,7 +225,7 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const hooks = `{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"first guard ran\"}}\\n'","timeout":1}]},{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf 'project guard rejected' >&2; exit 42","timeout":1}]}],"SessionStart":[{"hooks":[{"type":"command","command":"tee \"$PI_HOOK_CAPTURE\" >/dev/null","timeout":1}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"prompt rejected\"}\\n'","timeout":1}]}],"PreCompact":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"additionalContext\":\"compaction rejected\"}}\\n'","timeout":1}]}],"Stop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf 'first\\n' >> \"$PI_TERMINAL_HOOK_CAPTURE\"; printf '{\"decision\":\"block\",\"reason\":\"finish the regression\"}\\n'","timeout":1},{"type":"command","command":"cat >/dev/null; printf 'second\\n' >> \"$PI_TERMINAL_HOOK_CAPTURE\"; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"second terminal handler ran\"}}\\n'","timeout":1}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"review the delegated result\"}\\n'","timeout":1}]}]}}`
+	const hooks = `{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"first guard ran\"}}\\n'","timeout":1}]},{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf 'project guard rejected' >&2; exit 42","timeout":1}]}],"SessionStart":[{"hooks":[{"type":"command","command":"tee \"$PI_HOOK_CAPTURE\" >/dev/null","timeout":1}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"prompt rejected\"}\\n'","timeout":1}]}],"PreCompact":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"additionalContext\":\"compaction rejected\"}}\\n'","timeout":1}]}],"Stop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf 'first\\n' >> \"$PI_TERMINAL_HOOK_CAPTURE\"; printf '{\"decision\":\"block\",\"reason\":\"finish the regression\",\"dearAgentSpecFeedbackId\":\"%s\"}\\n' \"${PI_SPEC_FEEDBACK_ID:-}\"","timeout":1},{"type":"command","command":"cat >/dev/null; printf 'second\\n' >> \"$PI_TERMINAL_HOOK_CAPTURE\"; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"second terminal handler ran\"}}\\n'","timeout":1}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"review the delegated result\"}\\n'","timeout":1}]}]}}`
 	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -391,6 +391,7 @@ await commands.get("agm-mode")("auto", ctx);
 if (!activeTools.includes("write") || statuses.at(-1) !== "AGM auto/working") throw new Error("auto mode transition failed");
 const advisoryDecision = await handlers.get("tool_call")({toolName:"read", input:{path:"README.md"}}, ctx);
 if (advisoryDecision !== undefined || !notifications.some((value) => String(value).includes("Pi PreToolUse hook: first guard ran"))) throw new Error("advisory PreToolUse context was not surfaced");
+process.env.PI_SPEC_FEEDBACK_ID = "a".repeat(64);
 await handlers.get("agent_settled")({}, ctx);
 if (statuses.at(-1) !== "AGM auto/ready") throw new Error("missing settled status");
 if (userMessages.length !== 1 || !userMessages[0][0].includes("finish the regression") || !userMessages[0][0].includes("second terminal handler ran") || userMessages[0][1].deliverAs !== "followUp") throw new Error("aggregated structured Stop feedback was not delivered: " + JSON.stringify(userMessages));
@@ -405,9 +406,23 @@ await handlers.get("agent_settled")({}, ctx);
 await handlers.get("tool_result")({type:"tool_result", toolName:"subagent", input:{agent:"reviewer"}, content:[], isError:false}, ctx);
 if (userMessages.length !== 2) throw new Error("stop_hook_active did not bound repeated Stop/SubagentStop follow-ups: " + JSON.stringify(userMessages));
 if (!notifications.some((value) => String(value).includes("yielding after one continuation"))) throw new Error("bounded terminal-hook yield was not surfaced: " + notifications.join(" | "));
-await handlers.get("input")({type:"input", source:"interactive", text:"try the completed work again"}, ctx);
+process.env.PI_SPEC_FEEDBACK_ID = "b".repeat(64);
 await handlers.get("agent_settled")({}, ctx);
-if (userMessages.length !== 3) throw new Error("interactive input did not reset the Stop continuation budget");
+if (userMessages.length !== 3 || !userMessages[2][0].includes("finish the regression")) throw new Error("fresh SPEC feedback identity was suppressed by sibling continuation state: " + JSON.stringify(userMessages));
+await handlers.get("agent_settled")({}, ctx);
+if (userMessages.length !== 3) throw new Error("repeated SPEC feedback identity escaped the bounded outer loop: " + JSON.stringify(userMessages));
+for (const freshID of ["c", "d", "e", "f", "0", "1"]) {
+  process.env.PI_SPEC_FEEDBACK_ID = freshID.repeat(64);
+  await handlers.get("agent_settled")({}, ctx);
+}
+if (userMessages.length !== 9) throw new Error("fresh SPEC identities did not consume the finite per-turn continuation budget: " + JSON.stringify(userMessages));
+process.env.PI_SPEC_FEEDBACK_ID = "2".repeat(64);
+await handlers.get("agent_settled")({}, ctx);
+if (userMessages.length !== 9) throw new Error("ninth fresh SPEC identity escaped the finite per-turn continuation budget: " + JSON.stringify(userMessages));
+if (!notifications.some((value) => String(value).includes("bounded per-turn continuation budget"))) throw new Error("per-turn continuation budget yield was not surfaced: " + notifications.join(" | "));
+await handlers.get("input")({type:"input", source:"rpc", text:"try the completed work again"}, ctx);
+await handlers.get("agent_settled")({}, ctx);
+if (userMessages.length !== 10) throw new Error("RPC input did not reset the Stop continuation budget");
 await commands.get("agm-model")("openai/gpt-5.6-terra", ctx);
 if (selectedModel !== model || notifications.at(-1) !== "AGM model: openai/gpt-5.6-terra") throw new Error("model transition failed");
 `

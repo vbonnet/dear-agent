@@ -54,6 +54,24 @@ For a read-only corpus review, use the canonical
 inventories and HTML reports are maintainer-review evidence only; they do not
 authorize a product SPEC migration.
 
+## Migration and retirement
+
+Before deleting or relocating a governed contract, select the neutral owner,
+preserve or deliberately migrate stable requirement IDs, update reciprocal BDD
+links, and retain source or test evidence for native conformance. The
+deterministic guard permits a same-change relocation or complete retirement to
+reach mandatory review only when the selected immutable snapshot has no
+surviving reciprocal BDD or implementation ownership edge to a deleted path
+and every replacement passes the ordinary strict checks.
+Deleting `SPEC.owner` while implementation source survives is therefore
+blocked unless that directory gains a permitted local `SPEC.md` replacement
+that passes the same strict neutrality and contract checks.
+
+That result is structural admission, not proof that deleting an observable or
+changing a stable ID is correct. The changed-path evidence and reviewed diff
+remain the semantic preservation record, and uncertain ownership or observable
+semantics still require a maintainer decision.
+
 ## Evidence boundary
 
 Report source, local-test, CI, review, merge, install/discovery, and runtime

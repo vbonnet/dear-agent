@@ -28,6 +28,10 @@ type hookParityState struct {
 	piTerminalRegression     error
 	sharedReminderOutput     string
 	sharedReminderRegression error
+	boundedFailureOutput     string
+	boundedFailureRegression error
+	helperReproOutput        string
+	helperReproRegression    error
 }
 
 type bddHookGroup struct {
@@ -61,6 +65,12 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^staged SPEC contract feedback is configured$`, stagedSPECContractFeedbackIsConfigured)
 	ctx.Step(`^AGM exercises the shared reminder across all projected harness adapters$`, agmExercisesSharedSPECReminder)
 	ctx.Step(`^every reminder should route to the canonical authoring page and single-source skill$`, sharedSPECReminderUsesCanonicalAuthoringRoute)
+	ctx.Step(`^terminal SPEC feedback identity is configured$`, terminalSPECFeedbackIdentityIsConfigured)
+	ctx.Step(`^AGM exercises sibling continuations and repeated SPEC identities across native terminal adapters$`, agmExercisesBoundedSPECFeedbackIdentities)
+	ctx.Step(`^fresh SPEC identities should block once while repeats yield without claiming compliance$`, nativeTerminalAdaptersBoundFreshSPECFeedback)
+	ctx.Step(`^installed SPEC helper status is configured$`, installedSPECStatusIsConfigured)
+	ctx.Step(`^AGM rebuilds the expected helper with distinct wall-clock inputs$`, agmRebuildsExpectedSPECHelper)
+	ctx.Step(`^the expected helper bytes should remain identical for unchanged source and provenance$`, expectedSPECHelperBytesRemainIdentical)
 	ctx.Step(`^OpenCode idle-session SPEC feedback is configured$`, openCodeIdleSessionSPECFeedbackIsConfigured)
 	ctx.Step(`^AGM exercises repeated, synthetic, message-capacity, session-capacity, and deleted-session events$`, agmExercisesOpenCodeIdleSessionEvents)
 	ctx.Step(`^each real turn and the global session table should remain bounded while tracked deletion admits yielded sessions$`, openCodeIdleSessionEventsRemainBounded)
@@ -252,6 +262,78 @@ func sharedSPECReminderUsesCanonicalAuthoringRoute(ctx context.Context) error {
 	}
 	if !strings.Contains(state.sharedReminderOutput, "--- PASS: TestRunProvidesCooperativeTerminalReminderForValidStagedContract") {
 		return fmt.Errorf("shared staged-SPEC reminder output omitted its passing regression: %s", state.sharedReminderOutput)
+	}
+	return nil
+}
+
+func terminalSPECFeedbackIdentityIsConfigured(ctx context.Context) error {
+	_, err := getHookParityState(ctx)
+	return err
+}
+
+func agmExercisesBoundedSPECFeedbackIdentities(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	adapterOutput, adapterRegression := runLocalGuardrailNamedGoTests(ctx,
+		"./cmd/spec-contract-hook",
+		"TestTerminalFeedbackClaimDistinguishesSiblingContinuationSnapshotAndTurn",
+		"TestTerminalFeedbackClaimBoundsDeterministicValidationFailures",
+		"TestPiAdapterReturnsStableFeedbackIdentityForOuterLoop",
+		"TestAntigravityDeterministicBlockSupportsZeroBasedExecutionSequence",
+		"TestRunYieldsInvalidHookInvocationWithoutAStableRetrySignal",
+		"TestRunYieldsOversizedHookInputWithoutAStableRetrySignal",
+		"TestRunYieldsMalformedBoundedHookInputWithoutAStableRetrySignal",
+	)
+	piOutput, piRegression := runLocalGuardrailNamedGoTests(ctx,
+		"./agm/internal/permissionparity",
+		"TestEmbeddedPiExtensionDecisionParity",
+	)
+	state.boundedFailureOutput = adapterOutput + "\n" + piOutput
+	state.boundedFailureRegression = adapterRegression
+	if state.boundedFailureRegression == nil {
+		state.boundedFailureRegression = piRegression
+	}
+	return nil
+}
+
+func nativeTerminalAdaptersBoundFreshSPECFeedback(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.boundedFailureRegression != nil {
+		return fmt.Errorf("bounded terminal SPEC failure regressions: %w: %s", state.boundedFailureRegression, state.boundedFailureOutput)
+	}
+	return nil
+}
+
+func installedSPECStatusIsConfigured(ctx context.Context) error {
+	_, err := getHookParityState(ctx)
+	return err
+}
+
+func agmRebuildsExpectedSPECHelper(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.helperReproOutput, state.helperReproRegression = runLocalGuardrailNamedGoTests(ctx,
+		"./tests/buildstamp",
+		"TestSpecContractHookExpectedArtifactIsReproducible",
+		"TestSpecContractHookStatusArtifactPreservesDirectExitContract",
+	)
+	return nil
+}
+
+func expectedSPECHelperBytesRemainIdentical(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.helperReproRegression != nil {
+		return fmt.Errorf("SPEC helper reproducibility regression: %w: %s", state.helperReproRegression, state.helperReproOutput)
 	}
 	return nil
 }

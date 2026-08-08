@@ -1,8 +1,8 @@
 # Provider-Neutral SPEC Guard Specification
 
-<!-- Last audited at: 2026-08-01 -->
+<!-- Last audited at: 2026-08-08 -->
 
-**Version:** 1.3
+**Version:** 1.6
 **Status:** Draft
 **Scope:** `internal/specguard`
 
@@ -33,7 +33,7 @@ installed, registered, or running.
 
 **SPEC-GUARD-05** When a governed path has a symlink, gitlink, tree, conflict, path escape, or other nonregular Git mode, the guard shall block validation.
 
-**SPEC-GUARD-06** When the Git index or HEAD changes during staged evaluation, the guard shall block the result as a snapshot race.
+**SPEC-GUARD-06** When the Git index or HEAD changes during staged evaluation, including after the complete final dirty-worktree admission sequence, the guard shall block the result as a snapshot race.
 
 **SPEC-GUARD-07** When a SPEC.md file changes, the guard shall require identified strict EARS requirements and a repository-relative reciprocal BDD link.
 
@@ -64,6 +64,10 @@ installed, registered, or running.
 **SPEC-GUARD-20** When an immutable snapshot is admitted, the guard shall emit a deterministic snapshot identity that changes with the pinned staged index or committed comparison so bounded transports can scope continuation state without rereading mutable source bodies.
 
 **SPEC-GUARD-21** When an immutable snapshot changes a `SPEC.owner` edge or adds a co-located `SPEC.md` beside an existing edge, the guard shall require the edge to belong to a directory with a regular implementation source, shall require exactly one local ownership declaration, shall require one bounded canonical repository-relative path to an existing neutral `SPEC.md`, and shall apply the same strict EARS and reciprocal executable BDD checks to that canonical target.
+
+**SPEC-GUARD-22** Where a governed path is deleted, when the selected immutable snapshot has no surviving reciprocal BDD edge or implementation ownership edge to that path and every same-change replacement passes strict validation, the guard shall retain the deletion in its changed-path evidence and shall permit it to reach mandatory semantic retirement and stable-ID preservation review instead of blocking every deletion unconditionally.
+
+**SPEC-GUARD-23** When a `SPEC.owner` edge is deleted, the guard shall require its surviving implementation directory and every directory represented by a surviving changed implementation source in the same immutable diff to retain a valid `SPEC.owner` edge or a permitted local `SPEC.md` replacement that passes strict contract and neutrality validation.
 
 ## BDD Traceability
 

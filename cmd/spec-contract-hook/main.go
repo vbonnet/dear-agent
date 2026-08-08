@@ -40,6 +40,10 @@ const (
 
 var errIncompleteReminderMarker = errors.New("reminder marker content is incomplete")
 
+type reminderMarkerState struct {
+	feedbackDigest string
+}
+
 const stagedSPECReminderMessage = "SPEC contract files changed in the Git index. Cooperative deterministic checks passed, but review provider-neutral ownership and consolidation before finishing. Read docs/spec-authoring.md, then follow the single-source authoring workflow at spec-governance/skills/write-spec/SKILL.md; reference that skill instead of copying its body. This source route does not claim native skill discovery. This mutable checkout hook is not tamper-resistant. A separately reviewed changed-SPEC CI and provider rollout is required for mandatory immutable enforcement; this hook does not attest that enforcement is deployed, has run, or is provider-required."
 
 type providerProtocol string
@@ -58,26 +62,30 @@ type hookSpecificOutput struct {
 }
 
 type hookResponse struct {
-	Decision           string              `json:"decision,omitempty"`
-	Reason             string              `json:"reason,omitempty"`
-	SystemMessage      string              `json:"systemMessage,omitempty"`
-	HookSpecificOutput *hookSpecificOutput `json:"hookSpecificOutput,omitempty"`
+	Decision                string              `json:"decision,omitempty"`
+	Reason                  string              `json:"reason,omitempty"`
+	SystemMessage           string              `json:"systemMessage,omitempty"`
+	HookSpecificOutput      *hookSpecificOutput `json:"hookSpecificOutput,omitempty"`
+	DearAgentSpecFeedbackID string              `json:"dearAgentSpecFeedbackId,omitempty"`
 }
 
 type antigravityStopInput struct {
 	ConversationID  string   `json:"conversationId"`
-	ExecutionNumber int      `json:"executionNum"`
+	ExecutionNumber *int     `json:"executionNum"`
 	WorkspacePaths  []string `json:"workspacePaths"`
 }
 
 type terminalHookInput struct {
-	StopHookActive bool `json:"stop_hook_active"`
+	SessionID      string `json:"session_id"`
+	TurnID         string `json:"turn_id"`
+	StopHookActive *bool  `json:"stop_hook_active"`
 }
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
+//nolint:gocyclo // Linear CLI admission keeps every cooperative liveness fallback visible in execution order.
 func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	flags := flag.NewFlagSet("spec-contract-hook", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -86,20 +94,33 @@ func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	event := flags.String("event", "", "terminal hook event")
 	provider := flags.String("provider", "", "native hook protocol: claude, codex, antigravity, opencode, or pi")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *repository == "" {
-		return emitJSON(output, protocolFailure(providerProtocol(*provider), "Cooperative SPEC contract check unavailable: hook invocation must provide a repository root, supported provider protocol, and native terminal event"))
+		return emitJSON(output, protocolFailure(providerProtocol(*provider), *event, "Cooperative SPEC contract check unavailable: hook invocation must provide a repository root, supported provider protocol, and native terminal event"))
 	}
 	protocol := providerProtocol(*provider)
 	if !supportedProviderEvent(protocol, *event) {
-		return emitJSON(output, protocolFailure(protocol, "Cooperative SPEC contract check unavailable: native provider protocol does not support the requested terminal event"))
+		return emitJSON(output, protocolFailure(protocol, *event, "Cooperative SPEC contract check unavailable: native provider protocol does not support the requested terminal event"))
 	}
 	payload, err := readBoundedInput(input, maxHookInputBytes)
 	if err != nil {
-		return emitJSON(output, protocolFailure(protocol, "Cooperative SPEC contract check unavailable: hook input exceeded its safety limit"))
+		return emitJSON(output, protocolFailure(protocol, *event, "Cooperative SPEC contract check unavailable: hook input exceeded its safety limit"))
+	}
+	if *event == "UserPromptSubmit" {
+		if err := resetProviderFeedback(*repository, protocol, payload); err != nil {
+			_, _ = fmt.Fprintf(stderr, "spec-contract-hook: cannot reset per-turn feedback state; continuing without blocking the user prompt: %.256s\n", err.Error())
+		}
+		return emitJSON(output, hookResponse{})
+	}
+	if err := validateProviderInput(protocol, payload); err != nil {
+		reason := "Cooperative SPEC contract check unavailable: native hook input is not a valid bounded provider envelope"
+		if protocol == protocolAntigravity {
+			return emitJSON(output, antigravityProtocolFailure(payload, stderr, reason))
+		}
+		return emitJSON(output, protocolFailure(protocol, *event, reason))
 	}
 	resolvedRepository := *repository
 	if *rootFromWorkspaceInput {
 		if protocol != protocolAntigravity {
-			return emitJSON(output, protocolFailure(protocol, "Cooperative SPEC contract check unavailable: workspace-derived repository roots are supported only for the Antigravity protocol"))
+			return emitJSON(output, protocolFailure(protocol, *event, "Cooperative SPEC contract check unavailable: workspace-derived repository roots are supported only for the Antigravity protocol"))
 		}
 		resolvedRepository, err = antigravityWorkspaceRoot(payload)
 		if err != nil {
@@ -112,17 +133,27 @@ func run(args []string, input io.Reader, output, stderr io.Writer) int {
 		Repository: resolvedRepository,
 		Mode:       specguard.ModeStaged,
 	})
-	alreadyReminded := false
-	if protocol == protocolAntigravity && result.Decision == specguard.DecisionReminder {
-		claimed, claimErr := antigravityReminderAlreadyClaimed(resolvedRepository, payload, result)
+	alreadyClaimed := false
+	claimUnavailable := false
+	feedbackID := ""
+	if protocol != protocolOpenCode {
+		claimed, currentFeedbackID, claimErr := providerFeedbackAlreadyClaimed(resolvedRepository, protocol, payload, result)
+		feedbackID = currentFeedbackID
 		if claimErr == nil {
-			alreadyReminded = claimed
-		} else {
-			_, _ = fmt.Fprintf(stderr, "spec-contract-hook: Antigravity reminder state unavailable; using the bounded execution counter fallback: %.256s\n", claimErr.Error())
-			alreadyReminded = antigravityExecutionFallback(payload)
+			alreadyClaimed = claimed
+		} else if result.Decision != specguard.DecisionAllow {
+			// stop_hook_active is provider-global and cannot prove which of
+			// several matching Stop hooks caused a continuation. If this adapter
+			// cannot persist its own session+snapshot claim, use that global flag
+			// only as the liveness fallback: an ordinary first stop still receives
+			// feedback, while an active continuation yields. Antigravity has no
+			// documented sequence origin, so unavailable state yields immediately.
+			alreadyClaimed = protocol == protocolAntigravity || terminalStopHookActive(payload)
+			claimUnavailable = alreadyClaimed
+			_, _ = fmt.Fprintf(stderr, "spec-contract-hook: per-adapter feedback state unavailable; yielding cooperative feedback: %.256s\n", claimErr.Error())
 		}
 	}
-	return emitJSON(output, responseFor(protocol, *event, payload, result, alreadyReminded))
+	return emitJSON(output, responseFor(protocol, *event, result, alreadyClaimed, claimUnavailable, feedbackID))
 }
 
 // antigravityWorkspaceRoot selects a repository only from the provider's
@@ -175,7 +206,9 @@ func antigravityWorkspaceRoot(input []byte) (string, error) {
 
 func supportedProviderEvent(provider providerProtocol, event string) bool {
 	switch provider {
-	case protocolClaude, protocolCodex, protocolPi:
+	case protocolClaude:
+		return event == "Stop" || event == "SubagentStop" || event == "UserPromptSubmit"
+	case protocolCodex, protocolPi:
 		return event == "Stop" || event == "SubagentStop"
 	case protocolAntigravity, protocolOpenCode:
 		return event == "Stop"
@@ -198,7 +231,47 @@ func readBoundedInput(input io.Reader, limit int64) ([]byte, error) {
 	return payload, nil
 }
 
-func responseFor(protocol providerProtocol, event string, input []byte, result specguard.Result, alreadyReminded bool) hookResponse {
+//nolint:gocyclo // Straight-line native-provider schema dispatch is clearer and safer than distributed partial validation.
+func validateProviderInput(protocol providerProtocol, input []byte) error {
+	trimmed := strings.TrimSpace(string(input))
+	if protocol == protocolOpenCode && trimmed == "" {
+		// The OpenCode plugin owns session identity and intentionally invokes the
+		// shared adapter without a native stdin envelope.
+		return nil
+	}
+	var object map[string]json.RawMessage
+	if trimmed == "" || json.Unmarshal(input, &object) != nil || object == nil {
+		return fmt.Errorf("provider input must be one JSON object")
+	}
+	switch protocol {
+	case protocolClaude, protocolCodex, protocolPi:
+		var parsed terminalHookInput
+		if err := json.Unmarshal(input, &parsed); err != nil {
+			return fmt.Errorf("decode terminal retry signal: %w", err)
+		}
+		if parsed.SessionID == "" || len(parsed.SessionID) > 4096 || parsed.StopHookActive == nil {
+			return fmt.Errorf("terminal input omits a stable session retry identity")
+		}
+		if protocol == protocolCodex && (parsed.TurnID == "" || len(parsed.TurnID) > 4096) {
+			return fmt.Errorf("codex terminal input omits its native turn identity")
+		}
+	case protocolAntigravity:
+		var parsed antigravityStopInput
+		if err := json.Unmarshal(input, &parsed); err != nil {
+			return fmt.Errorf("decode Antigravity identity: %w", err)
+		}
+		if parsed.ConversationID == "" || len(parsed.ConversationID) > 4096 || parsed.ExecutionNumber == nil || *parsed.ExecutionNumber < 0 {
+			return fmt.Errorf("antigravity input omits a stable conversation execution identity")
+		}
+	case protocolOpenCode:
+		// A future nonempty OpenCode envelope must still be a bounded JSON object.
+	default:
+		return fmt.Errorf("provider protocol is unsupported")
+	}
+	return nil
+}
+
+func responseFor(protocol providerProtocol, event string, result specguard.Result, alreadyClaimed, claimUnavailable bool, feedbackID string) hookResponse {
 	if result.Decision == specguard.DecisionAllow {
 		return allowResponse(protocol)
 	}
@@ -207,16 +280,20 @@ func responseFor(protocol providerProtocol, event string, input []byte, result s
 	if result.Decision == specguard.DecisionBlock {
 		message = blockReason(result)
 	}
+	yieldMessage := repeatedReminderMessage
+	if claimUnavailable {
+		yieldMessage = "SPEC contract feedback could not establish private per-adapter retry state, so this cooperative hook is yielding rather than risking a loop. Review remains required before relying on the governed change. " + message
+	}
 
 	switch protocol {
 	case protocolClaude:
-		return claudeResponse(event, input, result.Decision, message)
+		return claudeResponse(event, result.Decision, message, alreadyClaimed, yieldMessage)
 	case protocolPi:
-		return piResponse(event, input, result.Decision, message)
+		return piResponse(event, result.Decision, message, alreadyClaimed, yieldMessage, feedbackID)
 	case protocolCodex, protocolOpenCode:
-		return codexLikeResponse(input, result.Decision, message)
+		return codexLikeResponse(result.Decision, message, alreadyClaimed, yieldMessage)
 	case protocolAntigravity:
-		return antigravityResponse(result.Decision, message, alreadyReminded)
+		return antigravityResponse(result.Decision, message, alreadyClaimed)
 	default:
 		return hookResponse{Decision: "block", Reason: message}
 	}
@@ -229,11 +306,11 @@ func allowResponse(protocol providerProtocol) hookResponse {
 	return hookResponse{}
 }
 
-const repeatedReminderMessage = "SPEC contract reminder already continued this terminal turn; allowing stop to avoid a retry loop. Review the staged ownership and consolidation before the next real user turn."
+const repeatedReminderMessage = "SPEC contract feedback already ran for this terminal retry; allowing stop to avoid a loop. Deterministic failures or semantic review may remain and must be addressed before the next governed completion."
 
-func claudeResponse(event string, input []byte, decision specguard.Decision, message string) hookResponse {
-	if decision == specguard.DecisionReminder && stopHookActive(input) {
-		return hookResponse{SystemMessage: repeatedReminderMessage}
+func claudeResponse(event string, decision specguard.Decision, message string, alreadyClaimed bool, yieldMessage string) hookResponse {
+	if (decision == specguard.DecisionReminder || decision == specguard.DecisionBlock) && alreadyClaimed {
+		return hookResponse{SystemMessage: yieldMessage}
 	}
 	if decision == specguard.DecisionReminder || decision == specguard.DecisionBlock {
 		return hookResponse{Decision: "block", Reason: message}
@@ -244,19 +321,19 @@ func claudeResponse(event string, input []byte, decision specguard.Decision, mes
 	}}
 }
 
-func piResponse(event string, input []byte, decision specguard.Decision, message string) hookResponse {
-	if decision == specguard.DecisionReminder && stopHookActive(input) {
-		return hookResponse{HookSpecificOutput: &hookSpecificOutput{HookEventName: event, AdditionalContext: repeatedReminderMessage}}
+func piResponse(event string, decision specguard.Decision, message string, alreadyClaimed bool, yieldMessage, feedbackID string) hookResponse {
+	if (decision == specguard.DecisionReminder || decision == specguard.DecisionBlock) && alreadyClaimed {
+		return hookResponse{HookSpecificOutput: &hookSpecificOutput{HookEventName: event, AdditionalContext: yieldMessage}, DearAgentSpecFeedbackID: feedbackID}
 	}
 	if decision == specguard.DecisionReminder || decision == specguard.DecisionBlock {
-		return hookResponse{Decision: "block", Reason: message}
+		return hookResponse{Decision: "block", Reason: message, DearAgentSpecFeedbackID: feedbackID}
 	}
 	return hookResponse{HookSpecificOutput: &hookSpecificOutput{HookEventName: event, AdditionalContext: message}}
 }
 
-func codexLikeResponse(input []byte, decision specguard.Decision, message string) hookResponse {
-	if decision == specguard.DecisionReminder && stopHookActive(input) {
-		return hookResponse{SystemMessage: repeatedReminderMessage}
+func codexLikeResponse(decision specguard.Decision, message string, alreadyClaimed bool, yieldMessage string) hookResponse {
+	if (decision == specguard.DecisionReminder || decision == specguard.DecisionBlock) && alreadyClaimed {
+		return hookResponse{SystemMessage: yieldMessage}
 	}
 	if decision == specguard.DecisionReminder || decision == specguard.DecisionBlock {
 		return hookResponse{Decision: "block", Reason: message, SystemMessage: message}
@@ -265,7 +342,7 @@ func codexLikeResponse(input []byte, decision specguard.Decision, message string
 }
 
 func antigravityResponse(decision specguard.Decision, message string, alreadyReminded bool) hookResponse {
-	if decision == specguard.DecisionReminder && alreadyReminded {
+	if (decision == specguard.DecisionReminder || decision == specguard.DecisionBlock) && alreadyReminded {
 		// Antigravity injects a Stop reason only when it also continues. Do
 		// not create a perpetual reminder loop after the one useful review
 		// continuation; an ordinary decision permits the stop.
@@ -274,30 +351,30 @@ func antigravityResponse(decision specguard.Decision, message string, alreadyRem
 	return hookResponse{Decision: "continue", Reason: message}
 }
 
-func stopHookActive(input []byte) bool {
+func terminalStopHookActive(input []byte) bool {
 	var parsed terminalHookInput
-	return json.Unmarshal(input, &parsed) == nil && parsed.StopHookActive
+	return json.Unmarshal(input, &parsed) == nil && parsed.StopHookActive != nil && *parsed.StopHookActive
 }
 
-func protocolFailure(protocol providerProtocol, reason string) hookResponse {
+func protocolFailure(protocol providerProtocol, event, reason string) hookResponse {
 	if protocol == protocolAntigravity {
 		// Without a decoded native conversation identity and execution number,
 		// Antigravity has no bounded retry signal. Allow termination instead of
 		// turning malformed invocations into an infinite Stop continuation.
 		return hookResponse{Decision: "allow"}
 	}
-	if protocol == protocolCodex || protocol == protocolOpenCode {
-		return hookResponse{Decision: "block", Reason: reason, SystemMessage: reason}
+	if protocol == protocolPi && (event == "Stop" || event == "SubagentStop") {
+		return hookResponse{HookSpecificOutput: &hookSpecificOutput{HookEventName: event, AdditionalContext: reason}}
 	}
-	return hookResponse{Decision: "block", Reason: reason}
+	// A malformed or unavailable cooperative source hook has no stable retry
+	// identity. Immediate advisory yield avoids a permanent terminal loop; the
+	// separately reviewed changed-SPEC CI remains the mandatory fail-closed seam.
+	return hookResponse{SystemMessage: reason}
 }
 
 func antigravityProtocolFailure(input []byte, stderr io.Writer, reason string) hookResponse {
 	var parsed antigravityStopInput
-	if json.Unmarshal(input, &parsed) != nil || parsed.ConversationID == "" || parsed.ExecutionNumber <= 0 {
-		return hookResponse{Decision: "allow"}
-	}
-	if parsed.ExecutionNumber > 1 {
+	if json.Unmarshal(input, &parsed) != nil || parsed.ConversationID == "" || len(parsed.ConversationID) > 4096 || parsed.ExecutionNumber == nil || *parsed.ExecutionNumber < 0 {
 		return hookResponse{Decision: "allow"}
 	}
 
@@ -330,49 +407,140 @@ func antigravityProtocolFailure(input []byte, stderr io.Writer, reason string) h
 }
 
 func antigravityReminderAlreadyClaimed(repository string, input []byte, result specguard.Result) (bool, error) {
-	var parsed antigravityStopInput
-	if err := json.Unmarshal(input, &parsed); err != nil {
-		// An unparseable provider envelope must not silently convert a reminder
-		// into a stop. Keep each invalid invocation fail-closed; the one-attempt
-		// guarantee is scoped to valid provider envelopes with stable identity.
-		return false, err
+	already, _, err := providerFeedbackAlreadyClaimed(repository, protocolAntigravity, input, result)
+	return already, err
+}
+
+//nolint:gocyclo // One ordered state transition keeps native identity validation, hashing, and fail-safe claim handling auditable.
+func providerFeedbackAlreadyClaimed(repository string, protocol providerProtocol, input []byte, result specguard.Result) (bool, string, error) {
+	var sessionID string
+	var nativeTurnID string
+	switch protocol {
+	case protocolClaude, protocolCodex, protocolPi:
+		var parsed terminalHookInput
+		if err := json.Unmarshal(input, &parsed); err != nil {
+			return false, "", err
+		}
+		if parsed.SessionID == "" || len(parsed.SessionID) > 4096 || parsed.StopHookActive == nil {
+			return false, "", fmt.Errorf("terminal feedback identity is incomplete")
+		}
+		if protocol == protocolCodex {
+			if parsed.TurnID == "" || len(parsed.TurnID) > 4096 {
+				return false, "", fmt.Errorf("codex terminal feedback identity omits its native turn")
+			}
+			nativeTurnID = parsed.TurnID
+		}
+		sessionID = parsed.SessionID
+	case protocolAntigravity:
+		var parsed antigravityStopInput
+		if err := json.Unmarshal(input, &parsed); err != nil {
+			return false, "", err
+		}
+		if parsed.ConversationID == "" || len(parsed.ConversationID) > 4096 || parsed.ExecutionNumber == nil || *parsed.ExecutionNumber < 0 {
+			return false, "", fmt.Errorf("antigravity feedback identity is incomplete")
+		}
+		sessionID = parsed.ConversationID
+	case protocolOpenCode:
+		return false, "", fmt.Errorf("opencode owns its terminal retry state")
+	default:
+		return false, "", fmt.Errorf("provider does not expose per-adapter terminal identity")
 	}
-	if parsed.ConversationID == "" || result.SnapshotID == "" {
-		return false, fmt.Errorf("antigravity reminder identity is incomplete")
-	}
-	root, err := filepath.Abs(repository)
+	providerDigest, err := providerSessionDigest(repository, protocol, sessionID)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	root, err = filepath.EvalSymlinks(filepath.Clean(root))
+	feedbackIdentity, err := json.Marshal(struct {
+		SchemaVersion string              `json:"schema_version"`
+		Decision      specguard.Decision  `json:"decision"`
+		Source        string              `json:"source"`
+		Base          string              `json:"base"`
+		Head          string              `json:"head"`
+		SnapshotID    string              `json:"snapshot_id"`
+		NativeTurnID  string              `json:"native_turn_id,omitempty"`
+		Changed       []string            `json:"changed"`
+		Findings      []specguard.Finding `json:"findings"`
+	}{
+		SchemaVersion: result.SchemaVersion,
+		Decision:      result.Decision,
+		Source:        result.Source,
+		Base:          result.Base,
+		Head:          result.Head,
+		SnapshotID:    result.SnapshotID,
+		NativeTurnID:  nativeTurnID,
+		Changed:       result.Changed,
+		Findings:      result.Findings,
+	})
 	if err != nil {
-		return false, err
+		return false, "", err
+	}
+	feedbackDigest := fmt.Sprintf("%x", sha256.Sum256(feedbackIdentity))
+	// Pi's persistent authorization extension owns its per-turn attempt state.
+	// The child adapter returns this bounded identity so the extension can
+	// distinguish a new SPEC snapshot from a sibling hook's continuation.
+	if protocol == protocolPi {
+		return false, feedbackDigest, nil
 	}
 	directory, err := reminderStateDirectory()
 	if err != nil {
-		return false, err
+		return false, feedbackDigest, err
 	}
-	conversationIdentity, err := json.Marshal(struct {
-		Repository     string `json:"repository"`
-		ConversationID string `json:"conversation_id"`
-	}{
-		Repository:     root,
-		ConversationID: parsed.ConversationID,
-	})
+	if result.Decision == specguard.DecisionAllow {
+		if err := clearReminderMarker(directory, providerDigest); err != nil {
+			return false, feedbackDigest, err
+		}
+		return false, feedbackDigest, nil
+	}
+	already, err := claimReminderMarker(directory, providerDigest, feedbackDigest)
 	if err != nil {
-		return false, err
+		return false, feedbackDigest, err
 	}
-	conversationDigest := fmt.Sprintf("%x", sha256.Sum256(conversationIdentity))
-	already, err := claimReminderMarker(directory, conversationDigest, result.SnapshotID)
-	if err != nil {
-		return false, err
-	}
-	return already, nil
+	return already, feedbackDigest, nil
 }
 
-func antigravityExecutionFallback(input []byte) bool {
-	var parsed antigravityStopInput
-	return json.Unmarshal(input, &parsed) == nil && parsed.ExecutionNumber > 1
+func resetProviderFeedback(repository string, protocol providerProtocol, input []byte) error {
+	if protocol != protocolClaude {
+		return fmt.Errorf("provider does not expose a configured user-turn reset")
+	}
+	var parsed terminalHookInput
+	if err := json.Unmarshal(input, &parsed); err != nil {
+		return err
+	}
+	if parsed.SessionID == "" || len(parsed.SessionID) > 4096 {
+		return fmt.Errorf("user-turn reset omits a bounded native session identity")
+	}
+	providerDigest, err := providerSessionDigest(repository, protocol, parsed.SessionID)
+	if err != nil {
+		return err
+	}
+	directory, err := reminderStateDirectory()
+	if err != nil {
+		return err
+	}
+	return clearReminderMarker(directory, providerDigest)
+}
+
+func providerSessionDigest(repository string, protocol providerProtocol, sessionID string) (string, error) {
+	root, err := filepath.Abs(repository)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		return "", err
+	}
+	identity, err := json.Marshal(struct {
+		Repository string           `json:"repository"`
+		Provider   providerProtocol `json:"provider"`
+		SessionID  string           `json:"session_id"`
+	}{
+		Repository: root,
+		Provider:   protocol,
+		SessionID:  sessionID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(identity)), nil
 }
 
 func reminderStateDirectory() (string, error) {
@@ -416,9 +584,9 @@ func claimReminderMarker(directory, conversationDigest, snapshotDigest string) (
 		return false, err
 	}
 	path := filepath.Join(directory, reminderMarkerPrefix+conversationDigest)
-	content, err := readReminderMarker(path)
+	marker, err := readReminderMarker(path)
 	if err == nil {
-		if content == snapshotDigest+"\n" {
+		if marker.feedbackDigest == snapshotDigest {
 			return true, nil
 		}
 		if err := writeReminderMarker(path, snapshotDigest, false); err != nil {
@@ -442,6 +610,31 @@ func claimReminderMarker(directory, conversationDigest, snapshotDigest string) (
 		return false, err
 	}
 	return false, nil
+}
+
+func clearReminderMarker(directory, conversationDigest string) error {
+	if !isLowerHexDigest(conversationDigest) {
+		return fmt.Errorf("reminder identity is invalid")
+	}
+	release, err := acquireReminderLock(directory)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	if _, err := pruneExpiredReminderMarkers(directory, time.Now()); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, reminderMarkerPrefix+conversationDigest)
+	if _, err := readReminderMarker(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func acquireReminderLock(directory string) (func(), error) {
@@ -553,27 +746,42 @@ func pruneExpiredReminderTemporary(directory string, entry os.DirEntry, now time
 	return true, nil
 }
 
-func readReminderMarker(path string) (string, error) {
+func readReminderMarker(path string) (reminderMarkerState, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return "", err
+		return reminderMarkerState{}, err
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
-		return "", fmt.Errorf("reminder marker identity is unsafe")
+		return reminderMarkerState{}, fmt.Errorf("reminder marker identity is unsafe")
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return reminderMarkerState{}, err
 	}
 	defer file.Close()
-	content, err := io.ReadAll(io.LimitReader(file, 66))
+	content, err := io.ReadAll(io.LimitReader(file, 76))
 	if err != nil {
-		return "", err
+		return reminderMarkerState{}, err
 	}
-	if len(content) != 65 || !isLowerHexDigest(string(content[:64])) || content[64] != '\n' {
-		return "", errIncompleteReminderMarker
+	marker := reminderMarkerState{}
+	var digest []byte
+	switch {
+	case len(content) == 64+1:
+		// Accept the pre-phase marker format so an upgraded helper can clear or
+		// complete already-safe one-shot state instead of stranding capacity.
+		digest = content[:len(content)-1]
+	case len(content) == len("claimed ")+64+1 && strings.HasPrefix(string(content), "claimed "):
+		digest = content[len("claimed ") : len(content)-1]
+	case len(content) == len("completed ")+64+1 && strings.HasPrefix(string(content), "completed "):
+		digest = content[len("completed ") : len(content)-1]
+	default:
+		return reminderMarkerState{}, errIncompleteReminderMarker
 	}
-	return string(content), nil
+	if content[len(content)-1] != '\n' || !isLowerHexDigest(string(digest)) {
+		return reminderMarkerState{}, errIncompleteReminderMarker
+	}
+	marker.feedbackDigest = string(digest)
+	return marker, nil
 }
 
 func writeReminderMarker(path, snapshotDigest string, exclusive bool) error {
@@ -584,7 +792,7 @@ func writeReminderMarker(path, snapshotDigest string, exclusive bool) error {
 	}
 	temporary := marker.Name()
 	defer func() { _ = os.Remove(temporary) }()
-	if _, err := marker.WriteString(snapshotDigest + "\n"); err != nil {
+	if _, err := marker.WriteString("claimed " + snapshotDigest + "\n"); err != nil {
 		_ = marker.Close()
 		return err
 	}
@@ -639,6 +847,9 @@ func emitJSON(output io.Writer, response hookResponse) int {
 		fallback := hookResponse{Decision: "block", Reason: "Cooperative SPEC contract check unavailable: hook response exceeded its safety limit; run the changed-SPEC CI and inspect the deterministic guard directly."}
 		if response.Decision == "continue" {
 			fallback.Decision = "continue"
+		}
+		if isLowerHexDigest(response.DearAgentSpecFeedbackID) {
+			fallback.DearAgentSpecFeedbackID = response.DearAgentSpecFeedbackID
 		}
 		encoded, _ = json.Marshal(fallback)
 		encoded = append(encoded, '\n')

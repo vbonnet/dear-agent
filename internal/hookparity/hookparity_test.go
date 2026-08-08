@@ -1,6 +1,7 @@
 package hookparity_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -45,10 +46,51 @@ func TestNativeSPECContractTransportsUseTheirProviderSchemas(t *testing.T) {
 				if len(adapters) != 1 {
 					t.Fatalf("%s must expose exactly one cooperative native SPEC guard adapter for %s, got %v", harness, event, adapters)
 				}
+				siblings := matchingCommands(commands, "stop-guardrail-feedback")
+				if len(commands) != 2 || len(siblings) != 1 {
+					t.Fatalf("%s %s terminal chain = %v, want one SPEC adapter and one sibling guardrail independent of order", harness, event, commands)
+				}
 				arguments := strings.Fields(adapters[0])
 				if argumentValue(arguments, "--provider") != config.provider || argumentValue(arguments, "--event") != event || argumentValue(arguments, "--root") == "" {
 					t.Fatalf("%s %s adapter does not bind the provider protocol, root, and event: %q", harness, event, adapters[0])
 				}
+			}
+		})
+	}
+
+	claude := readHookSettings(t, filepath.Join(root, ".claude", "settings.json"))
+	resets := eventCommands(claude, "UserPromptSubmit")
+	if len(resets) != 1 || len(matchingCommands(resets, "cmd/spec-contract-hook")) != 1 {
+		t.Fatalf("Claude UserPromptSubmit chain = %v, want exactly one SPEC feedback reset adapter", resets)
+	}
+	arguments := strings.Fields(resets[0])
+	if argumentValue(arguments, "--provider") != "claude" || argumentValue(arguments, "--event") != "UserPromptSubmit" || argumentValue(arguments, "--root") == "" {
+		t.Fatalf("Claude user-turn reset does not bind the provider protocol, root, and native event: %q", resets[0])
+	}
+}
+
+func TestCodexSourceSPECContractTransportResolvesRootFromNestedCWD(t *testing.T) {
+	root := repoRoot(t)
+	settings := readHookSettings(t, filepath.Join(root, ".codex", "hooks.json"))
+	for _, event := range []string{"Stop", "SubagentStop"} {
+		t.Run(event, func(t *testing.T) {
+			adapters := matchingCommands(eventCommands(settings, event), "cmd/spec-contract-hook")
+			if len(adapters) != 1 {
+				t.Fatalf("Codex %s adapters = %v, want exactly one", event, adapters)
+			}
+			command := exec.Command("/bin/sh", "-c", adapters[0])
+			command.Dir = filepath.Join(root, "agm")
+			command.Env = append(environmentWithout(os.Environ(), "AGM_CODEX_HOOK_ROOT", "CLAUDE_PROJECT_DIR"), "DEAR_AGENT_HOOK_STATE_DIR="+t.TempDir())
+			command.Stdin = strings.NewReader(`{"hook_event_name":"` + event + `","session_id":"nested-codex","turn_id":"nested-codex-turn","stop_hook_active":false}`)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			if err := command.Run(); err != nil {
+				t.Fatalf("run Codex %s adapter from nested cwd: %v\nstdout=%s\nstderr=%s", event, err, stdout.String(), stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("decode Codex %s response %q: %v; stderr=%s", event, stdout.String(), err, stderr.String())
 			}
 		})
 	}
@@ -99,7 +141,11 @@ func TestAntigravityUsesNamedStopHookSchema(t *testing.T) {
 	}
 	command := exec.Command(helper, "--root-from-workspace-stdin", "--provider", "antigravity", "--event", "Stop")
 	command.Dir = t.TempDir()
-	command.Env = append(os.Environ(), "DEAR_AGENT_HOOK_STATE_DIR="+t.TempDir())
+	stateDirectory := t.TempDir()
+	if err := os.Chmod(stateDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command.Env = append(os.Environ(), "DEAR_AGENT_HOOK_STATE_DIR="+stateDirectory)
 	command.Stdin = strings.NewReader(string(payload))
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -518,6 +564,23 @@ func hasCommandContaining(commands []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+func environmentWithout(environment []string, names ...string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		keep := true
+		for _, name := range names {
+			if strings.HasPrefix(entry, name+"=") {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func repoRoot(t *testing.T) string {

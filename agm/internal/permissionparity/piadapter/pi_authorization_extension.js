@@ -18,6 +18,8 @@ const MAX_TERMINAL_HOOK_FEEDBACK_CHARS = 16 * 1024;
 const MAX_TERMINAL_REASON_CHARS = 12 * 1024;
 const TERMINAL_CONTEXT_PREFIX = "Additional context: ";
 const MAX_TERMINAL_CONTEXT_CHARS = MAX_TERMINAL_HOOK_FEEDBACK_CHARS - MAX_TERMINAL_REASON_CHARS - TERMINAL_CONTEXT_PREFIX.length - 1;
+const MAX_TERMINAL_FOLLOW_UPS_PER_TURN = 8;
+const SPEC_FEEDBACK_ID_PATTERN = /^[0-9a-f]{64}$/;
 
 function readHookManifest(path) {
 	const descriptor = openSync(path, "r");
@@ -117,10 +119,13 @@ function parseHookOutput(output) {
 			const value = JSON.parse(lines[index]);
 			const hookOutput = value?.hookSpecificOutput || {};
 			const reason = value?.reason || hookOutput?.additionalContext || "hook rejected the event";
+			const specFeedbackID = SPEC_FEEDBACK_ID_PATTERN.test(String(value?.dearAgentSpecFeedbackId || ""))
+				? String(value.dearAgentSpecFeedbackId)
+				: "";
 			if (value?.decision === "block" || hookOutput?.permissionDecision === "deny") {
-				return {block: true, reason: String(reason)};
+				return {block: true, reason: String(reason), specFeedbackID};
 			}
-			if (hookOutput?.additionalContext) return {context: String(hookOutput.additionalContext)};
+			if (hookOutput?.additionalContext) return {context: String(hookOutput.additionalContext), specFeedbackID};
 		} catch {
 			// Hooks may print diagnostics before an optional final JSON decision.
 		}
@@ -152,6 +157,7 @@ export function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = 
 	let contextText = "";
 	let reasonText = "";
 	let terminalFailed = false;
+	const specFeedbackIDs = [];
 	const terminalFailure = (reason) => {
 		if (!terminal) return {block: true, reason};
 		terminalFailed = true;
@@ -187,6 +193,9 @@ export function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = 
 				continue;
 			}
 			const structured = parseHookOutput(result.stdout);
+			if (terminal && structured?.specFeedbackID && !specFeedbackIDs.includes(structured.specFeedbackID) && specFeedbackIDs.length < MAX_TERMINAL_HOOK_HANDLERS) {
+				specFeedbackIDs.push(structured.specFeedbackID);
+			}
 			if (structured?.block) {
 				const failure = terminalFailure(structured.reason);
 				if (failure) return failure;
@@ -217,9 +226,9 @@ export function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = 
 	}
 	if (terminalFailed) {
 		const context = contextText ? `${TERMINAL_CONTEXT_PREFIX}${contextText}` : "";
-		return {block: true, reason: [reasonText, context].filter(Boolean).join("\n") || `${eventName} hook failed`};
+		return {block: true, reason: [reasonText, context].filter(Boolean).join("\n") || `${eventName} hook failed`, specFeedbackIDs};
 	}
-	if (contextText) return {context: contextText};
+	if (contextText) return {context: contextText, specFeedbackIDs};
 	if (contexts.length > 0) return {context: contexts.join("\n")};
 	return undefined;
 }
@@ -331,6 +340,8 @@ export default function (pi) {
 	// extension passes its explicit loop state into the declarative projection
 	// and refuses a second follow-up for the same terminal event.
 	const activeStopEvents = new Set();
+	const lastSpecFeedbackByEvent = new Map();
+	const terminalFollowUpsThisTurn = new Map();
 	const projectDir = process.env.AGM_PI_PROJECT_DIR || process.cwd();
 	let policyLoadError = "";
 	try {
@@ -357,7 +368,11 @@ export default function (pi) {
 		// budget. Pi reports extension-created follow-ups with source=extension;
 		// only a real interactive or RPC user turn starts a fresh bounded turn.
 		if (_event?.source === "extension") return undefined;
-		if (_event?.source === "interactive" || _event?.source === "rpc") activeStopEvents.clear();
+		if (_event?.source === "interactive" || _event?.source === "rpc") {
+			activeStopEvents.clear();
+			lastSpecFeedbackByEvent.clear();
+			terminalFollowUpsThisTurn.clear();
+		}
 		const result = runProjectHooks("UserPromptSubmit", {event: _event}, projectDir);
 		if (result?.block) {
 			ctx.ui.notify(`Pi UserPromptSubmit hook: ${result.reason}`, "warning");
@@ -385,11 +400,21 @@ export default function (pi) {
 		const stopHookActive = activeStopEvents.has(eventName);
 		const result = runProjectHooks(eventName, {...call, stopHookActive}, projectDir);
 		if (result?.block) {
-			if (stopHookActive) {
+			const specFeedbackIDs = Array.isArray(result.specFeedbackIDs) ? result.specFeedbackIDs : [];
+			const nextSpecFeedbackID = specFeedbackIDs.at(-1) || "";
+			const freshSpecFeedback = nextSpecFeedbackID && nextSpecFeedbackID !== lastSpecFeedbackByEvent.get(eventName);
+			const followUps = terminalFollowUpsThisTurn.get(eventName) || 0;
+			if (followUps >= MAX_TERMINAL_FOLLOW_UPS_PER_TURN) {
+				ctx.ui.notify(`Pi ${eventName} hook reached its bounded per-turn continuation budget; yielding: ${result.reason}`, "warning");
+				return;
+			}
+			if (stopHookActive && !freshSpecFeedback) {
 				ctx.ui.notify(`Pi ${eventName} hook is still blocking; yielding after one continuation to avoid a retry loop: ${result.reason}`, "warning");
 				return;
 			}
 			activeStopEvents.add(eventName);
+			terminalFollowUpsThisTurn.set(eventName, followUps + 1);
+			if (nextSpecFeedbackID) lastSpecFeedbackByEvent.set(eventName, nextSpecFeedbackID);
 			ctx.ui.notify(`Pi ${eventName} hook: ${result.reason}`, "warning");
 			pi.sendUserMessage(result.reason, {deliverAs: "followUp"});
 			return;

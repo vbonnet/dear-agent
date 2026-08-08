@@ -40,12 +40,13 @@ type dirtyWorktreePath struct {
 }
 
 type gitSnapshot struct {
-	base               string
-	head               string
-	identity           string
-	files              map[string]sourceFile
-	implementationDirs map[string]bool
-	changed            []change
+	base                string
+	head                string
+	identity            string
+	files               map[string]sourceFile
+	implementationDirs  map[string]bool
+	implementationPaths map[string]bool
+	changed             []change
 }
 
 type gitClient struct {
@@ -403,7 +404,7 @@ func validateFilesystemIdentity(identity filesystemIdentity) *guardFailure {
 }
 
 //nolint:gocyclo // Sequential identity reads keep the index and worktree admission gates auditable.
-func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirtyWorktreeRead, afterIndexRead func()) (gitSnapshot, *guardFailure) {
+func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirtyWorktreeRead, afterFinalDirtyRead, afterIndexRead func()) (gitSnapshot, *guardFailure) {
 	dirtyBefore, failure := git.dirtyGovernedPaths(ctx, root)
 	if failure != nil {
 		return gitSnapshot{}, failure
@@ -473,6 +474,35 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 			identityFailure = fail("dirty-worktree-race", dirtyAfter[0].path, "a governed working-tree path became unstaged or nonignored untracked while the staged snapshot was being evaluated; stage the intended contract state or resolve the dirty path before retrying")
 		}
 	}
+	if identityFailure == nil && afterFinalDirtyRead != nil {
+		afterFinalDirtyRead()
+	}
+	// dirtyGovernedPaths runs multiple Git commands. A concurrent writer can
+	// stage a governed change after one of those commands has observed the
+	// worktree, so checkpoint the index, diff, and HEAD again only after the
+	// complete final dirty-worktree admission sequence.
+	if identityFailure == nil {
+		var finalIndex []byte
+		finalIndex, identityFailure = git.run(ctx, root, nil, git.limits.maxGitOutput,
+			"ls-files", "--cached", "--stage", "-z", "--")
+		if identityFailure == nil {
+			var finalDiff []byte
+			finalDiff, identityFailure = git.run(ctx, root, nil, git.limits.maxGitOutput,
+				"diff-index", "--cached", "--name-status", "-z", "--no-renames",
+				"--no-ext-diff", "--no-textconv", "--diff-filter=ACDMRTUXB", head, "--")
+			if identityFailure == nil && (!bytes.Equal(indexBefore, finalIndex) || !bytes.Equal(diffBefore, finalDiff)) {
+				identityFailure = fail("index-race", "", "Git index changed during final dirty-worktree admission")
+			}
+		}
+	}
+	if identityFailure == nil {
+		finalHead, finalHeadFailure := git.resolveCommit(ctx, root, "HEAD")
+		if finalHeadFailure != nil {
+			identityFailure = finalHeadFailure
+		} else if finalHead != head {
+			identityFailure = fail("head-race", "", "HEAD changed during final dirty-worktree admission")
+		}
+	}
 	if identityFailure != nil {
 		return gitSnapshot{}, identityFailure
 	}
@@ -484,12 +514,13 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 		return gitSnapshot{}, failure
 	}
 	return gitSnapshot{
-		base:               head,
-		head:               head,
-		identity:           snapshotIdentity("staged", []byte(head), indexBefore, diffBefore),
-		files:              files,
-		implementationDirs: implementationDirs(entries),
-		changed:            changed,
+		base:                head,
+		head:                head,
+		identity:            snapshotIdentity("staged", []byte(head), indexBefore, diffBefore),
+		files:               files,
+		implementationDirs:  implementationDirs(entries),
+		implementationPaths: implementationPaths(entries),
+		changed:             changed,
 	}, nil
 }
 
@@ -594,12 +625,13 @@ func (git gitClient) committedSnapshot(ctx context.Context, root, baseRevision s
 		return gitSnapshot{}, failure
 	}
 	return gitSnapshot{
-		base:               base,
-		head:               head,
-		identity:           snapshotIdentity("committed", []byte(base), []byte(head)),
-		files:              files,
-		implementationDirs: implementationDirs(entries),
-		changed:            changed,
+		base:                base,
+		head:                head,
+		identity:            snapshotIdentity("committed", []byte(base), []byte(head)),
+		files:               files,
+		implementationDirs:  implementationDirs(entries),
+		implementationPaths: implementationPaths(entries),
+		changed:             changed,
 	}, nil
 }
 

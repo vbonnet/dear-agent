@@ -18,3 +18,8 @@ Feature: Provider-neutral SPEC guard result
       | unknown-mode         |
       | staged-with-base     |
       | committed-no-base    |
+
+  Scenario: Contract retirement validates the surviving immutable graph
+    Given governed contract deletion validation is configured
+    When AGM exercises dangling deletion, live owner deletion, complete retirement, and same-change relocation
+    Then only structurally owned replacement, complete retirement, or relocation should reach semantic review

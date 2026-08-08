@@ -12,8 +12,10 @@ import (
 type specGuardStateKey struct{}
 
 type specGuardState struct {
-	request specguard.Request
-	result  specguard.Result
+	request            specguard.Request
+	result             specguard.Result
+	deletionOutput     string
+	deletionRegression error
 }
 
 // RegisterSpecGuardSteps registers the provider-neutral guard interface steps.
@@ -24,6 +26,9 @@ func RegisterSpecGuardSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^malformed provider-neutral SPEC guard case "([^"]+)"$`, malformedSpecGuardCase)
 	ctx.Step(`^the shared SPEC guard interface evaluates the request$`, evaluateSharedSpecGuard)
 	ctx.Step(`^the SPEC guard result should block and disclose its source, cooperative hook, and repository identity boundaries$`, specGuardShouldBlockWithBoundedEvidence)
+	ctx.Step(`^governed contract deletion validation is configured$`, governedContractDeletionValidationIsConfigured)
+	ctx.Step(`^AGM exercises dangling deletion, live owner deletion, complete retirement, and same-change relocation$`, agmExercisesGovernedContractDeletion)
+	ctx.Step(`^only structurally owned replacement, complete retirement, or relocation should reach semantic review$`, completeRetirementOrRelocationReachesSemanticReview)
 }
 
 func malformedSpecGuardCase(ctx context.Context, testCase string) error {
@@ -93,6 +98,34 @@ func specGuardShouldBlockWithBoundedEvidence(ctx context.Context) error {
 		if !strings.Contains(trust, phrase) {
 			return fmt.Errorf("SPEC guard trust boundary %q omits %q", state.result.TrustBoundary, phrase)
 		}
+	}
+	return nil
+}
+
+func governedContractDeletionValidationIsConfigured(ctx context.Context) error {
+	_, err := getSpecGuardState(ctx)
+	return err
+}
+
+func agmExercisesGovernedContractDeletion(ctx context.Context) error {
+	state, err := getSpecGuardState(ctx)
+	if err != nil {
+		return err
+	}
+	state.deletionOutput, state.deletionRegression = runLocalGuardrailNamedGoTests(ctx,
+		"./internal/specguard",
+		"TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement",
+	)
+	return nil
+}
+
+func completeRetirementOrRelocationReachesSemanticReview(ctx context.Context) error {
+	state, err := getSpecGuardState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.deletionRegression != nil {
+		return fmt.Errorf("governed contract deletion regression: %w: %s", state.deletionRegression, state.deletionOutput)
 	}
 	return nil
 }

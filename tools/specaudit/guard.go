@@ -28,7 +28,7 @@ func runGuard(args []string, stdout, _ io.Writer) int {
 	for _, argument := range args {
 		argumentBytes += len(argument)
 	}
-	parseErr := error(nil)
+	var parseErr error
 	if len(args) > maxGuardCLIArgs || argumentBytes > maxGuardCLIArgBytes {
 		parseErr = flag.ErrHelp
 	} else {
