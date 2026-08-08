@@ -1,6 +1,6 @@
 # Engram MCP Server (Go) - Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 
@@ -21,6 +21,8 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
    backfilled idempotently.
 4. **Drop-in**: preserves the legacy server's read tools
    (`engram_retrieve`, `engram_plugins_list`, `wayfinder_phase_status`).
+5. **Truthful identity**: the version advertised to MCP clients and logged at
+   startup is the version stamped into the compiled server.
 
 ## EARS Requirements
 
@@ -41,6 +43,12 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 **EMC-08** When beads_reconcile is invoked with dry_run enabled, the system shall report the beads that would be backfilled without performing any write.
 
 **EMC-09** When wayfinder_phase_status reads a status file, the server shall return phase state only after complete canonical schema 2.0 validation.
+
+**EMC-10** The `engram-mcp` executable shall report one consistent build-stamped version value across its observable interfaces.
+
+**EMC-11** When `engram-mcp` starts, the system shall log its build-stamped version value.
+
+**EMC-12** When an MCP client successfully initializes `engram-mcp`, the system shall return the same build-stamped version value as `serverInfo.version`.
 
 ## Tools
 
@@ -70,6 +78,9 @@ is the root cause this server exists to fix.
   including a regression test reproducing the acknowledged-but-not-landed
   write (`TestVerifiedCreate_AcknowledgedButNotLanded`).
 - `engram/cmd/engram-mcp`: unit tests for the read-tool ports and parsers.
+- `engram/cmd/engram-mcp`: an artifact-level regression builds the real binary
+  with a non-default version and verifies it through a raw MCP 2025-11-25
+  initialize response over stdio.
 
 ## BDD Traceability
 

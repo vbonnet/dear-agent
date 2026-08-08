@@ -52,6 +52,14 @@ Code's hook system for automatic retrieval.
 - Model Context Protocol server implementation
 - Exposes memory operations to MCP-compatible clients
 
+### MCP Executable Identity (`cmd/engram-mcp/`)
+- The startup log and MCP server identity both read `pkg/version.Version`.
+- The `build-engram-mcp` target stamps that owner through the repository-wide
+  `BUILD_STAMP_FLAGS` profile.
+- An artifact-level test builds the executable with a non-default stamp and
+  verifies the startup log and raw MCP initialize response agree.
+- The separately released `engram` CLI retains its own version contract.
+
 ### Internal (`internal/`)
 - Shared utilities and types
 - Memory file parsing and serialization
