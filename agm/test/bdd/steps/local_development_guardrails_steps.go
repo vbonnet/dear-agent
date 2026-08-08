@@ -117,6 +117,8 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
 	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
 	ctx.Step(`^bounded affected runner commands should terminate their descendants$`, boundedAffectedRunnerCommandsShouldTerminateTheirDescendants)
+	ctx.Step(`^AGM runs the affected runner fixture regressions$`, agmRunsAffectedRunnerFixtureRegressions)
+	ctx.Step(`^partial readiness, early completion, and setup timeout should be distinguished$`, affectedRunnerFixturesShouldDistinguishSetupOutcomes)
 	ctx.Step(`^AGM runs the effective required-check regressions$`, agmRunsEffectiveRequiredCheckRegressions)
 	ctx.Step(`^safe-merge should enforce complete provider-required CI without advisory drift$`, safeMergeShouldEnforceProviderRequiredCI)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
@@ -307,29 +309,6 @@ func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) 
 	}
 	if state.auditRegressionErr != nil {
 		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
-	}
-	return nil
-}
-
-func agmRunsAffectedRunnerProcessTreeRegressions(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	state.treeRegression, state.treeRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^(TestRunGoTestCommandTimeoutKillsProcessGroup|TestListPackagesContextCancellationKillsProcessGroup)$`,
-		"./cmd/test-affected",
-	)
-	return nil
-}
-
-func boundedAffectedRunnerCommandsShouldTerminateTheirDescendants(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.treeRegressionErr != nil {
-		return fmt.Errorf("affected runner process-tree regressions: %w: %s", state.treeRegressionErr, state.treeRegression)
 	}
 	return nil
 }

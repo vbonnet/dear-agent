@@ -128,6 +128,10 @@ Feature: Local development guardrails
     When AGM runs the affected runner process-tree regressions
     Then bounded affected runner commands should terminate their descendants
 
+  Scenario: Affected runner fixtures distinguish every setup outcome
+    When AGM runs the affected runner fixture regressions
+    Then partial readiness, early completion, and setup timeout should be distinguished
+
   Scenario: Safe merge distinguishes required checks from advisory history
     When AGM runs the effective required-check regressions
     Then safe-merge should enforce complete provider-required CI without advisory drift
