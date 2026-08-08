@@ -11,9 +11,8 @@
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
 // active WAYFINDER-STATUS.md; its canonical project_name is stamped into the
-// PR body (create) or mutation comment (close/reopen). On create, squash
-// auto-merge is armed on a new non-draft PR so it merges itself once required
-// checks and reviews pass. Draft PRs remain unarmed for a human to advance.
+// PR body (create) or mutation comment (close/reopen). Creation stops after
+// the provider-visible PR mutation; safe-merge owns routine merge admission.
 // Every invocation is audit-logged to
 // ~/.local/state/dear-agent/safe-pr.log and emits an OTel span (safepr.<verb>)
 // when a collector is configured.
@@ -117,9 +116,10 @@ func parseArgs(argv []string) (*parsedArgs, error) {
 			p.timeout = d
 			i++
 		case "--verify-ci":
-			// Opt-in: after create+arm, confirm CI actually started on the new
-			// PR's head SHA and warn (never fail) if it did not. Off by default
-			// so the common create path is never slowed by a poll.
+			// Opt-in: after successful non-draft creation, confirm CI actually
+			// started on the new PR's head SHA and warn (never fail) if it did
+			// not. Off by default so the common create path is never slowed by a
+			// poll.
 			p.verifyCI = true
 		case "--skip-preflight":
 			p.skipPreflight = true
@@ -360,13 +360,7 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transacti
 	)
 	span.End()
 
-	// Arm squash auto-merge on a freshly created, non-draft PR so routine PRs
-	// merge once required checks and reviews pass. Drafts are the explicit
-	// handoff boundary for human-required changes and must remain unarmed.
-	// Best-effort: the PR already exists, so a failure here (auto-merge disabled
-	// on the repo, branch not yet pushed) must not fail the run; it is surfaced
-	// as a warning and can be armed manually.
-	handlePostCreate(req, prURL, runErr, timeout, verifyCI, transaction)
+	handlePostCreate(req, prURL, runErr, verifyCI, transaction)
 
 	if ctx.Err() == context.DeadlineExceeded {
 		return githubExecution{prURL: prURL, exitCode: exitCode}, fmt.Errorf("gh exceeded %s and was killed — gh may have been waiting on an "+
@@ -409,19 +403,14 @@ func appendFinalAudit(req *safepr.Request, cwd string, outcome githubExecution, 
 	}
 }
 
-func handlePostCreate(req *safepr.Request, prURL string, runErr error, timeout time.Duration, verifyCI bool, transaction *safepr.WorktreeTransaction) {
+func handlePostCreate(req *safepr.Request, prURL string, runErr error, verifyCI bool, transaction *safepr.WorktreeTransaction) {
 	if runErr != nil || req.Verb != "create" || prURL == "" {
 		return
 	}
 	draft := requestsDraft(req.GhArgs)
-	if !draft {
-		if mergeErr := armAutoMerge(prURL, timeout, transaction); mergeErr != nil {
-			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
-		}
-	}
 	// Opt-in safety net for the push-then-PR-open race (bead ce-np2s): an
-	// armed PR whose head SHA never gets check-runs would wait on auto-merge
-	// forever with no signal. When asked, confirm CI actually started and warn
+	// unarmed PR whose head SHA never gets check-runs would otherwise need
+	// manual investigation. When asked, confirm CI actually started and warn
 	// loudly if it did not; the PR already exists, so this remains advisory.
 	if verifyCI && !draft {
 		warnIfNoCI(prURL, transaction)
@@ -510,9 +499,9 @@ const verifyCIPollWindow = 60 * time.Second
 
 // warnIfNoCI polls the new PR's head SHA for any check-run and, if none has
 // appeared within verifyCIPollWindow, prints a warning naming the PR and the
-// recovery command. It never returns an error: the PR was created and armed, so
-// a missing-CI condition is surfaced, not treated as a create failure. Any gh
-// lookup failure along the way is silently ignored — this is a best-effort
+// recovery command. It never returns an error: the PR was created, so a
+// missing-CI condition is surfaced rather than treated as a create failure. Any
+// gh lookup failure along the way is silently ignored — this is a best-effort
 // safety net, not a gate.
 func warnIfNoCI(prURL string, transaction *safepr.WorktreeTransaction) {
 	repo, num, ok := parsePRURL(prURL)
@@ -595,38 +584,6 @@ func ghCheckRunCount(repo, sha string, transaction *safepr.WorktreeTransaction) 
 	return n
 }
 
-// armAutoMerge enables squash auto-merge on prURL so the PR merges itself once
-// required checks and reviews pass. It runs with its own timeout and the same
-// non-interactive environment as the create call. A non-nil error is advisory:
-// the caller treats it as a warning, not a failure.
-func armAutoMerge(prURL string, timeout time.Duration, transaction *safepr.WorktreeTransaction) error {
-	if timeout <= 0 {
-		timeout = safepr.DefaultTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", "--auto", "--squash", prURL)
-	var errBuf bytes.Buffer
-	cmd.Stdout = nil // discard: success message ("✓ Armed auto-merge…") must not pollute safe-pr stdout
-	cmd.Stderr = &errBuf
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
-	if err := protectTransactionCommand(transaction, cmd); err != nil {
-		return err
-	}
-
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("gh pr merge --auto exceeded %s and was killed", timeout)
-		}
-		if msg := strings.TrimSpace(errBuf.String()); msg != "" {
-			return fmt.Errorf("gh pr merge --auto: %w\nsafe-pr: WARNING: gh stderr: %s", err, msg)
-		}
-		return fmt.Errorf("gh pr merge --auto: %w", err)
-	}
-	return nil
-}
-
 func protectTransactionCommand(transaction *safepr.WorktreeTransaction, cmd *exec.Cmd) error {
 	if cmd == nil {
 		return fmt.Errorf("protect safe-pr child command: command is required")
@@ -676,9 +633,9 @@ The session trace is stamped into the PR body (create) or comment (close/reopen)
 On create, 'make preflight-full' is run first to ensure local build/test/lint
 health before the PR hits CI (shift-left gate). Use --skip-preflight only for
 emergencies; prefer fixing the underlying issues instead.
-On create, squash auto-merge is armed on a new non-draft PR (best-effort) so it
-merges itself once required checks and reviews pass. A PR created with --draft
-remains unarmed for a human to advance.
+On create, safe-pr stops after provider-visible PR creation. Once checks and
+review are ready, use safe-merge for routine agent-authored merge admission.
+A PR created with --draft remains a human handoff.
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.

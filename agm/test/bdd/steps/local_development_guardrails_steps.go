@@ -58,6 +58,8 @@ type localDevGuardrailState struct {
 	childRegressionErr    error
 	auditRegression       string
 	auditRegressionErr    error
+	noMergeRegression     string
+	noMergeRegressionErr  error
 	treeRegression        string
 	treeRegressionErr     error
 	requiredCIRegression  string
@@ -111,10 +113,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
 	ctx.Step(`^AGM runs the protected repository cleanup regression$`, agmRunsProtectedRepositoryCleanupRegression)
 	ctx.Step(`^repository cleanup should preserve the worktree and its branches$`, repositoryCleanupShouldPreserveWorktreeAndBranches)
-	ctx.Step(`^AGM runs the safe-pr abrupt-parent regression$`, agmRunsSafePRAbruptParentRegression)
-	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
-	ctx.Step(`^AGM runs the safe-pr final transaction audit regression$`, agmRunsSafePRFinalTransactionAuditRegression)
-	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
+	registerSafePRRegressionGuardrailSteps(ctx)
 	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
 	ctx.Step(`^bounded affected runner commands should terminate their descendants$`, boundedAffectedRunnerCommandsShouldTerminateTheirDescendants)
 	ctx.Step(`^AGM runs the affected runner fixture regressions$`, agmRunsAffectedRunnerFixtureRegressions)
@@ -263,52 +262,6 @@ func repositoryCleanupShouldPreserveWorktreeAndBranches(ctx context.Context) err
 	}
 	if state.cleanupRegressionErr != nil {
 		return fmt.Errorf("protected repository cleanup regression: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
-	}
-	return nil
-}
-
-func agmRunsSafePRAbruptParentRegression(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	state.childRegression, state.childRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestWorktreeTransactionLockOutlivesKilledParentFor(ProtectedChild|GitHelper)$`,
-		"./internal/safepr",
-	)
-	return nil
-}
-
-func childShouldRetainTransactionOwnershipUntilExit(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.childRegressionErr != nil {
-		return fmt.Errorf("safe-pr abrupt-parent regression: %w: %s", state.childRegressionErr, state.childRegression)
-	}
-	return nil
-}
-
-func agmRunsSafePRFinalTransactionAuditRegression(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	state.auditRegression, state.auditRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestRun_CreateAuditsFinalTransactionOutcome$`,
-		"./cmd/safe-pr",
-	)
-	return nil
-}
-
-func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.auditRegressionErr != nil {
-		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
 	}
 	return nil
 }

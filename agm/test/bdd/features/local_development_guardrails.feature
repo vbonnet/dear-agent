@@ -124,6 +124,10 @@ Feature: Local development guardrails
     When AGM runs the safe-pr final transaction audit regression
     Then each safe-pr transaction should have one accurate audit record
 
+  Scenario: Safe PR creation never invokes a merge subprocess
+    When AGM runs the safe-pr no-merge subprocess regression
+    Then safe-pr creation should not invoke a merge subprocess
+
   Scenario: Bounded affected runner commands own their complete process trees
     When AGM runs the affected runner process-tree regressions
     Then bounded affected runner commands should terminate their descendants

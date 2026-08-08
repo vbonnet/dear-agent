@@ -1,6 +1,26 @@
-# ADR-034: Squash-only merge contract + auto-merge arming
+# ADR-034: Squash-only merge contract; routine auto-arming retired
 
-Status: Accepted (2026-06-24) · Epic ce-kf6j · closes ce-kf6j.7 · relates ce-kf6j.1, ce-kf6j.5, ce-r81r, ce-kf6j.3
+Status: Accepted (2026-06-24; amended 2026-08-08) · Epic ce-kf6j · closes ce-kf6j.7 · relates ce-kf6j.1, ce-kf6j.5, ce-r81r, ce-kf6j.3
+
+## Amendment: retire routine safe-pr auto-arming
+
+This amendment changes only decision 3 below. `safe-pr` now ends at attributed
+pull-request creation and optional CI discovery; it never arms or invokes a
+merge command. The routine path for agent-authored pull requests is:
+
+```text
+safe-push -> safe-pr create -> provider checks/review -> safe-merge
+```
+
+Human-required work remains draft until a human advances it. The separately
+governed exceptions remain unchanged: ADR-030 permits GitHub-native auto-merge
+for scoped Dependabot patch/minor updates, and `safe-merge break-glass` remains
+a TTY-only human emergency path.
+
+This amendment does not change or reassert the historical loose-versus-strict
+required-check decision. `ce-juhj.6` owns canonical ruleset reconciliation and
+the reviewed provider operation; `ce-1hu9.27` owns reviewed base-and-head
+candidate admission after that provider state is verified.
 
 Three changes landed together to form a new merge pipeline:
 
@@ -9,14 +29,14 @@ Three changes landed together to form a new merge pipeline:
 2. **Squash-only enforced via IaC** (ce-kf6j.5) — rebase and merge-commit strategies
    are blocked by the `modules/managed-repo` branch-protection ruleset; only squash
    merges land on `main`.
-3. **Auto-merge armed on routine `safe-pr create`** (ce-r81r) — `cmd/safe-pr`
+3. **Historical: auto-merge armed on routine `safe-pr create`** (ce-r81r) — `cmd/safe-pr`
    runs `gh pr merge --auto --squash <url>` after opening a non-draft PR, so it
-   merges once required checks and reviews pass. Drafts are an explicit human
-   handoff and remain unarmed.
+   merges once required checks and reviews pass. This decision is superseded by
+   the amendment above.
 
-**The routine pipeline:** push branch → open a non-draft PR via `safe-pr` → CI
-green → auto-merge fires. Human-required work stays draft until explicitly
-advanced.
+**Historical routine pipeline:** push branch → open a non-draft PR via
+`safe-pr` → CI green → auto-merge fires. Human-required work stays draft until
+explicitly advanced. The amendment above replaces this agent-authored path.
 
 **Supervisor contract (what changed for burndown workers):**
 
