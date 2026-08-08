@@ -131,9 +131,9 @@ func TestBuildStampIsVisibleInLegacyInitialize(t *testing.T) {
 
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve engram-mcp test source path")
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("resolve engram-mcp test working directory: %v", err)
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
 }
