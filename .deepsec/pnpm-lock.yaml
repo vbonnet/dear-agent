@@ -12,7 +12,7 @@ overrides:
   hono: ^4.13.0
   ip-address: ^10.4.0
   qs@6.15.1: 6.15.2
-  tar@7.5.15: 7.5.19
+  tar@7.5.15: 7.5.21
   undici: ^7.29.0
 
 importers:
@@ -566,8 +566,8 @@ packages:
   tar-stream@3.1.7:
     resolution: {integrity: sha512-qJj60CXt7IU1Ffyc3NJMjh6EkuCFej46zUqJ4J7pqYlThyd9bO0XBTmcOIhSzZJVWfsLks0+nle/j538YAW9RQ==}
 
-  tar@7.5.19:
-    resolution: {integrity: sha512-4LeEWl96twnS2Q7Bz4MGqgazLqO+hJN63GZxXoIqh1T3VweYD997gbU1ItNsQafqqXTXd5WFyFdReLtwvRBNiw==}
+  tar@7.5.21:
+    resolution: {integrity: sha512-XdhtCvlMywwxpCW8YEq3lOXBJpUPTR2OHHcwLPO3HwsJqOHa2Ok/oJ7ruGzp+JrKoRPVCzJwAdEjqLW/vNRPHA==}
     engines: {node: '>=18'}
 
   text-decoder@1.2.7:
@@ -851,7 +851,7 @@ snapshots:
       '@vercel/sandbox': 1.10.2
       jiti: 2.7.0
       minimatch: 10.2.5
-      tar: 7.5.19
+      tar: 7.5.21
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - bare-abort-controller
@@ -1186,7 +1186,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  tar@7.5.19:
+  tar@7.5.21:
     dependencies:
       '@isaacs/fs-minipass': 4.0.1
       chownr: 3.0.0
