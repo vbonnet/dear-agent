@@ -22,8 +22,8 @@
 # RELATED-SPEC: pkg/version/SPEC.md
 # RELATED-SPEC: tests/buildstamp/SPEC.md
 Feature: Hook harness parity
-  Active interactive harnesses should receive the same repository guardrails
-  through their native hook configuration surfaces.
+  Active interactive harnesses should receive equivalent SPEC review outcomes
+  through their native capabilities without inventing unsupported events.
 
   Scenario Outline: Active harness hook manifests expose shared guardrails
     Given hook harness "<harness>" is configured
@@ -42,16 +42,6 @@ Feature: Hook harness parity
       | codex-cli    | pretool-bypass-guard       |
       | codex-cli    | pretool-pr-guard           |
       | codex-cli    | stop-guardrail-feedback    |
-      | agy          | pretool-spawn-routing      |
-      | agy          | pretool-bead-close-guard   |
-      | agy          | pretool-bypass-guard       |
-      | agy          | pretool-pr-guard           |
-      | agy          | stop-guardrail-feedback    |
-      | opencode-cli | pretool-spawn-routing      |
-      | opencode-cli | pretool-bead-close-guard   |
-      | opencode-cli | pretool-bypass-guard       |
-      | opencode-cli | pretool-pr-guard           |
-      | opencode-cli | stop-guardrail-feedback    |
       | pi-cli       | pretool-spawn-routing      |
       | pi-cli       | pretool-bead-close-guard   |
       | pi-cli       | pretool-bypass-guard       |
@@ -69,18 +59,48 @@ Feature: Hook harness parity
       | codex-cli    | UserPromptSubmit |
       | codex-cli    | PreCompact       |
       | codex-cli    | PostCompact      |
-      | agy          | SessionStart     |
-      | agy          | UserPromptSubmit |
-      | agy          | PreCompact       |
-      | agy          | PostCompact      |
-      | opencode-cli | SessionStart     |
-      | opencode-cli | UserPromptSubmit |
-      | opencode-cli | PreCompact       |
-      | opencode-cli | PostCompact      |
       | pi-cli       | SessionStart     |
       | pi-cli       | UserPromptSubmit |
       | pi-cli       | PreCompact       |
       | pi-cli       | PostCompact      |
+
+  Scenario Outline: Active harness capabilities expose bounded SPEC review
+    Given hook harness "<harness>" is configured
+    When AGM validates hook parity for that harness
+    Then hook harness "<harness>" should expose bounded SPEC contract review
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+      | pi-cli       |
+
+  Scenario Outline: Capability gaps omit unsupported legacy projections
+    Given hook harness "<harness>" is configured
+    When AGM validates hook parity for that harness
+    Then hook harness "<harness>" should omit unsupported legacy hook projections
+
+    Examples:
+      | harness      |
+      | agy          |
+      | opencode-cli |
+
+  Scenario: Provider projections share the canonical SPEC authoring route
+    Given staged SPEC contract feedback is configured
+    When AGM exercises the shared reminder across all projected harness adapters
+    Then every reminder should route to the canonical authoring page and single-source skill
+
+  Scenario: Idle-session fallback bounds recursive SPEC feedback
+    Given OpenCode idle-session SPEC feedback is configured
+    When AGM exercises repeated, synthetic, message-capacity, session-capacity, and deleted-session events
+    Then each real turn and the global session table should remain bounded while tracked deletion admits yielded sessions
+
+  Scenario: Pi terminal aggregation has end-to-end resource budgets
+    Given Pi terminal hook aggregation is configured
+    When AGM exercises Pi terminal handler count, runtime, deadline, and output bounds
+    Then Pi should fail closed within its budgets while preserving multi-handler aggregation
 
   Scenario Outline: Repository post-merge hook exposes lifecycle safeguards
     Given the repository post-merge hook is configured

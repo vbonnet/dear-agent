@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -149,7 +150,7 @@ func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) 
 				}},
 			}},
 		}
-		if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
+		if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project"); err != nil {
 			t.Fatalf("neutralizeWorkspaceExecutingHooks(%s): %v", eventName, err)
 		}
 		groups := hooks[eventName].([]any)
@@ -209,6 +210,57 @@ func TestLaunchConfigOverridesDisablesMutableWorkspaceExecutingHooks(t *testing.
 		sessionKey := sessionFlagsHookSource + ":" + eventKey + ":0:0"
 		if _, ok := state[sessionKey].(map[string]any)["trusted_hash"]; !ok {
 			t.Fatalf("%s session hook state = %#v, want trusted hash", eventName, state[sessionKey])
+		}
+	}
+}
+
+func TestUnattendedCodexBypassPreservesDigestAttestedSPECContractStopAdapters(t *testing.T) {
+	useTrustedHookJSONFixture(t)
+	hookRoot := t.TempDir()
+	writeFile(t, filepath.Join(hookRoot, ".codex", "hooks.json"), `{
+		"hooks":{
+			"Stop":[{"hooks":[{"type":"command","command":"go run ./cmd/spec-contract-hook --root . --provider codex --event Stop"},{"type":"command","command":"scripts/stop-feedback"}]}],
+			"SubagentStop":[{"hooks":[{"type":"command","command":"go run ./cmd/spec-contract-hook --root . --provider codex --event SubagentStop"},{"type":"command","command":"scripts/subagent-feedback"}]}]
+		}
+	}`, 0o444)
+	hookRoot, digest := sealMaterializedFixture(t, hookRoot)
+	projectRoot := gittest.NewRepo(t)
+	overrides, err := LaunchConfigOverrides(hookRoot, digest, projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(strings.Join(overrides, "\n")), &parsed); err != nil {
+		t.Fatalf("generated overrides are not valid TOML: %v", err)
+	}
+	hooks := parsed["hooks"].(map[string]any)
+	state := hooks["state"].(map[string]any)
+	canonicalProjectRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventName := range []string{"Stop", "SubagentStop"} {
+		groups := hooks[eventName].([]any)
+		handlers := groups[0].(map[string]any)["hooks"].([]any)
+		adapter := handlers[0].(map[string]any)
+		command := adapter["command"].(string)
+		if !strings.Contains(command, trustedSpecContractHookPath) || !strings.Contains(command, canonicalProjectRoot) || strings.Contains(command, "go run") || strings.Contains(command, "/bin/true") || adapter["statusMessage"] != "Checking staged SPEC contracts with operator-owned helper" {
+			t.Fatalf("%s bypass adapter = %#v, want operator-owned SPEC helper", eventName, adapter)
+		}
+		noOp := handlers[1].(map[string]any)
+		if !strings.Contains(noOp["command"].(string), "/bin/true") || noOp["statusMessage"] != "Workspace-executing hook disabled for attested bypass" {
+			t.Fatalf("%s ordinary terminal handler = %#v, want explicit no-op", eventName, noOp)
+		}
+		eventKey := hookEventKeyLabels[eventName]
+		for handlerIndex := range handlers {
+			projectKey := filepath.Join(canonicalProjectRoot, ".codex", "hooks.json") + ":" + eventKey + ":0:" + strconv.Itoa(handlerIndex)
+			if state[projectKey].(map[string]any)["enabled"] != false {
+				t.Fatalf("%s project hook state = %#v, want disabled", eventName, state[projectKey])
+			}
+			sessionKey := sessionFlagsHookSource + ":" + eventKey + ":0:" + strconv.Itoa(handlerIndex)
+			if _, ok := state[sessionKey].(map[string]any)["trusted_hash"]; !ok {
+				t.Fatalf("%s session hook state = %#v, want trusted hash", eventName, state[sessionKey])
+			}
 		}
 	}
 }

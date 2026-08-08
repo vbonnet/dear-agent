@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/internal/specguard"
 )
 
 func TestParitySurfacesHaveSpecAndBDD(t *testing.T) {
@@ -677,6 +678,232 @@ func TestValidateAllImplementationSpecsRequiresNonGoSpec(t *testing.T) {
 	}
 }
 
+func TestValidateAllImplementationSpecsAcceptsCanonicalSharedSpecOwner(t *testing.T) {
+	t.Parallel()
+	for _, target := range []string{"SPEC.md", ".dear-agent/SPEC.md", "internal/shared/SPEC.md"} {
+		t.Run(strings.ReplaceAll(target, "/", "_"), func(t *testing.T) {
+			root := t.TempDir()
+			writeRepositorySharedCoverage(t, root, ".opencode/plugins", "adapter.mjs", target)
+			findings, err := ValidateAllImplementationSpecs(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(findings) != 0 {
+				t.Fatalf("canonical shared SPEC owner produced findings: %v", findings)
+			}
+		})
+	}
+}
+
+func TestValidateChangedGoPackageSpecsAcceptsCanonicalSharedSpecOwner(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRepositorySharedCoverage(t, root, "adapters/provider", "adapter.go", "internal/shared/SPEC.md")
+
+	findings := ValidateGoPackageSpecsForFiles(root, []string{"adapters/provider/adapter.go"})
+	if len(findings) != 0 {
+		t.Fatalf("changed package shared SPEC owner produced findings: %v", findings)
+	}
+}
+
+func TestValidateChangedGoPackageSpecsRejectsInvalidSharedSpecOwner(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		owner string
+		local bool
+		kind  FindingKind
+	}{
+		{name: "malformed", owner: "../shared/SPEC.md\n", kind: FindingKindInvalidSpecOwner},
+		{name: "missing target", owner: "internal/missing/SPEC.md\n", kind: FindingKindSpecRead},
+		{name: "ambiguous local", owner: "internal/shared/SPEC.md\n", local: true, kind: FindingKindInvalidSpecOwner},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCoverageFile(t, root, "adapters/provider/adapter.go", "package provider\n")
+			writeCoverageFile(t, root, "adapters/provider/SPEC.owner", test.owner)
+			if test.local {
+				writeRepositoryPackageCoverage(t, root, "adapters/provider", "support.go")
+			}
+			findings := ValidateGoPackageSpecsForFiles(root, []string{"adapters/provider/adapter.go"})
+			if len(findings) != 1 || findings[0].Kind != test.kind {
+				t.Fatalf("changed-Go invalid owner findings = %v, want one %s", findings, test.kind)
+			}
+		})
+	}
+}
+
+func TestValidateAllImplementationSpecsRejectsInvalidSharedSpecOwners(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		owner string
+	}{
+		{name: "empty", owner: ""},
+		{name: "traversal", owner: "../shared/SPEC.md\n"},
+		{name: "noncanonical", owner: "internal/../shared/SPEC.md\n"},
+		{name: "absolute", owner: "/internal/shared/SPEC.md\n"},
+		{name: "backslash", owner: "internal\\shared\\SPEC.md\n"},
+		{name: "multiple lines", owner: "internal/one/SPEC.md\ninternal/two/SPEC.md\n"},
+		{name: "not a spec", owner: "internal/shared/README.md\n"},
+		{name: "dotted harness owned", owner: ".opencode/shared/SPEC.md\n"},
+		{name: "bare harness owned", owner: "codex-cli/SPEC.md\n"},
+		{name: "plugin collection", owner: "internal/plugins/SPEC.md\n"},
+		{name: "colon", owner: "internal/shared:variant/SPEC.md\n"},
+		{name: "fragment", owner: "internal/shared/SPEC.md#fragment\n"},
+		{name: "glob", owner: "internal/*/SPEC.md\n"},
+		{name: "tilde", owner: "~/shared/SPEC.md\n"},
+		{name: "crlf", owner: "internal/shared/SPEC.md\r\n"},
+		{name: "control", owner: "internal/\x01shared/SPEC.md\n"},
+		{name: "invalid utf8", owner: string([]byte{'i', 'n', 't', 'e', 'r', 'n', 'a', 'l', '/', 0xff, '/', 'S', 'P', 'E', 'C', '.', 'm', 'd', '\n'})},
+		{name: "oversized", owner: strings.Repeat("a", specguard.MaxSpecOwnerBytes+1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCoverageFile(t, root, "adapters/provider/adapter.mjs", "export default {};\n")
+			writeCoverageFile(t, root, "adapters/provider/SPEC.owner", test.owner)
+			findings, err := ValidateAllImplementationSpecs(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(findings) != 1 || findings[0].Kind != FindingKindInvalidSpecOwner || findings[0].Path != "adapters/provider/SPEC.owner" {
+				t.Fatalf("invalid owner findings = %v", findings)
+			}
+		})
+	}
+}
+
+func TestValidateAllRepositorySpecsRejectsOrphanSharedSpecOwner(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRepositorySharedCoverage(t, root, "adapters/provider", "adapter.mjs", "internal/shared/SPEC.md")
+	if err := os.Remove(filepath.Join(root, "adapters", "provider", "adapter.mjs")); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := ValidateAllRepositorySpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Kind != FindingKindInvalidSpecOwner || !strings.Contains(findings[0].Message, "does not belong") {
+		t.Fatalf("orphan SPEC.owner findings = %v", findings)
+	}
+}
+
+func TestValidateAllImplementationSpecsRejectsSpecOwnerSymlinksAndIgnoredTargets(t *testing.T) {
+	t.Parallel()
+	t.Run("owner symlink", func(t *testing.T) {
+		root := t.TempDir()
+		writeCoverageFile(t, root, "adapters/provider/adapter.mjs", "export default {};\n")
+		writeCoverageFile(t, root, "owner-target", "internal/shared/SPEC.md\n")
+		if err := os.Symlink(filepath.Join("..", "..", "owner-target"), filepath.Join(root, "adapters", "provider", "SPEC.owner")); err != nil {
+			t.Fatal(err)
+		}
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindInvalidSpecOwner || !strings.Contains(findings[0].Message, "non-symlink") {
+			t.Fatalf("owner symlink findings = %v", findings)
+		}
+	})
+
+	t.Run("target symlink", func(t *testing.T) {
+		root := t.TempDir()
+		writeRepositorySharedCoverage(t, root, "adapters/provider", "adapter.mjs", "internal/shared/SPEC.md")
+		target := filepath.Join(root, "internal", "shared", "SPEC.md")
+		if err := os.Remove(target); err != nil {
+			t.Fatal(err)
+		}
+		writeCoverageFile(t, root, "internal/canonical/SPEC.md", validRepositoryCoverageSpec("agm/test/bdd/features/shared_owner.feature"))
+		if err := os.Symlink(filepath.Join("..", "canonical", "SPEC.md"), target); err != nil {
+			t.Fatal(err)
+		}
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindSpecRead || !strings.Contains(findings[0].Message, "non-symlink") {
+			t.Fatalf("target symlink findings = %v", findings)
+		}
+	})
+
+	t.Run("ignored target", func(t *testing.T) {
+		root := t.TempDir()
+		if out, err := gittest.Output(t, root, "init", "-q"); err != nil {
+			t.Fatalf("git init: %v: %s", err, out)
+		}
+		writeCoverageFile(t, root, ".gitignore", "internal/shared/\n")
+		writeRepositorySharedCoverage(t, root, "adapters/provider", "adapter.mjs", "internal/shared/SPEC.md")
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindSpecRead || !strings.Contains(findings[0].Message, "governed repository inventory") {
+			t.Fatalf("ignored target findings = %v", findings)
+		}
+	})
+}
+
+func TestValidateAllImplementationSpecsRejectsPointerChainsAndNoncanonicalFeatureBacklinks(t *testing.T) {
+	t.Parallel()
+	t.Run("pointer chain", func(t *testing.T) {
+		root := t.TempDir()
+		writeCoverageFile(t, root, "adapters/provider/adapter.mjs", "export default {};\n")
+		writeCoverageFile(t, root, "adapters/provider/SPEC.owner", "internal/shared/SPEC.md\n")
+		writeCoverageFile(t, root, "internal/shared/SPEC.md", "internal/canonical/SPEC.md\n")
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindInvalidSpecOwner || !strings.Contains(findings[0].Message, "another ownership pointer") {
+			t.Fatalf("pointer-chain findings = %v", findings)
+		}
+	})
+
+	t.Run("feature references pointer", func(t *testing.T) {
+		root := t.TempDir()
+		writeRepositorySharedCoverage(t, root, "adapters/provider", "adapter.mjs", "internal/shared/SPEC.md")
+		writeCoverageFile(t, root, "agm/test/bdd/features/shared_owner.feature", "# RELATED-SPEC: adapters/provider/SPEC.owner\nFeature: Shared owner\n")
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindFeatureMissingSpecRef || !strings.Contains(findings[0].Message, "internal/shared/SPEC.md") {
+			t.Fatalf("noncanonical feature backlink findings = %v", findings)
+		}
+	})
+}
+
+func TestValidateAllImplementationSpecsRejectsMissingAndAmbiguousSharedOwners(t *testing.T) {
+	t.Parallel()
+	t.Run("missing target", func(t *testing.T) {
+		root := t.TempDir()
+		writeCoverageFile(t, root, "adapters/provider/adapter.mjs", "export default {};\n")
+		writeCoverageFile(t, root, "adapters/provider/SPEC.owner", "internal/missing/SPEC.md\n")
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindSpecRead || findings[0].Path != "internal/missing/SPEC.md" {
+			t.Fatalf("missing owner target findings = %v", findings)
+		}
+	})
+
+	t.Run("co-located and shared", func(t *testing.T) {
+		root := t.TempDir()
+		writeRepositoryPackageCoverage(t, root, "adapters/provider", "adapter.mjs")
+		writeCoverageFile(t, root, "adapters/provider/SPEC.owner", "internal/shared/SPEC.md\n")
+		findings, err := ValidateAllImplementationSpecs(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(findings) != 1 || findings[0].Kind != FindingKindInvalidSpecOwner || !strings.Contains(findings[0].Message, "both") {
+			t.Fatalf("ambiguous owner findings = %v", findings)
+		}
+	})
+}
+
 func TestValidateAllRepositorySpecsIncludesDocOnlyContracts(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -724,4 +951,17 @@ func writeRepositoryPackageCoverage(t *testing.T, root, dir, goFile string) {
 	writeCoverageFile(t, root, filepath.ToSlash(filepath.Join(dir, goFile)), "package example\n")
 	writeCoverageFile(t, root, specPath, "# Example\n\n## EARS Requirements\n\n**EX-01** When coverage is checked, the system shall retain executable BDD traceability.\n\n- Feature: `"+featurePath+"`\n")
 	writeCoverageFile(t, root, featurePath, "# RELATED-SPEC: "+specPath+"\nFeature: Example\n")
+}
+
+func writeRepositorySharedCoverage(t *testing.T, root, dir, sourceFile, specPath string) {
+	t.Helper()
+	featurePath := "agm/test/bdd/features/shared_owner.feature"
+	writeCoverageFile(t, root, filepath.ToSlash(filepath.Join(dir, sourceFile)), "package example\n")
+	writeCoverageFile(t, root, filepath.ToSlash(filepath.Join(dir, "SPEC.owner")), specPath+"\n")
+	writeCoverageFile(t, root, specPath, validRepositoryCoverageSpec(featurePath))
+	writeCoverageFile(t, root, featurePath, "# RELATED-SPEC: "+specPath+"\nFeature: Shared owner\n")
+}
+
+func validRepositoryCoverageSpec(featurePath string) string {
+	return "# Shared\n\n## EARS Requirements\n\n**SHARED-01** When an adapter reuses shared behavior, the system shall retain one canonical contract owner.\n\n- Feature: `" + featurePath + "`\n"
 }

@@ -101,6 +101,38 @@ func TestScanReturnsStableRelativePathsAndExecutableMode(t *testing.T) {
 	}
 }
 
+func TestImplementationSourcePolicyIsSharedAndExcludesGeneratedPaths(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"internal/example/example.go",
+		"services/web/index.ts",
+		"config/runtime/settings.yaml",
+		"containers/service/Dockerfile",
+		"automation/Makefile",
+	} {
+		if !IsImplementationSource(path, true, false) {
+			t.Errorf("supported implementation source %q was rejected", path)
+		}
+	}
+	if !IsImplementationSource("hooks/pretool", true, true) || IsImplementationSource("hooks/pretool", true, false) {
+		t.Fatal("extensionless source did not honor executable metadata")
+	}
+	if IsImplementationSource("hooks/pretool", false, true) || IsImplementationSource("internal/example/example.go", false, true) {
+		t.Fatal("nonregular source entry was accepted")
+	}
+	for _, path := range []string{
+		"vendor/pkg/source.go",
+		"node_modules/pkg/index.js",
+		"dist/generated.js",
+		"testdata/fixture.go",
+		"docs/guide.md",
+	} {
+		if IsImplementationSource(path, true, true) {
+			t.Errorf("non-governed or non-source path %q was accepted", path)
+		}
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	if out, err := gittest.Output(t, dir, args...); err != nil {

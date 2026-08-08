@@ -26,8 +26,18 @@ workspace: oss
 - AGM registers `antigravity` as a known harness in
   `agm/internal/manifest/v3.go` (`knownHarnesses`).
 
-## Beads integration
+## Hook integration
 
-Beads lifecycle hooks for this harness live in `.agents/hooks.json`,
-mirroring the `.codex/hooks.json` pattern. They keep durable project
-task context through the Beads CLI in sync across the session lifecycle.
+`.agents/hooks.json` uses Antigravity's named-hook schema. Its
+`spec-contract-guard` Stop hook names the operator-installed,
+digest-bound `/usr/local/libexec/dear-agent-spec-contract-hook` helper rather
+than launching checkout code. The helper derives its sole Git worktree root
+from Antigravity's absolute `workspacePaths` input; absent, invalid, or
+multi-root input emits the native cooperative `decision: "continue"` envelope.
+Antigravity has no `SubagentStop` or Beads lifecycle hook events, and its
+`PreToolUse` contract has no neutral decision that preserves the harness's
+ordinary permission flow. This source therefore does not project unrelated
+legacy guardrails onto unsupported or semantically lossy events. The repository
+does not claim that this source configuration or helper is installed, loaded,
+or provider-required; artifact installation and provider rollout remain
+separate admission steps.

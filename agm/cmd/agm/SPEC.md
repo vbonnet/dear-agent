@@ -1130,10 +1130,6 @@ agm 3.0.0 (/usr/local/bin/agm)
 - [x] Configuration management
 - [x] Test infrastructure
 
-## BDD Traceability
-
-- Feature: `agm/test/bdd/features/harness_parity.feature`
-
 ## References
 
 - [AGM Architecture](ARCHITECTURE.md)

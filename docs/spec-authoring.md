@@ -20,6 +20,24 @@ or member applicability, stop for a product decision. Existing
 harness- or implementation-local `SPEC.md` files are audit candidates, not
 permission to delete or merge anything.
 
+## Implementation projections
+
+An implementation directory that only adapts a contract owned elsewhere must
+not create a second `SPEC.md` for co-location convenience. Add a `SPEC.owner`
+file containing exactly one canonical repository-relative path to the neutral
+product or domain `SPEC.md`, for example:
+
+```text
+internal/hookparity/SPEC.md
+```
+
+The target cannot live in a dotted or bare harness configuration,
+registration, plugin, or grouped harness root, and the implementation directory
+cannot declare both `SPEC.md` and `SPEC.owner`. Repository coverage applies the
+target's strict EARS and reciprocal BDD checks through the pointer. Use this
+only when the implementation adds no distinct observable contract; a new
+observable requires an ownership decision in the neutral product domain.
+
 ## Start here
 
 1. Read the canonical [`write-spec` workflow](../spec-governance/skills/write-spec/SKILL.md).

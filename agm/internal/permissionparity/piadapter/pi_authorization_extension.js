@@ -1,9 +1,70 @@
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 // Keep this implementation in parity with adapter.go; the Go tests execute it.
 const PLAN_TOOLS = new Set(["read", "grep", "find", "ls"]);
+const MAX_HOOK_TIMEOUT_SECONDS = 120;
+const MAX_HOOK_MANIFEST_BYTES = 1024 * 1024;
+const MAX_HOOK_HANDLERS_PER_EVENT = 64;
+const MAX_TERMINAL_HOOK_HANDLERS = 16;
+// The canonical terminal chain declares 60s and 120s handlers. Preserve both
+// validated budgets plus one second of deterministic orchestration allowance,
+// while retaining a finite aggregate deadline for any longer chain.
+const MAX_TERMINAL_RUN_MS = 181_000;
+const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+const MAX_TERMINAL_HOOK_OUTPUT_BYTES = 16 * 1024;
+const MAX_TERMINAL_HOOK_FEEDBACK_CHARS = 16 * 1024;
+const MAX_TERMINAL_REASON_CHARS = 12 * 1024;
+const TERMINAL_CONTEXT_PREFIX = "Additional context: ";
+const MAX_TERMINAL_CONTEXT_CHARS = MAX_TERMINAL_HOOK_FEEDBACK_CHARS - MAX_TERMINAL_REASON_CHARS - TERMINAL_CONTEXT_PREFIX.length - 1;
+
+function readHookManifest(path) {
+	const descriptor = openSync(path, "r");
+	try {
+		const info = fstatSync(descriptor);
+		if (!info.isFile() || info.size > MAX_HOOK_MANIFEST_BYTES) throw new Error("Pi hook manifest exceeds its size limit");
+		const buffer = Buffer.alloc(MAX_HOOK_MANIFEST_BYTES + 1);
+		let used = 0;
+		for (;;) {
+			const count = readSync(descriptor, buffer, used, buffer.length - used, null);
+			if (count === 0) break;
+			used += count;
+			if (used > MAX_HOOK_MANIFEST_BYTES) throw new Error("Pi hook manifest exceeds its size limit");
+		}
+		return buffer.subarray(0, used).toString("utf8");
+	} finally {
+		closeSync(descriptor);
+	}
+}
+
+function validateProjectHooks(hooks) {
+	const events = Object.entries(hooks);
+	if (events.length > 32) return "Pi hook manifest exceeds the event limit";
+	for (const [eventName, groups] of events) {
+		if (!Array.isArray(groups) || groups.length > 64) return `Pi hook event ${eventName} must be a bounded array`;
+		let handlerCount = 0;
+		for (const group of groups) {
+			if (!group || typeof group !== "object" || Array.isArray(group) || (group.matcher !== undefined && typeof group.matcher !== "string") || !Array.isArray(group.hooks) || group.hooks.length > 64) {
+				return `Pi hook event ${eventName} contains an invalid group`;
+			}
+			for (const hook of group.hooks) {
+			if (!hook || typeof hook !== "object" || Array.isArray(hook) || hook.type !== "command" || typeof hook.command !== "string" || !hook.command.trim() || hook.command.includes("\0")) {
+					return `Pi hook event ${eventName} contains an invalid command handler`;
+				}
+				if (hook.timeout !== undefined && (typeof hook.timeout !== "number" || !Number.isFinite(hook.timeout) || hook.timeout <= 0 || hook.timeout > MAX_HOOK_TIMEOUT_SECONDS)) {
+					return `Pi hook event ${eventName} contains an invalid timeout`;
+				}
+			}
+			handlerCount += group.hooks.length;
+			if (handlerCount > MAX_HOOK_HANDLERS_PER_EVENT) return `Pi hook event ${eventName} exceeds the handler limit`;
+			if ((eventName === "Stop" || eventName === "SubagentStop") && handlerCount > MAX_TERMINAL_HOOK_HANDLERS) {
+				return `Pi terminal hook event ${eventName} exceeds the handler limit`;
+			}
+		}
+	}
+	return "";
+}
 
 function piToolName(toolName) {
 	const raw = String(toolName || "");
@@ -17,10 +78,12 @@ function piToolName(toolName) {
 
 function loadProjectHooks(cwd) {
 	try {
-		const parsed = JSON.parse(readFileSync(join(cwd, ".pi", "hooks.json"), "utf8"));
+		const parsed = JSON.parse(readHookManifest(join(cwd, ".pi", "hooks.json")));
 		if (!parsed || typeof parsed.hooks !== "object" || Array.isArray(parsed.hooks)) {
 			return {hooks: {}, error: "Pi hook manifest must contain an object-valued hooks field"};
 		}
+		const validationError = validateProjectHooks(parsed.hooks);
+		if (validationError) return {hooks: {}, error: validationError};
 		return {hooks: parsed.hooks};
 	} catch (error) {
 		if (error?.code === "ENOENT") return {hooks: {}};
@@ -69,25 +132,66 @@ function parseHookOutput(output) {
 // hook manifest. Project trust and tool authorization remain separate: this
 // loads only after AGM has explicitly approved the selected working directory,
 // while the mandatory authorization decision still runs afterward.
-export function runProjectHooks(eventName, call, cwd = process.cwd()) {
+function appendBounded(current, value, limit) {
+	const text = String(value || "").trim();
+	if (!text || current.length >= limit) return current;
+	const separator = current ? "\n" : "";
+	const available = limit - current.length - separator.length;
+	return available > 0 ? current + separator + text.slice(0, available) : current;
+}
+
+export function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = {}) {
 	const loaded = loadProjectHooks(cwd);
 	if (loaded.error) return {block: true, reason: loaded.error};
 	const hooks = loaded.hooks;
+	const terminal = eventName === "Stop" || eventName === "SubagentStop";
+	const now = typeof runtime.now === "function" ? runtime.now : Date.now;
+	const spawn = typeof runtime.spawnSync === "function" ? runtime.spawnSync : spawnSync;
+	const terminalDeadline = terminal ? now() + MAX_TERMINAL_RUN_MS : 0;
 	const contexts = [];
+	let contextText = "";
+	let reasonText = "";
+	let terminalFailed = false;
+	const terminalFailure = (reason) => {
+		if (!terminal) return {block: true, reason};
+		terminalFailed = true;
+		reasonText = appendBounded(reasonText, reason || `${eventName} hook failed`, MAX_TERMINAL_REASON_CHARS);
+		return undefined;
+	};
+	hookGroups:
 	for (const group of hooks[eventName] || []) {
 		if (!hookMatches(group.matcher, call?.toolName)) continue;
-		for (const hook of group.hooks || []) {
-			if (hook.type !== "command" || typeof hook.command !== "string") continue;
-			const result = spawnSync("/bin/sh", ["-c", hook.command], {
-				cwd,
-				env: {...process.env, PI_PROJECT_DIR: cwd, CLAUDE_PROJECT_DIR: cwd},
-				input: hookInput(eventName, call, cwd),
-				encoding: "utf8",
-				timeout: Math.max(1, Number(hook.timeout) || 30) * 1000,
-				maxBuffer: 1024 * 1024,
-			});
+		for (const hook of group.hooks) {
+			let timeout = (hook.timeout || 30) * 1000;
+			if (terminal) {
+				const remaining = terminalDeadline - now();
+				if (remaining <= 0) {
+					terminalFailure(`${eventName} hook execution deadline exceeded before all handlers ran`);
+					break hookGroups;
+				}
+				timeout = Math.max(1, Math.min(timeout, remaining));
+			}
+			let result;
+			try {
+				result = spawn("/bin/sh", ["-c", hook.command], {
+					cwd,
+					env: {...process.env, PI_PROJECT_DIR: cwd, CLAUDE_PROJECT_DIR: cwd},
+					input: hookInput(eventName, call, cwd),
+					encoding: "utf8",
+					timeout,
+					maxBuffer: terminal ? MAX_TERMINAL_HOOK_OUTPUT_BYTES : MAX_HOOK_OUTPUT_BYTES,
+				});
+			} catch (error) {
+				const failure = terminalFailure(`${eventName} hook could not start: ${error?.message || error}`);
+				if (failure) return failure;
+				continue;
+			}
 			const structured = parseHookOutput(result.stdout);
-			if (structured?.block) return structured;
+			if (structured?.block) {
+				const failure = terminalFailure(structured.reason);
+				if (failure) return failure;
+				continue;
+			}
 			if (result.error || result.status !== 0) {
 				const stderr = String(result.stderr || "").trim();
 				let failure;
@@ -101,11 +205,21 @@ export function runProjectHooks(eventName, call, cwd = process.cwd()) {
 					partial ||= String(structured?.context || result.stdout || "").trim();
 				}
 				const detail = [failure, partial].filter(Boolean).join(": ");
-				return {block: true, reason: detail || `${eventName} hook failed`};
+				const hookFailure = terminalFailure(detail || `${eventName} hook failed`);
+				if (hookFailure) return hookFailure;
+				continue;
 			}
-			if (structured?.context) contexts.push(structured.context);
+			if (structured?.context) {
+				if (terminal) contextText = appendBounded(contextText, structured.context, MAX_TERMINAL_CONTEXT_CHARS);
+				else contexts.push(structured.context);
+			}
 		}
 	}
+	if (terminalFailed) {
+		const context = contextText ? `${TERMINAL_CONTEXT_PREFIX}${contextText}` : "";
+		return {block: true, reason: [reasonText, context].filter(Boolean).join("\n") || `${eventName} hook failed`};
+	}
+	if (contextText) return {context: contextText};
 	if (contexts.length > 0) return {context: contexts.join("\n")};
 	return undefined;
 }
@@ -212,7 +326,11 @@ export default function (pi) {
 	const launchID = process.env.AGM_PI_LAUNCH_ID || "";
 	let state = "ready";
 	let allow = [];
-	let stopHookActive = false;
+	// Stop continuations are bounded independently for parent and subagent
+	// completion. Pi does not have Claude's Stop-hook retry field, so the
+	// extension passes its explicit loop state into the declarative projection
+	// and refuses a second follow-up for the same terminal event.
+	const activeStopEvents = new Set();
 	const projectDir = process.env.AGM_PI_PROJECT_DIR || process.cwd();
 	let policyLoadError = "";
 	try {
@@ -235,6 +353,11 @@ export default function (pi) {
 		if (result?.block) ctx.ui.notify(`Pi SessionStart hook: ${result.reason}`, "warning");
 	});
 	pi.on("input", async (_event, ctx) => {
+		// A synthetic follow-up created below must not reset the one-shot stop
+		// budget. Pi reports extension-created follow-ups with source=extension;
+		// only a real interactive or RPC user turn starts a fresh bounded turn.
+		if (_event?.source === "extension") return undefined;
+		if (_event?.source === "interactive" || _event?.source === "rpc") activeStopEvents.clear();
 		const result = runProjectHooks("UserPromptSubmit", {event: _event}, projectDir);
 		if (result?.block) {
 			ctx.ui.notify(`Pi UserPromptSubmit hook: ${result.reason}`, "warning");
@@ -258,32 +381,34 @@ export default function (pi) {
 		state = "working";
 		updateStatus(ctx);
 	});
+	const handleTerminalHook = (eventName, call, ctx) => {
+		const stopHookActive = activeStopEvents.has(eventName);
+		const result = runProjectHooks(eventName, {...call, stopHookActive}, projectDir);
+		if (result?.block) {
+			if (stopHookActive) {
+				ctx.ui.notify(`Pi ${eventName} hook is still blocking; yielding after one continuation to avoid a retry loop: ${result.reason}`, "warning");
+				return;
+			}
+			activeStopEvents.add(eventName);
+			ctx.ui.notify(`Pi ${eventName} hook: ${result.reason}`, "warning");
+			pi.sendUserMessage(result.reason, {deliverAs: "followUp"});
+			return;
+		}
+		activeStopEvents.delete(eventName);
+		if (result?.context) ctx.ui.notify(`Pi ${eventName} hook: ${result.context}`, "warning");
+	};
 	pi.on("agent_settled", async (_event, ctx) => {
 		state = "ready";
 		updateStatus(ctx);
-		const result = runProjectHooks("Stop", {event: _event, stopHookActive}, projectDir);
-		if (result?.block) {
-			stopHookActive = true;
-			ctx.ui.notify(`Pi Stop hook: ${result.reason}`, "warning");
-			pi.sendUserMessage(result.reason, {deliverAs: "followUp"});
-		} else {
-			stopHookActive = false;
-			if (result?.context) ctx.ui.notify(`Pi Stop hook: ${result.context}`, "warning");
-		}
+		handleTerminalHook("Stop", {event: _event}, ctx);
 	});
 	pi.on("tool_result", async (_event, ctx) => {
 		if (String(_event?.toolName || "").toLowerCase() !== "subagent") return undefined;
-		const result = runProjectHooks("SubagentStop", {
+		handleTerminalHook("SubagentStop", {
 			toolName: _event.toolName,
 			input: _event.input,
 			event: _event,
-		}, projectDir);
-		if (result?.block) {
-			ctx.ui.notify(`Pi SubagentStop hook: ${result.reason}`, "warning");
-			pi.sendUserMessage(result.reason, {deliverAs: "followUp"});
-		} else if (result?.context) {
-			ctx.ui.notify(`Pi SubagentStop hook: ${result.context}`, "warning");
-		}
+		}, ctx);
 		return undefined;
 	});
 
@@ -329,6 +454,7 @@ export default function (pi) {
 		if (policyLoadError) return {block: true, reason: policyLoadError};
 		const guardrail = runProjectHooks("PreToolUse", {toolName: event.toolName, input: event.input, event}, projectDir);
 		if (guardrail?.block) return guardrail;
+		if (guardrail?.context) ctx.ui.notify(`Pi PreToolUse hook: ${guardrail.context}`, "warning");
 		const result = decide(mode, allow, {toolName: event.toolName, input: event.input}, ctx.hasUI);
 		if (result.action === "allow") return undefined;
 		if (result.action === "block") return {block: true, reason: result.reason};

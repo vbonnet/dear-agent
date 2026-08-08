@@ -148,6 +148,65 @@ func TestEnsurePiAuthorizationExtensionRejectsSymlinkBoundaries(t *testing.T) {
 	}
 }
 
+func TestPiProductionTerminalTimeoutBudgetsAreHonored(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	extensionRoot := t.TempDir()
+	extensionPath, err := EnsurePiAuthorizationExtension(extensionRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repository, ".pi", "hooks.json")); err != nil {
+		t.Fatalf("stat production Pi hook manifest: %v", err)
+	}
+	slowProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(slowProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const slowHooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sleep 3; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"long terminal handler completed\"}}\\n'","timeout":60}]}]}}`
+	if err := os.WriteFile(filepath.Join(slowProject, ".pi", "hooks.json"), []byte(slowHooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+for (const eventName of ["Stop", "SubagentStop"]) {
+  let clock = 0;
+  const observed = [];
+  const result = mod.runProjectHooks(eventName, {}, process.argv[2], {
+    now() { return clock; },
+    spawnSync(_command, args, options) {
+      observed.push({command: args[1], timeout: options.timeout, maxBuffer: options.maxBuffer});
+      clock += options.timeout + (observed.length === 1 ? 500 : 0);
+      return {status: 0, stdout: "", stderr: ""};
+    },
+  });
+  if (result !== undefined) throw new Error(eventName + " production hook chain unexpectedly failed: " + JSON.stringify(result));
+  if (observed.length !== 2 || observed[0].timeout !== 60000 || observed[1].timeout !== 120000) {
+    throw new Error(eventName + " production timeouts were shortened: " + JSON.stringify(observed));
+  }
+  if (!observed[0].command.includes("--event " + eventName) || !observed[1].command.includes("stop-guardrail-feedback")) {
+    throw new Error(eventName + " did not execute the production terminal chain: " + JSON.stringify(observed));
+  }
+  if (observed.some((entry) => entry.maxBuffer !== 16384)) throw new Error(eventName + " output capture was not bounded: " + JSON.stringify(observed));
+}
+const slowResult = mod.runProjectHooks("Stop", {}, process.argv[3]);
+if (slowResult?.context !== "long terminal handler completed") throw new Error("declared 60-second handler was shortened below its three-second execution: " + JSON.stringify(slowResult));
+`
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(repository), filepath.Clean(slowProject))
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("production Pi terminal budgets: %v\n%s", err, output)
+	}
+}
+
 func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -166,7 +225,7 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const hooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"first guard ran\"}}\\n'","timeout":1},{"type":"command","command":"cat >/dev/null; printf 'project guard rejected' >&2; exit 42","timeout":1}]}],"SessionStart":[{"hooks":[{"type":"command","command":"tee \"$PI_HOOK_CAPTURE\" >/dev/null","timeout":1}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"prompt rejected\"}\\n'","timeout":1}]}],"PreCompact":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"additionalContext\":\"compaction rejected\"}}\\n'","timeout":1}]}],"Stop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"finish the regression\"}\\n'","timeout":1}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"review the delegated result\"}\\n'","timeout":1}]}]}}`
+	const hooks = `{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"first guard ran\"}}\\n'","timeout":1}]},{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf 'project guard rejected' >&2; exit 42","timeout":1}]}],"SessionStart":[{"hooks":[{"type":"command","command":"tee \"$PI_HOOK_CAPTURE\" >/dev/null","timeout":1}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"prompt rejected\"}\\n'","timeout":1}]}],"PreCompact":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"additionalContext\":\"compaction rejected\"}}\\n'","timeout":1}]}],"Stop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf 'first\\n' >> \"$PI_TERMINAL_HOOK_CAPTURE\"; printf '{\"decision\":\"block\",\"reason\":\"finish the regression\"}\\n'","timeout":1},{"type":"command","command":"cat >/dev/null; printf 'second\\n' >> \"$PI_TERMINAL_HOOK_CAPTURE\"; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"second terminal handler ran\"}}\\n'","timeout":1}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"review the delegated result\"}\\n'","timeout":1}]}]}}`
 	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +252,40 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nonzeroProject, ".pi", "hooks.json"), []byte(nonzeroHooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	invalidShapeProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(invalidShapeProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const invalidShapeHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"true","timeout":999}]}]}}`
+	if err := os.WriteFile(filepath.Join(invalidShapeProject, ".pi", "hooks.json"), []byte(invalidShapeHooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invalidCommandProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(invalidCommandProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const invalidCommandHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"bad\u0000command","timeout":1}]}]}}`
+	if err := os.WriteFile(filepath.Join(invalidCommandProject, ".pi", "hooks.json"), []byte(invalidCommandHooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oversizedProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(oversizedProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oversizedProject, ".pi", "hooks.json"), []byte(strings.Repeat("x", 1024*1024+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	terminalLimitProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(terminalLimitProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	terminalHandlers := strings.TrimSuffix(strings.Repeat(`{"type":"command","command":"true","timeout":1},`, 17), ",")
+	terminalLimitHooks := `{"hooks":{"Stop":[{"hooks":[` + terminalHandlers + `]}]}}`
+	if err := os.WriteFile(filepath.Join(terminalLimitProject, ".pi", "hooks.json"), []byte(terminalLimitHooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	capturePath := filepath.Join(t.TempDir(), "hook-input.json")
+	terminalCapturePath := filepath.Join(t.TempDir(), "terminal-handlers.txt")
 	script := `
 import {readFileSync} from "node:fs";
 const source = readFileSync(process.argv[1], "utf8");
@@ -223,10 +315,42 @@ const timeoutHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{c
 if (!timeoutHook?.block || !timeoutHook.reason.includes("ETIMEDOUT") || !timeoutHook.reason.includes("timeout stderr") || timeoutHook.reason.includes("timeout context")) throw new Error("project hook timeout masked its execution failure: " + JSON.stringify(timeoutHook));
 const nonzeroHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[6]);
 if (!nonzeroHook?.block || !nonzeroHook.reason.startsWith("PreToolUse hook exited with status 42") || !nonzeroHook.reason.includes("advisory only")) throw new Error("project hook nonzero status was masked by advisory context: " + JSON.stringify(nonzeroHook));
-const unmatchedHook = mod.runProjectHooks("PreToolUse", {toolName:"read", input:{path:"README.md"}}, process.argv[2]);
+const unmatchedHook = mod.runProjectHooks("PreToolUse", {toolName:"edit", input:{path:"README.md"}}, process.argv[2]);
 if (unmatchedHook !== undefined) throw new Error("matcher ran for an unrelated tool");
 const malformedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[3]);
 if (!malformedHook?.block || !malformedHook.reason.includes("cannot load Pi hook manifest")) throw new Error("malformed hook manifest did not fail closed");
+const invalidShapeHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[7]);
+if (!invalidShapeHook?.block || !invalidShapeHook.reason.includes("invalid timeout")) throw new Error("invalid hook schema did not fail closed: " + JSON.stringify(invalidShapeHook));
+const invalidCommandHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[9]);
+if (!invalidCommandHook?.block || !invalidCommandHook.reason.includes("invalid command handler")) throw new Error("invalid hook command did not fail closed: " + JSON.stringify(invalidCommandHook));
+const oversizedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[8]);
+if (!oversizedHook?.block || !oversizedHook.reason.includes("size limit")) throw new Error("oversized hook manifest did not fail closed: " + JSON.stringify(oversizedHook));
+const terminalLimitHook = mod.runProjectHooks("Stop", {}, process.argv[10]);
+if (!terminalLimitHook?.block || !terminalLimitHook.reason.includes("terminal hook event Stop exceeds the handler limit")) throw new Error("terminal handler limit did not fail closed: " + JSON.stringify(terminalLimitHook));
+let deadlineClock = 0;
+let deadlineRuns = 0;
+let deadlineTimeout = 0;
+const deadlineHook = mod.runProjectHooks("Stop", {}, process.argv[2], {
+  now() { return deadlineClock; },
+  spawnSync(_command, _args, options) {
+    deadlineRuns++;
+    deadlineTimeout = options.timeout;
+    deadlineClock += 181001;
+    return {status: 0, stdout: '{"decision":"block","reason":"first bounded blocker"}\n', stderr: ""};
+  },
+});
+if (!deadlineHook?.block || !deadlineHook.reason.includes("first bounded blocker") || !deadlineHook.reason.includes("deadline exceeded")) throw new Error("terminal deadline did not fail closed with collected blockers: " + JSON.stringify(deadlineHook));
+if (deadlineRuns !== 1 || deadlineTimeout !== 1000) throw new Error("terminal handler escaped its declared per-handler or total budget: " + JSON.stringify({deadlineRuns, deadlineTimeout}));
+let aggregateRuns = 0;
+const aggregateHook = mod.runProjectHooks("Stop", {}, process.argv[2], {
+  now() { return 0; },
+  spawnSync(_command, _args, options) {
+    aggregateRuns++;
+    if (options.maxBuffer !== 16384 || options.timeout !== 1000) throw new Error("terminal spawn bounds were not applied: " + JSON.stringify(options));
+    return {status: 0, stdout: JSON.stringify({decision:"block", reason:"x".repeat(20000)}) + "\n", stderr: ""};
+  },
+});
+if (!aggregateHook?.block || aggregateRuns !== 2 || aggregateHook.reason.length > 16384) throw new Error("terminal aggregate collection was not bounded while preserving handler execution: " + JSON.stringify({aggregateRuns, reasonLength: aggregateHook?.reason?.length}));
 const handlers = new Map();
 const commands = new Map();
 let activeTools;
@@ -265,19 +389,34 @@ if (activeTools.join(",") !== "read,grep,find,ls") throw new Error("plan tools: 
 if (statuses.at(-1) !== "AGM plan/working") throw new Error("missing plan status");
 await commands.get("agm-mode")("auto", ctx);
 if (!activeTools.includes("write") || statuses.at(-1) !== "AGM auto/working") throw new Error("auto mode transition failed");
+const advisoryDecision = await handlers.get("tool_call")({toolName:"read", input:{path:"README.md"}}, ctx);
+if (advisoryDecision !== undefined || !notifications.some((value) => String(value).includes("Pi PreToolUse hook: first guard ran"))) throw new Error("advisory PreToolUse context was not surfaced");
 await handlers.get("agent_settled")({}, ctx);
 if (statuses.at(-1) !== "AGM auto/ready") throw new Error("missing settled status");
-if (userMessages.length !== 1 || userMessages[0][0] !== "finish the regression" || userMessages[0][1].deliverAs !== "followUp") throw new Error("structured Stop feedback was not delivered");
+if (userMessages.length !== 1 || !userMessages[0][0].includes("finish the regression") || !userMessages[0][0].includes("second terminal handler ran") || userMessages[0][1].deliverAs !== "followUp") throw new Error("aggregated structured Stop feedback was not delivered: " + JSON.stringify(userMessages));
+if (readFileSync(process.env.PI_TERMINAL_HOOK_CAPTURE, "utf8") !== "first\nsecond\n") throw new Error("terminal hook handlers did not both execute");
+const extensionInput = await handlers.get("input")({type:"input", source:"extension", text:"finish the regression"}, ctx);
+if (extensionInput !== undefined) throw new Error("extension follow-up was projected through UserPromptSubmit");
+await handlers.get("agent_settled")({}, ctx);
+if (userMessages.length !== 1) throw new Error("extension follow-up reset the Stop continuation budget");
 await handlers.get("tool_result")({type:"tool_result", toolName:"subagent", input:{agent:"reviewer"}, content:[], isError:false}, ctx);
 if (userMessages.length !== 2 || userMessages[1][0] !== "review the delegated result" || userMessages[1][1].deliverAs !== "followUp") throw new Error("structured SubagentStop feedback was not delivered");
+await handlers.get("agent_settled")({}, ctx);
+await handlers.get("tool_result")({type:"tool_result", toolName:"subagent", input:{agent:"reviewer"}, content:[], isError:false}, ctx);
+if (userMessages.length !== 2) throw new Error("stop_hook_active did not bound repeated Stop/SubagentStop follow-ups: " + JSON.stringify(userMessages));
+if (!notifications.some((value) => String(value).includes("yielding after one continuation"))) throw new Error("bounded terminal-hook yield was not surfaced: " + notifications.join(" | "));
+await handlers.get("input")({type:"input", source:"interactive", text:"try the completed work again"}, ctx);
+await handlers.get("agent_settled")({}, ctx);
+if (userMessages.length !== 3) throw new Error("interactive input did not reset the Stop continuation budget");
 await commands.get("agm-model")("openai/gpt-5.6-terra", ctx);
 if (selectedModel !== model || notifications.at(-1) !== "AGM model: openai/gpt-5.6-terra") throw new Error("model transition failed");
 `
-	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(path), filepath.Clean(project), filepath.Clean(malformedProject), filepath.Clean(capturePath), filepath.Clean(timeoutProject), filepath.Clean(nonzeroProject))
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(path), filepath.Clean(project), filepath.Clean(malformedProject), filepath.Clean(capturePath), filepath.Clean(timeoutProject), filepath.Clean(nonzeroProject), filepath.Clean(invalidShapeProject), filepath.Clean(oversizedProject), filepath.Clean(invalidCommandProject), filepath.Clean(terminalLimitProject))
 	command.Env = append(os.Environ(),
 		"AGM_PI_PROJECT_DIR="+filepath.Clean(project),
 		"AGM_PI_PERMISSION_POLICY_FILE="+filepath.Clean(policyPath),
 		"PI_HOOK_CAPTURE="+filepath.Clean(capturePath),
+		"PI_TERMINAL_HOOK_CAPTURE="+filepath.Clean(terminalCapturePath),
 		"PI_SESSION_ID=pi-native-session",
 	)
 	if output, err := command.CombinedOutput(); err != nil {

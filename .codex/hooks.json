@@ -61,6 +61,12 @@
       {
         "hooks": [
           {
+            "command": "go run \"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/cmd/spec-contract-hook\" --root \"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\" --provider codex --event Stop",
+            "statusMessage": "Checking staged SPEC contracts",
+            "timeout": 60,
+            "type": "command"
+          },
+          {
             "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",
             "timeout": 120,
@@ -72,6 +78,12 @@
     "SubagentStop": [
       {
         "hooks": [
+          {
+            "command": "go run \"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/cmd/spec-contract-hook\" --root \"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}\" --provider codex --event SubagentStop",
+            "statusMessage": "Checking staged SPEC contracts",
+            "timeout": 60,
+            "type": "command"
+          },
           {
             "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",

@@ -11,14 +11,23 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/internal/hookparity"
 )
 
 type hookParityState struct {
-	harness             string
-	hooks               map[string][]bddHookGroup
-	postMergeHook       string
-	companionOutput     string
-	companionRegression error
+	harness                  string
+	hooks                    map[string][]bddHookGroup
+	specContractReview       bool
+	unsupportedOmitted       bool
+	postMergeHook            string
+	companionOutput          string
+	companionRegression      error
+	openCodeOutput           string
+	openCodeRegression       error
+	piTerminalOutput         string
+	piTerminalRegression     error
+	sharedReminderOutput     string
+	sharedReminderRegression error
 }
 
 type bddHookGroup struct {
@@ -33,6 +42,8 @@ type bddHookSettings struct {
 	Hooks map[string][]bddHookGroup `json:"hooks"`
 }
 
+type bddNamedHookSettings map[string]map[string][]bddHookEntry
+
 type hookParityStateKey struct{}
 
 // RegisterHookParitySteps registers BDD steps for hook harness parity.
@@ -45,6 +56,17 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates hook parity for that harness$`, agmValidatesHookParityForThatHarness)
 	ctx.Step(`^hook harness "([^"]*)" should include guardrail hook "([^"]*)"$`, hookHarnessShouldIncludeGuardrailHook)
 	ctx.Step(`^hook harness "([^"]*)" should include Beads lifecycle hook "([^"]*)"$`, hookHarnessShouldIncludeBeadsLifecycleHook)
+	ctx.Step(`^hook harness "([^"]*)" should expose bounded SPEC contract review$`, hookHarnessShouldExposeBoundedSPECContractReview)
+	ctx.Step(`^hook harness "([^"]*)" should omit unsupported legacy hook projections$`, hookHarnessShouldOmitUnsupportedLegacyHookProjections)
+	ctx.Step(`^staged SPEC contract feedback is configured$`, stagedSPECContractFeedbackIsConfigured)
+	ctx.Step(`^AGM exercises the shared reminder across all projected harness adapters$`, agmExercisesSharedSPECReminder)
+	ctx.Step(`^every reminder should route to the canonical authoring page and single-source skill$`, sharedSPECReminderUsesCanonicalAuthoringRoute)
+	ctx.Step(`^OpenCode idle-session SPEC feedback is configured$`, openCodeIdleSessionSPECFeedbackIsConfigured)
+	ctx.Step(`^AGM exercises repeated, synthetic, message-capacity, session-capacity, and deleted-session events$`, agmExercisesOpenCodeIdleSessionEvents)
+	ctx.Step(`^each real turn and the global session table should remain bounded while tracked deletion admits yielded sessions$`, openCodeIdleSessionEventsRemainBounded)
+	ctx.Step(`^Pi terminal hook aggregation is configured$`, piTerminalHookAggregationIsConfigured)
+	ctx.Step(`^AGM exercises Pi terminal handler count, runtime, deadline, and output bounds$`, agmExercisesPiTerminalHookBounds)
+	ctx.Step(`^Pi should fail closed within its budgets while preserving multi-handler aggregation$`, piTerminalHookBoundsRemainFailClosed)
 	ctx.Step(`^the repository post-merge hook is configured$`, repositoryPostMergeHookIsConfigured)
 	ctx.Step(`^AGM validates repository post-merge hook coverage$`, agmValidatesRepositoryPostMergeHookCoverage)
 	ctx.Step(`^the repository post-merge hook should include lifecycle safeguard "([^"]*)"$`, repositoryPostMergeHookShouldIncludeLifecycleSafeguard)
@@ -71,21 +93,55 @@ func agmValidatesHookParityForThatHarness(ctx context.Context) error {
 	if state.harness == "" {
 		return fmt.Errorf("no hook harness configured")
 	}
-	path, ok := hookManifestPath(state.harness)
-	if !ok {
-		return fmt.Errorf("harness %q has no hook manifest path", state.harness)
+	root := hookBDDRepoRoot()
+	state.hooks = nil
+	state.specContractReview = false
+	state.unsupportedOmitted = false
+	switch state.harness {
+	case "agy":
+		path := filepath.Join(root, ".agents", "hooks.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read hook manifest %s: %w", path, err)
+		}
+		var settings bddNamedHookSettings
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse named hook manifest %s: %w", path, err)
+		}
+		entries := settings["spec-contract-guard"]["Stop"]
+		state.hooks = map[string][]bddHookGroup{"Stop": {{Hooks: entries}}}
+		state.specContractReview = len(entries) == 1 && entries[0].Command == "/usr/local/libexec/dear-agent-spec-contract-hook --root-from-workspace-stdin --provider antigravity --event Stop"
+		state.unsupportedOmitted = len(settings) == 1 && len(settings["spec-contract-guard"]) == 1
+	case "opencode-cli":
+		path := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read hook plugin %s: %w", path, err)
+		}
+		plugin := string(data)
+		state.specContractReview = strings.Contains(plugin, "session.idle") && strings.Contains(plugin, "cmd/spec-contract-hook") && strings.Contains(plugin, `"opencode"`) && strings.Contains(plugin, "promptAsync")
+		state.unsupportedOmitted, err = hookparity.OpenCodeLegacyProjectionIsInactive(root)
+		if err != nil {
+			return err
+		}
+	default:
+		path, ok := hookManifestPath(state.harness)
+		if !ok {
+			return fmt.Errorf("harness %q has no hook configuration surface", state.harness)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read hook manifest %s: %w", path, err)
+		}
+		var settings bddHookSettings
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse hook manifest %s: %w", path, err)
+		}
+		state.hooks = settings.Hooks
+		state.specContractReview = hookCommandsContain(state.hooks, "cmd/spec-contract-hook")
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read hook manifest %s: %w", path, err)
-	}
-	var settings bddHookSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("parse hook manifest %s: %w", path, err)
-	}
-	state.hooks = settings.Hooks
-	if len(state.hooks) == 0 {
-		return fmt.Errorf("hook manifest %s has no hooks", path)
+	if len(state.hooks) == 0 && !state.specContractReview {
+		return fmt.Errorf("harness %q has no validated hook capability", state.harness)
 	}
 	return nil
 }
@@ -130,6 +186,136 @@ func hookHarnessShouldIncludeBeadsLifecycleHook(ctx context.Context, harness, ev
 		}
 	}
 	return fmt.Errorf("harness %q missing Beads lifecycle hook %q", state.harness, want)
+}
+
+func hookHarnessShouldExposeBoundedSPECContractReview(ctx context.Context, harness string) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if agent.NormalizeHarnessName(harness) != state.harness {
+		return fmt.Errorf("configured hook harness = %q, want %q", state.harness, harness)
+	}
+	if !state.specContractReview {
+		return fmt.Errorf("harness %q has no bounded SPEC contract review transport", state.harness)
+	}
+	return nil
+}
+
+func hookHarnessShouldOmitUnsupportedLegacyHookProjections(ctx context.Context, harness string) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if agent.NormalizeHarnessName(harness) != state.harness {
+		return fmt.Errorf("configured hook harness = %q, want %q", state.harness, harness)
+	}
+	if !state.unsupportedOmitted {
+		return fmt.Errorf("harness %q retains an unsupported legacy hook projection", state.harness)
+	}
+	return nil
+}
+
+func openCodeIdleSessionSPECFeedbackIsConfigured(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.harness = "opencode-cli"
+	return agmValidatesHookParityForThatHarness(ctx)
+}
+
+func stagedSPECContractFeedbackIsConfigured(ctx context.Context) error {
+	_, err := getHookParityState(ctx)
+	return err
+}
+
+func agmExercisesSharedSPECReminder(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.sharedReminderOutput, state.sharedReminderRegression = runLocalGuardrailGoTest(ctx,
+		`^TestRunProvidesCooperativeTerminalReminderForValidStagedContract$`,
+		"./cmd/spec-contract-hook",
+	)
+	return nil
+}
+
+func sharedSPECReminderUsesCanonicalAuthoringRoute(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.sharedReminderRegression != nil {
+		return fmt.Errorf("shared staged-SPEC reminder regression: %w: %s", state.sharedReminderRegression, state.sharedReminderOutput)
+	}
+	if !strings.Contains(state.sharedReminderOutput, "--- PASS: TestRunProvidesCooperativeTerminalReminderForValidStagedContract") {
+		return fmt.Errorf("shared staged-SPEC reminder output omitted its passing regression: %s", state.sharedReminderOutput)
+	}
+	return nil
+}
+
+func agmExercisesOpenCodeIdleSessionEvents(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.openCodeOutput, state.openCodeRegression = runLocalGuardrailGoTest(ctx,
+		`^TestOpenCodeSPECContractPluginUsesIdleEventAndConservativeTransport$`,
+		"./internal/hookparity",
+	)
+	return nil
+}
+
+func openCodeIdleSessionEventsRemainBounded(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.openCodeRegression != nil {
+		return fmt.Errorf("OpenCode idle-session transport regression: %w: %s", state.openCodeRegression, state.openCodeOutput)
+	}
+	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginUsesIdleEventAndConservativeTransport") {
+		return fmt.Errorf("OpenCode idle-session transport output omitted its passing regression: %s", state.openCodeOutput)
+	}
+	return nil
+}
+
+func piTerminalHookAggregationIsConfigured(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.harness = "pi-cli"
+	return agmValidatesHookParityForThatHarness(ctx)
+}
+
+func agmExercisesPiTerminalHookBounds(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.piTerminalOutput, state.piTerminalRegression = runLocalGuardrailGoTest(ctx,
+		`^(TestPiProductionTerminalTimeoutBudgetsAreHonored|TestEmbeddedPiExtensionDecisionParity)$`,
+		"./agm/internal/permissionparity",
+	)
+	return nil
+}
+
+func piTerminalHookBoundsRemainFailClosed(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.piTerminalRegression != nil {
+		return fmt.Errorf("pi terminal hook bound regression: %w: %s", state.piTerminalRegression, state.piTerminalOutput)
+	}
+	if !strings.Contains(state.piTerminalOutput, "--- PASS: TestPiProductionTerminalTimeoutBudgetsAreHonored") ||
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestEmbeddedPiExtensionDecisionParity") {
+		return fmt.Errorf("pi terminal hook bound output omitted its passing regression: %s", state.piTerminalOutput)
+	}
+	return nil
 }
 
 func hookCommandsContain(hooks map[string][]bddHookGroup, substr string) bool {
@@ -365,9 +551,9 @@ func hookManifestPath(harness string) (string, bool) {
 	case "codex-cli":
 		return filepath.Join(root, ".codex", "hooks.json"), true
 	case "agy":
-		return filepath.Join(root, ".agents", "hooks.json"), true
+		return "", false
 	case "opencode-cli":
-		return filepath.Join(root, ".opencode", "hooks.json"), true
+		return "", false
 	case "pi-cli":
 		return filepath.Join(root, ".pi", "hooks.json"), true
 	default:

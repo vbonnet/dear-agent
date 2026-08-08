@@ -46,6 +46,35 @@ func (f File) Executable() bool {
 	return f.Mode.Perm()&0o111 != 0
 }
 
+// IsGovernedPath reports whether a repository-relative path belongs to the
+// shared governance inventory rather than VCS, dependency, generated-output,
+// test-fixture, or nested-worktree storage.
+func IsGovernedPath(path string) bool {
+	path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	return path != "." && filepath.IsLocal(filepath.FromSlash(path)) && !excludedPath(path)
+}
+
+// IsImplementationSource classifies source paths consistently for mutable
+// repository scans and immutable Git snapshots. Only regular files qualify;
+// executable is relevant only to extensionless hook or tool files.
+func IsImplementationSource(path string, regular, executable bool) bool {
+	if !regular || !IsGovernedPath(path) {
+		return false
+	}
+	name := filepath.Base(filepath.FromSlash(path))
+	switch strings.ToLower(name) {
+	case "dockerfile", "makefile":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
+		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",
+		".json", ".toml", ".plist", ".service", ".dockerfile":
+		return true
+	}
+	return filepath.Ext(name) == "" && executable
+}
+
 // Paths projects a file inventory to its stable repository-relative paths.
 func Paths(files []File) []string {
 	paths := make([]string, len(files))
@@ -90,7 +119,7 @@ func Scan(root string) ([]File, error) {
 	files := make([]File, 0, len(paths))
 	for _, path := range paths {
 		path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
-		if path == "." || !filepath.IsLocal(filepath.FromSlash(path)) || excludedPath(path) {
+		if !IsGovernedPath(path) {
 			continue
 		}
 		absolute := filepath.Join(absRoot, filepath.FromSlash(path))

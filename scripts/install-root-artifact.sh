@@ -5,7 +5,7 @@ IFS= read -r mode; case "$mode" in PROBE|INSTALL) ;; *) exit 2;; esac
 test "$mode" != PROBE || exit 42
 test "$(/usr/bin/id -u)" = 0 || exit 2
 artifact=$1; expected_hash=$2; root_gid=$3; destination=$4
-case "$destination" in /usr/local/libexec/dear-agent-codex-hook-json|/usr/local/libexec/dear-agent-bead-close-guard) ;; *) exit 2;; esac
+case "$destination" in /usr/local/libexec/dear-agent-codex-hook-json|/usr/local/libexec/dear-agent-spec-contract-hook|/usr/local/libexec/dear-agent-bead-close-guard) ;; *) exit 2;; esac
 staging=
 cleanup() { status=$?; trap - EXIT HUP INT TERM; test -z "$staging" || /bin/rm -f "$staging"; exit "$status"; }
 trap 'cleanup' EXIT HUP INT TERM

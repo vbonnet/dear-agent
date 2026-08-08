@@ -29,6 +29,37 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### Provider-Neutral SPEC Guard
+
+**File:** [`spec_guard.feature`](../test/bdd/features/spec_guard.feature)
+
+**Drives:** the `internal/specguard` source-result interface shared by local and
+CI callers.
+
+**Key scenarios:**
+- Malformed mode/base combinations fail closed through the same typed result.
+- Every result identifies the guard as provider-neutral source validation.
+- Semantic evidence is limited to immutable Git objects; staged mode separately
+  admits bounded tracked and nonignored untracked path/status metadata without
+  parsing mutable worktree bodies.
+- Governed tracked modifications/deletions and nonignored untracked additions
+  block staged evaluation until the intended contract state is staged or the
+  dirty path is resolved.
+- Source evidence explicitly disclaims provider and runtime verification.
+- Trust disclosure names checkpointed worktree, Git-directory, common-directory,
+  ancestor, and selector identity controls without claiming atomic filesystem
+  binding between checkpoints.
+- Repository-local terminal adapters disclose that mutable checkout code offers
+  cooperative feedback only and is not tamper-resistant. Any mandatory
+  immutable enforcement requires a separately reviewed changed-SPEC CI and
+  provider rollout; local results do not attest that it is deployed, has run,
+  or is provider-required.
+
+**Why this matters:** A deterministic source guard must neither skip governed
+dirty paths nor become another harness-owned policy copy. Local hook behavior
+must not be overstated as immutable, installed, provider-visible, or live
+enforcement.
+
 ### AGY Saved-Session Discovery
 
 **File:** [`agy_saved_session_discovery.feature`](../test/bdd/features/agy_saved_session_discovery.feature)
@@ -508,6 +539,15 @@ entrypoints should only add model/harness-specific guidance.
 - Stop and SubagentStop feedback hooks are configured.
 - Non-Claude harnesses expose Beads lifecycle hooks through their native hook
   manifests.
+- Every projected staged-SPEC reminder routes agents to `docs/spec-authoring.md`
+  and the single-source `spec-governance/skills/write-spec/SKILL.md` workflow
+  without claiming native skill discovery.
+- Idle-session fallback feedback remains one attempt per distinct real turn,
+  yields safely at bounded message and global-session limits, ignores recursive
+  synthetic updates, and admits yielded sessions after tracked state is deleted.
+- Pi terminal aggregation applies handler-count, per-handler runtime/output,
+  total-deadline, and aggregate-feedback bounds while preserving admitted
+  multi-handler feedback and failing closed on exhaustion.
 - The repository post-merge hook exposes its lifecycle safeguards.
 
 **Why this matters:** Safety and dogfooding guardrails must travel with every
@@ -1333,10 +1373,13 @@ or unredacted trace content would break parity or privacy for every caller.
 - Every parity BDD feature references its governing `SPEC.md`.
 - Every registered parity `SPEC.md` has a completed audit marker.
 - Every `*_parity.feature` file is registered in the coverage matrix.
-- Changed production Go package directories carry a co-located `SPEC.md`.
-- Changed production Go package `SPEC.md` files pass strict EARS lint.
-- The actual checkout gives every implementation directory strict co-located
-  SPEC and reciprocal executable BDD coverage across supported source formats.
+- Changed production Go package directories declare exactly one governed
+  contract through a local `SPEC.md` or checked `SPEC.owner` edge.
+- Changed production Go packages resolve a canonical `SPEC.md` that passes
+  strict EARS lint.
+- The actual checkout gives every implementation directory exactly one strict
+  local or shared SPEC owner with reciprocal executable BDD coverage across
+  supported source formats.
 - Every SPEC artifact, including doc-only and hidden policy contracts, retains
   strict EARS and reciprocal executable BDD traceability.
 

@@ -1,7 +1,9 @@
 package buildstamp_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +13,35 @@ import (
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+func TestRootArtifactInstallerProbeReachesSentinel(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join(sourceRoot(t), "scripts", "install-root-artifact.sh"))
+	if err != nil {
+		t.Fatalf("read root artifact installer: %v", err)
+	}
+	command := exec.Command("/bin/sh", "-c", string(script),
+		"dear-agent-root-artifact-installer",
+		"artifact",
+		strings.Repeat("0", 64),
+		"0",
+		"/usr/local/libexec/dear-agent-spec-contract-hook",
+	)
+	command.Stdin = bytes.NewBufferString("PROBE\n")
+	output, runErr := command.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 42 {
+		t.Fatalf("root installer PROBE exit = %v, want 42\n%s", runErr, output)
+	}
+
+	makefile, err := os.ReadFile(filepath.Join(sourceRoot(t), "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	if !bytes.Contains(makefile, []byte("printf 'PROBE\\n' | /usr/bin/sudo -k -n")) ||
+		bytes.Contains(makefile, []byte("printf 'PROBE\\\\n' | /usr/bin/sudo -k -n")) {
+		t.Fatal("spec-contract installer must send one real newline after PROBE")
+	}
+}
 
 func TestCanonicalAGMInstallBuildsCompanionPairWithProtectedStamps(t *testing.T) {
 	requireMake(t)
