@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -324,13 +323,20 @@ func TestRunGoTestCommandTimeoutKillsProcessGroup(t *testing.T) {
 		)
 	}()
 
-	raw := waitForFileContents(t, pidFile)
-	fields := strings.Fields(string(raw))
-	if len(fields) != 2 {
-		t.Fatalf("captured process IDs = %q, want leader and descendant", raw)
+	pids, err := awaitProcessFixture(
+		pidFile,
+		result,
+		func() { cancel(context.Canceled) },
+		func(code int) string {
+			return fmt.Sprintf("exit code %d: %s", code, stderr.String())
+		},
+		processFixtureSetupTimeout,
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
-	leaderPID := mustPID(t, fields[0])
-	childPID := mustPID(t, fields[1])
+	leaderPID := pids.leader
+	childPID := pids.child
 	t.Cleanup(func() {
 		_ = syscall.Kill(-leaderPID, syscall.SIGKILL)
 	})
@@ -370,21 +376,26 @@ func TestListPackagesContextCancellationKillsProcessGroup(t *testing.T) {
 		result <- err
 	}()
 
-	raw := waitForFileContents(t, pidFile)
-	fields := strings.Fields(string(raw))
-	if len(fields) != 2 {
-		t.Fatalf("captured process IDs = %q, want leader and descendant", raw)
+	pids, err := awaitProcessFixture(
+		pidFile,
+		result,
+		cancel,
+		func(err error) string { return fmt.Sprintf("error %v", err) },
+		processFixtureSetupTimeout,
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
-	leaderPID := mustPID(t, fields[0])
-	childPID := mustPID(t, fields[1])
+	leaderPID := pids.leader
+	childPID := pids.child
 	t.Cleanup(func() {
 		_ = syscall.Kill(-leaderPID, syscall.SIGKILL)
 	})
 
 	cancel()
 	select {
-	case err := <-result:
-		if err == nil {
+	case resultErr := <-result:
+		if resultErr == nil {
 			t.Fatal("listPackagesWithContext returned nil after cancellation")
 		}
 	case <-time.After(5 * time.Second):
@@ -392,29 +403,6 @@ func TestListPackagesContextCancellationKillsProcessGroup(t *testing.T) {
 	}
 	waitForProcessGone(t, leaderPID)
 	waitForProcessGone(t, childPID)
-}
-
-func waitForFileContents(t *testing.T, path string) []byte {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(path)
-		if err == nil && len(raw) > 0 {
-			return raw
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for process readiness file %s", path)
-	return nil
-}
-
-func mustPID(t *testing.T, raw string) int {
-	t.Helper()
-	pid, err := strconv.Atoi(raw)
-	if err != nil || pid <= 0 {
-		t.Fatalf("invalid process ID %q: %v", raw, err)
-	}
-	return pid
 }
 
 func waitForProcessGone(t *testing.T, pid int) {
