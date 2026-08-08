@@ -21,8 +21,8 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
    backfilled idempotently.
 4. **Drop-in**: preserves the legacy server's read tools
    (`engram_retrieve`, `engram_plugins_list`, `wayfinder_phase_status`).
-5. **Truthful identity**: the version advertised to MCP clients is the version
-   stamped into the shared build metadata package.
+5. **Truthful identity**: the version advertised to MCP clients and logged at
+   startup is the version stamped into the compiled server.
 
 ## EARS Requirements
 
@@ -44,11 +44,11 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 
 **EMC-09** When wayfinder_phase_status reads a status file, the server shall return phase state only after complete canonical schema 2.0 validation.
 
-**EMC-10** The system shall use `pkg/version.Version` as the sole Go source-code owner of the `engram-mcp` semantic version.
+**EMC-10** The `engram-mcp` executable shall report one consistent build-stamped semantic version across its observable interfaces.
 
-**EMC-11** When `engram-mcp` starts, the system shall log the value of `pkg/version.Version` as its version.
+**EMC-11** When `engram-mcp` starts, the system shall log its build-stamped semantic version.
 
-**EMC-12** When an MCP 2025-11-25 client initializes a compiled `engram-mcp` server, the system shall return the build-stamped `pkg/version.Version` value as `serverInfo.version`.
+**EMC-12** When an MCP 2025-11-25 client initializes a compiled `engram-mcp` server, the system shall return the same build-stamped semantic version as `serverInfo.version`.
 
 ## Tools
 
@@ -71,14 +71,6 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 
 `BEADS_DB` has deliberately no default: defaulting to a store nothing reads
 is the root cause this server exists to fix.
-
-## Version Ownership
-
-`pkg/version.Version` is the sole semantic-version owner for `engram-mcp`.
-The `build-engram-mcp` Make target stamps that variable through the repository's
-shared `BUILD_STAMP_FLAGS` profile. Both the startup log and the MCP initialize
-response read the same value. The separately released `engram` CLI retains its
-own version contract and is outside this server specification.
 
 ## Testing Strategy
 
