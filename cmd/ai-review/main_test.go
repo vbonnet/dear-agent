@@ -121,6 +121,49 @@ func TestRun_EmptyDiffApproves(t *testing.T) {
 	}
 }
 
+func TestRun_AuthenticatedEmptyDiffWithEscalationRequiresHumanReview(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, dir, head string) (base, newHead, prBody string)
+	}{
+		{
+			name: "PR body marker",
+			prepare: func(_ *testing.T, _ string, head string) (string, string, string) {
+				return head, head, "HUMAN REVIEW REQUIRED"
+			},
+		},
+		{
+			name: "allow-empty commit marker",
+			prepare: func(t *testing.T, dir, head string) (string, string, string) {
+				gittest.Run(t, dir, "commit", "--allow-empty", "-m", "HUMAN REVIEW REQUIRED")
+				return head, trim(gittest.Run(t, dir, "rev-parse", "HEAD")), ""
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, _, head := initRepo(t, "changed\n")
+			base, markedHead, prBody := tt.prepare(t, dir, head)
+			chdir(t, dir)
+
+			plan, err := buildReviewPlanWithPRBody(context.Background(), base, markedHead, prBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.EscalationTriggers) == 0 {
+				t.Fatalf("empty diff plan has no escalation trigger: %#v", plan)
+			}
+
+			c := baseConfig()
+			c.apiKey = "sk-test"
+			c.baseSHA, c.headSHA, c.prBody = base, markedHead, prBody
+			if got := run(c); got != 1 {
+				t.Fatalf("marked empty diff: run() = %d, want 1 (needs human review)", got)
+			}
+		})
+	}
+}
+
 func TestRun_OversizeDiffFailsClosed(t *testing.T) {
 	big := make([]byte, 2000)
 	for i := range big {

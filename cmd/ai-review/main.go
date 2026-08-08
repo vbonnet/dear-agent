@@ -350,10 +350,13 @@ func run(c config) int {
 		return failClosed(c, "the diff exceeded the auto-review size limit")
 	}
 
-	// Empty diff: no deterministic escalation can have been hidden here because
-	// the authenticated plan collected that evidence before the credential
-	// decision (AIREV-07/08).
+	// An empty tree diff is neutral only when the authenticated plan found no
+	// deterministic escalation. Explicit PR-body and allow-empty commit markers
+	// have no patch to send to the model, but must still require human review.
 	if strings.TrimSpace(diff) == "" {
+		if len(plan.EscalationTriggers) > 0 {
+			return handleMandatoryEscalation(c, plan.EscalationTriggers)
+		}
 		fmt.Println("::notice::empty diff; nothing to review.")
 		return 0
 	}

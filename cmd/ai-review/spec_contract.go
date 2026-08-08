@@ -35,45 +35,65 @@ const specContractVersion = "spec-contract/v3"
 const specAuthoringPolicyPath = "docs/spec-authoring.md"
 const activeHarnessRegistryPath = "agm/internal/agent/harnesses.go"
 
+// canonicalSpecAuthoringOwnerPaths is the exact authored contract surface
+// prescribed by docs/spec-authoring.md and the two canonical workflows it
+// routes to. These paths determine what future SPECs look like, so a revision
+// cannot change one and use the unchanged reviewer credential boundary to
+// publish a neutral result for itself.
+var canonicalSpecAuthoringOwnerPaths = [...]string{
+	specAuthoringPolicyPath,
+	"docs/templates/SPEC.md.tmpl",
+	"spec-governance/skills/write-spec/SKILL.md",
+	"spec-governance/skills/write-spec/references/contract-model.md",
+	"spec-governance/skills/write-spec/references/ears-and-bdd.md",
+	"spec-governance/skills/audit-specs/SKILL.md",
+	"spec-governance/skills/audit-specs/references/audit-verdicts.md",
+	"spec-governance/skills/audit-specs/references/report-schema.md",
+}
+
 const (
-	maxSpecContractDiffBytes   = 64 * 1024
-	maxGitIdentityBytes        = 256
-	maxGitMetadataBytes        = 4 * 1024 * 1024
-	maxSpecCorpusBytes         = 16 * 1024 * 1024
-	maxSpecBlobBytes           = 512 * 1024
-	maxFeatureBlobBytes        = 512 * 1024
-	maxFeatureContextBytes     = 512 * 1024
-	maxFeatureScenarios        = 512
-	maxFeatureSteps            = 4096
-	maxChangedSpecFiles        = 256
-	maxHeadSpecFiles           = 2048
-	maxFeatureLinks            = 128
-	maxRequirementsPerSpec     = 2048
-	maxChangedRequirements     = 4096
-	maxCorpusRequirements      = 100000
-	maxOwnershipCandidates     = 10000
-	maxOwnershipReasons        = 256
-	maxCandidatePathsShown     = 20
-	maxRequirementBodyBytes    = 16 * 1024
-	maxGitPathBytes            = 4096
-	maxChangedPaths            = 10000
-	maxHeadPaths               = 100000
-	maxSpecVerdictBytes        = 32 * 1024
-	maxSpecPolicyBytes         = 64 * 1024
-	maxChangedContractBytes    = 256 * 1024
-	maxSemanticCandidateBytes  = 128 * 1024
-	maxSemanticCandidates      = 1024
-	maxSemanticShardCandidates = 128
-	maxSemanticShards          = 8
-	maxSemanticShardBytes      = 256 * 1024
-	maxSemanticIndexBytes      = 2 * 1024 * 1024
-	maxSemanticVerdictBytes    = 64 * 1024
-	maxSemanticRationaleBytes  = 64
-	maxConcurrentSemanticCalls = 4
-	maxDeletionReviews         = 20
-	maxActiveHarnesses         = 32
-	maxApplicabilityReviews    = 8192
-	maxSpecPromptBytes         = 640 * 1024
+	maxSpecContractDiffBytes     = 64 * 1024
+	maxGitIdentityBytes          = 256
+	maxGitMetadataBytes          = 4 * 1024 * 1024
+	maxSpecCorpusBytes           = 16 * 1024 * 1024
+	maxSpecBlobBytes             = 512 * 1024
+	maxFeatureBlobBytes          = 512 * 1024
+	maxFeatureContextBytes       = 512 * 1024
+	maxFeatureScenarios          = 512
+	maxFeatureExecutableCases    = 4096
+	maxFeatureExecutableSteps    = 16 * 1024
+	maxFeatureInterpolationWork  = 64 * 1024 * 1024
+	maxFeatureInterpolationBytes = 16 * 1024 * 1024
+	maxFeatureSteps              = 4096
+	maxChangedSpecFiles          = 256
+	maxHeadSpecFiles             = 2048
+	maxFeatureLinks              = 128
+	maxRequirementsPerSpec       = 2048
+	maxChangedRequirements       = 4096
+	maxCorpusRequirements        = 100000
+	maxOwnershipCandidates       = 10000
+	maxOwnershipReasons          = 256
+	maxCandidatePathsShown       = 20
+	maxRequirementBodyBytes      = 16 * 1024
+	maxGitPathBytes              = 4096
+	maxChangedPaths              = 10000
+	maxHeadPaths                 = 100000
+	maxSpecVerdictBytes          = 32 * 1024
+	maxSpecPolicyBytes           = 64 * 1024
+	maxChangedContractBytes      = 256 * 1024
+	maxSemanticCandidateBytes    = 128 * 1024
+	maxSemanticCandidates        = 1024
+	maxSemanticShardCandidates   = 128
+	maxSemanticShards            = 8
+	maxSemanticShardBytes        = 256 * 1024
+	maxSemanticIndexBytes        = 2 * 1024 * 1024
+	maxSemanticVerdictBytes      = 64 * 1024
+	maxSemanticRationaleBytes    = 64
+	maxConcurrentSemanticCalls   = 4
+	maxDeletionReviews           = 20
+	maxActiveHarnesses           = 32
+	maxApplicabilityReviews      = 8192
+	maxSpecPromptBytes           = 640 * 1024
 )
 
 // Owner-classification responses share their output budget with adaptive
@@ -668,7 +688,7 @@ func changedContractAction(status string) (string, error) {
 // revision cannot use this gate to approve a change to its own policy,
 // workflow, implementation, or deterministic EARS parser.
 func specReviewOwnerPath(path string) bool {
-	return path == specAuthoringPolicyPath ||
+	return slices.Contains(canonicalSpecAuthoringOwnerPaths[:], path) ||
 		path == activeHarnessRegistryPath ||
 		path == ".github/workflows/review.yml" ||
 		path == ".github/rulesets/main.json" ||
@@ -964,6 +984,10 @@ func parseBDDFeature(path string, blob []byte) (bddFeatureEvidence, error) {
 	if document == nil || document.Feature == nil || strings.TrimSpace(document.Feature.Name) == "" {
 		return bddFeatureEvidence{}, errors.New("missing named Gherkin feature")
 	}
+	dialect := gherkin.DialectsBuiltin().GetDialect(document.Feature.Language)
+	if dialect == nil {
+		return bddFeatureEvidence{}, errors.New("unsupported Gherkin dialect")
+	}
 	evidence := bddFeatureEvidence{
 		Path:      path,
 		Language:  document.Feature.Language,
@@ -973,9 +997,15 @@ func parseBDDFeature(path string, blob []byte) (bddFeatureEvidence, error) {
 		Content:   string(blob),
 	}
 	stepCount := 0
-	appendScenario := func(rule string, scenario *messages.Scenario) error {
-		if scenario == nil || strings.TrimSpace(scenario.Name) == "" {
+	executableCases := 0
+	executionBudget := gherkinExecutionBudget{}
+	scenarioIDs := make(map[string]bool)
+	appendScenario := func(rule string, scenario *messages.Scenario, backgroundSteps int) error {
+		if scenario == nil || scenario.Id == "" || strings.TrimSpace(scenario.Name) == "" {
 			return errors.New("unnamed Gherkin scenario")
+		}
+		if scenarioIDs[scenario.Id] {
+			return errors.New("duplicate Gherkin scenario identity")
 		}
 		steps := make([]string, 0, len(scenario.Steps))
 		for _, step := range scenario.Steps {
@@ -988,6 +1018,18 @@ func parseBDDFeature(path string, blob []byte) (bddFeatureEvidence, error) {
 				return errors.New("too many Gherkin steps")
 			}
 		}
+		if len(steps) == 0 {
+			return errors.New("gherkin scenario has no runnable steps")
+		}
+		executions, err := scenarioExecutionCount(scenario, dialect, backgroundSteps, &executionBudget)
+		if err != nil {
+			return err
+		}
+		if executableCases > maxFeatureExecutableCases-executions {
+			return errors.New("too many executable Gherkin cases")
+		}
+		executableCases += executions
+		scenarioIDs[scenario.Id] = true
 		evidence.Scenarios = append(evidence.Scenarios, bddScenarioEvidence{
 			Rule:    strings.TrimSpace(rule),
 			Keyword: strings.TrimSpace(scenario.Keyword),
@@ -1000,23 +1042,42 @@ func parseBDDFeature(path string, blob []byte) (bddFeatureEvidence, error) {
 		}
 		return nil
 	}
+	featureBackgroundSteps := 0
 	for _, child := range document.Feature.Children {
 		if child == nil {
 			continue
 		}
+		if child.Background != nil {
+			steps, err := validateGherkinBackground(child.Background, &stepCount)
+			if err != nil {
+				return bddFeatureEvidence{}, err
+			}
+			featureBackgroundSteps += steps
+		}
 		if child.Scenario != nil {
-			if err := appendScenario("", child.Scenario); err != nil {
+			if err := appendScenario("", child.Scenario, featureBackgroundSteps); err != nil {
 				return bddFeatureEvidence{}, err
 			}
 		}
 		if child.Rule == nil {
 			continue
 		}
+		ruleBackgroundSteps := featureBackgroundSteps
 		for _, ruleChild := range child.Rule.Children {
-			if ruleChild == nil || ruleChild.Scenario == nil {
+			if ruleChild == nil {
 				continue
 			}
-			if err := appendScenario(child.Rule.Name, ruleChild.Scenario); err != nil {
+			if ruleChild.Background != nil {
+				steps, err := validateGherkinBackground(ruleChild.Background, &stepCount)
+				if err != nil {
+					return bddFeatureEvidence{}, err
+				}
+				ruleBackgroundSteps += steps
+			}
+			if ruleChild.Scenario == nil {
+				continue
+			}
+			if err := appendScenario(child.Rule.Name, ruleChild.Scenario, ruleBackgroundSteps); err != nil {
 				return bddFeatureEvidence{}, err
 			}
 		}
@@ -1025,6 +1086,219 @@ func parseBDDFeature(path string, blob []byte) (bddFeatureEvidence, error) {
 		return bddFeatureEvidence{}, errors.New("gherkin feature has no runnable scenario steps")
 	}
 	return evidence, nil
+}
+
+func validateGherkinBackground(background *messages.Background, stepCount *int) (int, error) {
+	if background == nil || len(background.Steps) == 0 {
+		return 0, errors.New("gherkin background has no runnable steps")
+	}
+	for _, step := range background.Steps {
+		if step == nil || strings.TrimSpace(step.Text) == "" {
+			return 0, errors.New("empty Gherkin background step")
+		}
+		(*stepCount)++
+		if *stepCount > maxFeatureSteps {
+			return 0, errors.New("too many Gherkin steps")
+		}
+	}
+	return len(background.Steps), nil
+}
+
+type gherkinExecutionBudget struct {
+	steps           int
+	workBytes       int
+	allocationBytes int
+}
+
+// scenarioExecutionCount validates executable cases directly on the bounded
+// AST. It deliberately does not materialize Gherkin pickles: explicit bounded
+// Examples substitution supplies the evidence this gate needs without letting
+// untrusted outline rows amplify step arguments in memory.
+func scenarioExecutionCount(scenario *messages.Scenario, dialect *gherkin.Dialect, backgroundSteps int, budget *gherkinExecutionBudget) (int, error) {
+	if budget == nil || backgroundSteps < 0 {
+		return 0, errors.New("missing Gherkin execution budget")
+	}
+	if !isGherkinKeyword(scenario.Keyword, dialect.ScenarioOutlineKeywords()) {
+		if len(scenario.Examples) != 0 {
+			return 0, errors.New("non-outline Gherkin scenario has examples")
+		}
+		if err := addGherkinBudget(&budget.steps, backgroundSteps+len(scenario.Steps), maxFeatureExecutableSteps, "too many executable Gherkin steps"); err != nil {
+			return 0, err
+		}
+		return 1, nil
+	}
+	if len(scenario.Examples) == 0 {
+		return 0, errors.New("gherkin scenario outline has no executable examples")
+	}
+	rowCount := 0
+	for _, examples := range scenario.Examples {
+		rows, err := executableExampleRows(examples)
+		if err != nil {
+			return 0, err
+		}
+		if rows == 0 {
+			continue
+		}
+		if rowCount > maxFeatureExecutableCases-rows {
+			return 0, errors.New("too many executable Gherkin cases")
+		}
+		rowCount += rows
+		needles, err := gherkinExampleNeedles(examples.TableHeader.Cells)
+		if err != nil {
+			return 0, err
+		}
+		for _, row := range examples.TableBody {
+			if err := validateOutlineExecution(scenario.Steps, backgroundSteps, needles, row.Cells, budget); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if rowCount == 0 {
+		return 0, errors.New("gherkin scenario outline has no executable examples")
+	}
+	return rowCount, nil
+}
+
+func gherkinExampleNeedles(variables []*messages.TableCell) ([]string, error) {
+	needles := make([]string, len(variables))
+	for i, variable := range variables {
+		if variable == nil || len(variable.Value) > maxFeatureInterpolationBytes-2 {
+			return nil, errors.New("gherkin scenario outline has an invalid interpolation cell")
+		}
+		needles[i] = "<" + variable.Value + ">"
+	}
+	return needles, nil
+}
+
+func validateOutlineExecution(steps []*messages.Step, backgroundSteps int, needles []string, values []*messages.TableCell, budget *gherkinExecutionBudget) error {
+	if len(needles) != len(values) {
+		return errors.New("gherkin scenario outline has a malformed examples row")
+	}
+	if backgroundSteps < 0 {
+		return errors.New("invalid Gherkin background step count")
+	}
+	if err := addGherkinBudget(&budget.steps, backgroundSteps+len(steps), maxFeatureExecutableSteps, "too many executable Gherkin steps"); err != nil {
+		return err
+	}
+	for _, step := range steps {
+		text, err := boundedGherkinSubstitution(step.Text, needles, values, budget)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(text) == "" {
+			return errors.New("gherkin scenario outline has an empty executable step")
+		}
+	}
+	return nil
+}
+
+func boundedGherkinSubstitution(text string, needles []string, values []*messages.TableCell, budget *gherkinExecutionBudget) (string, error) {
+	if budget == nil || len(needles) != len(values) {
+		return "", errors.New("gherkin scenario outline has malformed interpolation evidence")
+	}
+	current := text
+	for i, needle := range needles {
+		if needle == "" || values[i] == nil {
+			return "", errors.New("gherkin scenario outline has an invalid interpolation cell")
+		}
+		if err := addGherkinBudget(&budget.workBytes, len(current), maxFeatureInterpolationWork, "gherkin interpolation exceeds the review work limit"); err != nil {
+			return "", err
+		}
+		matches := strings.Count(current, needle)
+		if matches == 0 {
+			continue
+		}
+		nextBytes, err := gherkinReplacementBytes(len(current), len(needle), len(values[i].Value), matches)
+		if err != nil {
+			return "", err
+		}
+		if err := addGherkinBudget(&budget.workBytes, len(current), maxFeatureInterpolationWork, "gherkin interpolation exceeds the review work limit"); err != nil {
+			return "", err
+		}
+		if err := addGherkinBudget(&budget.allocationBytes, nextBytes, maxFeatureInterpolationBytes, "gherkin interpolation exceeds the review allocation limit"); err != nil {
+			return "", err
+		}
+		current = strings.ReplaceAll(current, needle, values[i].Value)
+		if len(current) != nextBytes {
+			return "", errors.New("invalid Gherkin interpolation length")
+		}
+	}
+	return current, nil
+}
+
+func gherkinReplacementBytes(current, needle, replacement, matches int) (int, error) {
+	if current < 0 || current > maxFeatureInterpolationBytes || needle < 1 || replacement < 0 || matches < 1 {
+		return 0, errors.New("invalid Gherkin interpolation size")
+	}
+	if replacement >= needle {
+		growth := replacement - needle
+		if growth > 0 && matches > (maxFeatureInterpolationBytes-current)/growth {
+			return 0, errors.New("gherkin interpolation exceeds the review allocation limit")
+		}
+		return current + matches*growth, nil
+	}
+	shrink := needle - replacement
+	if matches > current/shrink {
+		return 0, errors.New("invalid Gherkin interpolation size")
+	}
+	return current - matches*shrink, nil
+}
+
+func addGherkinBudget(total *int, add, limit int, message string) error {
+	if total == nil || add < 0 || limit < 0 || add > limit || *total < 0 || *total > limit-add {
+		return errors.New(message)
+	}
+	*total += add
+	return nil
+}
+
+func executableExampleRows(examples *messages.Examples) (int, error) {
+	if examples == nil {
+		return 0, errors.New("gherkin scenario outline has a malformed examples block")
+	}
+	if examples.TableHeader == nil {
+		if len(examples.TableBody) == 0 {
+			return 0, nil
+		}
+		return 0, errors.New("gherkin scenario outline has a malformed examples block")
+	}
+	if len(examples.TableHeader.Cells) == 0 {
+		return 0, errors.New("gherkin scenario outline has an invalid examples header")
+	}
+	headerNames := make(map[string]bool, len(examples.TableHeader.Cells))
+	for _, cell := range examples.TableHeader.Cells {
+		if cell == nil {
+			return 0, errors.New("gherkin scenario outline has an invalid examples header")
+		}
+		name := strings.TrimSpace(cell.Value)
+		if name == "" || headerNames[name] {
+			return 0, errors.New("gherkin scenario outline has an invalid examples header")
+		}
+		headerNames[name] = true
+	}
+	if len(examples.TableBody) == 0 {
+		return 0, nil
+	}
+	for _, row := range examples.TableBody {
+		if !validExampleRow(row, len(examples.TableHeader.Cells)) {
+			return 0, errors.New("gherkin scenario outline has a malformed examples row")
+		}
+	}
+	return len(examples.TableBody), nil
+}
+
+func validExampleRow(row *messages.TableRow, width int) bool {
+	if row == nil || len(row.Cells) != width {
+		return false
+	}
+	return !slices.Contains(row.Cells, nil)
+}
+
+func isGherkinKeyword(keyword string, candidates []string) bool {
+	keyword = strings.TrimSpace(keyword)
+	return slices.ContainsFunc(candidates, func(candidate string) bool {
+		return strings.TrimSpace(candidate) == keyword
+	})
 }
 
 func bddTags(tags []*messages.Tag) []string {

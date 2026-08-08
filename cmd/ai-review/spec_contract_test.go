@@ -214,7 +214,18 @@ func TestBuildReviewPlan_RequiresRunnableGherkinAndSuppliesAuthenticatedFeatureE
 	}{
 		{name: "feature without scenarios", feature: "# SPEC: module/SPEC.md\nFeature: contract\n", wantHuman: true},
 		{name: "scenario without steps", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario: empty\n", wantHuman: true},
+		{name: "outline without examples", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: empty <value>\n    Given value <value>\n", wantHuman: true},
+		{name: "outline with examples heading but no table", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: empty <value>\n    Given value <value>\n\n    Examples:\n", wantHuman: true},
+		{name: "outline with header but no rows", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: empty <value>\n    Given value <value>\n\n    Examples:\n      | value |\n", wantHuman: true},
+		{name: "outline with malformed row", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: malformed <first> <second>\n    Given values <first> and <second>\n\n    Examples:\n      | first | second |\n      | one   |\n", wantHuman: true},
+		{name: "outline with empty executable step", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: blank value\n    Given <value>\n\n    Examples:\n      | value |\n      |       |\n", wantHuman: true},
+		{name: "runnable scenario does not mask empty outline", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario: runnable\n    Given the contract is exercised\n\n  Scenario Outline: empty <value>\n    Given value <value>\n", wantHuman: true},
 		{name: "runnable scenario", feature: featureDocument("# SPEC: module/SPEC.md\n", "contract")},
+		{name: "runnable outline", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: case <value>\n    Given value <value>\n\n    Examples:\n      | value |\n      | one   |\n"},
+		{name: "runnable outline with an inert examples block", feature: "# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: case <value>\n    Given value <value>\n\n    Examples:\n\n    Examples:\n      | value |\n      | one   |\n"},
+		{name: "localized runnable outline", feature: "# language: fr\n# SPEC: module/SPEC.md\nFonctionnalité: contrat\n\n  Plan du scénario: cas <valeur>\n    Soit une valeur <valeur>\n\n    Exemples:\n      | valeur |\n      | une    |\n"},
+		{name: "localized outline without rows", feature: "# language: fr\n# SPEC: module/SPEC.md\nFonctionnalité: contrat\n\n  Plan du scénario: cas <valeur>\n    Soit une valeur <valeur>\n\n    Exemples:\n      | valeur |\n", wantHuman: true},
+		{name: "outline exceeding bounded executable cases", feature: outlineFeatureWithRows(maxFeatureExecutableCases + 1), wantHuman: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repo := newReviewRepo(t)
@@ -240,6 +251,89 @@ func TestBuildReviewPlan_RequiresRunnableGherkinAndSuppliesAuthenticatedFeatureE
 			}
 		})
 	}
+}
+
+func outlineFeatureWithRows(rows int) string {
+	var feature strings.Builder
+	feature.WriteString("# SPEC: module/SPEC.md\nFeature: contract\n\n  Scenario Outline: case <value>\n    Given value <value>\n\n    Examples:\n      | value |\n")
+	for i := range rows {
+		fmt.Fprintf(&feature, "      | %d |\n", i)
+	}
+	return feature.String()
+}
+
+func TestParseBDDFeature_BoundsOrderedOutlineSubstitution(t *testing.T) {
+	if _, err := parseBDDFeature("features/multi-column.feature", []byte(orderedOutlineFeature(12, false))); err != nil {
+		t.Fatalf("ordinary multi-column outline was rejected: %v", err)
+	}
+	if _, err := parseBDDFeature("features/amplified.feature", []byte(orderedOutlineFeature(25, true))); err == nil || !strings.Contains(err.Error(), "interpolation exceeds the review allocation limit") {
+		t.Fatalf("amplifying outline error = %v, want bounded interpolation failure", err)
+	}
+}
+
+func TestParseBDDFeature_BoundsInheritedOutlineStepInstances(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		rule bool
+	}{
+		{name: "feature background"},
+		{name: "rule background", rule: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseBDDFeature("features/inherited.feature", []byte(outlineWithBackgroundSteps(129, 128, tt.rule)))
+			if err == nil || !strings.Contains(err.Error(), "too many executable Gherkin steps") {
+				t.Fatalf("inherited outline error = %v, want executable-step bound", err)
+			}
+		})
+	}
+	if _, err := parseBDDFeature("features/inherited-small.feature", []byte(outlineWithBackgroundSteps(2, 2, false))); err != nil {
+		t.Fatalf("small inherited outline was rejected: %v", err)
+	}
+}
+
+func outlineWithBackgroundSteps(backgroundSteps, rows int, rule bool) string {
+	var feature strings.Builder
+	feature.WriteString("Feature: inherited execution\n")
+	indent := "  "
+	if rule {
+		feature.WriteString("\n  Rule: inherited scope\n")
+		indent = "    "
+	}
+	feature.WriteString("\n" + indent + "Background:\n")
+	for i := range backgroundSteps {
+		fmt.Fprintf(&feature, "%s  Given inherited step %d\n", indent, i)
+	}
+	feature.WriteString("\n" + indent + "Scenario Outline: bounded <value>\n" + indent + "  Given value <value>\n\n" + indent + "Examples:\n" + indent + "  | value |\n")
+	for i := range rows {
+		fmt.Fprintf(&feature, "%s  | %d |\n", indent, i)
+	}
+	return feature.String()
+}
+
+func orderedOutlineFeature(columns int, amplify bool) string {
+	var feature strings.Builder
+	feature.WriteString("Feature: ordered substitution\n\n  Scenario Outline: bounded values\n    Given ")
+	if amplify {
+		feature.WriteString("<column-0>")
+	} else {
+		for i := range columns {
+			fmt.Fprintf(&feature, "<column-%d> ", i)
+		}
+	}
+	feature.WriteString("\n\n    Examples:\n      ")
+	for i := range columns {
+		fmt.Fprintf(&feature, "| column-%d ", i)
+	}
+	feature.WriteString("|\n      ")
+	for i := range columns {
+		value := fmt.Sprintf("value-%d", i)
+		if amplify && i+1 < columns {
+			value = fmt.Sprintf("<column-%d><column-%d>", i+1, i+1)
+		}
+		fmt.Fprintf(&feature, "| %s ", value)
+	}
+	feature.WriteString("|\n")
+	return feature.String()
 }
 
 func TestBuildReviewPlan_ScansFullHeadCorpusForChangedOwnership(t *testing.T) {
@@ -464,12 +558,50 @@ func TestBuildReviewPlan_FailsClosedWithoutProtectedBaseHarnessRegistry(t *testi
 	}
 }
 
+func TestSpecReviewOwnerPath_CoversExactCanonicalSpecAuthoringSurface(t *testing.T) {
+	expected := []string{
+		specAuthoringPolicyPath,
+		"docs/templates/SPEC.md.tmpl",
+		"spec-governance/skills/write-spec/SKILL.md",
+		"spec-governance/skills/write-spec/references/contract-model.md",
+		"spec-governance/skills/write-spec/references/ears-and-bdd.md",
+		"spec-governance/skills/audit-specs/SKILL.md",
+		"spec-governance/skills/audit-specs/references/audit-verdicts.md",
+		"spec-governance/skills/audit-specs/references/report-schema.md",
+	}
+	if !slices.Equal(canonicalSpecAuthoringOwnerPaths[:], expected) {
+		t.Fatalf("canonical SPEC authoring owners = %v, want %v", canonicalSpecAuthoringOwnerPaths, expected)
+	}
+	for _, path := range expected {
+		if !specReviewOwnerPath(path) {
+			t.Errorf("canonical SPEC authoring owner %q is not protected", path)
+		}
+	}
+	for _, path := range []string{
+		"docs/templates/README.md",
+		"spec-governance/skills/write-spec/references/README.md",
+		"spec-governance/skills/audit-specs/examples/report-schema.md",
+		"spec-governance/skills/other/SKILL.md",
+	} {
+		if specReviewOwnerPath(path) {
+			t.Errorf("non-owner path %q entered the protected authoring surface", path)
+		}
+	}
+}
+
 func TestBuildReviewPlan_RequiresHumanForReviewEnforcementOwnerChanges(t *testing.T) {
 	for _, tc := range []struct {
 		path       string
 		wantReview bool
 	}{
 		{path: specAuthoringPolicyPath, wantReview: true},
+		{path: "docs/templates/SPEC.md.tmpl", wantReview: true},
+		{path: "spec-governance/skills/write-spec/SKILL.md", wantReview: true},
+		{path: "spec-governance/skills/write-spec/references/contract-model.md", wantReview: true},
+		{path: "spec-governance/skills/write-spec/references/ears-and-bdd.md", wantReview: true},
+		{path: "spec-governance/skills/audit-specs/SKILL.md", wantReview: true},
+		{path: "spec-governance/skills/audit-specs/references/audit-verdicts.md", wantReview: true},
+		{path: "spec-governance/skills/audit-specs/references/report-schema.md", wantReview: true},
 		{path: activeHarnessRegistryPath, wantReview: true},
 		{path: ".github/workflows/review.yml", wantReview: true},
 		{path: "cmd/ai-review/main.go", wantReview: true},
@@ -506,6 +638,9 @@ func TestBuildReviewPlan_RequiresHumanForReviewEnforcementOwnerChanges(t *testin
 			}
 			if tc.wantReview && (!plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "enforcement owner change")) {
 				t.Fatalf("protected owner change did not require maintainer review: %#v", plan)
+			}
+			if tc.wantReview && !plan.ReviewRelevant {
+				t.Fatalf("protected owner change could publish a neutral review plan: %#v", plan)
 			}
 		})
 	}
