@@ -33,7 +33,8 @@ dependency-free extension installed in AGM-private storage.
 
 **PI-AUTH-12** When a Pi Bash call contains unquoted shell control, redirection, command-substitution, or command-chaining syntax, the adapter shall not pre-approve the call from an AGM allowlist pattern and shall route it through the interactive or fail-closed unmatched decision.
 
-## Traceability
+## BDD Traceability
 
 - Package tests: `agm/internal/permissionparity/pi_test.go`
-- BDD: `agm/test/bdd/features/permission_parity.feature`
+- Feature: `agm/test/bdd/features/permission_parity.feature`
+- Feature: `agm/test/bdd/features/hook_parity.feature`

@@ -1,6 +1,7 @@
 # SPEC: internal/hookparity/SPEC.md
 # RELATED-SPEC: .codex/hooks/SPEC.md
 # RELATED-SPEC: .pi/guardrails/SPEC.md
+# RELATED-SPEC: agm/internal/permissionparity/piadapter/SPEC.md
 # RELATED-SPEC: scripts/git-hooks/SPEC.md
 # RELATED-SPEC: agm/internal/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-context-monitor/SPEC.md
