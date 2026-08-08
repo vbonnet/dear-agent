@@ -299,7 +299,7 @@ func TestProtectGoCommandProcessTreeIsGroupCancelable(t *testing.T) {
 func TestRunGoTestCommandTimeoutKillsProcessGroup(t *testing.T) {
 	binDir := t.TempDir()
 	pidFile := filepath.Join(t.TempDir(), "go-pids")
-	stub := "#!/bin/sh\nsleep 30 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_PID_FILE\"\nwait \"$child\"\n"
+	stub := "#!/bin/sh\nsleep 120 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_PID_FILE\"\nwait \"$child\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestRunGoTestCommandTimeoutKillsProcessGroup(t *testing.T) {
 func TestListPackagesContextCancellationKillsProcessGroup(t *testing.T) {
 	binDir := t.TempDir()
 	pidFile := filepath.Join(t.TempDir(), "go-list-pids")
-	stub := "#!/bin/sh\nsleep 30 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_LIST_PID_FILE\"\nwait \"$child\"\n"
+	stub := "#!/bin/sh\nsleep 120 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_LIST_PID_FILE\"\nwait \"$child\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}

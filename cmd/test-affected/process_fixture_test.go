@@ -153,7 +153,7 @@ func TestAwaitProcessFixtureReportsEarlyCommandExit(t *testing.T) {
 func TestAwaitProcessFixtureTimeoutCancelsAndJoinsProcessGroup(t *testing.T) {
 	binDir := t.TempDir()
 	observedPIDFile := filepath.Join(t.TempDir(), "observed-go-pids")
-	stub := "#!/bin/sh\nsleep 30 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_OBSERVED_PID_FILE\"\nwait \"$child\"\n"
+	stub := "#!/bin/sh\nsleep 120 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_OBSERVED_PID_FILE\"\nwait \"$child\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
