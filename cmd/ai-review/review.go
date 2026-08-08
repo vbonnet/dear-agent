@@ -91,10 +91,24 @@ const (
 	// SPEC reviews therefore reserve enough room for both reasoning and the
 	// complete bounded applicability/deletion verdict.
 	specReviewMaxTokens int64 = 64 * 1024
+	// reviewWorkflowTimeout must match the trusted review job timeout. The
+	// staged pipeline leaves five minutes for setup and publication, while each
+	// model call remains independently bounded.
+	reviewWorkflowTimeout = 60 * time.Minute
+	reviewPipelineTimeout = 55 * time.Minute
+	// Eight owner shards run at no more than four concurrently, so their two
+	// sequential waves fit in 21 minutes. The final SPEC call, parallel
+	// dimensions, and synthesis each have one 11-minute stage, giving valid
+	// 10-minute calls scheduling slack. Their 54-minute worst-case sequence
+	// leaves one minute in-process and five minutes before workflow timeout.
+	semanticOwnerSearchStageTimeout = 21 * time.Minute
+	finalSpecReviewStageTimeout     = 11 * time.Minute
+	dimensionReviewStageTimeout     = 11 * time.Minute
+	synthesisStageTimeout           = 11 * time.Minute
 	// The SDK requires streaming for large output budgets unless the caller
-	// supplies an explicit request timeout. Keep it below run's 20-minute
-	// context deadline so cancellation and retries remain bounded.
-	reviewRequestTimeout = 19 * time.Minute
+	// supplies an explicit request timeout. Every request must fit within its
+	// stage deadline; a shorter parent deadline still wins through context.
+	reviewRequestTimeout = 10 * time.Minute
 )
 
 // callClaude issues a single Messages API request with adaptive thinking and
@@ -140,6 +154,8 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 // whole batch errors (errgroup first-error semantics) so the caller fails
 // closed — a partial review is never treated as complete (SPEC R5, R12).
 func runDimensions(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, diff string) ([]dimensionReport, error) {
+	ctx, cancel := context.WithTimeout(ctx, dimensionReviewStageTimeout)
+	defer cancel()
 	dims := dimensions()
 	reports := make([]dimensionReport, len(dims))
 	g, ctx := errgroup.WithContext(ctx)
@@ -165,6 +181,8 @@ func runDimensions(ctx context.Context, client anthropic.Client, model anthropic
 // unparseable word is handled by ParseOutcome (fail closed, SPEC R7). Returns
 // the raw synthesis text (for the PR comment) alongside the parsed outcome.
 func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, reports []dimensionReport) (Outcome, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, synthesisStageTimeout)
+	defer cancel()
 	var sb strings.Builder
 	sb.WriteString("You are a senior engineer synthesizing independent review reports. The reports include five code review dimensions and may include an authoritative SPEC-CONTRACT report.\n")
 	sb.WriteString("Based on the review reports below, determine the overall outcome per this taxonomy:\n")

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -52,7 +53,8 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 	}
 	var workflow struct {
 		Jobs map[string]struct {
-			Name string `yaml:"name"`
+			Name           string `yaml:"name"`
+			TimeoutMinutes int    `yaml:"timeout-minutes"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(rawWorkflow, &workflow); err != nil {
@@ -64,6 +66,9 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 	}
 	if workflow.Jobs["review"].Name != "AI review orchestration" {
 		t.Fatalf("native job name = %q, want distinct orchestration name", workflow.Jobs["review"].Name)
+	}
+	if time.Duration(workflow.Jobs["review"].TimeoutMinutes)*time.Minute != reviewWorkflowTimeout {
+		t.Fatalf("workflow review timeout = %d minutes, want %s", workflow.Jobs["review"].TimeoutMinutes, reviewWorkflowTimeout)
 	}
 	if !strings.Contains(text, "-f name='SPEC Contract Review'") || !strings.Contains(text, "-f output[title]='SPEC Contract Review'") {
 		t.Fatal("workflow does not publish the unique authoritative SPEC Contract Review check")

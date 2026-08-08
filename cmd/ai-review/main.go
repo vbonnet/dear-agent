@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -362,7 +361,7 @@ func run(c config) int {
 	}
 
 	// Oversize diff fails closed rather than truncating (SPEC R10).
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), reviewPipelineTimeout)
 	defer cancel()
 
 	clientOptions := []option.RequestOption{option.WithAPIKey(c.apiKey)}

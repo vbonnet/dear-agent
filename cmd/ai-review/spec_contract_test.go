@@ -291,6 +291,32 @@ func TestParseBDDFeature_BoundsInheritedOutlineStepInstances(t *testing.T) {
 	}
 }
 
+func TestParseBDDFeature_ValidatesOutlineBackgroundSubstitutions(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		feature string
+		want    string
+	}{
+		{
+			name:    "feature background rejects an empty substituted step",
+			feature: "Feature: inherited substitution\n\n  Background:\n    Given <value>\n\n  Scenario Outline: bounded values\n    Given stable step\n\n    Examples:\n      | value |\n      |       |\n",
+			want:    "empty executable step",
+		},
+		{
+			name:    "rule background applies ordered bounded substitutions",
+			feature: outlineWithSubstitutingBackground(25, true),
+			want:    "interpolation exceeds the review allocation limit",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseBDDFeature("features/inherited-substitution.feature", []byte(tt.feature))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("inherited substitution error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func outlineWithBackgroundSteps(backgroundSteps, rows int, rule bool) string {
 	var feature strings.Builder
 	feature.WriteString("Feature: inherited execution\n")
@@ -328,6 +354,31 @@ func orderedOutlineFeature(columns int, amplify bool) string {
 	for i := range columns {
 		value := fmt.Sprintf("value-%d", i)
 		if amplify && i+1 < columns {
+			value = fmt.Sprintf("<column-%d><column-%d>", i+1, i+1)
+		}
+		fmt.Fprintf(&feature, "| %s ", value)
+	}
+	feature.WriteString("|\n")
+	return feature.String()
+}
+
+func outlineWithSubstitutingBackground(columns int, rule bool) string {
+	var feature strings.Builder
+	feature.WriteString("Feature: ordered inherited substitution\n")
+	indent := "  "
+	if rule {
+		feature.WriteString("\n  Rule: inherited scope\n")
+		indent = "    "
+	}
+	feature.WriteString("\n" + indent + "Background:\n" + indent + "  Given <column-0>\n\n")
+	feature.WriteString(indent + "Scenario Outline: bounded values\n" + indent + "  Given stable step\n\n" + indent + "Examples:\n" + indent + "  ")
+	for i := range columns {
+		fmt.Fprintf(&feature, "| column-%d ", i)
+	}
+	feature.WriteString("|\n" + indent + "  ")
+	for i := range columns {
+		value := fmt.Sprintf("value-%d", i)
+		if i+1 < columns {
 			value = fmt.Sprintf("<column-%d><column-%d>", i+1, i+1)
 		}
 		fmt.Fprintf(&feature, "| %s ", value)
@@ -1185,6 +1236,30 @@ func TestSemanticOwnerIndexIncludesZeroOverlapOwnerEvidence(t *testing.T) {
 	}
 	if len(reasons) != 0 || len(candidates) != 1 || candidates[0].Path != "domains/outcome/SPEC.md" || len(candidates[0].Signals) != 0 {
 		t.Fatalf("zero-overlap owner evidence candidates=%#v reasons=%v", candidates, reasons)
+	}
+}
+
+func TestSemanticOwnerShardPromptIncludesCompleteChangedVisibleContract(t *testing.T) {
+	plan := reviewableSemanticPlan(t, 1)
+	plan.Contracts[0].Content += "\n## Legacy observable contract\n\nThe service returns a durable receipt after every successful completion.\n"
+	_, prompt, err := semanticOwnerShardPrompts(plan, plan.OwnerShards[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "Authenticated bounded ownership evidence:\n"
+	_, raw, found := strings.Cut(prompt, marker)
+	if !found {
+		t.Fatal("semantic owner prompt omitted authenticated evidence")
+	}
+	var evidence semanticOwnerShardPromptEvidence
+	if err := json.Unmarshal([]byte(raw), &evidence); err != nil {
+		t.Fatalf("decode semantic owner evidence: %v", err)
+	}
+	if len(evidence.ChangedContracts) != 1 || !strings.Contains(evidence.ChangedContracts[0].VisibleContract, "Legacy observable contract") || !strings.Contains(evidence.ChangedContracts[0].VisibleContract, "durable receipt") {
+		t.Fatalf("changed visible contract = %#v, want complete legacy prose", evidence.ChangedContracts)
+	}
+	if !strings.Contains(prompt, "Changed contracts and every candidate contain complete bounded visible contract text") {
+		t.Fatal("semantic owner classifier instructions do not require reading changed visible contracts")
 	}
 }
 

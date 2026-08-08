@@ -8,10 +8,28 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
+
+func TestReviewDeadlineBudgetsFitWorkflowTimeout(t *testing.T) {
+	ownerWaves := (maxSemanticShards + maxConcurrentSemanticCalls - 1) / maxConcurrentSemanticCalls
+	if reviewWorkflowTimeout != 60*time.Minute || reviewPipelineTimeout >= reviewWorkflowTimeout {
+		t.Fatalf("workflow/pipeline deadlines = %s/%s, want a bounded pipeline below the 60-minute workflow", reviewWorkflowTimeout, reviewPipelineTimeout)
+	}
+	if reviewWorkflowTimeout-reviewPipelineTimeout < 5*time.Minute {
+		t.Fatalf("workflow reserve = %s, want at least 5 minutes", reviewWorkflowTimeout-reviewPipelineTimeout)
+	}
+	if semanticOwnerSearchStageTimeout < time.Duration(ownerWaves)*reviewRequestTimeout || finalSpecReviewStageTimeout < reviewRequestTimeout || dimensionReviewStageTimeout < reviewRequestTimeout || synthesisStageTimeout < reviewRequestTimeout {
+		t.Fatalf("stage budget cannot complete bounded request waves: owner=%s final=%s dimensions=%s synthesis=%s request=%s waves=%d", semanticOwnerSearchStageTimeout, finalSpecReviewStageTimeout, dimensionReviewStageTimeout, synthesisStageTimeout, reviewRequestTimeout, ownerWaves)
+	}
+	sequentialModelBudget := semanticOwnerSearchStageTimeout + finalSpecReviewStageTimeout + dimensionReviewStageTimeout + synthesisStageTimeout
+	if sequentialModelBudget > reviewPipelineTimeout-time.Minute {
+		t.Fatalf("sequential model budget = %s, want at least one minute inside pipeline %s", sequentialModelBudget, reviewPipelineTimeout)
+	}
+}
 
 func TestCallClaudeUsesRequestedOutputBudget(t *testing.T) {
 	var budgets []int64

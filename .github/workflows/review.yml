@@ -52,7 +52,7 @@ jobs:
   review:
     name: AI review orchestration
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
 
     steps:
       # This is intentionally first so a previous head success is normally

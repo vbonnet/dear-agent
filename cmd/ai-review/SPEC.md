@@ -55,6 +55,8 @@ separate provider-enforcement rollout is verified.
 
 **AIREV-22** When a changed SPEC plan is reviewable, the command shall prove before credential access that every owner-classification prompt, the canonical minimum-field-value and maximum-field-value complete shard verdicts, and the minimum complete final versioned verdict fit their accepted bounds, shall use dedicated bounded owner-classification and final SPEC output budgets, and shall reject any model response whose stop reason is not `end_turn`.
 
+**AIREV-23** When the review runs, the command shall bound every model request, owner-search wave, final SPEC review, concurrent dimension batch, synthesis stage, and total review pipeline with explicit deadlines whose worst-case sequential sum leaves a fixed reserve below the trusted workflow timeout; a deadline or provider failure shall remain fail closed and shall not permit an unbounded retry or partial approval.
+
 ## Enforcement wiring
 
 - `.github/workflows/review.yml` invokes this command from trusted
