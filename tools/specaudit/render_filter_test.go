@@ -22,7 +22,7 @@ func TestRenderFiltersCandidateAndBoundaryFindingCards(t *testing.T) {
 		`<article class="finding" id="SPEC-CLUSTER-001" data-verdict="merge-now">`,
 		`<article class="finding" id="SPEC-CLUSTER-002" data-verdict="keep-separate">`,
 		"document.querySelectorAll('#findings .finding,#boundaries .finding')",
-		"card.hidden=(q&&!card.innerText.toLowerCase().includes(q))||(v&&card.dataset.verdict!==v)",
+		"card.hidden=(q&&!card.textContent.toLowerCase().includes(q))||(v&&card.dataset.verdict!==v)",
 		"query.addEventListener('input',applyFilters)",
 		"verdict.addEventListener('change',applyFilters)",
 	} {

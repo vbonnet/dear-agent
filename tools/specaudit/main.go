@@ -5770,7 +5770,7 @@ html,body,.toc{overflow-x:hidden}
 	out.WriteString("</section></main><footer class=\"footer\"><div class=\"shell\">Self-contained offline report · no external scripts, fonts, styles, or data sources.</div></footer>")
 	out.WriteString(`<script>
 const query=document.getElementById('filter');const verdict=document.getElementById('verdict');
-function applyFilters(){const q=query.value.trim().toLowerCase();const v=verdict.value;for(const card of document.querySelectorAll('#findings .finding,#boundaries .finding')){card.hidden=(q&&!card.innerText.toLowerCase().includes(q))||(v&&card.dataset.verdict!==v)}}
+function applyFilters(){const q=query.value.trim().toLowerCase();const v=verdict.value;for(const card of document.querySelectorAll('#findings .finding,#boundaries .finding')){card.hidden=(q&&!card.textContent.toLowerCase().includes(q))||(v&&card.dataset.verdict!==v)}}
 query.addEventListener('input',applyFilters);verdict.addEventListener('change',applyFilters);
 </script></body></html>
 `)
