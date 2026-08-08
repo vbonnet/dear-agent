@@ -93,7 +93,7 @@
       "agm/internal/codexhooks/verify.go (2881 lines)",
       "agm/internal/dolt/adapter_test.go (1032 lines)",
       "agm/internal/dolt/sessions.go (1665 lines)",
-      "agm/internal/dolt/sessions_sqlite_test.go (1955 lines)",
+      "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)",
       "agm/internal/harnessexec/exec.go (1291 lines)",
       "agm/internal/harnessexec/handoff.go (1733 lines)",
       "agm/internal/harnessexec/handoff_test.go (2194 lines)",
@@ -103,9 +103,9 @@
       "agm/internal/ops/session_resume_test.go (1323 lines)",
       "agm/internal/sentinel/daemon/monitor.go (1036 lines)",
       "agm/internal/session/context_detector_test.go (1432 lines)",
-      "agm/internal/tmux/liveness.go (1018 lines)",
+      "agm/internal/tmux/liveness.go (1027 lines)",
       "agm/internal/tmux/prompt_detector.go (1236 lines)",
-      "agm/internal/tmux/tmux.go (1264 lines)",
+      "agm/internal/tmux/tmux.go (1283 lines)",
       "agm/internal/tmux/tmux_test.go (1109 lines)",
       "agm/internal/ui/table.go (1054 lines)",
       "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
@@ -128,7 +128,7 @@
       "tests/githooks/post_merge_test.go (1452 lines)",
       "tools/specaudit/main.go (6090 lines)",
       "tools/specaudit/main_test.go (3807 lines)",
-      "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1210 lines)"
+      "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
     ],
     "goroutine-recover": [
       "agm/cmd/agm-bus/main.go:190",
@@ -583,6 +583,39 @@
       },
       "reason": "Accept line count growth in local_development_guardrails_steps.go and goroutine recover in test-affected/main.go from PR #1134",
       "reference": "https://github.com/vbonnet/dear-agent/pull/1134"
+    },
+    {
+      "previous_baseline_sha256": "59aa2a47deaffdf50f235f9ca8dd371906d27606e350cad001ae321e9174a27c",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)",
+          "agm/internal/tmux/liveness.go (1027 lines)",
+          "agm/internal/tmux/tmux.go (1283 lines)",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions_sqlite_test.go (1955 lines)",
+          "agm/internal/tmux/liveness.go (1018 lines)",
+          "agm/internal/tmux/tmux.go (1264 lines)",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1210 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Retroactively admit file-size growth merged by PRs #1138, #1159, and #1161; decomposition remains tracked by ce-1hu9.34.",
+      "reference": "ce-1hu9.33"
     }
   ]
 }
