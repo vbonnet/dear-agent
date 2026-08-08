@@ -28,10 +28,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
-
-// Version is stamped at build time via -ldflags.
-var Version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -44,7 +42,7 @@ func main() {
 func run(logger *slog.Logger) error {
 	cfg := configFromEnv()
 	logger.Info("Starting Engram MCP Server",
-		"version", Version,
+		"version", pkgversion.Version,
 		"beads_db", cfg.BeadsDB,
 		"engram_root", cfg.EngramRoot)
 	if cfg.BeadsDB == "" {
@@ -55,7 +53,7 @@ func run(logger *slog.Logger) error {
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "engram",
-		Version: Version,
+		Version: pkgversion.Version,
 	}, nil)
 
 	addBeadsCreateTool(server, cfg)
