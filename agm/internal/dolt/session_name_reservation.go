@@ -224,7 +224,7 @@ func (a *Adapter) RenewSessionNameReservation(sessionID, name string) error {
 		// ownership and non-expiry are already proven above, and the TTL set at
 		// reservation time (2h) covers the caller's remaining launch/readiness
 		// work by orders of magnitude. Correctness must not depend on this UPDATE.
-		_, _ = a.conn.Exec( //nolint:errcheck,noctx // best-effort lease extension; see comment
+		_, _ = a.conn.Exec( //nolint:noctx // best-effort lease extension; see comment
 			`UPDATE agm_session_name_reservations
 			 SET expires_at = ?
 			 WHERE workspace = ? AND name = ?`,
