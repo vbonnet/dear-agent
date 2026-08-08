@@ -113,6 +113,8 @@
       "agm/test/bdd/steps/spec_governance_tooling_steps.go (1621 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1061 lines)",
+      "cmd/ai-review/spec_contract.go (3088 lines)",
+      "cmd/ai-review/spec_contract_test.go (2345 lines)",
       "cmd/vroom-dispatch-direct/main.go (1173 lines)",
       "cmd/vroom-dispatch/main.go (1618 lines)",
       "cmd/vroom-dispatch/main_test.go (1240 lines)",
@@ -616,6 +618,32 @@
       },
       "reason": "Retroactively admit file-size growth merged by PRs #1138, #1159, and #1161; decomposition remains tracked by ce-1hu9.34.",
       "reference": "ce-1hu9.33"
+    },
+    {
+      "previous_baseline_sha256": "9b54b8c59aba242b896c234aec2f6b915576dd0715d766b32b61b43784fc876c",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "cmd/ai-review/spec_contract.go (3088 lines)",
+          "cmd/ai-review/spec_contract_test.go (2345 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Retroactively admit the two SPEC contract reviewer file-size findings merged by PR #1132; decomposition remains tracked by ce-1hu9.37.",
+      "reference": "ce-1hu9.36; ce-1hu9.37"
     }
   ]
 }
