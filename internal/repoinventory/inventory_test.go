@@ -34,6 +34,35 @@ func TestScanUsesGitIgnoreRules(t *testing.T) {
 	}
 }
 
+func TestExecutableBDDFeaturePathUsesCanonicalRunnerRoot(t *testing.T) {
+	t.Parallel()
+	for _, filePath := range []string{
+		"agm/test/bdd/features/example.feature",
+	} {
+		if !IsExecutableBDDFeaturePath(filePath) {
+			t.Errorf("executable BDD feature %q was rejected", filePath)
+		}
+	}
+	for _, filePath := range []string{
+		"docs/contracts/example.feature",
+		"features/example.feature",
+		"agm/test/bdd/features-archive/example.feature",
+		"AGM/test/bdd/features/example.feature",
+		"agm/test/bdd/features/../example.feature",
+		"agm/test/bdd/features/nested/example.feature",
+		"agm/test/bdd/features/example.md",
+		"agm/test/bdd/features/.feature",
+		"agm/test/bdd/features/example feature.feature",
+		"agm/test/bdd/features/example).feature",
+		"agm/test/bdd/features/example`.feature",
+		"agm/test/bdd/features/examplé.feature",
+	} {
+		if IsExecutableBDDFeaturePath(filePath) {
+			t.Errorf("non-executable BDD feature %q was admitted", filePath)
+		}
+	}
+}
+
 func TestScanFallbackSkipsRepositoryOutputsAndDependencies(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

@@ -176,6 +176,10 @@ func parseSpecDocument(filePath string, body []byte) specDocument {
 			document.addIssue(parseIssue{category: issueBDD, code: "malformed-bdd-reference", line: lineNumber, message: "BDD traceability path is not a safe repository-relative .feature path"})
 			continue
 		}
+		if !repoinventory.IsExecutableBDDFeaturePath(featurePath) {
+			document.addIssue(parseIssue{category: issueBDD, code: "non-executable-bdd-reference", line: lineNumber, message: "BDD traceability must reference the executable agm/test/bdd/features suite"})
+			continue
+		}
 		if seenFeatures[featurePath] {
 			document.addIssue(parseIssue{category: issueBDD, code: "duplicate-bdd-reference", line: lineNumber, message: fmt.Sprintf("BDD feature %q is referenced more than once", featurePath)})
 			continue

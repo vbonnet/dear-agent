@@ -105,7 +105,7 @@ func TestAntigravityReminderClaimIsScopedToConversationAndSnapshot(t *testing.T)
 		t.Fatalf("new conversation response = %#v, want its own reminder", response)
 	}
 
-	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When the staged contract changes, the system shall review the new immutable snapshot.\n\n## BDD Traceability\n\n- Feature: `features/example.feature`\n")
+	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When the staged contract changes, the system shall review the new immutable snapshot.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
 	gittest.New(t).Run(t, root, "add", "--", "pkg/example/SPEC.md")
 	changed := specguard.Evaluate(context.Background(), specguard.Request{Repository: root, Mode: specguard.ModeStaged})
 	if changed.SnapshotID == initial.SnapshotID {
@@ -371,7 +371,7 @@ func TestTerminalFeedbackClaimDistinguishesSiblingContinuationSnapshotAndTurn(t 
 				t.Fatalf("repeated snapshot = %#v, want advisory yield", response)
 			}
 
-			writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When the staged contract changes, the system shall review the new immutable snapshot.\n\n## BDD Traceability\n\n- Feature: `features/example.feature`\n")
+			writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When the staged contract changes, the system shall review the new immutable snapshot.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
 			gittest.New(t).Run(t, root, "add", "--", "pkg/example/SPEC.md")
 			if response := invoke("session-a", true, "turn-a"); response.Decision != "block" {
 				t.Fatalf("new snapshot during active continuation = %#v, want fresh block", response)
@@ -519,7 +519,7 @@ func TestCleanTerminalFeedbackDoesNotConsumeCapacityAndClearsClaims(t *testing.T
 	if got := reminderMarkerCount(t, state); got != 0 {
 		t.Fatalf("marker count after clean result = %d, want 0", got)
 	}
-	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When a cleared claim is retried, the system shall admit a new bounded feedback attempt.\n\n## BDD Traceability\n\n- Feature: `features/example.feature`\n")
+	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n**EXAMPLE-02** When a cleared claim is retried, the system shall admit a new bounded feedback attempt.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
 	sandbox.Run(t, root, "add", "--", "pkg/example/SPEC.md")
 	if response := invoke("new-session-after-clear", "post-clear-turn"); response.Decision != "block" {
 		t.Fatalf("post-clear fresh response = %#v, want admitted block", response)
@@ -620,6 +620,9 @@ func TestAntigravityFailurePathsWithoutStableIdentityAllowTermination(t *testing
 		{name: "oversized input", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: bytes.Repeat([]byte("x"), maxHookInputBytes+1)},
 		{name: "malformed bounded input", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: []byte(`{`)},
 		{name: "missing stable identity", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: []byte(`{}`)},
+		{name: "missing execution number", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: []byte(`{"conversationId":"missing-execution"}`)},
+		{name: "negative execution number", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: []byte(`{"conversationId":"negative-execution","executionNum":-1}`)},
+		{name: "oversized conversation identity", args: []string{"--provider", "antigravity", "--root", ".", "--event", "Stop"}, input: fmt.Appendf(nil, `{"conversationId":%q,"executionNum":0}`, strings.Repeat("x", 4097))},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -956,9 +959,9 @@ func stagedContractRepository(t *testing.T) string {
 	t.Helper()
 	root := baseRepository(t)
 	sandbox := gittest.New(t)
-	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n## BDD Traceability\n\n- Feature: `features/example.feature`\n")
-	writeFile(t, root, "features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Example\n  Scenario: Contract remains valid\n    Given a staged contract\n    Then the guard reports its result\n")
-	sandbox.Run(t, root, "add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	writeFile(t, root, "pkg/example/SPEC.md", "# Example\n\n**EXAMPLE-01** When the guard evaluates a contract, the system shall preserve reciprocal BDD traceability.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
+	writeFile(t, root, "agm/test/bdd/features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Example\n  Scenario: Contract remains valid\n    Given a staged contract\n    Then the guard reports its result\n")
+	sandbox.Run(t, root, "add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 	return root
 }
 

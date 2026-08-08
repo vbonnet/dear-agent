@@ -8,8 +8,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/test/bdd/steps"
 )
 
-// TestFeatures runs every Gherkin scenario under features/. There is no tag
-// filter on purpose: any feature file that exists in this directory MUST run.
+// TestFeatures runs every Gherkin scenario in features/. There is no tag
+// filter on purpose: every direct-child feature file in this directory MUST
+// run, while a separate invariant rejects nested feature files that Godog would
+// otherwise discover recursively outside the flat catalog contract.
 // A scenario whose steps are not implemented fails as "undefined" rather than
 // being silently skipped, so dead/aspirational specs cannot accumulate. If you
 // add a feature file, add its step definitions in the same change.

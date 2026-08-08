@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +17,11 @@ import (
 )
 
 const gitInventoryTimeout = 10 * time.Second
+
+// ExecutableBDDFeatureRoot is the only repository path passed to the Godog
+// feature runner. Repository policy keeps executable features as direct
+// children so every catalog and coverage surface observes the same suite.
+const ExecutableBDDFeatureRoot = "agm/test/bdd/features"
 
 var excludedDirectoryNames = map[string]bool{
 	".git":         true,
@@ -52,6 +58,31 @@ func (f File) Executable() bool {
 func IsGovernedPath(path string) bool {
 	path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
 	return path != "." && filepath.IsLocal(filepath.FromSlash(path)) && !excludedPath(path)
+}
+
+// IsExecutableBDDFeaturePath reports whether a canonical repository-relative
+// path belongs to the feature tree the real BDD runner executes.
+func IsExecutableBDDFeaturePath(filePath string) bool {
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(filePath)))
+	prefix := ExecutableBDDFeatureRoot + "/"
+	name := strings.TrimPrefix(filePath, prefix)
+	return cleaned == filePath && IsGovernedPath(filePath) && name != filePath &&
+		pathpkg.Base(name) == name && canonicalBDDFeatureName(name)
+}
+
+func canonicalBDDFeatureName(name string) bool {
+	stem := strings.TrimSuffix(name, ".feature")
+	if stem == name || stem == "" {
+		return false
+	}
+	for _, char := range stem {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // IsImplementationSource classifies source paths consistently for mutable

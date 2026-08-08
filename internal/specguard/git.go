@@ -405,12 +405,23 @@ func validateFilesystemIdentity(identity filesystemIdentity) *guardFailure {
 
 //nolint:gocyclo // Sequential identity reads keep the index and worktree admission gates auditable.
 func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirtyWorktreeRead, afterFinalDirtyRead, afterIndexRead func()) (gitSnapshot, *guardFailure) {
+	indexFlagsBefore, failure := git.admitIndexFlags(ctx, root)
+	if failure != nil {
+		return gitSnapshot{}, failure
+	}
 	dirtyBefore, failure := git.dirtyGovernedPaths(ctx, root)
 	if failure != nil {
 		return gitSnapshot{}, failure
 	}
 	if len(dirtyBefore) != 0 {
 		return gitSnapshot{}, dirtyWorktreeFailure(dirtyBefore[0])
+	}
+	indexFlagsAfterDirtyBefore, _, failure := git.readIndexFlags(ctx, root)
+	if failure != nil {
+		return gitSnapshot{}, failure
+	}
+	if !bytes.Equal(indexFlagsBefore, indexFlagsAfterDirtyBefore) {
+		return gitSnapshot{}, fail("index-race", "", "Git index flags changed during initial dirty-worktree admission")
 	}
 	if afterDirtyWorktreeRead != nil {
 		afterDirtyWorktreeRead()
@@ -460,6 +471,13 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 			identityFailure = fail("index-race", "", "Git index changed while the staged snapshot was being evaluated")
 		}
 	}
+	if identityFailure == nil {
+		var indexFlagsAfter []byte
+		indexFlagsAfter, _, identityFailure = git.readIndexFlags(ctx, root)
+		if identityFailure == nil && !bytes.Equal(indexFlagsBefore, indexFlagsAfter) {
+			identityFailure = fail("index-race", "", "Git index flags changed while the staged snapshot was being evaluated")
+		}
+	}
 	headAfter, headFailure := git.resolveCommit(ctx, root, "HEAD")
 	if identityFailure == nil && headFailure != nil {
 		identityFailure = headFailure
@@ -467,11 +485,25 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 	if identityFailure == nil && headAfter != head {
 		identityFailure = fail("head-race", "", "HEAD changed while the staged snapshot was being evaluated")
 	}
+	var indexFlagsBeforeFinalDirty []byte
+	if identityFailure == nil {
+		indexFlagsBeforeFinalDirty, _, identityFailure = git.readIndexFlags(ctx, root)
+		if identityFailure == nil && !bytes.Equal(indexFlagsBefore, indexFlagsBeforeFinalDirty) {
+			identityFailure = fail("index-race", "", "Git index flags changed before final dirty-worktree admission")
+		}
+	}
 	if identityFailure == nil {
 		var dirtyAfter []dirtyWorktreePath
 		dirtyAfter, identityFailure = git.dirtyGovernedPaths(ctx, root)
 		if identityFailure == nil && len(dirtyAfter) != 0 {
 			identityFailure = fail("dirty-worktree-race", dirtyAfter[0].path, "a governed working-tree path became unstaged or nonignored untracked while the staged snapshot was being evaluated; stage the intended contract state or resolve the dirty path before retrying")
+		}
+	}
+	if identityFailure == nil {
+		var indexFlagsAfterFinalDirty []byte
+		indexFlagsAfterFinalDirty, _, identityFailure = git.readIndexFlags(ctx, root)
+		if identityFailure == nil && !bytes.Equal(indexFlagsBeforeFinalDirty, indexFlagsAfterFinalDirty) {
+			identityFailure = fail("index-race", "", "Git index flags changed during final dirty-worktree admission")
 		}
 	}
 	if identityFailure == nil && afterFinalDirtyRead != nil {
@@ -496,6 +528,13 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 		}
 	}
 	if identityFailure == nil {
+		var finalIndexFlags []byte
+		finalIndexFlags, _, identityFailure = git.readIndexFlags(ctx, root)
+		if identityFailure == nil && !bytes.Equal(indexFlagsBefore, finalIndexFlags) {
+			identityFailure = fail("index-race", "", "Git index flags changed during final dirty-worktree admission")
+		}
+	}
+	if identityFailure == nil {
 		finalHead, finalHeadFailure := git.resolveCommit(ctx, root, "HEAD")
 		if finalHeadFailure != nil {
 			identityFailure = finalHeadFailure
@@ -516,7 +555,7 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 	return gitSnapshot{
 		base:                head,
 		head:                head,
-		identity:            snapshotIdentity("staged", []byte(head), indexBefore, diffBefore),
+		identity:            snapshotIdentity("staged", []byte(head), indexBefore, indexFlagsBefore, diffBefore),
 		files:               files,
 		implementationDirs:  implementationDirs(entries),
 		implementationPaths: implementationPaths(entries),
@@ -567,6 +606,30 @@ func (git gitClient) dirtyGovernedPaths(ctx context.Context, root string) ([]dir
 	}
 	sort.Slice(dirty, func(i, j int) bool { return dirty[i].path < dirty[j].path })
 	return dirty, nil
+}
+
+func (git gitClient) admitIndexFlags(ctx context.Context, root string) ([]byte, *guardFailure) {
+	output, flagged, failure := git.readIndexFlags(ctx, root)
+	if failure != nil {
+		return nil, failure
+	}
+	if len(flagged) != 0 {
+		return nil, fail("index-flagged-governed-path", flagged[0], "governed paths must not use assume-unchanged or skip-worktree index flags; sparse checkouts that mark governed paths skip-worktree are unsupported")
+	}
+	return output, nil
+}
+
+func (git gitClient) readIndexFlags(ctx context.Context, root string) ([]byte, []string, *guardFailure) {
+	output, failure := git.run(ctx, root, nil, git.limits.maxGitOutput,
+		"ls-files", "--cached", "-v", "-z", "--")
+	if failure != nil {
+		return nil, nil, failure
+	}
+	flagged, failure := parseIndexFlaggedPaths(output, git.limits)
+	if failure != nil {
+		return nil, nil, failure
+	}
+	return output, flagged, nil
 }
 
 func dirtyWorktreeFailure(dirty dirtyWorktreePath) *guardFailure {
@@ -850,6 +913,42 @@ func parsePathList(output []byte, limits guardLimits) ([]string, *guardFailure) 
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func parseIndexFlaggedPaths(output []byte, limits guardLimits) ([]string, *guardFailure) {
+	records, failure := nulRecords(output, limits.maxEntries, "index-flag")
+	if failure != nil {
+		return nil, failure
+	}
+	flagged := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, record := range records {
+		if len(record) < 3 || record[1] != ' ' {
+			return nil, fail("malformed-index-flags", "", "Git index flag output contained invalid framing")
+		}
+		tag := record[0]
+		normalized := tag
+		assumeUnchanged := tag >= 'a' && tag <= 'z'
+		if assumeUnchanged {
+			normalized -= 'a' - 'A'
+		}
+		if !strings.ContainsRune("HSMRCK?", rune(normalized)) {
+			return nil, fail("malformed-index-flags", "", "Git index flag output contained an unsupported tag")
+		}
+		filePath := string(record[2:])
+		if failure := validateGitPath(filePath, limits.maxPathBytes); failure != nil {
+			return nil, failure
+		}
+		if seen[filePath] {
+			return nil, fail("malformed-index-flags", filePath, "Git index flag output contained a duplicate path")
+		}
+		seen[filePath] = true
+		if isGovernedPath(filePath) && (assumeUnchanged || normalized == 'S') {
+			flagged = append(flagged, filePath)
+		}
+	}
+	sort.Strings(flagged)
+	return flagged, nil
 }
 
 //nolint:gocyclo // Linear batch framing and object verification intentionally remain in one parser.

@@ -33,7 +33,11 @@ workspace: oss
 digest-bound `/usr/local/libexec/dear-agent-spec-contract-hook` helper rather
 than launching checkout code. The helper derives its sole Git worktree root
 from Antigravity's absolute `workspacePaths` input; absent, invalid, or
-multi-root input emits the native cooperative `decision: "continue"` envelope.
+multi-root input emits at most one native cooperative `decision: "continue"`
+envelope for a stable conversation identity. A repeated failure for that
+conversation, an input without a stable identity, or unavailable private retry
+state emits `decision: "allow"` so a malformed envelope cannot create an
+unbounded Stop loop.
 Antigravity has no `SubagentStop` or Beads lifecycle hook events, and its
 `PreToolUse` contract has no neutral decision that preserves the harness's
 ordinary permission flow. This source therefore does not project unrelated

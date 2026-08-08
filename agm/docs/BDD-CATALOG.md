@@ -9,9 +9,12 @@ AGM's SPEC invariants executable: each one is driven directly against the real
 ## Overview
 
 Scenarios are written in Gherkin and executed by `godog` via `TestFeatures`.
-There is **no tag filter**: every `.feature` file under `test/bdd/features/`
-runs on every build. A scenario whose steps are not implemented fails as
-`undefined` rather than being skipped — so this catalog can never drift back
+There is **no tag filter**: every direct-child `.feature` file in
+`test/bdd/features/` runs on every build. Nested files and basenames outside
+the shared ASCII letter, digit, dot, underscore, and hyphen grammar are rejected
+because Godog would execute them outside this flat parseable catalog and the
+shared governance registries. A scenario whose steps are not implemented fails
+as `undefined` rather than being skipped — so this catalog can never drift back
 into listing tests that do not actually run.
 
 **Location:** [`test/bdd/features/`](../test/bdd/features/)

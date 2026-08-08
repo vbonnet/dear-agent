@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-08 -->
 
-**Version:** 1.6
+**Version:** 1.7
 **Status:** Draft
 **Scope:** `internal/specguard`
 
@@ -11,8 +11,9 @@
 The module validates changed normative specifications at one seam shared by
 local workflows and CI. Semantic evidence is limited to immutable Git index or
 commit-tree objects. Staged mode additionally checks bounded Git-reported
-worktree path/status metadata so governed unstaged and nonignored untracked
-files cannot be silently skipped, without parsing their mutable bodies.
+worktree path/status metadata and index visibility flags so governed unstaged,
+hidden, and nonignored untracked files cannot be silently skipped, without
+parsing their mutable bodies.
 
 Repository-local terminal adapters run mutable checkout code and are
 cooperative reminders and blocks, not tamper-resistant controls. Any mandatory
@@ -68,6 +69,10 @@ installed, registered, or running.
 **SPEC-GUARD-22** Where a governed path is deleted, when the selected immutable snapshot has no surviving reciprocal BDD edge or implementation ownership edge to that path and every same-change replacement passes strict validation, the guard shall retain the deletion in its changed-path evidence and shall permit it to reach mandatory semantic retirement and stable-ID preservation review instead of blocking every deletion unconditionally.
 
 **SPEC-GUARD-23** When a `SPEC.owner` edge is deleted, the guard shall require its surviving implementation directory and every directory represented by a surviving changed implementation source in the same immutable diff to retain a valid `SPEC.owner` edge or a permitted local `SPEC.md` replacement that passes strict contract and neutrality validation.
+
+**SPEC-GUARD-24** When staged validation observes `assume-unchanged` or `skip-worktree` on a governed path, or those index flags change during evaluation, the guard shall block before accepting a snapshot whose dirty contract state Git may suppress. Sparse checkouts that mark governed paths `skip-worktree` are explicitly unsupported.
+
+**SPEC-GUARD-25** When a SPEC declares reciprocal BDD traceability, the guard shall admit only safe direct-child feature paths with the shared bounded basename grammar in the repository's executable `agm/test/bdd/features` suite and shall reject nested, unparseable, documentation-example, or other non-executed `.feature` files as contract evidence.
 
 ## BDD Traceability
 

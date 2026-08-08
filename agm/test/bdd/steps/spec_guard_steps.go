@@ -16,6 +16,8 @@ type specGuardState struct {
 	result             specguard.Result
 	deletionOutput     string
 	deletionRegression error
+	visibilityOutput   string
+	visibilityError    error
 }
 
 // RegisterSpecGuardSteps registers the provider-neutral guard interface steps.
@@ -29,6 +31,9 @@ func RegisterSpecGuardSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^governed contract deletion validation is configured$`, governedContractDeletionValidationIsConfigured)
 	ctx.Step(`^AGM exercises dangling deletion, live owner deletion, complete retirement, and same-change relocation$`, agmExercisesGovernedContractDeletion)
 	ctx.Step(`^only structurally owned replacement, complete retirement, or relocation should reach semantic review$`, completeRetirementOrRelocationReachesSemanticReview)
+	ctx.Step(`^staged SPEC guard visibility validation is configured$`, stagedSpecGuardVisibilityValidationIsConfigured)
+	ctx.Step(`^AGM exercises hidden index paths and executable BDD suite admission$`, agmExercisesSpecGuardVisibilityAdmission)
+	ctx.Step(`^index flags and non-executed feature links should fail closed$`, specGuardVisibilityAdmissionShouldFailClosed)
 }
 
 func malformedSpecGuardCase(ctx context.Context, testCase string) error {
@@ -126,6 +131,37 @@ func completeRetirementOrRelocationReachesSemanticReview(ctx context.Context) er
 	}
 	if state.deletionRegression != nil {
 		return fmt.Errorf("governed contract deletion regression: %w: %s", state.deletionRegression, state.deletionOutput)
+	}
+	return nil
+}
+
+func stagedSpecGuardVisibilityValidationIsConfigured(ctx context.Context) error {
+	_, err := getSpecGuardState(ctx)
+	return err
+}
+
+func agmExercisesSpecGuardVisibilityAdmission(ctx context.Context) error {
+	state, err := getSpecGuardState(ctx)
+	if err != nil {
+		return err
+	}
+	state.visibilityOutput, state.visibilityError = runLocalGuardrailNamedGoTests(ctx,
+		"./internal/specguard",
+		"TestStagedSnapshotRejectsGovernedIndexFlags",
+		"TestStagedSnapshotRechecksIndexFlagsAfterFinalDirtyWorktreeAdmission",
+		"TestSpecTraceabilityRejectsNonExecutableFeaturePaths",
+		"TestNonExecutableFeatureEvidenceFailsInStagedAndCommittedModes",
+	)
+	return nil
+}
+
+func specGuardVisibilityAdmissionShouldFailClosed(ctx context.Context) error {
+	state, err := getSpecGuardState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.visibilityError != nil {
+		return fmt.Errorf("SPEC guard visibility admission regressions: %w: %s", state.visibilityError, state.visibilityOutput)
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 // Package specguard evaluates changed SPEC contracts from immutable Git
 // snapshots. Staged mode also admits bounded Git-reported worktree path/status
-// metadata so dirty governed files cannot be silently skipped. It does not
-// inspect or attest provider, installation, or runtime state.
+// and index-flag metadata so dirty governed files cannot be silently skipped.
+// It does not inspect or attest provider, installation, or runtime state.
 package specguard
 
 import (
@@ -24,7 +24,7 @@ const (
 	GuardScope = "provider-neutral SPEC source guard"
 	// EvidenceClaim is the canonical limit on what a successful or failed
 	// local evaluation proves.
-	EvidenceClaim = "Semantic validation is limited to local Git index or commit-tree objects. Staged mode additionally inspects only bounded Git-reported tracked and nonignored untracked path/status metadata to prevent dirty governed paths from being silently skipped; mutable working-tree bodies are not parsed, and no provider, installation, hook registration, or runtime state is inspected."
+	EvidenceClaim = "Semantic validation is limited to local Git index or commit-tree objects. Staged mode additionally inspects only bounded Git-reported tracked and nonignored untracked path/status metadata plus assume-unchanged and skip-worktree index flags to prevent dirty governed paths from being silently skipped; mutable working-tree bodies are not parsed, and no provider, installation, hook registration, or runtime state is inspected."
 	// TrustBoundary is the canonical disclosure for trusted local inputs.
 	TrustBoundary = "For admitted snapshots, the guard pins and checkpoint-revalidates the canonical worktree root, Git directory, Git common directory, their ancestors, and .git and commondir selectors before and after each Git command. It trusts the selected Git executable, repository metadata and local configuration, object store, configured object alternates, ignore rules used to classify nonignored paths, and filesystem behavior between checkpoints. It sanitizes ambient Git configuration, disables replacement objects and lazy fetching, verifies returned blob bytes against object IDs, requires descendant-process termination before launching Git, and does not attest commit signatures or remote provenance. Repository-local terminal-hook adapters execute mutable checkout code and therefore provide cooperative feedback only; they are not tamper-resistant. Any mandatory immutable enforcement must come from a separately reviewed changed-SPEC CI and provider rollout; this source result does not attest that such enforcement is deployed, has run for a change, or is provider-required."
 )
@@ -184,7 +184,7 @@ func evaluate(ctx context.Context, request Request, limits guardLimits, dependen
 	var snapshot gitSnapshot
 	switch request.Mode {
 	case ModeStaged:
-		result.Source = "Git index object IDs compared with pinned HEAD after bounded dirty-worktree path/status admission"
+		result.Source = "Git index object IDs compared with pinned HEAD after bounded dirty-worktree path/status and index-flag admission"
 		snapshot, failure = git.stagedSnapshot(guardCtx, root, dependencies.afterDirtyWorktreeRead, dependencies.afterFinalDirtyRead, dependencies.afterIndexRead)
 	case ModeCommitted:
 		result.Source = "Git commit-tree object IDs from pinned base..HEAD"

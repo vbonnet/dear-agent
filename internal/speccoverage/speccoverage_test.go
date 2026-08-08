@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -915,6 +916,25 @@ func TestValidateAllRepositorySpecsIncludesDocOnlyContracts(t *testing.T) {
 	}
 	if len(findings) != 1 || findings[0].Path != "docs/policy/SPEC.md" || !strings.Contains(findings[0].Message, "executable BDD feature") {
 		t.Fatalf("expected missing doc-only BDD finding, got %v", findings)
+	}
+}
+
+func TestBDDFeaturePathsIgnoresNestedFeaturesForbiddenBySuitePolicy(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/top.feature", "Feature: Top\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/nested/child.feature", "Feature: Child\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/nested/ignored.md", "not executable\n")
+
+	paths, err := bddFeaturePaths(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"agm/test/bdd/features/top.feature",
+	}
+	if !slices.Equal(paths, want) {
+		t.Fatalf("BDD feature paths = %#v, want %#v", paths, want)
 	}
 }
 

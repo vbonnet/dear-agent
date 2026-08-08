@@ -365,10 +365,13 @@ func bddFeaturePaths(root string) ([]string, error) {
 
 	var features []string
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".feature") {
+		if entry.IsDir() {
 			continue
 		}
-		features = append(features, filepath.ToSlash(filepath.Join("agm", "test", "bdd", "features", entry.Name())))
+		feature := filepath.ToSlash(filepath.Join(repoinventory.ExecutableBDDFeatureRoot, entry.Name()))
+		if repoinventory.IsExecutableBDDFeaturePath(feature) {
+			features = append(features, feature)
+		}
 	}
 	slices.Sort(features)
 	return features, nil

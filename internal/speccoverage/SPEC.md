@@ -1,8 +1,8 @@
 # SPEC and BDD Coverage Specification
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-08-08 -->
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Enforced
 **Scope:** Repository-wide SPEC.md and executable BDD feature coverage.
 
@@ -22,7 +22,7 @@ configuration, service, and executable sources.
 
 **SCB-02** When a parity-critical surface is registered, the system shall require its `SPEC.md` file to exist.
 
-**SCB-03** When a parity-critical surface is registered, the system shall require its executable BDD feature file to exist under `agm/test/bdd/features/`.
+**SCB-03** When a parity-critical surface is registered, the system shall require its executable BDD feature file to exist as a canonically named direct child of `agm/test/bdd/features/` so the runner, catalog, parity registry, and coverage scanners observe the same flat parseable suite.
 
 **SCB-04** When a parity-critical `SPEC.md` file is present, the system shall require an `## EARS Requirements` section.
 

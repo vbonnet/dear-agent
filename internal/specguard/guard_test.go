@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -232,9 +233,9 @@ func TestGitContextCancellationClassificationTracksLifecycleOrdering(t *testing.
 func TestStagedSnapshotBlocksDirtyGovernedWorktreeWithoutParsingMutableBody(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 	fixture.write("pkg/example/SPEC.md", "mutable worktree bytes are deliberately not a valid SPEC\n")
 
 	result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
@@ -250,9 +251,9 @@ func TestStagedSnapshotBlocksDirtyGovernedWorktreeWithoutParsingMutableBody(t *t
 func TestStagedSnapshotUsesImmutableStagedContentWhenWorktreeIsClean(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 
 	result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 	if result.Decision != DecisionReminder {
@@ -261,7 +262,7 @@ func TestStagedSnapshotUsesImmutableStagedContentWhenWorktreeIsClean(t *testing.
 	if result.Findings == nil {
 		t.Fatal("successful result must encode findings as an empty array, not null")
 	}
-	if result.Source != "Git index object IDs compared with pinned HEAD after bounded dirty-worktree path/status admission" {
+	if result.Source != "Git index object IDs compared with pinned HEAD after bounded dirty-worktree path/status and index-flag admission" {
 		t.Fatalf("source = %q", result.Source)
 	}
 	if len(result.SnapshotID) != 64 {
@@ -300,7 +301,7 @@ func TestStagedSnapshotBlocksGovernedDirtyAddModifyAndDelete(t *testing.T) {
 		{
 			name: "tracked deletion",
 			mutate: func(fixture guardRepository) {
-				if err := os.Remove(filepath.Join(fixture.root, "features", "example.feature")); err != nil {
+				if err := os.Remove(filepath.Join(fixture.root, "agm", "test", "bdd", "features", "example.feature")); err != nil {
 					fixture.t.Fatal(err)
 				}
 			},
@@ -309,14 +310,65 @@ func TestStagedSnapshotBlocksGovernedDirtyAddModifyAndDelete(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newGuardRepository(t)
-			fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-			fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-			fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+			fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+			fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+			fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 			fixture.git("commit", "-m", "governed baseline")
 			test.mutate(fixture)
 
 			result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 			assertDecisionAndCode(t, result, DecisionBlock, "dirty-governed-worktree")
+		})
+	}
+}
+
+func TestStagedSnapshotRejectsGovernedIndexFlags(t *testing.T) {
+	t.Parallel()
+	for _, flag := range []string{"--assume-unchanged", "--skip-worktree"} {
+		for _, governedPath := range []string{
+			"pkg/example/SPEC.md",
+			"internal/adapter/SPEC.owner",
+			"agm/test/bdd/features/example.feature",
+		} {
+			for _, dirty := range []bool{false, true} {
+				name := strings.TrimPrefix(flag, "--") + "/" + strings.ReplaceAll(governedPath, "/", "-")
+				if dirty {
+					name += "/dirty"
+				} else {
+					name += "/clean"
+				}
+				t.Run(name, func(t *testing.T) {
+					fixture := newGuardRepository(t)
+					featurePath := "agm/test/bdd/features/example.feature"
+					fixture.write("pkg/example/SPEC.md", validSpec(featurePath))
+					fixture.write(featurePath, validFeature("pkg/example/SPEC.md"))
+					fixture.write("internal/adapter/adapter.go", "package adapter\n")
+					fixture.write("internal/adapter/SPEC.owner", "pkg/example/SPEC.md\n")
+					fixture.git("add", "--", "pkg/example/SPEC.md", featurePath, "internal/adapter/adapter.go", "internal/adapter/SPEC.owner")
+					fixture.git("commit", "-m", "governed baseline")
+					fixture.git("update-index", flag, "--", governedPath)
+					if dirty {
+						fixture.write(governedPath, "mutable contract hidden by an index flag\n")
+					}
+
+					result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+					assertDecisionAndCode(t, result, DecisionBlock, "index-flagged-governed-path")
+				})
+			}
+		}
+	}
+}
+
+func TestStagedSnapshotAllowsStableIndexFlagsOnUngovernedPaths(t *testing.T) {
+	t.Parallel()
+	for _, flag := range []string{"--assume-unchanged", "--skip-worktree"} {
+		t.Run(flag, func(t *testing.T) {
+			fixture := newGuardRepository(t)
+			fixture.git("update-index", flag, "--", "README.md")
+			result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+			if result.Decision != DecisionAllow || len(result.Findings) != 0 {
+				t.Fatalf("result = %#v, want clean ungoverned index flag admission", result)
+			}
 		})
 	}
 }
@@ -340,9 +392,9 @@ func TestStagedSnapshotDetectsDirtyWorktreeRace(t *testing.T) {
 func TestStagedSnapshotDetectsIndexRace(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 
 	mutated := false
 	result := evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged}, defaultLimits(), guardDependencies{
@@ -361,15 +413,15 @@ func TestStagedSnapshotDetectsIndexRace(t *testing.T) {
 func TestStagedSnapshotRechecksIndexAfterFinalDirtyWorktreeAdmission(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 
 	mutated := false
 	result := evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged}, defaultLimits(), guardDependencies{
 		afterFinalDirtyRead: func() {
 			mutated = true
-			fixture.write("pkg/example/SPEC.md", strings.Replace(validSpec("features/example.feature"), "provider-neutral outcome", "rechecked provider-neutral outcome", 1))
+			fixture.write("pkg/example/SPEC.md", strings.Replace(validSpec("agm/test/bdd/features/example.feature"), "provider-neutral outcome", "rechecked provider-neutral outcome", 1))
 			fixture.git("add", "--", "pkg/example/SPEC.md")
 		},
 	})
@@ -379,17 +431,38 @@ func TestStagedSnapshotRechecksIndexAfterFinalDirtyWorktreeAdmission(t *testing.
 	assertDecisionAndCode(t, result, DecisionBlock, "index-race")
 }
 
+func TestStagedSnapshotRechecksIndexFlagsAfterFinalDirtyWorktreeAdmission(t *testing.T) {
+	t.Parallel()
+	fixture := newGuardRepository(t)
+	featurePath := "agm/test/bdd/features/example.feature"
+	fixture.write("pkg/example/SPEC.md", validSpec(featurePath))
+	fixture.write(featurePath, validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", featurePath)
+
+	mutated := false
+	result := evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged}, defaultLimits(), guardDependencies{
+		afterFinalDirtyRead: func() {
+			mutated = true
+			fixture.git("update-index", "--skip-worktree", "--", "pkg/example/SPEC.md")
+		},
+	})
+	if !mutated {
+		t.Fatal("final index-flag mutation hook did not run")
+	}
+	assertDecisionAndCode(t, result, DecisionBlock, "index-race")
+}
+
 func TestCommittedSnapshotValidatesPinnedBaseToHead(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", invalidSpec("features/example.feature"))
-	fixture.write("features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Base contract\n  Scenario: Base has no assertion\n    Given a condition\n")
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", invalidSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Base contract\n  Scenario: Base has no assertion\n    Given a condition\n")
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 	fixture.git("commit", "-m", "add invalid base contract")
 	base := fixture.git("rev-parse", "HEAD")
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 	fixture.git("commit", "-m", "repair governed contract")
 
 	result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeCommitted, Base: base})
@@ -462,9 +535,9 @@ func TestChangedSpecRequiresStrictEARSNeutralOwnerAndReciprocalBDD(t *testing.T)
 		} {
 			t.Run(strings.ReplaceAll(specPath, "/", "_"), func(t *testing.T) {
 				fixture := newGuardRepository(t)
-				fixture.write(specPath, validSpec("features/harness.feature"))
-				fixture.write("features/harness.feature", validFeature(specPath))
-				fixture.git("add", "--", specPath, "features/harness.feature")
+				fixture.write(specPath, validSpec("agm/test/bdd/features/harness.feature"))
+				fixture.write("agm/test/bdd/features/harness.feature", validFeature(specPath))
+				fixture.git("add", "--", specPath, "agm/test/bdd/features/harness.feature")
 				result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 				assertDecisionAndCode(t, result, DecisionBlock, "non-neutral-spec-owner")
 			})
@@ -479,9 +552,9 @@ func TestChangedSpecRequiresStrictEARSNeutralOwnerAndReciprocalBDD(t *testing.T)
 		} {
 			t.Run(strings.ReplaceAll(specPath, "/", "_"), func(t *testing.T) {
 				fixture := newGuardRepository(t)
-				fixture.write(specPath, validSpec("features/logical.feature"))
-				fixture.write("features/logical.feature", validFeature(specPath))
-				fixture.git("add", "--", specPath, "features/logical.feature")
+				fixture.write(specPath, validSpec("agm/test/bdd/features/logical.feature"))
+				fixture.write("agm/test/bdd/features/logical.feature", validFeature(specPath))
+				fixture.git("add", "--", specPath, "agm/test/bdd/features/logical.feature")
 				result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 				if result.Decision != DecisionReminder || len(result.Findings) != 0 {
 					t.Fatalf("result = %#v, want reminder without deterministic findings", result)
@@ -492,37 +565,37 @@ func TestChangedSpecRequiresStrictEARSNeutralOwnerAndReciprocalBDD(t *testing.T)
 
 	t.Run("missing reciprocal feature link", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", validFeature("pkg/other/SPEC.md"))
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/other/SPEC.md"))
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		assertDecisionAndCode(t, result, DecisionBlock, "nonreciprocal-bdd-link")
 	})
 
 	t.Run("two primary owners", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("pkg/other/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", "# SPEC: pkg/example/SPEC.md\n# SPEC: pkg/other/SPEC.md\nFeature: Example\n  Scenario: Works\n    Given an observable condition\n")
-		fixture.git("add", "--", "pkg/example/SPEC.md", "pkg/other/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("pkg/other/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", "# SPEC: pkg/example/SPEC.md\n# SPEC: pkg/other/SPEC.md\nFeature: Example\n  Scenario: Works\n    Given an observable condition\n")
+		fixture.git("add", "--", "pkg/example/SPEC.md", "pkg/other/SPEC.md", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		assertDecisionAndCode(t, result, DecisionBlock, "bdd-primary-owner-count")
 	})
 
 	t.Run("Given and When only are not runnable BDD", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Example\n  Scenario: No assertion\n    Given an observable condition\n    When the contract is evaluated\n")
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Example\n  Scenario: No assertion\n    Given an observable condition\n    When the contract is evaluated\n")
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		assertDecisionAndCode(t, result, DecisionBlock, "scenario-without-assertion")
 	})
 
 	t.Run("Scenario Outline requires nonempty Examples", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Example\n  Scenario Outline: Missing examples\n    Given an observable <condition>\n    Then the outcome is preserved\n")
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", "# SPEC: pkg/example/SPEC.md\nFeature: Example\n  Scenario Outline: Missing examples\n    Given an observable <condition>\n    Then the outcome is preserved\n")
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		assertDecisionAndCode(t, result, DecisionBlock, "outline-without-examples")
 	})
@@ -783,9 +856,9 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 	t.Parallel()
 	newFixture := func(t *testing.T) guardRepository {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		fixture.git("commit", "-m", "add contract")
 		return fixture
 	}
@@ -802,10 +875,10 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 
 	t.Run("deleted feature leaves a dangling SPEC edge", func(t *testing.T) {
 		fixture := newFixture(t)
-		if err := os.Remove(filepath.Join(fixture.root, "features/example.feature")); err != nil {
+		if err := os.Remove(filepath.Join(fixture.root, "agm/test/bdd/features/example.feature")); err != nil {
 			t.Fatal(err)
 		}
-		fixture.git("add", "-u", "--", "features/example.feature")
+		fixture.git("add", "-u", "--", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		assertDecisionAndCode(t, result, DecisionBlock, "missing-bdd-feature")
 	})
@@ -816,12 +889,12 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
 		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
 		fixture.git("commit", "-m", "add implementation owner edge")
-		for _, relative := range []string{"pkg/example/SPEC.md", "features/example.feature"} {
+		for _, relative := range []string{"pkg/example/SPEC.md", "agm/test/bdd/features/example.feature"} {
 			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
 				t.Fatal(err)
 			}
 		}
-		fixture.git("add", "-u", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.git("add", "-u", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		assertDecisionAndCode(t, result, DecisionBlock, "missing-spec-owner-target")
 	})
@@ -902,9 +975,9 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 		if err := os.Remove(filepath.Join(fixture.root, "internal/adapter/SPEC.owner")); err != nil {
 			t.Fatal(err)
 		}
-		fixture.write("internal/adapter/SPEC.md", validSpec("features/adapter.feature"))
-		fixture.write("features/adapter.feature", validFeature("internal/adapter/SPEC.md"))
-		fixture.git("add", "-A", "--", "internal/adapter/SPEC.owner", "internal/adapter/SPEC.md", "features/adapter.feature")
+		fixture.write("internal/adapter/SPEC.md", validSpec("agm/test/bdd/features/adapter.feature"))
+		fixture.write("agm/test/bdd/features/adapter.feature", validFeature("internal/adapter/SPEC.md"))
+		fixture.git("add", "-A", "--", "internal/adapter/SPEC.owner", "internal/adapter/SPEC.md", "agm/test/bdd/features/adapter.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		if result.Decision != DecisionReminder || len(result.Findings) != 0 {
 			t.Fatalf("result = %#v, want valid replacement ownership reminder", result)
@@ -913,12 +986,12 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 
 	t.Run("complete retirement reaches semantic review", func(t *testing.T) {
 		fixture := newFixture(t)
-		for _, relative := range []string{"pkg/example/SPEC.md", "features/example.feature"} {
+		for _, relative := range []string{"pkg/example/SPEC.md", "agm/test/bdd/features/example.feature"} {
 			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
 				t.Fatal(err)
 			}
 		}
-		fixture.git("add", "-u", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.git("add", "-u", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		if result.Decision != DecisionReminder || len(result.Findings) != 0 || len(result.Changed) != 2 ||
 			!strings.Contains(result.Reminder, "retirement or stable-ID migration") {
@@ -932,8 +1005,8 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 			t.Fatal(err)
 		}
 		fixture.git("mv", "pkg/example/SPEC.md", "pkg/relocated/SPEC.md")
-		fixture.write("features/example.feature", validFeature("pkg/relocated/SPEC.md"))
-		fixture.git("add", "--", "features/example.feature")
+		fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/relocated/SPEC.md"))
+		fixture.git("add", "--", "agm/test/bdd/features/example.feature")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		if result.Decision != DecisionReminder || len(result.Findings) != 0 || len(result.Changed) != 3 {
 			t.Fatalf("result = %#v, want valid relocation reminder", result)
@@ -945,9 +1018,9 @@ func TestBoundsFailClosed(t *testing.T) {
 	t.Parallel()
 	t.Run("file size", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		limits := defaultLimits()
 		limits.maxFileBytes = 32
 		result := evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged}, limits, guardDependencies{})
@@ -1037,6 +1110,28 @@ func TestDirtyPathListParsingIsNULSafeAndBounded(t *testing.T) {
 	}
 }
 
+func TestIndexFlagParsingIsNULSafeAndGoverned(t *testing.T) {
+	t.Parallel()
+	output := []byte("H README.md\x00h pkg/example/SPEC.md\x00S agm/test/bdd/features/example.feature\x00s docs/other/SPEC.md\x00")
+	flagged, failure := parseIndexFlaggedPaths(output, defaultLimits())
+	if failure != nil {
+		t.Fatal(failure.message)
+	}
+	want := []string{"agm/test/bdd/features/example.feature", "docs/other/SPEC.md", "pkg/example/SPEC.md"}
+	if !slices.Equal(flagged, want) {
+		t.Fatalf("flagged paths = %#v, want %#v", flagged, want)
+	}
+	for _, malformed := range [][]byte{
+		[]byte("H missing-terminator"),
+		[]byte("! unsupported/SPEC.md\x00"),
+		[]byte("H duplicate/SPEC.md\x00H duplicate/SPEC.md\x00"),
+	} {
+		if _, failure := parseIndexFlaggedPaths(malformed, defaultLimits()); failure == nil {
+			t.Fatalf("malformed index-flag output %q was accepted", malformed)
+		}
+	}
+}
+
 func TestParseSpecOwnerAcceptsNeutralCanonicalTargets(t *testing.T) {
 	t.Parallel()
 	for _, target := range []string{"SPEC.md", ".dear-agent/SPEC.md", "internal/hookparity/SPEC.md"} {
@@ -1079,7 +1174,7 @@ func TestSpecOwnerChangesGovernCanonicalSharedContract(t *testing.T) {
 	fixture := newGuardRepository(t)
 	const (
 		specPath    = "internal/hookparity/SPEC.md"
-		featurePath = "features/hook_parity.feature"
+		featurePath = "agm/test/bdd/features/hook_parity.feature"
 		ownerPath   = ".opencode/plugins/SPEC.owner"
 	)
 	fixture.write(specPath, validSpec(featurePath))
@@ -1107,10 +1202,10 @@ func TestAddingLocalSpecBesideExistingOwnerFailsClosed(t *testing.T) {
 	fixture := newGuardRepository(t)
 	const (
 		sharedSpec    = "internal/hookparity/SPEC.md"
-		sharedFeature = "features/hook_parity.feature"
+		sharedFeature = "agm/test/bdd/features/hook_parity.feature"
 		ownerPath     = ".opencode/plugins/SPEC.owner"
 		localSpec     = ".opencode/plugins/SPEC.md"
-		localFeature  = "features/local.feature"
+		localFeature  = "agm/test/bdd/features/local.feature"
 	)
 	fixture.write(sharedSpec, validSpec(sharedFeature))
 	fixture.write(sharedFeature, validFeature(sharedSpec))
@@ -1156,7 +1251,7 @@ func TestSourceLessOrNonregularSpecOwnerFailsClosed(t *testing.T) {
 			fixture := newGuardRepository(t)
 			const (
 				specPath    = "internal/hookparity/SPEC.md"
-				featurePath = "features/hook_parity.feature"
+				featurePath = "agm/test/bdd/features/hook_parity.feature"
 				ownerPath   = ".opencode/plugins/SPEC.owner"
 			)
 			fixture.write(specPath, validSpec(featurePath))
@@ -1188,11 +1283,11 @@ func TestSpecOwnerChangesFailClosedOnInvalidOwnershipEdges(t *testing.T) {
 		{
 			name: "ambiguous local owner", owner: "internal/shared/SPEC.md\n", code: "ambiguous-spec-owner",
 			setup: func(fixture guardRepository) {
-				fixture.write(".opencode/plugins/SPEC.md", validSpec("features/local.feature"))
-				fixture.write("features/local.feature", validFeature(".opencode/plugins/SPEC.md"))
-				fixture.write("internal/shared/SPEC.md", validSpec("features/shared.feature"))
-				fixture.write("features/shared.feature", validFeature("internal/shared/SPEC.md"))
-				fixture.git("add", "--", ".opencode/plugins/SPEC.md", "features/local.feature", "internal/shared/SPEC.md", "features/shared.feature")
+				fixture.write(".opencode/plugins/SPEC.md", validSpec("agm/test/bdd/features/local.feature"))
+				fixture.write("agm/test/bdd/features/local.feature", validFeature(".opencode/plugins/SPEC.md"))
+				fixture.write("internal/shared/SPEC.md", validSpec("agm/test/bdd/features/shared.feature"))
+				fixture.write("agm/test/bdd/features/shared.feature", validFeature("internal/shared/SPEC.md"))
+				fixture.git("add", "--", ".opencode/plugins/SPEC.md", "agm/test/bdd/features/local.feature", "internal/shared/SPEC.md", "agm/test/bdd/features/shared.feature")
 			},
 		},
 	} {
@@ -1226,7 +1321,7 @@ func TestLogicalCorpusCountsDuplicateObjectPaths(t *testing.T) {
 
 func TestMarkdownFenceRequiresMatchingRunLengthAndTermination(t *testing.T) {
 	t.Parallel()
-	body := []byte("**EXAMPLE-01** The example contract shall remain valid.\n````text\n```\nAfter a trigger, the hidden example shall be ignored.\n````\n## BDD Traceability\n- Feature: `features/example.feature`\n")
+	body := []byte("**EXAMPLE-01** The example contract shall remain valid.\n````text\n```\nAfter a trigger, the hidden example shall be ignored.\n````\n## BDD Traceability\n- Feature: `agm/test/bdd/features/example.feature`\n")
 	document := parseSpecDocument("pkg/example/SPEC.md", body)
 	for _, issue := range document.issues {
 		if issue.code == "invalid-ears" || issue.code == "unterminated-markdown-fence" {
@@ -1240,6 +1335,71 @@ func TestMarkdownFenceRequiresMatchingRunLengthAndTermination(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("unterminated issues = %#v", unterminated.issues)
+	}
+}
+
+func TestSpecTraceabilityRejectsNonExecutableFeaturePaths(t *testing.T) {
+	t.Parallel()
+	for _, featurePath := range []string{
+		"docs/contracts/example.feature",
+		"features/example.feature",
+		"agm/test/bdd/features-archive/example.feature",
+		"AGM/test/bdd/features/example.feature",
+		"agm/test/bdd/features/nested/example.feature",
+		"agm/test/bdd/features/example feature.feature",
+	} {
+		document := parseSpecDocument("pkg/example/SPEC.md", []byte(validSpec(featurePath)))
+		if !hasParseIssueCode(document.issues, "non-executable-bdd-reference") || len(document.features) != 0 {
+			t.Fatalf("feature %q produced features=%#v issues=%#v", featurePath, document.features, document.issues)
+		}
+	}
+	traversal := parseSpecDocument("pkg/example/SPEC.md", []byte(validSpec("agm/test/bdd/features/../example.feature")))
+	if !hasParseIssueCode(traversal.issues, "malformed-bdd-reference") || len(traversal.features) != 0 {
+		t.Fatalf("traversal feature produced features=%#v issues=%#v", traversal.features, traversal.issues)
+	}
+	document := parseSpecDocument("pkg/example/SPEC.md", []byte(validSpec("agm/test/bdd/features/example.feature")))
+	if hasParseIssueCode(document.issues, "non-executable-bdd-reference") || !slices.Equal(document.features, []string{"agm/test/bdd/features/example.feature"}) {
+		t.Fatalf("executable feature produced features=%#v issues=%#v", document.features, document.issues)
+	}
+}
+
+func TestNonExecutableFeatureEvidenceFailsInStagedAndCommittedModes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		featurePath string
+		code        string
+		writePath   bool
+	}{
+		{name: "documentation example", featurePath: "docs/contracts/example.feature", code: "non-executable-bdd-reference", writePath: true},
+		{name: "near-prefix archive", featurePath: "agm/test/bdd/features-archive/example.feature", code: "non-executable-bdd-reference", writePath: true},
+		{name: "case variant", featurePath: "AGM/test/bdd/features/example.feature", code: "non-executable-bdd-reference", writePath: true},
+		{name: "nested feature", featurePath: "agm/test/bdd/features/nested/example.feature", code: "non-executable-bdd-reference", writePath: true},
+		{name: "unparseable basename", featurePath: "agm/test/bdd/features/example feature.feature", code: "non-executable-bdd-reference", writePath: true},
+		{name: "traversal", featurePath: "agm/test/bdd/features/../example.feature", code: "malformed-bdd-reference"},
+	}
+	for _, test := range tests {
+		for _, mode := range []Mode{ModeStaged, ModeCommitted} {
+			t.Run(test.name+"/"+string(mode), func(t *testing.T) {
+				fixture := newGuardRepository(t)
+				base := fixture.git("rev-parse", "HEAD")
+				fixture.write("pkg/example/SPEC.md", validSpec(test.featurePath))
+				paths := []string{"pkg/example/SPEC.md"}
+				if test.writePath {
+					fixture.write(test.featurePath, validFeature("pkg/example/SPEC.md"))
+					paths = append(paths, test.featurePath)
+				}
+				gitArgs := append([]string{"add", "--"}, paths...)
+				fixture.git(gitArgs...)
+				request := Request{Repository: fixture.root, Mode: mode}
+				if mode == ModeCommitted {
+					fixture.git("commit", "-m", "add non-executable contract evidence")
+					request.Base = base
+				}
+				result := Evaluate(context.Background(), request)
+				assertDecisionAndCode(t, result, DecisionBlock, test.code)
+			})
+		}
 	}
 }
 
@@ -1303,9 +1463,9 @@ func TestFeatureRunnableScenarioContract(t *testing.T) {
 func TestAmbientGitIndexAndReplacementObjectsCannotChangeEvidence(t *testing.T) {
 	t.Run("ambient index", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-		fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		other := newGuardRepository(t)
 		t.Setenv("GIT_INDEX_FILE", filepath.Join(other.root, ".git", "index"))
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
@@ -1316,18 +1476,18 @@ func TestAmbientGitIndexAndReplacementObjectsCannotChangeEvidence(t *testing.T) 
 
 	t.Run("replacement object", func(t *testing.T) {
 		fixture := newGuardRepository(t)
-		fixture.write("pkg/example/SPEC.md", invalidSpec("features/example.feature"))
-		fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-		fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+		fixture.write("pkg/example/SPEC.md", invalidSpec("agm/test/bdd/features/example.feature"))
+		fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+		fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 		staged := strings.Fields(fixture.git("ls-files", "--stage", "--", "pkg/example/SPEC.md"))
 		if len(staged) < 2 {
 			t.Fatalf("unexpected ls-files output: %q", staged)
 		}
 		validPath := filepath.Join(fixture.root, "valid-replacement")
-		if err := os.WriteFile(validPath, []byte(validSpec("features/example.feature")), 0o600); err != nil {
+		if err := os.WriteFile(validPath, []byte(validSpec("agm/test/bdd/features/example.feature")), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		validOID := fixture.gitInput(validSpec("features/example.feature"), "hash-object", "-w", "--stdin")
+		validOID := fixture.gitInput(validSpec("agm/test/bdd/features/example.feature"), "hash-object", "-w", "--stdin")
 		fixture.git("replace", staged[1], validOID)
 		t.Setenv("GIT_NO_REPLACE_OBJECTS", "0")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
@@ -1338,9 +1498,9 @@ func TestAmbientGitIndexAndReplacementObjectsCannotChangeEvidence(t *testing.T) 
 func TestMissingPromisorBlobDoesNotLazyFetch(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)
-	fixture.write("pkg/example/SPEC.md", validSpec("features/example.feature"))
-	fixture.write("features/example.feature", validFeature("pkg/example/SPEC.md"))
-	fixture.git("add", "--", "pkg/example/SPEC.md", "features/example.feature")
+	fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))
+	fixture.write("agm/test/bdd/features/example.feature", validFeature("pkg/example/SPEC.md"))
+	fixture.git("add", "--", "pkg/example/SPEC.md", "agm/test/bdd/features/example.feature")
 	fields := strings.Fields(fixture.git("ls-files", "--stage", "--", "pkg/example/SPEC.md"))
 	if len(fields) < 2 {
 		t.Fatalf("unexpected ls-files output: %q", fields)
