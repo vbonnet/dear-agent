@@ -181,9 +181,9 @@ const mod = await import("data:text/javascript;base64," + Buffer.from(source).to
 for (const eventName of ["Stop", "SubagentStop"]) {
   let clock = 0;
   const observed = [];
-  const result = mod.runProjectHooks(eventName, {}, process.argv[2], {
+  const result = await mod.runProjectHooks(eventName, {}, process.argv[2], {
     now() { return clock; },
-    spawnSync(_command, args, options) {
+    async runCommand(_command, args, options) {
       observed.push({command: args[1], timeout: options.timeout, maxBuffer: options.maxBuffer});
       clock += options.timeout + (observed.length === 1 ? 500 : 0);
       return {status: 0, stdout: "", stderr: ""};
@@ -198,12 +198,56 @@ for (const eventName of ["Stop", "SubagentStop"]) {
   }
   if (observed.some((entry) => entry.maxBuffer !== 16384)) throw new Error(eventName + " output capture was not bounded: " + JSON.stringify(observed));
 }
-const slowResult = mod.runProjectHooks("Stop", {}, process.argv[3]);
+const slowResult = await mod.runProjectHooks("Stop", {}, process.argv[3]);
 if (slowResult?.context !== "long terminal handler completed") throw new Error("declared 60-second handler was shortened below its three-second execution: " + JSON.stringify(slowResult));
 `
 	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(repository), filepath.Clean(slowProject))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("production Pi terminal budgets: %v\n%s", err, output)
+	}
+}
+
+func TestPiTerminalHookTimeoutKillsTermIgnoringProcessGroup(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	root := t.TempDir()
+	extensionPath, err := EnsurePiAuthorizationExtension(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	childPIDPath := filepath.Join(t.TempDir(), "term-ignoring-child.pid")
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"trap '' TERM; (trap '' TERM; while :; do sleep 1; done) & child=$!; printf '%s' \"$child\" > \"$PI_CHILD_PID_FILE\"; while :; do sleep 1; done","timeout":0.2}]}]}}`
+	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const started = Date.now();
+const result = await mod.runProjectHooks("Stop", {}, process.argv[2]);
+const elapsed = Date.now() - started;
+if (!result?.block || !result.reason.includes("ETIMEDOUT")) throw new Error("TERM-ignoring terminal hook did not fail closed: " + JSON.stringify(result));
+if (elapsed > 1500) throw new Error("TERM-ignoring terminal hook exceeded its bounded cleanup window: " + elapsed);
+const childPID = Number(readFileSync(process.argv[3], "utf8"));
+await new Promise((resolve) => setTimeout(resolve, 100));
+try {
+  process.kill(childPID, 0);
+  throw new Error("TERM-ignoring hook descendant survived process-group cleanup: " + childPID);
+} catch (error) {
+  if (error?.code !== "ESRCH") throw error;
+}
+`
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project), filepath.Clean(childPIDPath))
+	command.Env = append(os.Environ(), "PI_CHILD_PID_FILE="+childPIDPath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("TERM-ignoring Pi hook cleanup: %v\n%s", err, output)
 	}
 }
 
@@ -307,32 +351,32 @@ for (const [mode, allow, call, interactive, want] of cases) {
 }
 let hookResult;
 for (let attempt = 0; attempt < 3; attempt++) {
-  hookResult = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[2]);
+  hookResult = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[2]);
   if (hookResult?.reason?.includes("project guard rejected") || !hookResult?.reason?.includes("ETIMEDOUT")) break;
 }
 if (!hookResult?.block || !hookResult.reason.includes("project guard rejected")) throw new Error("project hook did not fail closed with its declared reason: " + JSON.stringify(hookResult));
-const timeoutHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[5]);
+const timeoutHook = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[5]);
 if (!timeoutHook?.block || !timeoutHook.reason.includes("ETIMEDOUT") || !timeoutHook.reason.includes("timeout stderr") || timeoutHook.reason.includes("timeout context")) throw new Error("project hook timeout masked its execution failure: " + JSON.stringify(timeoutHook));
-const nonzeroHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[6]);
+const nonzeroHook = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[6]);
 if (!nonzeroHook?.block || !nonzeroHook.reason.startsWith("PreToolUse hook exited with status 42") || !nonzeroHook.reason.includes("advisory only")) throw new Error("project hook nonzero status was masked by advisory context: " + JSON.stringify(nonzeroHook));
-const unmatchedHook = mod.runProjectHooks("PreToolUse", {toolName:"edit", input:{path:"README.md"}}, process.argv[2]);
+const unmatchedHook = await mod.runProjectHooks("PreToolUse", {toolName:"edit", input:{path:"README.md"}}, process.argv[2]);
 if (unmatchedHook !== undefined) throw new Error("matcher ran for an unrelated tool");
-const malformedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[3]);
+const malformedHook = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[3]);
 if (!malformedHook?.block || !malformedHook.reason.includes("cannot load Pi hook manifest")) throw new Error("malformed hook manifest did not fail closed");
-const invalidShapeHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[7]);
+const invalidShapeHook = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[7]);
 if (!invalidShapeHook?.block || !invalidShapeHook.reason.includes("invalid timeout")) throw new Error("invalid hook schema did not fail closed: " + JSON.stringify(invalidShapeHook));
-const invalidCommandHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[9]);
+const invalidCommandHook = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[9]);
 if (!invalidCommandHook?.block || !invalidCommandHook.reason.includes("invalid command handler")) throw new Error("invalid hook command did not fail closed: " + JSON.stringify(invalidCommandHook));
-const oversizedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[8]);
+const oversizedHook = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[8]);
 if (!oversizedHook?.block || !oversizedHook.reason.includes("size limit")) throw new Error("oversized hook manifest did not fail closed: " + JSON.stringify(oversizedHook));
-const terminalLimitHook = mod.runProjectHooks("Stop", {}, process.argv[10]);
+const terminalLimitHook = await mod.runProjectHooks("Stop", {}, process.argv[10]);
 if (!terminalLimitHook?.block || !terminalLimitHook.reason.includes("terminal hook event Stop exceeds the handler limit")) throw new Error("terminal handler limit did not fail closed: " + JSON.stringify(terminalLimitHook));
 let deadlineClock = 0;
 let deadlineRuns = 0;
 let deadlineTimeout = 0;
-const deadlineHook = mod.runProjectHooks("Stop", {}, process.argv[2], {
+const deadlineHook = await mod.runProjectHooks("Stop", {}, process.argv[2], {
   now() { return deadlineClock; },
-  spawnSync(_command, _args, options) {
+  async runCommand(_command, _args, options) {
     deadlineRuns++;
     deadlineTimeout = options.timeout;
     deadlineClock += 181001;
@@ -342,9 +386,9 @@ const deadlineHook = mod.runProjectHooks("Stop", {}, process.argv[2], {
 if (!deadlineHook?.block || !deadlineHook.reason.includes("first bounded blocker") || !deadlineHook.reason.includes("deadline exceeded")) throw new Error("terminal deadline did not fail closed with collected blockers: " + JSON.stringify(deadlineHook));
 if (deadlineRuns !== 1 || deadlineTimeout !== 1000) throw new Error("terminal handler escaped its declared per-handler or total budget: " + JSON.stringify({deadlineRuns, deadlineTimeout}));
 let aggregateRuns = 0;
-const aggregateHook = mod.runProjectHooks("Stop", {}, process.argv[2], {
+const aggregateHook = await mod.runProjectHooks("Stop", {}, process.argv[2], {
   now() { return 0; },
-  spawnSync(_command, _args, options) {
+  async runCommand(_command, _args, options) {
     aggregateRuns++;
     if (options.maxBuffer !== 16384 || options.timeout !== 1000) throw new Error("terminal spawn bounds were not applied: " + JSON.stringify(options));
     return {status: 0, stdout: JSON.stringify({decision:"block", reason:"x".repeat(20000)}) + "\n", stderr: ""};

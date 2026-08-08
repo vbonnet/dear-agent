@@ -1,5 +1,5 @@
 import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 
 // Keep this implementation in parity with adapter.go; the Go tests execute it.
@@ -20,6 +20,10 @@ const TERMINAL_CONTEXT_PREFIX = "Additional context: ";
 const MAX_TERMINAL_CONTEXT_CHARS = MAX_TERMINAL_HOOK_FEEDBACK_CHARS - MAX_TERMINAL_REASON_CHARS - TERMINAL_CONTEXT_PREFIX.length - 1;
 const MAX_TERMINAL_FOLLOW_UPS_PER_TURN = 8;
 const SPEC_FEEDBACK_ID_PATTERN = /^[0-9a-f]{64}$/;
+// A hook gets its declared execution budget.  If it has not exited at that
+// point, terminate its whole process group, then force-kill shortly after.
+// Terminal hooks cap that grace period at their aggregate deadline.
+const HOOK_KILL_GRACE_MS = 100;
 
 function readHookManifest(path) {
 	const descriptor = openSync(path, "r");
@@ -145,13 +149,109 @@ function appendBounded(current, value, limit) {
 	return available > 0 ? current + separator + text.slice(0, available) : current;
 }
 
-export function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = {}) {
+function terminationError(code, message) {
+	const error = new Error(`${code}: ${message}`);
+	error.code = code;
+	return error;
+}
+
+function signalProcessGroup(child, signal) {
+	if (!child.pid) return;
+	try {
+		// detached creates a new POSIX process group, so a hook cannot leave a
+		// TERM-ignoring child behind when its shell is stopped.
+		if (process.platform !== "win32") process.kill(-child.pid, signal);
+		else child.kill(signal);
+	} catch (error) {
+		// A completed child races normal cleanup. Other errors are reported by
+		// the child close/error path, which remains the hook result authority.
+		if (error?.code !== "ESRCH") child.kill(signal);
+	}
+}
+
+function appendOutput(chunks, size, value, limit) {
+	if (size >= limit) return {size, overflow: true};
+	const chunk = Buffer.from(value);
+	const allowed = Math.min(chunk.length, limit - size);
+	if (allowed > 0) chunks.push(chunk.subarray(0, allowed));
+	return {size: size + allowed, overflow: chunk.length > allowed};
+}
+
+function runBoundedHook(command, args, options) {
+	return new Promise((resolve) => {
+		let child;
+		try {
+			child = spawn(command, args, {
+				cwd: options.cwd,
+				env: options.env,
+				detached: process.platform !== "win32",
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+		} catch (error) {
+			resolve({status: null, stdout: "", stderr: "", error});
+			return;
+		}
+
+		const stdout = [];
+		const stderr = [];
+		let stdoutSize = 0;
+		let stderrSize = 0;
+		let timedOut = false;
+		let overflowed = false;
+		let settled = false;
+		let forceTimer;
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutTimer);
+			clearTimeout(forceTimer);
+			resolve({
+				...result,
+				stdout: Buffer.concat(stdout).toString("utf8"),
+				stderr: Buffer.concat(stderr).toString("utf8"),
+			});
+		};
+		const forceCleanup = () => signalProcessGroup(child, "SIGKILL");
+		const beginTermination = (reason) => {
+			if (timedOut || overflowed) return;
+			if (reason === "timeout") timedOut = true;
+			else overflowed = true;
+			signalProcessGroup(child, "SIGTERM");
+			const aggregateRemaining = options.deadline ? Math.max(0, options.deadline - Date.now()) : Infinity;
+			forceTimer = setTimeout(forceCleanup, Math.max(0, Math.min(HOOK_KILL_GRACE_MS, aggregateRemaining)));
+		};
+		const timeoutTimer = setTimeout(() => beginTermination("timeout"), Math.max(1, options.timeout));
+		child.stdout.on("data", (chunk) => {
+			const captured = appendOutput(stdout, stdoutSize, chunk, options.maxBuffer);
+			stdoutSize = captured.size;
+			if (captured.overflow) beginTermination("overflow");
+		});
+		child.stderr.on("data", (chunk) => {
+			const captured = appendOutput(stderr, stderrSize, chunk, options.maxBuffer);
+			stderrSize = captured.size;
+			if (captured.overflow) beginTermination("overflow");
+		});
+		child.stdin.on("error", () => {});
+		child.stdin.end(options.input);
+		child.on("error", (error) => finish({status: null, error}));
+		child.on("close", (status, signal) => {
+			const error = timedOut
+				? terminationError("ETIMEDOUT", `hook exceeded ${options.timeout}ms`)
+				: overflowed
+					? terminationError("ERR_CHILD_PROCESS_STDIO_MAXBUFFER", "hook output exceeded its capture limit")
+					: undefined;
+			finish({status, signal, error});
+		});
+	});
+}
+
+export async function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = {}) {
 	const loaded = loadProjectHooks(cwd);
 	if (loaded.error) return {block: true, reason: loaded.error};
 	const hooks = loaded.hooks;
 	const terminal = eventName === "Stop" || eventName === "SubagentStop";
 	const now = typeof runtime.now === "function" ? runtime.now : Date.now;
-	const spawn = typeof runtime.spawnSync === "function" ? runtime.spawnSync : spawnSync;
+	const runHook = typeof runtime.runCommand === "function" ? runtime.runCommand : runBoundedHook;
 	const terminalDeadline = terminal ? now() + MAX_TERMINAL_RUN_MS : 0;
 	const contexts = [];
 	let contextText = "";
@@ -179,13 +279,14 @@ export function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = 
 			}
 			let result;
 			try {
-				result = spawn("/bin/sh", ["-c", hook.command], {
+				result = await runHook("/bin/sh", ["-c", hook.command], {
 					cwd,
 					env: {...process.env, PI_PROJECT_DIR: cwd, CLAUDE_PROJECT_DIR: cwd},
 					input: hookInput(eventName, call, cwd),
 					encoding: "utf8",
 					timeout,
 					maxBuffer: terminal ? MAX_TERMINAL_HOOK_OUTPUT_BYTES : MAX_HOOK_OUTPUT_BYTES,
+					deadline: terminal ? terminalDeadline : 0,
 				});
 			} catch (error) {
 				const failure = terminalFailure(`${eventName} hook could not start: ${error?.message || error}`);
@@ -360,7 +461,7 @@ export default function (pi) {
 	pi.on("session_start", async (_event, ctx) => {
 		updateStatus(ctx);
 		if (policyLoadError) ctx.ui.notify(policyLoadError, "error");
-		const result = runProjectHooks("SessionStart", {event: _event}, projectDir);
+		const result = await runProjectHooks("SessionStart", {event: _event}, projectDir);
 		if (result?.block) ctx.ui.notify(`Pi SessionStart hook: ${result.reason}`, "warning");
 	});
 	pi.on("input", async (_event, ctx) => {
@@ -373,7 +474,7 @@ export default function (pi) {
 			lastSpecFeedbackByEvent.clear();
 			terminalFollowUpsThisTurn.clear();
 		}
-		const result = runProjectHooks("UserPromptSubmit", {event: _event}, projectDir);
+		const result = await runProjectHooks("UserPromptSubmit", {event: _event}, projectDir);
 		if (result?.block) {
 			ctx.ui.notify(`Pi UserPromptSubmit hook: ${result.reason}`, "warning");
 			return {action: "handled"};
@@ -381,7 +482,7 @@ export default function (pi) {
 		return undefined;
 	});
 	pi.on("session_before_compact", async (_event, ctx) => {
-		const result = runProjectHooks("PreCompact", {event: _event}, projectDir);
+		const result = await runProjectHooks("PreCompact", {event: _event}, projectDir);
 		if (result?.block) {
 			ctx.ui.notify(`Pi PreCompact hook: ${result.reason}`, "warning");
 			return {cancel: true};
@@ -389,16 +490,16 @@ export default function (pi) {
 		return undefined;
 	});
 	pi.on("session_compact", async (_event, ctx) => {
-		const result = runProjectHooks("PostCompact", {event: _event}, projectDir);
+		const result = await runProjectHooks("PostCompact", {event: _event}, projectDir);
 		if (result?.block) ctx.ui.notify(`Pi PostCompact hook: ${result.reason}`, "warning");
 	});
 	pi.on("agent_start", async (_event, ctx) => {
 		state = "working";
 		updateStatus(ctx);
 	});
-	const handleTerminalHook = (eventName, call, ctx) => {
+	const handleTerminalHook = async (eventName, call, ctx) => {
 		const stopHookActive = activeStopEvents.has(eventName);
-		const result = runProjectHooks(eventName, {...call, stopHookActive}, projectDir);
+		const result = await runProjectHooks(eventName, {...call, stopHookActive}, projectDir);
 		if (result?.block) {
 			const specFeedbackIDs = Array.isArray(result.specFeedbackIDs) ? result.specFeedbackIDs : [];
 			const nextSpecFeedbackID = specFeedbackIDs.at(-1) || "";
@@ -425,11 +526,11 @@ export default function (pi) {
 	pi.on("agent_settled", async (_event, ctx) => {
 		state = "ready";
 		updateStatus(ctx);
-		handleTerminalHook("Stop", {event: _event}, ctx);
+		await handleTerminalHook("Stop", {event: _event}, ctx);
 	});
 	pi.on("tool_result", async (_event, ctx) => {
 		if (String(_event?.toolName || "").toLowerCase() !== "subagent") return undefined;
-		handleTerminalHook("SubagentStop", {
+		await handleTerminalHook("SubagentStop", {
 			toolName: _event.toolName,
 			input: _event.input,
 			event: _event,
@@ -477,7 +578,7 @@ export default function (pi) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (policyLoadError) return {block: true, reason: policyLoadError};
-		const guardrail = runProjectHooks("PreToolUse", {toolName: event.toolName, input: event.input, event}, projectDir);
+		const guardrail = await runProjectHooks("PreToolUse", {toolName: event.toolName, input: event.input, event}, projectDir);
 		if (guardrail?.block) return guardrail;
 		if (guardrail?.context) ctx.ui.notify(`Pi PreToolUse hook: ${guardrail.context}`, "warning");
 		const result = decide(mode, allow, {toolName: event.toolName, input: event.input}, ctx.hasUI);

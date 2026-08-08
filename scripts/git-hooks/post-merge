@@ -396,7 +396,7 @@ maybe_rebuild_agm_pair() {
 # pinned source. It publishes no partial profile when either source fact is
 # unavailable.
 resolve_agm_pair_provenance() {
-  local _resolved_revision _resolved_build_date
+  local _resolved_revision _resolved_build_date _helper_build_date _helper_ldflags _spec_hook_tmp _expected_spec_hook_hash
 
   _resolved_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
   # Git lengthens --short=12 when twelve characters are not unique. Preserve
@@ -411,7 +411,35 @@ resolve_agm_pair_provenance() {
   )"
   [ -n "${_resolved_build_date}" ] || return 1
 
-  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.Version=dev-${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_resolved_build_date} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=post-merge-hook"
+  # Mirror Make's default build-spec-contract-hook stamp exactly. This source
+  # is a fresh detached checkout, so its default buildstamp GitCommit is the
+  # already admitted clean short revision; BuildDate intentionally preserves
+  # the commit's RFC3339 offset (`%cI`), as Make does.
+  _helper_build_date="$(git -C "${build_dir}" show -s --format=%cI HEAD 2>/dev/null || true)"
+  [ -n "${_helper_build_date}" ] || return 1
+  _helper_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.Version=dev -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_helper_build_date} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=makefile"
+
+  # AGM's unattended Codex projection admits only the root-installed helper
+  # whose digest was compiled into AGM. Build that helper from the same pinned
+  # detached revision as the pair, with the governed helper's reproducibility
+  # boundary, before staging either installed binary. A later privileged helper
+  # install is therefore required to match this exact source revision.
+  _spec_hook_tmp="$(mktemp "${TMPDIR:-/tmp}/dear-agent-spec-contract-hook.XXXXXX")" || return 1
+  if ! (
+    cd "${build_dir}" &&
+      CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false \
+        -ldflags "${_helper_ldflags}" -o "${_spec_hook_tmp}" ./cmd/spec-contract-hook
+  ); then
+    rm -f "${_spec_hook_tmp}" 2>/dev/null || true
+    return 1
+  fi
+  _expected_spec_hook_hash="$(/usr/bin/openssl dgst -sha256 -r "${_spec_hook_tmp}" 2>/dev/null || true)"
+  _expected_spec_hook_hash="${_expected_spec_hook_hash%% *}"
+  rm -f "${_spec_hook_tmp}" 2>/dev/null || true
+  [ "${#_expected_spec_hook_hash}" -eq 64 ] || return 1
+  case "${_expected_spec_hook_hash}" in *[!0-9a-f]*) return 1 ;; esac
+
+  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.Version=dev-${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_resolved_build_date} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=post-merge-hook -X github.com/vbonnet/dear-agent/agm/internal/codexhooks.expectedSpecContractHookSHA256=${_expected_spec_hook_hash}"
 }
 
 # maybe_rebuild_agm_pair_locked stages the CLI and detached archive companion
@@ -453,12 +481,12 @@ maybe_rebuild_agm_pair_locked() {
   _had_reaper=0
 
   echo "[post-merge:rebuild] Staging agm + agm-reaper (source changed in ${_trigger})..." >&2
-  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_agm_tmp}" ./agm/cmd/agm ); then
+  if ! ( cd "${build_dir}" && CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false -ldflags "${_pair_ldflags}" -o "${_agm_tmp}" ./agm/cmd/agm ); then
     rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
     echo "[post-merge:rebuild] ✗ agm pair staging FAILED — installed pair unchanged." >&2
     return 0
   fi
-  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_reaper_tmp}" ./agm/cmd/agm-reaper ); then
+  if ! ( cd "${build_dir}" && CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false -ldflags "${_pair_ldflags}" -o "${_reaper_tmp}" ./agm/cmd/agm-reaper ); then
     rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
     echo "[post-merge:rebuild] ✗ agm-reaper pair staging FAILED — installed pair unchanged." >&2
     return 0

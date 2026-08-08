@@ -150,7 +150,7 @@ func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) 
 				}},
 			}},
 		}
-		if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project"); err != nil {
+		if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project", strings.Repeat("a", 64)); err != nil {
 			t.Fatalf("neutralizeWorkspaceExecutingHooks(%s): %v", eventName, err)
 		}
 		groups := hooks[eventName].([]any)
@@ -179,7 +179,7 @@ func TestNeutralizeWorkspaceExecutingHooksRejectsUnpinnedSPECContractHelper(t *t
 			}},
 		}},
 	}
-	if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project"); err == nil ||
+	if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project", strings.Repeat("a", 64)); err == nil ||
 		!strings.Contains(err.Error(), "revision-bound SPEC contract hook") ||
 		!strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("neutralizeWorkspaceExecutingHooks() error = %v, want revision-bound helper rejection", err)
@@ -264,7 +264,12 @@ func TestUnattendedCodexBypassPreservesDigestAttestedSPECContractStopAdapters(t 
 		handlers := groups[0].(map[string]any)["hooks"].([]any)
 		adapter := handlers[0].(map[string]any)
 		command := adapter["command"].(string)
-		if !strings.Contains(command, trustedSpecContractHookPath) || !strings.Contains(command, canonicalProjectRoot) || strings.Contains(command, "go run") || strings.Contains(command, "/bin/true") || adapter["statusMessage"] != "Checking staged SPEC contracts with operator-owned helper" {
+		if !strings.Contains(command, trustedSpecContractHookPath) ||
+			!strings.Contains(command, "--expected-helper-sha256 "+expectedSpecContractHookSHA256) ||
+			!strings.Contains(command, canonicalProjectRoot) ||
+			strings.Contains(command, "go run") ||
+			strings.Contains(command, "/bin/true") ||
+			adapter["statusMessage"] != "Checking staged SPEC contracts with operator-owned helper" {
 			t.Fatalf("%s bypass adapter = %#v, want operator-owned SPEC helper", eventName, adapter)
 		}
 		noOp := handlers[1].(map[string]any)
@@ -593,6 +598,7 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	previousSystemValidator := validateTrustedSystemExecutable
 	previousDependencyValidator := validateTrustedHookDependency
 	previousSPECValidator := verifyPinnedSpecContractHook
+	previousSPECDigest := expectedSpecContractHookSHA256
 	trustedHookJSONPath = "/bin/sh"
 	validateAttestedExecutablePath = func(got string) error {
 		if got != attestedHookPath {
@@ -609,6 +615,7 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	validateTrustedSystemExecutable = func(string) error { return nil }
 	validateTrustedHookDependency = func(string) error { return nil }
 	verifyPinnedSpecContractHook = func() error { return nil }
+	expectedSpecContractHookSHA256 = strings.Repeat("a", 64)
 	t.Cleanup(func() {
 		trustedHookJSONPath = previousJSONPath
 		validateAttestedExecutablePath = previousPathValidator
@@ -616,5 +623,6 @@ func useTrustedHookJSONFixture(t *testing.T) {
 		validateTrustedSystemExecutable = previousSystemValidator
 		validateTrustedHookDependency = previousDependencyValidator
 		verifyPinnedSpecContractHook = previousSPECValidator
+		expectedSpecContractHookSHA256 = previousSPECDigest
 	})
 }

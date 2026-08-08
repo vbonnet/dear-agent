@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/hookparity"
 	"github.com/vbonnet/dear-agent/internal/specguard"
 )
 
@@ -36,9 +37,18 @@ const (
 	reminderMarkerTTL    = 24 * time.Hour
 	reminderLockWait     = 2 * time.Second
 	workspaceGitTimeout  = 10 * time.Second
+	operatorOwnedHelper  = "/usr/local/libexec/dear-agent-spec-contract-hook"
 )
 
 var errIncompleteReminderMarker = errors.New("reminder marker content is incomplete")
+
+var verifyOperatorOwnedHelperDigest = func(expectedSHA256 string) error {
+	return hookparity.VerifyDeployedHelperDigest(
+		operatorOwnedHelper,
+		expectedSHA256,
+		hookparity.ProductionHelperTrustPolicy(),
+	)
+}
 
 type reminderMarkerState struct {
 	feedbackDigest string
@@ -91,6 +101,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	repository := flags.String("root", ".", "repository root supplied by the native hook manifest")
 	rootFromWorkspaceInput := flags.Bool("root-from-workspace-stdin", false, "derive the Antigravity repository root from native workspacePaths input")
+	expectedHelperSHA256 := flags.String("expected-helper-sha256", "", "revision-bound digest required for operator-owned execution")
 	event := flags.String("event", "", "terminal hook event")
 	provider := flags.String("provider", "", "native hook protocol: claude, codex, antigravity, opencode, or pi")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *repository == "" {
@@ -99,6 +110,14 @@ func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	protocol := providerProtocol(*provider)
 	if !supportedProviderEvent(protocol, *event) {
 		return emitJSON(output, protocolFailure(protocol, *event, "Cooperative SPEC contract check unavailable: native provider protocol does not support the requested terminal event"))
+	}
+	if *expectedHelperSHA256 != "" {
+		if err := verifyOperatorOwnedHelperDigest(*expectedHelperSHA256); err != nil {
+			return emitJSON(output, hookResponse{
+				Decision: "block",
+				Reason:   "Unattended SPEC enforcement unavailable: the operator-owned helper no longer matches this session's revision-bound digest",
+			})
+		}
 	}
 	payload, err := readBoundedInput(input, maxHookInputBytes)
 	if err != nil {

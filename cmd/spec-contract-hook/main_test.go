@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,51 @@ import (
 )
 
 const reminderLockCrashHelperEnv = "DEAR_AGENT_REMINDER_LOCK_CRASH_HELPER"
+
+func TestRunRevalidatesOperatorOwnedHelperForDigestBoundInvocation(t *testing.T) {
+	root := stagedContractRepository(t)
+	expected := strings.Repeat("a", 64)
+	previous := verifyOperatorOwnedHelperDigest
+	t.Cleanup(func() { verifyOperatorOwnedHelperDigest = previous })
+
+	verified := ""
+	verifyOperatorOwnedHelperDigest = func(digest string) error {
+		verified = digest
+		return nil
+	}
+	var output bytes.Buffer
+	if got := run([]string{
+		"--root", root,
+		"--provider", "codex",
+		"--event", "Stop",
+		"--expected-helper-sha256", expected,
+	}, strings.NewReader(`{"session_id":"digest-bound","turn_id":"one","stop_hook_active":false}`), &output, &bytes.Buffer{}); got != 0 {
+		t.Fatalf("run() = %d output=%s", got, output.String())
+	}
+	if verified != expected {
+		t.Fatalf("revalidated digest = %q, want %q", verified, expected)
+	}
+}
+
+func TestRunBlocksWhenDigestBoundOperatorOwnedHelperChanges(t *testing.T) {
+	previous := verifyOperatorOwnedHelperDigest
+	verifyOperatorOwnedHelperDigest = func(string) error { return errors.New("digest mismatch") }
+	t.Cleanup(func() { verifyOperatorOwnedHelperDigest = previous })
+
+	var output bytes.Buffer
+	if got := run([]string{
+		"--root", ".",
+		"--provider", "codex",
+		"--event", "Stop",
+		"--expected-helper-sha256", strings.Repeat("a", 64),
+	}, strings.NewReader(`{"session_id":"digest-bound","turn_id":"one","stop_hook_active":false}`), &output, &bytes.Buffer{}); got != 0 {
+		t.Fatalf("run() = %d output=%s", got, output.String())
+	}
+	response := decodeResponse(t, output.Bytes())
+	if response.Decision != "block" || !strings.Contains(response.Reason, "revision-bound digest") {
+		t.Fatalf("response = %#v, want fail-closed digest mismatch", response)
+	}
+}
 
 func TestRunYieldsInvalidHookInvocationWithoutAStableRetrySignal(t *testing.T) {
 	t.Parallel()

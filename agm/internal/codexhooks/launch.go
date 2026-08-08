@@ -138,7 +138,7 @@ func embeddedMaterializedHooks(hookRoot, expectedDigest, projectRoot string) (ma
 	if err := validateMaterializedSystemExecutables(assets); err != nil {
 		return nil, err
 	}
-	if err := neutralizeWorkspaceExecutingHooks(hooks, projectRoot); err != nil {
+	if err := neutralizeWorkspaceExecutingHooks(hooks, projectRoot, expectedSpecContractHookSHA256); err != nil {
 		return nil, err
 	}
 	if err := validateTrustedHookDependencies(hooks, assets); err != nil {
@@ -213,9 +213,10 @@ func readMaterializedHookManifest(assets map[string]asset) (map[string]any, erro
 // index so hooksWithPinnedTrustState can disable the mutable copy. Ordinary
 // workspace commands become OS-owned no-ops. The recognizable terminal SPEC
 // adapter is instead projected through the separately installed, root-owned
-// helper with the canonical repository root; its final command is digest-pinned
-// by hooksWithPinnedTrustState.
-func neutralizeWorkspaceExecutingHooks(hooks map[string]any, projectRoot string) error {
+// helper with the canonical repository root. The helper receives the
+// revision-bound digest and revalidates its deployed bytes immediately before
+// every invocation; hooksWithPinnedTrustState then pins that complete command.
+func neutralizeWorkspaceExecutingHooks(hooks map[string]any, projectRoot, expectedDigest string) error {
 	if !filepath.IsAbs(projectRoot) || filepath.Clean(projectRoot) != projectRoot {
 		return fmt.Errorf("SPEC contract project root must be a clean absolute path")
 	}
@@ -254,7 +255,10 @@ func neutralizeWorkspaceExecutingHooks(hooks map[string]any, projectRoot string)
 					if err := verifyPinnedSpecContractHook(); err != nil {
 						return fmt.Errorf("validate revision-bound SPEC contract hook (run make install-spec-contract-hook from the same reviewed revision): %w", err)
 					}
-					handler["command"] = trustedSpecContractHookPath + " --root " + shellSingleQuote(projectRoot) + " --provider codex --event " + eventName
+					handler["command"] = trustedSpecContractHookPath +
+						" --expected-helper-sha256 " + expectedDigest +
+						" --root " + shellSingleQuote(projectRoot) +
+						" --provider codex --event " + eventName
 					handler["statusMessage"] = "Checking staged SPEC contracts with operator-owned helper"
 					continue
 				}
