@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -19,38 +20,50 @@ import (
 // AI_REVIEW_MAX_DIFF_BYTES.
 const defaultMaxDiffBytes = 1_500_000
 
+const maxAllowedReviewDiffBytes = 8 * 1024 * 1024
+
+const reviewAbsoluteDeadlineEnv = "AI_REVIEW_DEADLINE_UNIX"
+
 // config is the parsed environment.
 type config struct {
-	baseSHA   string
-	headSHA   string
-	pr        string
-	repo      string
-	eventName string
-	isFork    bool
-	override  bool
-	prBody    string
-	apiKey    string
-	model     anthropic.Model
-	effort    anthropic.OutputConfigEffort
-	maxDiff   int
+	baseSHA          string
+	headSHA          string
+	pr               string
+	repo             string
+	eventName        string
+	isFork           bool
+	override         bool
+	prBody           string
+	apiKey           string
+	apiBaseURL       string
+	keyFromEnv       bool
+	githubActions    bool
+	absoluteDeadline string
+	reviewContext    context.Context
+	model            anthropic.Model
+	effort           anthropic.OutputConfigEffort
+	maxDiff          int
 }
 
-// loadConfig reads the workflow environment. It does not validate the API key
-// here — key handling is a fail-closed decision made in run().
+// loadConfig reads the non-secret workflow environment. It deliberately
+// defers reading the API key until run() has built the authenticated plan and
+// completed deterministic prechecks.
 func loadConfig() config {
 	c := config{
-		baseSHA:   os.Getenv("BASE_SHA"),
-		headSHA:   os.Getenv("HEAD_SHA"),
-		pr:        os.Getenv("PR"),
-		repo:      os.Getenv("REPO"),
-		eventName: os.Getenv("EVENT_NAME"),
-		isFork:    os.Getenv("IS_FORK") == "true",
-		override:  os.Getenv("OVERRIDE") == "true",
-		prBody:    os.Getenv("PR_BODY"),
-		apiKey:    os.Getenv("ANTHROPIC_API_KEY"),
-		model:     anthropic.ModelClaudeOpus4_8,
-		effort:    anthropic.OutputConfigEffortHigh,
-		maxDiff:   defaultMaxDiffBytes,
+		baseSHA:          os.Getenv("BASE_SHA"),
+		headSHA:          os.Getenv("HEAD_SHA"),
+		pr:               os.Getenv("PR"),
+		repo:             os.Getenv("REPO"),
+		eventName:        os.Getenv("EVENT_NAME"),
+		isFork:           os.Getenv("IS_FORK") == "true",
+		override:         os.Getenv("OVERRIDE") == "true",
+		prBody:           os.Getenv("PR_BODY"),
+		keyFromEnv:       true,
+		githubActions:    os.Getenv("GITHUB_ACTIONS") == "true",
+		absoluteDeadline: os.Getenv(reviewAbsoluteDeadlineEnv),
+		model:            anthropic.ModelClaudeOpus4_8,
+		effort:           anthropic.OutputConfigEffortHigh,
+		maxDiff:          defaultMaxDiffBytes,
 	}
 	if m := os.Getenv("AI_REVIEW_MODEL"); m != "" {
 		c.model = anthropic.Model(m)
@@ -59,31 +72,70 @@ func loadConfig() config {
 		c.effort = anthropic.OutputConfigEffort(e)
 	}
 	if n := os.Getenv("AI_REVIEW_MAX_DIFF_BYTES"); n != "" {
-		if v, err := strconv.Atoi(n); err == nil && v > 0 {
+		if v, err := strconv.Atoi(n); err == nil && v > 0 && v <= maxAllowedReviewDiffBytes {
 			c.maxDiff = v
 		}
 	}
 	return c
 }
 
+// effectiveReviewDeadline caps one command invocation at the earlier of its
+// local pipeline budget and the trusted workflow cutoff. Local invocations do
+// not require workflow metadata; GitHub Actions invocations fail closed when
+// the protected workflow did not export a canonical, still-future deadline.
+func effectiveReviewDeadline(now time.Time, githubActions bool, rawAbsolute string) (time.Time, error) {
+	localDeadline := now.Add(reviewPipelineTimeout)
+	if !githubActions {
+		return localDeadline, nil
+	}
+	if rawAbsolute == "" {
+		return time.Time{}, fmt.Errorf("%s is required in GitHub Actions", reviewAbsoluteDeadlineEnv)
+	}
+	seconds, err := strconv.ParseInt(rawAbsolute, 10, 64)
+	if err != nil || seconds <= 0 {
+		return time.Time{}, fmt.Errorf("%s is malformed", reviewAbsoluteDeadlineEnv)
+	}
+	absolute := time.Unix(seconds, 0).UTC()
+	if !absolute.After(now) {
+		return time.Time{}, fmt.Errorf("%s has expired", reviewAbsoluteDeadlineEnv)
+	}
+	if absolute.Before(localDeadline) {
+		return absolute, nil
+	}
+	return localDeadline, nil
+}
+
+func newReviewContext(parent context.Context, now time.Time, githubActions bool, rawAbsolute string) (context.Context, context.CancelFunc, error) {
+	deadline, err := effectiveReviewDeadline(now, githubActions, rawAbsolute)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx, cancel := context.WithDeadline(parent, deadline)
+	return ctx, cancel, nil
+}
+
 // gitMergeBase finds the common ancestor of the current base and PR head.
 // Reviewing from that point excludes unrelated commits that landed on the base
 // branch after the PR forked, and makes every review input describe the PR.
 func gitMergeBase(base, head string) (string, error) {
-	out, err := exec.Command("git", "merge-base", base, head).Output()
-	if err != nil {
-		return "", fmt.Errorf("git merge-base %s %s: %w", base, head, err)
-	}
-	return strings.TrimSpace(string(out)), nil
+	return resolveMergeBase(context.Background(), base, head)
 }
 
-// gitDiff returns the full diff between merge base and head. No truncation.
-func gitDiff(mergeBase, head string) (string, error) {
-	out, err := exec.Command("git", "diff", mergeBase, head).Output()
-	if err != nil {
-		return "", fmt.Errorf("git diff %s %s: %w", mergeBase, head, err)
+// gitDiff returns either the complete diff or an overflow signal. A bounded
+// prefix is never returned as though it were a reviewable complete diff.
+func gitDiff(mergeBase, head string, limit int) (string, bool, error) {
+	return gitDiffContext(context.Background(), mergeBase, head, limit)
+}
+
+func gitDiffContext(ctx context.Context, mergeBase, head string, limit int) (string, bool, error) {
+	out, err := gitOutputBounded(ctx, limit, "diff", "--no-ext-diff", "--no-textconv", mergeBase, head)
+	if errors.Is(err, errGitOutputLimit) {
+		return "", true, nil
 	}
-	return string(out), nil
+	if err != nil {
+		return "", false, fmt.Errorf("git diff %s %s: %w", mergeBase, head, err)
+	}
+	return string(out), false, nil
 }
 
 // gitChangedPaths lists the files changed between base and head. Used for the
@@ -95,11 +147,27 @@ func gitDiff(mergeBase, head string) (string, error) {
 // Disabling detection reports the rename as a delete of the old path plus an
 // add of the new one, so the protected source is always scanned.
 func gitChangedPaths(base, head string) ([]string, error) {
-	out, err := exec.Command("git", "diff", "--no-renames", "--name-only", base, head).Output()
+	return gitChangedPathsContext(context.Background(), base, head)
+}
+
+func gitChangedPathsContext(ctx context.Context, base, head string) ([]string, error) {
+	out, err := gitOutputBounded(ctx, maxGitMetadataBytes, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", base, head)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only %s %s: %w", base, head, err)
 	}
-	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	fields := strings.Split(string(out), "\x00")
+	if len(fields) > 0 && fields[len(fields)-1] == "" {
+		fields = fields[:len(fields)-1]
+	}
+	if len(fields) > 10000 {
+		return nil, errors.New("changed-path count exceeds the review limit")
+	}
+	for _, path := range fields {
+		if !safeGitPath(path) {
+			return nil, errors.New("changed-path list contains an unsafe Git path")
+		}
+	}
+	return fields, nil
 }
 
 // gitBinaryPaths lists files whose change git could not express as a text
@@ -107,20 +175,36 @@ func gitChangedPaths(base, head string) ([]string, error) {
 // marker, so the payload never reaches the reviewers and its real size never
 // counts toward the size limit — an unreviewed executable or asset could
 // otherwise be approved. These are escalated to a human instead.
-func gitBinaryPaths(base, head string) []string {
-	out, err := exec.Command("git", "diff", "--no-renames", "--numstat", base, head).Output()
+func gitBinaryPaths(base, head string) ([]string, error) {
+	return gitBinaryPathsContext(context.Background(), base, head)
+}
+
+func gitBinaryPathsContext(ctx context.Context, base, head string) ([]string, error) {
+	out, err := gitOutputBounded(ctx, maxGitMetadataBytes, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--numstat", "-z", base, head)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("git diff --numstat %s %s: %w", base, head, err)
 	}
 	var bins []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+	for _, entry := range bytesSplitNUL(out) {
+		if len(entry) == 0 {
+			continue
+		}
 		// numstat marks binary entries with "-\t-\t<path>".
-		fields := strings.SplitN(line, "\t", 3)
-		if len(fields) == 3 && fields[0] == "-" && fields[1] == "-" {
-			bins = append(bins, strings.TrimSpace(fields[2]))
+		fields := strings.SplitN(string(entry), "\t", 3)
+		if len(fields) != 3 {
+			return nil, errors.New("malformed git --numstat output")
+		}
+		if fields[0] == "-" && fields[1] == "-" {
+			if !safeGitPath(fields[2]) {
+				return nil, errors.New("git --numstat returned an unsafe binary path")
+			}
+			bins = append(bins, fields[2])
+			if len(bins) > 10000 {
+				return nil, errors.New("binary-path count exceeds the review limit")
+			}
 		}
 	}
-	return bins
+	return bins, nil
 }
 
 // gitlinkMode is git's file mode for a submodule entry (a "gitlink").
@@ -131,41 +215,100 @@ const gitlinkMode = "160000"
 // <sha>" line — the external tree it points at is never in the payload, and
 // --numstat counts it as ordinary text rather than binary — so an unreviewed
 // dependency could otherwise ride an "approved" outcome (AIREV-06).
-func gitGitlinkPaths(base, head string) []string {
-	out, err := exec.Command("git", "diff", "--raw", "--no-renames", base, head).Output()
+func gitGitlinkPaths(base, head string) ([]string, error) {
+	return gitGitlinkPathsContext(context.Background(), base, head)
+}
+
+func gitGitlinkPathsContext(ctx context.Context, base, head string) ([]string, error) {
+	out, err := gitOutputBounded(ctx, maxGitMetadataBytes, "diff", "--no-ext-diff", "--no-textconv", "--raw", "--no-renames", "-z", base, head)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("git diff --raw %s %s: %w", base, head, err)
 	}
 	var links []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		// :<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>
-		meta, path, ok := strings.Cut(line, "\t")
-		if !ok || !strings.HasPrefix(meta, ":") {
-			continue
+	entries := bytesSplitNUL(out)
+	// With -z, raw diff emits metadata and pathname as separate NUL-delimited
+	// fields. --no-renames keeps that framing exactly two fields per change.
+	if len(entries)%2 != 0 {
+		return nil, errors.New("malformed git --raw NUL framing")
+	}
+	for i := 0; i < len(entries); i += 2 {
+		meta, path := string(entries[i]), string(entries[i+1])
+		// :<srcmode> <dstmode> <srcsha> <dstsha> <status>
+		if !strings.HasPrefix(meta, ":") {
+			return nil, errors.New("malformed git --raw output")
 		}
 		fields := strings.Fields(strings.TrimPrefix(meta, ":"))
-		if len(fields) < 2 {
-			continue
+		if len(fields) != 5 {
+			return nil, errors.New("malformed git --raw metadata")
+		}
+		if !safeGitPath(path) {
+			return nil, errors.New("git --raw returned an unsafe path")
 		}
 		if fields[0] == gitlinkMode || fields[1] == gitlinkMode {
-			links = append(links, strings.TrimSpace(path))
+			links = append(links, path)
+			if len(links) > 10000 {
+				return nil, errors.New("gitlink-path count exceeds the review limit")
+			}
 		}
 	}
-	return links
+	return links, nil
 }
 
 // gitCommitMessages returns the commit messages in base..head so the explicit
 // "HUMAN REVIEW REQUIRED" marker can be detected (REVIEW.md §3).
-func gitCommitMessages(base, head string) string {
-	out, err := exec.Command("git", "log", "--format=%B", base+".."+head).Output()
+func gitCommitMessages(base, head string) (string, error) {
+	return gitCommitMessagesContext(context.Background(), base, head)
+}
+
+func gitCommitMessagesContext(ctx context.Context, base, head string) (string, error) {
+	out, err := gitOutputBounded(ctx, maxGitMetadataBytes, "log", "--format=%B", base+".."+head)
 	if err != nil {
-		// Non-fatal: the marker may still appear in the PR body.
-		return ""
+		return "", fmt.Errorf("git log %s..%s: %w", base, head, err)
 	}
-	return string(out)
+	return string(out), nil
+}
+
+// deterministicEscalationTriggers collects every Git-derived REVIEW.md §3
+// input under the plan's context before any credential decision. It is shared
+// by the optional-model path and the credential-free workflow decision: any
+// unreadable, malformed, or bounded-out evidence must fail closed rather than
+// be mistaken for an irrelevant plan.
+func deterministicEscalationTriggers(ctx context.Context, base, head, prBody string) ([]string, error) {
+	changed, err := gitChangedPathsContext(ctx, base, head)
+	if err != nil {
+		return nil, err
+	}
+	commitMessages, err := gitCommitMessagesContext(ctx, base, head)
+	if err != nil {
+		return nil, err
+	}
+	binaries, err := gitBinaryPathsContext(ctx, base, head)
+	if err != nil {
+		return nil, err
+	}
+	gitlinks, err := gitGitlinkPathsContext(ctx, base, head)
+	if err != nil {
+		return nil, err
+	}
+	triggers := EscalationTriggers(changed, prBody, commitMessages)
+	triggers = append(triggers, BinaryEscalationTriggers(binaries)...)
+	triggers = append(triggers, GitlinkEscalationTriggers(gitlinks)...)
+	return triggers, nil
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--review-plan" {
+		plan, err := buildReviewPlanWithPRBody(context.Background(), os.Getenv("BASE_SHA"), os.Getenv("HEAD_SHA"), os.Getenv("PR_BODY"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ai-review: build review plan: %v\n", err)
+			os.Exit(1)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(plan); err != nil {
+			fmt.Fprintf(os.Stderr, "ai-review: write review plan: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	os.Exit(run(loadConfig()))
 }
 
@@ -200,64 +343,99 @@ func preflightGates(c config) (int, bool) {
 	return 0, false
 }
 
-// handleEmptyDiff resolves a run whose tree change is empty. An explicit
-// escalation marker still forces needs-human-review (AIREV-08).
-func handleEmptyDiff(c config, metaTriggers []string) int {
-	if len(metaTriggers) > 0 {
-		fmt.Printf("::warning::empty diff, but REVIEW.md §3 escalation triggered: %s\n", strings.Join(metaTriggers, "; "))
-		logCommentErr(postComment(c, buildComment(NeedsHumanReview, "Empty diff, but an explicit escalation marker is present.", nil, c.override, metaTriggers)))
-		if c.override && !requireComment(c, overrideComment("an explicit escalation marker is present on an empty diff")) {
-			return 1
-		}
-		return ExitFor(NeedsHumanReview, c.override)
-	}
-	fmt.Println("::notice::empty diff; nothing to review.")
-	return 0
-}
-
 // run executes the review and returns the process exit code. It is separated
 // from main so tests can exercise the env-driven control flow. Every failure
 // path returns a non-zero code (fail closed); only an Approved outcome, an
 // empty diff with no escalation marker, or the audited override yields 0.
 func run(c config) int {
+	ctx, cancel, err := newReviewContext(context.Background(), time.Now(), c.githubActions, c.absoluteDeadline)
+	if err != nil {
+		fmt.Printf("::error::trusted review deadline is unavailable: %v\n", err)
+		return 1
+	}
+	defer cancel()
+	c.reviewContext = ctx
+
+	// This plan is deliberately built before any credential or model call. It
+	// is the one deep seam that authenticates changed-SPEC evidence and performs
+	// deterministic ownership/traceability checks for both CI and tests.
+	plan, err := buildReviewPlanWithPRBody(ctx, c.baseSHA, c.headSHA, c.prBody)
+	if err != nil {
+		fmt.Printf("::error::could not build authenticated review plan: %v\n", err)
+		return failClosed(c, "the authenticated SPEC governance review plan could not be built")
+	}
+	// Credential material is intentionally read only after the authenticated
+	// plan and deterministic prechecks have completed.
+	if c.keyFromEnv {
+		c.apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	modelUnavailable := c.isFork || strings.TrimSpace(c.apiKey) == ""
+	if plan.needsHuman() && modelUnavailable {
+		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+	}
+	// A deterministic escalation still benefits from the complete automated
+	// review when credentials are available. Fork and secretless runs cannot
+	// make model calls, so they take the visible human-review fallback instead.
+	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
+		return handleMandatoryEscalation(c, plan.EscalationTriggers)
+	}
+	if plan.ReviewNeeded && modelUnavailable {
+		reason := "a relevant changed SPEC cannot be reviewed because the reviewer credential is unavailable"
+		if c.isFork {
+			reason = "a relevant changed SPEC originates from a fork and requires human review"
+		}
+		return handleSpecHumanReview(c, plan, reason)
+	}
+
 	if code, handled := preflightGates(c); handled {
 		return code
 	}
 
-	mergeBase, err := gitMergeBase(c.baseSHA, c.headSHA)
-	if err != nil {
-		fmt.Printf("::error::could not determine PR merge base: %v\n", err)
-		return failClosed(c, "the PR merge base could not be computed")
-	}
-
-	diff, err := gitDiff(mergeBase, c.headSHA)
+	mergeBase := plan.MergeBaseSHA
+	diff, tooLarge, err := gitDiffContext(ctx, mergeBase, c.headSHA, c.maxDiff)
 	if err != nil {
 		fmt.Printf("::error::could not compute diff: %v\n", err)
 		return failClosed(c, "the PR diff could not be computed")
 	}
-
-	// Metadata escalation is evaluated BEFORE the empty-diff shortcut: an
-	// explicit HUMAN REVIEW REQUIRED marker in the PR body or a commit message
-	// must force escalation even when the tree change is empty (AIREV-08).
-	metaTriggers := EscalationTriggers(nil, c.prBody, gitCommitMessages(mergeBase, c.headSHA))
-
-	// Empty diff: nothing to review (SPEC R11), unless a marker escalated.
-	if strings.TrimSpace(diff) == "" {
-		return handleEmptyDiff(c, metaTriggers)
-	}
-
-	// Oversize diff fails closed rather than truncating (SPEC R10).
-	if len(diff) > c.maxDiff {
-		msg := fmt.Sprintf("diff is %d bytes, over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.", len(diff), c.maxDiff)
+	if tooLarge {
+		msg := fmt.Sprintf("diff is over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.", c.maxDiff)
 		fmt.Printf("::error::%s\n", msg)
-		logCommentErr(postComment(c, oversizeComment(len(diff), c.maxDiff)))
+		logCommentErr(postComment(c, oversizeComment(c.maxDiff)))
 		return failClosed(c, "the diff exceeded the auto-review size limit")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
+	// An empty tree diff is neutral only when the authenticated plan found no
+	// deterministic escalation. Explicit PR-body and allow-empty commit markers
+	// have no patch to send to the model, but must still require human review.
+	if strings.TrimSpace(diff) == "" {
+		if len(plan.EscalationTriggers) > 0 {
+			return handleMandatoryEscalation(c, plan.EscalationTriggers)
+		}
+		fmt.Println("::notice::empty diff; nothing to review.")
+		return 0
+	}
 
-	client := anthropic.NewClient(option.WithAPIKey(c.apiKey))
+	clientOptions := []option.RequestOption{option.WithAPIKey(c.apiKey)}
+	if c.apiBaseURL != "" {
+		clientOptions = append(clientOptions, option.WithBaseURL(c.apiBaseURL))
+	}
+	client := anthropic.NewClient(clientOptions...)
+	var specReports []dimensionReport
+	specVerdict := Approved // no changed SPEC is neutral, not a blocking zero value
+	if plan.needsHuman() {
+		specVerdict = NeedsHumanReview
+		specReports = append(specReports, specContractReport(specContractVerdict{
+			Status:  NeedsHumanReview,
+			Summary: "Authenticated deterministic checks require human review: " + strings.Join(plan.HumanReasons, "; "),
+		}))
+	} else if plan.ReviewNeeded {
+		verdict, err := reviewSpecContract(ctx, client, c.model, c.effort, plan)
+		if err != nil {
+			return handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict")
+		}
+		specVerdict = verdict.Status
+		specReports = append(specReports, specContractReport(verdict))
+	}
 
 	reports, err := runDimensions(ctx, client, c.model, c.effort, diff)
 	if err != nil {
@@ -266,27 +444,23 @@ func run(c config) int {
 		return failClosed(c, "a review dimension call failed")
 	}
 
-	outcome, synthesis, err := synthesize(ctx, client, c.model, c.effort, reports)
+	// The SPEC report is an input to synthesis, not an after-the-fact appendix.
+	// This lets the synthesis explain the same authoritative evidence that the
+	// deterministic final-outcome reconciliation enforces below.
+	reports = append(specReports, reports...)
+	synthesizedOutcome, synthesis, err := synthesize(ctx, client, c.model, c.effort, reports)
 	if err != nil {
 		// Synthesis error fails closed (SPEC R6).
 		fmt.Printf("::error::review synthesis failed: %v\n", err)
 		return failClosed(c, "the review synthesis call failed")
 	}
 
-	// REVIEW.md §3 escalation is mandatory "regardless of finding severity", so
-	// it is enforced deterministically here rather than trusted to the model.
-	changed, err := gitChangedPaths(mergeBase, c.headSHA)
-	if err != nil {
-		fmt.Printf("::error::could not list changed paths: %v\n", err)
-		return failClosed(c, "the changed-path list could not be computed")
-	}
-	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(mergeBase, c.headSHA))
-	triggers = append(triggers, BinaryEscalationTriggers(gitBinaryPaths(mergeBase, c.headSHA))...)
-	triggers = append(triggers, GitlinkEscalationTriggers(gitGitlinkPaths(mergeBase, c.headSHA))...)
-	if len(triggers) > 0 {
-		fmt.Printf("::warning::REVIEW.md §3 escalation triggered: %s\n", strings.Join(triggers, "; "))
-	}
-	outcome = ApplyEscalation(outcome, triggers)
+	// REVIEW.md §3 escalation is mandatory "regardless of finding severity".
+	// The plan returns every deterministic trigger before the model runs, so
+	// this application is defensive rather than a second, unauthenticated Git read.
+	triggers := plan.EscalationTriggers
+	outcome := finalReviewOutcome(synthesizedOutcome, specVerdict, triggers)
+	synthesis = reconcileSynthesisDisplay(synthesizedOutcome, outcome, synthesis)
 
 	// Reporting the outcome is best-effort: the exit code already carries the
 	// verdict, so a comment outage must not change it.
@@ -304,6 +478,65 @@ func run(c config) int {
 	code := ExitFor(outcome, c.override)
 	fmt.Printf("::notice::AI review outcome: %s (exit %d, override=%t)\n", outcome, code, c.override)
 	return code
+}
+
+func specContractReport(verdict specContractVerdict) dimensionReport {
+	return dimensionReport{
+		key:  "spec-contract",
+		text: fmt.Sprintf("Authoritative outcome: %s\n%s", verdict.Status, renderSpecVerdict(verdict)),
+	}
+}
+
+// finalReviewOutcome applies the authoritative SPEC verdict before mandatory
+// escalation, so a REVIEW.md §3 trigger is always the final needs-human-review
+// outcome regardless of what either model review concluded.
+func finalReviewOutcome(synthesized, specVerdict Outcome, triggers []string) Outcome {
+	return ApplyEscalation(applySpecVerdict(synthesized, specVerdict), triggers)
+}
+
+// reconcileSynthesisDisplay prevents the sticky comment from presenting a
+// model verdict that deterministic policy has already overruled. When policy
+// changes the outcome, the model's conflicting first line and summary are
+// replaced rather than displayed as though they were still authoritative.
+func reconcileSynthesisDisplay(synthesized, final Outcome, synthesis string) string {
+	trimmed := strings.TrimSpace(synthesis)
+	firstLine, rest, hasRest := strings.Cut(trimmed, "\n")
+	if synthesized == final && strings.TrimSpace(firstLine) == final.String() {
+		return trimmed
+	}
+	if synthesized != final {
+		return final.String() + "\nFinal outcome reconciled with deterministic policy and authoritative review reports; see the detailed evidence below."
+	}
+	if hasRest && strings.TrimSpace(rest) != "" {
+		return final.String() + "\n" + strings.TrimSpace(rest)
+	}
+	return final.String()
+}
+
+// handleSpecHumanReview keeps an unresolved SPEC contract visibly in the
+// existing review lifecycle. A revision-bound override may pass the check on
+// human authority, but it never turns this verdict into approved.
+func handleSpecHumanReview(c config, plan reviewPlan, reason string) int {
+	trigger := "SPEC governance change requires human review: " + reason
+	if len(plan.Changes) > 0 {
+		trigger += " (" + plan.Changes[0].Path + ")"
+	}
+	return handleHumanReview(c, reason, []string{trigger})
+}
+
+// handleMandatoryEscalation makes a deterministic REVIEW.md §3 trigger
+// visible even when no SPEC changed and the reviewer credential is absent.
+func handleMandatoryEscalation(c config, triggers []string) int {
+	reason := "REVIEW.md §3 requires human review: " + strings.Join(triggers, "; ")
+	return handleHumanReview(c, reason, triggers)
+}
+
+func handleHumanReview(c config, reason string, triggers []string) int {
+	logCommentErr(postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers)))
+	if c.override && !requireComment(c, overrideComment(reason)) {
+		return 1
+	}
+	return ExitFor(NeedsHumanReview, c.override)
 }
 
 // failClosed returns the blocking exit code (1) for an intended failure, unless
