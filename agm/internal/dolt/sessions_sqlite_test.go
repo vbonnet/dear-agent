@@ -210,6 +210,58 @@ func TestSQLiteSessionNameReservationCanBeRenewedByOwner(t *testing.T) {
 	}
 }
 
+// TestSQLiteReservationOwnedAndUnexpiredBacksZeroRowRenewFallback covers the
+// authoritative primary-key ownership read that RenewSessionNameReservation
+// falls back to when its UPDATE reports zero rows affected. On Dolt that
+// zero-row result can be spurious for a just-reserved name (a real bug that
+// aborted every session creation with AGM-007); the fallback must recognise a
+// still-valid, still-owned lease as success while still rejecting foreign,
+// expired, and missing reservations.
+func TestSQLiteReservationOwnedAndUnexpiredBacksZeroRowRenewFallback(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	if err := adapter.ReserveSessionName("owner", "leased-name"); err != nil {
+		t.Fatalf("ReserveSessionName() error: %v", err)
+	}
+	now := time.Now()
+
+	owned, err := adapter.reservationOwnedAndUnexpired("owner", "leased-name", now)
+	if err != nil {
+		t.Fatalf("reservationOwnedAndUnexpired(owner) error: %v", err)
+	}
+	if !owned {
+		t.Fatal("owner must be reported as holding an unexpired reservation")
+	}
+
+	owned, err = adapter.reservationOwnedAndUnexpired("other", "leased-name", now)
+	if err != nil {
+		t.Fatalf("reservationOwnedAndUnexpired(other) error: %v", err)
+	}
+	if owned {
+		t.Fatal("a non-owner must not be reported as holding the reservation")
+	}
+
+	owned, err = adapter.reservationOwnedAndUnexpired("owner", "leased-name", now.Add(sessionNameReservationTTL+time.Minute))
+	if err != nil {
+		t.Fatalf("reservationOwnedAndUnexpired(expired) error: %v", err)
+	}
+	if owned {
+		t.Fatal("an expired reservation must not be reported as owned")
+	}
+
+	owned, err = adapter.reservationOwnedAndUnexpired("owner", "no-such-name", now)
+	if err != nil {
+		t.Fatalf("reservationOwnedAndUnexpired(missing) error: %v", err)
+	}
+	if owned {
+		t.Fatal("a missing reservation must not be reported as owned")
+	}
+}
+
 func TestSQLiteUpdateSessionCannotReactivateArchivedRowFromStaleManifest(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

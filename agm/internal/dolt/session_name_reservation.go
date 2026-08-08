@@ -201,9 +201,48 @@ func (a *Adapter) RenewSessionNameReservation(sessionID, name string) error {
 		return fmt.Errorf("get renewed session-name reservation rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
+		// Dolt (observed on 2.2.x) can report zero rows affected for an UPDATE
+		// whose WHERE demonstrably matches an existing row when that row was
+		// INSERTed by a recent, separate transaction — a primary-key SELECT of
+		// the same row still returns it. Renew's contract is only "this session
+		// still holds a valid lease on the name", which is satisfied whenever the
+		// reservation exists, is owned by this session, and is unexpired,
+		// independent of whether the redundant expires_at extension physically
+		// applied. Fall back to an authoritative primary-key ownership read
+		// before reporting a conflict, so a spurious zero-row UPDATE cannot fail
+		// an otherwise valid creation. Without this, session creation aborts with
+		// AGM-007 for a name the caller just successfully reserved.
+		owned, ownErr := a.reservationOwnedAndUnexpired(sessionID, name, now)
+		if ownErr != nil {
+			return ownErr
+		}
+		if owned {
+			return nil
+		}
 		return &SessionNameConflictError{Name: name}
 	}
 	return nil
+}
+
+// reservationOwnedAndUnexpired reports whether the workspace-scoped reservation
+// for name is currently held by sessionID and has not expired as of asOf. It
+// reads by primary key (workspace, name), which is not subject to the zero-row
+// UPDATE anomaly RenewSessionNameReservation compensates for.
+func (a *Adapter) reservationOwnedAndUnexpired(sessionID, name string, asOf time.Time) (bool, error) {
+	var owner string
+	var expiresAt time.Time
+	err := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT session_id, expires_at FROM agm_session_name_reservations
+		 WHERE workspace = ? AND name = ?`,
+		a.workspace, name,
+	).Scan(&owner, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("re-read session-name reservation after zero-row renew: %w", err)
+	}
+	return owner == sessionID && expiresAt.After(asOf), nil
 }
 
 // ReactivateSessionResult distinguishes a failed lifecycle mutation from a
