@@ -92,15 +92,19 @@ const (
 	// complete bounded applicability/deletion verdict.
 	specReviewMaxTokens int64 = 64 * 1024
 	// reviewWorkflowTimeout must match the trusted review job timeout. The
-	// staged pipeline leaves five minutes for setup and publication, while each
-	// model call remains independently bounded.
-	reviewWorkflowTimeout = 60 * time.Minute
-	reviewPipelineTimeout = 55 * time.Minute
+	// first trusted workflow step publishes an absolute review cutoff before
+	// this process starts; reviewWorkflowDeadlineOffset leaves a dedicated
+	// publication window even when setup consumes the command-local slack.
+	reviewWorkflowTimeout            = 70 * time.Minute
+	reviewWorkflowDeadlineOffset     = 67 * time.Minute
+	reviewWorkflowPublicationReserve = reviewWorkflowTimeout - reviewWorkflowDeadlineOffset
+	reviewPipelineTimeout            = 55 * time.Minute
 	// Eight owner shards run at no more than four concurrently, so their two
 	// sequential waves fit in 21 minutes. The final SPEC call, parallel
 	// dimensions, and synthesis each have one 11-minute stage, giving valid
 	// 10-minute calls scheduling slack. Their 54-minute worst-case sequence
-	// leaves one minute in-process and five minutes before workflow timeout.
+	// leaves one minute in-process. The absolute workflow cutoff independently
+	// preserves the publication reserve above.
 	semanticOwnerSearchStageTimeout = 21 * time.Minute
 	finalSpecReviewStageTimeout     = 11 * time.Minute
 	dimensionReviewStageTimeout     = 11 * time.Minute
@@ -118,6 +122,9 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 	if maxTokens <= 0 {
 		return "", fmt.Errorf("model output budget must be positive")
 	}
+	// A stage budget represents one bounded model attempt. SDK retries would
+	// otherwise outlive the advertised per-request allowance and eat the
+	// publication reserve established by the workflow deadline.
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     model,
@@ -130,7 +137,7 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
 		},
-	}, option.WithRequestTimeout(reviewRequestTimeout))
+	}, option.WithRequestTimeout(reviewRequestTimeout), option.WithMaxRetries(0))
 	if err != nil {
 		return "", err
 	}

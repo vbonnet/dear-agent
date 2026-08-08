@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -97,7 +98,11 @@ func postComment(c config, body string) error {
 	}
 
 	// Post first so the audit record exists before anything is removed.
-	post := exec.Command("gh", "pr", "comment", c.pr, "--repo", c.repo, "--body-file", "-")
+	ctx := c.reviewContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	post := exec.CommandContext(ctx, "gh", "pr", "comment", c.pr, "--repo", c.repo, "--body-file", "-")
 	post.Stdin = strings.NewReader(body)
 	post.Stdout = os.Stdout
 	post.Stderr = os.Stderr
@@ -108,15 +113,15 @@ func postComment(c config, body string) error {
 
 	// Then prune older marked comments, keeping the one just posted. Pruning is
 	// cosmetic — the audit record already exists — so failures are ignored.
-	pruneOldComments(c)
+	pruneOldComments(ctx, c)
 	return nil
 }
 
 // pruneOldComments removes all but the newest marked sticky comment. Best
 // effort by design: the freshly posted comment is the audit record, and losing
 // a tidy-up must never turn into a gate failure.
-func pruneOldComments(c config) {
-	list := exec.Command("gh", "api",
+func pruneOldComments(ctx context.Context, c config) {
+	list := exec.CommandContext(ctx, "gh", "api",
 		fmt.Sprintf("repos/%s/issues/%s/comments", c.repo, c.pr),
 		"--jq", fmt.Sprintf(`.[] | select(.body | startswith("%s")) | .id`, commentMarker))
 	out, err := list.Output()
@@ -125,7 +130,7 @@ func pruneOldComments(c config) {
 	}
 	ids := strings.Fields(string(out))
 	for _, id := range ids[:max(len(ids)-1, 0)] { // all but the newest
-		_ = exec.Command("gh", "api", "-X", "DELETE",
+		_ = exec.CommandContext(ctx, "gh", "api", "-X", "DELETE",
 			fmt.Sprintf("repos/%s/issues/comments/%s", c.repo, id)).Run()
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -21,22 +22,27 @@ const defaultMaxDiffBytes = 1_500_000
 
 const maxAllowedReviewDiffBytes = 8 * 1024 * 1024
 
+const reviewAbsoluteDeadlineEnv = "AI_REVIEW_DEADLINE_UNIX"
+
 // config is the parsed environment.
 type config struct {
-	baseSHA    string
-	headSHA    string
-	pr         string
-	repo       string
-	eventName  string
-	isFork     bool
-	override   bool
-	prBody     string
-	apiKey     string
-	apiBaseURL string
-	keyFromEnv bool
-	model      anthropic.Model
-	effort     anthropic.OutputConfigEffort
-	maxDiff    int
+	baseSHA          string
+	headSHA          string
+	pr               string
+	repo             string
+	eventName        string
+	isFork           bool
+	override         bool
+	prBody           string
+	apiKey           string
+	apiBaseURL       string
+	keyFromEnv       bool
+	githubActions    bool
+	absoluteDeadline string
+	reviewContext    context.Context
+	model            anthropic.Model
+	effort           anthropic.OutputConfigEffort
+	maxDiff          int
 }
 
 // loadConfig reads the non-secret workflow environment. It deliberately
@@ -44,18 +50,20 @@ type config struct {
 // completed deterministic prechecks.
 func loadConfig() config {
 	c := config{
-		baseSHA:    os.Getenv("BASE_SHA"),
-		headSHA:    os.Getenv("HEAD_SHA"),
-		pr:         os.Getenv("PR"),
-		repo:       os.Getenv("REPO"),
-		eventName:  os.Getenv("EVENT_NAME"),
-		isFork:     os.Getenv("IS_FORK") == "true",
-		override:   os.Getenv("OVERRIDE") == "true",
-		prBody:     os.Getenv("PR_BODY"),
-		keyFromEnv: true,
-		model:      anthropic.ModelClaudeOpus4_8,
-		effort:     anthropic.OutputConfigEffortHigh,
-		maxDiff:    defaultMaxDiffBytes,
+		baseSHA:          os.Getenv("BASE_SHA"),
+		headSHA:          os.Getenv("HEAD_SHA"),
+		pr:               os.Getenv("PR"),
+		repo:             os.Getenv("REPO"),
+		eventName:        os.Getenv("EVENT_NAME"),
+		isFork:           os.Getenv("IS_FORK") == "true",
+		override:         os.Getenv("OVERRIDE") == "true",
+		prBody:           os.Getenv("PR_BODY"),
+		keyFromEnv:       true,
+		githubActions:    os.Getenv("GITHUB_ACTIONS") == "true",
+		absoluteDeadline: os.Getenv(reviewAbsoluteDeadlineEnv),
+		model:            anthropic.ModelClaudeOpus4_8,
+		effort:           anthropic.OutputConfigEffortHigh,
+		maxDiff:          defaultMaxDiffBytes,
 	}
 	if m := os.Getenv("AI_REVIEW_MODEL"); m != "" {
 		c.model = anthropic.Model(m)
@@ -71,6 +79,41 @@ func loadConfig() config {
 	return c
 }
 
+// effectiveReviewDeadline caps one command invocation at the earlier of its
+// local pipeline budget and the trusted workflow cutoff. Local invocations do
+// not require workflow metadata; GitHub Actions invocations fail closed when
+// the protected workflow did not export a canonical, still-future deadline.
+func effectiveReviewDeadline(now time.Time, githubActions bool, rawAbsolute string) (time.Time, error) {
+	localDeadline := now.Add(reviewPipelineTimeout)
+	if !githubActions {
+		return localDeadline, nil
+	}
+	if rawAbsolute == "" {
+		return time.Time{}, fmt.Errorf("%s is required in GitHub Actions", reviewAbsoluteDeadlineEnv)
+	}
+	seconds, err := strconv.ParseInt(rawAbsolute, 10, 64)
+	if err != nil || seconds <= 0 {
+		return time.Time{}, fmt.Errorf("%s is malformed", reviewAbsoluteDeadlineEnv)
+	}
+	absolute := time.Unix(seconds, 0).UTC()
+	if !absolute.After(now) {
+		return time.Time{}, fmt.Errorf("%s has expired", reviewAbsoluteDeadlineEnv)
+	}
+	if absolute.Before(localDeadline) {
+		return absolute, nil
+	}
+	return localDeadline, nil
+}
+
+func newReviewContext(parent context.Context, now time.Time, githubActions bool, rawAbsolute string) (context.Context, context.CancelFunc, error) {
+	deadline, err := effectiveReviewDeadline(now, githubActions, rawAbsolute)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx, cancel := context.WithDeadline(parent, deadline)
+	return ctx, cancel, nil
+}
+
 // gitMergeBase finds the common ancestor of the current base and PR head.
 // Reviewing from that point excludes unrelated commits that landed on the base
 // branch after the PR forked, and makes every review input describe the PR.
@@ -81,7 +124,11 @@ func gitMergeBase(base, head string) (string, error) {
 // gitDiff returns either the complete diff or an overflow signal. A bounded
 // prefix is never returned as though it were a reviewable complete diff.
 func gitDiff(mergeBase, head string, limit int) (string, bool, error) {
-	out, err := gitOutputBounded(context.Background(), limit, "diff", "--no-ext-diff", "--no-textconv", mergeBase, head)
+	return gitDiffContext(context.Background(), mergeBase, head, limit)
+}
+
+func gitDiffContext(ctx context.Context, mergeBase, head string, limit int) (string, bool, error) {
+	out, err := gitOutputBounded(ctx, limit, "diff", "--no-ext-diff", "--no-textconv", mergeBase, head)
 	if errors.Is(err, errGitOutputLimit) {
 		return "", true, nil
 	}
@@ -301,10 +348,18 @@ func preflightGates(c config) (int, bool) {
 // path returns a non-zero code (fail closed); only an Approved outcome, an
 // empty diff with no escalation marker, or the audited override yields 0.
 func run(c config) int {
+	ctx, cancel, err := newReviewContext(context.Background(), time.Now(), c.githubActions, c.absoluteDeadline)
+	if err != nil {
+		fmt.Printf("::error::trusted review deadline is unavailable: %v\n", err)
+		return 1
+	}
+	defer cancel()
+	c.reviewContext = ctx
+
 	// This plan is deliberately built before any credential or model call. It
 	// is the one deep seam that authenticates changed-SPEC evidence and performs
 	// deterministic ownership/traceability checks for both CI and tests.
-	plan, err := buildReviewPlanWithPRBody(context.Background(), c.baseSHA, c.headSHA, c.prBody)
+	plan, err := buildReviewPlanWithPRBody(ctx, c.baseSHA, c.headSHA, c.prBody)
 	if err != nil {
 		fmt.Printf("::error::could not build authenticated review plan: %v\n", err)
 		return failClosed(c, "the authenticated SPEC governance review plan could not be built")
@@ -337,7 +392,7 @@ func run(c config) int {
 	}
 
 	mergeBase := plan.MergeBaseSHA
-	diff, tooLarge, err := gitDiff(mergeBase, c.headSHA, c.maxDiff)
+	diff, tooLarge, err := gitDiffContext(ctx, mergeBase, c.headSHA, c.maxDiff)
 	if err != nil {
 		fmt.Printf("::error::could not compute diff: %v\n", err)
 		return failClosed(c, "the PR diff could not be computed")
@@ -359,10 +414,6 @@ func run(c config) int {
 		fmt.Println("::notice::empty diff; nothing to review.")
 		return 0
 	}
-
-	// Oversize diff fails closed rather than truncating (SPEC R10).
-	ctx, cancel := context.WithTimeout(context.Background(), reviewPipelineTimeout)
-	defer cancel()
 
 	clientOptions := []option.RequestOption{option.WithAPIKey(c.apiKey)}
 	if c.apiBaseURL != "" {

@@ -55,6 +55,14 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 		Jobs map[string]struct {
 			Name           string `yaml:"name"`
 			TimeoutMinutes int    `yaml:"timeout-minutes"`
+			Steps          []struct {
+				Name           string `yaml:"name"`
+				TimeoutMinutes int    `yaml:"timeout-minutes"`
+				Env            struct {
+					ReviewDeadlineSeconds int `yaml:"REVIEW_DEADLINE_SECONDS"`
+				} `yaml:"env"`
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(rawWorkflow, &workflow); err != nil {
@@ -69,6 +77,52 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 	}
 	if time.Duration(workflow.Jobs["review"].TimeoutMinutes)*time.Minute != reviewWorkflowTimeout {
 		t.Fatalf("workflow review timeout = %d minutes, want %s", workflow.Jobs["review"].TimeoutMinutes, reviewWorkflowTimeout)
+	}
+	steps := workflow.Jobs["review"].Steps
+	if len(steps) == 0 || steps[0].Name != "Mark reviewed head pending" {
+		t.Fatal("trusted review deadline is not established by the first workflow step")
+	}
+	if time.Duration(steps[0].Env.ReviewDeadlineSeconds)*time.Second != reviewWorkflowDeadlineOffset {
+		t.Fatalf("workflow absolute cutoff offset = %d seconds, want %s", steps[0].Env.ReviewDeadlineSeconds, reviewWorkflowDeadlineOffset)
+	}
+	if !strings.Contains(steps[0].Run, "date -u +%s") || !strings.Contains(steps[0].Run, reviewAbsoluteDeadlineEnv+"=$review_deadline") || !strings.Contains(steps[0].Run, ">> \"$GITHUB_ENV\"") {
+		t.Fatal("first workflow step does not export the trusted absolute review deadline")
+	}
+	if reviewWorkflowTimeout-reviewWorkflowDeadlineOffset != reviewWorkflowPublicationReserve || reviewWorkflowPublicationReserve < 2*time.Minute {
+		t.Fatalf("workflow publication reserve = %s, want a bound of at least two minutes", reviewWorkflowPublicationReserve)
+	}
+	stepByName := make(map[string]struct {
+		TimeoutMinutes int
+		Run            string
+	}, len(steps))
+	for _, step := range steps {
+		stepByName[step.Name] = struct {
+			TimeoutMinutes int
+			Run            string
+		}{TimeoutMinutes: step.TimeoutMinutes, Run: step.Run}
+	}
+	for _, name := range []string{"Checkout trusted base revision", "Set up Go"} {
+		step := stepByName[name]
+		if step.TimeoutMinutes <= 0 || step.TimeoutMinutes > 10 {
+			t.Fatalf("%s timeout = %d minutes, want a bounded setup step", name, step.TimeoutMinutes)
+		}
+	}
+	boundedCalls := map[string]int{
+		"Fetch PR head for diff":                          3,
+		"Build authenticated SPEC governance review plan": 1,
+		"Clear override for a new pull request revision":  1,
+		"Attest override to the reviewed revision":        1,
+		"Detect override label":                           3,
+		"Run AI review gate":                              2,
+	}
+	for name, minimum := range boundedCalls {
+		run := stepByName[name].Run
+		if strings.Count(run, "timeout --signal=TERM --kill-after=5s") < minimum || !strings.Contains(run, reviewAbsoluteDeadlineEnv) {
+			t.Fatalf("%s does not bound all pre-publication work to the absolute cutoff", name)
+		}
+	}
+	if !strings.Contains(text, "90s gh api --method PATCH") {
+		t.Fatal("workflow does not bound final check publication inside the reserved window")
 	}
 	if !strings.Contains(text, "-f name='SPEC Contract Review'") || !strings.Contains(text, "-f output[title]='SPEC Contract Review'") {
 		t.Fatal("workflow does not publish the unique authoritative SPEC Contract Review check")

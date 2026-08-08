@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -29,18 +30,18 @@ func TestParseSpecContractVerdict_RejectsUnknownFieldsAndUnauthenticatedEvidence
 		ReviewNeeded: true,
 		Changes:      []specChange{{Path: "SPEC.md", Status: "modified"}},
 	}
-	valid := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA)
+	valid := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA)
 	if verdict, err := parseSpecContractVerdict([]byte(valid), plan); err != nil || verdict.Status != Approved {
 		t.Fatalf("valid verdict = %#v, %v", verdict, err)
 	}
 	for _, raw := range []string{
 		valid[:len(valid)-1] + `,"override":true}`,
-		fmt.Sprintf(`{"version":%q,"base_sha":"different","merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.MergeBaseSHA, plan.HeadSHA),
-		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":"different","head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.HeadSHA),
-		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"other/SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
-		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":null,"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
-		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":null,"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
-		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"applicability_reviews":[],"findings":null}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
+		fmt.Sprintf(`{"version":%q,"base_sha":"different","merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.MergeBaseSHA, plan.HeadSHA),
+		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":"different","head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.HeadSHA),
+		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"other/SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
+		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":null,"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
+		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":null,"contract_form_reviews":[],"applicability_reviews":[],"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
+		fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"SPEC.md","status":"modified"}],"status":"approved","summary":"Contract has one owner and reciprocal traceability.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":[],"findings":null}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA),
 	} {
 		if _, err := parseSpecContractVerdict([]byte(raw), plan); err == nil {
 			t.Fatalf("accepted unsafe verdict %s", raw)
@@ -60,9 +61,9 @@ func TestParseSpecContractVerdict_RequiresEveryAuthenticatedApplicabilityDisposi
 			{Path: "domains/session/SPEC.md", RequirementID: "SESSION-01", Promise: "When a session completes, the system shall retain it.", Harness: "codex-cli"},
 		},
 	}
-	validReviews := `[{"path":"domains/session/SPEC.md","requirement_id":"SESSION-01","harness":"claude-code","disposition":"supported","rationale":"The shared outcome applies without a native delta."},{"path":"domains/session/SPEC.md","requirement_id":"SESSION-01","harness":"codex-cli","disposition":"adapted","rationale":"The shared owner explicitly scopes the native translation."}]`
+	validReviews := `[{"path":"domains/session/SPEC.md","requirement_id":"SESSION-01","harness":"claude-code","disposition":"supported","rationale":"The stable promise applies."},{"path":"domains/session/SPEC.md","requirement_id":"SESSION-01","harness":"codex-cli","disposition":"adapted","rationale":"The scoped adaptation applies."}]`
 	verdictJSON := func(reviews string) string {
-		return fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"domains/session/SPEC.md","status":"modified"}],"status":"approved","summary":"Every active member has a final disposition.","deletion_reviews":[],"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, reviews)
+		return fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"domains/session/SPEC.md","status":"modified"}],"status":"approved","summary":"Every active member has a final disposition.","deletion_reviews":[],"contract_form_reviews":[],"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, reviews)
 	}
 	if verdict, err := parseSpecContractVerdict([]byte(verdictJSON(validReviews)), plan); err != nil || len(verdict.ApplicabilityReviews) != 2 {
 		t.Fatalf("complete applicability verdict = %#v, %v", verdict, err)
@@ -76,6 +77,70 @@ func TestParseSpecContractVerdict_RequiresEveryAuthenticatedApplicabilityDisposi
 		if _, err := parseSpecContractVerdict([]byte(verdictJSON(reviews)), plan); err == nil {
 			t.Fatalf("accepted incomplete or unauthenticated applicability reviews: %s", reviews)
 		}
+	}
+}
+
+func TestParseSpecContractVerdict_BindsCompleteContractFormAndStatus(t *testing.T) {
+	content := "# Contract\n\n**SESSION-01** When a session ends, the system shall persist it.\n\n## Purpose\n\nThe service also emits a durable receipt after completion.\n"
+	evidence := specContractFormEvidence{
+		Path:                  "domains/session/SPEC.md",
+		VisibleContractDigest: visibleContractDigest(content),
+		StableRequirementIDs:  []string{"SESSION-01"},
+	}
+	plan := reviewPlan{
+		Version:       specContractVersion,
+		BaseSHA:       strings.Repeat("a", 40),
+		MergeBaseSHA:  strings.Repeat("a", 40),
+		HeadSHA:       strings.Repeat("b", 40),
+		Changes:       []specChange{{Path: evidence.Path, Status: "modified"}},
+		Contracts:     []changedSpecContract{{Path: evidence.Path, Status: "modified", Content: content}},
+		ContractForms: []specContractFormEvidence{evidence},
+	}
+	if !validContractFormEvidence(plan) {
+		t.Fatal("exact visible-contract digest and stable IDs were not authenticated")
+	}
+	verdict := func(status, disposition string) []byte {
+		document := specContractVerdictDocument{
+			Version:         plan.Version,
+			BaseSHA:         plan.BaseSHA,
+			MergeBaseSHA:    plan.MergeBaseSHA,
+			HeadSHA:         plan.HeadSHA,
+			Changes:         plan.Changes,
+			Status:          status,
+			Summary:         "Contract prose was certified.",
+			DeletionReviews: []specDeletionReview{},
+			ContractFormReviews: []specContractFormReview{{
+				Path:                  evidence.Path,
+				VisibleContractDigest: evidence.VisibleContractDigest,
+				Disposition:           disposition,
+				Rationale:             "Mixed prose needs a stable ID.",
+			}},
+			ApplicabilityReviews: []specApplicabilityReview{},
+			Findings:             []specFinding{},
+		}
+		raw, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	if _, err := parseSpecContractVerdict(verdict("approved", "needs-conversion"), plan); err == nil {
+		t.Fatal("mixed-format observable prose certification was allowed to approve")
+	}
+	if parsed, err := parseSpecContractVerdict(verdict("needs-work", "needs-conversion"), plan); err != nil || parsed.Status != NeedsWork {
+		t.Fatalf("needs-conversion verdict = %#v, %v", parsed, err)
+	}
+	if _, err := parseSpecContractVerdict(verdict("needs-work", "uncertain"), plan); err == nil {
+		t.Fatal("uncertain complete-contract certification did not require human review")
+	}
+	if parsed, err := parseSpecContractVerdict(verdict("needs-human-review", "uncertain"), plan); err != nil || parsed.Status != NeedsHumanReview {
+		t.Fatalf("uncertain contract-form verdict = %#v, %v", parsed, err)
+	}
+	wrongDigest := evidence
+	wrongDigest.VisibleContractDigest = strings.Repeat("0", sha256.Size*2)
+	plan.ContractForms[0] = wrongDigest
+	if _, err := parseSpecContractVerdict(verdict("needs-work", "needs-conversion"), plan); err == nil {
+		t.Fatal("contract-form verdict with a stale visible-content digest was accepted")
 	}
 }
 
@@ -524,15 +589,16 @@ func TestSpecReviewPromptsRejectsStaleProtectedBaseEvidence(t *testing.T) {
 	}
 }
 
-func TestMinimumSpecVerdictSizeFitsOrdinaryCompleteGrid(t *testing.T) {
+func TestSpecVerdictBoundsFitOrdinaryCompleteGrid(t *testing.T) {
 	plan := reviewPlan{
-		Version:      specContractVersion,
-		BaseSHA:      strings.Repeat("a", 40),
-		MergeBaseSHA: strings.Repeat("a", 40),
-		HeadSHA:      strings.Repeat("b", 40),
-		Changes:      []specChange{{Path: "module/SPEC.md", Status: "modified"}},
+		Version:       specContractVersion,
+		BaseSHA:       strings.Repeat("a", 40),
+		MergeBaseSHA:  strings.Repeat("a", 40),
+		HeadSHA:       strings.Repeat("b", 40),
+		Changes:       []specChange{{Path: "module/SPEC.md", Status: "modified"}},
+		ContractForms: []specContractFormEvidence{{Path: "module/SPEC.md", VisibleContractDigest: strings.Repeat("c", sha256.Size*2), StableRequirementIDs: []string{"MOD-00"}}},
 	}
-	for requirement := range 20 {
+	for requirement := range 33 {
 		for _, harness := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"} {
 			plan.Applicability = append(plan.Applicability, specApplicabilityEvidence{
 				Path:          "module/SPEC.md",
@@ -541,12 +607,134 @@ func TestMinimumSpecVerdictSizeFitsOrdinaryCompleteGrid(t *testing.T) {
 			})
 		}
 	}
-	size, err := minimumSpecVerdictSize(plan)
+	minimum, err := minimumSpecVerdictSize(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size > maxSpecVerdictBytes {
-		t.Fatalf("minimum ordinary verdict size = %d, exceeds %d", size, maxSpecVerdictBytes)
+	maximum, err := maximumSpecVerdictSize(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visibleOutput, err := maximumSpecVerdictOutputBytes(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if minimum > maxSpecVerdictBytes || maximum > maxSpecVerdictBytes || visibleOutput > maxSpecVisibleOutputBytes {
+		t.Fatalf("ordinary verdict bounds minimum=%d maximum=%d visible=%d, limits=%d/%d", minimum, maximum, visibleOutput, maxSpecVerdictBytes, maxSpecVisibleOutputBytes)
+	}
+	if maximum <= visibleOutput || len(maximumSpecVerdictDocument(plan).Findings) != maxSpecFindings {
+		t.Fatalf("maximum verdict does not cover JSON expansion and all findings: maximum=%d visible=%d findings=%d", maximum, visibleOutput, len(maximumSpecVerdictDocument(plan).Findings))
+	}
+	if maxSpecVisibleOutputBytes > int(specReviewMaxTokens)/2 {
+		t.Fatalf("visible-output limit = %d, exceeds half of %d max tokens", maxSpecVisibleOutputBytes, specReviewMaxTokens)
+	}
+}
+
+func TestAppendApplicabilityEvidenceNeverAppendsPartialContractGrid(t *testing.T) {
+	requirements := []parsedRequirement{{ID: "BOUND-01", Body: "When bounded evidence is constructed, the system shall retain complete grids."}}
+	harnesses := []activeHarnessMemberEvidence{{Name: "claude-code"}, {Name: "codex-cli"}}
+
+	partial := reviewPlan{Applicability: make([]specApplicabilityEvidence, maxApplicabilityReviews-1)}
+	before := append([]specApplicabilityEvidence(nil), partial.Applicability...)
+	if appendApplicabilityEvidence(&partial, "domains/bounded/SPEC.md", requirements, harnesses) {
+		t.Fatal("a contract grid that crosses the authenticated limit was accepted")
+	}
+	if !slices.Equal(partial.Applicability, before) {
+		t.Fatalf("overflow appended a partial grid: before=%d after=%d", len(before), len(partial.Applicability))
+	}
+
+	exact := reviewPlan{Applicability: make([]specApplicabilityEvidence, maxApplicabilityReviews-len(harnesses))}
+	if !appendApplicabilityEvidence(&exact, "domains/bounded/SPEC.md", requirements, harnesses) || len(exact.Applicability) != maxApplicabilityReviews {
+		t.Fatalf("an exact-fit complete grid was rejected: entries=%d", len(exact.Applicability))
+	}
+	afterExactFit := append([]specApplicabilityEvidence(nil), exact.Applicability...)
+	if appendApplicabilityEvidence(&exact, "domains/later/SPEC.md", requirements, harnesses[:1]) || !slices.Equal(exact.Applicability, afterExactFit) {
+		t.Fatalf("evidence was appended after reaching the authenticated cap: entries=%d", len(exact.Applicability))
+	}
+}
+
+func TestBuildReviewPlanStopsApplicabilityConstructionAtFirstUnfittableContract(t *testing.T) {
+	repo := newReviewRepo(t)
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	var first strings.Builder
+	first.WriteString("# First bounded contract\n\n")
+	for index := range 1638 {
+		fmt.Fprintf(&first, "**CAP-%04d** When bounded case %04d is reviewed, the system shall retain result %04d.\n\n", index, index, index)
+	}
+	for _, item := range []struct {
+		path     string
+		contents string
+	}{
+		{path: "a/SPEC.md", contents: first.String()},
+		{path: "b/SPEC.md", contents: specWithoutTrace("NEXT-01", "When a later contract is reviewed, the system shall retain its complete grid.")},
+		{path: "c/SPEC.md", contents: specWithoutTrace("LAST-01", "When a final contract is reviewed, the system shall retain its complete grid.")},
+	} {
+		writeReviewFile(t, repo, item.path, item.contents)
+	}
+	gittest.Run(t, repo, "add", "a/SPEC.md", "b/SPEC.md", "c/SPEC.md")
+	gittest.Run(t, repo, "commit", "-m", "add bounded contracts")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Applicability) != 1638*5 || len(plan.Applicability) > maxApplicabilityReviews {
+		t.Fatalf("bounded applicability evidence entries=%d, want %d", len(plan.Applicability), 1638*5)
+	}
+	for _, evidence := range plan.Applicability {
+		if evidence.Path != "a/SPEC.md" {
+			t.Fatalf("an unfittable or later contract contributed partial evidence: %#v", evidence)
+		}
+	}
+	if count := strings.Count(strings.Join(plan.HumanReasons, "\n"), "complete active-harness applicability evidence exceeds the bounded review limit"); count != 1 {
+		t.Fatalf("applicability overflow reasons=%v, want one stable reason", plan.HumanReasons)
+	}
+}
+
+func TestMaximumSpecVerdictOutputUsesNonHTMLEscapedWorstCase(t *testing.T) {
+	ampersandPath := "module/&&&/SPEC.md"
+	quotePath := `module/""""""""/SPEC.md`
+	plan := reviewPlan{
+		Version:      specContractVersion,
+		BaseSHA:      strings.Repeat("a", 40),
+		MergeBaseSHA: strings.Repeat("a", 40),
+		HeadSHA:      strings.Repeat("b", 40),
+		Changes: []specChange{
+			{Path: ampersandPath, Status: "modified"},
+			{Path: quotePath, Status: "modified"},
+		},
+	}
+
+	wireDocument := maximumSpecVerdictDocument(plan)
+	outputDocument := maximumSpecVerdictOutputDocument(plan)
+	if wireDocument.Findings[0].Path != ampersandPath {
+		t.Fatalf("wire maximum path = %q, want HTML-expanding ampersand path", wireDocument.Findings[0].Path)
+	}
+	if outputDocument.Findings[0].Path != quotePath {
+		t.Fatalf("visible-output maximum path = %q, want quote-expanding path", outputDocument.Findings[0].Path)
+	}
+	if outputDocument.Summary != strings.Repeat(`"`, maxSpecSummaryBytes) || outputDocument.Findings[0].Message != strings.Repeat(`"`, maxSpecFindingTextBytes) {
+		t.Fatal("visible-output maximum does not fill bounded review strings with JSON-escaping quotes")
+	}
+
+	var raw bytes.Buffer
+	encoder := json.NewEncoder(&raw)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(outputDocument); err != nil {
+		t.Fatal(err)
+	}
+	encoded := bytes.TrimSuffix(raw.Bytes(), []byte{'\n'})
+	maximum, err := maximumSpecVerdictOutputBytes(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maximum != len(encoded) {
+		t.Fatalf("visible-output maximum = %d, quote-filled accepted witness = %d", maximum, len(encoded))
+	}
+	if _, err := parseSpecContractVerdict(encoded, plan); err != nil {
+		t.Fatalf("quote-filled maximum witness is not parser-permitted: %v", err)
 	}
 }
 
@@ -571,7 +759,7 @@ func TestBuildReviewPlan_EscalatesBeforeImpossibleVerdictCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	reasons := strings.Join(plan.HumanReasons, "\n")
-	if !plan.needsHuman() || !plan.OwnerIndexComplete || !strings.Contains(reasons, "minimum complete SPEC verdict") {
+	if !plan.needsHuman() || !plan.OwnerIndexComplete || !strings.Contains(reasons, "maximum-value canonical SPEC verdict") {
 		t.Fatalf("impossible output plan did not fail closed before model review: complete=%t reasons=%v applicability=%d", plan.OwnerIndexComplete, plan.HumanReasons, len(plan.Applicability))
 	}
 }
@@ -955,7 +1143,7 @@ func TestBuildReviewPlan_ProvidesCompleteChangedContractAndSemanticCandidates(t 
 	if len(candidates) != 3 || !strings.Contains(candidates["shared/SPEC.md"], "shared BDD backlink") || !strings.Contains(candidates["contracts/archive/SPEC.md"], "contract term") || !unrelatedIncluded {
 		t.Fatalf("semantic candidates = %#v, want every unchanged contract with BDD and lexical ranking signals", plan.OwnerIndex)
 	}
-	if !plan.OwnerIndexComplete || plan.ActiveHarnessInventory.Revision != base || len(plan.ActiveHarnessInventory.Members) != 5 || len(plan.Applicability) != 5 {
+	if !plan.OwnerIndexComplete || plan.ActiveHarnessInventory.Revision != base || len(plan.ActiveHarnessInventory.Members) != 5 || len(plan.Applicability) != 5 || len(plan.ContractForms) != 1 || plan.ContractForms[0].VisibleContractDigest != visibleContractDigest(changed) || !slices.Equal(plan.ContractForms[0].StableRequirementIDs, []string{"SESSION-01"}) {
 		t.Fatalf("authenticated active-member applicability evidence is incomplete: inventory=%#v applicability=%#v complete=%t", plan.ActiveHarnessInventory, plan.Applicability, plan.OwnerIndexComplete)
 	}
 	completeOwnerSearchForTest(t, &plan)
@@ -964,8 +1152,14 @@ func TestBuildReviewPlan_ProvidesCompleteChangedContractAndSemanticCandidates(t 
 	if _, _, err := specReviewPrompts(incomplete); err == nil || !strings.Contains(err.Error(), "incomplete active-harness applicability evidence") {
 		t.Fatalf("prompt accepted a truncated active-member applicability grid: %v", err)
 	}
+	tamperedForm := plan
+	tamperedForm.ContractForms = append([]specContractFormEvidence(nil), plan.ContractForms...)
+	tamperedForm.ContractForms[0].StableRequirementIDs = []string{"SESSION-OTHER"}
+	if _, _, err := specReviewPrompts(tamperedForm); err == nil || !strings.Contains(err.Error(), "incomplete changed-contract form evidence") {
+		t.Fatalf("prompt accepted contract-form evidence with inexact stable IDs: %v", err)
+	}
 	_, prompt, err := specReviewPrompts(plan)
-	if err != nil || !strings.Contains(prompt, "semantic_owner_search") || !strings.Contains(prompt, "every authenticated candidate was classified distinct") {
+	if err != nil || !strings.Contains(prompt, "semantic_owner_search") || !strings.Contains(prompt, "every authenticated candidate was classified distinct") || !strings.Contains(prompt, "contract_form_reviews") || !strings.Contains(prompt, "mixed-format") {
 		t.Fatalf("final prompt does not authenticate the completed sharded owner search: %v\n%s", err, prompt)
 	}
 	_, classifierPrompt, err := semanticOwnerShardPrompts(plan, plan.OwnerShards[0])
@@ -1239,6 +1433,140 @@ func TestSemanticOwnerIndexIncludesZeroOverlapOwnerEvidence(t *testing.T) {
 	}
 }
 
+func TestSemanticOwnerIndexAuthenticatesAndClassifiesEveryChangedPeer(t *testing.T) {
+	firstPath := "domains/first/SPEC.md"
+	secondPath := "domains/second/SPEC.md"
+	first := specWithoutTrace("FIRST-01", "When a session ends, the system shall retain the terminal result for later inspection.")
+	second := specWithoutTrace("SECOND-01", "When execution finishes, the system shall preserve its final outcome for subsequent inspection.")
+	unchanged := specWithoutTrace("OTHER-01", "When storage fills, the system shall reject a new upload.")
+	contracts := []changedSpecContract{
+		{Path: firstPath, Status: "modified", Content: first, FeaturePaths: []string{}},
+		{Path: secondPath, Status: "modified", Content: second, FeaturePaths: []string{}},
+	}
+	changes := []specChange{{Path: firstPath, Status: "modified"}, {Path: secondPath, Status: "modified"}}
+	index, reasons, err := semanticOwnerIndex(
+		contracts,
+		changes,
+		map[string][]byte{
+			firstPath:               []byte(first),
+			secondPath:              []byte(second),
+			"domains/other/SPEC.md": []byte(unchanged),
+		},
+		map[string]bool{firstPath: true, secondPath: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 0 || len(index) != 3 {
+		t.Fatalf("changed-peer owner index=%#v reasons=%v", index, reasons)
+	}
+	changedPeerOrdinals := make(map[string]int)
+	for ordinal, candidate := range index {
+		if candidate.Ordinal != ordinal {
+			t.Fatalf("candidate ordinal=%d at index %d", candidate.Ordinal, ordinal)
+		}
+		if candidate.Path == firstPath || candidate.Path == secondPath {
+			if !candidate.ChangedPeer || candidate.ChangedBDDBacklink || len(candidate.Signals) != 0 {
+				t.Fatalf("changed peer retained self-derived advisory signals: %#v", candidate)
+			}
+			changedPeerOrdinals[candidate.Path] = ordinal
+		} else if candidate.ChangedPeer {
+			t.Fatalf("unchanged candidate was marked as a changed peer: %#v", candidate)
+		}
+	}
+	if len(changedPeerOrdinals) != 2 {
+		t.Fatalf("changed peer coverage=%v, want both changed contracts", changedPeerOrdinals)
+	}
+
+	base := strings.Repeat("a", 40)
+	plan := reviewPlan{
+		Version:      specContractVersion,
+		BaseSHA:      base,
+		MergeBaseSHA: base,
+		HeadSHA:      strings.Repeat("b", 40),
+		Policy:       specPolicyEvidence{Path: specAuthoringPolicyPath, Revision: base, Content: testSpecAuthoringPolicy},
+		Changes:      changes,
+		Contracts:    contracts,
+		OwnerIndex:   index,
+	}
+	completeOwnerSearchForTest(t, &plan)
+	if !validSemanticOwnerIndex(plan) {
+		t.Fatal("complete changed-peer index failed independent authentication")
+	}
+	_, prompt, err := semanticOwnerShardPrompts(plan, plan.OwnerShards[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"changed_peer=false", "changed_peer=true", "never against itself", "every unordered pair of changed contracts"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("changed-peer prompt omitted %q: %s", required, prompt)
+		}
+	}
+
+	rebuild := func(candidates []semanticOwnerCandidate) reviewPlan {
+		t.Helper()
+		mutated := plan
+		mutated.OwnerIndex = append([]semanticOwnerCandidate(nil), candidates...)
+		for ordinal := range mutated.OwnerIndex {
+			mutated.OwnerIndex[ordinal].Ordinal = ordinal
+		}
+		digest, shards, shardReasons, buildErr := buildSemanticOwnerShards(mutated)
+		if buildErr != nil || len(shardReasons) != 0 {
+			t.Fatalf("rebuild mutated owner index: shards=%#v reasons=%v err=%v", shards, shardReasons, buildErr)
+		}
+		mutated.OwnerIndexDigest = digest
+		mutated.OwnerShards = shards
+		mutated.OwnerIndexComplete = true
+		return mutated
+	}
+	missing := append([]semanticOwnerCandidate(nil), index...)
+	missing = append(missing[:changedPeerOrdinals[secondPath]], missing[changedPeerOrdinals[secondPath]+1:]...)
+	if validSemanticOwnerIndex(rebuild(missing)) {
+		t.Fatal("an owner index missing one changed peer authenticated")
+	}
+	wrongMarker := append([]semanticOwnerCandidate(nil), index...)
+	wrongMarker[changedPeerOrdinals[firstPath]].ChangedPeer = false
+	if validSemanticOwnerIndex(rebuild(wrongMarker)) {
+		t.Fatal("a changed peer with a downgraded marker authenticated")
+	}
+	selfSignal := append([]semanticOwnerCandidate(nil), index...)
+	selfSignal[changedPeerOrdinals[firstPath]].Signals = []string{"matches its own promise"}
+	if validSemanticOwnerIndex(rebuild(selfSignal)) {
+		t.Fatal("a changed peer with self-derived signals authenticated")
+	}
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		results := make([]semanticOwnerClassification, 0, len(plan.OwnerShards[0].Candidates))
+		for _, candidate := range plan.OwnerShards[0].Candidates {
+			relation := "distinct"
+			if candidate.Ordinal == changedPeerOrdinals[secondPath] {
+				relation = "possible-owner"
+			}
+			results = append(results, semanticOwnerClassification{Ordinal: candidate.Ordinal, Relation: relation, Rationale: "This changed promise may duplicate its peer."})
+		}
+		verdict := semanticOwnerShardVerdict{Version: plan.Version, BaseSHA: plan.BaseSHA, MergeBaseSHA: plan.MergeBaseSHA, HeadSHA: plan.HeadSHA, IndexDigest: plan.OwnerIndexDigest, ShardOrdinal: 0, ShardDigest: plan.OwnerShards[0].Digest, Results: results}
+		raw, marshalErr := json.Marshal(verdict)
+		if marshalErr != nil {
+			t.Errorf("marshal semantic verdict: %v", marshalErr)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, modelResponse("end_turn", string(raw)))
+	}))
+	defer server.Close()
+	client := anthropic.NewClient(option.WithAPIKey("test-key"), option.WithBaseURL(server.URL))
+	verdict, err := reviewSpecContract(context.Background(), client, anthropic.ModelClaudeOpus4_8, anthropic.OutputConfigEffortHigh, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != NeedsHumanReview || calls.Load() != 1 || len(verdict.Findings) != 1 || verdict.Findings[0].Path != secondPath || !strings.Contains(verdict.Findings[0].Message, "candidate SPEC") {
+		t.Fatalf("changed-peer concern did not stop before final review: verdict=%#v calls=%d", verdict, calls.Load())
+	}
+}
+
 func TestSemanticOwnerShardPromptIncludesCompleteChangedVisibleContract(t *testing.T) {
 	plan := reviewableSemanticPlan(t, 1)
 	plan.Contracts[0].Content += "\n## Legacy observable contract\n\nThe service returns a durable receipt after every successful completion.\n"
@@ -1417,7 +1745,8 @@ func TestReviewSpecContractRunsEveryOwnerShardBeforeFinalReview(t *testing.T) {
 				t.Fatalf("test plan shards = %d, want 2", len(plan.OwnerShards))
 			}
 			finalApplicability := applicabilityReviewsJSON(t, plan, "supported")
-			finalVerdict := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"domains/session/SPEC.md","status":"modified"}],"status":"approved","summary":"The shared contract has one owner and complete test evidence.","deletion_reviews":[],"applicability_reviews":%s,"findings":[]}`, plan.Version, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, finalApplicability)
+			finalContractForms := contractFormReviewsJSON(t, plan, "complete")
+			finalVerdict := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"domains/session/SPEC.md","status":"modified"}],"status":"approved","summary":"The shared contract has one owner and complete test evidence.","deletion_reviews":[],"contract_form_reviews":%s,"applicability_reviews":%s,"findings":[]}`, plan.Version, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, finalContractForms, finalApplicability)
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
@@ -1548,15 +1877,16 @@ func TestBuildReviewPlan_RequiresStructuredReviewForDeletedRequirements(t *testi
 		t.Fatalf("deleted requirement evidence = %#v, reasons=%v", deleted, plan.HumanReasons)
 	}
 	applicability := applicabilityReviewsJSON(t, plan, "supported")
-	missing := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"module/SPEC.md","status":"modified"}],"status":"approved","summary":"Deletion is justified by the canonical owner.","deletion_reviews":[],"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, applicability)
+	contractForms := contractFormReviewsJSON(t, plan, "complete")
+	missing := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"module/SPEC.md","status":"modified"}],"status":"approved","summary":"Deletion is justified by the canonical owner.","deletion_reviews":[],"contract_form_reviews":%s,"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, contractForms, applicability)
 	if _, err := parseSpecContractVerdict([]byte(missing), plan); err == nil {
 		t.Fatal("accepted verdict without authenticated requirement deletion review")
 	}
-	justified := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"module/SPEC.md","status":"modified"}],"status":"approved","summary":"Deletion is justified by the canonical owner.","deletion_reviews":[{"path":"module/SPEC.md","requirement_id":"MOD-02","disposition":"justified","rationale":"The protected-base policy supports removing this obsolete local promise."}],"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, applicability)
+	justified := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"module/SPEC.md","status":"modified"}],"status":"approved","summary":"Deletion is justified by the canonical owner.","deletion_reviews":[{"path":"module/SPEC.md","requirement_id":"MOD-02","disposition":"justified","rationale":"Obsolete promise can be removed."}],"contract_form_reviews":%s,"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, contractForms, applicability)
 	if verdict, err := parseSpecContractVerdict([]byte(justified), plan); err != nil || len(verdict.DeletionReviews) != 1 {
 		t.Fatalf("justified deletion verdict = %#v, %v", verdict, err)
 	}
-	needsWork := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"module/SPEC.md","status":"modified"}],"status":"needs-work","summary":"The requirement deletion needs work.","deletion_reviews":[{"path":"module/SPEC.md","requirement_id":"MOD-02","disposition":"needs-work","rationale":"The removed promise still belongs to this canonical contract."}],"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, applicability)
+	needsWork := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"module/SPEC.md","status":"modified"}],"status":"needs-work","summary":"The requirement deletion needs work.","deletion_reviews":[{"path":"module/SPEC.md","requirement_id":"MOD-02","disposition":"needs-work","rationale":"Removed promise still belongs."}],"contract_form_reviews":%s,"applicability_reviews":%s,"findings":[]}`, specContractVersion, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, contractForms, applicability)
 	if verdict, err := parseSpecContractVerdict([]byte(needsWork), plan); err != nil || verdict.Status != NeedsWork {
 		t.Fatalf("deletion-only needs-work verdict = %#v, %v", verdict, err)
 	}
@@ -1875,7 +2205,25 @@ func applicabilityReviewsJSON(t *testing.T, plan reviewPlan, disposition string)
 			RequirementID: evidence.RequirementID,
 			Harness:       evidence.Harness,
 			Disposition:   disposition,
-			Rationale:     "The authenticated shared contract applies to this active member.",
+			Rationale:     "The stable promise applies.",
+		})
+	}
+	raw, err := json.Marshal(reviews)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func contractFormReviewsJSON(t *testing.T, plan reviewPlan, disposition string) string {
+	t.Helper()
+	reviews := make([]specContractFormReview, 0, len(plan.ContractForms))
+	for _, evidence := range plan.ContractForms {
+		reviews = append(reviews, specContractFormReview{
+			Path:                  evidence.Path,
+			VisibleContractDigest: evidence.VisibleContractDigest,
+			Disposition:           disposition,
+			Rationale:             "All promises map to stable IDs.",
 		})
 	}
 	raw, err := json.Marshal(reviews)
@@ -1921,6 +2269,11 @@ func reviewableSemanticPlan(t *testing.T, candidateCount int) reviewPlan {
 			FeaturePaths:       []string{},
 			Features:           []bddFeatureEvidence{},
 			RequirementChanges: []specRequirementDelta{},
+		}},
+		ContractForms: []specContractFormEvidence{{
+			Path:                  "domains/session/SPEC.md",
+			VisibleContractDigest: visibleContractDigest(contractContent),
+			StableRequirementIDs:  []string{parsed[0].ID},
 		}},
 		Applicability:      []specApplicabilityEvidence{},
 		OwnerIndex:         []semanticOwnerCandidate{},

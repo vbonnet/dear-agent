@@ -70,6 +70,16 @@ func TestRun_MissingKeyFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRun_InvalidTrustedCIDeadlineFailsBeforeReviewEvenWithOverride(t *testing.T) {
+	c := baseConfig()
+	c.githubActions = true
+	c.absoluteDeadline = "malformed"
+	c.override = true
+	if got := run(c); got != 1 {
+		t.Fatalf("invalid trusted CI deadline + override: run() = %d, want 1 (fail closed)", got)
+	}
+}
+
 func TestRun_MissingKeyWithOverridePasses(t *testing.T) {
 	c := noSpecConfig(t)
 	c.override = true
@@ -328,21 +338,19 @@ func TestRun_SPECReportParticipatesInSynthesisAndRemainsBlocking(t *testing.T) {
 			RequirementID: evidence.RequirementID,
 			Harness:       evidence.Harness,
 			Disposition:   "supported",
-			Rationale:     "The authenticated shared contract applies to this active member.",
+			Rationale:     "The stable promise applies.",
 		})
 	}
-	wireVerdict := struct {
-		Version              string                    `json:"version"`
-		BaseSHA              string                    `json:"base_sha"`
-		MergeBaseSHA         string                    `json:"merge_base_sha"`
-		HeadSHA              string                    `json:"head_sha"`
-		Changes              []specChange              `json:"changes"`
-		Status               string                    `json:"status"`
-		Summary              string                    `json:"summary"`
-		DeletionReviews      []specDeletionReview      `json:"deletion_reviews"`
-		ApplicabilityReviews []specApplicabilityReview `json:"applicability_reviews"`
-		Findings             []specFinding             `json:"findings"`
-	}{
+	contractForms := make([]specContractFormReview, 0, len(plan.ContractForms))
+	for _, evidence := range plan.ContractForms {
+		contractForms = append(contractForms, specContractFormReview{
+			Path:                  evidence.Path,
+			VisibleContractDigest: evidence.VisibleContractDigest,
+			Disposition:           "complete",
+			Rationale:             "All promises map to stable IDs.",
+		})
+	}
+	wireVerdict := specContractVerdictDocument{
 		Version:              specContractVersion,
 		BaseSHA:              plan.BaseSHA,
 		MergeBaseSHA:         plan.MergeBaseSHA,
@@ -351,6 +359,7 @@ func TestRun_SPECReportParticipatesInSynthesisAndRemainsBlocking(t *testing.T) {
 		Status:               "needs-work",
 		Summary:              "The contract needs a single fix before approval.",
 		DeletionReviews:      []specDeletionReview{},
+		ContractFormReviews:  contractForms,
 		ApplicabilityReviews: applicability,
 		Findings: []specFinding{{
 			Path:       "module/SPEC.md",

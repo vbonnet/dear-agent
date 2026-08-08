@@ -52,7 +52,7 @@ jobs:
   review:
     name: AI review orchestration
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 70
 
     steps:
       # This is intentionally first so a previous head success is normally
@@ -69,9 +69,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
+          REVIEW_DEADLINE_SECONDS: 4020
         run: |
           set -euo pipefail
-          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='SPEC Contract Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='SPEC Contract Review' -f output[summary]='Trusted SPEC contract review is running.' --jq .id)"
+          review_started_at="$(date -u +%s)"
+          review_deadline="$((review_started_at + REVIEW_DEADLINE_SECONDS))"
+          echo "AI_REVIEW_DEADLINE_UNIX=$review_deadline" >> "$GITHUB_ENV"
+          check_id="$(timeout --signal=TERM --kill-after=5s 30s gh api --method POST "repos/$REPO/check-runs" -f name='SPEC Contract Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='SPEC Contract Review' -f output[summary]='Trusted SPEC contract review is running.' --jq .id)"
           echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
 
       # SECURITY: check out the *base* (protected) revision, not the PR merge
@@ -82,6 +86,7 @@ jobs:
       # fetched below as *data* only (the diff), never executed.
       - name: Checkout trusted base revision
         uses: actions/checkout@v7
+        timeout-minutes: 10
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
@@ -89,6 +94,7 @@ jobs:
 
       - name: Set up Go
         uses: actions/setup-go@v7
+        timeout-minutes: 10
         with:
           go-version-file: 'go.mod'
           cache: true
@@ -103,13 +109,25 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
           origin="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           if [ -n "${PR:-}" ]; then
-            git fetch --no-tags "$origin" "+refs/pull/${PR}/head:refs/ai-review/head"
+            timeout --signal=TERM --kill-after=5s "${remaining}s" git fetch --no-tags "$origin" "+refs/pull/${PR}/head:refs/ai-review/head"
           else
-            git fetch --no-tags "$origin" "+${HEAD_SHA}:refs/ai-review/head"
+            timeout --signal=TERM --kill-after=5s "${remaining}s" git fetch --no-tags "$origin" "+${HEAD_SHA}:refs/ai-review/head"
           fi
-          git cat-file -e "${HEAD_SHA}^{commit}"
+          now="$(date -u +%s)"
+          if [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline expired while fetching the PR head"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" git cat-file -e "${HEAD_SHA}^{commit}"
 
       # This deterministic plan is built from authenticated Git objects before
       # reading ANTHROPIC_API_KEY or making any model call. The protected-base
@@ -127,7 +145,13 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          go run ./cmd/ai-review --review-plan > "$RUNNER_TEMP/ai-review-plan.json"
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" go run ./cmd/ai-review --review-plan > "$RUNNER_TEMP/ai-review-plan.json"
           status=$?
           set -e
           if [ "$status" -ne 0 ] || ! jq -e '(.version == "spec-contract/v3") and (.review_relevant | type == "boolean")' "$RUNNER_TEMP/ai-review-plan.json" >/dev/null 2>&1; then
@@ -150,7 +174,13 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh pr edit "$PR" --repo "$REPO" --remove-label 'ai-review:override'
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" gh pr edit "$PR" --repo "$REPO" --remove-label 'ai-review:override'
 
       # A label records who authorized an exception, but not which mutable PR
       # revision they reviewed. Record that revision in a bot-authored comment
@@ -165,7 +195,13 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/$REPO/issues/$PR/comments" \
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --method POST "repos/$REPO/issues/$PR/comments" \
             -f body="<!-- ai-review-override-sha:$HEAD_SHA -->
           Human override attested by the trusted review workflow for `$HEAD_SHA`."
 
@@ -182,6 +218,18 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          remaining_seconds() {
+            local now
+            now="$(date -u +%s)"
+            if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+              return 1
+            fi
+            printf '%s\n' "$((AI_REVIEW_DEADLINE_UNIX - now))"
+          }
+          reject_override() {
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
           labels="${LABELS:-}"
           # A new head must never inherit an override, even if a prior runner
           # was interrupted before it could remove the label.
@@ -190,19 +238,29 @@ jobs:
             exit 0
           fi
           reviewed_head="$HEAD_SHA"
-          attested_head="$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null | \
-            sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
+          remaining="$(remaining_seconds)" || reject_override
+          if ! comment_bodies="$(timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null)"; then
+            reject_override
+          fi
+          attested_head="$(printf '%s\n' "$comment_bodies" | sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
             grep -Fx "$reviewed_head" | tail -n 1 || true)"
           # PR-controlled pull_request workflows can post as
           # github-actions[bot], so a bot-authored marker alone is not an
           # authorization decision. Bind the active label to its latest actor
           # and require GitHub to verify that actor has maintainer authority.
-          label_actor="$(gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
-            --jq '.[] | select(.event == "labeled" and .label.name == "ai-review:override") | .actor.login' 2>/dev/null | tail -n 1 || true)"
+          remaining="$(remaining_seconds)" || reject_override
+          if ! label_actors="$(timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
+            --jq '.[] | select(.event == "labeled" and .label.name == "ai-review:override") | .actor.login' 2>/dev/null)"; then
+            reject_override
+          fi
+          label_actor="$(printf '%s\n' "$label_actors" | tail -n 1)"
           label_permission=""
           if [ -n "$label_actor" ]; then
-            label_permission="$(gh api "repos/$REPO/collaborators/$label_actor/permission" --jq .permission 2>/dev/null || true)"
+            remaining="$(remaining_seconds)" || reject_override
+            if ! label_permission="$(timeout --signal=TERM --kill-after=5s "${remaining}s" gh api "repos/$REPO/collaborators/$label_actor/permission" --jq .permission 2>/dev/null)"; then
+              reject_override
+            fi
           fi
           if printf '%s\n' "$labels" | grep -q '"ai-review:override"' && [ "$attested_head" = "$reviewed_head" ] && { [ "$label_permission" = maintain ] || [ "$label_permission" = admin ]; }; then
             echo "active=true" >> "$GITHUB_OUTPUT"
@@ -246,6 +304,12 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
           # Bootstrap: the reviewer is deliberately run from the protected base
           # revision, so on the rollout PR that first introduces cmd/ai-review
           # the base has no such package. Fail closed with a clear message
@@ -262,14 +326,23 @@ jobs:
                   "> The \`ai-review:override\` label is present and the trusted base revision does not yet contain \`cmd/ai-review\`, so no automated review could run." "" \
                   "This is the rollout PR that introduces the gate. The override is recorded on this PR as a label." "" \
                   "<sub>Review gate per REVIEW.md §2/§5.</sub>" > /tmp/ai-review-bootstrap.md
-                gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md || true
+                if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md; then
+                  echo "::error::could not record the bootstrap override audit comment"
+                  exit 1
+                fi
               fi
               exit 0
             fi
             echo "::error::cmd/ai-review is absent from the trusted base revision. This is expected only on the rollout PR that introduces it: apply the 'ai-review:override' label after a human review to land it. Thereafter the gate runs from protected base code."
             exit 1
           fi
-          go run ./cmd/ai-review
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" go run ./cmd/ai-review
 
       # pull_request_target is pinned to trusted base code, but GitHub attaches
       # its job check suite to that base revision. Publish the authoritative
@@ -305,7 +378,7 @@ jobs:
             summary='Neutral: ANTHROPIC_API_KEY is not configured and the authenticated plan has no changed SPEC.md, protected SPEC-review owner, or deterministic REVIEW.md escalation. No model approval is claimed.'
           fi
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
-          gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
+          timeout --signal=TERM --kill-after=5s 90s gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
             -f conclusion="$conclusion" \
             -f output[title]='SPEC Contract Review' \
