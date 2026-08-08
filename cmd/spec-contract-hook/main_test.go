@@ -21,6 +21,7 @@ import (
 const reminderLockCrashHelperEnv = "DEAR_AGENT_REMINDER_LOCK_CRASH_HELPER"
 
 func TestRunRevalidatesOperatorOwnedHelperForDigestBoundInvocation(t *testing.T) {
+	t.Setenv(reminderStateEnv, privateStateDirectory(t))
 	root := stagedContractRepository(t)
 	expected := strings.Repeat("a", 64)
 	previous := verifyOperatorOwnedHelperDigest
@@ -45,9 +46,59 @@ func TestRunRevalidatesOperatorOwnedHelperForDigestBoundInvocation(t *testing.T)
 	}
 }
 
-func TestRunBlocksWhenDigestBoundOperatorOwnedHelperChanges(t *testing.T) {
+func TestRunBoundsDigestMismatchByCodexSessionAndTurnWithoutEvaluatingCheckout(t *testing.T) {
+	t.Setenv(reminderStateEnv, privateStateDirectory(t))
 	previous := verifyOperatorOwnedHelperDigest
 	verifyOperatorOwnedHelperDigest = func(string) error { return errors.New("digest mismatch") }
+	t.Cleanup(func() { verifyOperatorOwnedHelperDigest = previous })
+	previousEvaluate := evaluateSpecContract
+	evaluationCalls := 0
+	evaluateSpecContract = func(context.Context, specguard.Request) specguard.Result {
+		evaluationCalls++
+		return specguard.Result{Decision: specguard.DecisionAllow}
+	}
+	t.Cleanup(func() { evaluateSpecContract = previousEvaluate })
+
+	root := t.TempDir()
+	invoke := func(turnID string, active bool) hookResponse {
+		t.Helper()
+		var output bytes.Buffer
+		input := fmt.Sprintf(`{"session_id":"digest-bound","turn_id":%q,"stop_hook_active":%t}`, turnID, active)
+		if got := run([]string{
+			"--root", root,
+			"--provider", "codex",
+			"--event", "Stop",
+			"--expected-helper-sha256", strings.Repeat("a", 64),
+		}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+			t.Fatalf("run() = %d output=%s", got, output.String())
+		}
+		return decodeResponse(t, output.Bytes())
+	}
+
+	if response := invoke("one", false); response.Decision != "block" || !strings.Contains(response.Reason, "revision-bound digest") {
+		t.Fatalf("first response = %#v, want fail-closed digest mismatch", response)
+	}
+	if response := invoke("one", true); response.Decision != "" || !strings.Contains(response.SystemMessage, "already ran") {
+		t.Fatalf("repeated response = %#v, want bounded advisory yield", response)
+	}
+	if response := invoke("two", true); response.Decision != "block" || !strings.Contains(response.Reason, "revision-bound digest") {
+		t.Fatalf("new-turn response = %#v, want fresh fail-closed digest mismatch", response)
+	}
+	if response := invoke("two", true); response.Decision != "" || response.SystemMessage == "" {
+		t.Fatalf("repeated new-turn response = %#v, want bounded advisory yield", response)
+	}
+	if evaluationCalls != 0 {
+		t.Fatalf("mutable checkout evaluations = %d, want 0 after helper digest mismatch", evaluationCalls)
+	}
+}
+
+func TestRunValidatesCodexEnvelopeBeforeDigestRevalidation(t *testing.T) {
+	previous := verifyOperatorOwnedHelperDigest
+	verificationCalls := 0
+	verifyOperatorOwnedHelperDigest = func(string) error {
+		verificationCalls++
+		return errors.New("digest mismatch")
+	}
 	t.Cleanup(func() { verifyOperatorOwnedHelperDigest = previous })
 
 	var output bytes.Buffer
@@ -56,12 +107,55 @@ func TestRunBlocksWhenDigestBoundOperatorOwnedHelperChanges(t *testing.T) {
 		"--provider", "codex",
 		"--event", "Stop",
 		"--expected-helper-sha256", strings.Repeat("a", 64),
-	}, strings.NewReader(`{"session_id":"digest-bound","turn_id":"one","stop_hook_active":false}`), &output, &bytes.Buffer{}); got != 0 {
+	}, strings.NewReader(`{"session_id":"digest-bound","stop_hook_active":false}`), &output, &bytes.Buffer{}); got != 0 {
 		t.Fatalf("run() = %d output=%s", got, output.String())
 	}
 	response := decodeResponse(t, output.Bytes())
-	if response.Decision != "block" || !strings.Contains(response.Reason, "revision-bound digest") {
-		t.Fatalf("response = %#v, want fail-closed digest mismatch", response)
+	if response.Decision != "" || response.SystemMessage == "" {
+		t.Fatalf("response = %#v, want bounded invalid-envelope yield", response)
+	}
+	if verificationCalls != 0 {
+		t.Fatalf("digest verifications = %d, want 0 before native input validation", verificationCalls)
+	}
+}
+
+func TestRunDigestMismatchUsesActiveFlagOnlyWhenPrivateClaimStateIsUnavailable(t *testing.T) {
+	t.Setenv(reminderStateEnv, "relative-state")
+	previous := verifyOperatorOwnedHelperDigest
+	verifyOperatorOwnedHelperDigest = func(string) error { return errors.New("digest mismatch") }
+	t.Cleanup(func() { verifyOperatorOwnedHelperDigest = previous })
+	previousEvaluate := evaluateSpecContract
+	evaluationCalls := 0
+	evaluateSpecContract = func(context.Context, specguard.Request) specguard.Result {
+		evaluationCalls++
+		return specguard.Result{Decision: specguard.DecisionAllow}
+	}
+	t.Cleanup(func() { evaluateSpecContract = previousEvaluate })
+
+	root := t.TempDir()
+	invoke := func(active bool) hookResponse {
+		t.Helper()
+		var output bytes.Buffer
+		input := fmt.Sprintf(`{"session_id":"unavailable-state","turn_id":"one","stop_hook_active":%t}`, active)
+		if got := run([]string{
+			"--root", root,
+			"--provider", "codex",
+			"--event", "Stop",
+			"--expected-helper-sha256", strings.Repeat("b", 64),
+		}, strings.NewReader(input), &output, &bytes.Buffer{}); got != 0 {
+			t.Fatalf("run() = %d output=%s", got, output.String())
+		}
+		return decodeResponse(t, output.Bytes())
+	}
+
+	if response := invoke(false); response.Decision != "block" || !strings.Contains(response.Reason, "revision-bound digest") {
+		t.Fatalf("ordinary first stop = %#v, want fail-closed mismatch", response)
+	}
+	if response := invoke(true); response.Decision != "" || !strings.Contains(response.SystemMessage, "could not establish private helper-digest retry state") {
+		t.Fatalf("active continuation = %#v, want bounded state-unavailable yield", response)
+	}
+	if evaluationCalls != 0 {
+		t.Fatalf("mutable checkout evaluations = %d, want 0 after helper digest mismatch", evaluationCalls)
 	}
 }
 

@@ -1,5 +1,6 @@
 import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 // Keep this implementation in parity with adapter.go; the Go tests execute it.
@@ -20,10 +21,13 @@ const TERMINAL_CONTEXT_PREFIX = "Additional context: ";
 const MAX_TERMINAL_CONTEXT_CHARS = MAX_TERMINAL_HOOK_FEEDBACK_CHARS - MAX_TERMINAL_REASON_CHARS - TERMINAL_CONTEXT_PREFIX.length - 1;
 const MAX_TERMINAL_FOLLOW_UPS_PER_TURN = 8;
 const SPEC_FEEDBACK_ID_PATTERN = /^[0-9a-f]{64}$/;
+const HOOK_SUPERVISOR_PROTOCOL = "dear-agent-pi-hook-supervisor-v1";
 // A hook gets its declared execution budget.  If it has not exited at that
 // point, terminate its whole process group, then force-kill shortly after.
 // Terminal hooks cap that grace period at their aggregate deadline.
 const HOOK_KILL_GRACE_MS = 100;
+const HOOK_SUPERVISOR_EXIT_WAIT_MS = 500;
+const HOOK_PIPE_DRAIN_GRACE_MS = 25;
 
 function readHookManifest(path) {
 	const descriptor = openSync(path, "r");
@@ -155,27 +159,112 @@ function terminationError(code, message) {
 	return error;
 }
 
-function signalProcessGroup(child, signal) {
-	if (!child.pid) return;
-	try {
-		// detached creates a new POSIX process group, so ordinary hook
-		// descendants are terminated with their shell. A descendant that starts
-		// a new session can escape that group; forced cleanup below still settles
-		// the caller's finite deadline even when such a process retains stdio.
-		if (process.platform !== "win32") process.kill(-child.pid, signal);
-		else child.kill(signal);
-	} catch (error) {
-		// A completed child races normal cleanup. Fall back to the direct child
-		// for other group-signal failures, but cleanup itself must never throw.
-		if (error?.code !== "ESRCH") {
-			try {
-				child.kill(signal);
-			} catch {
-				// The bounded failure result remains authoritative.
-			}
+// POSIX hooks run beneath a Node supervisor that remains the process-group
+// leader after the real hook exits. The hook receives only descriptors 0-2,
+// so it cannot forge the supervisor's result or cleanup channel. The parent
+// never signals a numeric PID: an authenticated IPC request makes the trusted
+// live leader perform TERM -> KILL against its own current process group.
+function posixHookSupervisorMain() {
+	const {spawn} = require("node:child_process");
+	const protocol = "dear-agent-pi-hook-supervisor-v1";
+	const keepAlive = setInterval(() => {}, 60_000);
+	let started = false;
+	let reported = false;
+	let cleanupStarted = false;
+	let controlToken = "";
+
+	process.on("SIGTERM", () => {});
+	const terminateOwnGroup = () => {
+		try {
+			process.kill(0, "SIGKILL");
+		} catch {
+			clearInterval(keepAlive);
+			process.exit(70);
 		}
-	}
+	};
+	process.on("disconnect", terminateOwnGroup);
+	if (!process.connected) terminateOwnGroup();
+
+	const send = (message) => {
+		if (!process.connected || typeof process.send !== "function") {
+			terminateOwnGroup();
+			return;
+		}
+		try {
+			process.send({protocol, ...message}, undefined, undefined, (error) => {
+				if (error) terminateOwnGroup();
+			});
+		} catch {
+			terminateOwnGroup();
+		}
+	};
+	const serializedError = (error) => ({
+		code: String(error?.code || "ERR_PI_HOOK_SPAWN").slice(0, 128),
+		message: String(error?.message || error || "hook process failed to start").slice(0, 4096),
+	});
+	const report = (status, signal, error = null) => {
+		if (reported) return;
+		reported = true;
+		send({type: "result", status, signal, error: error ? serializedError(error) : null});
+	};
+	const startCleanup = (graceMs) => {
+		cleanupStarted = true;
+		send({type: "cleanup-started", token: controlToken});
+		try {
+			process.kill(0, "SIGTERM");
+		} catch {
+			terminateOwnGroup();
+			return;
+		}
+		setTimeout(terminateOwnGroup, graceMs);
+	};
+
+	process.on("message", (message) => {
+		if (!message || typeof message !== "object" || Array.isArray(message) || message.protocol !== protocol) {
+			terminateOwnGroup();
+			return;
+		}
+		if (!started) {
+			if (message.type !== "start" || Object.keys(message).length !== 5 ||
+				typeof message.command !== "string" || !message.command || !Array.isArray(message.args) ||
+				message.args.some((argument) => typeof argument !== "string") ||
+				typeof message.token !== "string" || !/^[0-9a-f]{64}$/.test(message.token)) {
+				terminateOwnGroup();
+				return;
+			}
+			started = true;
+			controlToken = message.token;
+			const hookEnvironment = {...process.env};
+			delete hookEnvironment.NODE_CHANNEL_FD;
+			delete hookEnvironment.NODE_CHANNEL_SERIALIZATION_MODE;
+			let hook;
+			try {
+				hook = spawn(message.command, message.args, {
+					cwd: process.cwd(),
+					env: hookEnvironment,
+					stdio: ["inherit", "inherit", "inherit"],
+				});
+			} catch (error) {
+				report(null, null, error);
+				return;
+			}
+			hook.once("error", (error) => report(null, null, error));
+			hook.once("exit", (status, signal) => report(status, signal));
+			return;
+		}
+		if (message.type !== "cleanup" || Object.keys(message).length !== 4 || cleanupStarted ||
+			message.token !== controlToken || !Number.isInteger(message.graceMs) ||
+			message.graceMs < 0 || message.graceMs > 100) {
+			terminateOwnGroup();
+			return;
+		}
+		startCleanup(message.graceMs);
+	});
+
+	send({type: "ready"});
 }
+
+const POSIX_HOOK_SUPERVISOR_SOURCE = `(${posixHookSupervisorMain.toString()})()`;
 
 function appendOutput(chunks, size, value, limit) {
 	if (size >= limit) return {size, overflow: true};
@@ -185,14 +274,13 @@ function appendOutput(chunks, size, value, limit) {
 	return {size: size + allowed, overflow: chunk.length > allowed};
 }
 
-function runBoundedHook(command, args, options) {
+function runBoundedWindowsHook(command, args, options) {
 	return new Promise((resolve) => {
 		let child;
 		try {
 			child = spawn(command, args, {
 				cwd: options.cwd,
 				env: options.env,
-				detached: process.platform !== "win32",
 				stdio: ["pipe", "pipe", "pipe"],
 			});
 		} catch (error) {
@@ -230,7 +318,11 @@ function runBoundedHook(command, args, options) {
 			});
 		};
 		const forceCleanup = () => {
-			signalProcessGroup(child, "SIGKILL");
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				// The bounded failure result remains authoritative.
+			}
 			for (const stream of [child.stdin, child.stdout, child.stderr]) {
 				if (!stream) continue;
 				try {
@@ -251,7 +343,11 @@ function runBoundedHook(command, args, options) {
 			if (timedOut || overflowed) return;
 			if (reason === "timeout") timedOut = true;
 			else overflowed = true;
-			signalProcessGroup(child, "SIGTERM");
+			try {
+				child.kill("SIGTERM");
+			} catch {
+				// Force cleanup below still bounds the failure.
+			}
 			const aggregateRemaining = options.deadline ? Math.max(0, options.deadline - Date.now()) : Infinity;
 			forceTimer = setTimeout(forceCleanup, Math.max(0, Math.min(HOOK_KILL_GRACE_MS, aggregateRemaining)));
 		};
@@ -273,6 +369,278 @@ function runBoundedHook(command, args, options) {
 			finish(terminationResult(status, signal));
 		});
 	});
+}
+
+function runBoundedSupervisedHook(command, args, options) {
+	return new Promise((resolve) => {
+		let child;
+		let controlToken;
+		try {
+			controlToken = randomBytes(32).toString("hex");
+			child = spawn(process.execPath, ["-e", POSIX_HOOK_SUPERVISOR_SOURCE], {
+				cwd: options.cwd,
+				env: options.env,
+				detached: true,
+				stdio: ["pipe", "pipe", "pipe", "ipc"],
+			});
+		} catch (error) {
+			resolve({status: null, stdout: "", stderr: "", error});
+			return;
+		}
+
+		const stdout = [];
+		const stderr = [];
+		let stdoutSize = 0;
+		let stderrSize = 0;
+		let timedOut = false;
+		let overflowed = false;
+		let settled = false;
+		let supervisorReady = false;
+		let supervisorExited = false;
+		let supervisorExitStatus;
+		let supervisorExitSignal;
+		let cleanupRequested = false;
+		let cleanupAcknowledged = false;
+		let cleanupExitValidated = false;
+		let hookResultReceived = false;
+		let hookStatus = null;
+		let hookSignal = null;
+		let hookError;
+		let protocolError;
+		let cleanupError;
+		let timeoutTimer;
+		let cleanupWaitTimer;
+		let drainTimer;
+
+		const ensureCleanupExitValidated = () => {
+			if (hookResultReceived && cleanupRequested && !cleanupExitValidated && !timedOut && !overflowed && !protocolError && !cleanupError) {
+				cleanupError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", "hook supervisor cleanup was not validated by an acknowledged SIGKILL exit");
+			}
+		};
+		const terminationResult = () => ({
+			status: hookStatus,
+			signal: hookSignal,
+			error: timedOut
+				? terminationError("ETIMEDOUT", `hook exceeded ${options.timeout}ms`)
+				: overflowed
+					? terminationError("ERR_CHILD_PROCESS_STDIO_MAXBUFFER", "hook output exceeded its capture limit")
+					: protocolError || cleanupError || hookError,
+		});
+		const finish = () => {
+			if (settled) return;
+			ensureCleanupExitValidated();
+			settled = true;
+			clearTimeout(timeoutTimer);
+			clearTimeout(cleanupWaitTimer);
+			clearTimeout(drainTimer);
+			resolve({
+				...terminationResult(),
+				stdout: Buffer.concat(stdout).toString("utf8"),
+				stderr: Buffer.concat(stderr).toString("utf8"),
+			});
+		};
+		const destroyStreams = () => {
+			for (const stream of [child.stdin, child.stdout, child.stderr]) {
+				if (!stream) continue;
+				try {
+					stream.on("error", () => {});
+					stream.destroy();
+				} catch {
+					// Forced settlement cannot depend on stream teardown succeeding.
+				}
+			}
+		};
+		const forceSettlement = () => {
+			ensureCleanupExitValidated();
+			destroyStreams();
+			try {
+				child.unref();
+			} catch {
+				// The bounded failure result remains authoritative.
+			}
+			finish();
+		};
+		const settleAfterSupervisorExit = (status = supervisorExitStatus, signal = supervisorExitSignal) => {
+			if (status !== undefined || signal !== undefined) {
+				supervisorExitStatus = status;
+				supervisorExitSignal = signal;
+			}
+			clearTimeout(cleanupWaitTimer);
+			clearTimeout(drainTimer);
+			if (!hookResultReceived && !timedOut && !overflowed && !protocolError) {
+				protocolError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", "hook supervisor exited before reporting the hook result");
+			}
+			if (cleanupRequested && cleanupAcknowledged && supervisorExitStatus === null && supervisorExitSignal === "SIGKILL") {
+				cleanupExitValidated = true;
+			} else if (cleanupRequested && cleanupAcknowledged && !cleanupError) {
+				const exitDescription = supervisorExitSignal
+					? `signal ${supervisorExitSignal}`
+					: `status ${supervisorExitStatus}`;
+				cleanupError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", `hook supervisor cleanup exited with ${exitDescription} instead of SIGKILL`);
+			}
+			if (hookResultReceived && cleanupRequested && !cleanupAcknowledged && !timedOut && !overflowed && !protocolError && !cleanupError) {
+				cleanupError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", "hook supervisor exited before acknowledging cleanup");
+			}
+			drainTimer = setTimeout(forceSettlement, HOOK_PIPE_DRAIN_GRACE_MS);
+		};
+		const disconnectSupervisor = () => {
+			try {
+				if (child.connected) child.disconnect();
+			} catch {
+				// Bounded stream teardown remains the final fallback.
+			}
+		};
+		const hardSettleAfterChannelLoss = (message = "") => {
+			if (message && !protocolError) protocolError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", message);
+			cleanupRequested = true;
+			clearTimeout(cleanupWaitTimer);
+			disconnectSupervisor();
+			cleanupWaitTimer = setTimeout(forceSettlement, HOOK_SUPERVISOR_EXIT_WAIT_MS);
+		};
+		const requestCleanup = () => {
+			if (cleanupRequested || settled) return;
+			cleanupRequested = true;
+			if (supervisorExited) {
+				settleAfterSupervisorExit();
+				return;
+			}
+			if (!supervisorReady) {
+				// Before the authenticated ready message, disconnect is the only safe
+				// cleanup instruction. The supervisor self-kills its group at startup.
+				hardSettleAfterChannelLoss();
+				return;
+			}
+			const aggregateRemaining = options.deadline ? Math.max(0, options.deadline - Date.now()) : Infinity;
+			const graceMs = Math.max(0, Math.min(HOOK_KILL_GRACE_MS, aggregateRemaining));
+			try {
+				child.send({
+					protocol: HOOK_SUPERVISOR_PROTOCOL,
+					type: "cleanup",
+					token: controlToken,
+					graceMs,
+				}, undefined, undefined, (error) => {
+					if (error) hardSettleAfterChannelLoss(`cannot send hook cleanup request: ${error.message || error}`);
+				});
+			} catch (error) {
+				hardSettleAfterChannelLoss(`cannot send hook cleanup request: ${error?.message || error}`);
+				return;
+			}
+			cleanupWaitTimer = setTimeout(() => {
+				if (!supervisorExited && !timedOut && !overflowed && !protocolError && !cleanupError) {
+					cleanupError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", "hook supervisor did not exit after authenticated cleanup");
+				}
+				hardSettleAfterChannelLoss();
+			}, graceMs + HOOK_SUPERVISOR_EXIT_WAIT_MS);
+		};
+		const failProtocol = (message) => {
+			if (!protocolError) protocolError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", message);
+			requestCleanup();
+		};
+		const beginTermination = (reason) => {
+			if (timedOut || overflowed) return;
+			if (reason === "timeout") timedOut = true;
+			else overflowed = true;
+			requestCleanup();
+		};
+		const validError = (error) => error === null || (
+			error && typeof error === "object" && !Array.isArray(error) && Object.keys(error).length === 2 &&
+			typeof error.code === "string" && error.code.length > 0 && error.code.length <= 128 &&
+			typeof error.message === "string" && error.message.length > 0 && error.message.length <= 4096
+		);
+		const validResult = (message) => {
+			if (Object.keys(message).length !== 5 || !validError(message.error)) return false;
+			const validStatus = message.status === null || (Number.isInteger(message.status) && message.status >= 0 && message.status <= 255);
+			const validSignal = message.signal === null || (typeof message.signal === "string" && message.signal.length > 0 && message.signal.length <= 64);
+			if (!validStatus || !validSignal) return false;
+			if (message.error !== null) return message.status === null && message.signal === null;
+			return (message.status === null) !== (message.signal === null);
+		};
+
+		timeoutTimer = setTimeout(() => beginTermination("timeout"), Math.max(1, options.timeout));
+		child.stdout.on("data", (chunk) => {
+			const captured = appendOutput(stdout, stdoutSize, chunk, options.maxBuffer);
+			stdoutSize = captured.size;
+			if (captured.overflow) beginTermination("overflow");
+		});
+		child.stderr.on("data", (chunk) => {
+			const captured = appendOutput(stderr, stderrSize, chunk, options.maxBuffer);
+			stderrSize = captured.size;
+			if (captured.overflow) beginTermination("overflow");
+		});
+		child.stdin.on("error", () => {});
+		child.on("message", (message) => {
+			if (!message || typeof message !== "object" || Array.isArray(message) || message.protocol !== HOOK_SUPERVISOR_PROTOCOL) {
+				failProtocol("hook supervisor sent an invalid protocol message");
+				return;
+			}
+			if (message.type === "ready") {
+				if (Object.keys(message).length !== 2 || supervisorReady || hookResultReceived || cleanupRequested) {
+					failProtocol("hook supervisor sent an unexpected ready message");
+					return;
+				}
+				supervisorReady = true;
+				try {
+					child.send({protocol: HOOK_SUPERVISOR_PROTOCOL, type: "start", command, args, token: controlToken}, undefined, undefined, (error) => {
+						if (error) hardSettleAfterChannelLoss(`cannot send hook start request: ${error.message || error}`);
+					});
+					child.stdin.end(options.input);
+				} catch (error) {
+					hardSettleAfterChannelLoss(`cannot send hook start request: ${error?.message || error}`);
+				}
+				return;
+			}
+			if (message.type === "cleanup-started") {
+				if (Object.keys(message).length !== 3 || !cleanupRequested || cleanupAcknowledged || message.token !== controlToken) {
+					failProtocol("hook supervisor sent an invalid cleanup acknowledgement");
+					return;
+				}
+				cleanupAcknowledged = true;
+				return;
+			}
+			if (message.type !== "result" || !supervisorReady || hookResultReceived || !validResult(message)) {
+				failProtocol("hook supervisor sent an invalid result message");
+				return;
+			}
+			hookResultReceived = true;
+			hookStatus = message.status;
+			hookSignal = message.signal;
+			if (message.error) {
+				hookError = terminationError(message.error.code, message.error.message);
+			}
+			requestCleanup();
+		});
+		child.on("error", (error) => {
+			if (!child.pid) {
+				if (!protocolError) protocolError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", `hook supervisor failed: ${error?.message || error}`);
+				finish();
+			} else hardSettleAfterChannelLoss(`hook supervisor failed: ${error?.message || error}`);
+		});
+		child.on("disconnect", () => {
+			if (supervisorExited) return;
+			if (!cleanupRequested) {
+				hardSettleAfterChannelLoss("hook supervisor disconnected before cleanup");
+				return;
+			}
+			if (!cleanupAcknowledged && !timedOut && !overflowed && !protocolError && !cleanupError) {
+				cleanupError = terminationError("ERR_PI_HOOK_SUPERVISOR_PROTOCOL", "hook supervisor disconnected before acknowledging cleanup");
+			}
+			hardSettleAfterChannelLoss();
+		});
+		child.on("exit", (status, signal) => {
+			supervisorExited = true;
+			settleAfterSupervisorExit(status, signal);
+		});
+		child.on("close", (status, signal) => {
+			supervisorExited = true;
+			settleAfterSupervisorExit(status, signal);
+			finish();
+		});
+	});
+}
+
+function runBoundedHook(command, args, options) {
+	if (process.platform === "win32") return runBoundedWindowsHook(command, args, options);
+	return runBoundedSupervisedHook(command, args, options);
 }
 
 export async function runProjectHooks(eventName, call, cwd = process.cwd(), runtime = {}) {

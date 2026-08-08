@@ -370,7 +370,7 @@ maybe_rebuild_agm_pair() {
   agm_pair_handled=0
   [ -d "${repo_root}/agm/cmd/agm" ] || return 0
   [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
-  resolve_build_trigger agm/ pkg/ internal/ go.mod go.sum
+  resolve_build_trigger agm/ cmd/spec-contract-hook/ pkg/ internal/ go.mod go.sum
   [ "${_affected}" = "1" ] || return 0
   agm_pair_handled=1
 
@@ -450,7 +450,7 @@ maybe_rebuild_agm_pair_locked() {
   [ -d "${repo_root}/agm/cmd/agm" ] || return 0
   [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
 
-  resolve_build_trigger agm/ pkg/ internal/ go.mod go.sum
+  resolve_build_trigger agm/ cmd/spec-contract-hook/ pkg/ internal/ go.mod go.sum
 
   [ "${_affected}" = "1" ] || return 0
   agm_pair_handled=1

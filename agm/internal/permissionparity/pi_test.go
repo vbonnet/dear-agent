@@ -255,7 +255,73 @@ try {
 	}
 }
 
-func TestPiTerminalHookTimeoutSettlesWhenEscapedProcessRetainsPipes(t *testing.T) {
+func TestPiHookSupervisorKillsTermIgnoringDescendantAfterHookExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX detached-process semantics are required for this regression")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	extensionPath, err := EnsurePiAuthorizationExtension(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	childPIDPath := filepath.Join(t.TempDir(), "completed-hook-child.pid")
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		raw, readErr := os.ReadFile(childPIDPath)
+		if readErr != nil {
+			return
+		}
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if parseErr != nil || pid <= 1 {
+			return
+		}
+		process, findErr := os.FindProcess(pid)
+		if findErr == nil {
+			_ = process.Kill()
+		}
+	})
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"(trap '' HUP TERM; while :; do sleep 1; done) & child=$!; printf '%s' \"$child\" > \"$PI_CHILD_PID_FILE\"; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"completed hook output\"}}\\n'","timeout":2}]}]}}`
+	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const started = Date.now();
+const result = await mod.runProjectHooks("Stop", {}, process.argv[2]);
+const elapsed = Date.now() - started;
+if (result?.context !== "completed hook output") throw new Error("completed hook status/output was not preserved: " + JSON.stringify(result));
+if (elapsed > 1500) throw new Error("completed hook descendant cleanup exceeded its bound: " + elapsed);
+const childPID = Number(readFileSync(process.argv[3], "utf8"));
+for (let attempt = 0; attempt < 40; attempt++) {
+  try {
+    process.kill(childPID, 0);
+  } catch (error) {
+    if (error?.code === "ESRCH") process.exit(0);
+    throw error;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 25));
+}
+throw new Error("TERM-ignoring descendant survived cleanup after the real hook leader exited: " + childPID);
+`
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project), filepath.Clean(childPIDPath))
+	command.Env = append(os.Environ(), "PI_CHILD_PID_FILE="+childPIDPath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("completed Pi hook descendant cleanup: %v\n%s", err, output)
+	}
+}
+
+func TestPiHookSupervisorSettlesEscapedSessionWithoutStaleGroupSignal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX detached-process semantics are required for this regression")
 	}
@@ -297,12 +363,11 @@ const escaped = spawn(process.execPath, ["--input-type=module", "-e", "process.o
 });
 writeFileSync(process.env.PI_CHILD_PID_FILE, String(escaped.pid));
 escaped.unref();
-await new Promise(() => {});
 `
 	if err := os.WriteFile(escapeHelperPath, []byte(escapeHelper), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"$PI_NODE\" \"$PI_ESCAPE_HELPER\"","timeout":0.2}]}]}}`
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"$PI_NODE\" \"$PI_ESCAPE_HELPER\"","timeout":1}]}]}}`
 	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -310,20 +375,29 @@ await new Promise(() => {});
 import {readFileSync} from "node:fs";
 const source = readFileSync(process.argv[1], "utf8");
 const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const originalKill = process.kill.bind(process);
+const parentSignals = [];
+process.kill = (pid, signal) => {
+  parentSignals.push({pid, signal});
+  throw new Error("Pi hook parent attempted a numeric process signal");
+};
 let childPID = 0;
 try {
   const started = Date.now();
   const result = await mod.runProjectHooks("Stop", {}, process.argv[2]);
   const elapsed = Date.now() - started;
-  if (!result?.block || !result.reason.includes("ETIMEDOUT")) throw new Error("escaped-pipe terminal hook did not fail closed: " + JSON.stringify(result));
+  if (result !== undefined) throw new Error("successful escaped-pipe hook changed its real result: " + JSON.stringify(result));
   if (elapsed > 1500) throw new Error("escaped-pipe terminal hook exceeded its bounded cleanup window: " + elapsed);
   childPID = Number(readFileSync(process.argv[3], "utf8"));
   if (!Number.isSafeInteger(childPID) || childPID <= 1) throw new Error("invalid escaped hook PID: " + childPID);
-  process.kill(childPID, 0);
+  originalKill(childPID, 0);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  if (parentSignals.length !== 0) throw new Error("escaped-pipe cleanup used a parent numeric signal: " + JSON.stringify(parentSignals));
 } finally {
+  process.kill = originalKill;
   if (childPID > 1) {
     try {
-      process.kill(childPID, "SIGKILL");
+      originalKill(childPID, "SIGKILL");
     } catch (error) {
       if (error?.code !== "ESRCH") throw error;
     }
@@ -339,6 +413,215 @@ try {
 			t.Fatalf("escaped-pipe Pi hook exceeded the test deadline: %v\n%s", ctx.Err(), output)
 		}
 		t.Fatalf("escaped-pipe Pi hook cleanup: %v\n%s", err, output)
+	}
+}
+
+func TestPiHookSupervisorPreservesSuccessAndNonzeroOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX hook supervision is exercised by this regression")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	extensionPath, err := EnsurePiAuthorizationExtension(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const hooks = `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"cat >/dev/null; if test -n \"${NODE_CHANNEL_FD:-}\" || test -n \"${NODE_CHANNEL_SERIALIZATION_MODE:-}\" || (: >&3) 2>/dev/null; then printf 'hook inherited supervisor IPC' >&2; exit 99; fi; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"success stdout\"}}\\n'","timeout":1}]}],"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf 'nonzero stderr' >&2; exit 42","timeout":1}]}]}}`
+	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const success = await mod.runProjectHooks("SessionStart", {}, process.argv[2]);
+if (success?.context !== "success stdout") throw new Error("supervisor lost successful hook output: " + JSON.stringify(success));
+const nonzero = await mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[2]);
+if (!nonzero?.block || !nonzero.reason.startsWith("PreToolUse hook exited with status 42") || !nonzero.reason.includes("nonzero stderr")) {
+  throw new Error("supervisor lost nonzero hook status/output: " + JSON.stringify(nonzero));
+}
+`
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project))
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Pi hook supervisor status/output: %v\n%s", err, output)
+	}
+}
+
+func TestPiHookSupervisorFailsClosedOnMalformedPrematureOrResultExitState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX hook supervision is exercised by this regression")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	extensionPath, err := EnsurePiAuthorizationExtension(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"true","timeout":1}]}]}}`
+	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const ready = 'send({type: "ready"});';
+const report = 'send({type: "result", status, signal, error: error ? serializedError(error) : null});';
+const originalKill = process.kill.bind(process);
+for (const [name, target, replacement] of [
+  ["malformed", ready, 'send({type: "unexpected"});'],
+  ["result-then-exit", report, 'process.send({protocol, type: "result", status, signal, error: error ? serializedError(error) : null}, undefined, undefined, () => process.exit(0));'],
+  ["premature", ready, "process.exit(0);"],
+]) {
+  const altered = source.replace(target, replacement);
+  if (altered === source) throw new Error("could not construct " + name + " supervisor fixture");
+  const mod = await import("data:text/javascript;base64," + Buffer.from(altered).toString("base64") + "#" + name);
+  const parentSignals = [];
+  process.kill = (pid, signal) => {
+    parentSignals.push({pid, signal});
+    throw new Error("Pi hook parent attempted a numeric process signal");
+  };
+  const started = Date.now();
+  let result;
+  try {
+    result = await mod.runProjectHooks("Stop", {}, process.argv[2]);
+  } finally {
+    process.kill = originalKill;
+  }
+  const elapsed = Date.now() - started;
+  if (!result?.block || !result.reason.includes("ERR_PI_HOOK_SUPERVISOR_PROTOCOL")) {
+    throw new Error(name + " supervisor did not fail closed: " + JSON.stringify(result));
+  }
+  if (elapsed > 1500) throw new Error(name + " supervisor failure exceeded its cleanup bound: " + elapsed);
+  if (parentSignals.length !== 0) throw new Error(name + " supervisor state received a parent numeric signal: " + JSON.stringify(parentSignals));
+}
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project))
+	if output, err := command.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			t.Fatalf("malformed Pi hook supervisor exceeded the test deadline: %v\n%s", ctx.Err(), output)
+		}
+		t.Fatalf("malformed Pi hook supervisor state: %v\n%s", err, output)
+	}
+}
+
+func TestPiHookSupervisorRejectsAcknowledgedUnexpectedExitWithoutParentSignal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX hook supervision is exercised by this regression")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the Pi-native extension fixture")
+	}
+	extensionPath, err := EnsurePiAuthorizationExtension(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pidPaths := []string{
+		filepath.Join(t.TempDir(), "clean-exit-child.pid"),
+		filepath.Join(t.TempDir(), "signal-exit-child.pid"),
+		filepath.Join(t.TempDir(), "channel-loss-child.pid"),
+	}
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		for _, path := range pidPaths {
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				continue
+			}
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if parseErr != nil || pid <= 1 {
+				continue
+			}
+			process, findErr := os.FindProcess(pid)
+			if findErr == nil {
+				_ = process.Kill()
+			}
+		}
+	})
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"(trap '' HUP INT TERM; while :; do sleep 1; done) & child=$!; printf '%s' \"$child\" > \"$PI_CHILD_PID_FILE\"; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"hook completed\"}}\\n'","timeout":2}]}]}}`
+	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const script = `
+import {readFileSync} from "node:fs";
+const source = readFileSync(process.argv[1], "utf8");
+const cleanupTimer = "setTimeout(terminateOwnGroup, graceMs);";
+const disconnectHandler = 'process.on("disconnect", terminateOwnGroup);';
+const originalKill = process.kill.bind(process);
+for (const [index, name, replacements, want] of [
+  [0, "clean-exit", [[cleanupTimer, "setTimeout(() => process.exit(0), graceMs);"]], "status 0 instead of SIGKILL"],
+  [1, "signal-exit", [[cleanupTimer, 'setTimeout(() => process.kill(process.pid, "SIGINT"), graceMs);']], "signal SIGINT instead of SIGKILL"],
+  [2, "channel-loss", [
+    [disconnectHandler, 'process.on("disconnect", () => {});'],
+    [cleanupTimer, 'setTimeout(() => { if (process.connected) process.disconnect(); setTimeout(() => process.exit(0), 1000); }, graceMs);'],
+  ], "cleanup was not validated by an acknowledged SIGKILL exit"],
+]) {
+  let altered = source;
+  for (const [target, replacement] of replacements) {
+    const next = altered.replace(target, replacement);
+    if (next === altered) throw new Error("could not construct " + name + " supervisor fixture");
+    altered = next;
+  }
+  const mod = await import("data:text/javascript;base64," + Buffer.from(altered).toString("base64") + "#" + name);
+  process.env.PI_CHILD_PID_FILE = process.argv[3 + index];
+  const parentSignals = [];
+  process.kill = (pid, signal) => {
+    parentSignals.push({pid, signal});
+    throw new Error("Pi hook parent attempted a numeric process signal");
+  };
+  let childPID = 0;
+  try {
+    const started = Date.now();
+    const result = await mod.runProjectHooks("Stop", {}, process.argv[2]);
+    const elapsed = Date.now() - started;
+    if (!result?.block || !result.reason.includes("ERR_PI_HOOK_SUPERVISOR_PROTOCOL") || !result.reason.includes(want)) {
+      throw new Error(name + " acknowledged cleanup exit did not fail closed: " + JSON.stringify(result));
+    }
+    if (elapsed > 1500) throw new Error(name + " acknowledged cleanup exit exceeded its bound: " + elapsed);
+    childPID = Number(readFileSync(process.argv[3 + index], "utf8"));
+    if (!Number.isSafeInteger(childPID) || childPID <= 1) throw new Error("invalid " + name + " descendant PID: " + childPID);
+    originalKill(childPID, 0);
+    if (parentSignals.length !== 0) throw new Error(name + " cleanup used a parent numeric signal: " + JSON.stringify(parentSignals));
+  } finally {
+    process.kill = originalKill;
+    if (childPID > 1) {
+      try {
+        originalKill(childPID, "SIGKILL");
+      } catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+      }
+    }
+  }
+}
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project), filepath.Clean(pidPaths[0]), filepath.Clean(pidPaths[1]), filepath.Clean(pidPaths[2]))
+	if output, err := command.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			t.Fatalf("unexpected Pi supervisor exit exceeded the test deadline: %v\n%s", ctx.Err(), output)
+		}
+		t.Fatalf("unexpected acknowledged Pi supervisor exit: %v\n%s", err, output)
 	}
 }
 

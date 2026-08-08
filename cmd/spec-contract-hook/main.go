@@ -50,11 +50,15 @@ var verifyOperatorOwnedHelperDigest = func(expectedSHA256 string) error {
 	)
 }
 
+var evaluateSpecContract = specguard.Evaluate
+
 type reminderMarkerState struct {
 	feedbackDigest string
 }
 
 const stagedSPECReminderMessage = "SPEC contract files changed in the Git index. Cooperative deterministic checks passed, but review provider-neutral ownership and consolidation before finishing. Read docs/spec-authoring.md, then follow the single-source authoring workflow at spec-governance/skills/write-spec/SKILL.md; reference that skill instead of copying its body. This source route does not claim native skill discovery. This mutable checkout hook is not tamper-resistant. A separately reviewed changed-SPEC CI and provider rollout is required for mandatory immutable enforcement; this hook does not attest that enforcement is deployed, has run, or is provider-required."
+
+const operatorOwnedHelperDigestMismatchMessage = "Unattended SPEC enforcement unavailable: the operator-owned helper no longer matches this session's revision-bound digest"
 
 type providerProtocol string
 
@@ -111,14 +115,6 @@ func run(args []string, input io.Reader, output, stderr io.Writer) int {
 	if !supportedProviderEvent(protocol, *event) {
 		return emitJSON(output, protocolFailure(protocol, *event, "Cooperative SPEC contract check unavailable: native provider protocol does not support the requested terminal event"))
 	}
-	if *expectedHelperSHA256 != "" {
-		if err := verifyOperatorOwnedHelperDigest(*expectedHelperSHA256); err != nil {
-			return emitJSON(output, hookResponse{
-				Decision: "block",
-				Reason:   "Unattended SPEC enforcement unavailable: the operator-owned helper no longer matches this session's revision-bound digest",
-			})
-		}
-	}
 	payload, err := readBoundedInput(input, maxHookInputBytes)
 	if err != nil {
 		return emitJSON(output, protocolFailure(protocol, *event, "Cooperative SPEC contract check unavailable: hook input exceeded its safety limit"))
@@ -147,8 +143,29 @@ func run(args []string, input io.Reader, output, stderr io.Writer) int {
 				"Cooperative SPEC contract check unavailable: Antigravity input must supply exactly one valid absolute Git workspace root"))
 		}
 	}
+	if *expectedHelperSHA256 != "" {
+		if err := verifyOperatorOwnedHelperDigest(*expectedHelperSHA256); err != nil {
+			if protocol != protocolCodex {
+				return emitJSON(output, hookResponse{Decision: "block", Reason: operatorOwnedHelperDigestMismatchMessage})
+			}
+			alreadyClaimed, claimUnavailable := false, false
+			claimed, claimErr := codexHelperDigestMismatchAlreadyClaimed(resolvedRepository, payload, *expectedHelperSHA256)
+			if claimErr == nil {
+				alreadyClaimed = claimed
+			} else {
+				// A false active flag identifies an ordinary first stop and must
+				// fail closed. The provider-global active flag is only the last-
+				// resort liveness signal after private claim state becomes
+				// unavailable; yielding that continuation avoids an infinite loop.
+				alreadyClaimed = terminalStopHookActive(payload)
+				claimUnavailable = true
+				_, _ = fmt.Fprintf(stderr, "spec-contract-hook: helper-digest retry state unavailable; using bounded Codex liveness fallback: %.256s\n", claimErr.Error())
+			}
+			return emitJSON(output, codexHelperDigestMismatchResponse(alreadyClaimed, claimUnavailable))
+		}
+	}
 
-	result := specguard.Evaluate(context.Background(), specguard.Request{
+	result := evaluateSpecContract(context.Background(), specguard.Request{
 		Repository: resolvedRepository,
 		Mode:       specguard.ModeStaged,
 	})
@@ -318,6 +335,14 @@ func responseFor(protocol providerProtocol, event string, result specguard.Resul
 	}
 }
 
+func codexHelperDigestMismatchResponse(alreadyClaimed, claimUnavailable bool) hookResponse {
+	yieldMessage := repeatedReminderMessage
+	if claimUnavailable {
+		yieldMessage = "Unattended SPEC enforcement could not establish private helper-digest retry state, so this active Codex continuation is yielding rather than risking a loop. The installed helper still requires operator repair before the next governed completion. " + operatorOwnedHelperDigestMismatchMessage
+	}
+	return codexLikeResponse(specguard.DecisionBlock, operatorOwnedHelperDigestMismatchMessage, alreadyClaimed, yieldMessage)
+}
+
 func allowResponse(protocol providerProtocol) hookResponse {
 	if protocol == protocolAntigravity {
 		return hookResponse{Decision: "allow"}
@@ -428,6 +453,45 @@ func antigravityProtocolFailure(input []byte, stderr io.Writer, reason string) h
 func antigravityReminderAlreadyClaimed(repository string, input []byte, result specguard.Result) (bool, error) {
 	already, _, err := providerFeedbackAlreadyClaimed(repository, protocolAntigravity, input, result)
 	return already, err
+}
+
+// codexHelperDigestMismatchAlreadyClaimed uses a claim namespace separate from
+// staged-check feedback. The expected digest and native turn form the stable
+// failure identity, while repository and session scope the persistent marker.
+// This path intentionally does not inspect or evaluate mutable checkout state.
+func codexHelperDigestMismatchAlreadyClaimed(repository string, input []byte, expectedSHA256 string) (bool, error) {
+	var parsed terminalHookInput
+	if err := json.Unmarshal(input, &parsed); err != nil {
+		return false, err
+	}
+	if parsed.SessionID == "" || len(parsed.SessionID) > 4096 || parsed.TurnID == "" || len(parsed.TurnID) > 4096 || parsed.StopHookActive == nil {
+		return false, fmt.Errorf("codex helper-digest retry identity is incomplete")
+	}
+	providerDigest, err := providerSessionDigest(repository, protocolCodex, parsed.SessionID)
+	if err != nil {
+		return false, err
+	}
+	claimDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("codex-helper-digest-mismatch-claim-v1:"+providerDigest)))
+	feedbackIdentity, err := json.Marshal(struct {
+		SchemaVersion  string `json:"schema_version"`
+		Failure        string `json:"failure"`
+		ExpectedSHA256 string `json:"expected_sha256"`
+		NativeTurnID   string `json:"native_turn_id"`
+	}{
+		SchemaVersion:  "codex-helper-digest-mismatch/v1",
+		Failure:        "operator-owned-helper-digest-mismatch",
+		ExpectedSHA256: expectedSHA256,
+		NativeTurnID:   parsed.TurnID,
+	})
+	if err != nil {
+		return false, err
+	}
+	feedbackDigest := fmt.Sprintf("%x", sha256.Sum256(feedbackIdentity))
+	directory, err := reminderStateDirectory()
+	if err != nil {
+		return false, err
+	}
+	return claimReminderMarker(directory, claimDigest, feedbackDigest)
 }
 
 //nolint:gocyclo // One ordered state transition keeps native identity validation, hashing, and fail-safe claim handling auditable.

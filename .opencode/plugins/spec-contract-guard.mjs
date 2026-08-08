@@ -1,20 +1,66 @@
 import process from "node:process";
+import {closeSync} from "node:fs";
+import {setTimeout as delay} from "node:timers/promises";
 
 // Source-only OpenCode transport. It cannot block session termination; a
 // failing result is one bounded follow-up prompt per real session turn.
 const maxAdapterOutputBytes = 64 * 1024;
+const maxSupervisorStatusBytes = 4;
 const adapterTimeoutMs = 60_000;
+const adapterDrainMs = 250;
+const supervisorReapMs = 1_000;
 const maxTrackedMessageIDs = 4096;
 const maxTrackedSessions = 256;
 
-function boundedReader(stream, streamName, budget, terminate) {
+// The detached shell remains the group leader until its private stdin control
+// pipe receives cleanup or EOF. Its monitor then self-signals the current
+// process group, avoiding parent-side numeric PID/PGID races. The real hook
+// receives neither control stdin nor the supervisor-only status descriptor.
+const supervisorProgram = `
+trap '' HUP INT QUIT TERM PIPE
+exec 4<&0
+(
+  trap '' HUP INT QUIT TERM PIPE
+  exec 3>&-
+  exec 4<&-
+  IFS= read -r _ || :
+  while :; do
+    kill -KILL 0
+    /bin/sleep 0.05 || :
+  done
+) 0<&4 >/dev/null 2>&1 &
+cleanup_monitor=$!
+exec 4<&-
+(
+  trap - HUP INT QUIT TERM PIPE
+  exec 3>&-
+  exec </dev/null
+  exec "$@"
+) &
+hook_pid=$!
+wait "$hook_pid"
+hook_status=$?
+printf '%s\\n' "$hook_status" >&3 || :
+exec 3>&-
+exec 1>/dev/null 2>/dev/null
+wait "$cleanup_monitor" || :
+IFS= read -r _ || :
+while :; do
+  kill -KILL 0
+  /bin/sleep 0.05 || :
+done
+`;
+
+function boundedReader(stream, streamName, budget, terminate, maxBytes = maxAdapterOutputBytes) {
   const reader = stream?.getReader?.();
   if (!reader) throw new Error(`SPEC contract adapter ${streamName} stream is unavailable`);
-  let cancelled = false;
-  const cancel = async () => {
-    if (cancelled) return;
-    cancelled = true;
-    try { await reader.cancel(); } catch { /* Process termination is the authoritative boundary. */ }
+  let cancelPromise;
+  const cancel = () => {
+    if (cancelPromise) return cancelPromise;
+    cancelPromise = (async () => {
+      try { await reader.cancel(); } catch { /* Process termination is the authoritative boundary. */ }
+    })();
+    return cancelPromise;
   };
   const read = async () => {
     const chunks = [];
@@ -24,7 +70,7 @@ function boundedReader(stream, streamName, budget, terminate) {
         const {done, value} = await reader.read();
         if (done) break;
         const chunk = value instanceof Uint8Array ? value : new Uint8Array(value || []);
-        if (budget.used + chunk.byteLength > maxAdapterOutputBytes) {
+        if (budget.used + chunk.byteLength > maxBytes) {
           terminate({kind: "overflow", streamName});
           return "";
         }
@@ -50,63 +96,217 @@ async function runAdapter(worktree) {
   if (typeof worktree !== "string" || !worktree) {
     return {error: "OpenCode did not provide a project worktree"};
   }
-  if (process.platform === "win32" || typeof process.kill !== "function") {
+  if (process.platform === "win32") {
     return {error: "OpenCode SPEC contract adapter requires POSIX process-group termination"};
   }
   let proc;
   try {
-    proc = Bun.spawn(["go", "run", "./cmd/spec-contract-hook", "--root", worktree, "--provider", "opencode", "--event", "Stop"], {
-      cwd: worktree, detached: true, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+    proc = Bun.spawn([
+      "/bin/sh", "-c", supervisorProgram, "dear-agent-opencode-spec-supervisor",
+      "go", "run", "./cmd/spec-contract-hook", "--root", worktree, "--provider", "opencode", "--event", "Stop",
+    ], {
+      cwd: worktree, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"],
     });
-  } catch (error) { return {error: `could not start shared Go SPEC contract adapter: ${error?.message || error}`}; }
+  } catch (error) {
+    return {error: `could not start shared Go SPEC contract adapter supervisor: ${error?.message || error}`};
+  }
+
   const readers = [];
+  const budget = {used: 0};
   let termination;
+  let resolveTermination;
+  let cleanupRequestPromise;
+  const terminationPromise = new Promise((resolve) => { resolveTermination = resolve; });
+  const supervisorExit = Promise.resolve(proc.exited).then(
+    (exitCode) => {
+      return {exitCode, signal: proc.signalCode || proc.signal || ""};
+    },
+    (error) => {
+      return {error};
+    },
+  );
+  const requestSupervisorCleanup = () => {
+    if (cleanupRequestPromise) return cleanupRequestPromise;
+    // stdin is a supervisor-only control pipe. The real hook receives
+    // /dev/null, while EOF also gives the monitor an independent parent-death
+    // cleanup signal. No parent-side numeric process identity is ever used.
+    cleanupRequestPromise = (async () => {
+      try {
+        if (!proc.stdin?.write || !proc.stdin?.end) throw new Error("supervisor control pipe is unavailable");
+        await Promise.resolve(proc.stdin.write("cleanup\n"));
+        if (proc.stdin.flush) await Promise.resolve(proc.stdin.flush());
+        await Promise.resolve(proc.stdin.end());
+        return undefined;
+      } catch (error) {
+        try { await Promise.resolve(proc.stdin?.end?.()); } catch { /* EOF remains the fallback cleanup request. */ }
+        return error;
+      }
+    })();
+    return cleanupRequestPromise;
+  };
   const terminate = (cause) => {
     if (termination) return;
     termination = cause;
-    try {
-      // detached:true makes the direct `go run` child its POSIX process-group
-      // leader. A negative PID therefore terminates both the Go driver and the
-      // compiled adapter (plus any descendants retaining the output pipes).
-      process.kill(-proc.pid, "SIGKILL");
-    } catch (error) {
-      termination = {kind: "terminate", cause, error};
-      try { proc.kill("SIGKILL"); } catch { /* Stream cancellation still bounds the caller. */ }
-    }
+    resolveTermination(termination);
+    void requestSupervisorCleanup();
     for (const reader of readers) void reader.cancel();
   };
-  const budget = {used: 0};
+  const settleReaders = async (readerPromises, milliseconds) => {
+    const settled = Promise.allSettled(readerPromises);
+    return Promise.race([
+      settled.then((results) => ({results, timedOut: false})),
+      delay(milliseconds).then(() => ({results: undefined, timedOut: true})),
+    ]);
+  };
+
+  const statusFD = proc.stdio?.[3];
+  let timeout;
   try {
-    readers.push(boundedReader(proc.stdout, "stdout", budget, terminate));
-    readers.push(boundedReader(proc.stderr, "stderr", budget, terminate));
-  } catch (error) {
-    terminate({kind: "read", streamName: "output", error});
-    try { await proc.exited; } catch { /* The start/read error is the useful diagnostic. */ }
-    return {error: String(error?.message || error)};
+    let readerSetupError;
+    let outputReaders;
+    let statusReader;
+    try {
+      if (!Number.isInteger(statusFD) || statusFD < 0 || typeof Bun.file !== "function") {
+        throw new Error("supervisor status pipe is unavailable");
+      }
+      outputReaders = [];
+      const stdoutReader = boundedReader(proc.stdout, "stdout", budget, terminate);
+      outputReaders.push(stdoutReader);
+      readers.push(stdoutReader);
+      const stderrReader = boundedReader(proc.stderr, "stderr", budget, terminate);
+      outputReaders.push(stderrReader);
+      readers.push(stderrReader);
+      statusReader = boundedReader(
+        Bun.file(statusFD).stream(),
+        "status",
+        {used: 0},
+        (cause) => terminate({kind: "status", error: cause.error || new Error("supervisor status exceeded its bounded frame")}),
+        maxSupervisorStatusBytes,
+      );
+      readers.push(statusReader);
+    } catch (error) {
+      readerSetupError = error;
+      terminate({kind: "read", streamName: "output", error});
+    }
+    if (readerSetupError) {
+      const cleanup = await Promise.race([
+        requestSupervisorCleanup().then((error) => ({error, timedOut: false})),
+        delay(adapterDrainMs).then(() => ({error: new Error("supervisor cleanup request did not settle"), timedOut: true})),
+      ]);
+      const reaped = await Promise.race([
+        supervisorExit.then((outcome) => ({outcome, timedOut: false})),
+        delay(supervisorReapMs).then(() => ({outcome: undefined, timedOut: true})),
+      ]);
+      if (reaped.timedOut) return {error: `trusted adapter supervisor did not exit after reader setup failure${cleanup.error ? `: ${cleanup.error?.message || cleanup.error}` : ""}`};
+      if (reaped.outcome?.signal !== "SIGKILL") {
+        const detail = reaped.outcome?.error?.message || reaped.outcome?.error || reaped.outcome?.signal || reaped.outcome?.exitCode;
+        return {error: `trusted adapter supervisor did not exit with SIGKILL after reader setup failure${detail !== undefined && detail !== "" ? `: ${detail}` : ""}`};
+      }
+      if (cleanup.error) return {error: `could not request shared Go SPEC contract adapter supervisor cleanup: ${cleanup.error?.message || cleanup.error}`};
+      return {error: String(readerSetupError?.message || readerSetupError)};
+    }
+    const readerPromises = outputReaders.map((reader) => reader.read());
+    const statusPromise = statusReader.read().then((frame) => {
+      if (!/^(0|[1-9][0-9]{0,2})\n?$/.test(frame)) {
+        terminate({kind: "status", error: new Error("supervisor returned an invalid adapter status frame")});
+        return {stopped: true};
+      }
+      const exitCode = Number.parseInt(frame, 10);
+      if (exitCode > 255) {
+        terminate({kind: "status", error: new Error("supervisor returned an out-of-range adapter status")});
+        return {stopped: true};
+      }
+      return {exitCode};
+    });
+    timeout = setTimeout(() => terminate({kind: "timeout"}), adapterTimeoutMs);
+    const phase = await Promise.race([
+      statusPromise.then((status) => ({kind: "status", status})),
+      supervisorExit.then((outcome) => ({kind: "supervisor-exit", outcome})),
+      terminationPromise.then((cause) => ({kind: "termination", cause})),
+    ]);
+
+    let adapterExitCode;
+    let readerSettlement;
+    if (phase.kind === "status" && !phase.status.stopped) {
+      adapterExitCode = phase.status.exitCode;
+      readerSettlement = await settleReaders(readerPromises, adapterDrainMs);
+      if (readerSettlement.timedOut) {
+        for (const reader of readers) void reader.cancel();
+        readerSettlement = await settleReaders(readerPromises, adapterDrainMs);
+      }
+    } else if (!termination && (phase.kind === "supervisor-exit" || phase.status?.stopped)) {
+      const outcome = phase.kind === "supervisor-exit" ? phase.outcome : await supervisorExit;
+      termination = {kind: "supervisor-exit", outcome};
+      resolveTermination(termination);
+      for (const reader of readers) void reader.cancel();
+    }
+
+    if (termination && !readerSettlement) {
+      readerSettlement = await settleReaders(readerPromises, adapterDrainMs);
+      if (readerSettlement.timedOut) {
+        for (const reader of readers) void reader.cancel();
+        readerSettlement = await settleReaders(readerPromises, adapterDrainMs);
+      }
+    }
+    const cleanup = await Promise.race([
+      requestSupervisorCleanup().then((error) => ({error, timedOut: false})),
+      delay(adapterDrainMs).then(() => ({error: new Error("supervisor cleanup request did not settle"), timedOut: true})),
+    ]);
+    if (cleanup.error && termination?.kind !== "supervisor-exit") {
+      termination = {kind: "terminate", cause: termination || {kind: "complete"}, error: cleanup.error};
+    }
+    const reaped = await Promise.race([
+      supervisorExit.then((outcome) => ({outcome, timedOut: false})),
+      delay(supervisorReapMs).then(() => ({outcome: undefined, timedOut: true})),
+    ]);
+    if (reaped.timedOut) {
+      const cleanupDetail = termination?.kind === "terminate" ? `; cleanup channel failed: ${termination.error?.message || termination.error}` : "";
+      termination = {kind: "reap", cause: termination, error: new Error(`trusted adapter supervisor did not exit after supervisor-owned cleanup${cleanupDetail}`)};
+    } else if (termination?.kind !== "supervisor-exit" && reaped.outcome?.signal !== "SIGKILL") {
+      const detail = reaped.outcome?.error?.message || reaped.outcome?.error || reaped.outcome?.signal || reaped.outcome?.exitCode;
+      termination = {
+        kind: "cleanup-exit",
+        cause: termination,
+        error: new Error(`trusted adapter supervisor did not exit with SIGKILL after supervisor-owned cleanup${detail !== undefined && detail !== "" ? `: ${detail}` : ""}`),
+      };
+    }
+
+    if (termination?.kind === "overflow") return {error: `SPEC contract adapter ${termination.streamName} exceeded ${maxAdapterOutputBytes} combined output bytes`};
+    if (termination?.kind === "timeout") return {error: "shared Go SPEC contract adapter failed (timeout)"};
+    if (termination?.kind === "read") return {error: `could not read shared Go SPEC contract adapter ${termination.streamName}: ${termination.error?.message || termination.error}`};
+    if (termination?.kind === "status") return {error: `could not read shared Go SPEC contract adapter status: ${termination.error?.message || termination.error}`};
+    if (termination?.kind === "supervisor-exit") {
+      const detail = termination.outcome?.error?.message || termination.outcome?.error || termination.outcome?.signal || termination.outcome?.exitCode;
+      return {error: `shared Go SPEC contract adapter supervisor exited before reporting status${detail !== undefined && detail !== "" ? `: ${detail}` : ""}`};
+    }
+    if (termination?.kind === "terminate") return {error: `could not request shared Go SPEC contract adapter supervisor cleanup: ${termination.error?.message || termination.error}`};
+    if (termination?.kind === "reap") return {error: termination.error.message};
+    if (termination?.kind === "cleanup-exit") return {error: termination.error.message};
+    if (!readerSettlement?.results) return {error: "shared Go SPEC contract adapter output did not settle after bounded cancellation"};
+    const rejected = readerSettlement.results.find((result) => result.status === "rejected");
+    if (rejected) return {error: `shared Go SPEC contract adapter transport failed: ${rejected.reason?.message || rejected.reason}`};
+    const stdout = readerSettlement.results[0].value.trim();
+    const stderr = readerSettlement.results[1].value.trim();
+    if (adapterExitCode !== 0) {
+      return {error: `shared Go SPEC contract adapter failed${stderr ? `: ${stderr}` : ""}`};
+    }
+    if (!stdout || stdout === "{}") return {noop: true};
+    try {
+      const response = JSON.parse(stdout);
+      if (typeof response.systemMessage !== "string" || !response.systemMessage.trim()) return {error: "shared Go SPEC contract adapter returned unsupported OpenCode response"};
+      return {message: response.systemMessage, blocked: response.decision === "block"};
+    } catch (error) { return {error: `shared Go SPEC contract adapter returned invalid JSON: ${error?.message || error}`}; }
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+    if (!cleanupRequestPromise) void requestSupervisorCleanup();
+    await Promise.race([
+      Promise.allSettled(readers.map((reader) => reader.cancel())),
+      delay(adapterDrainMs),
+    ]);
+    if (Number.isInteger(statusFD) && statusFD >= 0) {
+      try { closeSync(statusFD); } catch { /* The bounded status reader may already have closed it. */ }
+    }
   }
-  const timeout = setTimeout(() => terminate({kind: "timeout"}), adapterTimeoutMs);
-  const settled = await Promise.allSettled([readers[0].read(), readers[1].read(), proc.exited]);
-  clearTimeout(timeout);
-  if (termination?.kind === "overflow") return {error: `SPEC contract adapter ${termination.streamName} exceeded ${maxAdapterOutputBytes} combined output bytes`};
-  if (termination?.kind === "timeout") return {error: "shared Go SPEC contract adapter failed (timeout)"};
-  if (termination?.kind === "read") return {error: `could not read shared Go SPEC contract adapter ${termination.streamName}: ${termination.error?.message || termination.error}`};
-  if (termination?.kind === "terminate") return {error: `could not terminate shared Go SPEC contract adapter process group: ${termination.error?.message || termination.error}`};
-  const rejected = settled.find((result) => result.status === "rejected");
-  if (rejected) return {error: `shared Go SPEC contract adapter transport failed: ${rejected.reason?.message || rejected.reason}`};
-  const stdout = settled[0].value.trim();
-  const stderr = settled[1].value.trim();
-  const exitCode = settled[2].value;
-  const signal = proc.signalCode || proc.signal;
-  if (signal || exitCode !== 0) {
-    const cause = signal ? ` (${signal})` : "";
-    return {error: `shared Go SPEC contract adapter failed${cause}${stderr ? `: ${stderr}` : ""}`};
-  }
-  if (!stdout || stdout === "{}") return {noop: true};
-  try {
-    const response = JSON.parse(stdout);
-    if (typeof response.systemMessage !== "string" || !response.systemMessage.trim()) return {error: "shared Go SPEC contract adapter returned unsupported OpenCode response"};
-    return {message: response.systemMessage, blocked: response.decision === "block"};
-  } catch (error) { return {error: `shared Go SPEC contract adapter returned invalid JSON: ${error?.message || error}`}; }
 }
 
 export const SpecContractGuard = async ({client, worktree, directory}) => {

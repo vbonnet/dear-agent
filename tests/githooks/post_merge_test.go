@@ -1021,6 +1021,18 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	}
 }
 
+// The governed helper digest is compiled into AGM. A helper-only source merge
+// must therefore rebuild the helper-derived provenance and both installed AGM
+// binaries from the same immutable revision.
+func TestRebuild_SpecContractHookOnlyRebuildsCoherentAGMPair(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"cmd/spec-contract-hook/main.go": "package main // v2\n"})
+	wantRevision := revParse(t, repo, "HEAD")
+
+	records := installRecords(t, runRebuildRecord(t, repo))
+	requireCoherentAGMDeployments(t, records, wantRevision)
+}
+
 // Docs-, test-, and config-only merges rebuild NOTHING (fast path).
 func TestRebuild_NonSourceChanges_SkipsAll(t *testing.T) {
 	cases := []struct {

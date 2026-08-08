@@ -72,11 +72,11 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM rebuilds the expected helper with distinct wall-clock inputs$`, agmRebuildsExpectedSPECHelper)
 	ctx.Step(`^the expected helper bytes should remain identical for unchanged source and provenance$`, expectedSPECHelperBytesRemainIdentical)
 	ctx.Step(`^OpenCode idle-session SPEC feedback is configured$`, openCodeIdleSessionSPECFeedbackIsConfigured)
-	ctx.Step(`^AGM exercises repeated, synthetic, message-capacity, session-capacity, and deleted-session events$`, agmExercisesOpenCodeIdleSessionEvents)
-	ctx.Step(`^each real turn and the global session table should remain bounded while tracked deletion admits yielded sessions$`, openCodeIdleSessionEventsRemainBounded)
+	ctx.Step(`^AGM exercises repeated, synthetic, capacity, deletion, and supervisor lifecycle events$`, agmExercisesOpenCodeIdleSessionEvents)
+	ctx.Step(`^OpenCode feedback and adapter cleanup should remain bounded and identity-safe$`, openCodeIdleSessionEventsRemainBounded)
 	ctx.Step(`^Pi terminal hook aggregation is configured$`, piTerminalHookAggregationIsConfigured)
-	ctx.Step(`^AGM exercises Pi terminal handler count, runtime, deadline, and output bounds$`, agmExercisesPiTerminalHookBounds)
-	ctx.Step(`^Pi should fail closed within its budgets while preserving multi-handler aggregation$`, piTerminalHookBoundsRemainFailClosed)
+	ctx.Step(`^AGM exercises Pi terminal handler and supervisor lifecycle bounds$`, agmExercisesPiTerminalHookBounds)
+	ctx.Step(`^Pi should fail closed within its budgets while preserving aggregation and identity-safe cleanup$`, piTerminalHookBoundsRemainFailClosed)
 	ctx.Step(`^the repository post-merge hook is configured$`, repositoryPostMergeHookIsConfigured)
 	ctx.Step(`^AGM validates repository post-merge hook coverage$`, agmValidatesRepositoryPostMergeHookCoverage)
 	ctx.Step(`^the repository post-merge hook should include lifecycle safeguard "([^"]*)"$`, repositoryPostMergeHookShouldIncludeLifecycleSafeguard)
@@ -347,7 +347,7 @@ func agmExercisesOpenCodeIdleSessionEvents(ctx context.Context) error {
 		return err
 	}
 	state.openCodeOutput, state.openCodeRegression = runLocalGuardrailGoTest(ctx,
-		`^TestOpenCodeSPECContractPlugin(UsesIdleEventAndConservativeTransport|TerminatesProcessGroup)$`,
+		`^TestOpenCodeSPECContractPlugin(UsesIdleEventAndConservativeTransport|TerminatesProcessGroup|BoundsEscapedOutputWithoutStaleGroupSignal|UsesOnlySupervisorOwnedCleanup|ParentExitCleansDetachedSupervisorTree)$`,
 		"./internal/hookparity",
 	)
 	return nil
@@ -367,6 +367,15 @@ func openCodeIdleSessionEventsRemainBounded(ctx context.Context) error {
 	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginTerminatesProcessGroup") {
 		return fmt.Errorf("OpenCode process-group transport output omitted its passing regression: %s", state.openCodeOutput)
 	}
+	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginBoundsEscapedOutputWithoutStaleGroupSignal") {
+		return fmt.Errorf("OpenCode escaped-output transport output omitted its passing regression: %s", state.openCodeOutput)
+	}
+	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginUsesOnlySupervisorOwnedCleanup") {
+		return fmt.Errorf("OpenCode supervisor-owned cleanup output omitted its passing regression: %s", state.openCodeOutput)
+	}
+	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginParentExitCleansDetachedSupervisorTree") {
+		return fmt.Errorf("OpenCode parent-exit cleanup output omitted its passing regression: %s", state.openCodeOutput)
+	}
 	return nil
 }
 
@@ -385,7 +394,7 @@ func agmExercisesPiTerminalHookBounds(ctx context.Context) error {
 		return err
 	}
 	state.piTerminalOutput, state.piTerminalRegression = runLocalGuardrailGoTest(ctx,
-		`^(TestPiProductionTerminalTimeoutBudgetsAreHonored|TestEmbeddedPiExtensionDecisionParity)$`,
+		`^(TestPiProductionTerminalTimeoutBudgetsAreHonored|TestEmbeddedPiExtensionDecisionParity|TestPiHookSupervisorKillsTermIgnoringDescendantAfterHookExit|TestPiHookSupervisorSettlesEscapedSessionWithoutStaleGroupSignal|TestPiHookSupervisorPreservesSuccessAndNonzeroOutput|TestPiHookSupervisorFailsClosedOnMalformedPrematureOrResultExitState|TestPiHookSupervisorRejectsAcknowledgedUnexpectedExitWithoutParentSignal)$`,
 		"./agm/internal/permissionparity",
 	)
 	return nil
@@ -400,7 +409,12 @@ func piTerminalHookBoundsRemainFailClosed(ctx context.Context) error {
 		return fmt.Errorf("pi terminal hook bound regression: %w: %s", state.piTerminalRegression, state.piTerminalOutput)
 	}
 	if !strings.Contains(state.piTerminalOutput, "--- PASS: TestPiProductionTerminalTimeoutBudgetsAreHonored") ||
-		!strings.Contains(state.piTerminalOutput, "--- PASS: TestEmbeddedPiExtensionDecisionParity") {
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestEmbeddedPiExtensionDecisionParity") ||
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestPiHookSupervisorKillsTermIgnoringDescendantAfterHookExit") ||
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestPiHookSupervisorSettlesEscapedSessionWithoutStaleGroupSignal") ||
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestPiHookSupervisorPreservesSuccessAndNonzeroOutput") ||
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestPiHookSupervisorFailsClosedOnMalformedPrematureOrResultExitState") ||
+		!strings.Contains(state.piTerminalOutput, "--- PASS: TestPiHookSupervisorRejectsAcknowledgedUnexpectedExitWithoutParentSignal") {
 		return fmt.Errorf("pi terminal hook bound output omitted its passing regression: %s", state.piTerminalOutput)
 	}
 	return nil

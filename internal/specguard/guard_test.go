@@ -1031,7 +1031,7 @@ func TestBoundsFailClosed(t *testing.T) {
 		if descendantTerminationAdmission(runtime.GOOS) != nil {
 			t.Skip("guard rejects this platform before executing the POSIX test helper")
 		}
-		executable := writeFakeGit(t, "#!/bin/sh\nsleep 5\n")
+		executable := writeFakeGit(t, "#!/bin/sh\nexec sleep 5\n")
 		limits := defaultLimits()
 		limits.gitTime = 25 * time.Millisecond
 		limits.wallTime = 100 * time.Millisecond

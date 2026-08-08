@@ -102,15 +102,15 @@ Feature: Hook harness parity
     When AGM rebuilds the expected helper with distinct wall-clock inputs
     Then the expected helper bytes should remain identical for unchanged source and provenance
 
-  Scenario: Idle-session fallback bounds recursive SPEC feedback
+  Scenario: Idle-session fallback bounds recursive SPEC feedback and adapter cleanup
     Given OpenCode idle-session SPEC feedback is configured
-    When AGM exercises repeated, synthetic, message-capacity, session-capacity, and deleted-session events
-    Then each real turn and the global session table should remain bounded while tracked deletion admits yielded sessions
+    When AGM exercises repeated, synthetic, capacity, deletion, and supervisor lifecycle events
+    Then OpenCode feedback and adapter cleanup should remain bounded and identity-safe
 
-  Scenario: Pi terminal aggregation has end-to-end resource budgets
+  Scenario: Pi terminal aggregation and supervisor cleanup have end-to-end resource bounds
     Given Pi terminal hook aggregation is configured
-    When AGM exercises Pi terminal handler count, runtime, deadline, and output bounds
-    Then Pi should fail closed within its budgets while preserving multi-handler aggregation
+    When AGM exercises Pi terminal handler and supervisor lifecycle bounds
+    Then Pi should fail closed within its budgets while preserving aggregation and identity-safe cleanup
 
   Scenario Outline: Repository post-merge hook exposes lifecycle safeguards
     Given the repository post-merge hook is configured
