@@ -1,6 +1,6 @@
 # AGM MCP Server - Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-08 -->
 
 ## Overview
 
@@ -52,10 +52,17 @@ actual SDK registration path.
 
 **MCS-16** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 
+**MCS-17** When an MCP client completes initialization, the system shall advertise the version identity of the running AGM artifact in `serverInfo.version`.
+
+**MCS-18** When the server reports startup identity, the system shall use the same version identity that it advertises to an initialized MCP client.
+
+**MCS-19** When a build lacks release-version metadata, the system shall expose a nonempty development fallback identity without claiming a numbered release.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Test consequence: Deterministic integration test `TestMCPInitializeReportsSharedBuildVersion` observes `serverInfo.version` and the independently negotiated protocol through a real in-memory SDK initialization handshake; no new BDD feature is required because the external session BDD harness does not expose MCP initialization metadata.
 
 ## Use Cases
 
@@ -368,7 +375,7 @@ mcp_server:
 
 ### MCP Stdio Transport
 
-- **Protocol**: Model Context Protocol v1.2.0
+- **Protocol**: Model Context Protocol version negotiated by the pinned SDK
 - **Transport**: stdio (stdin/stdout)
 - **Logging**: stderr only (critical requirement)
 - **Format**: JSON-RPC 2.0
@@ -414,28 +421,16 @@ mcp_server:
 - No stack traces to clients (log to stderr)
 - Graceful degradation (return empty results on non-fatal errors)
 
-## Versioning
+## Implementation Identity and Protocol
 
-### Version Information
+The server's implementation identity is the running AGM artifact version. The
+build system supplies release provenance through the repository's shared
+version package; an unstamped developer build uses that package's nonempty
+development fallback. The first process header, structured startup log, and
+MCP `serverInfo.version` all expose this same identity.
 
-```go
-var (
-    Version   = "1.0.0-dev"
-    GitCommit = "unknown"
-    BuildDate = "unknown"
-    BuiltBy   = "unknown"
-)
-```
-
-- Set via ldflags at build time
-- Printed to stderr on startup
-- Exposed in MCP server implementation
-
-### API Versioning
-
-- MCP Protocol: v1.2.0 (go-sdk)
-- AGM MCP Server: v1.0.0
-- No breaking changes planned for v1.x
+Implementation identity is not the MCP wire protocol version. The pinned MCP
+SDK independently negotiates protocol support with each client.
 
 ## Future Enhancements (V2+)
 
@@ -478,7 +473,7 @@ var (
 
 ### MCP Specification Compliance
 
-- Implements MCP v1.2.0 protocol
+- Negotiates supported MCP protocol versions through the pinned SDK
 - Uses official `github.com/modelcontextprotocol/go-sdk`
 - Follows stdio transport requirements
 - Adheres to JSON-RPC 2.0 format

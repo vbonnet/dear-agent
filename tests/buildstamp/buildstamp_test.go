@@ -521,6 +521,46 @@ func TestGovernedBuildRecipesUseSharedStampSeam(t *testing.T) {
 	}
 }
 
+func TestAGMFamilyBuildEntrypointsUseSharedVersionPackage(t *testing.T) {
+	entrypoints := []string{
+		".github/workflows/ci.yml",
+		".github/workflows/cross-platform-test.yml",
+		"scripts/preflight.sh",
+	}
+	canonicalAssignments := []string{
+		"-X " + versionPackage + ".Version=",
+		"-X " + versionPackage + ".GitCommit=",
+		"-X " + versionPackage + ".BuildDate=",
+		"-X " + versionPackage + ".BuiltBy=",
+	}
+	obsoleteAssignments := []string{
+		"-X main.Version=",
+		"-X main.GitCommit=",
+		"-X main.BuildDate=",
+		"-X main.BuiltBy=",
+	}
+
+	for _, entrypoint := range entrypoints {
+		t.Run(strings.ReplaceAll(entrypoint, "/", "_"), func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(sourceRoot(t), filepath.FromSlash(entrypoint)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents := string(data)
+			for _, assignment := range canonicalAssignments {
+				if !strings.Contains(contents, assignment) {
+					t.Errorf("%s is missing canonical linker assignment %q", entrypoint, assignment)
+				}
+			}
+			for _, assignment := range obsoleteAssignments {
+				if strings.Contains(contents, assignment) {
+					t.Errorf("%s retains obsolete linker assignment %q", entrypoint, assignment)
+				}
+			}
+		})
+	}
+}
+
 func buildProbe(t *testing.T, env map[string]string, extraArgs ...string) buildStamp {
 	t.Helper()
 	args := []string{
