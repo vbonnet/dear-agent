@@ -79,7 +79,7 @@ func dimensions() []dimension {
 	}
 }
 
-// dimensionReport holds one lens's rendered findings.
+// dimensionReport holds one review report's rendered findings.
 type dimensionReport struct {
 	key  string
 	text string
@@ -160,20 +160,21 @@ func runDimensions(ctx context.Context, client anthropic.Client, model anthropic
 	return reports, nil
 }
 
-// synthesize collects the dimension reports and asks the model for a single
+// synthesize collects the review reports and asks the model for a single
 // outcome word. A synthesis error is returned (fail closed, SPEC R6); an
 // unparseable word is handled by ParseOutcome (fail closed, SPEC R7). Returns
 // the raw synthesis text (for the PR comment) alongside the parsed outcome.
 func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, reports []dimensionReport) (Outcome, string, error) {
 	var sb strings.Builder
-	sb.WriteString("You are a senior engineer synthesizing five independent code review dimensions.\n")
-	sb.WriteString("Based on the dimension reports below, determine the overall outcome per this taxonomy:\n")
+	sb.WriteString("You are a senior engineer synthesizing independent review reports. The reports include five code review dimensions and may include an authoritative SPEC-CONTRACT report.\n")
+	sb.WriteString("Based on the review reports below, determine the overall outcome per this taxonomy:\n")
 	sb.WriteString("- approved: no blocking findings\n")
 	sb.WriteString("- needs-work: fixable blocking findings exist\n")
 	sb.WriteString("- rejected: fundamental design problem\n")
 	sb.WriteString("- needs-human-review: security auto-fail trigger, escalation trigger, or novel irreversible decision\n\n")
 	sb.WriteString("Rules: any security blocking finding -> needs-human-review. Any other blocking finding -> needs-work. ")
 	sb.WriteString("Data-loss finding -> rejected. Ambiguous findings resolve down (needs-work beats approved; needs-human-review beats needs-work).\n")
+	sb.WriteString("When a SPEC-CONTRACT report is present, its declared authoritative outcome is binding: preserve needs-work, rejected, or needs-human-review and never upgrade it to approved.\n")
 	sb.WriteString("Escalate to needs-human-review regardless of severity when the diff touches any of: agent permissions; pre/post-tool hooks or hook registration; ")
 	sb.WriteString("security boundaries (write guards, deny rules, CODEOWNERS, PII manifests); infrastructure that is expensive to reverse (IaC, schema changes, CI/CD pipeline edits); ")
 	sb.WriteString("or an explicit HUMAN REVIEW REQUIRED marker.\n")

@@ -2,9 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
@@ -174,6 +181,229 @@ func TestRun_OversizeDiffWithOverridePasses(t *testing.T) {
 	if got := run(c); got != 0 {
 		t.Fatalf("oversize diff + override: run() = %d, want 0", got)
 	}
+}
+
+func TestRun_AuthenticatedMandatoryEscalationStillRunsFullReview(t *testing.T) {
+	dir, _, base := initRepo(t, "changed\n")
+	writeReviewFile(t, dir, ".github/workflows/review.yml", "name: review\n")
+	gittest.Run(t, dir, "add", ".github/workflows/review.yml")
+	gittest.Run(t, dir, "commit", "-m", "change review workflow")
+	head := strings.TrimSpace(gittest.Run(t, dir, "rev-parse", "HEAD"))
+	chdir(t, dir)
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.needsHuman() || len(plan.EscalationTriggers) == 0 {
+		t.Fatalf("mandatory-escalation fixture produced plan %#v", plan)
+	}
+
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		requests = append(requests, string(body))
+		mu.Unlock()
+		response := "No blocking findings."
+		if strings.Contains(string(body), "You are a synthesis agent") {
+			response = "approved\nThe dimension reports contain no blocking findings."
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, modelResponse("end_turn", response))
+	}))
+	defer server.Close()
+
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	c.apiKey = "test-key"
+	c.apiBaseURL = server.URL
+	if got := run(c); got != 1 {
+		t.Fatalf("authenticated mandatory escalation: run() = %d, want 1", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != len(dimensions())+1 {
+		t.Fatalf("authenticated mandatory escalation made %d model calls, want %d dimensions plus synthesis", len(requests), len(dimensions())+1)
+	}
+	if !slicesContainText(requests, "You are a synthesis agent") {
+		t.Fatal("authenticated mandatory escalation skipped synthesis")
+	}
+}
+
+func TestRun_MandatoryEscalationShortCircuitsForFork(t *testing.T) {
+	dir, _, base := initRepo(t, "changed\n")
+	writeReviewFile(t, dir, ".github/workflows/review.yml", "name: review\n")
+	gittest.Run(t, dir, "add", ".github/workflows/review.yml")
+	gittest.Run(t, dir, "commit", "-m", "change review workflow")
+	head := strings.TrimSpace(gittest.Run(t, dir, "rev-parse", "HEAD"))
+	chdir(t, dir)
+
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, modelResponse("end_turn", "approved"))
+	}))
+	defer server.Close()
+
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	c.apiKey = "test-key"
+	c.apiBaseURL = server.URL
+	c.isFork = true
+	if got := run(c); got != 1 {
+		t.Fatalf("fork mandatory escalation: run() = %d, want 1", got)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("fork mandatory escalation made %d model calls, want 0", calls.Load())
+	}
+}
+
+func TestRun_SPECReportParticipatesInSynthesisAndRemainsBlocking(t *testing.T) {
+	repo := newReviewRepo(t)
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	writeReviewFile(t, repo, "module/SPEC.md", specDocument("MOD-01", "When checked, the system shall report it.", "features/module.feature"))
+	writeReviewFile(t, repo, "features/module.feature", featureDocument("# SPEC: module/SPEC.md\n", "contract"))
+	gittest.Run(t, repo, "add", "module/SPEC.md", "features/module.feature")
+	gittest.Run(t, repo, "commit", "-m", "add contract")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applicability := make([]specApplicabilityReview, 0, len(plan.Applicability))
+	for _, evidence := range plan.Applicability {
+		applicability = append(applicability, specApplicabilityReview{
+			Path:          evidence.Path,
+			RequirementID: evidence.RequirementID,
+			Harness:       evidence.Harness,
+			Disposition:   "supported",
+			Rationale:     "The authenticated shared contract applies to this active member.",
+		})
+	}
+	wireVerdict := struct {
+		Version              string                    `json:"version"`
+		BaseSHA              string                    `json:"base_sha"`
+		MergeBaseSHA         string                    `json:"merge_base_sha"`
+		HeadSHA              string                    `json:"head_sha"`
+		Changes              []specChange              `json:"changes"`
+		Status               string                    `json:"status"`
+		Summary              string                    `json:"summary"`
+		DeletionReviews      []specDeletionReview      `json:"deletion_reviews"`
+		ApplicabilityReviews []specApplicabilityReview `json:"applicability_reviews"`
+		Findings             []specFinding             `json:"findings"`
+	}{
+		Version:              specContractVersion,
+		BaseSHA:              plan.BaseSHA,
+		MergeBaseSHA:         plan.MergeBaseSHA,
+		HeadSHA:              plan.HeadSHA,
+		Changes:              plan.Changes,
+		Status:               "needs-work",
+		Summary:              "The contract needs a single fix before approval.",
+		DeletionReviews:      []specDeletionReview{},
+		ApplicabilityReviews: applicability,
+		Findings: []specFinding{{
+			Path:       "module/SPEC.md",
+			Severity:   "blocking",
+			Message:    "The observable outcome is ambiguous.",
+			Suggestion: "State one observable outcome.",
+		}},
+	}
+	verdictJSON, err := json.Marshal(wireVerdict)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			http.Error(w, readErr.Error(), http.StatusBadRequest)
+			return
+		}
+		request := string(body)
+		mu.Lock()
+		requests = append(requests, request)
+		mu.Unlock()
+		response := "No blocking findings."
+		switch {
+		case strings.Contains(request, "You are a strict SPEC contract reviewer"):
+			response = string(verdictJSON)
+		case strings.Contains(request, "You are a synthesis agent"):
+			response = "approved\nThe code dimensions contain no blocking findings."
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, modelResponse("end_turn", response))
+	}))
+	defer server.Close()
+
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	c.apiKey = "test-key"
+	c.apiBaseURL = server.URL
+	if got := run(c); got != 1 {
+		t.Fatalf("blocking SPEC verdict with approved synthesis: run() = %d, want 1", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != len(dimensions())+2 {
+		t.Fatalf("SPEC review run made %d model calls, want SPEC plus %d dimensions plus synthesis", len(requests), len(dimensions()))
+	}
+	var synthesisRequest string
+	for _, request := range requests {
+		if strings.Contains(request, "You are a synthesis agent") {
+			synthesisRequest = request
+			break
+		}
+	}
+	if !strings.Contains(synthesisRequest, "SPEC-CONTRACT") || !strings.Contains(synthesisRequest, "Authoritative outcome: needs-work") {
+		t.Fatalf("synthesis request omitted authoritative SPEC report: %s", synthesisRequest)
+	}
+}
+
+func TestFinalReviewOutcomeAndSynthesisDisplayPreserveAuthoritativeBlocks(t *testing.T) {
+	tests := []struct {
+		name        string
+		specVerdict Outcome
+		triggers    []string
+		want        Outcome
+	}{
+		{name: "SPEC needs work", specVerdict: NeedsWork, want: NeedsWork},
+		{name: "SPEC human review", specVerdict: NeedsHumanReview, want: NeedsHumanReview},
+		{name: "mandatory escalation wins over rejected SPEC", specVerdict: Rejected, triggers: []string{"CI/CD pipeline edit"}, want: NeedsHumanReview},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := finalReviewOutcome(Approved, tt.specVerdict, tt.triggers)
+			if got != tt.want {
+				t.Fatalf("finalReviewOutcome() = %s, want %s", got, tt.want)
+			}
+			displayed := reconcileSynthesisDisplay(Approved, got, "approved\nNo blocking findings.")
+			if first, _, _ := strings.Cut(displayed, "\n"); first != got.String() {
+				t.Fatalf("displayed synthesis starts %q, want %q: %s", first, got, displayed)
+			}
+			if strings.Contains(strings.ToLower(displayed), "approved") {
+				t.Fatalf("displayed blocking synthesis still claims approval: %s", displayed)
+			}
+		})
+	}
+}
+
+func slicesContainText(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildReviewPlan_SelectsOnlyExactSpecBasenamesAndRenameSides(t *testing.T) {

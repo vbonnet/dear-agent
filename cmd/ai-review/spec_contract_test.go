@@ -2,15 +2,21 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
@@ -124,14 +130,18 @@ func TestBuildReviewPlan_RejectsNonBacktickedFeaturePath(t *testing.T) {
 }
 
 func TestBuildReviewPlan_AllowsAuthenticatedDeterministicNoBDDEvidence(t *testing.T) {
-	for _, consequence := range []string{
-		"No BDD change with reason: deterministic unit coverage proves the private parser seam.",
-		"Deterministic schema test validates the private protocol boundary.",
+	for _, test := range []struct {
+		line        string
+		heading     string
+		consequence string
+	}{
+		{line: "- No BDD change, with reason: deterministic unit coverage proves the private parser seam.", heading: "## BDD traceability", consequence: "No BDD change, with reason: deterministic unit coverage proves the private parser seam."},
+		{line: "- Test consequence: Deterministic schema test validates the private protocol boundary.", heading: "## BDD Traceability", consequence: "Deterministic schema test validates the private protocol boundary."},
 	} {
-		t.Run(consequence, func(t *testing.T) {
+		t.Run(test.consequence, func(t *testing.T) {
 			repo := newReviewRepo(t)
 			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
-			spec := "# Contract\n\n**MOD-01** When checked, the system shall report it.\n\n## BDD Traceability\n\n- Test consequence: " + consequence + "\n"
+			spec := "# Contract\n\n**MOD-01** When checked, the system shall report it.\n\n" + test.heading + "\n\n" + test.line + "\n"
 			writeReviewFile(t, repo, "module/SPEC.md", spec)
 			gittest.Run(t, repo, "add", "module/SPEC.md")
 			gittest.Run(t, repo, "commit", "-m", "add deterministic contract")
@@ -142,8 +152,34 @@ func TestBuildReviewPlan_AllowsAuthenticatedDeterministicNoBDDEvidence(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			if plan.needsHuman() || len(plan.Contracts) != 1 || plan.Contracts[0].TestConsequence != consequence || len(plan.Contracts[0].Features) != 0 {
+			if plan.needsHuman() || len(plan.Contracts) != 1 || plan.Contracts[0].TestConsequence != test.consequence || len(plan.Contracts[0].Features) != 0 {
 				t.Fatalf("deterministic no-BDD evidence was not retained: %#v, reasons=%v", plan.Contracts, plan.HumanReasons)
+			}
+		})
+	}
+}
+
+func TestBuildReviewPlan_RejectsMalformedCanonicalNoBDDEvidence(t *testing.T) {
+	for _, line := range []string{
+		"- No BDD change with reason: parser coverage exists.",
+		"- No BDD change, with reason:",
+		"- no bdd change, with reason: parser coverage exists.",
+	} {
+		t.Run(line, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			spec := "# Contract\n\n**MOD-01** When checked, the system shall report it.\n\n## BDD Traceability\n\n" + line + "\n"
+			writeReviewFile(t, repo, "module/SPEC.md", spec)
+			gittest.Run(t, repo, "add", "module/SPEC.md")
+			gittest.Run(t, repo, "commit", "-m", "add malformed no-BDD evidence")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+			plan, err := buildReviewPlan(context.Background(), base, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "lacks a BDD feature") {
+				t.Fatalf("malformed canonical no-BDD declaration was accepted: %#v", plan)
 			}
 		})
 	}
@@ -311,7 +347,7 @@ func TestBuildReviewPlan_LoadsPromptPolicyOnlyFromProtectedBase(t *testing.T) {
 	// A policy change correctly stops before the semantic owner search. Mark
 	// that independent stage complete only to exercise prompt serialization;
 	// production never calls the model for this human-review plan.
-	plan.CandidateSearchComplete = true
+	completeOwnerSearchForTest(t, &plan)
 	system, user, err := specReviewPrompts(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -390,8 +426,8 @@ func TestBuildReviewPlan_EscalatesBeforeImpossibleVerdictCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	reasons := strings.Join(plan.HumanReasons, "\n")
-	if !plan.needsHuman() || !plan.CandidateSearchComplete || !strings.Contains(reasons, "minimum complete SPEC verdict") {
-		t.Fatalf("impossible output plan did not fail closed before model review: complete=%t reasons=%v applicability=%d", plan.CandidateSearchComplete, plan.HumanReasons, len(plan.Applicability))
+	if !plan.needsHuman() || !plan.OwnerIndexComplete || !strings.Contains(reasons, "minimum complete SPEC verdict") {
+		t.Fatalf("impossible output plan did not fail closed before model review: complete=%t reasons=%v applicability=%d", plan.OwnerIndexComplete, plan.HumanReasons, len(plan.Applicability))
 	}
 }
 
@@ -725,25 +761,30 @@ func TestBuildReviewPlan_ProvidesCompleteChangedContractAndSemanticCandidates(t 
 	if plan.needsHuman() || len(plan.Contracts) != 1 || plan.Contracts[0].Content != changed {
 		t.Fatalf("changed contract context = %#v, reasons=%v", plan.Contracts, plan.HumanReasons)
 	}
-	candidates := make(map[string]string, len(plan.Candidates))
-	for _, candidate := range plan.Candidates {
+	candidates := make(map[string]string, len(plan.OwnerIndex))
+	for _, candidate := range plan.OwnerIndex {
 		candidates[candidate.Path] = strings.Join(candidate.Signals, "\n")
 	}
 	_, unrelatedIncluded := candidates["unrelated/SPEC.md"]
 	if len(candidates) != 3 || !strings.Contains(candidates["shared/SPEC.md"], "shared BDD backlink") || !strings.Contains(candidates["contracts/archive/SPEC.md"], "contract term") || !unrelatedIncluded {
-		t.Fatalf("semantic candidates = %#v, want every unchanged contract with BDD and lexical ranking signals", plan.Candidates)
+		t.Fatalf("semantic candidates = %#v, want every unchanged contract with BDD and lexical ranking signals", plan.OwnerIndex)
 	}
-	if !plan.CandidateSearchComplete || plan.ActiveHarnessInventory.Revision != base || len(plan.ActiveHarnessInventory.Members) != 5 || len(plan.Applicability) != 5 {
-		t.Fatalf("authenticated active-member applicability evidence is incomplete: inventory=%#v applicability=%#v complete=%t", plan.ActiveHarnessInventory, plan.Applicability, plan.CandidateSearchComplete)
+	if !plan.OwnerIndexComplete || plan.ActiveHarnessInventory.Revision != base || len(plan.ActiveHarnessInventory.Members) != 5 || len(plan.Applicability) != 5 {
+		t.Fatalf("authenticated active-member applicability evidence is incomplete: inventory=%#v applicability=%#v complete=%t", plan.ActiveHarnessInventory, plan.Applicability, plan.OwnerIndexComplete)
 	}
+	completeOwnerSearchForTest(t, &plan)
 	incomplete := plan
 	incomplete.Applicability = append([]specApplicabilityEvidence(nil), plan.Applicability[:len(plan.Applicability)-1]...)
 	if _, _, err := specReviewPrompts(incomplete); err == nil || !strings.Contains(err.Error(), "incomplete active-harness applicability evidence") {
 		t.Fatalf("prompt accepted a truncated active-member applicability grid: %v", err)
 	}
 	_, prompt, err := specReviewPrompts(plan)
-	if err != nil || !strings.Contains(prompt, "low-confidence semantic uncertainty") || !strings.Contains(prompt, "needs-human-review") {
-		t.Fatalf("prompt does not route uncertain ownership to human review: %v\n%s", err, prompt)
+	if err != nil || !strings.Contains(prompt, "semantic_owner_search") || !strings.Contains(prompt, "every authenticated candidate was classified distinct") {
+		t.Fatalf("final prompt does not authenticate the completed sharded owner search: %v\n%s", err, prompt)
+	}
+	_, classifierPrompt, err := semanticOwnerShardPrompts(plan, plan.OwnerShards[0])
+	if err != nil || !strings.Contains(classifierPrompt, "possible-owner") || !strings.Contains(classifierPrompt, "uncertain") || !strings.Contains(classifierPrompt, "do not omit, add, duplicate, or reorder") {
+		t.Fatalf("classifier prompt does not route uncertain ownership to human review: %v\n%s", err, classifierPrompt)
 	}
 	if !strings.Contains(plan.Contracts[0].Content, "REMOTE-CURRENT-CONTEXT") {
 		t.Fatal("complete current contract context was not retained")
@@ -792,7 +833,7 @@ func TestBuildReviewPlan_RejectsHarnessLocalNormativeOwnersWithoutPeerComparison
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "harness-local normative SPEC ownership is forbidden") || len(plan.Candidates) != 0 || plan.CandidateSearchComplete {
+			if !plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "harness-local normative SPEC ownership is forbidden") || len(plan.OwnerIndex) != 0 || plan.OwnerIndexComplete {
 				t.Fatalf("harness-local owner was not rejected before semantic peer comparison: %#v", plan)
 			}
 		})
@@ -816,14 +857,14 @@ func TestBuildReviewPlan_AllowsLogicalDomainOwnersUnderInternalAndCmd(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			if plan.needsHuman() || !plan.CandidateSearchComplete {
+			if plan.needsHuman() || !plan.OwnerIndexComplete {
 				t.Fatalf("logical domain owner was rejected by path: %#v", plan)
 			}
 		})
 	}
 }
 
-func TestSemanticCandidatesEscalatesInsteadOfTruncatingOwnerSearch(t *testing.T) {
+func TestSemanticOwnerIndexPartitionsEveryUnchangedSPECExactlyOnce(t *testing.T) {
 	changed := specWithoutTrace("OWN-01", "When an adapter completes, the system shall preserve the terminal result.")
 	contracts := []changedSpecContract{{
 		Path:    "domains/session/SPEC.md",
@@ -831,21 +872,169 @@ func TestSemanticCandidatesEscalatesInsteadOfTruncatingOwnerSearch(t *testing.T)
 	}}
 	changes := []specChange{{Path: "domains/session/SPEC.md", Status: "modified"}}
 	corpus := map[string][]byte{"domains/session/SPEC.md": []byte(changed)}
-	for index := range maxSemanticCandidates + 4 {
+	for index := range 598 {
 		prefix := []string{"pkg", "cmd", "agm", "internal"}[index%4]
-		path := fmt.Sprintf("%s/component-%02d/SPEC.md", prefix, index)
-		corpus[path] = []byte(specWithoutTrace(fmt.Sprintf("OTHER-%02d", index), "When an adapter completes, the system shall preserve the terminal result."))
+		path := fmt.Sprintf("%s/component-%03d/SPEC.md", prefix, index)
+		body := fmt.Sprintf("When storage bucket %03d fills, the system shall reject a new upload.", index)
+		corpus[path] = []byte(specWithoutTrace(fmt.Sprintf("OTHER-%03d", index), body))
 	}
-	candidates, reasons, err := semanticCandidates(contracts, changes, corpus, map[string]bool{})
+	index, reasons, err := semanticOwnerIndex(contracts, changes, corpus, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 0 || len(reasons) != 1 || !strings.Contains(reasons[0], "complete semantic owner candidate search") {
-		t.Fatalf("incomplete owner search candidates = %d, reasons=%v; want fail-closed escalation", len(candidates), reasons)
+	if len(reasons) != 0 || len(index) != 598 {
+		t.Fatalf("owner index candidates = %d, reasons=%v; want complete 598-SPEC projection", len(index), reasons)
+	}
+	seen := make(map[string]bool, len(index))
+	for ordinal, candidate := range index {
+		if candidate.Ordinal != ordinal || seen[candidate.Path] || (ordinal > 0 && candidate.Path <= index[ordinal-1].Path) {
+			t.Fatalf("owner index is duplicated, reordered, or has a bad ordinal at %d: %#v", ordinal, candidate)
+		}
+		seen[candidate.Path] = true
+	}
+	plan := reviewPlan{Version: specContractVersion, BaseSHA: strings.Repeat("a", 40), MergeBaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40), OwnerIndex: index}
+	digest, shards, shardReasons, err := buildSemanticOwnerShards(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digest == "" || len(shardReasons) != 0 || len(shards) == 0 || len(shards) > maxSemanticShards {
+		t.Fatalf("bounded shards = %d digest=%q reasons=%v", len(shards), digest, shardReasons)
+	}
+	nextOrdinal := 0
+	for _, shard := range shards {
+		if len(shard.Candidates) == 0 || len(shard.Candidates) > maxSemanticShardCandidates {
+			t.Fatalf("shard %d candidate count = %d", shard.Ordinal, len(shard.Candidates))
+		}
+		for _, candidate := range shard.Candidates {
+			if candidate.Ordinal != nextOrdinal {
+				t.Fatalf("shards skipped or reordered ordinal: got %d want %d", candidate.Ordinal, nextOrdinal)
+			}
+			nextOrdinal++
+		}
+	}
+	if nextOrdinal != len(index) {
+		t.Fatalf("shards covered %d candidates, want %d", nextOrdinal, len(index))
 	}
 }
 
-func TestSemanticCandidatesIncludesZeroOverlapOwnerEvidence(t *testing.T) {
+func TestCurrentSPECCorpusFitsSemanticOwnerShardBounds(t *testing.T) {
+	repositoryRoot := filepath.Clean(filepath.Join("..", ".."))
+	corpus := make(map[string][]byte)
+	err := filepath.Walk(repositoryRoot, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			switch info.Name() {
+			case ".git", "node_modules", ".cache":
+				if path != repositoryRoot {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if info.Name() != "SPEC.md" {
+			return nil
+		}
+		relative, err := filepath.Rel(repositoryRoot, path)
+		if err != nil {
+			return err
+		}
+		blob, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		corpus[filepath.ToSlash(relative)] = blob
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := specWithoutTrace("CHECK-01", "When the current corpus is reviewed, the system shall classify every unchanged owner.")
+	index, reasons, err := semanticOwnerIndex(
+		[]changedSpecContract{{Path: "synthetic/current/SPEC.md", Content: changed}},
+		[]specChange{{Path: "synthetic/current/SPEC.md", Status: "modified"}},
+		corpus,
+		map[string]bool{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("current %d-SPEC corpus exceeds semantic owner index bounds: %v", len(corpus), reasons)
+	}
+	legacyTelemetryFound := false
+	for _, candidate := range index {
+		if candidate.Path != "pkg/telemetry/SPEC.md" {
+			continue
+		}
+		legacyTelemetryFound = len(candidate.RequirementIDs) == 0 && strings.Contains(candidate.VisibleContract, "FR-1.1") && strings.Contains(candidate.VisibleContract, "EventListener interface")
+	}
+	if !legacyTelemetryFound {
+		t.Fatal("current legacy telemetry SPEC promises were absent from the bounded owner projection")
+	}
+	plan := reviewPlan{Version: specContractVersion, BaseSHA: strings.Repeat("a", 40), MergeBaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40), OwnerIndex: index}
+	digest, shards, reasons, err := buildSemanticOwnerShards(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digest == "" || len(reasons) != 0 || len(shards) == 0 || len(shards) > maxSemanticShards {
+		t.Fatalf("current %d-SPEC corpus requires %d shards: digest=%q reasons=%v", len(corpus), len(shards), digest, reasons)
+	}
+	t.Logf("current corpus projects %d SPECs, including bounded legacy telemetry promises, into %d shards", len(index), len(shards))
+}
+
+func TestSemanticOwnerIndexPreservesBoundedMixedFormatNormativePromises(t *testing.T) {
+	changed := specWithoutTrace("SESSION-01", "When a session completes, the system shall preserve its terminal result.")
+	mixed := "# Mixed monitoring contract\n\n## EARS requirements\n\n**MON-01** When monitoring starts, the system shall expose its current status.\n\n## Functional Requirements\n\n- **FR-1.1**: EventListener interface for implementing listeners\n- **NFR-1.1**: Listener execution does not block event recording\n"
+	index, reasons, err := semanticOwnerIndex(
+		[]changedSpecContract{{Path: "domains/session/SPEC.md", Content: changed}},
+		[]specChange{{Path: "domains/session/SPEC.md", Status: "modified"}},
+		map[string][]byte{
+			"domains/session/SPEC.md": []byte(changed),
+			"pkg/monitoring/SPEC.md":  []byte(mixed),
+		},
+		map[string]bool{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 0 || len(index) != 1 || !slices.Equal(index[0].RequirementIDs, []string{"MON-01"}) || !strings.Contains(index[0].VisibleContract, "MON-01") || !strings.Contains(index[0].VisibleContract, "FR-1.1") || !strings.Contains(index[0].VisibleContract, "EventListener interface") {
+		t.Fatalf("mixed-format normative projection=%#v reasons=%v", index, reasons)
+	}
+	base := strings.Repeat("a", 40)
+	plan := reviewPlan{
+		Version:      specContractVersion,
+		BaseSHA:      base,
+		MergeBaseSHA: base,
+		HeadSHA:      strings.Repeat("b", 40),
+		Policy:       specPolicyEvidence{Path: specAuthoringPolicyPath, Revision: base, Content: testSpecAuthoringPolicy},
+		Changes:      []specChange{{Path: "domains/session/SPEC.md", Status: "modified"}},
+		Contracts:    []changedSpecContract{{Path: "domains/session/SPEC.md", Status: "modified", Content: changed, FeaturePaths: []string{}, Features: []bddFeatureEvidence{}, RequirementChanges: []specRequirementDelta{}}},
+		OwnerIndex:   index,
+	}
+	digest, shards, shardReasons, err := buildSemanticOwnerShards(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shardReasons) != 0 || len(shards) != 1 {
+		t.Fatalf("legacy owner shard=%#v reasons=%v", shards, shardReasons)
+	}
+	plan.OwnerIndexDigest = digest
+	plan.OwnerShards = shards
+	plan.OwnerIndexComplete = true
+	_, prompt, err := semanticOwnerShardPrompts(plan, shards[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"visible_contract", "MON-01", "FR-1.1", "EventListener interface", "return uncertain when it is empty or insufficient"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("mixed-format owner classifier prompt omits %q: %s", expected, prompt)
+		}
+	}
+}
+
+func TestSemanticOwnerIndexIncludesZeroOverlapOwnerEvidence(t *testing.T) {
 	changed := specWithoutTrace("OWN-01", "When a session ends, the system shall keep its final result.")
 	owner := specWithoutTrace("TERM-01", "While execution terminates, observers shall persist completion evidence.")
 	contracts := []changedSpecContract{{Path: "domains/session/SPEC.md", Content: changed}}
@@ -855,7 +1044,7 @@ func TestSemanticCandidatesIncludesZeroOverlapOwnerEvidence(t *testing.T) {
 		"domains/outcome/SPEC.md": []byte(owner),
 	}
 
-	candidates, reasons, err := semanticCandidates(contracts, changes, corpus, map[string]bool{})
+	candidates, reasons, err := semanticOwnerIndex(contracts, changes, corpus, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -864,9 +1053,242 @@ func TestSemanticCandidatesIncludesZeroOverlapOwnerEvidence(t *testing.T) {
 	}
 }
 
-func TestBuildReviewPlan_EscalatesIncompleteOwnerCandidateSearch(t *testing.T) {
-	repo := newReviewRepo(t)
+func TestSemanticOwnerIndexFailsClosedAtCandidateAndShardBounds(t *testing.T) {
+	changed := specWithoutTrace("OWN-01", "When a session ends, the system shall keep its final result.")
+	contracts := []changedSpecContract{{Path: "domains/session/SPEC.md", Content: changed}}
+	changes := []specChange{{Path: "domains/session/SPEC.md", Status: "modified"}}
+	corpus := map[string][]byte{"domains/session/SPEC.md": []byte(changed)}
 	for index := range maxSemanticCandidates + 1 {
+		path := fmt.Sprintf("domains/candidate-%04d/SPEC.md", index)
+		corpus[path] = []byte(specWithoutTrace(fmt.Sprintf("CAND-%04d", index), "When storage fills, the system shall reject a new upload."))
+	}
+	index, reasons, err := semanticOwnerIndex(contracts, changes, corpus, map[string]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(index) != 0 || len(reasons) != 1 || !strings.Contains(reasons[0], fmt.Sprintf("%d-candidate", maxSemanticCandidates)) {
+		t.Fatalf("candidate overflow index=%d reasons=%v", len(index), reasons)
+	}
+
+	largeIndex := make([]semanticOwnerCandidate, 0, 65)
+	for ordinal := range 65 {
+		largeIndex = append(largeIndex, semanticOwnerCandidate{
+			Ordinal:         ordinal,
+			Path:            fmt.Sprintf("domains/large-%02d/SPEC.md", ordinal),
+			RequirementIDs:  []string{fmt.Sprintf("LARGE-%02d", ordinal)},
+			VisibleContract: strings.Repeat("x", 30*1024),
+			FeaturePaths:    []string{},
+			Signals:         []string{},
+		})
+	}
+	plan := reviewPlan{Version: specContractVersion, BaseSHA: strings.Repeat("a", 40), MergeBaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40), OwnerIndex: largeIndex}
+	_, shards, reasons, err := buildSemanticOwnerShards(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shards) != 0 || len(reasons) != 1 || !strings.Contains(reasons[0], fmt.Sprintf("%d-shard", maxSemanticShards)) {
+		t.Fatalf("shard overflow shards=%d reasons=%v", len(shards), reasons)
+	}
+}
+
+func TestParseSemanticOwnerShardVerdictRejectsIncompleteOrUnauthenticatedResults(t *testing.T) {
+	plan := reviewableSemanticPlan(t, 3)
+	shard := plan.OwnerShards[0]
+	worstOrdinalPlan := reviewableSemanticPlan(t, maxSemanticCandidates)
+	worstOrdinalShard := worstOrdinalPlan.OwnerShards[len(worstOrdinalPlan.OwnerShards)-1]
+	maximumBytes, err := maximumSemanticOwnerVerdictSize(worstOrdinalPlan, worstOrdinalShard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maximumBytes > maxSemanticVerdictBytes {
+		t.Fatalf("maximum-value canonical semantic owner verdict is %d bytes, limit %d", maximumBytes, maxSemanticVerdictBytes)
+	}
+	valid := semanticOwnerShardVerdict{
+		Version:      plan.Version,
+		BaseSHA:      plan.BaseSHA,
+		MergeBaseSHA: plan.MergeBaseSHA,
+		HeadSHA:      plan.HeadSHA,
+		IndexDigest:  plan.OwnerIndexDigest,
+		ShardOrdinal: shard.Ordinal,
+		ShardDigest:  shard.Digest,
+		Results: []semanticOwnerClassification{
+			{Ordinal: 0, Relation: "distinct", Rationale: "The observable promise is different."},
+			{Ordinal: 1, Relation: "possible-owner", Rationale: "The observable promise may overlap."},
+			{Ordinal: 2, Relation: "uncertain", Rationale: "The bounded normative evidence is insufficient."},
+		},
+	}
+	validRaw, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := parseSemanticOwnerShardVerdict(validRaw, plan, shard); err != nil || len(got.Results) != 3 {
+		t.Fatalf("valid semantic owner verdict = %#v, %v", got, err)
+	}
+
+	mutations := []func(*semanticOwnerShardVerdict){
+		func(verdict *semanticOwnerShardVerdict) { verdict.Results = verdict.Results[:2] },
+		func(verdict *semanticOwnerShardVerdict) {
+			verdict.Results[0], verdict.Results[1] = verdict.Results[1], verdict.Results[0]
+		},
+		func(verdict *semanticOwnerShardVerdict) { verdict.Results[1].Ordinal = verdict.Results[0].Ordinal },
+		func(verdict *semanticOwnerShardVerdict) { verdict.Results[1].Relation = "same" },
+		func(verdict *semanticOwnerShardVerdict) {
+			verdict.Results[1].Rationale = strings.Repeat("x", maxSemanticRationaleBytes+1)
+		},
+		func(verdict *semanticOwnerShardVerdict) { verdict.ShardDigest = strings.Repeat("0", sha256.Size*2) },
+		func(verdict *semanticOwnerShardVerdict) { verdict.IndexDigest = strings.Repeat("0", sha256.Size*2) },
+	}
+	for index, mutate := range mutations {
+		copy := valid
+		copy.Results = append([]semanticOwnerClassification(nil), valid.Results...)
+		mutate(&copy)
+		raw, err := json.Marshal(copy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := parseSemanticOwnerShardVerdict(raw, plan, shard); err == nil {
+			t.Fatalf("mutation %d was accepted: %s", index, raw)
+		}
+	}
+	unknown := append(append([]byte(nil), validRaw[:len(validRaw)-1]...), []byte(`,"override":true}`)...)
+	if _, err := parseSemanticOwnerShardVerdict(unknown, plan, shard); err == nil {
+		t.Fatalf("unknown field was accepted: %s", unknown)
+	}
+	withNullResults := valid
+	withNullResults.Results = nil
+	nullRaw, err := json.Marshal(withNullResults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseSemanticOwnerShardVerdict(nullRaw, plan, shard); err == nil {
+		t.Fatalf("null results were accepted: %s", nullRaw)
+	}
+
+	emptyVisiblePlan := reviewableSemanticPlan(t, 1)
+	emptyVisiblePlan.OwnerIndex[0].VisibleContract = ""
+	digest, shards, reasons, err := buildSemanticOwnerShards(emptyVisiblePlan)
+	if err != nil || len(reasons) != 0 || len(shards) != 1 {
+		t.Fatalf("empty visible test shard=%#v reasons=%v err=%v", shards, reasons, err)
+	}
+	emptyVisiblePlan.OwnerIndexDigest = digest
+	emptyVisiblePlan.OwnerShards = shards
+	emptyVisibleVerdict := semanticOwnerShardVerdict{
+		Version:      emptyVisiblePlan.Version,
+		BaseSHA:      emptyVisiblePlan.BaseSHA,
+		MergeBaseSHA: emptyVisiblePlan.MergeBaseSHA,
+		HeadSHA:      emptyVisiblePlan.HeadSHA,
+		IndexDigest:  digest,
+		ShardOrdinal: 0,
+		ShardDigest:  shards[0].Digest,
+		Results:      []semanticOwnerClassification{{Ordinal: 0, Relation: "distinct", Rationale: "The contract is different."}},
+	}
+	emptyVisibleRaw, err := json.Marshal(emptyVisibleVerdict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseSemanticOwnerShardVerdict(emptyVisibleRaw, emptyVisiblePlan, shards[0]); err == nil || !strings.Contains(err.Error(), "empty visible") {
+		t.Fatalf("empty visible projection proved a distinct contract: %v", err)
+	}
+}
+
+func TestReviewSpecContractRunsEveryOwnerShardBeforeFinalReview(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		uncertainOrdinal int
+		wantStatus       Outcome
+		wantCalls        int32
+	}{
+		{name: "all distinct reaches final review", uncertainOrdinal: -1, wantStatus: Approved, wantCalls: 3},
+		{name: "uncertain candidate stops before final review", uncertainOrdinal: 128, wantStatus: NeedsHumanReview, wantCalls: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan := reviewableSemanticPlan(t, maxSemanticShardCandidates+1)
+			if len(plan.OwnerShards) != 2 {
+				t.Fatalf("test plan shards = %d, want 2", len(plan.OwnerShards))
+			}
+			finalApplicability := applicabilityReviewsJSON(t, plan, "supported")
+			finalVerdict := fmt.Sprintf(`{"version":%q,"base_sha":%q,"merge_base_sha":%q,"head_sha":%q,"changes":[{"path":"domains/session/SPEC.md","status":"modified"}],"status":"approved","summary":"The shared contract has one owner and complete test evidence.","deletion_reviews":[],"applicability_reviews":%s,"findings":[]}`, plan.Version, plan.BaseSHA, plan.MergeBaseSHA, plan.HeadSHA, finalApplicability)
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var request struct {
+					Messages []struct {
+						Content []struct {
+							Text string `json:"text"`
+						} `json:"content"`
+					} `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) != 1 || len(request.Messages[0].Content) != 1 {
+					t.Errorf("decode model request: messages=%#v err=%v", request.Messages, err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				user := request.Messages[0].Content[0].Text
+				const marker = "Authenticated bounded ownership evidence:\n"
+				if _, encoded, found := strings.Cut(user, marker); found {
+					var evidence semanticOwnerShardPromptEvidence
+					if err := json.Unmarshal([]byte(encoded), &evidence); err != nil {
+						t.Errorf("decode semantic owner prompt: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					results := make([]semanticOwnerClassification, 0, len(evidence.Shard.Candidates))
+					for _, candidate := range evidence.Shard.Candidates {
+						relation := "distinct"
+						if candidate.Ordinal == test.uncertainOrdinal {
+							relation = "uncertain"
+						}
+						results = append(results, semanticOwnerClassification{Ordinal: candidate.Ordinal, Relation: relation, Rationale: "The bounded normative projection supports this classification."})
+					}
+					verdict := semanticOwnerShardVerdict{Version: plan.Version, BaseSHA: plan.BaseSHA, MergeBaseSHA: plan.MergeBaseSHA, HeadSHA: plan.HeadSHA, IndexDigest: plan.OwnerIndexDigest, ShardOrdinal: evidence.Shard.Ordinal, ShardDigest: evidence.Shard.Digest, Results: results}
+					raw, err := json.Marshal(verdict)
+					if err != nil {
+						t.Errorf("marshal semantic verdict: %v", err)
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, modelResponse("end_turn", string(raw)))
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, modelResponse("end_turn", finalVerdict))
+			}))
+			defer server.Close()
+			client := anthropic.NewClient(option.WithAPIKey("test-key"), option.WithBaseURL(server.URL))
+
+			verdict, err := reviewSpecContract(context.Background(), client, anthropic.ModelClaudeOpus4_8, anthropic.OutputConfigEffortHigh, plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verdict.Status != test.wantStatus || calls.Load() != test.wantCalls {
+				t.Fatalf("review verdict=%s calls=%d, want verdict=%s calls=%d", verdict.Status, calls.Load(), test.wantStatus, test.wantCalls)
+			}
+			if test.uncertainOrdinal >= 0 {
+				path := plan.OwnerIndex[test.uncertainOrdinal].Path
+				if !strings.Contains(verdict.Summary, path) || len(verdict.Findings) != 1 || verdict.Findings[0].Path != path {
+					t.Fatalf("human owner verdict does not identify %q: summary=%q findings=%#v", path, verdict.Summary, verdict.Findings)
+				}
+			}
+		})
+	}
+}
+
+func TestSemanticOwnerHumanVerdictFailsClosedForUnauthenticatedOrdinal(t *testing.T) {
+	plan := reviewableSemanticPlan(t, 1)
+	verdict := semanticOwnerHumanVerdict(plan, semanticOwnerClassification{
+		Ordinal:   len(plan.OwnerIndex),
+		Relation:  "uncertain",
+		Rationale: "The candidate was not authenticated.",
+	})
+	if verdict.Status != NeedsHumanReview || !strings.Contains(verdict.Summary, "unauthenticated candidate ordinal") || len(verdict.Findings) != 0 {
+		t.Fatalf("unauthenticated ordinal did not fail closed: %#v", verdict)
+	}
+}
+
+func TestBuildReviewPlan_ShardsOwnerCorpusBeyondFormerTwelveCandidateCap(t *testing.T) {
+	repo := newReviewRepo(t)
+	for index := range 20 {
 		path := fmt.Sprintf("domains/candidate-%02d/SPEC.md", index)
 		body := fmt.Sprintf("When storage bucket %03d fills, the system shall reject a new upload.", index)
 		writeReviewFile(t, repo, path, specWithoutTrace(fmt.Sprintf("CAND-%03d", index), body))
@@ -888,8 +1310,8 @@ func TestBuildReviewPlan_EscalatesIncompleteOwnerCandidateSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.needsHuman() || plan.CandidateSearchComplete || len(plan.Candidates) != 0 || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "complete semantic owner candidate search") {
-		t.Fatalf("truncated owner search did not force needs-human evidence: %#v", plan)
+	if plan.needsHuman() || !plan.OwnerIndexComplete || len(plan.OwnerIndex) != 20 || len(plan.OwnerShards) == 0 {
+		t.Fatalf("bounded exhaustive owner search did not admit the ordinary corpus: %#v", plan)
 	}
 }
 
@@ -1251,4 +1673,110 @@ func applicabilityReviewsJSON(t *testing.T, plan reviewPlan, disposition string)
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func reviewableSemanticPlan(t *testing.T, candidateCount int) reviewPlan {
+	t.Helper()
+	base := strings.Repeat("a", 40)
+	head := strings.Repeat("b", 40)
+	contractContent := specWithoutTrace("SESSION-01", "When a session completes, the system shall retain its final outcome.")
+	parsed, err := parseRequirements(contractContent)
+	if err != nil || len(parsed) != 1 {
+		t.Fatalf("parse test contract = %#v, %v", parsed, err)
+	}
+	members := make([]activeHarnessMemberEvidence, 0, 5)
+	for _, name := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"} {
+		member, ok := activeHarnessMember(name)
+		if !ok {
+			t.Fatalf("missing trusted harness member %s", name)
+		}
+		members = append(members, member)
+	}
+	plan := reviewPlan{
+		Version:      specContractVersion,
+		BaseSHA:      base,
+		MergeBaseSHA: base,
+		HeadSHA:      head,
+		Policy:       specPolicyEvidence{Path: specAuthoringPolicyPath, Revision: base, Content: testSpecAuthoringPolicy},
+		ActiveHarnessInventory: activeHarnessInventoryEvidence{
+			Path:     activeHarnessRegistryPath,
+			Revision: base,
+			Members:  members,
+		},
+		Changes: []specChange{{Path: "domains/session/SPEC.md", Status: "modified"}},
+		Contracts: []changedSpecContract{{
+			Path:               "domains/session/SPEC.md",
+			Status:             "modified",
+			Content:            contractContent,
+			FeaturePaths:       []string{},
+			Features:           []bddFeatureEvidence{},
+			RequirementChanges: []specRequirementDelta{},
+		}},
+		Applicability:      []specApplicabilityEvidence{},
+		OwnerIndex:         []semanticOwnerCandidate{},
+		OwnerShards:        []semanticOwnerShard{},
+		ReviewNeeded:       true,
+		ReviewRelevant:     true,
+		EscalationTriggers: []string{},
+		HumanReasons:       []string{},
+	}
+	for _, member := range members {
+		plan.Applicability = append(plan.Applicability, specApplicabilityEvidence{
+			Path:          "domains/session/SPEC.md",
+			RequirementID: parsed[0].ID,
+			Promise:       parsed[0].Body,
+			Harness:       member.Name,
+		})
+	}
+	for ordinal := range candidateCount {
+		plan.OwnerIndex = append(plan.OwnerIndex, semanticOwnerCandidate{
+			Ordinal:         ordinal,
+			Path:            fmt.Sprintf("domains/candidate-%03d/SPEC.md", ordinal),
+			RequirementIDs:  []string{fmt.Sprintf("CAND-%03d", ordinal)},
+			VisibleContract: fmt.Sprintf("**CAND-%03d** When storage bucket %03d fills, the system shall reject a new upload.", ordinal, ordinal),
+			FeaturePaths:    []string{},
+			Signals:         []string{},
+		})
+	}
+	digest, shards, reasons, err := buildSemanticOwnerShards(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("test plan owner bounds: %v", reasons)
+	}
+	plan.OwnerIndexDigest = digest
+	plan.OwnerShards = shards
+	plan.OwnerIndexComplete = true
+	return plan
+}
+
+func completeOwnerSearchForTest(t *testing.T, plan *reviewPlan) {
+	t.Helper()
+	digest, shards, reasons, err := buildSemanticOwnerShards(*plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("test owner index exceeds bounds: %v", reasons)
+	}
+	plan.OwnerIndexDigest = digest
+	plan.OwnerShards = shards
+	plan.OwnerIndexComplete = true
+	receipts := make([]semanticOwnerShardReceipt, 0, len(shards))
+	for index, shard := range shards {
+		receipts = append(receipts, semanticOwnerShardReceipt{
+			Ordinal:        index,
+			ShardDigest:    shard.Digest,
+			CandidateCount: len(shard.Candidates),
+			VerdictDigest:  strings.Repeat("a", sha256.Size*2),
+		})
+	}
+	plan.OwnerSearch = &semanticOwnerSearchEvidence{
+		IndexDigest:    digest,
+		CandidateCount: len(plan.OwnerIndex),
+		ShardCount:     len(shards),
+		Receipts:       receipts,
+		Complete:       true,
+	}
 }

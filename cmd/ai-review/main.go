@@ -33,6 +33,7 @@ type config struct {
 	override   bool
 	prBody     string
 	apiKey     string
+	apiBaseURL string
 	keyFromEnv bool
 	model      anthropic.Model
 	effort     anthropic.OutputConfigEffort
@@ -309,18 +310,22 @@ func run(c config) int {
 		fmt.Printf("::error::could not build authenticated review plan: %v\n", err)
 		return failClosed(c, "the authenticated SPEC governance review plan could not be built")
 	}
-	if plan.needsHuman() {
-		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
-	}
-	if len(plan.EscalationTriggers) > 0 {
-		return handleMandatoryEscalation(c, plan.EscalationTriggers)
-	}
 	// Credential material is intentionally read only after the authenticated
 	// plan and deterministic prechecks have completed.
 	if c.keyFromEnv {
 		c.apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
-	if plan.ReviewNeeded && (c.isFork || strings.TrimSpace(c.apiKey) == "") {
+	modelUnavailable := c.isFork || strings.TrimSpace(c.apiKey) == ""
+	if plan.needsHuman() && modelUnavailable {
+		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+	}
+	// A deterministic escalation still benefits from the complete automated
+	// review when credentials are available. Fork and secretless runs cannot
+	// make model calls, so they take the visible human-review fallback instead.
+	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
+		return handleMandatoryEscalation(c, plan.EscalationTriggers)
+	}
+	if plan.ReviewNeeded && modelUnavailable {
 		reason := "a relevant changed SPEC cannot be reviewed because the reviewer credential is unavailable"
 		if c.isFork {
 			reason = "a relevant changed SPEC originates from a fork and requires human review"
@@ -357,19 +362,26 @@ func run(c config) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
-	client := anthropic.NewClient(option.WithAPIKey(c.apiKey))
+	clientOptions := []option.RequestOption{option.WithAPIKey(c.apiKey)}
+	if c.apiBaseURL != "" {
+		clientOptions = append(clientOptions, option.WithBaseURL(c.apiBaseURL))
+	}
+	client := anthropic.NewClient(clientOptions...)
 	var specReports []dimensionReport
 	specVerdict := Approved // no changed SPEC is neutral, not a blocking zero value
-	if plan.ReviewNeeded {
+	if plan.needsHuman() {
+		specVerdict = NeedsHumanReview
+		specReports = append(specReports, specContractReport(specContractVerdict{
+			Status:  NeedsHumanReview,
+			Summary: "Authenticated deterministic checks require human review: " + strings.Join(plan.HumanReasons, "; "),
+		}))
+	} else if plan.ReviewNeeded {
 		verdict, err := reviewSpecContract(ctx, client, c.model, c.effort, plan)
 		if err != nil {
 			return handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict")
 		}
 		specVerdict = verdict.Status
-		specReports = append(specReports, dimensionReport{key: "spec-contract", text: renderSpecVerdict(verdict)})
-		if verdict.Status == NeedsHumanReview {
-			return handleSpecHumanReview(c, plan, "the changed-SPEC reviewer requires human review: "+verdict.Summary)
-		}
+		specReports = append(specReports, specContractReport(verdict))
 	}
 
 	reports, err := runDimensions(ctx, client, c.model, c.effort, diff)
@@ -379,7 +391,11 @@ func run(c config) int {
 		return failClosed(c, "a review dimension call failed")
 	}
 
-	outcome, synthesis, err := synthesize(ctx, client, c.model, c.effort, reports)
+	// The SPEC report is an input to synthesis, not an after-the-fact appendix.
+	// This lets the synthesis explain the same authoritative evidence that the
+	// deterministic final-outcome reconciliation enforces below.
+	reports = append(specReports, reports...)
+	synthesizedOutcome, synthesis, err := synthesize(ctx, client, c.model, c.effort, reports)
 	if err != nil {
 		// Synthesis error fails closed (SPEC R6).
 		fmt.Printf("::error::review synthesis failed: %v\n", err)
@@ -388,11 +404,10 @@ func run(c config) int {
 
 	// REVIEW.md §3 escalation is mandatory "regardless of finding severity".
 	// The plan returns every deterministic trigger before the model runs, so
-	// this call is defensive rather than a second, unauthenticated Git read.
+	// this application is defensive rather than a second, unauthenticated Git read.
 	triggers := plan.EscalationTriggers
-	outcome = ApplyEscalation(outcome, triggers)
-	outcome = applySpecVerdict(outcome, specVerdict)
-	reports = append(specReports, reports...)
+	outcome := finalReviewOutcome(synthesizedOutcome, specVerdict, triggers)
+	synthesis = reconcileSynthesisDisplay(synthesizedOutcome, outcome, synthesis)
 
 	// Reporting the outcome is best-effort: the exit code already carries the
 	// verdict, so a comment outage must not change it.
@@ -410,6 +425,39 @@ func run(c config) int {
 	code := ExitFor(outcome, c.override)
 	fmt.Printf("::notice::AI review outcome: %s (exit %d, override=%t)\n", outcome, code, c.override)
 	return code
+}
+
+func specContractReport(verdict specContractVerdict) dimensionReport {
+	return dimensionReport{
+		key:  "spec-contract",
+		text: fmt.Sprintf("Authoritative outcome: %s\n%s", verdict.Status, renderSpecVerdict(verdict)),
+	}
+}
+
+// finalReviewOutcome applies the authoritative SPEC verdict before mandatory
+// escalation, so a REVIEW.md §3 trigger is always the final needs-human-review
+// outcome regardless of what either model review concluded.
+func finalReviewOutcome(synthesized, specVerdict Outcome, triggers []string) Outcome {
+	return ApplyEscalation(applySpecVerdict(synthesized, specVerdict), triggers)
+}
+
+// reconcileSynthesisDisplay prevents the sticky comment from presenting a
+// model verdict that deterministic policy has already overruled. When policy
+// changes the outcome, the model's conflicting first line and summary are
+// replaced rather than displayed as though they were still authoritative.
+func reconcileSynthesisDisplay(synthesized, final Outcome, synthesis string) string {
+	trimmed := strings.TrimSpace(synthesis)
+	firstLine, rest, hasRest := strings.Cut(trimmed, "\n")
+	if synthesized == final && strings.TrimSpace(firstLine) == final.String() {
+		return trimmed
+	}
+	if synthesized != final {
+		return final.String() + "\nFinal outcome reconciled with deterministic policy and authoritative review reports; see the detailed evidence below."
+	}
+	if hasRest && strings.TrimSpace(rest) != "" {
+		return final.String() + "\n" + strings.TrimSpace(rest)
+	}
+	return final.String()
 }
 
 // handleSpecHumanReview keeps an unresolved SPEC contract visibly in the
