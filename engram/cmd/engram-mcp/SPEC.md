@@ -1,6 +1,6 @@
 # Engram MCP Server (Go) - Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 
