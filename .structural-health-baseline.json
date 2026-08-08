@@ -109,7 +109,6 @@
       "agm/internal/tmux/tmux_test.go (1109 lines)",
       "agm/internal/ui/table.go (1054 lines)",
       "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
-      "agm/test/bdd/steps/local_development_guardrails_steps.go (1007 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps.go (1621 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1061 lines)",
@@ -644,6 +643,29 @@
       },
       "reason": "Retroactively admit the two SPEC contract reviewer file-size findings merged by PR #1132; decomposition remains tracked by ce-1hu9.37.",
       "reference": "ce-1hu9.36; ce-1hu9.37"
+    },
+    {
+      "previous_baseline_sha256": "8154ec64937c7c8d3f4a1abe31c2041a98c99c68570360628f2a2a9e95a78b93",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/local_development_guardrails_steps.go (1007 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
     }
   ]
 }
