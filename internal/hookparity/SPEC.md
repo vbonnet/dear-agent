@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-08-08 -->
 
-**Version:** 1.4
+**Version:** 1.5
 **Status:** Baseline
 **Scope:** Repository-scoped hook manifests and shared guardrail hook scripts.
 
@@ -39,7 +39,7 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-11** When a harness lacks a lifecycle event or a neutral pre-tool decision that preserves its ordinary permission flow, the system shall omit the active projection and shall record the capability boundary rather than translate success into automatic approval or unconditional prompting; a governance-required legacy path may remain only as exact inert retirement metadata with no hook payload or runtime claim.
 
-**HHP-12** Where a harness can surface remediation only as an idle-session follow-up, when the neutral guard returns feedback after a distinct user turn, the harness shall issue no more than one follow-up for that turn, shall not treat its own or repeated message updates as new turns, shall cease follow-ups safely after its bounded turn-history capacity is reached, shall cap globally retained session state by yielding untracked sessions rather than evicting continuation state, and shall admit a yielded session after explicit deletion frees capacity.
+**HHP-12** Where a harness can surface remediation only as an idle-session follow-up, when the neutral guard returns feedback after a distinct user turn, the harness shall issue no more than one follow-up for that turn, shall not treat its own or repeated message updates as new turns, shall cease follow-ups safely after its bounded turn-history capacity is reached, shall cap globally retained session state by yielding untracked sessions rather than evicting continuation state, and shall admit a yielded session after explicit deletion frees capacity; when that transport launches the neutral adapter asynchronously, it shall isolate the complete adapter tree in a POSIX process group, capture stdout and stderr incrementally within one combined 64 KiB budget, terminate the entire group and await the direct child on output exhaustion or timeout, fail conservatively where process-group termination is unavailable, and preserve the single-attempt state before awaiting it.
 
 **HHP-13** When AGY configures its bounded SPEC review, its source manifest shall name the absolute operator-owned adapter and that adapter shall select exactly one valid absolute Git workspace supplied by the native hook input rather than rely on the hook process current directory.
 
@@ -47,13 +47,13 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-15** When Pi projects Stop or SubagentStop through multiple matching handlers, the Pi adapter shall execute every matching handler admitted by its total count and execution-deadline budgets before returning bounded aggregate blocking reasons and advisory contexts; it shall honor each validated manifest timeout up to 120 seconds without silently shortening the canonical 60-second and 120-second terminal chain, cap captured output, bound feedback while collecting it, and fail closed when a count or aggregate deadline budget is exhausted.
 
-**HHP-16** When an operator audits the installed SPEC helper, the status surface shall remain read-only while reporting missing or stale bytes and rejecting any leaf or trusted ancestor that is not owned by UID 0, non-writable by group and world, a non-symlink of the required kind, and executable at the leaf.
+**HHP-16** When an operator audits the installed SPEC helper, the status surface shall remain read-only while reporting missing or stale bytes and rejecting any leaf or trusted ancestor that is not owned by UID 0, non-writable by group and world, a non-symlink of the required kind, searchable by unprivileged launchers at every ancestor, and readable and executable without set-user-ID, set-group-ID, or other special mode bits at the leaf; inaccessible trusted ancestry shall be reported as untrusted rather than an inspection failure, and after hashing the surface shall revalidate both the open descriptor and deployed pathname against the admitted identity before reporting the digest.
 
-**HHP-17** When AGM launches unattended Codex with a recognizable terminal SPEC adapter, the system shall replace that source adapter with the validated root-owned helper, bind the canonical repository root, disable the mutable project copy, and digest-pin the effective session command.
+**HHP-17** When AGM launches unattended Codex with a recognizable terminal SPEC adapter, the system shall replace that source adapter only after its trusted deployed bytes match the revision-matched expected artifact digest embedded by the governed AGM build, bind the canonical repository root, disable the mutable project copy, and digest-pin the effective session command.
 
 **HHP-18** When Claude or Codex terminal feedback runs, the adapter shall bind its attempt to the native session and deterministic feedback identity, shall include Codex's bounded native turn identity in the Codex attempt, shall clear Claude's prior session claim on the native `UserPromptSubmit` boundary, shall allow at most one blocker among concurrent invocations of the same attempt, shall block once for a fresh identity even when a sibling hook caused the provider-global active continuation, shall yield a repeated identity without claiming compliance, and shall use the provider-global flag only as a liveness fallback when private claim state is unavailable.
 
-**HHP-19** When the installed SPEC helper status surface rebuilds its expected artifact from unchanged source and provenance, the build shall use stable source-derived stamp input, path-independent compilation, and disabled implicit VCS stamping so separate invocations produce comparable bytes instead of wall-clock drift.
+**HHP-19** When the installed SPEC helper status surface rebuilds its expected artifact from unchanged source and provenance, the build shall use stable source-derived stamp input, path-independent compilation, disabled ambient Go workspace mode, and disabled implicit VCS stamping so separate invocations produce comparable bytes instead of wall-clock drift.
 
 **HHP-20** Where a cooperative terminal adapter cannot establish a stable retry identity because its invocation or bounded input is invalid, the adapter shall yield termination with advisory feedback instead of creating an unbounded fail-closed loop, without weakening the separately enforced changed-SPEC CI decision.
 

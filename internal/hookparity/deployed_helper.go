@@ -2,10 +2,13 @@ package hookparity
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -39,9 +42,57 @@ type DeployedHelperStatus struct {
 	Reason         string `json:"reason,omitempty"`
 }
 
+var hashDeployedHelperFile = readerSHA256
+
 // ProductionHelperTrustPolicy requires UID 0 ownership through filesystem root.
 func ProductionHelperTrustPolicy() HelperTrustPolicy {
 	return HelperTrustPolicy{OwnerUID: 0, TrustedRoot: string(filepath.Separator)}
+}
+
+// VerifyDeployedHelperDigest admits one deployed helper only when its trusted
+// filesystem identity remains stable while the exact expected bytes are read.
+// It is intended for launch-time consumers that already carry a revision-bound
+// expected artifact digest and therefore do not have a local artifact path to
+// compare through InspectDeployedHelper.
+func VerifyDeployedHelperDigest(deployed, expectedSHA256 string, policy HelperTrustPolicy) error {
+	deployed, err := cleanAbsolutePath(deployed, "deployed helper")
+	if err != nil {
+		return err
+	}
+	trustedRoot, err := cleanAbsolutePath(policy.TrustedRoot, "trusted root")
+	if err != nil {
+		return err
+	}
+	decoded, err := hex.DecodeString(expectedSHA256)
+	if err != nil || len(decoded) != sha256.Size || expectedSHA256 != strings.ToLower(expectedSHA256) {
+		return errors.New("expected helper SHA-256 must be 64 lowercase hexadecimal characters")
+	}
+
+	info, err := os.Lstat(deployed)
+	if err != nil {
+		if reason, ancestryErr := validateTrustedAncestry(filepath.Dir(deployed), trustedRoot, policy.OwnerUID); ancestryErr != nil {
+			return ancestryErr
+		} else if reason != "" {
+			return errors.New(reason)
+		}
+		return fmt.Errorf("inspect deployed helper: %w", err)
+	}
+	if reason := validateHelperLeaf(info, policy.OwnerUID); reason != "" {
+		return errors.New(reason)
+	}
+	if reason, ancestryErr := validateTrustedAncestry(filepath.Dir(deployed), trustedRoot, policy.OwnerUID); ancestryErr != nil {
+		return ancestryErr
+	} else if reason != "" {
+		return errors.New(reason)
+	}
+	actualSHA256, err := verifiedFileSHA256(deployed, info, policy.OwnerUID)
+	if err != nil {
+		return err
+	}
+	if actualSHA256 != expectedSHA256 {
+		return errors.New("deployed helper digest does not match the revision-bound expected artifact")
+	}
+	return nil
 }
 
 // InspectDeployedHelper verifies content identity plus the complete ownership
@@ -73,6 +124,13 @@ func InspectDeployedHelper(artifact, deployed string, policy HelperTrustPolicy) 
 		return status, nil
 	}
 	if err != nil {
+		if reason, ancestryErr := validateTrustedAncestry(filepath.Dir(deployed), trustedRoot, policy.OwnerUID); ancestryErr != nil {
+			return DeployedHelperStatus{}, ancestryErr
+		} else if reason != "" {
+			status.Status = HelperUntrusted
+			status.Reason = reason
+			return status, nil
+		}
 		return DeployedHelperStatus{}, fmt.Errorf("inspect deployed helper: %w", err)
 	}
 	if reason := validateHelperLeaf(info, policy.OwnerUID); reason != "" {
@@ -124,8 +182,14 @@ func validateHelperLeaf(info os.FileInfo, ownerUID uint32) string {
 	if uid != ownerUID {
 		return fmt.Sprintf("deployed helper owner UID is %d, want %d", uid, ownerUID)
 	}
-	if info.Mode().Perm()&0o111 == 0 {
-		return "deployed helper is not executable"
+	if info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		return "deployed helper has privileged or special mode bits"
+	}
+	if info.Mode().Perm()&0o001 == 0 {
+		return "deployed helper is not executable by unprivileged launchers"
+	}
+	if info.Mode().Perm()&0o004 == 0 {
+		return "deployed helper is not readable by unprivileged launchers"
 	}
 	if info.Mode().Perm()&0o022 != 0 {
 		return "deployed helper is group- or world-writable"
@@ -141,7 +205,19 @@ func validateTrustedAncestry(start, root string, ownerUID uint32) (string, error
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "deployed helper is outside the trusted ancestry root", nil
 	}
-	for current := start; ; current = filepath.Dir(current) {
+	ancestry := make([]string, 0, 8)
+	for current := start; ; {
+		ancestry = append(ancestry, current)
+		if current == root {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "deployed helper ancestry did not reach the trusted root", nil
+		}
+		current = parent
+	}
+	for _, current := range slices.Backward(ancestry) {
 		info, statErr := os.Lstat(current)
 		if statErr != nil {
 			return "", fmt.Errorf("inspect deployed helper ancestor %s: %w", current, statErr)
@@ -159,14 +235,11 @@ func validateTrustedAncestry(start, root string, ownerUID uint32) (string, error
 		if info.Mode().Perm()&0o022 != 0 {
 			return fmt.Sprintf("deployed helper ancestor %s is group- or world-writable", current), nil
 		}
-		if current == root {
-			return "", nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "deployed helper ancestry did not reach the trusted root", nil
+		if info.Mode().Perm()&0o001 == 0 {
+			return fmt.Sprintf("deployed helper ancestor %s is not searchable by unprivileged launchers", current), nil
 		}
 	}
+	return "", nil
 }
 
 func fileSHA256(path string) (string, error) {
@@ -191,11 +264,32 @@ func verifiedFileSHA256(path string, expected os.FileInfo, ownerUID uint32) (str
 	if !os.SameFile(expected, opened) || validateHelperLeaf(opened, ownerUID) != "" {
 		return "", fmt.Errorf("deployed helper changed during validation")
 	}
-	digest, err := readerSHA256(file)
+	digest, err := hashDeployedHelperFile(file)
 	if err != nil {
 		return "", fmt.Errorf("hash deployed helper: %w", err)
 	}
+	openedAfterHash, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("reinspect opened deployed helper: %w", err)
+	}
+	pathAfterHash, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("reinspect deployed helper path: %w", err)
+	}
+	if !sameHelperSnapshot(expected, openedAfterHash, ownerUID) ||
+		!sameHelperSnapshot(opened, openedAfterHash, ownerUID) ||
+		!sameHelperSnapshot(openedAfterHash, pathAfterHash, ownerUID) {
+		return "", fmt.Errorf("deployed helper changed during validation")
+	}
 	return digest, nil
+}
+
+func sameHelperSnapshot(before, after os.FileInfo, ownerUID uint32) bool {
+	return os.SameFile(before, after) &&
+		before.Mode() == after.Mode() &&
+		before.Size() == after.Size() &&
+		before.ModTime().Equal(after.ModTime()) &&
+		validateHelperLeaf(after, ownerUID) == ""
 }
 
 func readerSHA256(reader io.Reader) (string, error) {

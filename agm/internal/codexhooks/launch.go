@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/hookparity"
 )
 
 var sessionFlagsHookSource = func() string {
@@ -34,6 +36,10 @@ const (
 )
 
 var (
+	// expectedSpecContractHookSHA256 is injected only by the governed AGM build
+	// after it builds the revision-matched helper artifact. An empty or malformed
+	// value deliberately disables unattended SPEC adapter projection.
+	expectedSpecContractHookSHA256    string
 	trustedHookJSONPath               = "/usr/local/libexec/dear-agent-codex-hook-json"
 	trustedExecutableSearchPath       = attestedHookPath
 	validateAttestedExecutablePath    = validateTrustedExecutableSearchPath
@@ -41,6 +47,13 @@ var (
 	validateTrustedSystemExecutable   = validateTrustedHookExecutable
 	validateTrustedHookDependency     = validateTrustedExecutableCommand
 	validateTrustedExecutableLeaf     = validateTrustedHookExecutable
+	verifyPinnedSpecContractHook      = func() error {
+		return hookparity.VerifyDeployedHelperDigest(
+			trustedSpecContractHookPath,
+			expectedSpecContractHookSHA256,
+			hookparity.ProductionHelperTrustPolicy(),
+		)
+	}
 )
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
@@ -238,8 +251,8 @@ func neutralizeWorkspaceExecutingHooks(hooks map[string]any, projectRoot string)
 				}
 				command, _ := handler["command"].(string)
 				if isSPECContractAdapter(command, eventName) {
-					if err := validateTrustedSystemExecutable(trustedSpecContractHookPath); err != nil {
-						return fmt.Errorf("validate trusted SPEC contract hook (install with make install-spec-contract-hook): %w", err)
+					if err := verifyPinnedSpecContractHook(); err != nil {
+						return fmt.Errorf("validate revision-bound SPEC contract hook (run make install-spec-contract-hook from the same reviewed revision): %w", err)
 					}
 					handler["command"] = trustedSpecContractHookPath + " --root " + shellSingleQuote(projectRoot) + " --provider codex --event " + eventName
 					handler["statusMessage"] = "Checking staged SPEC contracts with operator-owned helper"

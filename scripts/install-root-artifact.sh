@@ -9,8 +9,8 @@ case "$destination" in /usr/local/libexec/dear-agent-codex-hook-json|/usr/local/
 staging=; cleanup() { status=$?; trap - EXIT HUP INT TERM; test -z "$staging" || /bin/rm -f "$staging"; exit "$status"; }
 trap 'cleanup' EXIT HUP INT TERM
 platform=$(/usr/bin/uname -s); case "$platform" in Darwin|Linux) :;; *) exit 2;; esac
-trusted() { test -d "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits & 0022))" -eq 0; }
-trusted_file() { test -f "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits & 0022))" -eq 0; }
+trusted() { test -d "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits & 0022))" -eq 0 && test "$((0$mode_bits & 0001))" -ne 0; }
+trusted_file() { test -f "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits))" -eq "$((0755))"; }
 file_identity() { case "$platform" in Darwin) /usr/bin/stat -f '%d:%i' "$1";; Linux) /usr/bin/stat -c '%d:%i' "$1";; esac; }
 for dir in / /usr /usr/local; do trusted "$dir" || exit 2; done
 if test -e /usr/local/libexec || test -L /usr/local/libexec; then trusted /usr/local/libexec || exit 2; else /usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec; trusted /usr/local/libexec || exit 2; fi

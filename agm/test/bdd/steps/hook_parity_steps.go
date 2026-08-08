@@ -347,7 +347,7 @@ func agmExercisesOpenCodeIdleSessionEvents(ctx context.Context) error {
 		return err
 	}
 	state.openCodeOutput, state.openCodeRegression = runLocalGuardrailGoTest(ctx,
-		`^TestOpenCodeSPECContractPluginUsesIdleEventAndConservativeTransport$`,
+		`^TestOpenCodeSPECContractPlugin(UsesIdleEventAndConservativeTransport|TerminatesProcessGroup)$`,
 		"./internal/hookparity",
 	)
 	return nil
@@ -363,6 +363,9 @@ func openCodeIdleSessionEventsRemainBounded(ctx context.Context) error {
 	}
 	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginUsesIdleEventAndConservativeTransport") {
 		return fmt.Errorf("OpenCode idle-session transport output omitted its passing regression: %s", state.openCodeOutput)
+	}
+	if !strings.Contains(state.openCodeOutput, "--- PASS: TestOpenCodeSPECContractPluginTerminatesProcessGroup") {
+		return fmt.Errorf("OpenCode process-group transport output omitted its passing regression: %s", state.openCodeOutput)
 	}
 	return nil
 }

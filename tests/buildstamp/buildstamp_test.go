@@ -524,8 +524,10 @@ func TestGovernedBuildRecipesUseSharedStampSeam(t *testing.T) {
 		`source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"`,
 		`export _BUILD_STAMP_DATE="$$source_date"`,
 		`mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_ARTIFACT))"`,
-		`go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)"`,
+		`CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)"`,
 		`status-spec-contract-hook: build-spec-contract-hook build-spec-contract-hook-status`,
+		`build-agm: build-spec-contract-hook`,
+		`-X github.com/vbonnet/dear-agent/agm/internal/codexhooks.expectedSpecContractHookSHA256=$$expected_spec_hook_hash`,
 	} {
 		if !strings.Contains(string(data), required) {
 			t.Errorf("SPEC helper expected-artifact build omits reproducibility seam %q", required)

@@ -2,6 +2,7 @@ package hookparity_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 type hookSettings struct {
@@ -204,16 +206,58 @@ import {pathToFileURL} from "node:url";
 const calls = [];
 const logs = [];
 const prompts = [];
+const groupSignals = [];
+const directKills = [];
+const processes = [];
+const timers = [];
 let failNextLog = false;
 let failNextPrompt = false;
 let reenterPrompt = false;
 let reenterLogSession = "";
 const encoded = (value) => new TextEncoder().encode(value);
 const results = [];
+globalThis.setTimeout = (callback, milliseconds) => { const timer = {callback, milliseconds, cleared: false}; timers.push(timer); return timer; };
+globalThis.clearTimeout = (timer) => { timer.cleared = true; };
+const controlledStream = (value, holdOpen) => {
+  const chunks = Array.isArray(value) ? value : value ? [value] : [];
+  let controller;
+  const stream = new ReadableStream({
+    start(next) { controller = next; for (const chunk of chunks) next.enqueue(chunk); if (!holdOpen) next.close(); },
+  });
+  return {stream, close() { try { controller.close(); } catch {} }};
+};
+const originalProcessKill = process.kill.bind(process);
+process.kill = (pid, signal) => {
+  if (pid >= 0) return originalProcessKill(pid, signal);
+  const proc = processes.find((candidate) => candidate.pid === -pid);
+  if (!proc) throw new Error("unknown process group " + pid);
+  groupSignals.push({pid, signal});
+  proc.groupKill(signal);
+  return true;
+};
 globalThis.Bun = {
-  spawnSync(args, options) {
+  spawn(args, options) {
     calls.push([args, options]);
-    return results.shift() || {exitCode: 0, stdout: encoded('{"decision":"block","systemMessage":"repair the contract"}'), stderr: new Uint8Array()};
+    const result = results.shift() || {exitCode: 0, stdout: encoded('{"decision":"block","systemMessage":"repair the contract"}'), stderr: new Uint8Array()};
+    const stdout = controlledStream(result.stdout, Boolean(result.pending));
+    const stderr = controlledStream(result.stderr, Boolean(result.pending));
+    let exitCode = result.pending ? null : (result.exitCode ?? 0);
+    let signalCode = result.signalCode || null;
+    let resolveExit;
+    const exited = result.pending ? new Promise((resolve) => { resolveExit = resolve; }) : Promise.resolve(exitCode ?? 1);
+    const proc = {
+      pid: 1000 + calls.length,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      exited,
+      get exitCode() { return exitCode; },
+      get signalCode() { return signalCode; },
+      groupKill(signal) { signalCode = signal; exitCode = null; resolveExit?.(1); },
+      kill(signal) { directKills.push({signal, pid: this.pid}); this.groupKill(signal); },
+      finish(code = 0) { exitCode = code; stdout.close(); stderr.close(); resolveExit?.(code); },
+    };
+    processes.push(proc);
+    return proc;
   },
 };
 const mod = await import(pathToFileURL(process.argv[1]).href);
@@ -227,7 +271,8 @@ await hooks.event({event: {type: "session.idle", properties: {sessionID: "sessio
 if (calls.length !== 1) throw new Error("session.idle did not run exactly one adapter: " + calls.length);
 const [args, options] = calls[0];
 if (args.join("|") !== ["go", "run", "./cmd/spec-contract-hook", "--root", process.argv[2], "--provider", "opencode", "--event", "Stop"].join("|")) throw new Error("adapter argv: " + JSON.stringify(args));
-if (options.cwd !== process.argv[2] || options.stdin !== "ignore" || options.timeout !== 60000 || options.maxBuffer !== 65536) throw new Error("adapter options: " + JSON.stringify(options));
+if (options.cwd !== process.argv[2] || options.detached !== true || options.stdin !== "ignore" || options.stdout !== "pipe" || options.stderr !== "pipe" || "timeout" in options || "maxBuffer" in options) throw new Error("adapter options: " + JSON.stringify(options));
+if (timers.length !== 1 || timers[0].milliseconds !== 60000 || !timers[0].cleared) throw new Error("adapter timeout was not explicit and cleared: " + JSON.stringify(timers));
 if (logs.length !== 1 || logs[0].body.level !== "warn" || !logs[0].body.message.includes("bounded follow-up")) throw new Error("block log: " + JSON.stringify(logs));
 if (prompts.length !== 1 || prompts[0].path.id !== "session-1" || !prompts[0].body.messageID || !prompts[0].body.parts[0].text.includes("repair the contract")) throw new Error("bounded prompt: " + JSON.stringify(prompts));
 if (prompts[0].throwOnError !== true) throw new Error("prompt transport did not require SDK errors to throw");
@@ -255,17 +300,23 @@ results.push({exitCode: 0, stdout: encoded("not json"), stderr: new Uint8Array()
 await hooks.event({event: {type: "session.idle", properties: {sessionID: "malformed-session"}}});
 if (logs.length !== 3 || prompts.length !== 3 || !logs[2].body.message.includes("invalid JSON")) throw new Error("invalid adapter output was not surfaced conservatively: " + JSON.stringify(logs));
 
-results.push({exitCode: null, exitedDueToTimeout: true, stdout: new Uint8Array(), stderr: new Uint8Array()});
-await hooks.event({event: {type: "session.idle", properties: {sessionID: "timeout-session"}}});
+results.push({pending: true, stdout: new Uint8Array(), stderr: new Uint8Array()});
+const timeoutTimerCount = timers.length;
+const timeoutRun = hooks.event({event: {type: "session.idle", properties: {sessionID: "timeout-session"}}});
+while (timers.length === timeoutTimerCount) await Promise.resolve();
+timers.at(-1).callback();
+await timeoutRun;
 if (logs.length !== 4 || prompts.length !== 4 || !logs[3].body.message.includes("timeout")) throw new Error("timeout was not surfaced conservatively: " + JSON.stringify(logs));
+if (groupSignals.length !== 1 || groupSignals[0].signal !== "SIGKILL" || directKills.length !== 0) throw new Error("timeout did not terminate and await the adapter process group: " + JSON.stringify({groupSignals, directKills}));
 
 results.push({exitCode: null, signalCode: "SIGKILL", stdout: new Uint8Array(), stderr: new Uint8Array()});
 await hooks.event({event: {type: "session.idle", properties: {sessionID: "signal-session"}}});
 if (logs.length !== 5 || prompts.length !== 5 || !logs[4].body.message.includes("SIGKILL")) throw new Error("signal was not surfaced conservatively: " + JSON.stringify(logs));
 
-results.push({exitCode: 0, stdout: encoded("x".repeat(70000)), stderr: new Uint8Array()});
+results.push({exitCode: 0, stdout: [encoded("x".repeat(40000)), encoded("x".repeat(30000))], stderr: new Uint8Array()});
 await hooks.event({event: {type: "session.idle", properties: {sessionID: "oversize-session"}}});
 if (logs.length !== 6 || prompts.length !== 6 || !logs[5].body.message.includes("exceeded")) throw new Error("oversized adapter output was not surfaced conservatively: " + JSON.stringify(logs));
+if (groupSignals.length !== 2 || groupSignals[1].signal !== "SIGKILL" || directKills.length !== 0) throw new Error("streamed overflow did not terminate and await the adapter process group: " + JSON.stringify({groupSignals, directKills}));
 
 await hooks.event({event: {type: "session.deleted", properties: {info: {id: "session-1"}}}});
 await hooks.event({event: {type: "session.idle", properties: {sessionID: "session-1"}}});
@@ -323,10 +374,111 @@ if (calls.length !== callsBeforeSessionCapacity || prompts.length !== promptsBef
 await cappedHooks.event({event: {type: "session.deleted", properties: {sessionID: "capacity-session-0"}}});
 await cappedHooks.event({event: {type: "session.idle", properties: {sessionID: "capacity-overflow"}}});
 if (calls.length !== callsBeforeSessionCapacity + 1 || prompts.length !== promptsBeforeSessionCapacity + 1) throw new Error("tracked deletion did not deterministically admit the yielded session");
+
+const callsBeforePendingIdle = calls.length;
+const promptsBeforePendingIdle = prompts.length;
+results.push({pending: true, stdout: encoded('{"decision":"block","systemMessage":"async repair"}'), stderr: new Uint8Array()});
+const pendingIdle = hooks.event({event: {type: "session.idle", properties: {sessionID: "pending-session"}}});
+while (calls.length === callsBeforePendingIdle) await Promise.resolve();
+await hooks.event({event: {type: "session.idle", properties: {sessionID: "pending-session"}}});
+if (calls.length !== callsBeforePendingIdle + 1) throw new Error("pending streamed adapter admitted a duplicate idle run");
+processes.at(-1).finish();
+await pendingIdle;
+if (prompts.length !== promptsBeforePendingIdle + 1 || !prompts.at(-1).body.parts[0].text.includes("async repair")) throw new Error("pending streamed adapter did not complete one bounded follow-up");
+
+const signalsBeforeStderrLimit = groupSignals.length;
+const logsBeforeStderrLimit = logs.length;
+results.push({exitCode: 0, stdout: new Uint8Array(), stderr: [encoded("e".repeat(40000)), encoded("e".repeat(30000))]});
+await hooks.event({event: {type: "session.idle", properties: {sessionID: "stderr-limit-session"}}});
+if (groupSignals.length !== signalsBeforeStderrLimit + 1 || groupSignals.at(-1).signal !== "SIGKILL" || directKills.length !== 0) throw new Error("stderr overflow did not terminate the adapter process group");
+if (logs.length !== logsBeforeStderrLimit + 1 || !logs.at(-1).body.message.includes("stderr exceeded")) throw new Error("stderr overflow was not surfaced conservatively: " + JSON.stringify(logs.at(-1)));
 `
 	command := exec.Command(node, "--input-type=module", "-e", script, plugin, root)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("OpenCode plugin transport: %v\n%s", err, output)
+	}
+}
+
+func TestOpenCodeSPECContractPluginTerminatesProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("OpenCode source transport deliberately requires POSIX process groups")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to exercise the OpenCode process-group contract")
+	}
+	root := repoRoot(t)
+	fixtureDir := t.TempDir()
+	pidFile := filepath.Join(fixtureDir, "processes")
+	fakeGo := filepath.Join(fixtureDir, "go")
+	const fakeGoScript = `#!/bin/sh
+set -eu
+/bin/sh -c 'trap "" TERM; i=0; while test "$i" -lt 8000; do printf 0123456789; i=$((i + 1)); done; while :; do /bin/sleep 60; done' &
+child=$!
+printf '%s %s\n' "$$" "$child" > "$OPENCODE_DESCENDANT_PID_FILE"
+wait "$child"
+`
+	if err := os.WriteFile(fakeGo, []byte(fakeGoScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		data, readErr := os.ReadFile(pidFile)
+		if readErr != nil {
+			return
+		}
+		fields := strings.Fields(string(data))
+		if len(fields) > 0 {
+			_ = exec.Command("/bin/kill", "-KILL", "-"+fields[0]).Run()
+		}
+	})
+
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+	script := `
+import {readFileSync} from "node:fs";
+import {spawn} from "node:child_process";
+import {Readable} from "node:stream";
+import {pathToFileURL} from "node:url";
+const logs = [];
+const prompts = [];
+globalThis.Bun = {spawn(args, options) {
+  if (options.detached !== true) throw new Error("adapter was not isolated in a process group");
+  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: true, env: process.env, stdio: ["ignore", "pipe", "pipe"]});
+  let signalCode = null;
+  const exited = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => { signalCode = signal; resolve(code ?? 1); });
+  });
+  return {pid: child.pid, stdout: Readable.toWeb(child.stdout), stderr: Readable.toWeb(child.stderr), exited, get signalCode() { return signalCode; }, kill(signal) { child.kill(signal); }};
+}};
+const mod = await import(pathToFileURL(process.argv[1]).href);
+const client = {app: {async log(entry) { logs.push(entry); }}, session: {async promptAsync(entry) { prompts.push(entry); }}};
+const hooks = await mod.SpecContractGuard({worktree: process.argv[2], client});
+const started = Date.now();
+await hooks.event({event: {type: "session.idle", properties: {sessionID: "process-group"}}});
+if (Date.now() - started > 5000) throw new Error("overflow termination exceeded five seconds");
+if (logs.length !== 1 || !logs[0].body.message.includes("exceeded") || prompts.length !== 1) throw new Error("overflow was not surfaced: " + JSON.stringify({logs, prompts}));
+const [leader] = readFileSync(process.env.OPENCODE_DESCENDANT_PID_FILE, "utf8").trim().split(/\s+/).map(Number);
+let alive = true;
+for (let attempt = 0; attempt < 100; attempt++) {
+  try { process.kill(-leader, 0); } catch { alive = false; break; }
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
+if (alive) throw new Error("adapter process group survived overflow termination");
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, plugin, root)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "PATH=") && !strings.HasPrefix(entry, "OPENCODE_DESCENDANT_PID_FILE=") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	command.Env = append(command.Env,
+		"PATH="+fixtureDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"OPENCODE_DESCENDANT_PID_FILE="+pidFile,
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("OpenCode process-group transport: %v\n%s", err, output)
 	}
 }
 

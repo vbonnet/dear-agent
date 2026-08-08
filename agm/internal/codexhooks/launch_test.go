@@ -166,6 +166,26 @@ func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) 
 	}
 }
 
+func TestNeutralizeWorkspaceExecutingHooksRejectsUnpinnedSPECContractHelper(t *testing.T) {
+	previous := verifyPinnedSpecContractHook
+	verifyPinnedSpecContractHook = func() error { return os.ErrPermission }
+	t.Cleanup(func() { verifyPinnedSpecContractHook = previous })
+
+	hooks := map[string]any{
+		"Stop": []any{map[string]any{
+			"hooks": []any{map[string]any{
+				"type":    "command",
+				"command": "go run ./cmd/spec-contract-hook --root . --provider codex --event Stop",
+			}},
+		}},
+	}
+	if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project"); err == nil ||
+		!strings.Contains(err.Error(), "revision-bound SPEC contract hook") ||
+		!strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("neutralizeWorkspaceExecutingHooks() error = %v, want revision-bound helper rejection", err)
+	}
+}
+
 func TestLaunchConfigOverridesDisablesMutableWorkspaceExecutingHooks(t *testing.T) {
 	useTrustedHookJSONFixture(t)
 	hookRoot := t.TempDir()
@@ -572,6 +592,7 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	previousJSONValidator := validateTrustedHookJSONExecutable
 	previousSystemValidator := validateTrustedSystemExecutable
 	previousDependencyValidator := validateTrustedHookDependency
+	previousSPECValidator := verifyPinnedSpecContractHook
 	trustedHookJSONPath = "/bin/sh"
 	validateAttestedExecutablePath = func(got string) error {
 		if got != attestedHookPath {
@@ -587,11 +608,13 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	}
 	validateTrustedSystemExecutable = func(string) error { return nil }
 	validateTrustedHookDependency = func(string) error { return nil }
+	verifyPinnedSpecContractHook = func() error { return nil }
 	t.Cleanup(func() {
 		trustedHookJSONPath = previousJSONPath
 		validateAttestedExecutablePath = previousPathValidator
 		validateTrustedHookJSONExecutable = previousJSONValidator
 		validateTrustedSystemExecutable = previousSystemValidator
 		validateTrustedHookDependency = previousDependencyValidator
+		verifyPinnedSpecContractHook = previousSPECValidator
 	})
 }

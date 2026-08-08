@@ -662,7 +662,7 @@ build-spec-contract-hook:
 	@mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_ARTIFACT))"
 	@source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"; \
 		export _BUILD_STAMP_DATE="$$source_date"; \
-		CGO_ENABLED=0 go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)" ./cmd/spec-contract-hook/
+		CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)" ./cmd/spec-contract-hook/
 	@echo "Built: $(SPEC_CONTRACT_HOOK_ARTIFACT)"
 
 build-spec-contract-hook-status:
@@ -1554,13 +1554,20 @@ install-vroom-governor: build-vroom-governor
 	$(call install-go-bin,bin/vroom-governor)
 
 # Build the AGM CLI and its detached archive companion with one version stamp.
-# A standalone `go install ./agm/cmd/agm` omits both the stamp and companion;
-# prefer `make install-agm` so async archive compatibility remains coherent.
-build-agm:
+# The governed build also pins the exact revision-matched SPEC helper artifact
+# into AGM's unattended Codex launch boundary. A standalone
+# `go install ./agm/cmd/agm` omits that pin, the stamp, and the companion;
+# prefer `make install-agm` so launch and async archive compatibility remain
+# coherent.
+build-agm: build-spec-contract-hook
 	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm ./agm/cmd/agm/
-	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	@expected_spec_hook_hash="$$(/usr/bin/openssl dgst -sha256 -r "$(SPEC_CONTRACT_HOOK_ARTIFACT)")"; \
+		expected_spec_hook_hash="$${expected_spec_hook_hash%% *}"; \
+		test "$${#expected_spec_hook_hash}" -eq 64; \
+		export _BUILD_STAMP_EXTRA_LDFLAGS="$${_BUILD_STAMP_EXTRA_LDFLAGS} -X github.com/vbonnet/dear-agent/agm/internal/codexhooks.expectedSpecContractHookSHA256=$$expected_spec_hook_hash"; \
+		CGO_ENABLED=0 GOWORK=off go build $(BUILD_STAMP_FLAGS) -o bin/agm ./agm/cmd/agm/
+	CGO_ENABLED=0 GOWORK=off go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
 
 install-agm: build-agm
