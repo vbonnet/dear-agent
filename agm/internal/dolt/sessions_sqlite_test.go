@@ -214,9 +214,10 @@ func TestSQLiteSessionNameReservationCanBeRenewedByOwner(t *testing.T) {
 // authoritative primary-key ownership read that RenewSessionNameReservation
 // falls back to when its UPDATE reports zero rows affected. On Dolt that
 // zero-row result can be spurious for a just-reserved name (a real bug that
-// aborted every session creation with AGM-007); the fallback must recognise a
-// still-valid, still-owned lease as success while still rejecting foreign,
-// expired, and missing reservations.
+// aborted every session creation with AGM-007), and it affects UPDATEs
+// regardless of predicate — so the consistent primary-key SELECT, not a
+// re-UPDATE, is the arbiter. It must recognise a still-valid, still-owned lease
+// while still rejecting foreign, expired, and missing reservations.
 func TestSQLiteReservationOwnedAndUnexpiredBacksZeroRowRenewFallback(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {
@@ -259,6 +260,16 @@ func TestSQLiteReservationOwnedAndUnexpiredBacksZeroRowRenewFallback(t *testing.
 	}
 	if owned {
 		t.Fatal("a missing reservation must not be reported as owned")
+	}
+
+	// The full renew path returns success for the owner (its UPDATE applies
+	// normally on SQLite) and a conflict for a non-owner.
+	if err := adapter.RenewSessionNameReservation("owner", "leased-name"); err != nil {
+		t.Fatalf("RenewSessionNameReservation(owner) error: %v", err)
+	}
+	var conflict *SessionNameConflictError
+	if err := adapter.RenewSessionNameReservation("other", "leased-name"); !errors.As(err, &conflict) {
+		t.Fatalf("RenewSessionNameReservation(other) error = %v, want SessionNameConflictError", err)
 	}
 }
 
