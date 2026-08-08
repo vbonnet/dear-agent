@@ -1,6 +1,6 @@
 # Engram MCP Server (Go) - Specification
 
-<!-- Last audited at: 2026-08-07 -->
+<!-- Last audited at: 2026-07-04 -->
 
 ## Overview
 
@@ -44,11 +44,11 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 
 **EMC-09** When wayfinder_phase_status reads a status file, the server shall return phase state only after complete canonical schema 2.0 validation.
 
-**EMC-10** The `engram-mcp` executable shall report one consistent build-stamped semantic version across its observable interfaces.
+**EMC-10** The `engram-mcp` executable shall report one consistent build-stamped version value across its observable interfaces.
 
-**EMC-11** When `engram-mcp` starts, the system shall log its build-stamped semantic version.
+**EMC-11** When `engram-mcp` starts, the system shall log its build-stamped version value.
 
-**EMC-12** When an MCP 2025-11-25 client initializes a compiled `engram-mcp` server, the system shall return the same build-stamped semantic version as `serverInfo.version`.
+**EMC-12** When an MCP client successfully initializes `engram-mcp`, the system shall return the same build-stamped version value as `serverInfo.version`.
 
 ## Tools
 
