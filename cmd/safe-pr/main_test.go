@@ -191,7 +191,7 @@ esac
 					// interactive gh prompts. This real-subprocess regression instead
 					// needs scheduler headroom under -race so it tests the command
 					// matrix, not host load.
-					outcome, executeErr = execGh(req, 5*time.Second, tc.verifyCI, transaction)
+					outcome, executeErr = execGh(context.Background(), req, 5*time.Second, tc.verifyCI, transaction)
 					return executeErr
 				})
 			})
@@ -228,20 +228,76 @@ func captureSafePRStderr(t *testing.T, fn func()) string {
 	}
 	original := os.Stderr
 	os.Stderr = writer
-	t.Cleanup(func() { os.Stderr = original })
+	restored := false
+	restore := func() {
+		if !restored {
+			os.Stderr = original
+			restored = true
+		}
+	}
+	t.Cleanup(func() {
+		restore()
+		_ = writer.Close()
+		_ = reader.Close()
+	})
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		data, readErr := io.ReadAll(reader)
+		readDone <- readResult{data: data, err: readErr}
+	}()
 
 	fn()
+	restore()
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close stderr pipe: %v", err)
 	}
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("read stderr pipe: %v", err)
+	result := <-readDone
+	if result.err != nil {
+		t.Fatalf("read stderr pipe: %v", result.err)
 	}
 	if err := reader.Close(); err != nil {
 		t.Fatalf("close stderr reader: %v", err)
 	}
-	return string(data)
+	return string(result.data)
+}
+
+func TestCaptureSafePRStderrDrainsConcurrently(t *testing.T) {
+	payload := strings.Repeat("x", 128*1024)
+	var writeErr error
+	stderr := captureSafePRStderr(t, func() {
+		_, writeErr = io.WriteString(os.Stderr, payload)
+	})
+	if writeErr != nil {
+		t.Fatalf("write captured stderr: %v", writeErr)
+	}
+	if stderr != payload {
+		t.Fatalf("captured stderr bytes = %d, want %d", len(stderr), len(payload))
+	}
+}
+
+func TestWarnIfNoCIStopsBeforeProviderLookupWhenCanceled(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-invoked")
+	fakeGH := filepath.Join(binDir, "gh")
+	script := "#!/bin/sh\nprintf invoked > \"$SAFE_PR_TEST_GH_LOG\"\n"
+	if err := os.WriteFile(fakeGH, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SAFE_PR_TEST_GH_LOG", logPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	warnIfNoCI(ctx, "https://github.com/vbonnet/dear-agent/pull/1173", nil)
+	if data, err := os.ReadFile(logPath); err == nil {
+		t.Fatalf("canceled CI verification invoked gh: %q", data)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("inspect fake gh log: %v", err)
+	}
 }
 
 func TestRequestsDraft(t *testing.T) {
@@ -512,7 +568,7 @@ func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 	ghCalled := false
 	origGitHub := executeGitHub
 	t.Cleanup(func() { executeGitHub = origGitHub })
-	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
+	executeGitHub = func(context.Context, *safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
 		ghCalled = true
 		return githubExecution{}, nil
 	}
@@ -543,7 +599,7 @@ func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
 	ghCalled := false
 	origGitHub := executeGitHub
 	t.Cleanup(func() { executeGitHub = origGitHub })
-	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
+	executeGitHub = func(context.Context, *safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
 		ghCalled = true
 		return githubExecution{}, nil
 	}
@@ -591,7 +647,7 @@ func TestRun_CreateProtectsPreflightAndGitHubMutation(t *testing.T) {
 		events = append(events, "preflight")
 		return nil
 	}
-	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
+	executeGitHub = func(context.Context, *safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
 		if !protected {
 			t.Fatal("GitHub mutation ran outside worktree protection")
 		}
@@ -647,7 +703,7 @@ func TestRun_CreateAuditsFinalTransactionOutcome(t *testing.T) {
 				}
 				return nil
 			}
-			executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
+			executeGitHub = func(context.Context, *safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
 				githubCalled = true
 				return githubExecution{prURL: tc.wantPRURL}, nil
 			}
