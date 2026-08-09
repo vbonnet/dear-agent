@@ -2,6 +2,8 @@ package bus
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ import (
 type mockGuildClient struct {
 	mu        sync.Mutex
 	me        *discordgo.User
+	meWait    <-chan struct{}
 	sent      []sentMsg
 	pages     [][]*discordgo.Message // ChannelMessages returns these in order
 	pageIdx   int
@@ -32,7 +35,12 @@ type sentMsg struct {
 	data      *discordgo.MessageSend
 }
 
-func (m *mockGuildClient) Me() (*discordgo.User, error) { return m.me, nil }
+func (m *mockGuildClient) Me() (*discordgo.User, error) {
+	if m.meWait != nil {
+		<-m.meWait
+	}
+	return m.me, nil
+}
 
 func (m *mockGuildClient) ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend) (*discordgo.Message, error) {
 	m.mu.Lock()
@@ -137,20 +145,127 @@ func startMultibot(t *testing.T, a *MultiBotDiscordAdapter) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- a.Start(ctx) }()
+	startExited, err := waitForMultibotReady(a, done, 2*time.Second)
+	if err != nil {
+		if startExited {
+			cancel()
+		} else if stopErr := stopMultibot(cancel, done, 3*time.Second); stopErr != nil {
+			t.Error(stopErr)
+		}
+		t.Fatal(err)
+		return nil
+	}
+	return func() {
+		if err := stopMultibot(cancel, done, 3*time.Second); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func waitForMultibotReady(a *MultiBotDiscordAdapter, done <-chan error, timeout time.Duration) (bool, error) {
+	deadline := time.NewTimer(timeout)
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer deadline.Stop()
+	defer poll.Stop()
+	for !multibotReady(a) {
+		select {
+		case err := <-done:
+			if err != nil {
+				return true, fmt.Errorf("start adapter: %w", err)
+			}
+			return true, errors.New("adapter stopped before becoming ready")
+		case <-deadline.C:
+			return false, errors.New("adapter did not become ready within timeout")
+		case <-poll.C:
+		}
+	}
+	return false, nil
+}
+
+func stopMultibot(cancel context.CancelFunc, done <-chan error, timeout time.Duration) error {
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("stop adapter: %w", err)
+		}
+		return nil
+	case <-time.After(timeout):
+		return errors.New("adapter did not stop within timeout")
+	}
+}
+
+func multibotReady(a *MultiBotDiscordAdapter) bool {
+	a.mu.Lock()
+	started := a.started
+	a.mu.Unlock()
+	if !started {
+		return false
+	}
+	for _, agent := range a.Agents {
+		delivery, err := a.Registry.Route(discordAgentSessionID(agent.Name))
+		routed, ok := delivery.(*multiBotDelivery)
+		if err != nil || !ok || routed.agent != agent || routed.adapter != a {
+			return false
+		}
+	}
+	return true
+}
+
+func TestMultibotReadyRequiresEveryAgentAndListener(t *testing.T) {
+	a, clients, _ := newMultibotTest(t)
+	codexIdentity := make(chan struct{})
+	clients["tok-codex"].meWait = codexIdentity
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Start(ctx) }()
+	released := false
+	startDoneConsumed := false
+	defer func() {
+		if !released {
+			close(codexIdentity)
+		}
+		if startDoneConsumed {
+			cancel()
+			return
+		}
+		if err := stopMultibot(cancel, done, 3*time.Second); err != nil {
+			t.Error(err)
+		}
+	}()
+
 	deadline := time.Now().Add(2 * time.Second)
+	claudeReady := false
 	for time.Now().Before(deadline) {
 		if _, err := a.Registry.Route(discordAgentSessionID("claude")); err == nil {
+			claudeReady = true
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	return func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			t.Error("adapter did not stop within timeout")
-		}
+	if !claudeReady {
+		t.Fatal("claude pseudo-session was not registered before timeout")
+	}
+	if multibotReady(a) {
+		t.Fatal("adapter reported ready while codex identity was blocked")
+	}
+	startExited, err := waitForMultibotReady(a, done, 20*time.Millisecond)
+	if startExited {
+		startDoneConsumed = true
+		t.Fatalf("adapter exited during partial startup: %v", err)
+	}
+	if err == nil {
+		t.Fatal("readiness wait returned during partial startup")
+	}
+
+	close(codexIdentity)
+	released = true
+	startExited, err = waitForMultibotReady(a, done, 2*time.Second)
+	if startExited {
+		startDoneConsumed = true
+	}
+	if startExited || err != nil {
+		t.Fatalf("readiness wait failed after complete startup: exited=%t err=%v", startExited, err)
 	}
 }
 
