@@ -26,4 +26,7 @@
 
 - Package behavior: `cmd/cleanup-worktrees/main.go`
 - Regression coverage: `internal/safepr/worktree_test.go`
+
+## BDD Traceability
+
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
