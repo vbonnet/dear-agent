@@ -67,6 +67,8 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-26** When baseline persistence targets a symlink, the system shall atomically replace the resolved target while preserving the symlink directory entry and the target file mode.
 
+**STRUCT-HEALTH-27** When a pull request or push targets `main`, the system shall run the `Structural Health (baselined)` check without a label gate or path filter, shall bound that job to 15 minutes, and shall report setup or scan failure as a failed check.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/quality_command_guardrails.feature` enforces that this command keeps co-located SPEC coverage.
@@ -76,4 +78,5 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 - Baseline transition and persistence behavior:
   `cmd/structural-health/baseline_test.go`.
 - Scan, diff, and report behavior: `cmd/structural-health/main_test.go`.
+- Workflow delivery contract: `cmd/structural-health/workflow_contract_test.go`.
 - Repository-level signal: `go run ./cmd/structural-health`.
