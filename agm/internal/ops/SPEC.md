@@ -258,8 +258,9 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-50** When `Sweep` cannot remove a worktree that it positively classified for removal, the system shall record the removal failure, preserve the associated local branch, and continue processing without force-removing the worktree; `Sweep` shall never delete a remote branch.
 
 OPS-50 generalizes the safety invariant formerly owned by the retired legacy
-cleanup script as REPO-SCRIPT-04. The shared Go operation is now the canonical
-owner across every caller.
+cleanup script as REPO-SCRIPT-04. The shared `Sweep` operation owns this
+invariant for the canonical `agm worktree sweep` path that replaces that
+script; other cleanup operations retain their own contracts.
 
 ---
 
