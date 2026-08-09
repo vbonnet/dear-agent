@@ -237,19 +237,19 @@ func evaluateDeepsecAdmission(expression string, event deepsecAdmissionEvent) (b
 	var err error
 	expression, err = stripDeepsecOuterParentheses(expression)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("strip outer parentheses: %w", err)
 	}
 
 	parts, err := splitDeepsecTopLevel(expression, "||")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("split || expression: %w", err)
 	}
 	if len(parts) > 1 {
 		result := false
 		for _, part := range parts {
 			value, evalErr := evaluateDeepsecAdmission(part, event)
 			if evalErr != nil {
-				return false, evalErr
+				return false, fmt.Errorf("evaluate || operand %q: %w", part, evalErr)
 			}
 			result = result || value
 		}
@@ -258,14 +258,14 @@ func evaluateDeepsecAdmission(expression string, event deepsecAdmissionEvent) (b
 
 	parts, err = splitDeepsecTopLevel(expression, "&&")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("split && expression: %w", err)
 	}
 	if len(parts) > 1 {
 		result := true
 		for _, part := range parts {
 			value, evalErr := evaluateDeepsecAdmission(part, event)
 			if evalErr != nil {
-				return false, evalErr
+				return false, fmt.Errorf("evaluate && operand %q: %w", part, evalErr)
 			}
 			result = result && value
 		}
@@ -294,7 +294,7 @@ func stripDeepsecOuterParentheses(expression string) (string, error) {
 	for strings.HasPrefix(expression, "(") {
 		encloses, err := deepsecOuterParenthesesEncloseWholeExpression(expression)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("check outer parentheses: %w", err)
 		}
 		if !encloses {
 			break
