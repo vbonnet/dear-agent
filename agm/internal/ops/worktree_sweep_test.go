@@ -473,6 +473,9 @@ func TestSweep_RemoveFailureIsRecordedNotFatal(t *testing.T) {
 	if res.Failed["/wt/m"] == "" {
 		t.Fatalf("failure must be recorded in res.Failed")
 	}
+	if len(f.delBranch) != 0 {
+		t.Fatalf("failed worktree removal must preserve local branch: %v", f.delBranch)
+	}
 }
 
 func TestSweep_BranchDeleteFailureStillCountsWorktreeRemoved(t *testing.T) {

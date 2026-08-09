@@ -1,9 +1,9 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-27 -->
+<!-- Last audited at: 2026-08-08 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-07-27
+**Last Updated**: 2026-08-08
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -255,6 +255,12 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-49** When `Sweep` runs in dry-run mode without a caller-confirmed active-session set, the system shall still classify every worktree and shall remove nothing.
 
+**OPS-50** When `Sweep` cannot remove a worktree that it positively classified for removal, the system shall record the removal failure, preserve the associated local branch, and continue processing without force-removing the worktree; `Sweep` shall never delete a remote branch.
+
+OPS-50 generalizes the safety invariant formerly owned by the retired legacy
+cleanup script as REPO-SCRIPT-04. The shared Go operation is now the canonical
+owner across every caller.
+
 ---
 
 ## Key Invariants
@@ -284,3 +290,12 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 - Feature: `agm/test/bdd/features/trust_protocol.feature`
 - Feature: `agm/test/bdd/features/scan_loop.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
+
+## Deterministic Package-Test Traceability
+
+- `agm/internal/ops/worktree_sweep_test.go`:
+  `TestSweep_RemoveFailureIsRecordedNotFatal` proves that a failed non-force
+  removal is recorded without deleting the local branch, and
+  `TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch` proves that Sweep
+  never force-removes a worktree. Remote-branch deletion is absent from the
+  shared Sweep dependency contract.
