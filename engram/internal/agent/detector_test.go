@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -372,6 +374,127 @@ func TestDetectorClearCacheOnFreshDetector(t *testing.T) {
 	}
 }
 
+func TestDetectorConcurrentDetectAndClearCache(t *testing.T) {
+	t.Parallel()
+
+	const iterations = 250
+	tests := []struct {
+		name   string
+		inputs detectorInputs
+		want   Agent
+	}{
+		{
+			name: "detected agent",
+			inputs: detectorInputs{
+				getenv: func(key string) string {
+					if key == "CURSOR" {
+						return "1"
+					}
+					return ""
+				},
+				userHomeDir: func() (string, error) { return detectorTestHome, nil },
+				pathExists:  func(string) bool { return false },
+			},
+			want: AgentCursor,
+		},
+		{
+			name: "unknown agent",
+			inputs: detectorInputs{
+				getenv:      func(string) string { return "" },
+				userHomeDir: func() (string, error) { return detectorTestHome, nil },
+				pathExists:  func(string) bool { return false },
+			},
+			want: AgentUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			detector := newDetector(tt.inputs)
+			if got := detector.Detect(); got != tt.want {
+				t.Fatalf("warm Detect() = %q, want %q", got, tt.want)
+			}
+
+			start := make(chan struct{})
+			results := make(chan Agent, iterations)
+			var workers sync.WaitGroup
+			workers.Add(2)
+
+			go func() {
+				defer workers.Done()
+				<-start
+				for range iterations {
+					results <- detector.Detect()
+				}
+			}()
+			go func() {
+				defer workers.Done()
+				<-start
+				for range iterations {
+					detector.ClearCache()
+				}
+			}()
+
+			close(start)
+			workers.Wait()
+			close(results)
+
+			for got := range results {
+				if got != tt.want {
+					t.Fatalf("concurrent Detect() = %q, want %q", got, tt.want)
+				}
+			}
+			if got := detector.Detect(); got != tt.want {
+				t.Fatalf("final Detect() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectorConcurrentCacheGenerations(t *testing.T) {
+	t.Parallel()
+
+	var claudeMarker atomic.Bool
+	var evaluations atomic.Int64
+	inputs := detectorInputs{
+		getenv: func(string) string { return "" },
+		userHomeDir: func() (string, error) {
+			evaluations.Add(1)
+			return detectorTestHome, nil
+		},
+		pathExists: func(path string) bool {
+			return path == filepath.Join(detectorTestHome, ".claude") && claudeMarker.Load()
+		},
+	}
+	detector := newDetector(inputs)
+
+	if got := evaluations.Load(); got != 0 {
+		t.Fatalf("evaluations after construction = %d, want 0", got)
+	}
+	assertConcurrentDetectionWave(t, detector, AgentUnknown)
+	if got := evaluations.Load(); got != 1 {
+		t.Fatalf("evaluations after first wave = %d, want 1", got)
+	}
+
+	claudeMarker.Store(true)
+	assertConcurrentDetectionWave(t, detector, AgentUnknown)
+	if got := evaluations.Load(); got != 1 {
+		t.Fatalf("evaluations for cached wave = %d, want 1", got)
+	}
+
+	detector.ClearCache()
+	assertConcurrentDetectionWave(t, detector, AgentClaudeCode)
+	if got := evaluations.Load(); got != 2 {
+		t.Fatalf("evaluations after clear = %d, want 2", got)
+	}
+	assertConcurrentDetectionWave(t, detector, AgentClaudeCode)
+	if got := evaluations.Load(); got != 2 {
+		t.Fatalf("evaluations for second cached wave = %d, want 2", got)
+	}
+}
+
 func TestNewDetectorUsesCompleteSystemInputs(t *testing.T) {
 	t.Parallel()
 
@@ -462,5 +585,31 @@ func isSupportedAgent(agent Agent) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func assertConcurrentDetectionWave(t *testing.T, detector *Detector, want Agent) {
+	t.Helper()
+
+	const calls = 64
+	start := make(chan struct{})
+	results := make(chan Agent, calls)
+	var workers sync.WaitGroup
+	workers.Add(calls)
+	for range calls {
+		go func() {
+			defer workers.Done()
+			<-start
+			results <- detector.Detect()
+		}()
+	}
+
+	close(start)
+	workers.Wait()
+	close(results)
+	for got := range results {
+		if got != want {
+			t.Fatalf("concurrent Detect() = %q, want %q", got, want)
+		}
 	}
 }
