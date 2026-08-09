@@ -184,13 +184,15 @@ func waitForMultibotReady(a *MultiBotDiscordAdapter, done <-chan error, timeout 
 
 func stopMultibot(cancel context.CancelFunc, done <-chan error, timeout time.Duration) error {
 	cancel()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case err := <-done:
 		if err != nil {
 			return fmt.Errorf("stop adapter: %w", err)
 		}
 		return nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return errors.New("adapter did not stop within timeout")
 	}
 }
