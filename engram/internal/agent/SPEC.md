@@ -30,11 +30,11 @@ without inspecting working-directory markers. A cached result, including
 ## Concurrency and Cache Generations
 
 `Detector` is safe for concurrent method calls and its zero value is ready for
-use. Methods on one instance are serialized: concurrent cache misses share one
-detection result, and `ClearCache` waits for an in-flight detection before it
-invalidates that completed cache generation. A `Detect` call started after
-`ClearCache` returns reads a new generation of current inputs. A `Detector`
-must not be copied after first use.
+use. Methods on one instance are serialized: concurrent cache misses within one
+cache generation share one detection result, and `ClearCache` waits for an
+in-flight detection before it invalidates that completed cache generation. A
+`Detect` call started after `ClearCache` returns reads a new generation of
+current inputs. A `Detector` must not be copied after first use.
 
 ## EARS Requirements
 
