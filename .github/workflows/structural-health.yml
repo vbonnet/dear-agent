@@ -35,11 +35,8 @@ permissions:
 jobs:
   structural-health:
     name: Structural Health (baselined)
-    # Non-required: pull requests run only with the `full-ci` label. Pushes to
-    # main always run because the non-pull-request side of this condition wins.
-    if: >-
-      github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'full-ci')
+    # Run on every declared main PR and main push. This check is not yet
+    # provider-required, but the workflow must expose setup and scan failures.
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
