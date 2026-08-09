@@ -1,783 +1,439 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-// TestNewDetector verifies detector initialization
-func TestNewDetector(t *testing.T) {
+const detectorTestHome = "/detector-test-home"
+
+type fakeDetectorInputs struct {
+	env     map[string]string
+	home    string
+	homeErr error
+	paths   map[string]bool
+}
+
+func newFakeDetectorInputs() *fakeDetectorInputs {
+	return &fakeDetectorInputs{
+		env:   make(map[string]string),
+		home:  detectorTestHome,
+		paths: make(map[string]bool),
+	}
+}
+
+func (f *fakeDetectorInputs) inputs() detectorInputs {
+	return detectorInputs{
+		getenv: func(key string) string {
+			return f.env[key]
+		},
+		userHomeDir: func() (string, error) {
+			return f.home, f.homeErr
+		},
+		pathExists: func(path string) bool {
+			return f.paths[path]
+		},
+	}
+}
+
+func TestDetectUsesExactPriority(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		env     map[string]string
+		home    string
+		homeErr error
+		paths   map[string]bool
+		want    Agent
+	}{
+		{
+			name: "claude value environment wins over every lower signal",
+			env: map[string]string{
+				"CLAUDECODE":        "1",
+				"CURSOR":            "1",
+				"CURSOR_SESSION_ID": "cursor-session",
+				"WINDSURF":          "1",
+				"AIDER_MODEL":       "model",
+				"AIDER_ARCHITECT":   "1",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentClaudeCode,
+		},
+		{
+			name: "claude entrypoint environment wins over every lower signal",
+			env: map[string]string{
+				"CLAUDECODE":             "0",
+				"CLAUDE_CODE_ENTRYPOINT": "/bin/claude",
+				"CURSOR":                 "1",
+				"WINDSURF":               "1",
+				"AIDER_MODEL":            "model",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentClaudeCode,
+		},
+		{
+			name: "cursor value environment wins below non-triggering claude",
+			env: map[string]string{
+				"CLAUDECODE":  "0",
+				"CURSOR":      "1",
+				"WINDSURF":    "1",
+				"AIDER_MODEL": "model",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentCursor,
+		},
+		{
+			name: "cursor session environment wins below non-triggering cursor value",
+			env: map[string]string{
+				"CURSOR":            "0",
+				"CURSOR_SESSION_ID": "cursor-session",
+				"WINDSURF":          "1",
+				"AIDER_MODEL":       "model",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentCursor,
+		},
+		{
+			name: "windsurf environment wins below non-triggering cursor",
+			env: map[string]string{
+				"CURSOR":      "0",
+				"WINDSURF":    "1",
+				"AIDER_MODEL": "model",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentWindsurf,
+		},
+		{
+			name: "aider model environment precedes every filesystem signal",
+			env: map[string]string{
+				"WINDSURF":    "0",
+				"AIDER_MODEL": "model",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentAider,
+		},
+		{
+			name: "aider architect environment is supported",
+			env: map[string]string{
+				"AIDER_ARCHITECT": "1",
+			},
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentAider,
+		},
+		{
+			name: "non-triggering environment values fall through to unknown",
+			env: map[string]string{
+				"CLAUDECODE": "enabled",
+				"CURSOR":     "enabled",
+				"WINDSURF":   "enabled",
+			},
+			home:  detectorTestHome,
+			paths: unrelatedDetectorPaths(),
+			want:  AgentUnknown,
+		},
+		{
+			name:    "home resolution error fails closed before cwd markers",
+			home:    detectorTestHome,
+			homeErr: errors.New("home unavailable"),
+			paths:   allDetectorMarkerPaths(detectorTestHome),
+			want:    AgentUnknown,
+		},
+		{
+			name:  "home claude marker wins over every cwd marker",
+			home:  detectorTestHome,
+			paths: allDetectorMarkerPaths(detectorTestHome),
+			want:  AgentClaudeCode,
+		},
+		{
+			name: "cursor cwd marker wins over lower cwd markers",
+			home: detectorTestHome,
+			paths: detectorPaths(
+				".cursorrules",
+				".windsurfrules",
+				".aider.conf.yml",
+				".aiderignore",
+			),
+			want: AgentCursor,
+		},
+		{
+			name: "windsurf cwd marker wins over aider cwd markers",
+			home: detectorTestHome,
+			paths: detectorPaths(
+				".windsurfrules",
+				".aider.conf.yml",
+				".aiderignore",
+			),
+			want: AgentWindsurf,
+		},
+		{
+			name:  "aider config cwd marker is supported",
+			home:  detectorTestHome,
+			paths: detectorPaths(".aider.conf.yml"),
+			want:  AgentAider,
+		},
+		{
+			name:  "aider ignore cwd marker is supported",
+			home:  detectorTestHome,
+			paths: detectorPaths(".aiderignore"),
+			want:  AgentAider,
+		},
+		{
+			name:  "unrelated home contents return unknown",
+			home:  detectorTestHome,
+			paths: unrelatedDetectorPaths(),
+			want:  AgentUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newFakeDetectorInputs()
+			fake.env = tt.env
+			fake.home = tt.home
+			fake.homeErr = tt.homeErr
+			fake.paths = tt.paths
+
+			if got := newDetector(fake.inputs()).Detect(); got != tt.want {
+				t.Fatalf("Detect() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectorCachesDetectedAndUnknownResults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		setup  func(*fakeDetectorInputs)
+		mutate func(*fakeDetectorInputs)
+		want   Agent
+	}{
+		{
+			name: "detected agent remains cached",
+			setup: func(fake *fakeDetectorInputs) {
+				fake.env["CURSOR"] = "1"
+			},
+			mutate: func(fake *fakeDetectorInputs) {
+				fake.env = map[string]string{"CLAUDECODE": "1"}
+			},
+			want: AgentCursor,
+		},
+		{
+			name:  "unknown remains cached",
+			setup: func(*fakeDetectorInputs) {},
+			mutate: func(fake *fakeDetectorInputs) {
+				fake.paths[filepath.Join(fake.home, ".claude")] = true
+			},
+			want: AgentUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newFakeDetectorInputs()
+			tt.setup(fake)
+			detector := newDetector(fake.inputs())
+
+			if got := detector.Detect(); got != tt.want {
+				t.Fatalf("first Detect() = %q, want %q", got, tt.want)
+			}
+			tt.mutate(fake)
+			if got := detector.Detect(); got != tt.want {
+				t.Fatalf("cached Detect() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectorClearCacheRereadsCurrentInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		setup     func(*fakeDetectorInputs)
+		firstWant Agent
+		mutate    func(*fakeDetectorInputs)
+		nextWant  Agent
+	}{
+		{
+			name: "environment change",
+			setup: func(fake *fakeDetectorInputs) {
+				fake.env["CURSOR"] = "1"
+			},
+			firstWant: AgentCursor,
+			mutate: func(fake *fakeDetectorInputs) {
+				fake.env = map[string]string{"CLAUDECODE": "1"}
+			},
+			nextWant: AgentClaudeCode,
+		},
+		{
+			name:      "filesystem change after cached unknown",
+			setup:     func(*fakeDetectorInputs) {},
+			firstWant: AgentUnknown,
+			mutate: func(fake *fakeDetectorInputs) {
+				fake.paths[".windsurfrules"] = true
+			},
+			nextWant: AgentWindsurf,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newFakeDetectorInputs()
+			tt.setup(fake)
+			detector := newDetector(fake.inputs())
+
+			if got := detector.Detect(); got != tt.firstWant {
+				t.Fatalf("first Detect() = %q, want %q", got, tt.firstWant)
+			}
+			tt.mutate(fake)
+			detector.ClearCache()
+			if got := detector.Detect(); got != tt.nextWant {
+				t.Fatalf("Detect() after ClearCache() = %q, want %q", got, tt.nextWant)
+			}
+		})
+	}
+}
+
+func TestDetectorInstancesReadInputsLazily(t *testing.T) {
+	t.Parallel()
+
+	fake := newFakeDetectorInputs()
+	fake.env["CURSOR"] = "1"
+	detectorOne := newDetector(fake.inputs())
+	detectorTwo := newDetector(fake.inputs())
+
+	if got := detectorOne.Detect(); got != AgentCursor {
+		t.Fatalf("detectorOne.Detect() = %q, want %q", got, AgentCursor)
+	}
+
+	fake.env = map[string]string{"WINDSURF": "1"}
+	if got := detectorOne.Detect(); got != AgentCursor {
+		t.Fatalf("cached detectorOne.Detect() = %q, want %q", got, AgentCursor)
+	}
+	if got := detectorTwo.Detect(); got != AgentWindsurf {
+		t.Fatalf("lazy detectorTwo.Detect() = %q, want %q", got, AgentWindsurf)
+	}
+}
+
+func TestDetectorClearCacheOnFreshDetector(t *testing.T) {
+	t.Parallel()
+
+	fake := newFakeDetectorInputs()
+	detector := newDetector(fake.inputs())
+	detector.ClearCache()
+
+	if got := detector.Detect(); got != AgentUnknown {
+		t.Fatalf("Detect() = %q, want %q", got, AgentUnknown)
+	}
+}
+
+func TestNewDetectorUsesCompleteSystemInputs(t *testing.T) {
+	t.Parallel()
+
 	detector := NewDetector()
 	if detector == nil {
 		t.Fatal("NewDetector() returned nil")
 	}
-}
-
-// TestDetect_ClaudeCode_EnvVar verifies Claude Code detection via CLAUDECODE env var
-func TestDetect_ClaudeCode_EnvVar(t *testing.T) {
-	// Save and restore env
-	oldVal := os.Getenv("CLAUDECODE")
-	defer func() {
-		if oldVal != "" {
-			t.Setenv("CLAUDECODE", oldVal)
-		} else {
-			os.Unsetenv("CLAUDECODE")
-		}
-	}()
-
-	t.Setenv("CLAUDECODE", "1")
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q", agent, AgentClaudeCode)
+	if detector.inputs == nil {
+		t.Fatal("NewDetector() did not configure system inputs")
+	}
+	if detector.inputs.getenv == nil || detector.inputs.userHomeDir == nil || detector.inputs.pathExists == nil {
+		t.Fatal("NewDetector() configured incomplete system inputs")
 	}
 }
 
-// TestDetect_ClaudeCode_EntrypointEnv verifies Claude Code detection via CLAUDE_CODE_ENTRYPOINT
-func TestDetect_ClaudeCode_EntrypointEnv(t *testing.T) {
-	oldVal := os.Getenv("CLAUDE_CODE_ENTRYPOINT")
-	defer func() {
-		if oldVal != "" {
-			t.Setenv("CLAUDE_CODE_ENTRYPOINT", oldVal)
-		} else {
-			os.Unsetenv("CLAUDE_CODE_ENTRYPOINT")
-		}
-	}()
-
-	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "/some/path")
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q", agent, AgentClaudeCode)
-	}
-}
-
-// TestDetect_Cursor_EnvVar verifies Cursor detection via CURSOR env var
-func TestDetect_Cursor_EnvVar(t *testing.T) {
-	// Save and clear all agent env vars
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"CURSOR_SESSION_ID":      os.Getenv("CURSOR_SESSION_ID"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Clear all then set only CURSOR
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("CURSOR", "1")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentCursor {
-		t.Errorf("Detect() = %q, want %q", agent, AgentCursor)
-	}
-}
-
-// TestDetect_Cursor_SessionID verifies Cursor detection via CURSOR_SESSION_ID env var (P0-4 fix)
-func TestDetect_Cursor_SessionID(t *testing.T) {
-	// Save and clear all agent env vars
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"CURSOR_SESSION_ID":      os.Getenv("CURSOR_SESSION_ID"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Clear all then set only CURSOR_SESSION_ID
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("CURSOR_SESSION_ID", "test-session-123")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentCursor {
-		t.Errorf("Detect() = %q, want %q (via CURSOR_SESSION_ID)", agent, AgentCursor)
-	}
-}
-
-// TestDetect_Windsurf_EnvVar verifies Windsurf detection via WINDSURF env var
-func TestDetect_Windsurf_EnvVar(t *testing.T) {
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("WINDSURF", "1")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentWindsurf {
-		t.Errorf("Detect() = %q, want %q", agent, AgentWindsurf)
-	}
-}
-
-// TestDetect_Aider_ModelEnv verifies Aider detection via AIDER_MODEL env var
-func TestDetect_Aider_ModelEnv(t *testing.T) {
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("AIDER_MODEL", "gpt-4")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentAider {
-		t.Errorf("Detect() = %q, want %q", agent, AgentAider)
-	}
-}
-
-// TestDetect_Aider_ArchitectEnv verifies Aider detection via AIDER_ARCHITECT env var
-func TestDetect_Aider_ArchitectEnv(t *testing.T) {
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("AIDER_ARCHITECT", "1")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentAider {
-		t.Errorf("Detect() = %q, want %q", agent, AgentAider)
-	}
-}
-
-// TestDetect_ClaudeCode_FileDetection verifies Claude Code detection via ~/.claude/ directory
-func TestDetect_ClaudeCode_FileDetection(t *testing.T) {
-	// Only test file detection if env vars are not set
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	// This test will only pass if ~/.claude/ directory actually exists
-	// We can't create it in the test because it's in the user's home directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("Cannot get home directory")
-	}
-
-	claudeDir := filepath.Join(homeDir, ".claude")
-	if _, err := os.Stat(claudeDir); err != nil {
-		t.Skipf("~/.claude/ directory doesn't exist, skipping file detection test")
-	}
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q (via ~/.claude/ directory)", agent, AgentClaudeCode)
-	}
-}
-
-// TestDetect_Cursor_FileDetection verifies Cursor detection via .cursorrules file
-func TestDetect_Cursor_FileDetection(t *testing.T) {
-	// Clear all env vars
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	// Create temporary .cursorrules file
-	tmpDir := t.TempDir()
-
-	cursorRulesPath := filepath.Join(tmpDir, ".cursorrules")
-	if err := os.WriteFile(cursorRulesPath, []byte("test"), 0644); err != nil {
-		t.Fatalf("failed to create .cursorrules: %v", err)
-	}
-
-	// Change to temp directory for file detection
-
-	t.Chdir(tmpDir)
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	// Note: This might still detect Claude Code if ~/.claude/ exists
-	// So we check if it's either Cursor or ClaudeCode (via fallback)
-	if agent != AgentCursor && agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q or %q (fallback)", agent, AgentCursor, AgentClaudeCode)
-	}
-}
-
-// TestDetect_Windsurf_FileDetection verifies Windsurf detection via .windsurfrules file
-func TestDetect_Windsurf_FileDetection(t *testing.T) {
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	tmpDir := t.TempDir()
-
-	windsurfRulesPath := filepath.Join(tmpDir, ".windsurfrules")
-	if err := os.WriteFile(windsurfRulesPath, []byte("test"), 0644); err != nil {
-		t.Fatalf("failed to create .windsurfrules: %v", err)
-	}
-
-
-	t.Chdir(tmpDir)
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentWindsurf && agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q or %q (fallback)", agent, AgentWindsurf, AgentClaudeCode)
-	}
-}
-
-// TestDetect_Aider_FileDetection verifies Aider detection via .aider.conf.yml file
-func TestDetect_Aider_FileDetection(t *testing.T) {
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	tmpDir := t.TempDir()
-
-	aiderConfPath := filepath.Join(tmpDir, ".aider.conf.yml")
-	if err := os.WriteFile(aiderConfPath, []byte("model: gpt-4"), 0644); err != nil {
-		t.Fatalf("failed to create .aider.conf.yml: %v", err)
-	}
-
-
-	t.Chdir(tmpDir)
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentAider && agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q or %q (fallback)", agent, AgentAider, AgentClaudeCode)
-	}
-}
-
-// TestDetect_Unknown verifies that detection returns "unknown" when no agent is found
-func TestDetect_Unknown(t *testing.T) {
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	// Create temp directory with no agent files
-	tmpDir := t.TempDir()
-
-
-	t.Chdir(tmpDir)
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	// Note: May still detect Claude Code if ~/.claude/ exists
-	if agent != AgentUnknown && agent != AgentClaudeCode {
-		t.Logf("Detected %q, likely due to ~/.claude/ directory existing", agent)
-	}
-}
-
-// TestFileExists verifies the fileExists helper function
-func TestFileExists(t *testing.T) {
-	detector := NewDetector()
-
-	// Test with existing file
-	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if !detector.fileExists(tmpFile.Name()) {
-		t.Errorf("fileExists(%q) = false, want true", tmpFile.Name())
-	}
-
-	// Test with non-existing file
-	nonExistent := "/tmp/this-file-should-not-exist-12345"
-	if detector.fileExists(nonExistent) {
-		t.Errorf("fileExists(%q) = true, want false", nonExistent)
-	}
-
-	// Test with directory
-	tmpDir := t.TempDir()
-
-	if !detector.fileExists(tmpDir) {
-		t.Errorf("fileExists(%q) = false, want true (directories should return true)", tmpDir)
-	}
-}
-
-// TestDetect_MultipleEnvVars verifies priority when multiple env vars set
-func TestDetect_MultipleEnvVars(t *testing.T) {
-	// Save all env vars
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Claude Code should take priority
-	t.Setenv("CLAUDECODE", "1")
-	t.Setenv("CURSOR", "1")
-	t.Setenv("WINDSURF", "1")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentClaudeCode {
-		t.Errorf("Detect() with multiple env vars = %q, want %q (Claude Code should have priority)", agent, AgentClaudeCode)
-	}
-}
-
-// TestDetect_FallbackPriority verifies file detection fallback order
-func TestDetect_FallbackPriority(t *testing.T) {
-	// Create temp directory for file detection tests
-	tmpDir := t.TempDir()
-
-	// Clear all env vars
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	// Create multiple agent files in temp dir
-	os.WriteFile(filepath.Join(tmpDir, ".cursorrules"), []byte("test"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, ".windsurfrules"), []byte("test"), 0644)
-
-	t.Chdir(tmpDir)
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	// Should detect Cursor (appears first in file checks after ~/.claude)
-	// Or Claude Code if ~/.claude exists
-	if agent != AgentCursor && agent != AgentClaudeCode {
-		t.Logf("Detected %q, this is acceptable (file-based detection)", agent)
-	}
-}
-
-// TestDetect_EdgeCase_ClaudeCodeNotSet verifies fallback when CLAUDECODE not "1"
-func TestDetect_EdgeCase_ClaudeCodeNotSet(t *testing.T) {
-	// Save all env vars
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Set CLAUDECODE to something other than "1"
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("CLAUDECODE", "0")
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	// CLAUDECODE must be "1" to trigger detection
-	if agent == AgentClaudeCode {
-		// Unless ~/.claude exists (file-based fallback)
-		homeDir, _ := os.UserHomeDir()
-		if _, err := os.Stat(filepath.Join(homeDir, ".claude")); err != nil {
-			t.Error("Detect() triggered Claude Code with CLAUDECODE=0, should require CLAUDECODE=1")
-		}
-	}
-}
-
-// TestDetect_AiderignoreFile verifies Aider detection via .aiderignore file
-func TestDetect_AiderignoreFile(t *testing.T) {
-	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
-	savedEnvs := make(map[string]string)
-	for _, env := range envVars {
-		savedEnvs[env] = os.Getenv(env)
-		os.Unsetenv(env)
-	}
-	defer func() {
-		for env, val := range savedEnvs {
-			if val != "" {
-				t.Setenv(env, val)
-			}
-		}
-	}()
-
-	tmpDir := t.TempDir()
-
-	aiderIgnorePath := filepath.Join(tmpDir, ".aiderignore")
-	if err := os.WriteFile(aiderIgnorePath, []byte("*.log"), 0644); err != nil {
-		t.Fatalf("failed to create .aiderignore: %v", err)
-	}
-
-
-	t.Chdir(tmpDir)
-
-	detector := NewDetector()
-	agent := detector.Detect()
-
-	if agent != AgentAider && agent != AgentClaudeCode {
-		t.Errorf("Detect() = %q, want %q or %q (fallback)", agent, AgentAider, AgentClaudeCode)
-	}
-}
-
-// TestDetect_Caching verifies that detection result is cached after first call
-func TestDetect_Caching(t *testing.T) {
-	// Save and clear all agent env vars
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"CURSOR_SESSION_ID":      os.Getenv("CURSOR_SESSION_ID"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Clear all env vars and set CURSOR
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("CURSOR", "1")
-
-	detector := NewDetector()
-
-	// First call should detect Cursor
-	agent1 := detector.Detect()
-	if agent1 != AgentCursor {
-		t.Errorf("First Detect() = %q, want %q", agent1, AgentCursor)
-	}
-
-	// Change env var to Claude Code
-	os.Unsetenv("CURSOR")
-	t.Setenv("CLAUDECODE", "1")
-
-	// Second call should still return cached Cursor (not re-detect)
-	agent2 := detector.Detect()
-	if agent2 != AgentCursor {
-		t.Errorf("Second Detect() = %q, want %q (should return cached value)", agent2, AgentCursor)
-	}
-}
-
-// TestDetect_CachingMultipleCalls verifies cache returns same result on multiple calls
-func TestDetect_CachingMultipleCalls(t *testing.T) {
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("WINDSURF", "1")
-
-	detector := NewDetector()
-
-	// Call Detect() multiple times
-	agent1 := detector.Detect()
-	agent2 := detector.Detect()
-	agent3 := detector.Detect()
-
-	// All calls should return the same cached result
-	if agent1 != agent2 || agent2 != agent3 {
-		t.Errorf("Detect() calls returned different values: %q, %q, %q (should all be same)", agent1, agent2, agent3)
-	}
-
-	if agent1 != AgentWindsurf {
-		t.Errorf("Detect() = %q, want %q", agent1, AgentWindsurf)
-	}
-}
-
-// TestClearCache verifies that ClearCache forces re-detection
-func TestClearCache(t *testing.T) {
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"CURSOR_SESSION_ID":      os.Getenv("CURSOR_SESSION_ID"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
-	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	for key := range envVars {
-		os.Unsetenv(key)
-	}
-	t.Setenv("AIDER_MODEL", "gpt-4")
-
-	detector := NewDetector()
-
-	// First detection
-	agent1 := detector.Detect()
-	if agent1 != AgentAider {
-		t.Errorf("First Detect() = %q, want %q", agent1, AgentAider)
-	}
-
-	// Change env var
-	os.Unsetenv("AIDER_MODEL")
-	t.Setenv("CLAUDECODE", "1")
-
-	// Before clear, should still get cached value
-	agent2 := detector.Detect()
-	if agent2 != AgentAider {
-		t.Errorf("Detect() before ClearCache() = %q, want %q (cached)", agent2, AgentAider)
-	}
-
-	// Clear cache
+func TestDetectorZeroValueRemainsUsable(t *testing.T) {
+	var detector Detector
 	detector.ClearCache()
 
-	// After clear, should re-detect and get Claude Code
-	agent3 := detector.Detect()
-	if agent3 != AgentClaudeCode {
-		t.Errorf("Detect() after ClearCache() = %q, want %q", agent3, AgentClaudeCode)
+	inputs := detector.activeInputs()
+	if inputs.getenv == nil || inputs.userHomeDir == nil || inputs.pathExists == nil {
+		t.Fatal("zero-value Detector resolved incomplete system inputs")
+	}
+
+	if got := detector.Detect(); !isSupportedAgent(got) {
+		t.Fatalf("zero-value Detector.Detect() = %q, want a supported Agent value", got)
 	}
 }
 
-// TestClearCache_NewDetector verifies ClearCache works with fresh detector
-func TestClearCache_NewDetector(t *testing.T) {
-	detector := NewDetector()
+func TestSystemDetectorInputsPathExists(t *testing.T) {
+	t.Parallel()
 
-	// ClearCache on new detector should not panic
-	detector.ClearCache()
-
-	// Should still detect normally
-	agent := detector.Detect()
-	if agent == "" {
-		t.Error("Detect() returned empty string after ClearCache() on new detector")
+	inputs := systemDetectorInputs()
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "marker")
+	if err := os.WriteFile(filePath, []byte("marker"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
 	}
-}
 
-// TestDetect_CachingPerInstance verifies each detector instance has its own cache
-func TestDetect_CachingPerInstance(t *testing.T) {
-	envVars := map[string]string{
-		"CLAUDECODE":             os.Getenv("CLAUDECODE"),
-		"CLAUDE_CODE_ENTRYPOINT": os.Getenv("CLAUDE_CODE_ENTRYPOINT"),
-		"CURSOR":                 os.Getenv("CURSOR"),
-		"WINDSURF":               os.Getenv("WINDSURF"),
-		"AIDER_MODEL":            os.Getenv("AIDER_MODEL"),
-		"AIDER_ARCHITECT":        os.Getenv("AIDER_ARCHITECT"),
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "file", path: filePath, want: true},
+		{name: "directory", path: tempDir, want: true},
+		{name: "missing", path: filepath.Join(tempDir, "missing"), want: false},
 	}
-	defer func() {
-		for key, val := range envVars {
-			if val != "" {
-				t.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := inputs.pathExists(tt.path); got != tt.want {
+				t.Fatalf("pathExists(%q) = %t, want %t", tt.path, got, tt.want)
 			}
-		}
-	}()
-
-	for key := range envVars {
-		os.Unsetenv(key)
+		})
 	}
-	t.Setenv("CURSOR", "1")
+}
 
-	// Create two detectors
-	detector1 := NewDetector()
-	detector2 := NewDetector()
+func allDetectorMarkerPaths(home string) map[string]bool {
+	return detectorPaths(
+		filepath.Join(home, ".claude"),
+		".cursorrules",
+		".windsurfrules",
+		".aider.conf.yml",
+		".aiderignore",
+	)
+}
 
-	// First detector detects Cursor
-	agent1 := detector1.Detect()
-	if agent1 != AgentCursor {
-		t.Errorf("detector1.Detect() = %q, want %q", agent1, AgentCursor)
+func unrelatedDetectorPaths() map[string]bool {
+	return detectorPaths(
+		filepath.Join("/unrelated-operator-home", ".claude"),
+		filepath.Join("/unrelated-project", ".cursorrules"),
+	)
+}
+
+func detectorPaths(paths ...string) map[string]bool {
+	result := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		result[path] = true
 	}
+	return result
+}
 
-	// Change env var to Windsurf
-	os.Unsetenv("CURSOR")
-	t.Setenv("WINDSURF", "1")
-
-	// First detector should still return cached Cursor
-	agent1Again := detector1.Detect()
-	if agent1Again != AgentCursor {
-		t.Errorf("detector1.Detect() after env change = %q, want %q (cached)", agent1Again, AgentCursor)
-	}
-
-	// Second detector (created before env change) should detect Windsurf when called first time
-	agent2 := detector2.Detect()
-	if agent2 != AgentWindsurf {
-		t.Errorf("detector2.Detect() = %q, want %q", agent2, AgentWindsurf)
+func isSupportedAgent(agent Agent) bool {
+	switch agent {
+	case AgentClaudeCode, AgentCursor, AgentWindsurf, AgentAider, AgentUnknown:
+		return true
+	default:
+		return false
 	}
 }
