@@ -295,8 +295,9 @@ script; other cleanup operations retain their own contracts.
 ## Deterministic Package-Test Traceability
 
 - `agm/internal/ops/worktree_sweep_test.go`:
-  `TestSweep_RemoveFailureIsRecordedNotFatal` proves that a failed non-force
-  removal is recorded without deleting the local branch, and
+  `TestSweep_RemoveFailureIsRecordedAndProcessingContinues` proves that a
+  failed non-force removal is recorded without deleting the local branch and
+  does not prevent a later eligible worktree from being removed, and
   `TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch` proves that Sweep
   never force-removes a worktree. Remote-branch deletion is absent from the
   shared Sweep dependency contract.
