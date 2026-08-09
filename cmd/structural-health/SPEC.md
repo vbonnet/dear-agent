@@ -72,7 +72,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 ## BDD Traceability
 
 - `agm/test/bdd/features/quality_command_guardrails.feature` enforces that this command keeps co-located SPEC coverage.
-- STRUCT-HEALTH-27 specifies deterministic CI workflow structure rather than user-facing behavior, so `workflow_contract_test.go` is its explicit non-BDD test consequence.
+- Test consequence: Deterministic integration test `cmd/structural-health/workflow_contract_test.go` validates STRUCT-HEALTH-27's private CI workflow configuration seam.
 
 ## Test Traceability
 
