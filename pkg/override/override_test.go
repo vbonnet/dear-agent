@@ -155,7 +155,7 @@ func TestAuthorizeRefusesExpiredAndMismatchedGrants(t *testing.T) {
 
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("save grant: %v", err)
@@ -170,7 +170,7 @@ func TestAuthorizeRefusesExpiredAndMismatchedGrants(t *testing.T) {
 	}
 
 	// A grant for one kind must not authorize another.
-	grant := Grant{Kind: KindCodexHookTrust, ApprovedBy: "valentin", ExpiresUTC: now.Add(time.Hour)}
+	grant := Grant{Kind: KindCodexHookTrust, ApprovedBy: "operator", ExpiresUTC: now.Add(time.Hour)}
 	if err := os.WriteFile(GrantPath(KindAdmissionBrake), mustJSON(t, grant), 0o600); err != nil {
 		t.Fatalf("write cross-kind grant: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestAuthorizeRecordsGrantedUse(t *testing.T) {
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 		CodexHooks: testCodexHookSource(),
 	}); err != nil {
@@ -238,7 +238,7 @@ func TestCodexHookGrantIsBoundToReviewedBytes(t *testing.T) {
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 		CodexHooks: testCodexHookSource(),
 	}); err != nil {
@@ -257,7 +257,7 @@ func TestCodexHookGrantIsBoundToReviewedBytes(t *testing.T) {
 
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("save legacy generic grant: %v", err)
@@ -273,7 +273,7 @@ func TestReservationRecordsOnlyAfterCommit(t *testing.T) {
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	if err := SaveGrant(Grant{
 		Kind:       KindAdmissionBrake,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("save grant: %v", err)
@@ -317,7 +317,7 @@ func TestCommitAllRecordsCombinedReservationsAtomically(t *testing.T) {
 	for _, kind := range []Kind{KindAdmissionBrake, KindSupervisorOAuthCheck} {
 		if err := SaveGrant(Grant{
 			Kind:       kind,
-			ApprovedBy: "valentin",
+			ApprovedBy: "operator",
 			ExpiresUTC: time.Now().Add(time.Hour),
 		}); err != nil {
 			t.Fatalf("save %s grant: %v", kind, err)
@@ -347,7 +347,7 @@ func TestCommitAllRecordsCombinedReservationsAtomically(t *testing.T) {
 	brake, oauth := reserveBoth()
 	if err := SaveGrant(Grant{
 		Kind:       KindSupervisorOAuthCheck,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: time.Now().Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("expire OAuth grant: %v", err)
@@ -361,7 +361,7 @@ func TestCommitAllRecordsCombinedReservationsAtomically(t *testing.T) {
 
 	if err := SaveGrant(Grant{
 		Kind:       KindSupervisorOAuthCheck,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("restore OAuth grant: %v", err)
@@ -390,14 +390,14 @@ func TestCommitAllDoesNotSpendBrakeWhenCodexGrantExpires(t *testing.T) {
 	now := time.Now()
 	if err := SaveGrant(Grant{
 		Kind:       KindAdmissionBrake,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("save brake grant: %v", err)
 	}
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 		CodexHooks: testCodexHookSource(),
 	}); err != nil {
@@ -422,7 +422,7 @@ func TestCommitAllDoesNotSpendBrakeWhenCodexGrantExpires(t *testing.T) {
 	}
 	if err := SaveGrant(Grant{
 		Kind:       KindCodexHookTrust,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(-time.Minute),
 		CodexHooks: testCodexHookSource(),
 	}); err != nil {
@@ -441,7 +441,7 @@ func TestAbandonedReservationDoesNotConsumeLedgerQuota(t *testing.T) {
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	if err := SaveGrant(Grant{
 		Kind:       KindAdmissionBrake,
-		ApprovedBy: "valentin",
+		ApprovedBy: "operator",
 		ExpiresUTC: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("save grant: %v", err)

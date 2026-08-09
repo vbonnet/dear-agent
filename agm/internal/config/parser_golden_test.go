@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +33,12 @@ func TestConfigParsing_DefaultConfig(t *testing.T) {
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-default", jsonData)
+	assertConfigGolden(t, g, "config-default", jsonData)
+}
+
+func assertConfigGolden(t *testing.T, g *goldie.Goldie, name string, data []byte) {
+	t.Helper()
+	g.Assert(t, name, []byte(strings.TrimRight(string(data), "\n")+"\n"))
 }
 
 // TestConfigParsing_MinimalYAML tests parsing minimal YAML configuration
@@ -68,7 +74,7 @@ log_level: debug
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-minimal-yaml", jsonData)
+	assertConfigGolden(t, g, "config-minimal-yaml", jsonData)
 }
 
 // TestConfigParsing_FullYAML tests parsing complete YAML configuration
@@ -113,7 +119,7 @@ health_check:
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-full-yaml", jsonData)
+	assertConfigGolden(t, g, "config-full-yaml", jsonData)
 }
 
 // TestConfigParsing_TimeoutDisabled tests configuration with disabled timeout
@@ -148,7 +154,7 @@ timeout:
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-timeout-disabled", jsonData)
+	assertConfigGolden(t, g, "config-timeout-disabled", jsonData)
 }
 
 // TestConfigParsing_LockDisabled tests configuration with disabled locking
@@ -182,7 +188,7 @@ lock:
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-lock-disabled", jsonData)
+	assertConfigGolden(t, g, "config-lock-disabled", jsonData)
 }
 
 // TestConfigParsing_HealthCheckCustomized tests customized health check configuration
@@ -218,7 +224,7 @@ health_check:
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-healthcheck-customized", jsonData)
+	assertConfigGolden(t, g, "config-healthcheck-customized", jsonData)
 }
 
 // TestConfigParsing_WorkspaceConfig tests workspace configuration
@@ -252,7 +258,7 @@ workspace_config: /tmp/test-agm/acme-workspace.yaml
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-workspace", jsonData)
+	assertConfigGolden(t, g, "config-workspace", jsonData)
 }
 
 // TestConfigStructure_BreakingChanges tests detection of breaking config structure changes
@@ -293,7 +299,7 @@ func TestConfigStructure_BreakingChanges(t *testing.T) {
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-structure", jsonData)
+	assertConfigGolden(t, g, "config-structure", jsonData)
 }
 
 // TestConfigParsing_YAMLRoundTrip tests YAML -> struct -> YAML round-trip
@@ -331,5 +337,5 @@ health_check:
 		t.Fatalf("failed to marshal config: %v", err)
 	}
 
-	g.Assert(t, "config-yaml-roundtrip", jsonData)
+	assertConfigGolden(t, g, "config-yaml-roundtrip", jsonData)
 }

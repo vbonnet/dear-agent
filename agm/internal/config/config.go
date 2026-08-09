@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/vbonnet/dear-agent/pkg/notify"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,6 +42,9 @@ type Config struct {
 
 	// Budget enforcement configuration
 	Budget BudgetConfig `yaml:"budget"`
+
+	// Notification delivery configuration
+	Notify NotifyConfig `yaml:"notify"`
 }
 
 // StorageConfig holds centralized storage configuration
@@ -212,6 +216,21 @@ type BudgetConfig struct {
 	FallbackChain []string `yaml:"fallback_chain,omitempty"`
 }
 
+// NotifyConfig controls best-effort user-facing notification delivery.
+type NotifyConfig struct {
+	// Enabled controls whether completion notifications are emitted.
+	// Default: true, with a local log dispatcher.
+	Enabled bool `yaml:"enabled"`
+
+	// Recipient is an operator label copied into notification metadata.
+	// Empty means "the operator"; no personal identity is hardcoded.
+	Recipient string `yaml:"recipient,omitempty"`
+
+	// Dispatchers declares pluggable notification channels. Supported types are
+	// log, desktop, webhook, and tmux. Empty uses a log dispatcher.
+	Dispatchers []notify.DispatcherConfig `yaml:"dispatchers,omitempty"`
+}
+
 // Default returns default configuration
 func Default() *Config {
 	homeDir, _ := os.UserHomeDir()
@@ -305,6 +324,13 @@ func Default() *Config {
 			},
 			FallbackChain: []string{"sonnet", "haiku"},
 		},
+		Notify: NotifyConfig{
+			Enabled:   true,
+			Recipient: "the operator",
+			Dispatchers: []notify.DispatcherConfig{
+				{Type: "log"},
+			},
+		},
 	}
 }
 
@@ -333,6 +359,9 @@ func Load(cfgFile string) (*Config, error) {
 	}
 	if file := os.Getenv("AGM_LOG_FILE"); file != "" {
 		cfg.LogFile = file
+	}
+	if recipient := os.Getenv("AGM_NOTIFY_RECIPIENT"); recipient != "" {
+		cfg.Notify.Recipient = recipient
 	}
 
 	// OpenCode adapter environment overrides

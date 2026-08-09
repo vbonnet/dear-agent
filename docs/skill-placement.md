@@ -122,9 +122,9 @@ followed by a discovery smoke test in each claimed consumer.
 | Skill | Rule it enforces | Owner |
 |---|---|---|
 | `research-pipeline` (a candidate skill proposed in a private dotfiles repo) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
-| writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
+| writing pipeline, `linkedin-cross-post` | the operator's voice and cadence | dotfiles (+ a distribution gap to close) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
-| a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |
+| a hypothetical deployment skill | the target site's release policy (even though it calls `safe-pr`) | the target site |
 
 ### Research-pipeline workflow boundary
 

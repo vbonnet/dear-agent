@@ -82,6 +82,16 @@ func TestDefault(t *testing.T) {
 	if cfg.Adapters.GeminiHooks.SocketPath != "/tmp/agm-gemini-hook.sock" {
 		t.Errorf("Adapters.GeminiHooks.SocketPath = %s, expected /tmp/agm-gemini-hook.sock", cfg.Adapters.GeminiHooks.SocketPath)
 	}
+
+	if !cfg.Notify.Enabled {
+		t.Error("Notify.Enabled should be true by default")
+	}
+	if cfg.Notify.Recipient != "the operator" {
+		t.Errorf("Notify.Recipient = %q, expected neutral default", cfg.Notify.Recipient)
+	}
+	if len(cfg.Notify.Dispatchers) != 1 || cfg.Notify.Dispatchers[0].Type != "log" {
+		t.Fatalf("Notify.Dispatchers = %#v, expected default log dispatcher", cfg.Notify.Dispatchers)
+	}
 }
 
 func TestLoad_DefaultsWhenMissing(t *testing.T) {
@@ -119,6 +129,13 @@ health_check:
   enabled: false
   cache_duration: 3s
   probe_timeout: 1s
+notify:
+  enabled: true
+  recipient: on-call
+  dispatchers:
+    - type: webhook
+      url: http://127.0.0.1:9999/hook
+      max_retries: 1
 `
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
@@ -151,6 +168,15 @@ health_check:
 	}
 	if cfg.HealthCheck.CacheDuration != 3*time.Second {
 		t.Errorf("HealthCheck.CacheDuration = %v, expected 3s", cfg.HealthCheck.CacheDuration)
+	}
+	if cfg.Notify.Recipient != "on-call" {
+		t.Errorf("Notify.Recipient = %q, expected on-call", cfg.Notify.Recipient)
+	}
+	if len(cfg.Notify.Dispatchers) != 1 {
+		t.Fatalf("Notify.Dispatchers length = %d, expected 1", len(cfg.Notify.Dispatchers))
+	}
+	if got := cfg.Notify.Dispatchers[0]; got.Type != "webhook" || got.URL != "http://127.0.0.1:9999/hook" || got.MaxRetries != 1 {
+		t.Errorf("Notify.Dispatchers[0] = %#v, expected configured webhook", got)
 	}
 }
 

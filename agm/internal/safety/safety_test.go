@@ -313,7 +313,7 @@ func TestDetectCodexSessionUninitialized(t *testing.T) {
 		},
 		{
 			name:          "shell prompt only",
-			paneContent:   "vbonnet@mac merged %",
+			paneContent:   "operator@host merged %",
 			wantViolation: true,
 			wantEvidence:  "no codex composer",
 		},
@@ -355,7 +355,7 @@ func TestDetectAgySessionUninitialized(t *testing.T) {
 		},
 		{
 			name:          "shell prompt only",
-			paneContent:   "vbonnet@mac agy-e2e-workdir %",
+			paneContent:   "operator@host agy-e2e-workdir %",
 			wantViolation: true,
 			wantEvidence:  "no agy prompt",
 		},
@@ -412,7 +412,7 @@ func TestDetectOpenCodeSessionUninitialized(t *testing.T) {
 		{name: "composer", paneContent: "session ready\n> "},
 		{name: "product chrome", paneContent: "OpenCode\nworkspace"},
 		{name: "active work", paneContent: "Running..."},
-		{name: "shell only", paneContent: "vbonnet@mac work %", wantViolation: true},
+		{name: "shell only", paneContent: "operator@host work %", wantViolation: true},
 	}
 
 	for _, tt := range tests {

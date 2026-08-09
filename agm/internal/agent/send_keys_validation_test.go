@@ -31,7 +31,7 @@ func TestValidateSendKeysText(t *testing.T) {
 		// widget, not a shell — so rejecting them would be the wrong tool and
 		// would mangle legitimate titles.
 		{"plain", "my session", false},
-		{"apostrophe", "valentin's session", false},
+		{"apostrophe", "operator's session", false},
 		{"shell metacharacters are harmless in a TUI", "fix $HOME && `ls`; echo", false},
 		{"non-ASCII", "réunion — 会議", false},
 		{"emoji", "ship it 🚢", false},

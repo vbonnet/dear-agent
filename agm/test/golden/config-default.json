@@ -97,5 +97,19 @@
       "sonnet",
       "haiku"
     ]
+  },
+  "Notify": {
+    "Enabled": true,
+    "Recipient": "the operator",
+    "Dispatchers": [
+      {
+        "Type": "log",
+        "Enabled": null,
+        "URL": "",
+        "MaxRetries": 0,
+        "RetryDelay": 0,
+        "Target": ""
+      }
+    ]
   }
 }

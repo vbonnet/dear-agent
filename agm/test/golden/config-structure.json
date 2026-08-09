@@ -77,5 +77,10 @@
     "StateFile": "",
     "SessionTokenCaps": null,
     "FallbackChain": null
+  },
+  "Notify": {
+    "Enabled": false,
+    "Recipient": "",
+    "Dispatchers": null
   }
 }

@@ -120,8 +120,8 @@ func TestUnstickCaller(t *testing.T) {
 	}
 
 	t.Setenv("AGM_SESSION_NAME", "")
-	t.Setenv("USER", "valentin")
-	if got := unstickCaller(); got != "valentin" {
-		t.Fatalf("unstickCaller() = %q, want valentin", got)
+	t.Setenv("USER", "operator")
+	if got := unstickCaller(); got != "operator" {
+		t.Fatalf("unstickCaller() = %q, want operator", got)
 	}
 }

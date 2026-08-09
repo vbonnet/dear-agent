@@ -4,6 +4,14 @@ Thank you for your interest in contributing!
 
 ## Development Setup
 
+## Public Repository Privacy
+
+Do not commit personal names, personal email addresses, device names, or
+operator-specific handles to this public repository. Use neutral terms such as
+`the user`, `the operator`, `maintainer`, `operator@host`, or configurable
+values in examples, tests, docs, and notification paths. This keeps public
+artifacts reusable and avoids leaking private operational details.
+
 ### Prerequisites
 
 - Go 1.25 or later

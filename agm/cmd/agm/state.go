@@ -206,6 +206,16 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	// exitCode is -1 because state-reporter hooks do not receive the exit code.
 	if stateSetSource == "sessionend-hook" || stateSetSource == "stop-hook" {
 		agmtrace.RecordSessionLifecycleSpan(ctx, m, time.Now(), -1)
+		if newState == "STOPPED" {
+			notifySessionCompletion(ctx, cfg, completionNotification{
+				SessionID: m.SessionID,
+				Name:      m.Name,
+				Harness:   m.Harness,
+				Model:     m.Model,
+				Outcome:   string(m.Outcome),
+				Source:    stateSetSource,
+			})
+		}
 	}
 
 	return nil

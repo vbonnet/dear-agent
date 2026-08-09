@@ -293,7 +293,7 @@ func TestContainsResumeFailurePattern(t *testing.T) {
 		},
 		{
 			name:   "Shell prompt is not a failure",
-			line:   "vbonnet@mac install-skills %",
+			line:   "operator@host install-skills %",
 			wantOK: false,
 		},
 		{
