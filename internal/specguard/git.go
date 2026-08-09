@@ -1240,6 +1240,7 @@ type gitProcessGroupLifecycle struct {
 	command                 *exec.Cmd
 	enabled                 bool
 	directChildExitObserved bool
+	terminationSignaled     bool
 }
 
 func newGitProcessGroupLifecycle(command *exec.Cmd) *gitProcessGroupLifecycle {
@@ -1260,7 +1261,11 @@ func (lifecycle *gitProcessGroupLifecycle) cancelObserved() (bool, error) {
 	if !lifecycle.enabled || lifecycle.command.Process == nil {
 		return false, os.ErrProcessDone
 	}
-	return true, killProcessGroup(lifecycle.command.Process)
+	err := killProcessGroup(lifecycle.command.Process)
+	if err == nil {
+		lifecycle.terminationSignaled = true
+	}
+	return true, err
 }
 
 func (lifecycle *gitProcessGroupLifecycle) complete(directChildExitObserved, skipKill bool) error {
@@ -1292,7 +1297,11 @@ func (lifecycle *gitProcessGroupLifecycle) terminateLocked() error {
 	if err := killProcessGroup(lifecycle.command.Process); errors.Is(err, os.ErrProcessDone) {
 		return nil
 	} else if errors.Is(err, syscall.EPERM) {
-		complete, classificationErr := gitProcessGroupEPERMComplete(processGroupID, lifecycle.directChildExitObserved)
+		complete, classificationErr := gitProcessGroupEPERMComplete(
+			processGroupID,
+			lifecycle.directChildExitObserved,
+			lifecycle.terminationSignaled,
+		)
 		if classificationErr != nil {
 			return fmt.Errorf("classify EPERM for Git process group %d: %w", processGroupID, classificationErr)
 		}

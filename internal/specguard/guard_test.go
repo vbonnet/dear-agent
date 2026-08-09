@@ -155,6 +155,38 @@ func TestGitProcessGroupLifecycleRejectsLateCancellation(t *testing.T) {
 	cancellations.Wait()
 }
 
+func TestGitProcessGroupLifecycleRecordsSuccessfulTerminationSignal(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("guard fails admission on platforms without verified process-group termination")
+	}
+	command := exec.Command("/bin/sh", "-c", "exec sleep 30")
+	configureProcessGroup(command)
+	if err := command.Start(); err != nil {
+		t.Fatalf("start Git child: %v", err)
+	}
+	reaped := false
+	defer func() {
+		if !reaped {
+			_ = killProcessGroup(command.Process)
+			_ = command.Wait()
+		}
+	}()
+
+	lifecycle := newGitProcessGroupLifecycle(command)
+	observed, signalErr := lifecycle.cancelObserved()
+	if !observed || signalErr != nil || !lifecycle.terminationSignaled {
+		t.Fatalf("early termination signal = (%v, %v, recorded=%v), want successful recorded signal", observed, signalErr, lifecycle.terminationSignaled)
+	}
+	observedExitErr := waitForGitCommandExitWithoutReaping(command.Process.Pid)
+	if cleanupErr := lifecycle.complete(observedExitErr == nil, errors.Is(observedExitErr, syscall.ECHILD)); cleanupErr != nil {
+		t.Fatalf("complete signaled Git lifecycle: %v", cleanupErr)
+	}
+	if err := command.Wait(); err == nil {
+		t.Fatal("terminated Git child unexpectedly reported success")
+	}
+	reaped = true
+}
+
 func TestGitRunPreCanceledContextDoesNotStart(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "git-started")
 	quotedMarker := strings.ReplaceAll(marker, "'", "'\"'\"'")

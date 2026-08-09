@@ -19,6 +19,6 @@ func waitForGitCommandExitWithoutReaping(pid int) error {
 	return fmt.Errorf("wait without reaping is unsupported for Git child pid %d on Windows", pid)
 }
 
-func gitProcessGroupEPERMComplete(_ int, _ bool) (bool, error) {
+func gitProcessGroupEPERMComplete(_ int, _, _ bool) (bool, error) {
 	return false, nil
 }

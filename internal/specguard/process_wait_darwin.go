@@ -7,12 +7,22 @@ import (
 	"fmt"
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
 const gitDarwinPIDWaitType = 1 // P_PID from <sys/wait.h>.
+
+// gitDarwinProcessZombie is SZOMB from Darwin's <sys/proc.h>. x/sys exposes
+// ExternProc.P_stat but not the corresponding process-state constants.
+const gitDarwinProcessZombie int8 = 5
+
+const (
+	gitDarwinProcessGroupDrainGrace = 500 * time.Millisecond
+	gitDarwinProcessGroupPoll       = 5 * time.Millisecond
+)
 
 const (
 	gitDarwinChildExited = 1 // CLD_EXITED from <sys/signal.h>.
@@ -73,25 +83,40 @@ func waitForGitCommandExitWithoutReaping(pid int) error {
 	}
 }
 
-// gitProcessGroupEPERMComplete distinguishes Darwin's ordinary zombie-leader
-// EPERM from an isolated group that still contains an unsignalable descendant.
-// The trusted, same-credential Git model is complete only when the process
-// table contains the pinned leader and no other current group member.
-func gitProcessGroupEPERMComplete(processGroupID int, directChildExitObserved bool) (bool, error) {
+// gitProcessGroupEPERMComplete distinguishes Darwin's ordinary zombie-only
+// EPERM from an isolated group that still contains an unsignalable live
+// descendant. The trusted, same-credential Git model is complete only when
+// the process table contains the pinned leader and every remaining member has
+// already reached the terminal zombie state. A bounded drain is permitted
+// only after an earlier group signal succeeded; otherwise uncertainty fails
+// immediately rather than treating natural descendant exit as cleanup proof.
+func gitProcessGroupEPERMComplete(processGroupID int, directChildExitObserved, terminationSignaled bool) (bool, error) {
 	if !directChildExitObserved {
 		return false, nil
 	}
-	members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", processGroupID)
-	if err != nil {
-		return false, err
-	}
-	leaderFound := false
-	for _, member := range members {
-		if int(member.Proc.P_pid) == processGroupID {
-			leaderFound = true
-		} else {
+	deadline := time.Now().Add(gitDarwinProcessGroupDrainGrace)
+	for {
+		members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", processGroupID)
+		if err != nil {
+			return false, err
+		}
+		if gitDarwinProcessGroupTerminal(members, processGroupID) {
+			return true, nil
+		}
+		if !terminationSignaled || !time.Now().Before(deadline) {
 			return false, nil
 		}
+		time.Sleep(gitDarwinProcessGroupPoll)
 	}
-	return leaderFound, nil
+}
+
+func gitDarwinProcessGroupTerminal(members []unix.KinfoProc, processGroupID int) bool {
+	leaderFound := false
+	for _, member := range members {
+		if int(member.Eproc.Pgid) != processGroupID || member.Proc.P_stat != gitDarwinProcessZombie {
+			return false
+		}
+		leaderFound = leaderFound || int(member.Proc.P_pid) == processGroupID
+	}
+	return leaderFound
 }

@@ -25,6 +25,6 @@ func waitForGitCommandExitWithoutReaping(pid int) error {
 	}
 }
 
-func gitProcessGroupEPERMComplete(_ int, _ bool) (bool, error) {
+func gitProcessGroupEPERMComplete(_ int, _, _ bool) (bool, error) {
 	return false, nil
 }
