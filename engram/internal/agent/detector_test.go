@@ -10,10 +10,12 @@ import (
 const detectorTestHome = "/detector-test-home"
 
 type fakeDetectorInputs struct {
-	env     map[string]string
-	home    string
-	homeErr error
-	paths   map[string]bool
+	env       map[string]string
+	home      string
+	homeErr   error
+	paths     map[string]bool
+	homeCalls int
+	pathCalls []string
 }
 
 func newFakeDetectorInputs() *fakeDetectorInputs {
@@ -30,9 +32,11 @@ func (f *fakeDetectorInputs) inputs() detectorInputs {
 			return f.env[key]
 		},
 		userHomeDir: func() (string, error) {
+			f.homeCalls++
 			return f.home, f.homeErr
 		},
 		pathExists: func(path string) bool {
+			f.pathCalls = append(f.pathCalls, path)
 			return f.paths[path]
 		},
 	}
@@ -42,12 +46,14 @@ func TestDetectUsesExactPriority(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		env     map[string]string
-		home    string
-		homeErr error
-		paths   map[string]bool
-		want    Agent
+		name            string
+		env             map[string]string
+		home            string
+		homeErr         error
+		paths           map[string]bool
+		want            Agent
+		wantNoHomeRead  bool
+		wantNoPathReads bool
 	}{
 		{
 			name: "claude value environment wins over every lower signal",
@@ -59,9 +65,11 @@ func TestDetectUsesExactPriority(t *testing.T) {
 				"AIDER_MODEL":       "model",
 				"AIDER_ARCHITECT":   "1",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentClaudeCode,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentClaudeCode,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "claude entrypoint environment wins over every lower signal",
@@ -72,9 +80,11 @@ func TestDetectUsesExactPriority(t *testing.T) {
 				"WINDSURF":               "1",
 				"AIDER_MODEL":            "model",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentClaudeCode,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentClaudeCode,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "cursor value environment wins below non-triggering claude",
@@ -84,9 +94,11 @@ func TestDetectUsesExactPriority(t *testing.T) {
 				"WINDSURF":    "1",
 				"AIDER_MODEL": "model",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentCursor,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentCursor,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "cursor session environment wins below non-triggering cursor value",
@@ -96,9 +108,11 @@ func TestDetectUsesExactPriority(t *testing.T) {
 				"WINDSURF":          "1",
 				"AIDER_MODEL":       "model",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentCursor,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentCursor,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "windsurf environment wins below non-triggering cursor",
@@ -107,9 +121,11 @@ func TestDetectUsesExactPriority(t *testing.T) {
 				"WINDSURF":    "1",
 				"AIDER_MODEL": "model",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentWindsurf,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentWindsurf,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "aider model environment precedes every filesystem signal",
@@ -117,18 +133,22 @@ func TestDetectUsesExactPriority(t *testing.T) {
 				"WINDSURF":    "0",
 				"AIDER_MODEL": "model",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentAider,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentAider,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "aider architect environment is supported",
 			env: map[string]string{
 				"AIDER_ARCHITECT": "1",
 			},
-			home:  detectorTestHome,
-			paths: allDetectorMarkerPaths(detectorTestHome),
-			want:  AgentAider,
+			home:            detectorTestHome,
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentAider,
+			wantNoHomeRead:  true,
+			wantNoPathReads: true,
 		},
 		{
 			name: "non-triggering environment values fall through to unknown",
@@ -142,11 +162,12 @@ func TestDetectUsesExactPriority(t *testing.T) {
 			want:  AgentUnknown,
 		},
 		{
-			name:    "home resolution error fails closed before cwd markers",
-			home:    detectorTestHome,
-			homeErr: errors.New("home unavailable"),
-			paths:   allDetectorMarkerPaths(detectorTestHome),
-			want:    AgentUnknown,
+			name:            "home resolution error fails closed before cwd markers",
+			home:            detectorTestHome,
+			homeErr:         errors.New("home unavailable"),
+			paths:           allDetectorMarkerPaths(detectorTestHome),
+			want:            AgentUnknown,
+			wantNoPathReads: true,
 		},
 		{
 			name:  "home claude marker wins over every cwd marker",
@@ -207,6 +228,12 @@ func TestDetectUsesExactPriority(t *testing.T) {
 
 			if got := newDetector(fake.inputs()).Detect(); got != tt.want {
 				t.Fatalf("Detect() = %q, want %q", got, tt.want)
+			}
+			if tt.wantNoHomeRead && fake.homeCalls != 0 {
+				t.Fatalf("Detect() resolved home %d time(s), want no home read", fake.homeCalls)
+			}
+			if tt.wantNoPathReads && len(fake.pathCalls) != 0 {
+				t.Fatalf("Detect() inspected paths %v, want no path reads", fake.pathCalls)
 			}
 		})
 	}
