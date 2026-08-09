@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,7 +20,7 @@ func TestStructuralHealthWorkflowContract(t *testing.T) {
 	}
 
 	var workflow structuralHealthWorkflow
-	decoder := yaml.NewDecoder(strings.NewReader(string(raw)))
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&workflow); err != nil {
 		t.Fatal(err)
