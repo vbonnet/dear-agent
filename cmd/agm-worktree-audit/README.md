@@ -2,9 +2,10 @@
 
 Read-only audit that scans every git repository under a root directory (default
 `~/src`) and reports worktrees and branches that look reclaimable. It never
-removes a worktree or deletes a branch — reclamation lives in
-`agm worktree sweep` and `scripts/cleanup-worktrees.sh`. This tool's job is to
-produce a clear report for deciding what to clean up.
+removes a worktree or deletes a branch. Its job is to produce a clear report
+for deciding what to clean up. Reclamation lives in the dry-run-default
+`agm worktree sweep`; execute mode removes only worktrees positively classified
+as clean and merged after fail-closed active-session checks.
 
 It is the periodic audit half of Beads `ce-ank`.
 

@@ -4,8 +4,9 @@
 //
 // It is a read-only diagnostic: it never removes a worktree or deletes a
 // branch. Its job is to produce a clear report a human (or a follow-up
-// cleanup task) can act on. Reclamation lives elsewhere
-// (`agm worktree sweep`, `scripts/cleanup-worktrees.sh`).
+// cleanup task) can act on. Reclamation lives in the dry-run-default
+// `agm worktree sweep`; execute mode removes only worktrees positively
+// classified as clean and merged after fail-closed active-session checks.
 //
 // Four finding categories are reported (see [FindingKind]):
 //
