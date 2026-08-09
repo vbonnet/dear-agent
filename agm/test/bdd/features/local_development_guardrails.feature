@@ -8,6 +8,7 @@
 # RELATED-SPEC: cmd/safe-rebase/SPEC.md
 # RELATED-SPEC: cmd/safe-unlock/SPEC.md
 # RELATED-SPEC: cmd/test-affected/SPEC.md
+# RELATED-SPEC: cmd/cleanup-worktrees/SPEC.md
 # RELATED-SPEC: scripts/SPEC.md
 # RELATED-SPEC: wayfinder/pkg/sandbox/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
