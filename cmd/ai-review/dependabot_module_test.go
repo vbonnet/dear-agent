@@ -296,6 +296,12 @@ func TestDependabotModuleOnlyCandidateValidatesGoSumSemantics(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "Windows CRLF checksum files",
+			baseSum: strings.ReplaceAll(commonGoMod+oldVersion, "\n", "\r\n"),
+			headSum: strings.ReplaceAll(commonGoMod+newVersion, "\n", "\r\n"),
+			want:    true,
+		},
+		{
 			name:    "common checksum mutated",
 			baseSum: dependencySumLine("example.com/stable", "v1.0.0", "stable-base") + oldVersion,
 			headSum: dependencySumLine("example.com/stable", "v1.0.0", "stable-head") + newVersion,

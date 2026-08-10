@@ -285,6 +285,10 @@ func goSumChangeSafe(base, head []byte) (bool, error) {
 func parseGoSum(raw []byte) (map[string]string, error) {
 	sums := make(map[string]string)
 	for number, line := range strings.Split(string(raw), "\n") {
+		// Go's own go.sum reader tokenizes fields and therefore accepts CRLF.
+		// Preserve the otherwise exact line grammar while accepting that one
+		// canonical cross-platform line ending.
+		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
 			continue
 		}
