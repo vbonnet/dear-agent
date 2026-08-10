@@ -255,13 +255,6 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-49** When `Sweep` runs in dry-run mode without a caller-confirmed active-session set, the system shall still classify every worktree and shall remove nothing.
 
-**OPS-50** When `Sweep` cannot remove a worktree that it positively classified for removal, the system shall record the removal failure, preserve the associated local branch, and continue processing without force-removing the worktree; `Sweep` shall never delete a remote branch.
-
-OPS-50 generalizes the safety invariant formerly owned by the retired legacy
-cleanup script as REPO-SCRIPT-04. The shared `Sweep` operation owns this
-invariant for the canonical `agm worktree sweep` path that replaces that
-script; other cleanup operations retain their own contracts.
-
 ---
 
 ## Key Invariants
@@ -291,13 +284,3 @@ script; other cleanup operations retain their own contracts.
 - Feature: `agm/test/bdd/features/trust_protocol.feature`
 - Feature: `agm/test/bdd/features/scan_loop.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
-
-## Deterministic Package-Test Traceability
-
-- `agm/internal/ops/worktree_sweep_test.go`:
-  `TestSweep_RemoveFailureIsRecordedAndProcessingContinues` proves that a
-  failed non-force removal is recorded without deleting the local branch and
-  does not prevent a later eligible worktree from being removed, and
-  `TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch` proves that Sweep
-  never force-removes a worktree. Remote-branch deletion is absent from the
-  shared Sweep dependency contract.
