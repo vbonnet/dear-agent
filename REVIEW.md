@@ -1,7 +1,7 @@
 # REVIEW.md — Multi-agent PR review protocol
 
 - **Status:** authoritative
-- **Last updated:** 2026-06-11
+- **Last updated:** 2026-08-10
 
 Every PR against this repo goes through the review protocol below before
 merging. The protocol is designed for a dark-factory loop: an LLM review agent
@@ -127,6 +127,31 @@ partial evidence as complete.
 The semantic reviewer must keep uncertain ownership separate from confirmed
 defects: incomplete or low-confidence semantic evidence is
 `needs-human-review`, not an invented canonical owner or a blocking conclusion.
+
+### Authenticated dependency automation
+
+A dependency version bump does not change a SPEC contract. The trusted review
+plan therefore identifies a narrow automation candidate when Git proves that a
+current-base change modifies only `go.mod` (optionally with `go.sum`), preserves
+the module, Go, toolchain, and all non-require directives, changes at least one
+existing requirement version, and has no other review or escalation evidence.
+The parsed require graph may add or remove only requirements marked indirect,
+or reclassify retained requirements between direct and indirect, as part of
+that authenticated update. Direct requirements may not be added or removed.
+Membership of any policy-annotated require block and every non-tool-managed
+requirement or require-block annotation remain fixed. The workflow may publish
+a neutral, non-model verdict only when GitHub's trusted APIs also match
+Dependabot's immutable app-bot ID and numeric repository identity, bind the
+exact current head to the canonical Dependabot/GitHub commit identities and the
+current protected-base parent, and show either an unmodified original head or
+an exact-head force push by Dependabot or an existing maintain/admin principal.
+
+This is not a contributor-facing bypass. A fork, a claimed bot login, a branch
+name, a label, a graph-only change with no existing version bump, any `replace`,
+non-require directive change, extra path, stale-base evidence, or parsing
+failure keeps the ordinary fail-closed path. Patch/minor merge
+eligibility remains owned separately by `.github/workflows/dependabot-automerge.yml`
+and all provider-required checks must still pass.
 
 An organization-level required workflow remains defence in depth against a
 malicious maintainer with push access.
