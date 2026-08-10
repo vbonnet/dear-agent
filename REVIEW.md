@@ -58,7 +58,8 @@ diff touches any of the following:
 - **Agent permissions** — any edit to `permissions.allow`, `permissions.ask`, or `permissions.deny`.
 - **Pre-tool hooks** — any change to hook scripts or hook registration in `settings.json`.
 - **Security boundaries** — write guards, deny rules, `~/src` enforcement, PII manifests.
-- **Infrastructure that is expensive to reverse** — database schema changes, launchd plist installs, CI/CD pipeline edits.
+- **Protected review policy, enforcement, and provider rules** — this policy, the trusted AI-review workflow, review implementation, and ruleset declarations.
+- **Infrastructure that is expensive to reverse** — database schema changes, infrastructure-as-code, launchd plist installs, and systemd service installs.
 - **Explicit `HUMAN REVIEW REQUIRED` label** in the PR description or commit message.
 
 Escalation is not a failure state — it is a correct outcome that preserves
@@ -156,8 +157,11 @@ change.
 The reviewer binary and workflow definition are loaded from the protected base
 revision; the PR revision is only ever diffed, never executed.
 
-Changes to either `.github/workflows/` or `cmd/ai-review/` are deterministic
-§3 escalation triggers, so they require human review before becoming trusted.
+Changes to `REVIEW.md`, `.github/workflows/review.yml`, `.github/rulesets/`, or
+`cmd/ai-review/` are deterministic §3 escalation triggers, so the candidate
+revision cannot approve changes to its own review authority. Other workflow
+changes stay in the automated review loop and escalate only when their content,
+not their directory, produces a blocking outcome.
 
 Changed `SPEC.md` files have an additional authenticated contract review. The
 trusted base supplies both the canonical authoring policy and the exact

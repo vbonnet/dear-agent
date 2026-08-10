@@ -23,7 +23,7 @@ separate provider-enforcement rollout is verified.
 
 **AIREV-06** When the review runs, the command shall submit the complete diff to each dimension and shall run the five dimensions concurrently as independent model calls.
 
-**AIREV-07** When the changed paths touch agent permissions, pre or post tool hooks, security boundaries, expensive-to-reverse infrastructure, or CI and CD pipeline definitions, the command shall force the outcome to needs-human-review regardless of the synthesized outcome.
+**AIREV-07** When the changed paths touch agent permissions, pre or post tool hooks, security boundaries, protected review policy or enforcement or provider rules, or expensive-to-reverse infrastructure, the command shall force the outcome to needs-human-review regardless of the synthesized outcome.
 
 **AIREV-08** When the pull request body or a commit message contains the explicit human review required marker, the command shall force the outcome to needs-human-review.
 

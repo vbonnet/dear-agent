@@ -23,11 +23,11 @@ type escalationRule struct {
 // severity", so it must not depend on a nondeterministic synthesis.
 var escalationRules = []escalationRule{
 	{
-		reason: "CI/CD pipeline edit",
+		reason: "protected review policy, enforcement, or provider rules change",
 		match: func(p string) bool {
-			return strings.HasPrefix(p, ".github/workflows/") ||
-				strings.HasPrefix(p, ".github/rulesets/") ||
-				strings.HasPrefix(p, ".github/actions/")
+			return p == "REVIEW.md" ||
+				p == ".github/workflows/review.yml" ||
+				strings.HasPrefix(p, ".github/rulesets/")
 		},
 	},
 	{

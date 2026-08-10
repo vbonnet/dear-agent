@@ -8,7 +8,10 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		paths []string
 		want  bool
 	}{
-		{"workflow edit", []string{".github/workflows/review.yml"}, true},
+		{"ordinary workflow", []string{".github/workflows/structural-health.yml"}, false},
+		{"ordinary custom action", []string{".github/actions/setup-go/action.yml"}, false},
+		{"authoritative review policy", []string{"REVIEW.md"}, true},
+		{"trusted review workflow", []string{".github/workflows/review.yml"}, true},
 		{"review gate implementation", []string{"cmd/ai-review/escalation.go"}, true},
 		{"ruleset edit", []string{".github/rulesets/main.json"}, true},
 		{"settings.json", []string{".claude/settings.json"}, true},
@@ -131,7 +134,7 @@ func TestHookEscalationIsScoped(t *testing.T) {
 func TestApplyEscalation(t *testing.T) {
 	// Escalation forces needs-human-review from any outcome...
 	for _, o := range []Outcome{Approved, NeedsWork, Rejected, NeedsHumanReview} {
-		if got := ApplyEscalation(o, []string{"CI/CD pipeline edit"}); got != NeedsHumanReview {
+		if got := ApplyEscalation(o, []string{"critical trust-root change"}); got != NeedsHumanReview {
 			t.Errorf("ApplyEscalation(%v, triggered) = %v, want NeedsHumanReview", o, got)
 		}
 	}
@@ -143,15 +146,23 @@ func TestApplyEscalation(t *testing.T) {
 	}
 }
 
-// TestEscalationBlocksApprovedCIChange is the regression guard for the Codex
-// P1 finding: a CI/CD edit must never merge on a model-produced "approved".
-func TestEscalationBlocksApprovedCIChange(t *testing.T) {
-	triggers := EscalationTriggers([]string{".github/workflows/review.yml"}, "", "")
-	outcome := ApplyEscalation(Approved, triggers)
+// TestEscalationProtectsReviewTrustRootAndAllowsRoutineCI keeps the human-only
+// boundary on review authority rather than on every workflow consumer.
+func TestEscalationProtectsReviewTrustRootAndAllowsRoutineCI(t *testing.T) {
+	routine := EscalationTriggers([]string{".github/workflows/structural-health.yml"}, "", "")
+	if len(routine) != 0 {
+		t.Fatalf("routine workflow must stay in automated review, got %v", routine)
+	}
+	if outcome := ApplyEscalation(Approved, routine); outcome != Approved || ExitFor(outcome, false) != 0 {
+		t.Fatalf("routine workflow approved outcome = %v, want mergeable", outcome)
+	}
+
+	protected := EscalationTriggers([]string{".github/workflows/review.yml"}, "", "")
+	outcome := ApplyEscalation(Approved, protected)
 	if outcome != NeedsHumanReview {
-		t.Fatalf("CI/CD edit synthesized as approved must escalate, got %v", outcome)
+		t.Fatalf("trusted review workflow must escalate, got %v", outcome)
 	}
 	if ExitFor(outcome, false) != 1 {
-		t.Fatal("escalated outcome must block the merge")
+		t.Fatal("protected review workflow escalation must block the merge")
 	}
 }

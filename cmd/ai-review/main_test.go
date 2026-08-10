@@ -535,7 +535,7 @@ func TestFinalReviewOutcomeAndSynthesisDisplayPreserveAuthoritativeBlocks(t *tes
 	}{
 		{name: "SPEC needs work", specVerdict: NeedsWork, want: NeedsWork},
 		{name: "SPEC human review", specVerdict: NeedsHumanReview, want: NeedsHumanReview},
-		{name: "mandatory escalation wins over rejected SPEC", specVerdict: Rejected, triggers: []string{"CI/CD pipeline edit"}, want: NeedsHumanReview},
+		{name: "mandatory escalation wins over rejected SPEC", specVerdict: Rejected, triggers: []string{"critical trust-root change"}, want: NeedsHumanReview},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -201,7 +201,7 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 	sb.WriteString("Data-loss finding -> rejected. Ambiguous findings resolve down (needs-work beats approved; needs-human-review beats needs-work).\n")
 	sb.WriteString("When a SPEC-CONTRACT report is present, its declared authoritative outcome is binding: preserve needs-work, rejected, or needs-human-review and never upgrade it to approved.\n")
 	sb.WriteString("Escalate to needs-human-review regardless of severity when the diff touches any of: agent permissions; pre/post-tool hooks or hook registration; ")
-	sb.WriteString("security boundaries (write guards, deny rules, CODEOWNERS, PII manifests); infrastructure that is expensive to reverse (IaC, schema changes, CI/CD pipeline edits); ")
+	sb.WriteString("security boundaries (write guards, deny rules, CODEOWNERS, PII manifests); protected review policy, enforcement, or provider rules; infrastructure that is expensive to reverse (IaC, schema changes, launchd or systemd installs); ")
 	sb.WriteString("or an explicit HUMAN REVIEW REQUIRED marker.\n")
 	sb.WriteString("FORMAT (strict): the FIRST LINE must contain exactly one outcome word (approved | needs-work | rejected | needs-human-review) and NOTHING ELSE — no prefix, no punctuation, no explanation. ")
 	sb.WriteString("Begin the brief summary on the SECOND line. A first line that is not a bare outcome word is treated as a failure and blocks the merge.\n\n")

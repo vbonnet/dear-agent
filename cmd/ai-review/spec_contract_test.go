@@ -2017,7 +2017,7 @@ func TestBuildReviewPlan_MarksEveryDeterministicEscalationRelevant(t *testing.T)
 		name string
 		path string
 	}{
-		{"CI pipeline", ".github/workflows/ci.yml"},
+		{"provider rules", ".github/rulesets/secondary.json"},
 		{"permission boundary", "agm/internal/permissionparity/parity.go"},
 		{"tool hook", ".codex/hooks/pretool-guard"},
 		{"security boundary", "internal/fsguard/fsguard.go"},
