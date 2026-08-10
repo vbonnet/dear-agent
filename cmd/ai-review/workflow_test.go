@@ -435,8 +435,7 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 		"Fetch PR head for diff":                          2,
 		"Build authenticated SPEC governance review plan": 1,
 		"Authenticate Dependabot module-only exception":   3,
-		"Attest override to the reviewed revision":        1,
-		"Detect override label":                           3,
+		"Detect override label":                           1,
 		"Run AI review gate":                              2,
 	}
 	for name, minimum := range boundedCalls {

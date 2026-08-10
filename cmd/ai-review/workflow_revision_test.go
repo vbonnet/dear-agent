@@ -257,18 +257,32 @@ func TestWorkflowDoesNotReuseMutableEventRevisionEvidence(t *testing.T) {
 	}
 	eventHead := "github.event.pull_request.head.sha"
 	if strings.Count(string(raw), eventHead) != 1 {
-		t.Fatalf("event head has %d uses, want only the label-attestation mutation guard", strings.Count(string(raw), eventHead))
+		t.Fatalf("event head has %d uses, want only the exact-head override-event guard", strings.Count(string(raw), eventHead))
 	}
 	for _, step := range reviewWorkflowRevisionSteps(t) {
-		if step.Name == "Attest override to the reviewed revision" {
-			if !strings.Contains(step.If, "steps.pending.outputs.head_sha == "+eventHead) {
-				t.Errorf("%s does not bind its event mutation to the resolved head", step.Name)
+		if step.Name != "Detect override label" {
+			continue
+		}
+		wantEnv := map[string]string{
+			"EVENT_NAME":        "$" + "{{ github.event_name }}",
+			"EVENT_ACTION":      "$" + "{{ github.event.action }}",
+			"EVENT_LABEL":       "$" + "{{ github.event.label.name }}",
+			"EVENT_HEAD_SHA":    "$" + "{{ github.event.pull_request.head.sha }}",
+			"EVENT_ACTOR_LOGIN": "$" + "{{ github.event.sender.login }}",
+			"EVENT_ACTOR_ID":    "$" + "{{ github.event.sender.id }}",
+			"EVENT_ACTOR_TYPE":  "$" + "{{ github.event.sender.type }}",
+		}
+		for name, want := range wantEnv {
+			if got := step.Env[name]; got != want {
+				t.Errorf("override %s = %q, want trusted event value %q", name, got, want)
 			}
 		}
+		return
 	}
+	t.Fatal("Detect override label step is missing")
 }
 
-func TestWorkflowSynchronizeOrderingUsesRevisionAttestation(t *testing.T) {
+func TestWorkflowOverrideActivationIsExactHeadLabeledEvent(t *testing.T) {
 	var detect workflowRevisionStep
 	for _, step := range reviewWorkflowRevisionSteps(t) {
 		if step.Name == "Detect override label" {
@@ -279,23 +293,225 @@ func TestWorkflowSynchronizeOrderingUsesRevisionAttestation(t *testing.T) {
 	if detect.Run == "" {
 		t.Fatal("Detect override label step is missing")
 	}
+	if strings.Contains(detect.Run, "/comments?") || strings.Contains(detect.Run, "ai-review-override-sha") {
+		t.Fatal("override detection still treats a forgeable bot-authored marker as authority")
+	}
 	const (
 		currentHead = "1111111111111111111111111111111111111111"
 		oldHead     = "2222222222222222222222222222222222222222"
 	)
 	tests := []struct {
-		name         string
-		eventHead    string
-		attestedHead string
-		want         bool
+		name           string
+		eventName      string
+		action         string
+		eventLabel     string
+		eventHead      string
+		actorLogin     string
+		actorID        string
+		actorType      string
+		permissionJSON string
+		labels         string
+		markerHead     string
+		failAPI        bool
+		want           bool
 	}{
-		{name: "same-head delayed synchronize preserves newer valid override", eventHead: currentHead, attestedHead: currentHead, want: true},
-		{name: "stale synchronize preserves newer valid override", eventHead: oldHead, attestedHead: currentHead, want: true},
-		{name: "stale synchronize cannot revive old override", eventHead: oldHead, attestedHead: oldHead},
+		{
+			name:       "verified maintainer exact-head labeled event",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"maintainer", 101, "User", "write", "maintain",
+			),
+			labels: `["ai-review:override"]`,
+			want:   true,
+		},
+		{
+			name:       "stale labeled event head mismatch",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  oldHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"maintainer", 101, "User", "write", "maintain",
+			),
+			labels: `["ai-review:override"]`,
+		},
+		{
+			name:       "verified administrator exact-head labeled event",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "administrator",
+			actorID:    "102",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"administrator", 102, "User", "admin", "admin",
+			),
+			labels: `["ai-review:override"]`,
+			want:   true,
+		},
+		{
+			name:       "synchronize with retained label and forged marker",
+			eventName:  "pull_request_target",
+			action:     "synchronize",
+			eventHead:  currentHead,
+			actorLogin: "writer",
+			actorID:    "103",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"writer", 103, "User", "write", "write",
+			),
+			labels:     `["ai-review:override"]`,
+			markerHead: currentHead,
+		},
+		{
+			name:       "other event with forged marker",
+			eventName:  "pull_request_target",
+			action:     "edited",
+			eventHead:  currentHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"maintainer", 101, "User", "write", "maintain",
+			),
+			labels:     `["ai-review:override"]`,
+			markerHead: currentHead,
+		},
+		{
+			name:       "exact-head labeled event from ordinary writer",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "writer",
+			actorID:    "103",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"writer", 103, "User", "write", "write",
+			),
+			labels: `["ai-review:override"]`,
+		},
+		{
+			name:       "actor permission API failure",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"maintainer", 101, "User", "write", "maintain",
+			),
+			labels:  `["ai-review:override"]`,
+			failAPI: true,
+		},
+		{
+			name:       "bot actor cannot authorize override",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "automation-bot",
+			actorID:    "104",
+			actorType:  "Bot",
+			permissionJSON: collaboratorPermissionJSON(
+				"automation-bot", 104, "Bot", "admin", "admin",
+			),
+			labels: `["ai-review:override"]`,
+		},
+		{
+			name:       "permission response identity mismatch",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"different-user", 999, "User", "admin", "admin",
+			),
+			labels: `["ai-review:override"]`,
+		},
+		{
+			name:           "malformed permission response",
+			eventName:      "pull_request_target",
+			action:         "labeled",
+			eventLabel:     "ai-review:override",
+			eventHead:      currentHead,
+			actorLogin:     "maintainer",
+			actorID:        "101",
+			actorType:      "User",
+			permissionJSON: `{`,
+			labels:         `["ai-review:override"]`,
+		},
+		{
+			name:           "oversized permission response",
+			eventName:      "pull_request_target",
+			action:         "labeled",
+			eventLabel:     "ai-review:override",
+			eventHead:      currentHead,
+			actorLogin:     "maintainer",
+			actorID:        "101",
+			actorType:      "User",
+			permissionJSON: strings.Repeat("x", 65537),
+			labels:         `["ai-review:override"]`,
+		},
+		{
+			name:       "wrong label event",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "dependencies",
+			eventHead:  currentHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"maintainer", 101, "User", "write", "maintain",
+			),
+			labels: `["ai-review:override"]`,
+		},
+		{
+			name:       "override absent from current API snapshot",
+			eventName:  "pull_request_target",
+			action:     "labeled",
+			eventLabel: "ai-review:override",
+			eventHead:  currentHead,
+			actorLogin: "maintainer",
+			actorID:    "101",
+			actorType:  "User",
+			permissionJSON: collaboratorPermissionJSON(
+				"maintainer", 101, "User", "write", "maintain",
+			),
+			labels: `[]`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := runOverrideDetection(t, detect.Run, currentHead, test.eventHead, test.attestedHead)
+			got := runOverrideDetection(t, detect.Run, currentHead, overrideDetectionInput{
+				EventName:      test.eventName,
+				Action:         test.action,
+				EventLabel:     test.eventLabel,
+				EventHead:      test.eventHead,
+				ActorLogin:     test.actorLogin,
+				ActorID:        test.actorID,
+				ActorType:      test.actorType,
+				PermissionJSON: test.permissionJSON,
+				Labels:         test.labels,
+				MarkerHead:     test.markerHead,
+				FailAPI:        test.failAPI,
+			})
 			if got != test.want {
 				t.Fatalf("active = %v, want %v", got, test.want)
 			}
@@ -303,17 +519,34 @@ func TestWorkflowSynchronizeOrderingUsesRevisionAttestation(t *testing.T) {
 	}
 }
 
-func runOverrideDetection(t *testing.T, run, head, eventHead, attestedHead string) bool {
+type overrideDetectionInput struct {
+	EventName      string
+	Action         string
+	EventLabel     string
+	EventHead      string
+	ActorLogin     string
+	ActorID        string
+	ActorType      string
+	PermissionJSON string
+	Labels         string
+	MarkerHead     string
+	FailAPI        bool
+}
+
+func runOverrideDetection(t *testing.T, run, head string, input overrideDetectionInput) bool {
 	t.Helper()
 	tmp := t.TempDir()
 	output := filepath.Join(tmp, "github-output")
+	permissionFile := filepath.Join(tmp, "permission.json")
+	if err := os.WriteFile(permissionFile, []byte(input.PermissionJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	gh := filepath.Join(tmp, "gh")
 	fakeGH := strings.Join([]string{
 		"#!/bin/sh",
 		"case \"$*\" in",
-		"  *\"/comments?\"*) printf '<!-- ai-review-override-sha:%s -->\\n' \"$FAKE_ATTESTED_HEAD\" ;;",
-		"  *\"/events?\"*) printf 'maintainer\\n' ;;",
-		"  *\"/collaborators/\"*\"/permission\"*) printf 'admin\\n' ;;",
+		"  *\"/comments?\"*) printf '<!-- ai-review-override-sha:%s -->\\n' \"$FAKE_MARKER_HEAD\" ;;",
+		"  *\"/collaborators/\"*\"/permission\"*) [ \"$FAKE_GH_FAIL\" = true ] && exit 1; cat \"$FAKE_PERMISSION_FILE\" ;;",
 		"  *) exit 64 ;;",
 		"esac",
 		"",
@@ -341,15 +574,22 @@ func runOverrideDetection(t *testing.T, run, head, eventHead, attestedHead strin
 	cmd.Env = append(os.Environ(),
 		"PATH="+tmp+":"+os.Getenv("PATH"),
 		"GITHUB_OUTPUT="+output,
+		"RUNNER_TEMP="+tmp,
 		"AI_REVIEW_DEADLINE_UNIX="+fmt.Sprint(time.Now().Add(time.Minute).Unix()),
-		"LABELS=[\"ai-review:override\"]",
+		"LABELS="+input.Labels,
 		"GH_TOKEN=test",
 		"REPO=owner/repo",
-		"ACTION=synchronize",
-		"EVENT_HEAD_SHA="+eventHead,
-		"PR=1",
 		"HEAD_SHA="+head,
-		"FAKE_ATTESTED_HEAD="+attestedHead,
+		"EVENT_NAME="+input.EventName,
+		"EVENT_ACTION="+input.Action,
+		"EVENT_LABEL="+input.EventLabel,
+		"EVENT_HEAD_SHA="+input.EventHead,
+		"EVENT_ACTOR_LOGIN="+input.ActorLogin,
+		"EVENT_ACTOR_ID="+input.ActorID,
+		"EVENT_ACTOR_TYPE="+input.ActorType,
+		"FAKE_PERMISSION_FILE="+permissionFile,
+		"FAKE_MARKER_HEAD="+input.MarkerHead,
+		"FAKE_GH_FAIL="+fmt.Sprint(input.FailAPI),
 	)
 	raw, err := cmd.CombinedOutput()
 	if err != nil {
@@ -366,6 +606,13 @@ func runOverrideDetection(t *testing.T, run, head, eventHead, attestedHead strin
 		}
 	}
 	return active
+}
+
+func collaboratorPermissionJSON(login string, id int, actorType, permission, roleName string) string {
+	return fmt.Sprintf(
+		`{"permission":%q,"role_name":%q,"user":{"login":%q,"id":%d,"type":%q}}`,
+		permission, roleName, login, id, actorType,
+	)
 }
 
 func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {

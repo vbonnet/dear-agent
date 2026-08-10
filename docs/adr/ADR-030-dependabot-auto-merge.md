@@ -34,10 +34,12 @@ and ambiguous evidence. The workflow then verifies the immutable Dependabot app-
 numeric repository identity. It first resolves current open-PR and
 protected-main snapshots through GitHub's trusted API, fetches that exact head
 object rather than the mutable pull-request ref, and binds the diff, body,
-labels, identities, live base, and verdict to the resolved object IDs.
-Revision-specific label attestation requires the event head to equal the
-resolved head. Synchronize runs do not remove the label; a stale label without
-an exact-current-head attestation grants no authority. It then binds the REST commit response
+labels, identities, live base, and verdict to the resolved object IDs. A human
+override activates only in an exact-current-head `ai-review:override` labeled
+event whose actor GitHub currently verifies has `maintain` or `admin`
+permission. Synchronize and every other event ignore retained labels and
+forgeable bot-authored markers, but do not remove the cosmetic label; a
+maintainer removes and reapplies it to review another revision. It then binds the REST commit response
 to the exact reviewed head and current protected-base parent and matches the
 canonical Dependabot author and GitHub `web-flow` committer identities. An original head
 must have no head-reference mutation event; a replaced head needs an exact-SHA

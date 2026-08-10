@@ -5,8 +5,9 @@ name: AI Code Review (5-dimension)
 # is the enforcement signal.
 #
 # Fail-closed contract (see cmd/ai-review), in force whenever the gate runs:
-#   - only an "approved" outcome (or the audited 'ai-review:override' label)
-#     exits 0; needs-work / rejected / needs-human-review fail this workflow.
+#   - only an "approved" outcome (or an authenticated exact-head maintainer
+#     'ai-review:override' labeled event) exits 0; needs-work / rejected /
+#     needs-human-review fail this workflow.
 #   - fork PRs, per-dimension API failure, synthesis failure, unparseable
 #     outcome, and oversize diffs all fail closed. (A missing secret also fails
 #     closed inside cmd/ai-review. While no reviewer credential is configured,
@@ -31,8 +32,8 @@ name: AI Code Review (5-dimension)
 on:
   # pull_request_target is deliberate: this workflow checks out and executes
   # only the protected base revision, while treating the PR head as diff data.
-  # That trusted context can both attest an override to the exact head SHA and
-  # publish revision-bound attestations and review comments.
+  # That trusted context can authenticate a maintainer's exact-head label event
+  # and publish revision-bound verdicts and review comments.
   pull_request_target:
     # `labeled`/`unlabeled` matter: applying the documented `ai-review:override`
     # label must produce a NEW check run on the same head SHA, otherwise the
@@ -379,41 +380,28 @@ jobs:
             echo 'exempt=true' >> "$GITHUB_OUTPUT"
           fi
 
-      # A label records who authorized an exception, but not which mutable PR
-      # revision they reviewed. Record that revision in a bot-authored comment
-      # from the trusted workflow. The detection step below accepts an override
-      # only when this attestation matches the current PR head. A push leaves
-      # the cosmetic label in place but invalidates the old marker; remove and
-      # reapply that label to attest a later revision.
-      - name: Attest override to the reviewed revision
-        if: github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'ai-review:override' && steps.pending.outputs.head_sha == github.event.pull_request.head.sha && contains(fromJSON(steps.pending.outputs.labels), 'ai-review:override')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          now="$(date -u +%s)"
-          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
-            echo "::error::trusted review deadline is missing, malformed, or expired"
-            exit 1
-          fi
-          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
-          timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --method POST "repos/$REPO/issues/$PR/comments" \
-            -f body="<!-- ai-review-override-sha:$HEAD_SHA -->
-          Human override attested by the trusted review workflow for `$HEAD_SHA`."
-
-      # The override is revision-bound: a new pull-request head must never
-      # inherit an approval for an earlier revision.
+      # Override authority belongs to this trusted event, not to persistent PR
+      # state. A historical maintainer-applied label plus a bot-authored comment
+      # is insufficient because a PR-controlled pull_request workflow can post
+      # as github-actions[bot]. Activate only for the exact-current-head labeled
+      # event whose actor GitHub currently verifies as maintain/admin. A push
+      # leaves the stale cosmetic label untouched so a delayed synchronize run
+      # cannot remove a newer label application, but synchronize and every other
+      # event remain inactive. Remove and reapply the label to review a new head.
       - name: Detect override label
         id: override
         env:
           LABELS: ${{ steps.pending.outputs.labels }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_ACTOR_LOGIN: ${{ github.event.sender.login }}
+          EVENT_ACTOR_ID: ${{ github.event.sender.id }}
+          EVENT_ACTOR_TYPE: ${{ github.event.sender.type }}
         run: |
           set -euo pipefail
           remaining_seconds() {
@@ -430,31 +418,36 @@ jobs:
           }
           labels="${LABELS:-}"
           reviewed_head="$HEAD_SHA"
-          remaining="$(remaining_seconds)" || reject_override
-          if ! comment_bodies="$(timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null)"; then
+          if [ "${EVENT_NAME:-}" != pull_request_target ] || \
+             [ "${EVENT_ACTION:-}" != labeled ] || \
+             [ "${EVENT_LABEL:-}" != 'ai-review:override' ] || \
+             [ "${EVENT_HEAD_SHA:-}" != "$reviewed_head" ] || \
+             ! printf '%s\n' "$labels" | grep -q '"ai-review:override"'; then
             reject_override
           fi
-          attested_head="$(printf '%s\n' "$comment_bodies" | sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
-            grep -Fx "$reviewed_head" | tail -n 1 || true)"
-          # PR-controlled pull_request workflows can post as
-          # github-actions[bot], so a bot-authored marker alone is not an
-          # authorization decision. Bind the active label to its latest actor
-          # and require GitHub to verify that actor has maintainer authority.
+          label_actor_login="${EVENT_ACTOR_LOGIN:-}"
+          label_actor_id="${EVENT_ACTOR_ID:-}"
+          label_actor_type="${EVENT_ACTOR_TYPE:-}"
+          [[ "$label_actor_login" =~ ^[A-Za-z0-9-]+$ ]] || reject_override
+          [[ "$label_actor_id" =~ ^[0-9]+$ ]] || reject_override
+          [ "$label_actor_type" = User ] || reject_override
           remaining="$(remaining_seconds)" || reject_override
-          if ! label_actors="$(timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
-            --jq '.[] | select(.event == "labeled" and .label.name == "ai-review:override") | .actor.login' 2>/dev/null)"; then
+          permission_file="$RUNNER_TEMP/ai-review-override-actor-permission.json"
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/collaborators/$label_actor_login/permission" > "$permission_file"; then
             reject_override
           fi
-          label_actor="$(printf '%s\n' "$label_actors" | tail -n 1)"
-          label_permission=""
-          if [ -n "$label_actor" ]; then
-            remaining="$(remaining_seconds)" || reject_override
-            if ! label_permission="$(timeout --signal=TERM --kill-after=5s "${remaining}s" gh api "repos/$REPO/collaborators/$label_actor/permission" --jq .permission 2>/dev/null)"; then
-              reject_override
-            fi
-          fi
-          if printf '%s\n' "$labels" | grep -q '"ai-review:override"' && [ "$attested_head" = "$reviewed_head" ] && { [ "$label_permission" = maintain ] || [ "$label_permission" = admin ]; }; then
+          [ "$(wc -c < "$permission_file")" -le 65536 ] || reject_override
+          if jq -e \
+            --arg login "$label_actor_login" \
+            --argjson id "$label_actor_id" \
+            --arg type "$label_actor_type" '
+              (.user.login == $login) and
+              (.user.id == $id) and
+              (.user.type == $type) and
+              ((.role_name == "maintain" or .role_name == "admin") or .permission == "admin")
+            ' "$permission_file" >/dev/null 2>&1; then
             echo "active=true" >> "$GITHUB_OUTPUT"
           else
             echo "active=false" >> "$GITHUB_OUTPUT"
