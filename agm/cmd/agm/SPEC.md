@@ -7,11 +7,11 @@
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: 2026-07-27 -->
+<!-- Last audited at: 2026-08-08 -->
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
-**Last Updated:** 2026-07-27
+**Last Updated:** 2026-08-08
 
 ## Overview
 
@@ -75,7 +75,7 @@ Provide a production-ready CLI that:
 
 **CLI-23** When `agm wiki query-save` receives user-controlled question or answer text, the system shall accept file-backed inputs, reject conflicting inline and file values, and preserve file content without shell evaluation.
 
-**CLI-41** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
+**CLI-56** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 

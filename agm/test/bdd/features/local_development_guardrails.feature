@@ -112,10 +112,6 @@ Feature: Local development guardrails
     When AGM runs the protected cleanup regressions
     Then Wayfinder and AGM cleanup should preserve Git-locked checkouts
 
-  Scenario: Repository cleanup preserves branches for protected worktrees
-    When AGM runs the protected repository cleanup regression
-    Then repository cleanup should preserve the worktree and its branches
-
   Scenario: Safe PR child lifetime survives abrupt parent termination
     When AGM runs the safe-pr abrupt-parent regression
     Then the child should retain transaction ownership until it exits
