@@ -995,6 +995,7 @@ func baselineJSONWithUnsupportedScanner(t *testing.T) string {
 func baselineJSONWithUnsupportedTransitionScanner(t *testing.T) string {
 	t.Helper()
 	bl := validV2Baseline(keySet(nil))
+	// Provider canary: intentionally cross the 1,000-line structural threshold.
 	bl.Transitions[0].ScannerVersion = scannerKeyVersion + 1
 	return string(mustMarshalBaseline(t, bl))
 }
