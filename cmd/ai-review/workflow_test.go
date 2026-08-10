@@ -313,6 +313,20 @@ esac
 	if err := os.WriteFile(gh, []byte(fakeGH), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	timeout := filepath.Join(tmp, "timeout")
+	fakeTimeout := `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --signal=*|--kill-after=*) shift ;;
+    *s) shift; break ;;
+    *) exit 64 ;;
+  esac
+done
+exec "$@"
+`
+	if err := os.WriteFile(timeout, []byte(fakeTimeout), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(time.Minute).Unix()
 	cmd := exec.Command("bash", "-c", run)
 	cmd.Env = append(os.Environ(),
