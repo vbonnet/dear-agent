@@ -13,7 +13,7 @@ decisions.
 
 ## EARS Requirements
 
-**CONFIG-01** When AGM loads configuration without a file, the system shall return defaults for sessions, timeouts, locks, health checks, adapters, auto-resume, status line, sandbox, and budget settings.
+**CONFIG-01** When AGM loads configuration without a file, the system shall return defaults for sessions, timeouts, locks, health checks, adapters, auto-resume, status line, sandbox, budget, and notification settings.
 
 **CONFIG-02** When a configuration file overrides only some settings, the system shall preserve default values for unspecified settings.
 
@@ -29,7 +29,11 @@ decisions.
 
 **CONFIG-08** When workspace detection cannot resolve a workspace, the system shall return an actionable error instead of prompting interactively.
 
-**CONFIG-09** When adapter, sandbox, budget, or status-line defaults are changed, the system shall keep active harnesses on shared defaults unless a harness-specific setting is explicit.
+**CONFIG-09** When adapter, sandbox, budget, status-line, or notification defaults are changed, the system shall keep active harnesses on shared defaults unless a harness-specific setting is explicit.
+
+**CONFIG-10** When notification configuration is loaded, the system shall preserve a configurable recipient label, default to a generic operator label, and allow `AGM_NOTIFY_RECIPIENT` to override only that recipient label.
+
+**CONFIG-11** When notification dispatcher configuration is omitted, the system shall preserve zero-config completion delivery by defaulting to a local log dispatcher.
 
 ## BDD Traceability
 
