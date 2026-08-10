@@ -66,8 +66,15 @@
       data loss — but it means the sweep does nothing at all until a port is
       supplied. Between 2026-07-05 and 2026-08-07 this job exited non-zero on
       every hourly tick for that reason and ~/.agm/sandboxes reached 239 GB.
-      With the port set, an individually unreachable workspace degrades to a
-      logged warning and the reachable ones are still swept.
+
+      Scope of the port fix, precisely: it lets the inventory resolve. It does
+      NOT make the sweep tolerant of unreachable stores in general. Per
+      sandboxGCLiveSessionIDsFromDolt, only a *recognised missing-database*
+      error degrades to a logged warning and lets the remaining workspaces be
+      swept; any other store-open failure (connection refused, timeout, auth)
+      still aborts the entire sweep, by design. So a Dolt server that is down
+      remains a hard stop, and the sweep will report it rather than reap on
+      partial knowledge.
     -->
     <key>DOLT_PORT</key>
     <string>3307</string>

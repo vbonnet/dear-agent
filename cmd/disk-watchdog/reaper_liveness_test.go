@@ -103,12 +103,12 @@ func TestCheckGCHealth_MissingLogIsStale(t *testing.T) {
 func TestCheckGCHealth_NeverSweptIsStale(t *testing.T) {
 	now := time.Now()
 	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
-		`{"timestamp":"`+now.Format(time.RFC3339Nano)+`","operation":"sandbox_gc_reap","session_id":"abc"}`,
+		gcErrorAt(now.Add(-2*time.Hour), "inventory failed"),
 	)}
 
 	got := checkGCHealth(cfg, now)
 	if got == nil || !got.Stale {
-		t.Fatalf("a log with no completed sweep must be stale, got %+v", got)
+		t.Fatalf("a log with no proof of life must be stale, got %+v", got)
 	}
 	if !got.LastSuccess.IsZero() {
 		t.Errorf("LastSuccess should be zero, got %v", got.LastSuccess)

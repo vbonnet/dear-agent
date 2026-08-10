@@ -21,6 +21,11 @@ type Entry struct {
 	BytesReclaimed int64     `json:"bytes_reclaimed,omitempty"`
 	DryRun         bool      `json:"dry_run,omitempty"`
 	Error          string    `json:"error,omitempty"`
+	// Errors counts sub-operations that were attempted and failed within a
+	// single sweep. A sweep can return success overall while individual
+	// deletions fail, so readers that treat a completion record as evidence of
+	// health must be able to see that count rather than infer it from Reason.
+	Errors int `json:"errors,omitempty"`
 }
 
 // DefaultPath returns the default gc.jsonl path (~/.agm/logs/gc.jsonl).

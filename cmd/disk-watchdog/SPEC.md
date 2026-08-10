@@ -25,6 +25,22 @@ remediation path being killed by the exhaustion it existed to relieve — and
 nothing consumed that fact, so the mesh kept spawning until the host had to be
 power-cycled. The brake is the consumer: a TTL'd latch every spawn path reads.
 
+Since PR #1160 it also checks **reaper liveness**. Free space is a *lagging*
+indicator of a leaked-sandbox problem: by the time it crosses the 20 GiB floor,
+hundreds of GB have accumulated and the remediation path itself gets killed by
+the exhaustion. A reaper that has stopped completing sweeps is the *leading*
+indicator and is independent of current free space. Between 2026-07-05 and
+2026-08-07 the hourly `agm sandbox gc` exited non-zero on every tick — 388
+failures into an unread log — while `~/.agm/sandboxes` reached 239 GB and every
+tick here reported `Status: OK`. That is the same "nothing consumed that fact"
+shape as ce-93lw.18, one layer down.
+
+A stale reaper alarms and exits 1 but deliberately does **not** latch the brake
+(DW-18): halting every spawn because a GC is behind would be a worse outage than
+the leak it warns about. Only proof of a *real* sweep counts (DW-21) — a dry run
+reclaims nothing and a sweep whose deletions all failed leaves the sandboxes in
+place, so counting either would let a broken reaper suppress its own alarm.
+
 ## EARS Requirements
 
 **DW-01** When free disk space on the measured filesystem falls below the critical floor (default 5 GiB), the system shall classify the condition as CRITICAL.
@@ -43,7 +59,7 @@ power-cycled. The brake is the consumer: a TTL'd latch every spawn path reads.
 
 **DW-08** When remediation or the trail append fails, the system shall report the failure and still exit with the breach exit code 1.
 
-**DW-09** When no threshold is breached, the system shall exit 0 without invoking any remediation.
+**DW-09** When no threshold is breached and the sandbox reaper is not stale, the system shall exit 0 without invoking any remediation.
 
 **DW-10** While dry-run mode is set, the system shall detect and log breaches but the system shall not remove any worktree.
 
@@ -58,3 +74,17 @@ power-cycled. The brake is the consumer: a TTL'd latch every spawn path reads.
 **DW-15** While dry-run mode is set, the system shall not write or remove the admission brake file.
 
 **DW-16** If engaging or releasing the admission brake fails, then the system shall report the failure on stderr and the system shall not change its exit code.
+
+**DW-17** When the sandbox GC has not recorded proof of a completed sweep within the reaper-liveness window (default 6h), the system shall classify the condition as at least WARN and the system shall exit 1.
+
+**DW-18** When the sandbox reaper is stale, the system shall not invoke remediation and the system shall not engage the admission brake.
+
+**DW-19** When the sandbox reaper is stale and the sandbox GC recorded an error after its last proof of life, the system shall include that error in the alarm reason.
+
+**DW-20** While the reaper-liveness window is zero or the sandbox GC log path is empty, the system shall not evaluate reaper liveness.
+
+**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors, or a sandbox reap record, as proof of a completed sweep.
+
+**DW-22** When evaluating reaper liveness, the system shall ignore records that are not sandbox-GC operations and records timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
+
+**DW-23** If the sandbox GC log cannot be read, then the system shall classify the sandbox reaper as stale.

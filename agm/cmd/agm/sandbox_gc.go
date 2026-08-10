@@ -146,7 +146,12 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		Operation: "sandbox_gc_completed",
 		Reason: fmt.Sprintf("scanned=%d reaped=%d kept=%d errors=%d",
 			result.Scanned, result.Reaped, result.Kept, result.Errors),
+		// DryRun and Errors are load-bearing for the reader, not decoration.
+		// A dry run proves nothing was reclaimed, and a sweep whose deletions
+		// all failed is not a healthy sweep; disk-watchdog refuses to count
+		// either as a liveness heartbeat.
 		DryRun: result.DryRun,
+		Errors: result.Errors,
 	})
 
 	if sandboxGCJSON {

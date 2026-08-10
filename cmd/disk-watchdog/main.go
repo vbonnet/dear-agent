@@ -69,12 +69,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
@@ -284,6 +286,8 @@ type gcLogEntry struct {
 	Timestamp time.Time `json:"timestamp"`
 	Operation string    `json:"operation"`
 	Error     string    `json:"error,omitempty"`
+	DryRun    bool      `json:"dry_run,omitempty"`
+	Errors    int       `json:"errors,omitempty"`
 }
 
 // The operation emitted once per successful sweep, reap or no reap. A sweep
@@ -291,17 +295,50 @@ type gcLogEntry struct {
 // would call a correctly-idle reaper dead.
 const gcCompletedOperation = "sandbox_gc_completed"
 
+// gcOperationPrefix scopes this reader to sandbox-GC records. gc.jsonl is
+// shared with the session GC, which writes its own failures (`gc_archive_error`
+// and friends). Attributing one of those to a stale sandbox reaper would point
+// whoever reads the alarm at an unrelated subsystem.
+const gcOperationPrefix = "sandbox_gc"
+
+// gcClockSkewTolerance bounds how far ahead of now a heartbeat may be dated and
+// still count. An append-only log keeps the maximum timestamp forever, so a
+// single heartbeat written while the host clock ran fast would otherwise yield
+// a negative age — permanently "healthy" — and no later correctly-dated record
+// could displace it.
+const gcClockSkewTolerance = 5 * time.Minute
+
+// healthyHeartbeat reports whether a completion record is evidence the reaper
+// actually did its job. A dry run reclaims nothing, and a sweep whose deletion
+// attempts failed leaves the sandboxes in place; counting either would let a
+// broken reaper suppress its own alarm indefinitely.
+func (e gcLogEntry) healthyHeartbeat() bool {
+	return e.Operation == gcCompletedOperation && !e.DryRun && e.Errors == 0
+}
+
 // gcLogSummary is what one pass over the GC log yields.
 type gcLogSummary struct {
+	// LastSuccess is the newest heartbeat that proves a real, error-free sweep.
 	LastSuccess time.Time
+	// LastReap is the newest individual reap record. A pre-heartbeat `agm` emits
+	// these but no completion record, so they are the compatibility signal that
+	// keeps a newer watchdog from calling an older-but-working GC dead.
+	LastReap    time.Time
 	LastError   string
 	LastErrorAt time.Time
 }
 
-// scanGCLog reads every record in the GC log and keeps the newest completed
-// sweep and the newest error. Malformed lines are skipped rather than fatal: a
-// truncated final write must not blind the check to the records before it.
-func scanGCLog(path string) (gcLogSummary, error) {
+// scanGCLog reads every sandbox-GC record in the log and keeps the newest
+// healthy heartbeat, the newest reap, and the newest error.
+//
+// It reads with a bufio.Reader rather than a Scanner deliberately. A Scanner
+// aborts the whole scan with ErrTooLong on any line above its buffer cap, which
+// on an append-only log means one oversized or corrupt record would hide every
+// valid heartbeat appended after it — the watchdog would then sit in a false
+// stale state forever. ReadString has no line-length ceiling, so a malformed
+// record costs one failed Unmarshal and the scan continues. Genuine I/O errors
+// are returned rather than swallowed.
+func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 	var s gcLogSummary
 	f, err := os.Open(path)
 	if err != nil {
@@ -309,26 +346,44 @@ func scanGCLog(path string) (gcLogSummary, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	// GC entries are single-line JSON, but a truncated write can leave a long
-	// partial line; a generous cap keeps one bad line from aborting the scan.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		var e gcLogEntry
-		if json.Unmarshal(scanner.Bytes(), &e) != nil {
-			continue
+	horizon := now.Add(gcClockSkewTolerance)
+	r := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, readErr := r.ReadString('\n')
+		if len(line) > 0 {
+			s.observe(line, horizon)
 		}
-		if e.Operation == gcCompletedOperation {
-			if e.Timestamp.After(s.LastSuccess) {
-				s.LastSuccess = e.Timestamp
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return s, nil
 			}
-			continue
-		}
-		if e.Error != "" && e.Timestamp.After(s.LastErrorAt) {
-			s.LastErrorAt, s.LastError = e.Timestamp, e.Error
+			return s, readErr
 		}
 	}
-	return s, nil
+}
+
+// observe folds one raw log line into the summary. Records dated beyond the
+// clock-skew horizon are discarded outright.
+func (s *gcLogSummary) observe(line string, horizon time.Time) {
+	var e gcLogEntry
+	if json.Unmarshal([]byte(line), &e) != nil {
+		return
+	}
+	if !strings.HasPrefix(e.Operation, gcOperationPrefix) || e.Timestamp.After(horizon) {
+		return
+	}
+	switch {
+	case e.healthyHeartbeat():
+		if e.Timestamp.After(s.LastSuccess) {
+			s.LastSuccess = e.Timestamp
+		}
+	case e.Operation == "sandbox_gc_reap":
+		if e.Timestamp.After(s.LastReap) {
+			s.LastReap = e.Timestamp
+		}
+	case e.Error != "" && e.Timestamp.After(s.LastErrorAt):
+		s.LastErrorAt, s.LastError = e.Timestamp, e.Error
+	}
 }
 
 // checkGCHealth classifies reaper liveness from the GC log. A missing or
@@ -338,7 +393,7 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 	if cfg.gcLogPath == "" || cfg.gcMaxAge <= 0 {
 		return nil
 	}
-	summary, err := scanGCLog(cfg.gcLogPath)
+	summary, err := scanGCLog(cfg.gcLogPath, now)
 	if err != nil {
 		return &gcHealth{
 			Stale: true,
@@ -347,18 +402,28 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 		}
 	}
 
-	h := &gcHealth{LastSuccess: summary.LastSuccess}
-	// Only surface an error newer than the last success; an older error that a
-	// later successful sweep superseded is noise.
-	if summary.LastErrorAt.After(summary.LastSuccess) {
+	// Compatibility with an `agm` predating the heartbeat: such a build emits
+	// per-sandbox reap records but no completion record, so a recent reap is
+	// accepted as proof of life. Errors are deliberately NOT accepted here —
+	// treating a failing GC's own error records as evidence it is alive would
+	// mask exactly the failure this check exists to catch.
+	last, viaFallback := summary.LastSuccess, false
+	if summary.LastReap.After(last) {
+		last, viaFallback = summary.LastReap, true
+	}
+
+	h := &gcHealth{LastSuccess: last}
+	// Only surface an error newer than the last proof of life; an older error
+	// that a later successful sweep superseded is noise.
+	if summary.LastErrorAt.After(last) {
 		h.LastError = summary.LastError
 	}
 	switch {
-	case summary.LastSuccess.IsZero():
+	case last.IsZero():
 		h.Stale = true
 		h.Reason = fmt.Sprintf("sandbox GC has never recorded a completed sweep in %s", cfg.gcLogPath)
 	default:
-		h.Age = now.Sub(summary.LastSuccess)
+		h.Age = now.Sub(last)
 		if h.Age > cfg.gcMaxAge {
 			h.Stale = true
 			h.Reason = fmt.Sprintf("sandbox GC last completed a sweep %s ago (max %s)",
@@ -367,6 +432,9 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 	}
 	if h.Stale && h.LastError != "" {
 		h.Reason += fmt.Sprintf("; last GC error: %s", h.LastError)
+	}
+	if h.Stale && viaFallback {
+		h.Reason += "; liveness inferred from reap records — installed agm predates the sandbox_gc_completed heartbeat"
 	}
 	return h
 }
