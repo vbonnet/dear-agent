@@ -1,8 +1,8 @@
 # Hook Harness Parity Specification
 
-<!-- Last audited at: 2026-08-08 -->
+<!-- Last audited at: 2026-08-10 -->
 
-**Version:** 1.5
+**Version:** 1.6
 **Status:** Baseline
 **Scope:** Repository-scoped hook manifests and shared guardrail hook scripts.
 
@@ -41,7 +41,7 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-12** Where a harness can surface remediation only as an idle-session follow-up, when the neutral guard returns feedback after a distinct user turn, the harness shall issue no more than one follow-up for that turn, shall not treat its own or repeated message updates as new turns, shall cease follow-ups safely after its bounded turn-history capacity is reached, shall cap globally retained session state by yielding untracked sessions rather than evicting continuation state, and shall admit a yielded session after explicit deletion frees capacity; when that transport launches the neutral adapter asynchronously, it shall isolate the complete adapter tree in a POSIX process group, pin a trusted group-leader identity through cleanup, capture stdout and stderr incrementally within one combined 64 KiB budget, obtain bounded adapter status through a supervisor-owned channel not inherited by the adapter, drain retained output within fixed bounds, request identity-relative cleanup through a separate supervisor-owned channel whose closure independently cleans up after parent loss rather than use parent-side numeric process signaling, terminate contained descendants and await the direct supervisor on completion, output exhaustion, or timeout, accept completion only after the expected supervisor-owned group termination is observed, fail conservatively where process-group termination is unavailable, and preserve the single-attempt state before awaiting it.
 
-**HHP-13** When AGY configures its bounded SPEC review, its source manifest shall name the absolute operator-owned adapter and that adapter shall select exactly one valid absolute Git workspace supplied by the native hook input rather than rely on the hook process current directory.
+**HHP-13** When AGY configures its bounded SPEC review, its source manifest shall name the absolute operator-owned adapter and that adapter shall select exactly one valid absolute Git workspace supplied by the native hook input rather than rely on the hook process current directory; the Git query that validates that workspace shall have a fixed timeout, isolate and cancel its process group where the platform supports it, and bound output-pipe draining when a descendant retains a descriptor.
 
 **HHP-14** When AGY supplies an invalid, missing, or ambiguous workspace root, the adapter shall bound remediation to one continuation per stable conversation and failure identity without assuming whether the native execution sequence starts at zero or one; a repeated or missing identity, or unavailable private claim state, shall allow termination.
 
@@ -62,6 +62,8 @@ extension events projected through `.pi/hooks.json`.
 **HHP-22** When automation needs the installed-helper status exit contract, the system shall provide a directly runnable built status artifact that emits one JSON result and preserves exit 0 for current, 1 for missing, stale, or untrusted, and 2 for inspection or usage failure; a Make convenience target may expose Make's documented recipe-failure translation.
 
 **HHP-23** When Pi aggregates terminal handlers, the SPEC adapter shall return a bounded deterministic feedback identity and the persistent Pi extension shall allow one follow-up for each fresh identity despite sibling continuation state, suppress repeats, retain a finite per-turn continuation budget, and reset that budget on a real interactive or RPC turn.
+
+**HHP-24** When a provider-native hook response exceeds the serialized output limit, the adapter shall emit a complete compact response without changing the terminal outcome: a block remains a block, an AGY continuation remains a continuation, and a top-level or hook-specific yield remains non-blocking while preserving its native event and valid deterministic feedback identity.
 
 ## BDD Traceability
 

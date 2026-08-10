@@ -537,10 +537,11 @@ entrypoints should only add model/harness-specific guidance.
 **Drives:** repository hook manifests and `internal/hookparity`.
 
 **Key scenarios:**
-- Claude Code, Codex CLI, AGY, OpenCode, and Pi expose the required PreToolUse
-  guardrails.
-- Stop and SubagentStop feedback hooks are configured.
-- Non-Claude harnesses expose Beads lifecycle hooks through their native hook
+- Claude Code, Codex CLI, and Pi expose the shared guardrails through native
+  hook manifests; AGY and OpenCode omit unsupported legacy hook projections.
+- Every active harness exposes bounded SPEC review through its available native
+  capability, including terminal feedback or an idle-session fallback.
+- Codex CLI and Pi expose Beads lifecycle hooks through their native hook
   manifests.
 - Every projected staged-SPEC reminder routes agents to `docs/spec-authoring.md`
   and the single-source `spec-governance/skills/write-spec/SKILL.md` workflow

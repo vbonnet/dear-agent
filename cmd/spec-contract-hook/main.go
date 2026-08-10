@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -221,12 +220,10 @@ func antigravityWorkspaceRoot(input []byte) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), workspaceGitTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", "-C", canonicalWorkspace, "rev-parse", "--show-toplevel")
-	output, err := command.Output()
+	gitRoot, err := specguard.ResolveRepositoryRoot(ctx, canonicalWorkspace)
 	if err != nil {
 		return "", fmt.Errorf("resolve Git workspace root: %w", err)
 	}
-	gitRoot := strings.TrimSpace(string(output))
 	if gitRoot == "" || strings.ContainsAny(gitRoot, "\r\n") || !filepath.IsAbs(gitRoot) {
 		return "", errors.New("git workspace root is invalid")
 	}
@@ -925,12 +922,8 @@ func emitJSON(output io.Writer, response hookResponse) int {
 	encoded = append(encoded, '\n')
 	if len(encoded) > maxHookOutputBytes {
 		// A terminal hook must always leave a complete, actionable envelope.
-		// Do not truncate JSON or turn an oversized block explanation into a
-		// successful silent exit.
-		fallback := hookResponse{Decision: "block", Reason: "Cooperative SPEC contract check unavailable: hook response exceeded its safety limit; run the changed-SPEC CI and inspect the deterministic guard directly."}
-		if response.Decision == "continue" {
-			fallback.Decision = "continue"
-		}
+		// Do not truncate JSON or change whether the native provider retries.
+		fallback := boundedHookResponse(response)
 		if isLowerHexDigest(response.DearAgentSpecFeedbackID) {
 			fallback.DearAgentSpecFeedbackID = response.DearAgentSpecFeedbackID
 		}
@@ -942,4 +935,29 @@ func emitJSON(output io.Writer, response hookResponse) int {
 		return 1
 	}
 	return 0
+}
+
+func boundedHookResponse(response hookResponse) hookResponse {
+	const blockMessage = "Cooperative SPEC contract check unavailable: hook response exceeded its safety limit; run the changed-SPEC CI and inspect the deterministic guard directly."
+	const yieldMessage = "SPEC contract feedback exceeded its safety limit and was compacted; this cooperative hook is yielding rather than risking a terminal retry loop. Run the changed-SPEC CI and inspect the deterministic guard directly."
+
+	switch {
+	case response.Decision == "continue":
+		return hookResponse{Decision: "continue", Reason: blockMessage}
+	case response.Decision == "allow":
+		return hookResponse{Decision: "allow"}
+	case response.Decision == "" && response.HookSpecificOutput != nil:
+		return hookResponse{HookSpecificOutput: &hookSpecificOutput{
+			HookEventName:     response.HookSpecificOutput.HookEventName,
+			AdditionalContext: yieldMessage,
+		}}
+	case response.Decision == "" && response.SystemMessage != "":
+		return hookResponse{SystemMessage: yieldMessage}
+	default:
+		fallback := hookResponse{Decision: "block", Reason: blockMessage}
+		if response.SystemMessage != "" {
+			fallback.SystemMessage = blockMessage
+		}
+		return fallback
+	}
 }

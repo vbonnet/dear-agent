@@ -149,6 +149,23 @@ func Evaluate(ctx context.Context, request Request) Result {
 	return evaluate(ctx, request, defaultLimits(), guardDependencies{})
 }
 
+// ResolveRepositoryRoot returns the canonical worktree root through the same
+// identity-pinned, descendant-owning Git admission used by Evaluate.
+func ResolveRepositoryRoot(ctx context.Context, repository string) (string, error) {
+	limits := defaultLimits()
+	resolveCtx, cancel := context.WithTimeout(ctx, limits.wallTime)
+	defer cancel()
+	executable, failure := resolveGitExecutable()
+	if failure != nil {
+		return "", fmt.Errorf("%s: %s", failure.code, failure.message)
+	}
+	identity, failure := (gitClient{executable: executable, limits: limits}).admitRepository(resolveCtx, repository)
+	if failure != nil {
+		return "", fmt.Errorf("%s: %s", failure.code, failure.message)
+	}
+	return identity.root, nil
+}
+
 func evaluate(ctx context.Context, request Request, limits guardLimits, dependencies guardDependencies) Result {
 	result := baseResult(request.Mode)
 	if failure := validateRequest(ctx, request, limits); failure != nil {

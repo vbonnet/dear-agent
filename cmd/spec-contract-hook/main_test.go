@@ -1014,11 +1014,35 @@ func TestRunBlocksGovernedRenameAndBinaryContracts(t *testing.T) {
 	}
 }
 
+func TestRunCompactsOversizedOpenCodeBlockForPlugin(t *testing.T) {
+	t.Setenv(reminderStateEnv, privateStateDirectory(t))
+	previousEvaluate := evaluateSpecContract
+	evaluateSpecContract = func(context.Context, specguard.Request) specguard.Result {
+		return specguard.Result{
+			Decision: specguard.DecisionBlock,
+			Findings: []specguard.Finding{{Code: "OVERSIZED", Message: strings.Repeat("x", maxHookOutputBytes)}},
+		}
+	}
+	t.Cleanup(func() { evaluateSpecContract = previousEvaluate })
+
+	var output bytes.Buffer
+	if got := run([]string{"--root", t.TempDir(), "--provider", "opencode", "--event", "Stop"}, strings.NewReader(""), &output, &bytes.Buffer{}); got != 0 {
+		t.Fatalf("run() = %d output=%s", got, output.String())
+	}
+	response := decodeResponse(t, output.Bytes())
+	if response.Decision != "block" || response.Reason == "" || response.SystemMessage == "" {
+		t.Fatalf("compacted OpenCode response = %#v, want plugin-readable block", response)
+	}
+	if response.SystemMessage != response.Reason || !strings.Contains(response.SystemMessage, "exceeded its safety limit") {
+		t.Fatalf("compacted OpenCode guidance = %#v, want bounded shared guidance", response)
+	}
+}
+
 func TestEmitJSONBoundsFallbackAndDetectsShortWrite(t *testing.T) {
 	t.Parallel()
 	t.Run("oversized response becomes compact block", func(t *testing.T) {
 		var output bytes.Buffer
-		if got := emitJSON(&output, hookResponse{SystemMessage: strings.Repeat("x", maxHookOutputBytes)}); got != 0 {
+		if got := emitJSON(&output, hookResponse{Decision: "block", Reason: strings.Repeat("x", maxHookOutputBytes)}); got != 0 {
 			t.Fatalf("emitJSON() = %d", got)
 		}
 		if output.Len() > maxHookOutputBytes {
@@ -1027,6 +1051,26 @@ func TestEmitJSONBoundsFallbackAndDetectsShortWrite(t *testing.T) {
 		response := decodeResponse(t, output.Bytes())
 		if response.Decision != "block" || !strings.Contains(response.Reason, "exceeded its safety limit") {
 			t.Fatalf("fallback response = %#v", response)
+		}
+	})
+	t.Run("oversized Codex-like block retains compact system guidance", func(t *testing.T) {
+		var output bytes.Buffer
+		if got := emitJSON(&output, hookResponse{Decision: "block", Reason: strings.Repeat("x", maxHookOutputBytes), SystemMessage: strings.Repeat("x", maxHookOutputBytes)}); got != 0 {
+			t.Fatalf("emitJSON() = %d", got)
+		}
+		response := decodeResponse(t, output.Bytes())
+		if response.Decision != "block" || response.SystemMessage == "" || response.SystemMessage != response.Reason {
+			t.Fatalf("fallback response = %#v, want native block with compact system guidance", response)
+		}
+	})
+	t.Run("oversized top-level yield remains a native yield", func(t *testing.T) {
+		var output bytes.Buffer
+		if got := emitJSON(&output, hookResponse{SystemMessage: strings.Repeat("x", maxHookOutputBytes)}); got != 0 {
+			t.Fatalf("emitJSON() = %d", got)
+		}
+		response := decodeResponse(t, output.Bytes())
+		if response.Decision != "" || response.Reason != "" || !strings.Contains(response.SystemMessage, "yielding") {
+			t.Fatalf("fallback response = %#v, want bounded top-level yield", response)
 		}
 	})
 	t.Run("oversized Antigravity response remains a native continuation", func(t *testing.T) {
@@ -1048,6 +1092,23 @@ func TestEmitJSONBoundsFallbackAndDetectsShortWrite(t *testing.T) {
 		response := decodeResponse(t, output.Bytes())
 		if response.Decision != "block" || response.DearAgentSpecFeedbackID != feedbackID || !strings.Contains(response.Reason, "exceeded its safety limit") {
 			t.Fatalf("fallback response = %#v", response)
+		}
+	})
+	t.Run("oversized Pi yield retains its native event and feedback identity", func(t *testing.T) {
+		var output bytes.Buffer
+		feedbackID := strings.Repeat("b", 64)
+		if got := emitJSON(&output, hookResponse{
+			HookSpecificOutput:      &hookSpecificOutput{HookEventName: "Stop", AdditionalContext: strings.Repeat("x", maxHookOutputBytes)},
+			DearAgentSpecFeedbackID: feedbackID,
+		}); got != 0 {
+			t.Fatalf("emitJSON() = %d", got)
+		}
+		response := decodeResponse(t, output.Bytes())
+		if response.Decision != "" || response.Reason != "" || response.SystemMessage != "" || response.DearAgentSpecFeedbackID != feedbackID {
+			t.Fatalf("fallback response = %#v, want bounded Pi yield", response)
+		}
+		if response.HookSpecificOutput == nil || response.HookSpecificOutput.HookEventName != "Stop" || !strings.Contains(response.HookSpecificOutput.AdditionalContext, "yielding") {
+			t.Fatalf("fallback native output = %#v, want Stop yield", response.HookSpecificOutput)
 		}
 	})
 	t.Run("short write is a failed hook transport", func(t *testing.T) {

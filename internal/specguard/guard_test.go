@@ -36,6 +36,25 @@ func TestEvaluateRejectsMalformedRequests(t *testing.T) {
 	}
 }
 
+func TestResolveRepositoryRootUsesGuardedAdmission(t *testing.T) {
+	fixture := newGuardRepository(t)
+	nested := filepath.Join(fixture.root, "nested")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveRepositoryRoot(context.Background(), nested)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryRoot() error = %v", err)
+	}
+	want, err := filepath.EvalSymlinks(fixture.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ResolveRepositoryRoot() = %q, want %q", got, want)
+	}
+}
+
 func TestUnsupportedPlatformsFailAdmissionBeforeGitLaunch(t *testing.T) {
 	t.Parallel()
 	for _, goos := range []string{"windows", "freebsd"} {
