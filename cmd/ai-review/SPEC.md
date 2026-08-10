@@ -41,11 +41,11 @@ separate provider-enforcement rollout is verified.
 
 **AIREV-15** When the command invokes Git to inspect a pull request revision, the command shall enforce time and output limits, shall expose only an allowlisted non-credential environment to the subprocess, and shall read exact committed object bytes without applying revision-controlled export transformations.
 
-**AIREV-16** When a pull request changes the canonical SPEC authoring entry point, template, write or audit workflow and reference files, active harness registry, trusted review workflow or ruleset, review implementation, deterministic Markdown or EARS parsers, Go build manifests, workspace manifests, or vendored dependencies used by that implementation, the command shall require maintainer review rather than allow the revision to approve its own enforcement change.
+**AIREV-16** When a pull request changes the canonical SPEC authoring entry point, template, write or audit workflow and reference files, active harness registry, trusted review workflow or ruleset, review implementation, deterministic Markdown or EARS parsers, Go build manifests, workspace manifests, or vendored dependencies used by that implementation, the command shall record a maintainer-review requirement rather than allow the revision to approve its own enforcement change, while it shall distinguish reviewer dependency inputs from SPEC contract changes and only the trusted workflow may convert the exact AIREV-24 dependency-automation case to neutral.
 
 **AIREV-17** When a changed SPEC or protected enforcement owner is reviewed from a head that does not contain the current protected base, the command shall require the branch to be updated and shall not bind policy or corpus evidence to the stale merge base.
 
-**AIREV-18** When the trusted source workflow runs, it shall attempt to publish a uniquely named `SPEC Contract Review` semantic verdict for the reviewed pull-request head and shall fail its distinct native `AI review orchestration` job when creation or publication is unavailable; without a reviewer credential, only plans with no changed SPEC, protected owner, binary or gitlink evidence, or deterministic AIREV-07 or AIREV-08 escalation may publish neutral, while every other relevant plan shall remain fail closed pending a revision-bound maintainer override. Neither source result is yet a provider-required merge gate.
+**AIREV-18** When the trusted source workflow runs, it shall attempt to publish a uniquely named `SPEC Contract Review` semantic verdict for the reviewed pull-request head and shall fail its distinct native `AI review orchestration` job when creation or publication is unavailable; without a reviewer credential, only plans with no changed SPEC, protected owner, binary or gitlink evidence, or deterministic AIREV-07 or AIREV-08 escalation, plus the authenticated AIREV-24 dependency-automation case, may publish neutral, while every other relevant plan shall remain fail closed pending a revision-bound maintainer override. Neither source result is yet a provider-required merge gate.
 
 **AIREV-19** When a changed SPEC plan is reviewable, the command shall parse the exact package-level `activeHarnesses` string-slice literal from `agm/internal/agent/harnesses.go` at the authenticated protected-base revision and shall require one final `supported`, `adapted`, `unsupported`, or `not-applicable` reviewer disposition for every active member and every stable current promise in each added or modified SPEC, while approval shall require an explicit semantic-reviewer certification that no observable mixed-format prose bypasses that grid.
 
@@ -57,6 +57,8 @@ separate provider-enforcement rollout is verified.
 
 **AIREV-23** When the review runs, the workflow and command shall bound every setup action, pre-publication network or Git operation, model request, owner-search wave, final SPEC review, concurrent dimension batch, synthesis stage, and total command invocation with explicit deadlines whose worst-case execution fits the earlier of a command-local budget and a trusted absolute workflow cutoff exported by the first workflow step; that cutoff shall leave a bounded publication reserve below the trusted job timeout, and a missing, malformed, expired, or reached deadline or provider failure shall remain fail closed without an unbounded retry or partial approval.
 
+**AIREV-24** When the authenticated Git plan proves that a current-base pull request modifies only `go.mod` or `go.mod` and `go.sum`, both module files parse, at least one existing required-module version changes, only the parsed require graph may otherwise change, module identity, Go and toolchain directives, all non-require syntax, and all exclude and retract directives remain unchanged, no replace directive exists, and no SPEC, other protected owner, binary, gitlink, or deterministic escalation evidence exists, the plan shall mark a dependency-automation candidate, while the trusted workflow shall publish a non-blocking neutral verdict without a model call only when GitHub's trusted event context also identifies the immutable Dependabot app bot and the same numeric repository, and any missing, malformed, additional, fork-controlled, or uncertain evidence shall preserve the ordinary fail-closed review path.
+
 ## Enforcement wiring
 
 - `.github/workflows/review.yml` invokes this command from trusted
@@ -64,6 +66,11 @@ separate provider-enforcement rollout is verified.
   head under the unique `SPEC Contract Review` check context. The workflow's
   native `AI review orchestration` job has a distinct name and fails if
   creation or publication of that semantic check fails.
+- The command classifies only the Git shape of a possible
+  dependency-version-led module update. The trusted workflow separately
+  authenticates Dependabot's immutable
+  bot identity and the numeric head-repository identity before it may skip the
+  model and publish neutral; neither branch names nor labels authorize it.
 - This source workflow is not evidence that either context is provider-required
   or that an LLM reviewed a pull request. Provider enforcement, credentials,
   and an exact-head canary belong to a separate reviewed infrastructure

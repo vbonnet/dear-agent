@@ -1,7 +1,7 @@
 # REVIEW.md — Multi-agent PR review protocol
 
 - **Status:** authoritative
-- **Last updated:** 2026-06-11
+- **Last updated:** 2026-08-10
 
 Every PR against this repo goes through the review protocol below before
 merging. The protocol is designed for a dark-factory loop: an LLM review agent
@@ -127,6 +127,25 @@ partial evidence as complete.
 The semantic reviewer must keep uncertain ownership separate from confirmed
 defects: incomplete or low-confidence semantic evidence is
 `needs-human-review`, not an invented canonical owner or a blocking conclusion.
+
+### Authenticated dependency automation
+
+A dependency version bump does not change a SPEC contract. The trusted review
+plan therefore identifies a narrow automation candidate when Git proves that a
+current-base change modifies only `go.mod` (optionally with `go.sum`), preserves
+the module, Go, toolchain, and all non-require directives, changes at least one
+existing requirement version, and has no other review or escalation evidence.
+The parsed require graph may add, remove, or reclassify transitive requirements
+as part of that authenticated update. The workflow may publish a neutral,
+non-model verdict only when GitHub's trusted event context also matches
+Dependabot's immutable app-bot ID and the numeric repository identity.
+
+This is not a contributor-facing bypass. A fork, a claimed bot login, a branch
+name, a label, a graph-only change with no existing version bump, any `replace`,
+non-require directive change, extra path, stale-base evidence, or parsing
+failure keeps the ordinary fail-closed path. Patch/minor merge
+eligibility remains owned separately by `.github/workflows/dependabot-automerge.yml`
+and all provider-required checks must still pass.
 
 An organization-level required workflow remains defence in depth against a
 malicious maintainer with push access.

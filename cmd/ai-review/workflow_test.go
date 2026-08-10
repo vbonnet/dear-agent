@@ -20,9 +20,11 @@ func TestWorkflowBuildsSpecPlanBeforeCredentialDecision(t *testing.T) {
 	plan := strings.Index(text, "name: Build authenticated SPEC governance review plan")
 	version := strings.Contains(text, `(.version == "`+specContractVersion+`")`)
 	relevance := strings.Contains(text, `(.review_relevant | type == "boolean")`)
+	dependabotCandidate := strings.Contains(text, `(.dependabot_module_only_candidate | type == "boolean")`)
 	planBody := strings.Contains(text, "PR_BODY: ${{ github.event.pull_request.body }}")
 	key := strings.Index(text, "name: Detect review key")
-	gate := strings.Contains(text, "if: steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true'")
+	gate := strings.Contains(text, "steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true'")
+	dependabotGate := strings.Contains(text, "steps.dependabot.outputs.exempt != 'true' || steps.override.outputs.active == 'true'")
 	neutral := strings.Contains(text, `[ "$PLAN_OUTCOME" = success ]`)
 	irrelevant := strings.Contains(text, `[ "$REVIEW_RELEVANT" = false ]`)
 	if plan < 0 || key < 0 || plan >= key {
@@ -31,10 +33,10 @@ func TestWorkflowBuildsSpecPlanBeforeCredentialDecision(t *testing.T) {
 	if !version {
 		t.Fatalf("workflow does not authenticate review plan version %q", specContractVersion)
 	}
-	if !relevance || !planBody {
+	if !relevance || !dependabotCandidate || !planBody {
 		t.Fatal("workflow plan does not authenticate review relevance from the PR body and deterministic escalation evidence")
 	}
-	if !gate {
+	if !gate || !dependabotGate {
 		t.Fatal("relevant SPEC or deterministic escalation plan does not force the existing review gate to run")
 	}
 	if !neutral || !irrelevant {
@@ -42,6 +44,85 @@ func TestWorkflowBuildsSpecPlanBeforeCredentialDecision(t *testing.T) {
 	}
 	if strings.Contains(text, "no changed SPEC.md or protected SPEC-review owner") {
 		t.Fatal("neutral wording omits deterministic escalation evidence")
+	}
+}
+
+func TestWorkflowDependabotExceptionRequiresTrustedIdentityAndGitEvidence(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "review.yml")
+	raw, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string            `yaml:"name"`
+				If   string            `yaml:"if"`
+				Env  map[string]string `yaml:"env"`
+				Run  string            `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	steps := make(map[string]struct {
+		If  string
+		Env map[string]string
+		Run string
+	})
+	for _, step := range workflow.Jobs["review"].Steps {
+		steps[step.Name] = struct {
+			If  string
+			Env map[string]string
+			Run string
+		}{If: step.If, Env: step.Env, Run: step.Run}
+	}
+	auth := steps["Authenticate Dependabot module-only exception"]
+	if auth.If != "steps.plan.outcome == 'success'" {
+		t.Fatalf("Dependabot authentication condition = %q", auth.If)
+	}
+	wantEnv := map[string]string{
+		"CANDIDATE":       "${{ steps.plan.outputs.dependabot_module_only_candidate }}",
+		"PR_AUTHOR_LOGIN": "${{ github.event.pull_request.user.login }}",
+		"PR_AUTHOR_ID":    "${{ github.event.pull_request.user.id }}",
+		"PR_AUTHOR_TYPE":  "${{ github.event.pull_request.user.type }}",
+		"HEAD_REPO_ID":    "${{ github.event.pull_request.head.repo.id }}",
+		"BASE_REPO_ID":    "${{ github.event.repository.id }}",
+	}
+	if len(auth.Env) != len(wantEnv) {
+		t.Fatalf("Dependabot authentication environment keys = %v, want exactly %v", auth.Env, wantEnv)
+	}
+	for name, want := range wantEnv {
+		if auth.Env[name] != want {
+			t.Errorf("Dependabot authentication %s = %q, want %q", name, auth.Env[name], want)
+		}
+	}
+	for _, predicate := range []string{
+		`[ "$CANDIDATE" = true ]`,
+		`[ "$PR_AUTHOR_LOGIN" = 'dependabot[bot]' ]`,
+		`[ "$PR_AUTHOR_ID" = 49699333 ]`,
+		`[ "$PR_AUTHOR_TYPE" = Bot ]`,
+		`[ "$HEAD_REPO_ID" = "$BASE_REPO_ID" ]`,
+	} {
+		if !strings.Contains(auth.Run, predicate) {
+			t.Errorf("Dependabot authentication omits %s", predicate)
+		}
+	}
+	for _, untrusted := range []string{"github.actor", "head.ref", "labels"} {
+		if strings.Contains(auth.Run, untrusted) {
+			t.Errorf("Dependabot authentication trusts %q", untrusted)
+		}
+	}
+	gate := steps["Run AI review gate"]
+	if !strings.Contains(gate.If, "steps.dependabot.outputs.exempt != 'true' || steps.override.outputs.active == 'true'") {
+		t.Fatal("authenticated Dependabot exception does not guard model execution")
+	}
+	publish := steps["Publish check on reviewed head"]
+	if publish.Env["DEPENDABOT_EXEMPT"] != "${{ steps.dependabot.outputs.exempt }}" ||
+		!strings.Contains(publish.Run, `[ "$DEPENDABOT_EXEMPT" = true ]`) ||
+		!strings.Contains(publish.Run, "authenticated same-repository Dependabot dependency-version-led Go module update") {
+		t.Fatal("Dependabot exception does not publish an explicit neutral, non-model verdict")
 	}
 }
 

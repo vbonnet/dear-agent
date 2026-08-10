@@ -12,7 +12,10 @@ name: AI Code Review (5-dimension)
 #     closed inside cmd/ai-review. While no reviewer credential is configured,
 #     an authenticated plan with neither SPEC-governance work nor a deterministic
 #     REVIEW.md §3 escalation may take this workflow's explicit neutral path
-#     before command invocation.)
+#     before command invocation. The other neutral path is an authenticated,
+#     same-repository Dependabot dependency-version-led Go module update; the
+#     trusted plan proves the diff shape and the event proves the bot and
+#     repository IDs.)
 #
 # Runs on every PR revision (opened/synchronize/reopened/ready_for_review), not
 # just the draft->ready edge, so the check that gates the current head SHA
@@ -148,17 +151,48 @@ jobs:
           now="$(date -u +%s)"
           if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
             echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            echo 'dependabot_module_only_candidate=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
           timeout --signal=TERM --kill-after=5s "${remaining}s" go run ./cmd/ai-review --review-plan > "$RUNNER_TEMP/ai-review-plan.json"
           status=$?
           set -e
-          if [ "$status" -ne 0 ] || ! jq -e '(.version == "spec-contract/v3") and (.review_relevant | type == "boolean")' "$RUNNER_TEMP/ai-review-plan.json" >/dev/null 2>&1; then
+          if [ "$status" -ne 0 ] || ! jq -e '(.version == "spec-contract/v3") and (.review_relevant | type == "boolean") and (.dependabot_module_only_candidate | type == "boolean")' "$RUNNER_TEMP/ai-review-plan.json" >/dev/null 2>&1; then
             echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            echo 'dependabot_module_only_candidate=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "review_relevant=$(jq -r '.review_relevant' "$RUNNER_TEMP/ai-review-plan.json")" >> "$GITHUB_OUTPUT"
+          echo "dependabot_module_only_candidate=$(jq -r '.dependabot_module_only_candidate' "$RUNNER_TEMP/ai-review-plan.json")" >> "$GITHUB_OUTPUT"
+
+      # The plan authenticates exact Git objects but deliberately knows nothing
+      # about GitHub identities. Complete the decision from GitHub's trusted event:
+      # Dependabot's immutable app bot ID, Bot type, and numeric same-repository
+      # identity must all match. Logins, labels, actors, and branch names alone
+      # are insufficient because contributor-controlled workflows can spoof them.
+      - name: Authenticate Dependabot module-only exception
+        id: dependabot
+        if: steps.plan.outcome == 'success'
+        env:
+          CANDIDATE: ${{ steps.plan.outputs.dependabot_module_only_candidate }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          BASE_REPO_ID: ${{ github.event.repository.id }}
+        run: |
+          set -euo pipefail
+          exempt=false
+          if [ "$CANDIDATE" = true ] && \
+             [ "$PR_AUTHOR_LOGIN" = 'dependabot[bot]' ] && \
+             [ "$PR_AUTHOR_ID" = 49699333 ] && \
+             [ "$PR_AUTHOR_TYPE" = Bot ] && \
+             [ -n "$HEAD_REPO_ID" ] && \
+             [ "$HEAD_REPO_ID" = "$BASE_REPO_ID" ]; then
+            exempt=true
+          fi
+          echo "exempt=$exempt" >> "$GITHUB_OUTPUT"
 
       # A human override approves one reviewed revision, not a mutable branch.
       # Remove it as soon as a contributor pushes a new head; the resulting
@@ -289,8 +323,12 @@ jobs:
         continue-on-error: true
         # Relevant SPEC governance changes and every deterministic escalation
         # run even without a credential, so an absent credential is human review
-        # instead of a neutral result.
-        if: steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true'
+        # instead of a neutral result. Only the authenticated dependency-version-led
+        # Dependabot exception skips model execution, even when a key exists;
+        # an active human override still runs so its audit receipt is preserved.
+        if: >-
+          (steps.dependabot.outputs.exempt != 'true' || steps.override.outputs.active == 'true') &&
+          (steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true')
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -361,12 +399,21 @@ jobs:
           OVERRIDE: ${{ steps.override.outputs.active }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           REVIEW_RELEVANT: ${{ steps.plan.outputs.review_relevant }}
+          DEPENDABOT_OUTCOME: ${{ steps.dependabot.outcome }}
+          DEPENDABOT_EXEMPT: ${{ steps.dependabot.outputs.exempt }}
         run: |
           set -euo pipefail
           conclusion=failure
           summary="Trusted review gate completed with outcome: $OUTCOME."
           if [ "$OUTCOME" = success ]; then
             conclusion=success
+          elif [ "$OUTCOME" = skipped ] && [ "$PLAN_OUTCOME" = success ] && [ "$DEPENDABOT_OUTCOME" = success ] && [ "$DEPENDABOT_EXEMPT" = true ] && [ "$KEY_OUTCOME" = success ] && [ "$OVERRIDE" != true ]; then
+            # The authenticated plan proves an exact dependency-version-led Go module
+            # delta, while the trusted event proves the immutable Dependabot bot
+            # ID and same-repository numeric identity. This is non-blocking but
+            # remains honest: no model approval is claimed.
+            conclusion=neutral
+            summary='Neutral: authenticated same-repository Dependabot dependency-version-led Go module update. No model approval or human override is claimed.'
           elif [ "$OUTCOME" = skipped ] && [ "$PLAN_OUTCOME" = success ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "$OVERRIDE" != true ] && [ "$REVIEW_RELEVANT" = false ]; then
             # The ONLY non-failure skip: key detection ran, succeeded, and
             # affirmatively reported no key, with no override in play. Any
@@ -407,11 +454,17 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEPENDABOT_EXEMPT: ${{ steps.dependabot.outputs.exempt }}
         run: |
           set -euo pipefail
+          if [ "$DEPENDABOT_EXEMPT" = true ]; then
+            reason="The authenticated plan for \`$HEAD_SHA\` proves a dependency-version-led Go module update, and the trusted event identifies the same-repository Dependabot app bot. This workflow check is neutral; no model approval or human override is claimed."
+          else
+            reason="\`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed."
+          fi
           printf '%s\n' '<!-- ai-review-5d -->' \
             '## AI Code Review — neutral (no automated review ran)' '' \
-            "> \`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed." '' \
+            "> $reason" '' \
             'Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.' '' \
             '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-neutral.md
           gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-neutral.md \
