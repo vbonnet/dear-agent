@@ -6,10 +6,12 @@ removes a worktree or deletes a branch. Its job is to produce a clear report
 for deciding what to clean up. For linked worktrees beneath its configured
 `--worktrees-dir`, the dry-run-default `agm worktree sweep` can reclaim only
 worktrees positively classified as clean and merged after fail-closed
-active-session checks. A successful execute-mode removal also force-deletes the
-selected worktree's local branch so squash-merged branches can be reclaimed;
-it never deletes remote branches. Findings outside that configured base remain
-report-only and require a separately reviewed, repository-scoped cleanup path.
+active-session checks. After a successful execute-mode worktree removal, the
+sweep attempts to force-delete the selected local branch so squash-merged
+branches can be reclaimed; if that branch deletion fails, it warns and leaves
+the branch in place. It never deletes remote branches. Findings outside that
+configured base remain report-only and require a separately reviewed,
+repository-scoped cleanup path.
 
 It is the periodic audit half of Beads `ce-ank`.
 
