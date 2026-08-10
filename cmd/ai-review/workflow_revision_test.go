@@ -223,7 +223,7 @@ func runExactHeadFetch(t *testing.T, run, head, failMode string) (string, error)
 	if err := os.WriteFile(timeout, []byte(fakeTimeout), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", run)
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", run)
 	cmd.Env = append(os.Environ(),
 		"PATH="+tmp+":"+os.Getenv("PATH"),
 		"AI_REVIEW_DEADLINE_UNIX="+fmt.Sprint(time.Now().Add(time.Minute).Unix()),
@@ -337,7 +337,7 @@ func runOverrideDetection(t *testing.T, run, head, eventHead, attestedHead strin
 	if err := os.WriteFile(timeout, []byte(fakeTimeout), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", run)
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", run)
 	cmd.Env = append(os.Environ(),
 		"PATH="+tmp+":"+os.Getenv("PATH"),
 		"GITHUB_OUTPUT="+output,
@@ -453,7 +453,7 @@ func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, 
 		dependabotOutcome = "success"
 		dependabotExempt = "true"
 	}
-	cmd := exec.Command("bash", "-c", run)
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", run)
 	cmd.Env = append(os.Environ(),
 		"PATH="+tmp+":"+os.Getenv("PATH"),
 		"GITHUB_OUTPUT="+output,
@@ -551,7 +551,7 @@ func runCurrentPRRevisionResolver(t *testing.T, run, response, failAPI string) (
 	if err := os.WriteFile(timeout, []byte(fakeTimeout), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", run)
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", run)
 	cmd.Env = append(os.Environ(),
 		"PATH="+tmp+":"+os.Getenv("PATH"),
 		"GITHUB_OUTPUT="+output,
