@@ -6,12 +6,12 @@
 
 **AGMR-02** When AGM exposes notifications, status, comparison, or backup behavior, the system shall keep those outcomes available to every active harness.
 
-**AGMR-03** When periodic AGM worktree reclamation cannot remove a worktree that it positively classified for removal, the system shall report the failure, preserve the associated local branch, continue evaluating the remaining candidates, and shall neither force-remove the failed worktree nor delete any remote branch.
+**AGMR-03** When periodic AGM worktree reclamation cannot remove a worktree that it positively classified for removal, the system shall report the failure, preserve the associated local branch, continue attempting removal of the remaining positively classified candidates, and shall neither force-remove the failed worktree nor delete any remote branch.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-- Test consequence: Deterministic unit tests in `agm/internal/ops/worktree_sweep_test.go` prove that a failed non-force removal is reported without deleting its local branch, does not stop later eligible candidates, and never exposes remote-branch deletion through the reclamation dependency contract.
+- Test consequence: Deterministic unit and integration tests in `agm/internal/ops/worktree_sweep_test.go` and `agm/internal/ops/worktree_sweep_integration_test.go` prove that a failed non-force removal is reported without deleting its local branch, does not stop later eligible removals, and local-branch cleanup preserves the corresponding remote ref.
 
 <!-- Last audited at: 2026-06-28 -->
 

@@ -63,3 +63,33 @@ func TestRealSweepDeps_Discover(t *testing.T) {
 		t.Fatalf("missing base must be ([],nil), got %v / %v", none, err)
 	}
 }
+
+func TestRealSweepDeps_DeleteBranchPreservesRemoteRef(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	base := t.TempDir()
+	remote := filepath.Join(base, "remote.git")
+	repo := filepath.Join(base, "repo")
+
+	git(t, base, "init", "--bare", remote)
+	git(t, base, "init", "-b", "main", repo)
+	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "f")
+	git(t, repo, "commit", "-m", "init")
+	git(t, repo, "branch", "reclaim")
+	git(t, repo, "remote", "add", "origin", remote)
+	git(t, repo, "push", "origin", "main", "reclaim")
+
+	if err := (RealSweepDeps{}).DeleteBranch(repo, "reclaim", true); err != nil {
+		t.Fatalf("DeleteBranch: %v", err)
+	}
+	if err := gittest.Command(t, repo, "show-ref", "--verify", "--quiet", "refs/heads/reclaim").Run(); err == nil {
+		t.Fatal("local reclaim branch still exists")
+	}
+	if err := gittest.Command(t, repo, "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/reclaim").Run(); err != nil {
+		t.Fatalf("remote reclaim ref was removed: %v", err)
+	}
+}
