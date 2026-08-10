@@ -37,8 +37,8 @@ decisions.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/config_directory_parity.feature`
-- `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/config_directory_parity.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
 ## Package Test Traceability
 
