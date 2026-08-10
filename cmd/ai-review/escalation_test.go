@@ -11,9 +11,12 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"ordinary workflow", []string{".github/workflows/structural-health.yml"}, false},
 		{"ordinary custom action", []string{".github/actions/setup-go/action.yml"}, false},
 		{"authoritative review policy", []string{"REVIEW.md"}, true},
+		{"mixed-case authoritative review policy", []string{"Review.md"}, true},
 		{"trusted review workflow", []string{".github/workflows/review.yml"}, true},
+		{"mixed-case trusted review workflow", []string{".GitHub/Workflows/Review.yml"}, true},
 		{"review gate implementation", []string{"cmd/ai-review/escalation.go"}, true},
 		{"ruleset edit", []string{".github/rulesets/main.json"}, true},
+		{"mixed-case ruleset edit", []string{".GitHub/Rulesets/Main.json"}, true},
 		{"settings.json", []string{".claude/settings.json"}, true},
 		// Permission/authorization surfaces are matched by concept, so a new
 		// owning package does not silently escape escalation.

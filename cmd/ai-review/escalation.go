@@ -25,9 +25,10 @@ var escalationRules = []escalationRule{
 	{
 		reason: "protected review policy, enforcement, or provider rules change",
 		match: func(p string) bool {
-			return p == "REVIEW.md" ||
-				p == ".github/workflows/review.yml" ||
-				strings.HasPrefix(p, ".github/rulesets/")
+			lower := strings.ToLower(p)
+			return lower == "review.md" ||
+				lower == ".github/workflows/review.yml" ||
+				strings.HasPrefix(lower, ".github/rulesets/")
 		},
 	},
 	{
