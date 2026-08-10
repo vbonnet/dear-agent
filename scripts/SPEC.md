@@ -10,8 +10,6 @@
 
 **REPO-SCRIPT-03** When local preflight runs repository tests, the system shall use the same explicit test timeout as required CI.
 
-**REPO-SCRIPT-04** When stale-worktree removal fails, the system shall preserve the associated local and remote branches and report the removal failure.
-
 **REPO-SCRIPT-05** When the GOBIN guard runs and the Go toolchain bin directory or its sentinel binary is absent, the system shall append an escalation record to the decision trail and exit non-zero.
 
 ## BDD Traceability
