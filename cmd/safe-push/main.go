@@ -1,5 +1,5 @@
 // safe-push pushes a git branch without ever hanging on the macOS keychain
-// credential helper and without ever force-pushing.
+// credential helper and without force-pushing protected/default branches.
 //
 // Usage:
 //
@@ -68,7 +68,7 @@ func run(argv []string) error {
 	return safegit.Push(repoDir, pushArgs, timeout)
 }
 
-const usage = `safe-push — push git without hanging on the keychain helper, and never force-push.
+const usage = `safe-push — push git without hanging on the keychain helper.
 
 Usage:
   safe-push [-C <repo-dir>] [--timeout <dur>] [git push args...]
@@ -83,7 +83,13 @@ All other arguments are passed straight through to ` + "`git push`" + `.
 Examples:
   safe-push -u origin my-branch
   safe-push -C ~/worktrees/dear-agent/foo -u origin foo
+  safe-push -C ~/worktrees/dear-agent/foo --force-with-lease origin foo
   safe-push --timeout 60s origin HEAD:main
+
+Force-push policy:
+  safe-push allows force-pushes only to non-default PR branches, preferably via
+  --force-with-lease. It refuses force-pushes to main, master, and the repo's
+  configured default branch. --mirror remains refused.
 
 Why this exists:
   The macOS osxkeychain credential helper sits first in git's generic helper

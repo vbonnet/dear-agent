@@ -211,11 +211,17 @@ func TestOpenCodeHookParserRegressions(t *testing.T) {
 			wantCode: 0,
 		},
 		{
-			name:       "bypass guard blocks short force push",
+			name:       "bypass guard blocks short force push to main",
 			script:     ".opencode/hooks/pretool-bypass-guard",
-			command:    "git push -f origin feat/harness-model-parity",
+			command:    "git push -f origin main",
 			wantCode:   2,
 			wantOutput: "git push --force",
+		},
+		{
+			name:     "bypass guard allows short force push to feature branch",
+			script:   ".opencode/hooks/pretool-bypass-guard",
+			command:  "git push -f origin feat/harness-model-parity",
+			wantCode: 0,
 		},
 		{
 			name:       "pr guard catches repo flag before create",

@@ -3,6 +3,8 @@ package fsguard
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/safegit"
 )
 
 // Shell control operators that separate one simple command from the next.
@@ -429,15 +431,6 @@ func parseGit(args []string) (cFlag, sub string, subArgs []string) {
 	return cFlag, "", nil
 }
 
-func isForcePush(subArgs []string) bool {
-	for _, o := range subArgs {
-		if o == "--force" || o == "-f" || strings.HasPrefix(o, "--force-with-lease") {
-			return true
-		}
-	}
-	return false
-}
-
 // checkGit applies the ~/src-specific git rules to a git invocation's
 // arguments (everything after the literal "git"). currentDir is the effective
 // working directory, used when the command has no -C flag.
@@ -461,10 +454,10 @@ func (g *Guard) checkGit(args []string, currentDir string) (allowed bool, messag
 
 	repo := g.repoName(repoDir, src)
 	if sub == "push" {
-		if isForcePush(subArgs) {
-			return false, "You're trying to force-push to ~/src, which can " +
-				"clobber the golden reference. Use a plain `git -C ~/src/" +
-				repo + " push` (no --force), or do the work in a worktree."
+		if target, blocked := safegit.ForcePushViolation(repoDir, "", subArgs); blocked {
+			return false, "You're trying to force-push protected/default branch `" + target +
+				"` in ~/src. Use normal PR/merge flow for main/master/default; " +
+				"force-with-lease is only allowed for non-default PR branches."
 		}
 		return true, ""
 	}

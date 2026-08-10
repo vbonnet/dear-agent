@@ -1,7 +1,7 @@
 // Package safegit builds and runs git pushes that cannot hang on the macOS
-// keychain credential helper, and cannot force-push.
+// keychain credential helper, and only force-push non-protected branches.
 //
-// The hang it prevents
+// # The hang it prevents
 //
 // On this host the git credential helper chain is, for any host not explicitly
 // remapped, the *generic* chain from the system gitconfig:
@@ -26,7 +26,7 @@
 // only *appends* the CLI helper; it never resets osxkeychain off the front of
 // the chain, so it inherits the same hang for every non-github.com context.
 //
-// The fix
+// # The fix
 //
 // CredentialResetArgs emits an empty `-c credential.helper=` (which clears the
 // entire accumulated helper list, osxkeychain included) followed by a single
@@ -76,8 +76,6 @@ func CredentialResetArgs(ghPath string) []string {
 }
 
 // ForceFlag reports the first force-push flag or force refspec in args, if any.
-// Force-push is rejected by construction: a wrapper that can clobber shared
-// history is not a wrapper worth allow-listing.
 //
 // Detected forms:
 //   - -f / --force / --force-with-lease / --force-if-includes (flags)
@@ -99,6 +97,123 @@ func ForceFlag(args []string) (string, bool) {
 	return "", false
 }
 
+// ProtectedBranches returns branch names that must not be force-pushed. main
+// and master are always protected; origin/HEAD is added when available.
+func ProtectedBranches(repoDir string) map[string]bool {
+	protected := map[string]bool{"main": true, "master": true}
+	if repoDir == "" {
+		repoDir = "."
+	}
+	cmd := exec.Command("git", "-C", repoDir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	out, err := cmd.Output()
+	if err == nil {
+		branch := strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
+		if branch != "" {
+			protected[branch] = true
+		}
+	}
+	return protected
+}
+
+// ForcePushViolation reports whether pushArgs force-push to a protected branch.
+// Force-pushing non-default PR branches is allowed; --mirror remains blocked.
+func ForcePushViolation(repoDir, currentBranch string, pushArgs []string) (string, bool) {
+	for _, a := range pushArgs {
+		if a == "--mirror" {
+			return a, true
+		}
+	}
+	flag, ok := ForceFlag(pushArgs)
+	if !ok {
+		return "", false
+	}
+	if currentBranch == "" {
+		currentBranch = currentPushBranch(repoDir)
+	}
+	protected := ProtectedBranches(repoDir)
+	for _, branch := range forcePushTargets(currentBranch, pushArgs) {
+		if protected[branch] {
+			return branch, true
+		}
+	}
+	return flag, false
+}
+
+func forcePushTargets(currentBranch string, pushArgs []string) []string {
+	var targets []string
+	skipNext := false
+	for i, arg := range pushArgs {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		switch {
+		case arg == "--force" || arg == "-f" || arg == "--force-with-lease" || arg == "--force-if-includes" || arg == "--mirror":
+			continue
+		case strings.HasPrefix(arg, "--force-with-lease=") || strings.HasPrefix(arg, "--force-if-includes="):
+			ref := strings.TrimPrefix(strings.TrimPrefix(arg, "--force-with-lease="), "--force-if-includes=")
+			ref = strings.TrimPrefix(ref, "refs/heads/")
+			if ref != "" && !strings.Contains(ref, ":") {
+				targets = append(targets, ref)
+			}
+			continue
+		case strings.HasPrefix(arg, "-"):
+			if optionConsumesNext(arg) && i+1 < len(pushArgs) {
+				skipNext = true
+			}
+			continue
+		case arg == "origin" || arg == "upstream":
+			continue
+		}
+		arg = strings.TrimPrefix(arg, "+")
+		if target := pushTargetBranch(arg); target != "" {
+			targets = append(targets, target)
+		}
+	}
+	if len(targets) == 0 && currentBranch != "" {
+		targets = append(targets, currentBranch)
+	}
+	return targets
+}
+
+func optionConsumesNext(arg string) bool {
+	switch arg {
+	case "-u", "--set-upstream", "--repo", "--receive-pack", "--exec", "--push-option", "-o":
+		return true
+	}
+	return false
+}
+
+func pushTargetBranch(refspec string) string {
+	if strings.Contains(refspec, "*") {
+		return ""
+	}
+	if strings.Contains(refspec, ":") {
+		parts := strings.Split(refspec, ":")
+		if len(parts) != 2 || parts[1] == "" {
+			return ""
+		}
+		return strings.TrimPrefix(parts[1], "refs/heads/")
+	}
+	return strings.TrimPrefix(refspec, "refs/heads/")
+}
+
+func currentPushBranch(repoDir string) string {
+	if repoDir == "" {
+		repoDir = "."
+	}
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "HEAD" {
+		return ""
+	}
+	return branch
+}
+
 // PushArgs assembles the full git argv for a safe push: an optional `-C
 // repoDir`, the credential reset, `push`, and the caller's push arguments.
 func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
@@ -113,14 +228,15 @@ func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
 }
 
 // Push runs a safe push, streaming git's output to the caller's stdout/stderr.
-// It rejects force-push, bounds the run by timeout (DefaultTimeout if zero),
-// and sets GIT_TERMINAL_PROMPT=0 so git never falls back to an interactive
-// prompt. A timeout is reported as a credential-helper hang, the failure this
-// package exists to convert from "hang forever" into "fail in seconds".
+// It rejects force-pushes to protected branches, bounds the run by timeout
+// (DefaultTimeout if zero), and sets GIT_TERMINAL_PROMPT=0 so git never falls
+// back to an interactive prompt. A timeout is reported as a credential-helper
+// hang, the failure this package exists to convert from "hang forever" into
+// "fail in seconds".
 func Push(repoDir string, pushArgs []string, timeout time.Duration) error {
-	if flag, ok := ForceFlag(pushArgs); ok {
-		return fmt.Errorf("refusing %q: safe-push blocks force-pushes, --mirror, and +refspec "+
-			"(any of these can overwrite remote history) — remove the flag/refspec to proceed", flag)
+	if target, blocked := ForcePushViolation(repoDir, currentPushBranch(repoDir), pushArgs); blocked {
+		return fmt.Errorf("refusing %q: safe-push blocks force-pushes to protected/default branches "+
+			"(main, master, and the repository default); use --force-with-lease only for non-default PR branches", target)
 	}
 	gh, err := ResolveGh()
 	if err != nil {

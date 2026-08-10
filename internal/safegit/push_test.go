@@ -94,7 +94,51 @@ func TestPushArgs_NoRepoDirOmitsDashC(t *testing.T) {
 func TestPush_RejectsForceBeforeRunning(t *testing.T) {
 	// Force is rejected up front, so this never shells out to git.
 	err := Push("", []string{"--force", "origin", "main"}, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "force-pushes") {
+	if err == nil || !strings.Contains(err.Error(), "protected/default") {
 		t.Fatalf("expected force rejection, got %v", err)
+	}
+}
+
+func TestForcePushViolation_AllowsFeatureBranches(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"force-with-lease branch", []string{"--force-with-lease", "origin", "feature/rebased"}},
+		{"short force branch", []string{"-f", "origin", "fix/stale-pr"}},
+		{"force refspec to feature", []string{"origin", "+HEAD:refs/heads/feature/rebased"}},
+		{"implicit current feature", []string{"--force-with-lease", "origin"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if target, blocked := ForcePushViolation("", "feature/current", tc.args); blocked {
+				t.Fatalf("ForcePushViolation(%q) blocked %q", tc.args, target)
+			}
+		})
+	}
+}
+
+func TestForcePushViolation_BlocksProtectedBranches(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"force main", []string{"--force", "origin", "main"}},
+		{"force master", []string{"--force-with-lease", "origin", "master"}},
+		{"force lease equals main", []string{"--force-with-lease=main", "origin"}},
+		{"force refspec to main", []string{"origin", "+HEAD:refs/heads/main"}},
+		{"mirror", []string{"--mirror"}},
+		{"implicit current main", []string{"--force-with-lease", "origin"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			current := "feature/current"
+			if tc.name == "implicit current main" {
+				current = "main"
+			}
+			if _, blocked := ForcePushViolation("", current, tc.args); !blocked {
+				t.Fatalf("ForcePushViolation(%q) allowed protected force-push", tc.args)
+			}
+		})
 	}
 }

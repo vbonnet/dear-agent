@@ -103,7 +103,9 @@ state why.
 
 **FSG-29** When `git push` is invoked within `~/src/` without `--force`, `-f`, or `--force-with-lease`, the system shall allow it.
 
-**FSG-30** When `git push` is invoked with `--force`, `-f`, or `--force-with-lease`, the system shall block it regardless of working directory.
+**FSG-30** When `git push` is invoked with `--force`, `-f`, or `--force-with-lease` to `main`, `master`, or the repository's configured default branch, the system shall block it.
+
+**FSG-30a** When `git push` is invoked with `--force`, `-f`, or `--force-with-lease` to a non-default PR branch, the system shall allow it. `--force-with-lease` is preferred.
 
 **FSG-31** When `git merge`, `git pull`, `git fetch`, `git clone`, or `git worktree` is invoked within `~/src/`, the system shall allow it.
 

@@ -50,12 +50,14 @@ if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?commit' \
     "Fix the pre-commit hook failure — hooks catch real problems; bypassing them hides defects"
 fi
 
-# git push --force (bare)
+# git push --force to protected/default branches, or with no explicit target.
 if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?push' \
    && printf '%s' "$cmd" | grep -qE -- '(^|[[:space:]])(-f|--force)([[:space:]]|$)' \
-   && ! printf '%s' "$cmd" | grep -q -- '--force-with-lease'; then
+   && ! printf '%s' "$cmd" | grep -q -- '--force-with-lease' \
+   && { printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(main|master|refs/heads/(main|master))([[:space:]]|$)' \
+        || ! printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(origin|upstream)[[:space:]]+([^[:space:]]+:)?(refs/heads/)?[^[:space:]-][^[:space:]]*'; }; then
   block "git push" "--force" \
-    "Use safe-rebase then push normally; or use --force-with-lease if you own the branch"
+    "Use normal PR/merge flow for main/master/default; force-push only non-default PR branches, preferably with --force-with-lease"
 fi
 
 exit 0
