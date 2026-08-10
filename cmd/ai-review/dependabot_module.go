@@ -32,9 +32,10 @@ const maxDependabotModuleBlobBytes = 2 * 1024 * 1024
 //
 // Both go.mod objects must be regular, non-executable text blobs. Their module,
 // go, toolchain, exclude, retract, and every other non-require token must be
-// identical. Requirement membership and indirect markers may change, but at
-// least one requirement present on both sides must change version. A replace
-// directive on either side is never eligible, even when it is unchanged.
+// identical. Only indirect requirement membership and indirect markers on
+// retained requirements may change, but at least one requirement present on
+// both sides must change version. A replace directive on either side is never
+// eligible, even when it is unchanged.
 func dependabotModuleOnlyCandidate(ctx context.Context, mergeBase, head string) (bool, error) {
 	actualMergeBase, err := resolveMergeBase(ctx, mergeBase, head)
 	if err != nil {
@@ -127,47 +128,71 @@ func moduleDependencyVersionLedChange(base, head []byte) (bool, error) {
 	if !bytes.Equal(baseModule.withoutRequireDirectives, headModule.withoutRequireDirectives) {
 		return false, nil
 	}
+	if !equalModuleAnnotatedRequireBlocks(baseModule.annotatedRequireBlocks, headModule.annotatedRequireBlocks) {
+		return false, nil
+	}
+	return moduleRequirementsVersionLedChange(baseModule.requirements, headModule.requirements), nil
+}
 
+func moduleRequirementsVersionLedChange(base, head map[string]moduleRequirement) bool {
 	versionChanged := false
-	for path, baseRequirement := range baseModule.requirements {
-		headRequirement, ok := headModule.requirements[path]
+	for path, baseRequirement := range base {
+		headRequirement, ok := head[path]
 		if !ok {
-			if len(baseRequirement.annotations) != 0 {
-				return false, nil
+			if !baseRequirement.indirect || len(baseRequirement.annotations) != 0 {
+				return false
 			}
 			continue
 		}
 		if !slices.Equal(baseRequirement.annotations, headRequirement.annotations) {
-			return false, nil
+			return false
 		}
 		if baseRequirement.version != headRequirement.version {
 			versionChanged = true
 		}
 	}
-	for path, headRequirement := range headModule.requirements {
-		if _, existed := baseModule.requirements[path]; !existed && len(headRequirement.annotations) != 0 {
-			return false, nil
+	for path, headRequirement := range head {
+		if _, existed := base[path]; !existed &&
+			(!headRequirement.indirect || len(headRequirement.annotations) != 0) {
+			return false
 		}
 	}
-	return versionChanged, nil
+	return versionChanged
 }
 
 type moduleVersionState struct {
 	requirements             map[string]moduleRequirement
+	annotatedRequireBlocks   []moduleAnnotatedRequireBlock
 	withoutRequireDirectives []byte
 	hasReplace               bool
 }
 
 type moduleRequirement struct {
 	version     string
+	indirect    bool
 	annotations []string
+}
+
+type moduleAnnotatedRequireBlock struct {
+	index   int
+	block   moduleComments
+	lparen  moduleComments
+	rparen  moduleComments
+	members []string
+}
+
+type moduleComments struct {
+	before []string
+	suffix []string
+	after  []string
 }
 
 // parseModuleVersionState removes parsed require directives before formatting.
 // Equality of the resulting bytes is therefore a strict proof that all
-// non-require syntax and comments stayed fixed. Requirement annotations are
-// authenticated separately, with the tool-managed indirect marker normalized
-// away so directness may change without admitting arbitrary comment changes.
+// non-require syntax and comments stayed fixed. Requirement and require-block
+// annotations are authenticated separately, with the tool-managed indirect
+// marker normalized away so directness may change without admitting arbitrary
+// comment changes.
 func parseModuleVersionState(raw []byte) (moduleVersionState, error) {
 	file, err := modfile.Parse("go.mod", raw, nil)
 	if err != nil {
@@ -181,6 +206,7 @@ func parseModuleVersionState(raw []byte) (moduleVersionState, error) {
 		requirements: make(map[string]moduleRequirement, len(file.Require)),
 		hasReplace:   len(file.Replace) != 0,
 	}
+	requirementPaths := make(map[*modfile.Line]string, len(file.Require))
 	for _, requirement := range file.Require {
 		path, parsed, err := parseModuleRequirement(requirement)
 		if err != nil {
@@ -190,6 +216,11 @@ func parseModuleVersionState(raw []byte) (moduleVersionState, error) {
 			return moduleVersionState{}, fmt.Errorf("go.mod repeats requirement path %q", path)
 		}
 		state.requirements[path] = parsed
+		requirementPaths[requirement.Syntax] = path
+	}
+	state.annotatedRequireBlocks, err = parseModuleAnnotatedRequireBlocks(file.Syntax, requirementPaths)
+	if err != nil {
+		return moduleVersionState{}, err
 	}
 	for path := range state.requirements {
 		if err := file.DropRequire(path); err != nil {
@@ -221,8 +252,80 @@ func parseModuleRequirement(requirement *modfile.Require) (string, moduleRequire
 	}
 	return requirement.Mod.Path, moduleRequirement{
 		version:     requirement.Mod.Version,
+		indirect:    requirement.Indirect,
 		annotations: annotations,
 	}, nil
+}
+
+func parseModuleAnnotatedRequireBlocks(syntax *modfile.FileSyntax, requirementPaths map[*modfile.Line]string) ([]moduleAnnotatedRequireBlock, error) {
+	if syntax == nil {
+		return nil, nil
+	}
+	var result []moduleAnnotatedRequireBlock
+	requireBlockIndex := 0
+	for _, statement := range syntax.Stmt {
+		block, ok := statement.(*modfile.LineBlock)
+		if !ok || len(block.Token) != 1 || block.Token[0] != "require" {
+			continue
+		}
+		annotatedBlock := moduleAnnotatedRequireBlock{
+			index:  requireBlockIndex,
+			block:  parseModuleComments(block.Comments),
+			lparen: parseModuleComments(block.LParen.Comments),
+			rparen: parseModuleComments(block.RParen.Comments),
+		}
+		requireBlockIndex++
+		if annotatedBlock.block.empty() && annotatedBlock.lparen.empty() && annotatedBlock.rparen.empty() {
+			continue
+		}
+		annotatedBlock.members = make([]string, 0, len(block.Line))
+		for _, line := range block.Line {
+			path, ok := requirementPaths[line]
+			if !ok {
+				return nil, errors.New("annotated go.mod require block contains unparsed requirement evidence")
+			}
+			annotatedBlock.members = append(annotatedBlock.members, path)
+		}
+		slices.Sort(annotatedBlock.members)
+		result = append(result, annotatedBlock)
+	}
+	return result, nil
+}
+
+func parseModuleComments(comments modfile.Comments) moduleComments {
+	return moduleComments{
+		before: moduleCommentTokens(comments.Before),
+		suffix: moduleCommentTokens(comments.Suffix),
+		after:  moduleCommentTokens(comments.After),
+	}
+}
+
+func moduleCommentTokens(comments []modfile.Comment) []string {
+	tokens := make([]string, len(comments))
+	for index, comment := range comments {
+		tokens[index] = comment.Token
+	}
+	return tokens
+}
+
+func (comments moduleComments) empty() bool {
+	return len(comments.before) == 0 && len(comments.suffix) == 0 && len(comments.after) == 0
+}
+
+func equalModuleAnnotatedRequireBlocks(base, head []moduleAnnotatedRequireBlock) bool {
+	return slices.EqualFunc(base, head, func(base, head moduleAnnotatedRequireBlock) bool {
+		return base.index == head.index &&
+			equalModuleComments(base.block, head.block) &&
+			equalModuleComments(base.lparen, head.lparen) &&
+			equalModuleComments(base.rparen, head.rparen) &&
+			slices.Equal(base.members, head.members)
+	})
+}
+
+func equalModuleComments(base, head moduleComments) bool {
+	return slices.Equal(base.before, head.before) &&
+		slices.Equal(base.suffix, head.suffix) &&
+		slices.Equal(base.after, head.after)
 }
 
 func moduleRequirementAnnotations(requirement *modfile.Require) ([]string, error) {

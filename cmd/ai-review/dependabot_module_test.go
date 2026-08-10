@@ -138,6 +138,7 @@ func TestDependabotModuleOnlyCandidateRejectsNonVersionManifestChanges(t *testin
 	withUnchangedPolicyBump := strings.Replace(withPolicyDirectives, "v1.2.3", "v1.2.4", 1)
 	withReplace := dependabotCandidateBaseGoMod + "\nreplace example.com/direct => ../direct\n"
 	withReplaceBump := strings.Replace(withReplace, "v1.2.3", "v1.2.4", 1)
+	indirectVersionBump := strings.Replace(dependabotCandidateBaseGoMod, "v0.4.5", "v0.5.0", 1)
 
 	for _, test := range []struct {
 		name    string
@@ -153,21 +154,37 @@ func TestDependabotModuleOnlyCandidateRejectsNonVersionManifestChanges(t *testin
 			want:    true,
 		},
 		{
-			name:    "require added",
+			name:    "direct require added",
 			baseMod: dependabotCandidateBaseGoMod,
 			headMod: strings.Replace(versionBump, "\n)", "\n\texample.com/added v1.0.0\n)", 1),
+		},
+		{
+			name:    "indirect require added",
+			baseMod: dependabotCandidateBaseGoMod,
+			headMod: strings.Replace(versionBump, "\n)", "\n\texample.com/added v1.0.0 // indirect\n)", 1),
 			want:    true,
 		},
 		{
-			name:    "require removed",
+			name:    "indirect require removed",
 			baseMod: dependabotCandidateBaseGoMod,
 			headMod: strings.Replace(versionBump, "\n\texample.com/indirect v0.4.5 // indirect", "", 1),
 			want:    true,
 		},
 		{
-			name:    "indirect marker changed",
+			name:    "direct require removed",
+			baseMod: dependabotCandidateBaseGoMod,
+			headMod: strings.Replace(indirectVersionBump, "\texample.com/direct v1.2.3\n", "", 1),
+		},
+		{
+			name:    "retained indirect requirement becomes direct",
 			baseMod: dependabotCandidateBaseGoMod,
 			headMod: strings.Replace(versionBump, " // indirect", "", 1),
+			want:    true,
+		},
+		{
+			name:    "retained direct requirement becomes indirect",
+			baseMod: dependabotCandidateBaseGoMod,
+			headMod: strings.Replace(versionBump, "example.com/direct v1.2.4", "example.com/direct v1.2.4 // indirect", 1),
 			want:    true,
 		},
 		{
@@ -181,7 +198,7 @@ func TestDependabotModuleOnlyCandidateRejectsNonVersionManifestChanges(t *testin
 			headMod: strings.Replace(dependabotCandidateBaseGoMod, "\n\texample.com/indirect v0.4.5 // indirect", "", 1),
 		},
 		{
-			name:    "indirect marker changed without existing version bump",
+			name:    "retained indirect requirement becomes direct without existing version bump",
 			baseMod: dependabotCandidateBaseGoMod,
 			headMod: strings.Replace(dependabotCandidateBaseGoMod, " // indirect", "", 1),
 		},
@@ -266,6 +283,86 @@ func TestDependabotModuleOnlyCandidateRejectsNonVersionManifestChanges(t *testin
 				}
 				return
 			}
+			if err != nil {
+				t.Fatalf("dependabotModuleOnlyCandidate() error = %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("dependabotModuleOnlyCandidate() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDependabotModuleOnlyCandidateAuthenticatesRequireBlockComments(t *testing.T) {
+	versionBump := strings.Replace(dependabotCandidateBaseGoMod, "v1.2.3", "v1.2.4", 1)
+	policyBlocks := `module example.com/project
+
+go 1.26.5
+
+toolchain go1.26.5
+
+require ( // runtime policy
+	example.com/direct v1.2.3
+)
+
+require ( // tooling policy
+	example.com/indirect v0.4.5 // indirect
+)
+`
+	policyBlockSwap := `module example.com/project
+
+go 1.26.5
+
+toolchain go1.26.5
+
+require ( // runtime policy
+	example.com/indirect v0.4.5 // indirect
+)
+
+require ( // tooling policy
+	example.com/direct v1.2.4
+)
+`
+
+	for _, test := range []struct {
+		name    string
+		baseMod string
+		headMod string
+		want    bool
+	}{
+		{
+			name:    "block opener comment preserved",
+			baseMod: strings.Replace(dependabotCandidateBaseGoMod, "require (", "require ( // dependency policy", 1),
+			headMod: strings.Replace(versionBump, "require (", "require ( // dependency policy", 1),
+			want:    true,
+		},
+		{
+			name:    "block opener comment changed",
+			baseMod: strings.Replace(dependabotCandidateBaseGoMod, "require (", "require ( // dependency policy", 1),
+			headMod: strings.Replace(versionBump, "require (", "require ( // changed policy", 1),
+		},
+		{
+			name:    "block opener comment removed",
+			baseMod: strings.Replace(dependabotCandidateBaseGoMod, "require (", "require ( // dependency policy", 1),
+			headMod: versionBump,
+		},
+		{
+			name:    "block closing comment changed",
+			baseMod: strings.Replace(dependabotCandidateBaseGoMod, "\n)", "\n\t// dependency policy\n)", 1),
+			headMod: strings.Replace(versionBump, "\n)", "\n\t// changed policy\n)", 1),
+		},
+		{
+			name:    "requirements swapped across policy-commented blocks",
+			baseMod: policyBlocks,
+			headMod: policyBlockSwap,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := evaluateDependabotModuleCandidate(
+				t,
+				map[string]string{"go.mod": test.baseMod},
+				map[string]string{"go.mod": test.headMod},
+			)
 			if err != nil {
 				t.Fatalf("dependabotModuleOnlyCandidate() error = %v", err)
 			}

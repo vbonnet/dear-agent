@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,6 +85,11 @@ func TestWorkflowDependabotExceptionRequiresTrustedIdentityAndGitEvidence(t *tes
 		t.Fatalf("Dependabot authentication condition = %q", auth.If)
 	}
 	wantEnv := map[string]string{
+		"GH_TOKEN":        "${{ secrets.GITHUB_TOKEN }}",
+		"REPO":            "${{ github.repository }}",
+		"PR":              "${{ github.event.pull_request.number }}",
+		"BASE_SHA":        "${{ github.event.pull_request.base.sha }}",
+		"HEAD_SHA":        "${{ github.event.pull_request.head.sha }}",
 		"CANDIDATE":       "${{ steps.plan.outputs.dependabot_module_only_candidate }}",
 		"PR_AUTHOR_LOGIN": "${{ github.event.pull_request.user.login }}",
 		"PR_AUTHOR_ID":    "${{ github.event.pull_request.user.id }}",
@@ -99,11 +106,18 @@ func TestWorkflowDependabotExceptionRequiresTrustedIdentityAndGitEvidence(t *tes
 		}
 	}
 	for _, predicate := range []string{
-		`[ "$CANDIDATE" = true ]`,
-		`[ "$PR_AUTHOR_LOGIN" = 'dependabot[bot]' ]`,
-		`[ "$PR_AUTHOR_ID" = 49699333 ]`,
-		`[ "$PR_AUTHOR_TYPE" = Bot ]`,
-		`[ "$HEAD_REPO_ID" = "$BASE_REPO_ID" ]`,
+		`[ "$CANDIDATE" != true ]`,
+		`[ "$PR_AUTHOR_LOGIN" != 'dependabot[bot]' ]`,
+		`[ "$PR_AUTHOR_ID" != 49699333 ]`,
+		`[ "$PR_AUTHOR_TYPE" != Bot ]`,
+		`[ "$HEAD_REPO_ID" != "$BASE_REPO_ID" ]`,
+		`"repos/$REPO/commits/$HEAD_SHA"`,
+		`.author.id == 49699333`,
+		`.committer.id == 19864447`,
+		`.parents[0].sha == $base`,
+		`.event == "head_ref_force_pushed" and .commit_id == $head`,
+		`(.user.id == $id)`,
+		`(.role_name == "maintain" or .role_name == "admin" or .permission == "admin")`,
 	} {
 		if !strings.Contains(auth.Run, predicate) {
 			t.Errorf("Dependabot authentication omits %s", predicate)
@@ -124,6 +138,218 @@ func TestWorkflowDependabotExceptionRequiresTrustedIdentityAndGitEvidence(t *tes
 		!strings.Contains(publish.Run, "authenticated same-repository Dependabot dependency-version-led Go module update") {
 		t.Fatal("Dependabot exception does not publish an explicit neutral, non-model verdict")
 	}
+}
+
+func TestWorkflowDependabotHeadAuthenticationFailsClosed(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "review.yml")
+	raw, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string `yaml:"name"`
+				Run  string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	var authRun string
+	for _, step := range workflow.Jobs["review"].Steps {
+		if step.Name == "Authenticate Dependabot module-only exception" {
+			authRun = step.Run
+			break
+		}
+	}
+	if authRun == "" {
+		t.Fatal("Dependabot authentication step is missing")
+	}
+
+	const (
+		head = "1111111111111111111111111111111111111111"
+		base = "2222222222222222222222222222222222222222"
+	)
+	validCommit := dependabotHeadCommitJSON(head, base)
+	tests := []struct {
+		name       string
+		commitJSON string
+		eventsJSON string
+		permission string
+		failAPI    string
+		want       bool
+	}{
+		{
+			name:       "positive original live shape",
+			commitJSON: validCommit,
+			eventsJSON: `[[{"event":"labeled","actor":{"login":"dependabot[bot]","id":49699333,"type":"Bot"}}]]`,
+			want:       true,
+		},
+		{
+			name:       "positive maintainer triggered rebase",
+			commitJSON: validCommit,
+			eventsJSON: `[[{"event":"head_ref_force_pushed","commit_id":"` + head + `","actor":{"login":"maintainer","id":42,"type":"User"}}]]`,
+			permission: `{"permission":"write","role_name":"maintain","user":{"login":"maintainer","id":42,"type":"User"}}`,
+			want:       true,
+		},
+		{
+			name:       "mismatched current head SHA",
+			commitJSON: dependabotHeadCommitJSON("3333333333333333333333333333333333333333", base),
+			eventsJSON: `[[]]`,
+		},
+		{
+			name:       "mismatched parent SHA",
+			commitJSON: dependabotHeadCommitJSON(head, "3333333333333333333333333333333333333333"),
+			eventsJSON: `[[]]`,
+		},
+		{
+			name:       "non Dependabot author login",
+			commitJSON: strings.Replace(validCommit, `"login":"dependabot[bot]"`, `"login":"attacker"`, 1),
+			eventsJSON: `[[]]`,
+		},
+		{
+			name:       "non Dependabot author id",
+			commitJSON: strings.Replace(validCommit, `"id":49699333`, `"id":42`, 1),
+			eventsJSON: `[[]]`,
+		},
+		{
+			name:       "non Dependabot author type",
+			commitJSON: strings.Replace(validCommit, `"type":"Bot"`, `"type":"User"`, 1),
+			eventsJSON: `[[]]`,
+		},
+		{
+			name:       "missing API identity fields",
+			commitJSON: `{"sha":"` + head + `","commit":{},"parents":[{"sha":"` + base + `"}]}`,
+			eventsJSON: `[[]]`,
+		},
+		{
+			name:       "commit API failure",
+			commitJSON: validCommit,
+			eventsJSON: `[[]]`,
+			failAPI:    "commit",
+		},
+		{
+			name:       "timeline API failure",
+			commitJSON: validCommit,
+			eventsJSON: `[[]]`,
+			failAPI:    "events",
+		},
+		{
+			name:       "malformed timeline event preserves publication path",
+			commitJSON: validCommit,
+			eventsJSON: `[[1]]`,
+		},
+		{
+			name:       "ordinary writer replaced head",
+			commitJSON: validCommit,
+			eventsJSON: `[[{"event":"head_ref_force_pushed","commit_id":"` + head + `","actor":{"login":"writer","id":43,"type":"User"}}]]`,
+			permission: `{"permission":"write","user":{"login":"writer","id":43,"type":"User"}}`,
+		},
+		{
+			name:       "permission identity does not match timeline actor",
+			commitJSON: validCommit,
+			eventsJSON: `[[{"event":"head_ref_force_pushed","commit_id":"` + head + `","actor":{"login":"maintainer","id":42,"type":"User"}}]]`,
+			permission: `{"permission":"admin","role_name":"admin","user":{"login":"maintainer","id":99,"type":"User"}}`,
+		},
+		{
+			name:       "permission API failure",
+			commitJSON: validCommit,
+			eventsJSON: `[[{"event":"head_ref_force_pushed","commit_id":"` + head + `","actor":{"login":"maintainer","id":42,"type":"User"}}]]`,
+			failAPI:    "permission",
+		},
+		{
+			name:       "force push event belongs to older head",
+			commitJSON: validCommit,
+			eventsJSON: `[[{"event":"head_ref_force_pushed","commit_id":"3333333333333333333333333333333333333333","actor":{"login":"dependabot[bot]","id":49699333,"type":"Bot"}}]]`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := runDependabotHeadAuthentication(t, authRun, head, base, test.commitJSON, test.eventsJSON, test.permission, test.failAPI)
+			if got != test.want {
+				t.Fatalf("exempt = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func dependabotHeadCommitJSON(head, base string) string {
+	return fmt.Sprintf(`{
+		"sha":%q,
+		"author":{"login":"dependabot[bot]","id":49699333,"type":"Bot"},
+		"committer":{"login":"web-flow","id":19864447,"type":"User"},
+		"commit":{
+			"author":{"name":"dependabot[bot]","email":"49699333+dependabot[bot]@users.noreply.github.com"},
+			"committer":{"name":"GitHub","email":"noreply@github.com"}
+		},
+		"parents":[{"sha":%q}]
+	}`, head, base)
+}
+
+func runDependabotHeadAuthentication(t *testing.T, run, head, base, commitJSON, eventsJSON, permission, failAPI string) bool {
+	t.Helper()
+	tmp := t.TempDir()
+	output := filepath.Join(tmp, "github-output")
+	gh := filepath.Join(tmp, "gh")
+	fakeGH := `#!/bin/sh
+case "$*" in
+  *"/commits/"*)
+    [ "$FAKE_GH_FAIL" = commit ] && exit 1
+    printf '%s\n' "$FAKE_COMMIT_JSON"
+    ;;
+  *"/issues/"*"/events"*)
+    [ "$FAKE_GH_FAIL" = events ] && exit 1
+    printf '%s\n' "$FAKE_EVENTS_JSON"
+    ;;
+  *"/collaborators/"*"/permission"*)
+    [ "$FAKE_GH_FAIL" = permission ] && exit 1
+    printf '%s\n' "$FAKE_PERMISSION_JSON"
+    ;;
+  *) exit 64 ;;
+esac
+`
+	if err := os.WriteFile(gh, []byte(fakeGH), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Minute).Unix()
+	cmd := exec.Command("bash", "-c", run)
+	cmd.Env = append(os.Environ(),
+		"PATH="+tmp+":"+os.Getenv("PATH"),
+		"GITHUB_OUTPUT="+output,
+		"RUNNER_TEMP="+tmp,
+		fmt.Sprintf("AI_REVIEW_DEADLINE_UNIX=%d", deadline),
+		"GH_TOKEN=test",
+		"REPO=owner/repo",
+		"PR=1",
+		"BASE_SHA="+base,
+		"HEAD_SHA="+head,
+		"CANDIDATE=true",
+		"PR_AUTHOR_LOGIN=dependabot[bot]",
+		"PR_AUTHOR_ID=49699333",
+		"PR_AUTHOR_TYPE=Bot",
+		"HEAD_REPO_ID=123",
+		"BASE_REPO_ID=123",
+		"FAKE_COMMIT_JSON="+commitJSON,
+		"FAKE_EVENTS_JSON="+eventsJSON,
+		"FAKE_PERMISSION_JSON="+permission,
+		"FAKE_GH_FAIL="+failAPI,
+	)
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("authentication step hard-failed instead of preserving ordinary review: %v\n%s", err, raw)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := false
+	for line := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n") {
+		if value, ok := strings.CutPrefix(line, "exempt="); ok {
+			got = value == "true"
+		}
+	}
+	return got
 }
 
 func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
@@ -191,6 +417,7 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 	boundedCalls := map[string]int{
 		"Fetch PR head for diff":                          3,
 		"Build authenticated SPEC governance review plan": 1,
+		"Authenticate Dependabot module-only exception":   3,
 		"Clear override for a new pull request revision":  1,
 		"Attest override to the reviewed revision":        1,
 		"Detect override label":                           3,

@@ -167,14 +167,23 @@ jobs:
           echo "dependabot_module_only_candidate=$(jq -r '.dependabot_module_only_candidate' "$RUNNER_TEMP/ai-review-plan.json")" >> "$GITHUB_OUTPUT"
 
       # The plan authenticates exact Git objects but deliberately knows nothing
-      # about GitHub identities. Complete the decision from GitHub's trusted event:
-      # Dependabot's immutable app bot ID, Bot type, and numeric same-repository
-      # identity must all match. Logins, labels, actors, and branch names alone
-      # are insufficient because contributor-controlled workflows can spoof them.
+      # about GitHub identities. Complete the decision from GitHub's trusted APIs.
+      # Besides the immutable PR creator and numeric same-repository identity,
+      # authenticate the current head as one GitHub-created Dependabot commit
+      # directly on the protected base. A replaced head must also have an exact
+      # head_ref_force_pushed timeline event by Dependabot or by a principal that
+      # GitHub currently grants maintainer authority. This is deliberately
+      # fail-closed: API, schema, identity, ancestry, or timeline uncertainty
+      # leaves exempt=false and sends the PR through the ordinary review path.
       - name: Authenticate Dependabot module-only exception
         id: dependabot
         if: steps.plan.outcome == 'success'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CANDIDATE: ${{ steps.plan.outputs.dependabot_module_only_candidate }}
           PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
           PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
@@ -183,16 +192,128 @@ jobs:
           BASE_REPO_ID: ${{ github.event.repository.id }}
         run: |
           set -euo pipefail
-          exempt=false
-          if [ "$CANDIDATE" = true ] && \
-             [ "$PR_AUTHOR_LOGIN" = 'dependabot[bot]' ] && \
-             [ "$PR_AUTHOR_ID" = 49699333 ] && \
-             [ "$PR_AUTHOR_TYPE" = Bot ] && \
-             [ -n "$HEAD_REPO_ID" ] && \
-             [ "$HEAD_REPO_ID" = "$BASE_REPO_ID" ]; then
-            exempt=true
+          # Write the safe default first. Every rejection below exits zero so
+          # publication still runs, but the candidate cannot take the neutral
+          # exception and therefore follows the ordinary fail-closed gate.
+          echo 'exempt=false' >> "$GITHUB_OUTPUT"
+          reject() {
+            echo "::warning::Dependabot head provenance was not authenticated: $1"
+            exit 0
+          }
+          remaining_seconds() {
+            local now
+            now="$(date -u +%s)"
+            if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+              return 1
+            fi
+            printf '%s\n' "$((AI_REVIEW_DEADLINE_UNIX - now))"
+          }
+
+          if [ "$CANDIDATE" != true ] || \
+             [ "$PR_AUTHOR_LOGIN" != 'dependabot[bot]' ] || \
+             [ "$PR_AUTHOR_ID" != 49699333 ] || \
+             [ "$PR_AUTHOR_TYPE" != Bot ] || \
+             [ -z "$HEAD_REPO_ID" ] || \
+             [ "$HEAD_REPO_ID" != "$BASE_REPO_ID" ]; then
+            exit 0
           fi
-          echo "exempt=$exempt" >> "$GITHUB_OUTPUT"
+          [[ "$PR" =~ ^[0-9]+$ ]] || reject 'pull request number is malformed'
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || reject 'base SHA is malformed'
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || reject 'head SHA is malformed'
+
+          commit_json="$RUNNER_TEMP/dependabot-current-head.json"
+          remaining="$(remaining_seconds)" || reject 'trusted review deadline is unavailable'
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/commits/$HEAD_SHA" > "$commit_json"; then
+            reject 'current-head commit API lookup failed'
+          fi
+          [ "$(wc -c < "$commit_json")" -le 1048576 ] || reject 'current-head commit response is oversized'
+          if ! jq -e --arg head "$HEAD_SHA" --arg base "$BASE_SHA" '
+            (.sha == $head) and
+            (.author.login == "dependabot[bot]") and
+            (.author.id == 49699333) and
+            (.author.type == "Bot") and
+            (.commit.author.name == "dependabot[bot]") and
+            (.commit.author.email == "49699333+dependabot[bot]@users.noreply.github.com") and
+            (.committer.login == "web-flow") and
+            (.committer.id == 19864447) and
+            (.committer.type == "User") and
+            (.commit.committer.name == "GitHub") and
+            (.commit.committer.email == "noreply@github.com") and
+            ((.parents | type) == "array") and
+            (.parents | length == 1) and
+            (.parents[0].sha == $base)
+          ' "$commit_json" >/dev/null 2>&1; then
+            reject 'current head is not the expected single Dependabot commit on the protected base'
+          fi
+
+          events_json="$RUNNER_TEMP/dependabot-head-events.json"
+          remaining="$(remaining_seconds)" || reject 'trusted review deadline expired before timeline lookup'
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/issues/$PR/events?per_page=100" > "$events_json"; then
+            reject 'pull-request timeline API lookup failed'
+          fi
+          [ "$(wc -c < "$events_json")" -le 2097152 ] || reject 'pull-request timeline response is oversized'
+          if ! jq -e '((type == "array") and (all(.[]; (type == "array") and all(.[]; type == "object"))))' "$events_json" >/dev/null 2>&1; then
+            reject 'pull-request timeline response is malformed'
+          fi
+
+          if ! mutation_count="$(jq -r '[((add // [])[]) | select(.event == "head_ref_force_pushed" or .event == "head_ref_deleted" or .event == "head_ref_restored")] | length' "$events_json")"; then
+            reject 'pull-request timeline mutation evidence is malformed'
+          fi
+          if ! matching_actor="$(jq -r --arg head "$HEAD_SHA" '
+              [((add // [])[]) |
+                select(.event == "head_ref_force_pushed" and .commit_id == $head)] |
+              last // empty |
+              [.actor.login, (.actor.id | tostring), .actor.type] |
+              @tsv
+            ' "$events_json")"; then
+            reject 'pull-request timeline actor evidence is malformed'
+          fi
+
+          # No head-ref mutation means this is still the original single
+          # Dependabot commit authenticated above. Once the branch has changed,
+          # the timeline must bind the exact current SHA to an authenticated
+          # actor; an event for any other revision is not transferable.
+          if [ "$mutation_count" = 0 ]; then
+            echo 'exempt=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ -n "$matching_actor" ] || reject 'no exact current-head force-push event exists'
+          IFS=$'\t' read -r head_actor_login head_actor_id head_actor_type <<< "$matching_actor"
+          if [ "$head_actor_login" = 'dependabot[bot]' ] && \
+             [ "$head_actor_id" = 49699333 ] && \
+             [ "$head_actor_type" = Bot ]; then
+            echo 'exempt=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A maintainer-triggered Dependabot rebase records the maintainer as
+          # the force-push actor even though GitHub creates the authenticated
+          # bot/web-flow commit. Accept only authority GitHub says already has
+          # the repository's maintain/admin override power; ordinary writers
+          # cannot turn spoofed commit metadata into a neutral verdict.
+          [[ "$head_actor_login" =~ ^[A-Za-z0-9-]+$ ]] || reject 'head actor login is malformed'
+          permission_file="$RUNNER_TEMP/dependabot-head-actor-permission.json"
+          remaining="$(remaining_seconds)" || reject 'trusted review deadline expired before actor lookup'
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/collaborators/$head_actor_login/permission" > "$permission_file"; then
+            reject 'head actor permission lookup failed'
+          fi
+          if jq -e \
+            --arg login "$head_actor_login" \
+            --argjson id "$head_actor_id" \
+            --arg type "$head_actor_type" '
+              (.user.login == $login) and
+              (.user.id == $id) and
+              (.user.type == $type) and
+              (.role_name == "maintain" or .role_name == "admin" or .permission == "admin")
+            ' "$permission_file" >/dev/null 2>&1; then
+            echo 'exempt=true' >> "$GITHUB_OUTPUT"
+          fi
 
       # A human override approves one reviewed revision, not a mutable branch.
       # Remove it as soon as a contributor pushes a new head; the resulting

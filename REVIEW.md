@@ -135,10 +135,16 @@ plan therefore identifies a narrow automation candidate when Git proves that a
 current-base change modifies only `go.mod` (optionally with `go.sum`), preserves
 the module, Go, toolchain, and all non-require directives, changes at least one
 existing requirement version, and has no other review or escalation evidence.
-The parsed require graph may add, remove, or reclassify transitive requirements
-as part of that authenticated update. The workflow may publish a neutral,
-non-model verdict only when GitHub's trusted event context also matches
-Dependabot's immutable app-bot ID and the numeric repository identity.
+The parsed require graph may add or remove only requirements marked indirect,
+or reclassify retained requirements between direct and indirect, as part of
+that authenticated update. Direct requirements may not be added or removed.
+Membership of any policy-annotated require block and every non-tool-managed
+requirement or require-block annotation remain fixed. The workflow may publish
+a neutral, non-model verdict only when GitHub's trusted APIs also match
+Dependabot's immutable app-bot ID and numeric repository identity, bind the
+exact current head to the canonical Dependabot/GitHub commit identities and the
+current protected-base parent, and show either an unmodified original head or
+an exact-head force push by Dependabot or an existing maintain/admin principal.
 
 This is not a contributor-facing bypass. A fork, a claimed bot login, a branch
 name, a label, a graph-only change with no existing version bump, any `replace`,

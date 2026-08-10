@@ -24,13 +24,24 @@ checks."
 
 The trusted SPEC-review workflow independently treats an authenticated
 same-repository Dependabot dependency-version-led `go.mod`/`go.sum` delta as
-neutral. Its protected-base classifier permits parsed require-graph updates only
-alongside an existing requirement version bump, while rejecting non-require
-module changes, special directives, extra files, stale branches, and ambiguous
-evidence; the workflow then verifies the immutable Dependabot app-bot ID and
-numeric repository identity from GitHub's trusted event context. This avoids
-calling a dependency version update a SPEC change without creating a
-contributor-controlled bypass.
+neutral. Its protected-base classifier permits indirect requirement membership
+changes and retained-requirement directness changes only alongside an existing
+requirement version bump. Direct requirements may not be added or removed.
+Membership of policy-annotated require blocks and non-tool-managed requirement
+or require-block annotations remain fixed, and the classifier rejects
+non-require module changes, special directives, extra files, stale branches,
+and ambiguous evidence. The workflow then verifies the immutable Dependabot app-bot ID and
+numeric repository identity, binds the REST commit response to the exact
+reviewed head and current protected-base parent, and matches the canonical
+Dependabot author and GitHub `web-flow` committer identities. An original head
+must have no head-reference mutation event; a replaced head needs an exact-SHA
+`head_ref_force_pushed` event by Dependabot or by an actor whose current GitHub
+identity and permission response prove pre-existing `maintain` or `admin`
+authority. API failures and ambiguous provenance return to ordinary fail-closed
+review rather than crashing verdict publication. This avoids calling a
+dependency version update a SPEC change without creating an ordinary-writer
+bypass; the maintainer arm adds no authority beyond the audited revision
+override maintainers already possess.
 
 Rejected: making Gemini review bumps (wrong layer, wastes quota); a dependabot
 arm inside the merge loop (puts mechanical bumps on the serial governed path);
