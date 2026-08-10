@@ -873,13 +873,18 @@ func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) 
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			repo := newReviewRepo(t)
+			before, after := "before\n", "after\n"
+			if tc.path == "go.mod" {
+				before = dependabotCandidateBaseGoMod
+				after = strings.Replace(dependabotCandidateBaseGoMod, "v1.2.3", "v1.2.4", 1)
+			}
 			if tc.path != specAuthoringPolicyPath && tc.path != activeHarnessRegistryPath {
-				writeReviewFile(t, repo, tc.path, "before\n")
+				writeReviewFile(t, repo, tc.path, before)
 				gittest.Run(t, repo, "add", tc.path)
 				gittest.Run(t, repo, "commit", "-m", "add review input")
 			}
 			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
-			writeReviewFile(t, repo, tc.path, "after\n")
+			writeReviewFile(t, repo, tc.path, after)
 			gittest.Run(t, repo, "add", tc.path)
 			gittest.Run(t, repo, "commit", "-m", "change review input")
 			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
@@ -936,6 +941,25 @@ func TestBuildReviewPlanMarksOnlySafeModuleDeltaAsDependabotCandidate(t *testing
 	}
 	if marked.DependabotModuleOnlyCandidate || len(marked.EscalationTriggers) == 0 {
 		t.Fatalf("explicit escalation entered dependency automation path: %#v", marked)
+	}
+}
+
+func TestBuildReviewPlanSurfacesDependabotCandidateEvidenceErrors(t *testing.T) {
+	repo := newReviewRepo(t)
+	writeReviewFile(t, repo, "go.mod", dependabotCandidateBaseGoMod)
+	gittest.Run(t, repo, "add", "go.mod")
+	gittest.Run(t, repo, "commit", "-m", "add module input")
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+
+	writeReviewFile(t, repo, "go.mod", "module example.com/project\nrequire (\n")
+	gittest.Run(t, repo, "add", "go.mod")
+	gittest.Run(t, repo, "commit", "-m", "malform module input")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	_, err := buildReviewPlan(context.Background(), base, head)
+	if err == nil || !strings.Contains(err.Error(), "evaluate Dependabot module-only candidate") || !strings.Contains(err.Error(), "parse head go.mod") {
+		t.Fatalf("buildReviewPlan() error = %v, want wrapped malformed candidate evidence", err)
 	}
 }
 

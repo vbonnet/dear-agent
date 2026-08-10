@@ -405,7 +405,10 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		return plan, nil
 	}
 	dependabotCandidate, err := dependabotModuleOnlyCandidate(ctx, mergeBase, head)
-	plan.DependabotModuleOnlyCandidate = err == nil && dependabotCandidate &&
+	if err != nil {
+		return reviewPlan{}, fmt.Errorf("evaluate Dependabot module-only candidate: %w", err)
+	}
+	plan.DependabotModuleOnlyCandidate = dependabotCandidate &&
 		len(plan.Changes) == 0 &&
 		len(plan.EscalationTriggers) == 0 &&
 		onlyReviewerDependencyReasons(plan.HumanReasons)
