@@ -639,16 +639,30 @@ func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {
 		failAPI     bool
 		outcome     string
 		dependabot  bool
+		isFork      bool
+		keyPresent  bool
+		keyless     bool // gate step's keyless_cannot_run output (exit 78)
 		want        string
 	}{
 		{name: "approved current-base review", currentBase: base, outcome: "success", want: "success"},
 		{name: "neutral current-base Dependabot review", currentBase: base, outcome: "skipped", dependabot: true, want: "neutral"},
 		{name: "protected main advanced during review", currentBase: advanced, outcome: "success", want: "failure"},
 		{name: "freshness API failure", currentBase: base, failAPI: true, outcome: "success", want: "failure"},
+		// Only the gate's explicit cannot-run-without-credential exit (78,
+		// surfaced as keyless_cannot_run=true) publishes neutral-with-warning,
+		// and only same-repository with the key affirmatively absent. A
+		// keyless failure WITHOUT that discrimination (plan build error,
+		// expired deadline, timeout) stays a failure, as do fork PRs,
+		// stale-base publication, and any failure while a key is present.
+		{name: "keyless same-repo cannot-run failure is neutral with warning", currentBase: base, outcome: "failure", keyless: true, want: "neutral"},
+		{name: "keyless failure without cannot-run discrimination stays failure", currentBase: base, outcome: "failure", want: "failure"},
+		{name: "keyless fork cannot-run failure stays failure", currentBase: base, outcome: "failure", keyless: true, isFork: true, want: "failure"},
+		{name: "keyless cannot-run failure with stale base stays failure", currentBase: advanced, outcome: "failure", keyless: true, want: "failure"},
+		{name: "gate failure with key present stays failure", currentBase: base, outcome: "failure", keyPresent: true, want: "failure"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := runReviewPublication(t, publish.Run, base, test.currentBase, test.outcome, test.dependabot, test.failAPI)
+			got := runReviewPublication(t, publish.Run, base, test.currentBase, test.outcome, test.dependabot, test.isFork, test.keyPresent, test.keyless, test.failAPI)
 			if got != test.want {
 				t.Fatalf("conclusion = %q, want %q", got, test.want)
 			}
@@ -656,7 +670,7 @@ func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {
 	}
 }
 
-func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, dependabot, failAPI bool) string {
+func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, dependabot, isFork, keyPresent, keyless, failAPI bool) string {
 	t.Helper()
 	tmp := t.TempDir()
 	output := filepath.Join(tmp, "github-output")
@@ -710,12 +724,14 @@ func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, 
 		"REPO=owner/repo",
 		"OUTCOME="+outcome,
 		"KEY_OUTCOME=success",
-		"KEY_PRESENT=false",
+		"KEY_PRESENT="+fmt.Sprint(keyPresent),
 		"OVERRIDE=false",
 		"PLAN_OUTCOME=success",
 		"REVIEW_RELEVANT=false",
 		"DEPENDABOT_OUTCOME="+dependabotOutcome,
 		"DEPENDABOT_EXEMPT="+dependabotExempt,
+		"IS_FORK="+fmt.Sprint(isFork),
+		"KEYLESS_CANNOT_RUN="+fmt.Sprint(keyless),
 		"FAKE_CURRENT_BASE="+currentBase,
 		"FAKE_GH_FAIL="+fmt.Sprint(failAPI),
 	)

@@ -94,6 +94,22 @@ per-dimension API failure, synthesis failure, an unparseable outcome, or an
 oversize diff, all fail the workflow check. They block a merge only when the
 provider has separately made that exact check required.
 
+**Keyless exception (skip-with-warning).** While `ANTHROPIC_API_KEY` is not
+configured as a repository secret, a same-repository, non-override run whose
+*sole* blocker is the absent credential — an otherwise-reviewable changed
+SPEC, or a §3 escalation whose accompanying model review cannot run — exits
+with the distinct code 78 ("review cannot run"), and the workflow publishes
+that one disposition as a **neutral-with-warning** check instead of a
+failure: no approval is claimed, the command still posts its
+`needs-human-review` evidence on the PR, and the neutral comment states that
+human review is recommended before merge. Conclusive SPEC-governance verdicts
+that need no model (ownership edges, reviewer-dependency changes,
+traceability failures, stale-base evidence) stay blocking even keyless, as do
+fork PRs, plan build errors, expired deadlines, override audit failures, and
+any failure while a key *is* configured. Configuring the secret makes exit 78
+unreachable and restores the full fail-closed contract above with no further
+change.
+
 > [!NOTE]
 > **Provider state verified 2026-07-31**: `ANTHROPIC_API_KEY` is unset and the
 > active GitHub ruleset has no AI-review required context. The workflow source
