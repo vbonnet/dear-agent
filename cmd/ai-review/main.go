@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -278,6 +279,14 @@ func deterministicEscalationTriggers(ctx context.Context, base, head, prBody str
 	if err != nil {
 		return nil, err
 	}
+	treeIdentities, err := loadTreeIdentityEvidence(ctx, base, head)
+	if err != nil {
+		return nil, err
+	}
+	return deterministicEscalationTriggersWithEvidence(ctx, base, head, prBody, changed, treeIdentities)
+}
+
+func deterministicEscalationTriggersWithEvidence(ctx context.Context, base, head, prBody string, changed []string, treeIdentities treeIdentityEvidence) ([]string, error) {
 	commitMessages, err := gitCommitMessagesContext(ctx, base, head)
 	if err != nil {
 		return nil, err
@@ -291,9 +300,37 @@ func deterministicEscalationTriggers(ctx context.Context, base, head, prBody str
 		return nil, err
 	}
 	triggers := EscalationTriggers(changed, prBody, commitMessages)
+	identityTriggers, err := checkoutIdentityTriggers(ctx, treeIdentities, changed)
+	if err != nil {
+		return nil, err
+	}
+	triggers = append(triggers, identityTriggers...)
+	triggers = append(triggers, unsafeAIReviewTestIdentityTriggers(treeIdentities, changed)...)
+	triggers = append(triggers, privilegedWorkflowEscalationTriggersWithEvidence(ctx, treeIdentities, changed)...)
 	triggers = append(triggers, BinaryEscalationTriggers(binaries)...)
 	triggers = append(triggers, GitlinkEscalationTriggers(gitlinks)...)
-	return triggers, nil
+	return boundedUniqueEscalationTriggers(triggers)
+}
+
+const maxDeterministicEscalationTriggers = 256
+
+func boundedUniqueEscalationTriggers(triggers []string) ([]string, error) {
+	seen := make(map[string]bool)
+	for _, trigger := range triggers {
+		if trigger == "" || seen[trigger] {
+			continue
+		}
+		seen[trigger] = true
+		if len(seen) > maxDeterministicEscalationTriggers {
+			return nil, errors.New("deterministic escalation trigger count exceeds the review limit")
+		}
+	}
+	ordered := make([]string, 0, len(seen))
+	for trigger := range seen {
+		ordered = append(ordered, trigger)
+	}
+	sort.Strings(ordered)
+	return ordered, nil
 }
 
 func main() {

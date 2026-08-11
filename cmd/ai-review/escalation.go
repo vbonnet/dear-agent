@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -28,23 +29,22 @@ var escalationRules = []escalationRule{
 			// Git tree paths are case-sensitive, but supported case-insensitive
 			// checkouts can make an added case variant shadow the canonical
 			// trust-root bytes. Match case-fold aliases as protected too.
-			lower := strings.ToLower(p)
-			return lower == "review.md" ||
-				lower == ".github/workflows/review.yml" ||
-				strings.HasPrefix(lower, ".github/rulesets/")
+			return normalizedPathRelated(p, "REVIEW.md") ||
+				normalizedPathRelated(p, ".github/workflows/review.yml") ||
+				normalizedPathRelated(p, ".github/rulesets")
 		},
 	},
 	{
 		reason: "agent permissions or authorization change",
 		match: func(p string) bool {
-			lower := strings.ToLower(p)
+			lower := normalizedPathIdentity(p)
 			base := basename(lower)
 			// Matched by concept rather than by an enumerated path list: any
 			// permission/authorization surface is a §3 trigger, and an
 			// allowlist of specific packages is structurally incomplete (a new
 			// owner can always be added). Over-escalation here is the safe
 			// direction — REVIEW.md §3 calls escalation "a correct outcome".
-			return strings.HasPrefix(lower, "agm/internal/rbac/") ||
+			return normalizedPathRelated(p, "agm/internal/rbac") ||
 				base == "settings.json" || base == "settings.local.json" ||
 				strings.Contains(lower, "permission") ||
 				strings.Contains(lower, "authorization") ||
@@ -54,8 +54,11 @@ var escalationRules = []escalationRule{
 	{
 		reason: "pre/post-tool hook change or hook registration",
 		match: func(p string) bool {
-			lower := strings.ToLower(p)
+			lower := normalizedPathIdentity(p)
 			base := basename(lower)
+			if normalizedPathRelated(p, ".codex/config.toml") {
+				return true
+			}
 			// Registration files (hooks.json) and the packages that own hook
 			// implementations must match too — a hooks.json has no "/hooks/"
 			// segment, and a hook implementation's basename is often main.go.
@@ -64,9 +67,12 @@ var escalationRules = []escalationRule{
 			// unrelated application packages (e.g. engram/hooks/), which would
 			// force needless human review on routine maintenance.
 			for _, owner := range toolHookDirs {
-				if strings.Contains(lower, owner) {
+				if normalizedPathRelated(p, owner) {
 					return true
 				}
+			}
+			if pathHasComponentSuffix(lower, "-hooks") {
+				return true
 			}
 			// Registration/installer surfaces own hook wiring even when they
 			// live outside a hooks directory (e.g. agm/cmd/agm/install_hooks.go
@@ -83,12 +89,12 @@ var escalationRules = []escalationRule{
 	{
 		reason: "security boundary change (write guard, deny rules, PII manifest)",
 		match: func(p string) bool {
-			lower := strings.ToLower(p)
+			lower := normalizedPathIdentity(p)
 			// Match the packages that *own* the boundary, not just filename
 			// spellings — internal/fsguard owns the pre-tool write guards and
 			// ~/src enforcement, and its path contains none of the spellings.
 			for _, owner := range securityBoundaryDirs {
-				if strings.Contains(lower, owner) {
+				if normalizedPathRelated(p, owner) {
 					return true
 				}
 			}
@@ -103,12 +109,12 @@ var escalationRules = []escalationRule{
 	{
 		reason: "database schema or migration change",
 		match: func(p string) bool {
-			lower := strings.ToLower(p)
+			lower := normalizedPathIdentity(p)
 			base := basename(lower)
-			return strings.HasPrefix(lower, "agm/internal/dolt/") ||
+			return normalizedPathRelated(p, "agm/internal/dolt") ||
 				strings.HasSuffix(lower, ".sql") ||
-				strings.Contains(lower, "/migrations/") ||
-				strings.Contains(lower, "/migration/") ||
+				pathHasComponent(lower, "migrations") ||
+				pathHasComponent(lower, "migration") ||
 				base == "schema.sql" || base == "schema.go" ||
 				strings.HasSuffix(lower, "_schema.sql")
 		},
@@ -116,37 +122,52 @@ var escalationRules = []escalationRule{
 	{
 		reason: "infrastructure that is expensive to reverse (IaC, launchd, systemd)",
 		match: func(p string) bool {
-			lower := strings.ToLower(p)
+			lower := normalizedPathIdentity(p)
 			return strings.HasSuffix(lower, ".tf") ||
 				strings.HasSuffix(lower, ".plist") ||
 				strings.HasSuffix(lower, ".service") ||
-				strings.Contains(lower, "/launchd/") ||
-				strings.Contains(lower, "/systemd/")
+				pathHasComponent(lower, "launchd") ||
+				pathHasComponent(lower, "systemd")
 		},
 	},
 }
 
 // toolHookDirs are the directories that own pre/post-tool hooks — the surface
-// REVIEW.md §3 means by "pre-tool hooks". Deliberately narrower than any
+// REVIEW.md §3 means by "pre/post-tool hooks". Deliberately narrower than any
 // directory named "hooks".
 var toolHookDirs = []string{
-	".claude/hooks/",
-	".config/claude-code/hooks/",
-	".config/git/hooks/",
+	".claude/hooks",
+	".config/claude-code/hooks",
+	".config/git/hooks",
 	".agents/hooks",
 	".codex/hooks",
-	"agm/hooks/",
-	"-hooks/",
+	".opencode/hooks",
+	".pi/guardrails",
+	"agm/.githooks",
+	"agm/hooks",
+	"agm/cmd/agm/hooks",
+	"agm/internal/hooks",
+	"agm/internal/codexhooks",
 }
 
-// securityBoundaryDirs are the packages that own a security boundary. A change
-// anywhere inside one escalates, regardless of the individual filename.
+// securityBoundaryDirs are the packages that own a security boundary. A
+// production or governance change anywhere inside one escalates, regardless
+// of the individual filename. EscalationTriggers separately keeps Go test-only
+// changes under cmd/ai-review in the automated review loop.
 var securityBoundaryDirs = []string{
-	"internal/fsguard/",
-	"internal/safegit/",
-	"internal/writeguard/",
-	"pkg/fsguard/",
-	"cmd/ai-review/",
+	"internal/fsguard",
+	"internal/safegit",
+	"internal/writeguard",
+	"pkg/fsguard",
+	"cmd/ai-review",
+}
+
+func isAIReviewGoTestPath(path string) bool {
+	lower := normalizedPathIdentity(path)
+	// Go excludes only the exact lowercase ASCII _test.go suffix from a normal
+	// package build. Fold the owner directory for checkout-alias safety, but
+	// never fold the suffix: *_TEST.go and *_teſt.go can be production inputs.
+	return strings.HasPrefix(lower, "cmd/ai-review/") && strings.HasSuffix(path, "_test.go")
 }
 
 // basename returns the final path element.
@@ -155,6 +176,19 @@ func basename(p string) string {
 		return p[i+1:]
 	}
 	return p
+}
+
+func pathHasComponent(path, component string) bool {
+	return slices.Contains(strings.Split(path, "/"), component)
+}
+
+func pathHasComponentSuffix(path, suffix string) bool {
+	for part := range strings.SplitSeq(path, "/") {
+		if strings.HasSuffix(part, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // BinaryEscalationTriggers returns a trigger per binary path. A binary change
@@ -199,6 +233,12 @@ func EscalationTriggers(changedPaths []string, prBody, commitMessages string) []
 	for _, p := range changedPaths {
 		p = strings.TrimSpace(p)
 		if p == "" {
+			continue
+		}
+		// Go test files cannot enter the production reviewer binary. Keep a
+		// pure test-hardening change autonomous while --no-renames ensures that
+		// either production side of a boundary-crossing rename is still seen.
+		if isAIReviewGoTestPath(p) {
 			continue
 		}
 		for _, rule := range escalationRules {

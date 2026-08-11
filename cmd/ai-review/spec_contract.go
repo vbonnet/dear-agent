@@ -343,20 +343,68 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 	if len(fields)/2 > maxChangedPaths {
 		return reviewPlan{}, errors.New("changed-path count exceeds the review limit")
 	}
+	changedPaths := make([]string, 0, len(fields)/2)
 	for i := 0; i < len(fields); i += 2 {
 		status, path := string(fields[i]), string(fields[i+1])
 		if len(status) != 1 || !safeGitPath(path) {
 			return reviewPlan{}, errors.New("unsafe changed path evidence")
 		}
-		if specReviewOwnerPath(path) {
+		changedPaths = append(changedPaths, path)
+	}
+	// An authenticated empty diff has no path, blob, or checkout identity to
+	// classify. Preserve explicit PR/commit escalation markers, but avoid
+	// loading the full tree: unrelated historical aliases must not turn a
+	// no-change review into a failure.
+	if len(changedPaths) == 0 {
+		commitMessages, err := gitCommitMessagesContext(ctx, mergeBase, head)
+		if err != nil {
+			return reviewPlan{}, fmt.Errorf("collect empty-diff commit evidence: %w", err)
+		}
+		plan.EscalationTriggers, err = boundedUniqueEscalationTriggers(EscalationTriggers(nil, prBody, commitMessages))
+		if err != nil {
+			return reviewPlan{}, err
+		}
+		plan.ReviewRelevant = len(plan.EscalationTriggers) > 0
+		return plan, nil
+	}
+	treeIdentities, err := loadTreeIdentityEvidence(ctx, mergeBase, head)
+	if err != nil {
+		return reviewPlan{}, fmt.Errorf("authenticate Git tree path identities: %w", err)
+	}
+	specControlRisks, err := changedSpecControlIdentityRisks(ctx, treeIdentities, changedPaths)
+	if err != nil {
+		return reviewPlan{}, fmt.Errorf("authenticate SPEC control path identities: %w", err)
+	}
+	riskPaths := make([]string, 0, len(specControlRisks))
+	for path := range specControlRisks {
+		riskPaths = append(riskPaths, path)
+	}
+	sort.Strings(riskPaths)
+	for _, path := range riskPaths {
+		plan.HumanReasons = append(plan.HumanReasons, specControlRisks[path])
+	}
+	for i := 0; i < len(fields); i += 2 {
+		status, path := string(fields[i]), string(fields[i+1])
+		if specReviewOwnerPathAuthenticated(path, treeIdentities) {
 			plan.HumanReasons = append(plan.HumanReasons, "SPEC review enforcement owner change requires maintainer review ("+path+")")
 		}
 		if specReviewDependencyPath(path) {
 			plan.HumanReasons = append(plan.HumanReasons, "SPEC reviewer dependency graph change requires maintainer review ("+path+")")
 		}
+		// Noncanonical case/normalization aliases can shadow a canonical SPEC
+		// control file on supported checkouts while Git reports only the alias.
+		// Fail closed before treating that path as an ordinary file.
+		controlName, exactControlName := specControlBasename(path)
+		if specControlRisks[path] != "" {
+			continue
+		}
+		if controlName != "" && !exactControlName {
+			plan.HumanReasons = append(plan.HumanReasons, fmt.Sprintf("SPEC control path case-fold alias requires maintainer review (%s aliases %s)", path, controlName))
+			continue
+		}
 		// Exact basename comparisons deliberately avoid suffix matching (for
 		// example, NOT-A-SPEC.md and NOT-SPEC.owner are ordinary files).
-		if filepath.Base(path) == "SPEC.owner" {
+		if controlName == "SPEC.owner" {
 			action, err := changedContractAction(status)
 			if err != nil {
 				return reviewPlan{}, fmt.Errorf("unsupported changed SPEC.owner status %q", status)
@@ -364,7 +412,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 			plan.HumanReasons = append(plan.HumanReasons, fmt.Sprintf("SPEC ownership edge %s requires maintainer review (%s)", action, path))
 			continue
 		}
-		if filepath.Base(path) != "SPEC.md" {
+		if controlName != "SPEC.md" {
 			continue
 		}
 		switch status {
@@ -388,7 +436,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		return plan.Changes[i].Path < plan.Changes[j].Path
 	})
 	plan.ReviewNeeded = len(plan.Changes) > 0 || plan.needsHuman()
-	triggers, err := deterministicEscalationTriggers(ctx, mergeBase, head, prBody)
+	triggers, err := deterministicEscalationTriggersWithEvidence(ctx, mergeBase, head, prBody, changedPaths, treeIdentities)
 	if err != nil {
 		return reviewPlan{}, fmt.Errorf("collect deterministic escalation evidence: %w", err)
 	}
@@ -441,7 +489,7 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 	// Ownership and reciprocal traceability are deterministic prechecks over
 	// authenticated HEAD blobs. They run before the semantic reviewer, whose
 	// judgment cannot repair missing evidence or choose a contract owner.
-	headSpecs, err := loadHeadSpecCorpus(ctx, head)
+	headSpecs, err := loadHeadSpecCorpusFromTree(ctx, treeIdentities.head)
 	if err != nil {
 		return reviewPlan{}, fmt.Errorf("load HEAD SPEC corpus: %w", err)
 	}
@@ -770,18 +818,41 @@ func changedContractAction(status string) (string, error) {
 	}
 }
 
+func specControlBasename(path string) (string, bool) {
+	base := filepath.Base(path)
+	switch normalizedPathIdentity(base) {
+	case "spec.md":
+		return "SPEC.md", base == "SPEC.md"
+	case "spec.owner":
+		return "SPEC.owner", base == "SPEC.owner"
+	default:
+		return "", false
+	}
+}
+
 // specReviewOwnerPath identifies the direct protected-base owners whose future
 // behavior determines whether changed SPEC contracts are reviewed at all. A
 // revision cannot use this gate to approve a change to its own policy,
 // workflow, implementation, or deterministic EARS parser.
 func specReviewOwnerPath(path string) bool {
-	return slices.Contains(canonicalSpecAuthoringOwnerPaths[:], path) ||
-		path == activeHarnessRegistryPath ||
-		path == ".github/workflows/review.yml" ||
-		path == ".github/rulesets/main.json" ||
-		strings.HasPrefix(path, "cmd/ai-review/") ||
-		strings.HasPrefix(path, "internal/earslint/") ||
-		strings.HasPrefix(path, "internal/markdownvisible/")
+	return specReviewProtectedOwnerPath(path) && !isAIReviewGoTestPath(path)
+}
+
+func specReviewProtectedOwnerPath(path string) bool {
+	return normalizedPathRelatedToAny(path, canonicalSpecAuthoringOwnerPaths[:]) ||
+		normalizedPathRelated(path, activeHarnessRegistryPath) ||
+		normalizedPathRelated(path, ".github/workflows/review.yml") ||
+		normalizedPathRelated(path, ".github/rulesets/main.json") ||
+		normalizedPathRelated(path, "cmd/ai-review") ||
+		normalizedPathRelated(path, "internal/earslint") ||
+		normalizedPathRelated(path, "internal/markdownvisible")
+}
+
+func specReviewOwnerPathAuthenticated(path string, evidence treeIdentityEvidence) bool {
+	if !specReviewProtectedOwnerPath(path) {
+		return false
+	}
+	return !evidence.safeAIReviewTestPath(path)
 }
 
 // specReviewDependencyPath identifies build inputs that can change the trusted
@@ -789,11 +860,11 @@ func specReviewOwnerPath(path string) bool {
 // supply-chain boundary for ordinary contributors; the workflow may separately
 // recognize a narrowly authenticated Dependabot dependency-version-led update.
 func specReviewDependencyPath(path string) bool {
-	return path == "go.mod" ||
-		path == "go.sum" ||
-		path == "go.work" ||
-		path == "go.work.sum" ||
-		strings.HasPrefix(path, "vendor/")
+	return normalizedPathRelated(path, "go.mod") ||
+		normalizedPathRelated(path, "go.sum") ||
+		normalizedPathRelated(path, "go.work") ||
+		normalizedPathRelated(path, "go.work.sum") ||
+		normalizedPathRelated(path, "vendor")
 }
 
 func loadActiveHarnessInventory(ctx context.Context, base string) (activeHarnessInventoryEvidence, error) {
@@ -914,8 +985,11 @@ func activeHarnessMember(name string) (activeHarnessMemberEvidence, bool) {
 
 //nolint:gocyclo // Explicit intrinsic-root handling prevents logical-seam and future-member bypasses.
 func harnessLocalSpecOwner(path string, members []activeHarnessMemberEvidence) bool {
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 || filepath.Base(path) != "SPEC.md" {
+	if filepath.Base(path) != "SPEC.md" {
+		return false
+	}
+	parts := strings.Split(normalizedPathIdentity(path), "/")
+	if len(parts) < 2 {
 		return false
 	}
 	// Dotted configuration roots, plugin roots, and explicit harness groupings
@@ -930,15 +1004,19 @@ func harnessLocalSpecOwner(path string, members []activeHarnessMemberEvidence) b
 		}
 	}
 	for _, member := range members {
-		if slices.Contains(member.Aliases, parts[0]) {
+		aliases := make([]string, len(member.Aliases))
+		for i, alias := range member.Aliases {
+			aliases[i] = normalizedPathIdentity(alias)
+		}
+		if slices.Contains(aliases, parts[0]) {
 			return true
 		}
 		for _, part := range parts[:len(parts)-1] {
-			if part == member.ConfigRoot {
+			if part == normalizedPathIdentity(member.ConfigRoot) {
 				return true
 			}
 			if dottedAlias, dotted := strings.CutPrefix(part, "."); dotted {
-				for _, alias := range member.Aliases {
+				for _, alias := range aliases {
 					if dottedAlias == alias || dottedAlias == alias+"-plugin" {
 						return true
 					}
@@ -1941,38 +2019,34 @@ func normalizeHumanReasons(plan *reviewPlan) error {
 	return nil
 }
 
-//nolint:gocyclo // Tree authentication keeps every admitted SPEC mode and object check co-located.
 func loadHeadSpecCorpus(ctx context.Context, head string) (map[string][]byte, error) {
-	if !validObjectID(head) {
-		return nil, errors.New("head must be a full Git object ID")
-	}
-	out, err := gitOutputBounded(ctx, maxGitMetadataBytes, "ls-tree", "-r", "-z", head)
+	tree, err := loadTreeIdentityIndex(ctx, head)
 	if err != nil {
 		return nil, err
 	}
-	fields := bytes.Split(out, []byte{0})
-	if len(fields) > 0 && len(fields[len(fields)-1]) == 0 {
-		fields = fields[:len(fields)-1]
-	}
-	if len(fields) > maxHeadPaths {
-		return nil, errors.New("HEAD path count exceeds the review limit")
-	}
+	return loadHeadSpecCorpusFromTree(ctx, tree)
+}
+
+func loadHeadSpecCorpusFromTree(ctx context.Context, tree treeIdentityIndex) (map[string][]byte, error) {
 	requests := make([]gitBlobRequest, 0)
-	for _, raw := range fields {
-		metadata, rawPath, ok := bytes.Cut(raw, []byte{'\t'})
-		parts := strings.Fields(string(metadata))
-		if !ok || len(parts) != 3 || !validObjectID(parts[2]) {
-			return nil, errors.New("HEAD contains malformed Git tree metadata")
-		}
-		path := string(rawPath)
-		if !safeGitPath(path) {
-			return nil, errors.New("HEAD contains an unsafe Git path")
+	paths := make([]string, 0, len(tree.byPath))
+	for path := range tree.byPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		entry := tree.byPath[path]
+		// The authenticated tree index includes directories so checkout-identity
+		// proofs can reason about file/directory conflicts. A directory whose
+		// literal name is SPEC.md is not itself a normative SPEC document.
+		if entry.Type == "tree" {
+			continue
 		}
 		if filepath.Base(path) == "SPEC.md" {
-			if parts[0] != "100644" || parts[1] != "blob" {
+			if entry.Mode != "100644" || entry.Type != "blob" {
 				return nil, fmt.Errorf("HEAD SPEC is not a regular non-executable blob (%s)", path)
 			}
-			requests = append(requests, gitBlobRequest{Path: path, ObjectID: parts[2]})
+			requests = append(requests, gitBlobRequest{Path: path, ObjectID: entry.ObjectID})
 			if len(requests) > maxHeadSpecFiles {
 				return nil, errors.New("HEAD contains too many SPEC files")
 			}

@@ -15,8 +15,19 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"trusted review workflow", []string{".github/workflows/review.yml"}, true},
 		{"case-fold alias of review workflow", []string{".GitHub/Workflows/Review.yml"}, true},
 		{"review gate implementation", []string{"cmd/ai-review/escalation.go"}, true},
+		{"review gate governance", []string{"cmd/ai-review/SPEC.md"}, true},
+		{"review test-only hardening", []string{"cmd/ai-review/spec_contract_test.go"}, false},
+		{"review test-only deletion path", []string{"cmd/ai-review/spec_contract_git_test.go"}, false},
+		{"review test-only owner case-fold alias", []string{"CMD/AI-REVIEW/Spec_Contract_test.go"}, false},
+		{"review uppercase test suffix is production", []string{"cmd/ai-review/backdoor_TEST.go"}, true},
+		{"review Unicode test suffix is production", []string{"cmd/ai-review/backdoor_teſt.go"}, true},
+		{"review test-only rename", []string{"cmd/ai-review/old_test.go", "cmd/ai-review/new_test.go"}, false},
+		{"review production renamed to test", []string{"cmd/ai-review/review.go", "cmd/ai-review/review_test.go"}, true},
+		{"review test renamed to production", []string{"cmd/ai-review/review_test.go", "cmd/ai-review/review.go"}, true},
+		{"review non-Go test-shaped file", []string{"cmd/ai-review/review_test.yaml"}, true},
 		{"ruleset edit", []string{".github/rulesets/main.json"}, true},
 		{"case-fold alias of ruleset", []string{".GitHub/Rulesets/Main.json"}, true},
+		{"Unicode-fold alias of ruleset", []string{".github/ruleſetſ/main.json"}, true},
 		{"case-only rename retains canonical deletion", []string{"REVIEW.md", "Review.md"}, true},
 		{"settings.json", []string{".claude/settings.json"}, true},
 		// Permission/authorization surfaces are matched by concept, so a new
@@ -26,11 +37,28 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"pi authorization ext", []string{"agm/internal/permissionparity/piadapter/pi_authorization_extension.js"}, true},
 		{"hook installer", []string{"agm/cmd/agm/install_hooks.go"}, true},
 		{"hook script", []string{".config/claude-code/hooks/pretool-bash-write-guard"}, true},
+		{"OpenCode hook root", []string{".opencode/hooks"}, true},
+		{"OpenCode hook case alias", []string{".OPENCODE/HOOKS/stop-guardrail-feedback"}, true},
+		{"Pi guardrail Unicode alias", []string{".pi/guardrailſ/stop-guardrail-feedback"}, true},
+		{"AGM command hook root", []string{"agm/cmd/agm/hooks"}, true},
+		{"AGM command hook descendant", []string{"agm/cmd/agm/hooks/session-start-agm-state-ready"}, true},
+		{"AGM internal hook root", []string{"agm/internal/hooks"}, true},
+		{"AGM internal hook case alias", []string{"AGM/INTERNAL/HOOKS/exit_gate.go"}, true},
+		{"AGM internal hook Unicode alias", []string{"agm/internal/hookſ/living_docs_check.go"}, true},
+		{"AGM internal hook descendant", []string{"agm/internal/hooks/living_docs_check.go"}, true},
+		{"AGM Git hook root alias", []string{"AGM/.GITHOOKS"}, true},
+		{"AGM Git hook descendant", []string{"agm/.githooks/pre-commit"}, true},
+		{"Codex hook Unicode root alias", []string{"agm/internal/codexhookſ"}, true},
+		{"Codex hook descendant", []string{"agm/internal/codexhooks/verify.go"}, true},
 		{"pretool prefix", []string{"cmd/pretool-fs-write-guard/main.go"}, true},
 		// Hook *registration* files have no "/hooks/" segment, and hook
 		// implementations are often named main.go under a -hooks/ owner dir.
 		{"agents hooks.json", []string{".agents/hooks.json"}, true},
 		{"codex hooks.json", []string{".codex/hooks.json"}, true},
+		{"Codex hook feature config", []string{".codex/config.toml"}, true},
+		{"Codex hook feature config case alias", []string{".CODEX/CONFIG.TOML"}, true},
+		{"Codex hook feature config Unicode alias", []string{".codex/conﬁg.toml"}, true},
+		{"Codex hook feature config descendant", []string{".codex/config.toml/payload"}, true},
 		{"agm-hooks impl", []string{"agm/cmd/agm-hooks/pretool-bash-blocker/main.go"}, true},
 		{"write guard", []string{"internal/writeguard/write-guard.go"}, true},
 		// The package that owns the boundary must escalate even though its
@@ -115,6 +143,10 @@ func TestHookEscalationIsScoped(t *testing.T) {
 		"engram/hooks/registry_test.go",
 		"engram/hooks/registry.go",
 		"pkg/hooks/doc.go",
+		"agm/.git-hooks-doc/pre-commit",
+		"agm/internal/hooksdocs/helper.go",
+		"agm/internal/codexhookdocs/verify.go",
+		".codex/config.toml.example",
 	}
 	for _, p := range shouldNot {
 		if got := EscalationTriggers([]string{p}, "", ""); len(got) != 0 {
@@ -126,6 +158,7 @@ func TestHookEscalationIsScoped(t *testing.T) {
 		".config/claude-code/hooks/pretool-bash-write-guard",
 		"agm/cmd/agm-hooks/pretool-bash-blocker/main.go",
 		"agm/hooks/cmd/posttool-cost-guard/main.go",
+		"agm/internal/hooks/living_docs_check.go",
 		".agents/hooks.json",
 	}
 	for _, p := range shouldEscalate {
