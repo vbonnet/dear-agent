@@ -78,9 +78,7 @@
       "github.com/vbonnet/dear-agent/wayfinder/internal/tracker",
       "github.com/vbonnet/dear-agent/wayfinder/lib/presets"
     ],
-    "doc-path": [
-      "internal/ops.ResumeSession"
-    ],
+    "doc-path": [],
     "file-size": [
       "agm/cmd/agm-mcp-server/tools_test.go (1025 lines)",
       "agm/cmd/agm/archive_test.go (1579 lines)",
@@ -662,6 +660,29 @@
         "file-size": [
           "agm/test/bdd/steps/local_development_guardrails_steps.go (1007 lines)"
         ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
+    },
+    {
+      "previous_baseline_sha256": "d60656b62a749b0bf2a07c19aec1cb29a14742495dadd6445a26cfd4c3dfddff",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [
+          "internal/ops.ResumeSession"
+        ],
+        "file-size": [],
         "goroutine-recover": [],
         "raw-mem-gate": [],
         "zero-test": []
