@@ -36,6 +36,8 @@ type SessionDetail struct {
 	ContextUsage     *ContextUsage            `json:"context_usage,omitempty"`
 	PermissionMode   string                   `json:"permission_mode,omitempty"`
 	HarnessHistory   []manifest.HarnessSwitch `json:"harness_history,omitempty"`
+	FinalOutput      string                   `json:"final_output,omitempty"`
+	FinalOutputAt    string                   `json:"final_output_at,omitempty"`
 }
 
 // ContextUsage mirrors manifest.ContextUsage for JSON output.
@@ -149,6 +151,10 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 		CreatedAt:        m.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:        m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		PermissionMode:   m.PermissionMode,
+		FinalOutput:      m.FinalOutput,
+	}
+	if !m.FinalOutputAt.IsZero() {
+		d.FinalOutputAt = m.FinalOutputAt.UTC().Format("2006-01-02T15:04:05Z")
 	}
 
 	if m.ParentSessionID != nil {

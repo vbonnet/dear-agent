@@ -18,6 +18,7 @@ tree.
 |---|---|
 | `list_sessions` | `agm_list_sessions`; required nested `filters` with `status`, `agent_type`, and `limit`; root `fields`; no `offset` |
 | `get_session` | compatibility name `agm_get_session_metadata`; required `identifier` |
+| `get_session_output` | `agm_get_session_output`; required `identifier`; optional `lines`; exact match |
 | `search_sessions` | `agm_search_sessions`; root `query`; required nested `filters` with `status` and `limit` |
 | `get_status` | intentionally absent |
 | `archive_session` | `agm_archive_session`; required `identifier`; live `dry_run` extension |
