@@ -11,11 +11,12 @@ import (
 func TestBuildGeminiResearchArgs(t *testing.T) {
 	args := buildGeminiResearchArgs("what is RAG?", geminiResearchOptions{
 		effort: "high", model: "gemini-x", timeout: 90 * time.Second,
+		addDirs: []string{"/frames"},
 	})
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"--print", "--dangerously-skip-permissions", "--disable-slash-commands",
-		"--print-timeout 1m30s", "--effort high", "--model gemini-x", "-p",
+		"--print-timeout 1m30s", "--effort high", "--model gemini-x", "--add-dir /frames", "-p",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args %q missing %q", joined, want)
@@ -30,7 +31,7 @@ func TestBuildGeminiResearchArgs(t *testing.T) {
 func TestBuildGeminiResearchArgsOmitsUnsetOptionals(t *testing.T) {
 	args := buildGeminiResearchArgs("hi", geminiResearchOptions{})
 	joined := strings.Join(args, " ")
-	for _, unwanted := range []string{"--effort", "--model", "--print-timeout"} {
+	for _, unwanted := range []string{"--effort", "--model", "--print-timeout", "--add-dir"} {
 		if strings.Contains(joined, unwanted) {
 			t.Errorf("args %q should omit %q when unset", joined, unwanted)
 		}
@@ -39,10 +40,11 @@ func TestBuildGeminiResearchArgsOmitsUnsetOptionals(t *testing.T) {
 
 func TestRunGeminiResearchSuccess(t *testing.T) {
 	var gotAgy string
-	var gotArgs []string
-	run := func(_ context.Context, agyPath string, args []string, _ string) ([]byte, error) {
+	var gotArgs, gotEnv []string
+	run := func(_ context.Context, agyPath string, args, env []string, _ string) ([]byte, error) {
 		gotAgy = agyPath
 		gotArgs = args
+		gotEnv = env
 		return []byte("  RAG augments an LLM with retrieved context. DONE-RAG\n"), nil
 	}
 	out, err := runGeminiResearch(context.Background(), "  what is RAG?  ", geminiResearchOptions{
@@ -57,15 +59,20 @@ func TestRunGeminiResearchSuccess(t *testing.T) {
 	if gotAgy != "/fake/agy" {
 		t.Errorf("agy path = %q, want /fake/agy", gotAgy)
 	}
-	// Prompt is trimmed before being passed through.
 	if gotArgs[len(gotArgs)-1] != "what is RAG?" {
 		t.Errorf("prompt arg = %q, want trimmed 'what is RAG?'", gotArgs[len(gotArgs)-1])
+	}
+	// Sensitive vars must be scrubbed from the child environment.
+	for _, e := range gotEnv {
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") || strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			t.Errorf("child env leaked a sensitive var: %q", e)
+		}
 	}
 }
 
 func TestRunGeminiResearchEmptyPrompt(t *testing.T) {
 	called := false
-	run := func(context.Context, string, []string, string) ([]byte, error) {
+	run := func(context.Context, string, []string, []string, string) ([]byte, error) {
 		called = true
 		return nil, nil
 	}
@@ -78,7 +85,7 @@ func TestRunGeminiResearchEmptyPrompt(t *testing.T) {
 }
 
 func TestRunGeminiResearchExecErrorSurfacesOutput(t *testing.T) {
-	run := func(context.Context, string, []string, string) ([]byte, error) {
+	run := func(context.Context, string, []string, []string, string) ([]byte, error) {
 		return []byte("account eligibility verification pending"), errors.New("exit status 1")
 	}
 	out, err := runGeminiResearch(context.Background(), "p", geminiResearchOptions{agyPath: "/fake/agy"}, run)
@@ -100,4 +107,37 @@ func TestResolveGeminiResearchPrompt(t *testing.T) {
 	if got, _ := resolveGeminiResearchPrompt(nil, "", strings.NewReader("piped prompt")); got != "piped prompt" {
 		t.Errorf("stdin prompt = %q", got)
 	}
+}
+
+func TestResolveGeminiResearchPromptBoundsStdin(t *testing.T) {
+	// A stream larger than the cap is truncated, not buffered unbounded.
+	huge := strings.NewReader(strings.Repeat("x", maxGeminiResearchStdinBytes+4096))
+	got, err := resolveGeminiResearchPrompt(nil, "", huge)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(got) != maxGeminiResearchStdinBytes {
+		t.Errorf("stdin prompt length = %d, want capped at %d", len(got), maxGeminiResearchStdinBytes)
+	}
+}
+
+func TestTruncateGeminiOutputRuneSafe(t *testing.T) {
+	// Multi-byte runes must never be split mid-character.
+	s := strings.Repeat("é", 10) // 2 bytes each
+	got := truncateGeminiOutput(s, 4)
+	if !utf8ValidString(got) {
+		t.Errorf("truncated output is not valid UTF-8: %q", got)
+	}
+	if []rune(got)[0] != 'é' {
+		t.Errorf("truncation split a rune: %q", got)
+	}
+}
+
+func utf8ValidString(s string) bool {
+	for _, r := range s {
+		if r == '�' {
+			return false
+		}
+	}
+	return true
 }
