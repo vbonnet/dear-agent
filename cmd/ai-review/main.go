@@ -338,7 +338,18 @@ func preflightGates(c config) (int, bool) {
 			return 0, true
 		}
 		fmt.Println("::error::ANTHROPIC_API_KEY is not set; the AI review gate cannot run and fails closed. Set the secret, or apply the 'ai-review:override' label after a human review.")
-		return 1, true
+		// AIREV-26 is evidence-first even here: the cannot-run status may
+		// only be reported once the disposition is recorded on the PR (or no
+		// PR context exists to post to). A failed post keeps the plain
+		// blocking exit.
+		code := keylessExit(c, 1)
+		if code == exitKeylessCannotRun {
+			if err := postComment(c, buildComment(NeedsHumanReview, "the ANTHROPIC_API_KEY secret is not configured, so no automated review could run", nil, false, nil, true)); err != nil {
+				logCommentErr(err)
+				return 1, true
+			}
+		}
+		return code, true
 	}
 	return 0, false
 }
@@ -370,21 +381,62 @@ func run(c config) int {
 		c.apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	modelUnavailable := c.isFork || strings.TrimSpace(c.apiKey) == ""
+	// A deterministic SPEC-governance human-review verdict (ownership edge,
+	// reviewer-dependency, traceability, stale base) is conclusive without a
+	// model: the missing credential is NOT its blocker, so it keeps the
+	// ordinary blocking exit even when keyless (AIREV-26 boundary).
 	if plan.needsHuman() && modelUnavailable {
-		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+		code, _ := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "), false)
+		return code
+	}
+	// AIREV-26 never softens an oversize or uncomputable diff: with a key
+	// those are hard failures at the review stage below, so EVERY keyless
+	// run that could reach a cannot-run translation — escalation, reviewable
+	// SPEC, or the credential preflight on an ordinary diff — must probe the
+	// same bound first and fail closed identically. This deliberately
+	// mirrors the keyed oversize handling rather than sharing its code so
+	// each path stays visible at its own trust transition.
+	if keylessTranslatable(c) {
+		_, tooLarge, diffErr := gitDiffContext(ctx, plan.MergeBaseSHA, c.headSHA, c.maxDiff)
+		if diffErr != nil {
+			fmt.Printf("::error::could not compute diff: %v\n", diffErr)
+			return failClosed(c, "the PR diff could not be computed")
+		}
+		if tooLarge {
+			fmt.Printf("::error::diff is over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.\n", c.maxDiff)
+			logCommentErr(postComment(c, oversizeComment(c.maxDiff)))
+			return failClosed(c, "the diff exceeded the auto-review size limit")
+		}
 	}
 	// A deterministic escalation still benefits from the complete automated
 	// review when credentials are available. Fork and secretless runs cannot
 	// make model calls, so they take the visible human-review fallback instead.
+	// keylessExit relabels only the same-repository, non-override, no-key case
+	// with the distinct cannot-run code — and only when the escalation
+	// evidence comment demonstrably reached the PR, because the workflow's
+	// neutral-with-warning verdict points readers at that evidence. A failed
+	// evidence post keeps the plain blocking exit. It never changes whether
+	// this run blocks.
 	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
-		return handleMandatoryEscalation(c, plan.EscalationTriggers)
+		code, evidencePosted := handleMandatoryEscalation(c, plan.EscalationTriggers, keylessTranslatable(c))
+		if evidencePosted {
+			return keylessExit(c, code)
+		}
+		return code
 	}
+	// An otherwise-reviewable changed SPEC stopped solely by the absent
+	// credential is the canonical cannot-run disposition, under the same
+	// evidence-first requirement.
 	if plan.ReviewNeeded && modelUnavailable {
 		reason := "a relevant changed SPEC cannot be reviewed because the reviewer credential is unavailable"
 		if c.isFork {
 			reason = "a relevant changed SPEC originates from a fork and requires human review"
 		}
-		return handleSpecHumanReview(c, plan, reason)
+		code, evidencePosted := handleSpecHumanReview(c, plan, reason, keylessTranslatable(c))
+		if evidencePosted {
+			return keylessExit(c, code)
+		}
+		return code
 	}
 
 	if code, handled := preflightGates(c); handled {
@@ -409,7 +461,8 @@ func run(c config) int {
 	// have no patch to send to the model, but must still require human review.
 	if strings.TrimSpace(diff) == "" {
 		if len(plan.EscalationTriggers) > 0 {
-			return handleMandatoryEscalation(c, plan.EscalationTriggers)
+			code, _ := handleMandatoryEscalation(c, plan.EscalationTriggers, false)
+			return code
 		}
 		fmt.Println("::notice::empty diff; nothing to review.")
 		return 0
@@ -431,7 +484,8 @@ func run(c config) int {
 	} else if plan.ReviewNeeded {
 		verdict, err := reviewSpecContract(ctx, client, c.model, c.effort, plan)
 		if err != nil {
-			return handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict")
+			code, _ := handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict", false)
+			return code
 		}
 		specVerdict = verdict.Status
 		specReports = append(specReports, specContractReport(verdict))
@@ -464,7 +518,7 @@ func run(c config) int {
 
 	// Reporting the outcome is best-effort: the exit code already carries the
 	// verdict, so a comment outage must not change it.
-	logCommentErr(postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers)))
+	logCommentErr(postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers, false)))
 
 	// But when an override is what converts a NON-approved outcome into a pass,
 	// the audit record is load-bearing (AIREV-03) — the check would otherwise
@@ -515,28 +569,36 @@ func reconcileSynthesisDisplay(synthesized, final Outcome, synthesis string) str
 
 // handleSpecHumanReview keeps an unresolved SPEC contract visibly in the
 // existing review lifecycle. A revision-bound override may pass the check on
-// human authority, but it never turns this verdict into approved.
-func handleSpecHumanReview(c config, plan reviewPlan, reason string) int {
+// human authority, but it never turns this verdict into approved. The second
+// result reports whether the human-review evidence comment demonstrably
+// reached the PR (or no PR context exists to post to): the AIREV-26 cannot-run
+// translation is only honest when the evidence it advertises actually exists.
+func handleSpecHumanReview(c config, plan reviewPlan, reason string, keylessNeutral bool) (int, bool) {
 	trigger := "SPEC governance change requires human review: " + reason
 	if len(plan.Changes) > 0 {
 		trigger += " (" + plan.Changes[0].Path + ")"
 	}
-	return handleHumanReview(c, reason, []string{trigger})
+	return handleHumanReview(c, reason, []string{trigger}, keylessNeutral)
 }
 
 // handleMandatoryEscalation makes a deterministic REVIEW.md §3 trigger
 // visible even when no SPEC changed and the reviewer credential is absent.
-func handleMandatoryEscalation(c config, triggers []string) int {
+func handleMandatoryEscalation(c config, triggers []string, keylessNeutral bool) (int, bool) {
 	reason := "REVIEW.md §3 requires human review: " + strings.Join(triggers, "; ")
-	return handleHumanReview(c, reason, triggers)
+	return handleHumanReview(c, reason, triggers, keylessNeutral)
 }
 
-func handleHumanReview(c config, reason string, triggers []string) int {
-	logCommentErr(postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers)))
+// handleHumanReview posts the evidence comment and returns the blocking exit.
+// keylessNeutral marks the AIREV-26 cannot-run disposition, whose banner must
+// describe the neutral-with-warning publication the trusted workflow will
+// actually make; every other disposition keeps the fail-closed banner.
+func handleHumanReview(c config, reason string, triggers []string, keylessNeutral bool) (int, bool) {
+	commentErr := postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers, keylessNeutral))
+	logCommentErr(commentErr)
 	if c.override && !requireComment(c, overrideComment(reason)) {
-		return 1
+		return 1, commentErr == nil
 	}
-	return ExitFor(NeedsHumanReview, c.override)
+	return ExitFor(NeedsHumanReview, c.override), commentErr == nil
 }
 
 // failClosed returns the blocking exit code (1) for an intended failure, unless
