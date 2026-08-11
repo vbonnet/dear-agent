@@ -60,6 +60,8 @@ diff touches any of the following:
 - **Security boundaries** — write guards, deny rules, `~/src` enforcement, PII manifests.
 - **Infrastructure that is expensive to reverse** — database schema changes, launchd plist installs, CI/CD pipeline edits.
 - **Explicit `HUMAN REVIEW REQUIRED` label** in the PR description or commit message.
+- **Oversized or poorly scoped PR** — the diff is too large to review reliably
+  as one unit, or it combines unrelated concerns that should be split.
 
 Escalation is not a failure state — it is a correct outcome that preserves
 human authority over irreversible decisions.
@@ -70,6 +72,14 @@ the synthesis agent's judgement — §3 says escalation is mandatory "regardless
 finding severity", so it must not depend on a nondeterministic model call. A
 diff that trips any trigger is forced to `needs-human-review` even if all five
 dimensions report clean.
+
+For scope, deterministic checks should flag obvious size risk before an LLM is
+involved: more than 1,000 changed lines, 50 or more changed files, or changes
+spanning four or more top-level areas should produce a split suggestion. The
+LLM review may add a separate judgement when the diff appears to mix unrelated
+concerns, but size and changed-area thresholds must not depend on model output.
+Reviewers should ask authors to split these PRs into small, independently
+reviewable and independently testable stacked PRs whenever possible.
 
 ---
 

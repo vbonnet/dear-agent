@@ -124,6 +124,18 @@ before pushing, or drop a one-line `exec make preflight` pre-push hook into
 3. Describe what your PR does and why
 4. Link any related issues
 
+### Small, stacked PRs
+
+Agents should prefer small, targeted pull requests that are easy to review and
+test independently. When a change is large, split it into a GitHub stacked PR
+series: land mechanical refactors, renames, generated updates, or pure test
+scaffolding first, then put the risky behavior change in a focused follow-up PR.
+
+Each PR in the stack must stand on its own: it should have a clear purpose,
+pass the relevant tests, and be independently understandable from its diff and
+description. Do not bundle unrelated concerns into one monster PR just because
+they were discovered in the same session.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
