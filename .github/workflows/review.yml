@@ -634,7 +634,12 @@ jobs:
             # ANTHROPIC_API_KEY is configured, exit 78 is unreachable and
             # every gate failure blocks again.
             conclusion=neutral
-            summary='Neutral with warning: ANTHROPIC_API_KEY is not configured, so the automated 5-dimension review could NOT run on a review-relevant change. Human review is recommended before merge. No model approval is claimed.'
+            # Deliberately does not assert review-relevance: exit 78 also
+            # covers the credential preflight on an ordinary diff (for
+            # example after a transient plan-step failure defaulted
+            # review_relevant=true), where the binary's own authenticated
+            # plan found no SPEC or escalation evidence.
+            summary='Neutral with warning: ANTHROPIC_API_KEY is not configured, so the automated 5-dimension review could NOT run. Any escalation or SPEC evidence the authenticated plan recorded is in the PR comments. Human review is recommended before merge. No model approval is claimed.'
           fi
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           timeout --signal=TERM --kill-after=5s 90s gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
@@ -674,7 +679,7 @@ jobs:
           if [ "$DEPENDABOT_EXEMPT" = true ]; then
             reason="The authenticated plan for \`$HEAD_SHA\` proves a dependency-version-led Go module update, and trusted API snapshots identify the same-repository Dependabot app bot. This workflow check is neutral; no model approval or human override is claimed."
           elif [ "${KEYLESS_CANNOT_RUN:-}" = true ]; then
-            reason="\`ANTHROPIC_API_KEY\` is not configured, so the automated 5-dimension review could **not** run on \`$HEAD_SHA\` even though the authenticated plan flagged it as review-relevant. **Human review is recommended before merge.** The gate's needs-human-review comment above records the exact evidence. No model approval is claimed."
+            reason="\`ANTHROPIC_API_KEY\` is not configured, so the automated 5-dimension review could **not** run on \`$HEAD_SHA\`. **Human review is recommended before merge.** The gate's needs-human-review comment above records the authenticated plan's evidence for this revision. No model approval is claimed."
           else
             reason="\`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed."
           fi
