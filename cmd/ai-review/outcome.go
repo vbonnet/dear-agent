@@ -179,13 +179,21 @@ func ExitFor(o Outcome, override bool) int {
 // deliberately maps it to a neutral-with-warning check conclusion.
 const exitKeylessCannotRun = 78
 
+// keylessTranslatable reports whether this run satisfies the AIREV-26
+// same-repository, non-override, no-credential predicate — the only shape of
+// run whose blocking disposition the trusted workflow may publish as
+// neutral-with-warning.
+func keylessTranslatable(c config) bool {
+	return !c.isFork && !c.override && strings.TrimSpace(c.apiKey) == ""
+}
+
 // keylessExit translates a blocking disposition into exitKeylessCannotRun
 // when — and only when — the run is same-repository, non-override, and the
 // credential is absent. A zero (passing) code is never touched, and an
 // override run keeps its ordinary codes so a failed override audit comment
 // still hard-fails.
 func keylessExit(c config, code int) int {
-	if code != 0 && !c.isFork && !c.override && strings.TrimSpace(c.apiKey) == "" {
+	if code != 0 && keylessTranslatable(c) {
 		return exitKeylessCannotRun
 	}
 	return code

@@ -375,7 +375,7 @@ func run(c config) int {
 	// model: the missing credential is NOT its blocker, so it keeps the
 	// ordinary blocking exit even when keyless (AIREV-26 boundary).
 	if plan.needsHuman() && modelUnavailable {
-		code, _ := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+		code, _ := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "), false)
 		return code
 	}
 	// A deterministic escalation still benefits from the complete automated
@@ -388,7 +388,7 @@ func run(c config) int {
 	// evidence post keeps the plain blocking exit. It never changes whether
 	// this run blocks.
 	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
-		code, evidencePosted := handleMandatoryEscalation(c, plan.EscalationTriggers)
+		code, evidencePosted := handleMandatoryEscalation(c, plan.EscalationTriggers, keylessTranslatable(c))
 		if evidencePosted {
 			return keylessExit(c, code)
 		}
@@ -402,7 +402,7 @@ func run(c config) int {
 		if c.isFork {
 			reason = "a relevant changed SPEC originates from a fork and requires human review"
 		}
-		code, evidencePosted := handleSpecHumanReview(c, plan, reason)
+		code, evidencePosted := handleSpecHumanReview(c, plan, reason, keylessTranslatable(c))
 		if evidencePosted {
 			return keylessExit(c, code)
 		}
@@ -431,7 +431,7 @@ func run(c config) int {
 	// have no patch to send to the model, but must still require human review.
 	if strings.TrimSpace(diff) == "" {
 		if len(plan.EscalationTriggers) > 0 {
-			code, _ := handleMandatoryEscalation(c, plan.EscalationTriggers)
+			code, _ := handleMandatoryEscalation(c, plan.EscalationTriggers, false)
 			return code
 		}
 		fmt.Println("::notice::empty diff; nothing to review.")
@@ -454,7 +454,7 @@ func run(c config) int {
 	} else if plan.ReviewNeeded {
 		verdict, err := reviewSpecContract(ctx, client, c.model, c.effort, plan)
 		if err != nil {
-			code, _ := handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict")
+			code, _ := handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict", false)
 			return code
 		}
 		specVerdict = verdict.Status
@@ -488,7 +488,7 @@ func run(c config) int {
 
 	// Reporting the outcome is best-effort: the exit code already carries the
 	// verdict, so a comment outage must not change it.
-	logCommentErr(postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers)))
+	logCommentErr(postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers, false)))
 
 	// But when an override is what converts a NON-approved outcome into a pass,
 	// the audit record is load-bearing (AIREV-03) — the check would otherwise
@@ -543,23 +543,27 @@ func reconcileSynthesisDisplay(synthesized, final Outcome, synthesis string) str
 // result reports whether the human-review evidence comment demonstrably
 // reached the PR (or no PR context exists to post to): the AIREV-26 cannot-run
 // translation is only honest when the evidence it advertises actually exists.
-func handleSpecHumanReview(c config, plan reviewPlan, reason string) (int, bool) {
+func handleSpecHumanReview(c config, plan reviewPlan, reason string, keylessNeutral bool) (int, bool) {
 	trigger := "SPEC governance change requires human review: " + reason
 	if len(plan.Changes) > 0 {
 		trigger += " (" + plan.Changes[0].Path + ")"
 	}
-	return handleHumanReview(c, reason, []string{trigger})
+	return handleHumanReview(c, reason, []string{trigger}, keylessNeutral)
 }
 
 // handleMandatoryEscalation makes a deterministic REVIEW.md §3 trigger
 // visible even when no SPEC changed and the reviewer credential is absent.
-func handleMandatoryEscalation(c config, triggers []string) (int, bool) {
+func handleMandatoryEscalation(c config, triggers []string, keylessNeutral bool) (int, bool) {
 	reason := "REVIEW.md §3 requires human review: " + strings.Join(triggers, "; ")
-	return handleHumanReview(c, reason, triggers)
+	return handleHumanReview(c, reason, triggers, keylessNeutral)
 }
 
-func handleHumanReview(c config, reason string, triggers []string) (int, bool) {
-	commentErr := postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers))
+// handleHumanReview posts the evidence comment and returns the blocking exit.
+// keylessNeutral marks the AIREV-26 cannot-run disposition, whose banner must
+// describe the neutral-with-warning publication the trusted workflow will
+// actually make; every other disposition keeps the fail-closed banner.
+func handleHumanReview(c config, reason string, triggers []string, keylessNeutral bool) (int, bool) {
+	commentErr := postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers, keylessNeutral))
 	logCommentErr(commentErr)
 	if c.override && !requireComment(c, overrideComment(reason)) {
 		return 1, commentErr == nil

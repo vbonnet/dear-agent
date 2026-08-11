@@ -28,15 +28,22 @@ func emojiFor(o Outcome) string {
 	}
 }
 
-// buildComment renders the sticky review comment body.
-func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, override bool, triggers []string) string {
+// buildComment renders the sticky review comment body. keylessNeutral marks
+// the AIREV-26 cannot-run disposition, whose banner must describe the
+// neutral-with-warning publication instead of claiming a failed check the
+// workflow will not report.
+func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, override bool, triggers []string, keylessNeutral bool) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, commentMarker)
 	fmt.Fprintf(&b, "## %s AI Code Review — %s\n\n", emojiFor(outcome), outcome)
 	// Deliberately says nothing about whether this context is provider-required:
 	// live ruleset/IaC state changes independently of this binary. Wording that
 	// hard-codes either state would make the PR-facing audit record false.
-	fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This check is **fail-closed**: any non-approved outcome fails it.\n\n")
+	if keylessNeutral {
+		fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). No reviewer credential is configured, so this run cannot execute the model review and publishes as **neutral-with-warning** (AIREV-26): no approval is claimed, and **human review is recommended before merge**.\n\n")
+	} else {
+		fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This check is **fail-closed**: any non-approved outcome fails it.\n\n")
+	}
 	if len(triggers) > 0 {
 		fmt.Fprintf(&b, "### 🔴 Mandatory escalation (REVIEW.md §3)\n\nThis diff trips escalation triggers, so the outcome is forced to `needs-human-review` regardless of the dimension findings:\n\n")
 		for _, t := range triggers {

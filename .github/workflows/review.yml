@@ -678,10 +678,17 @@ jobs:
           else
             reason="\`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed."
           fi
+          if [ "${KEYLESS_CANNOT_RUN:-}" = true ]; then
+            # The gate has just posted current-head evidence above; do not
+            # blanket-invalidate "earlier" comments, only stale overrides.
+            carryover='The needs-human-review evidence above applies to **this** revision. Any `ai-review:override` from an earlier revision does **not** carry to this one.'
+          else
+            carryover='Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.'
+          fi
           printf '%s\n' '<!-- ai-review-5d -->' \
             '## AI Code Review — neutral (no automated review ran)' '' \
             "> $reason" '' \
-            'Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.' '' \
+            "$carryover" '' \
             '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-neutral.md
           gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-neutral.md \
             || echo "::warning::could not post the neutral review comment; the check still carries the verdict."
