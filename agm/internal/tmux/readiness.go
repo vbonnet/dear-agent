@@ -349,7 +349,11 @@ func queuedComposerOwnsTail(region, content, harness string) bool {
 	}
 	switch harness {
 	case "claude-code":
-		return hasTerminalIdleFooter(lines, isClaudeIdleFooter) && queuedPastePayloadOwnsTail(lines, isClaudeIdleComposerChrome)
+		// Share the composer footer parser with hasTailOwnedClaudeComposer so a
+		// queued AGM paste on a modern cwd/login/effort footer is still
+		// recognized as idle-composer-owned (ce-wn4qe); the legacy whitelist
+		// rejected those lines and downgraded the paste to human input.
+		return hasTerminalIdleFooter(lines, isClaudeComposerFooterChrome) && queuedPastePayloadOwnsTail(lines, isClaudeComposerFooterChrome)
 	case "codex-cli":
 		// Codex keeps its model footer visible while a turn is active, and a
 		// queued paste replaces the empty cursor that would otherwise prove idle
@@ -396,16 +400,6 @@ func hasTerminalIdleFooter(lines []string, isFooter func(string) bool) bool {
 			continue
 		}
 		return isFooter(line)
-	}
-	return false
-}
-
-func isClaudeIdleFooter(line string) bool {
-	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
-	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
 	}
 	return false
 }
@@ -769,26 +763,6 @@ func isClaudeComposerFooterChrome(line string) bool {
 	}
 	// Status-line cwd anchor, e.g. "vbonnet@mac:/private/tmp/wd".
 	return claudeStatusCwdPattern.MatchString(plain)
-}
-
-func isClaudeIdleComposerChrome(line string) bool {
-	line = strings.TrimSpace(stripANSI(line))
-	if line == "" {
-		return true
-	}
-	if strings.Trim(line, "─━┄┈╌╍ ") == "" {
-		return true
-	}
-	lower := strings.ToLower(line)
-	if strings.Contains(lower, "esc to interrupt") {
-		return false
-	}
-	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func hasTailOwnedGeminiComposer(content string) bool {
