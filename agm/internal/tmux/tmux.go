@@ -898,6 +898,23 @@ type SessionInfo struct {
 	AttachedList    string
 }
 
+// ListSessionsWithInfoStrict lists sessions without collapsing a tmux exec
+// failure into an empty result. ListSessionsWithInfo maps every ExitError to
+// "[]SessionInfo{}, nil" so a missing server reads as "no sessions" — but a
+// permission-denied or unreachable socket produces the same ExitError, and a
+// caller that treats the empty list as an observation then concludes every live
+// session is stopped. Callers that must distinguish "observed, nothing running"
+// from "could not observe" use this form (ce-0zng9).
+func ListSessionsWithInfoStrict() ([]SessionInfo, error) {
+	ctx := context.Background()
+	socketPath := GetSocketPath()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}:#{session_attached_list}")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
+	}
+	return parseSessionInfoLines(string(output)), nil
+}
+
 // ListSessionsWithInfo returns all active tmux sessions with attachment information
 func ListSessionsWithInfo() ([]SessionInfo, error) {
 	ctx := context.Background()
@@ -918,13 +935,18 @@ func ListSessionsWithInfo() ([]SessionInfo, error) {
 		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	return parseSessionInfoLines(string(output)), nil
+}
+
+// parseSessionInfoLines parses the shared "name:count:attached_list" format
+// emitted by both list-sessions callers.
+func parseSessionInfoLines(output string) []SessionInfo {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	sessions := make([]SessionInfo, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
 		}
-		// Parse "name:count:attached_list" format
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) < 2 {
 			continue
@@ -943,7 +965,7 @@ func ListSessionsWithInfo() ([]SessionInfo, error) {
 			AttachedList:    attachedList,
 		})
 	}
-	return sessions, nil
+	return sessions
 }
 
 // ClientInfo holds information about a tmux client

@@ -113,7 +113,18 @@ func ListSessions(ctx *OpContext, req *ListSessionsRequest) (*ListSessionsResult
 	var tmuxSessions []session.SessionInfo
 	tmuxObserved := false
 	if ctx.Tmux != nil {
-		if ti, ok := ctx.Tmux.(tmuxInfoProvider); ok {
+		// Prefer the strict lister. The plain ListSessionsWithInfo maps every
+		// tmux ExitError to an empty list with a nil error, so a missing or
+		// permission-denied socket is indistinguishable from "no sessions
+		// running" — which would set tmuxObserved and report every live
+		// manifest as stopped, recreating the false-dead result this guard
+		// exists to prevent (ce-0zng9).
+		if strict, ok := ctx.Tmux.(tmuxStrictInfoProvider); ok {
+			if infos, err := strict.ListSessionsWithInfoStrict(); err == nil {
+				tmuxSessions = infos
+				tmuxObserved = true
+			}
+		} else if ti, ok := ctx.Tmux.(tmuxInfoProvider); ok {
 			if infos, err := ti.ListSessionsWithInfo(); err == nil {
 				tmuxSessions = infos
 				tmuxObserved = true
@@ -189,6 +200,12 @@ func toSessionSummary(m *manifest.Manifest, statuses map[string]string, attached
 		UpdatedAt:     m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		EstimatedCost: estCost,
 	}
+}
+
+// tmuxStrictInfoProvider is the optional capability that reports a tmux
+// observation failure as an error instead of an empty session list.
+type tmuxStrictInfoProvider interface {
+	ListSessionsWithInfoStrict() ([]session.SessionInfo, error)
 }
 
 // tmuxInfoProvider is the interface needed for attachment-aware status computation.

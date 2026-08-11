@@ -209,10 +209,7 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 		return "unknown"
 	}
 
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
-	}
+	tmuxName := session.TmuxSessionName(m)
 
 	has, err := existenceForStatus(tmux, ti, tmuxName)
 	if err != nil {

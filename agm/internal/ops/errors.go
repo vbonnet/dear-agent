@@ -74,6 +74,7 @@ const (
 	ErrCodeActiveSessionKill  = "AGM-014"
 	ErrCodeLockTimeout        = "AGM-015"
 	ErrCodeSessionNotReady    = "AGM-016"
+	ErrCodeOutputUnavailable  = "AGM-017"
 	ErrCodeDryRun             = "AGM-100"
 )
 
@@ -229,6 +230,34 @@ func ErrSessionNotReady(name, readiness string) *OpError {
 		Parameters: map[string]string{
 			"session":   name,
 			"readiness": readiness,
+		},
+	}
+}
+
+// ErrOutputUnavailable reports that a session's output could not be read right
+// now for a reason that may clear on its own — an unreachable tmux socket, a
+// permission failure, or a capture that failed against a still-live pane.
+//
+// This is deliberately NOT an input error. Classifying a transient backend
+// failure as input/invalid (400, AGM-005) tells a programmatic client the
+// caller made a permanent mistake and hands it suggestions about correcting the
+// identifier, when the correct advice is to retry an unchanged request. 503
+// matches ErrTmuxNotRunning, the other backend-unavailable case.
+func ErrOutputUnavailable(name, reason string) *OpError {
+	return &OpError{
+		Status:   503,
+		Type:     "session/output_unavailable",
+		Code:     ErrCodeOutputUnavailable,
+		Title:    "Session output is temporarily unavailable",
+		Detail:   fmt.Sprintf("Output for session %q could not be read: %s. The request was well-formed; this is a transient backend condition.", name, reason),
+		Instance: "session/get_output",
+		Suggestions: []string{
+			"Retry the same request; no change to the identifier is needed.",
+			"Check that the AGM tmux socket is reachable: `tmux -S ~/.agm/agm.sock list-sessions`.",
+		},
+		Parameters: map[string]string{
+			"session": name,
+			"reason":  reason,
 		},
 	}
 }

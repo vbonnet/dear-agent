@@ -87,8 +87,13 @@ type sessionObservation struct {
 	reportedIdle bool
 	everExisted  bool
 	reportedGone bool
-	lastTail     string
-	baselined    bool
+	// exitPersisted tracks whether the OFFLINE/final-output write for a
+	// reported exit actually landed. It is separate from reportedGone so a
+	// failed write can be retried on later scans without re-notifying the
+	// operator about the same exit on every tick.
+	exitPersisted bool
+	lastTail      string
+	baselined     bool
 }
 
 // NewCompletionWatcher creates a watcher with default thresholds.
@@ -147,10 +152,12 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		cw.observations[m.SessionID] = obs
 	}
 
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
-	}
+	// The canonical helper applies the same sanitization the session was
+	// actually created with. Targeting the raw display name instead would probe
+	// a different pane for any manifest whose name needed sanitizing (e.g.
+	// "my.session" is created as "mysession" but normalizes to "my-session"
+	// here), reporting a live WORKING session as exited and persisting OFFLINE.
+	tmuxName := session.TmuxSessionName(m)
 
 	exists, err := cw.sessionExists(ctx, tmuxName)
 	if err != nil {
@@ -162,6 +169,7 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	}
 	obs.everExisted = true
 	obs.reportedGone = false
+	obs.exitPersisted = false
 
 	// A failed or blank capture is not evidence of stable content. Without
 	// this, repeated capture failures on a live pane would keep falling through
@@ -254,12 +262,20 @@ func (cw *CompletionWatcher) observeActivity(obs *sessionObservation, m *manifes
 // pre-watcher tmux is history and is not replayed.
 func (cw *CompletionWatcher) observeGone(obs *sessionObservation, m *manifest.Manifest) *CompletionEvent {
 	if obs.reportedGone {
+		// The operator has already heard about this exit, but the durable write
+		// may have failed. Retry it quietly until it lands: without this, a
+		// transient storage failure leaves the record in WORKING forever with no
+		// final output, even after storage recovers.
+		if !obs.exitPersisted {
+			obs.exitPersisted = cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
+		}
 		return nil
 	}
 	if !obs.everExisted && !strings.EqualFold(strings.TrimSpace(m.State), manifest.StateWorking) {
 		return nil
 	}
 	obs.reportedGone = true
+	obs.exitPersisted = cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
 	event := &CompletionEvent{
 		SessionID:      m.SessionID,
 		SessionName:    m.Name,
@@ -268,7 +284,6 @@ func (cw *CompletionWatcher) observeGone(obs *sessionObservation, m *manifest.Ma
 		Output:         obs.lastTail,
 		DetectedAt:     time.Now(),
 	}
-	cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
 	return event
 }
 
@@ -343,15 +358,15 @@ func (cw *CompletionWatcher) capturePaneTail(tmuxName string) (string, bool) {
 // still reported for notification (the notification itself carries the output,
 // so the operator never loses the result), but the failure is logged loudly
 // rather than discarded.
-func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, output string) {
+func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, output string) bool {
 	if cw.DryRun {
-		return
+		return true
 	}
 	current, err := cw.ctx.Storage.GetSession(sessionID)
 	if err != nil || current == nil {
 		slog.Warn("completion-watcher: could not load session for durable completion write; notification still carries the output",
 			"session_id", sessionID, "error", err)
-		return
+		return false
 	}
 	current.State = state
 	current.StateUpdatedAt = time.Now()
@@ -363,7 +378,9 @@ func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, o
 	if err := cw.ctx.Storage.UpdateSession(current); err != nil {
 		slog.Warn("completion-watcher: durable completion write failed; notification still carries the output",
 			"session_id", sessionID, "state", state, "error", err)
+		return false
 	}
+	return true
 }
 
 // persistState updates only the durable state fields (no output capture),

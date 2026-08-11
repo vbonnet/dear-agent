@@ -76,6 +76,35 @@ func TestGetSessionOutput_UnprovenAbsenceDoesNotServeFinalCapture(t *testing.T) 
 	}
 }
 
+// strictListTmux implements the strict observation capability so the list path
+// can distinguish "observed, nothing running" from "could not observe".
+type strictListTmux struct {
+	*session.MockTmux
+	err error
+}
+
+func (s *strictListTmux) ListSessionsWithInfoStrict() ([]session.SessionInfo, error) {
+	return nil, s.err
+}
+
+// TestListSessions_StrictObservationFailureReportsUnknown pins the production
+// case the plain lister cannot express: tmux maps a missing or permission-denied
+// socket to an empty list with a nil error, which would look like a successful
+// observation of zero sessions and mark every live manifest stopped.
+func TestListSessions_StrictObservationFailureReportsUnknown(t *testing.T) {
+	m := testManifest("live-worker", "", time.Time{})
+	storage := &mockStorage{sessions: []*manifest.Manifest{m}}
+	tmux := &strictListTmux{MockTmux: session.NewMockTmux(), err: errors.New("tmux socket unreachable")}
+
+	result, err := ListSessions(&OpContext{Storage: storage, Tmux: tmux}, &ListSessionsRequest{})
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if got := result.Sessions[0].Status; got != "unknown" {
+		t.Fatalf("status on an unobservable tmux = %q, want unknown", got)
+	}
+}
+
 func TestListSessions_NoTmuxReportsUnknownNotStopped(t *testing.T) {
 	m := testManifest("live-worker", "", time.Time{})
 	storage := &mockStorage{sessions: []*manifest.Manifest{m}}

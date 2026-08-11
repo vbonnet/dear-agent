@@ -67,10 +67,9 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 		State:     m.State,
 	}
 
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
-	}
+	// Canonical helper: the raw display name can normalize to a different
+	// target than the pane the session was created with (see CompletionWatcher).
+	tmuxName := session.TmuxSessionName(m)
 
 	if done, err := captureLiveOutput(ctx, result, status, tmuxName, lines); done {
 		return result, err
@@ -105,8 +104,8 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 // like a finished session. When only the plain checker exists (test fakes),
 // its answer is used as-is.
 func requireProvenPaneAbsence(ctx *OpContext, tmuxName string) error {
-	retry := ErrInvalidInput("identifier",
-		"Session liveness could not be confirmed, so the durable final capture (which describes an earlier completion) was not served; retry.")
+	retry := ErrOutputUnavailable(tmuxName,
+		"session liveness could not be confirmed, so the durable final capture (which describes an earlier completion) was not served")
 	if strict, ok := ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
 		exists, err := strict.HasSessionStrict(requestContext(ctx), tmuxName)
 		if err != nil || exists {
@@ -144,7 +143,8 @@ func captureLiveOutput(ctx *OpContext, result *GetSessionOutputResult, status, t
 	// session from an unreachable one, and answering with an earlier task's
 	// capture would misrepresent the current one.
 	if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr != nil || stillExists {
-		return false, ErrInvalidInput("identifier", "Live output capture failed for a running session; retry. (A durable final capture, if any, describes an earlier completion, not the current task.)")
+		return false, ErrOutputUnavailable(tmuxName,
+			"live capture failed for a running session (a durable final capture, if any, describes an earlier completion, not the current task)")
 	}
 	return false, nil
 }
