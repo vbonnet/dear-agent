@@ -390,12 +390,13 @@ func run(c config) int {
 		return code
 	}
 	// AIREV-26 never softens an oversize or uncomputable diff: with a key
-	// those are hard failures at the review stage below, so a keyless run
-	// that would otherwise take the cannot-run translation must probe the
+	// those are hard failures at the review stage below, so EVERY keyless
+	// run that could reach a cannot-run translation — escalation, reviewable
+	// SPEC, or the credential preflight on an ordinary diff — must probe the
 	// same bound first and fail closed identically. This deliberately
 	// mirrors the keyed oversize handling rather than sharing its code so
 	// each path stays visible at its own trust transition.
-	if keylessTranslatable(c) && (len(plan.EscalationTriggers) > 0 || plan.ReviewNeeded) {
+	if keylessTranslatable(c) {
 		_, tooLarge, diffErr := gitDiffContext(ctx, plan.MergeBaseSHA, c.headSHA, c.maxDiff)
 		if diffErr != nil {
 			fmt.Printf("::error::could not compute diff: %v\n", diffErr)

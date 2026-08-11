@@ -165,6 +165,16 @@ func TestRun_KeylessOversizeDiffStaysHardFailure(t *testing.T) {
 	}
 }
 
+func TestRun_KeylessOrdinaryOversizeDiffStaysHardFailure(t *testing.T) {
+	// Even with no changed SPEC and no escalation, a keyless run must not
+	// reach the preflight cannot-run exit when the diff exceeds the bound.
+	c := noSpecConfig(t)
+	c.maxDiff = 1
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless ordinary oversize diff: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
+
 func TestRun_InvalidTrustedCIDeadlineFailsBeforeReviewEvenWithOverride(t *testing.T) {
 	c := baseConfig()
 	c.githubActions = true
