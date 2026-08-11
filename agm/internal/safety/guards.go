@@ -378,10 +378,10 @@ func detectSessionUninitialized(paneContent string, claudeRunning bool) *Violati
 		}
 	}
 
-	// Only a live, tail-owning selected trust row is current onboarding. An
-	// answered selector retained above a newer composer is historical evidence
-	// and must not keep an initialized session blocked.
-	if tmux.TrustSelectorOwnsInput(paneContent) {
+	// Only a live, tail-owning trust dialog is current onboarding. An answered
+	// dialog retained above a newer composer is historical evidence and must not
+	// keep an initialized session blocked.
+	if tmux.TrustDialogOwnsInput(paneContent) {
 		return &Violation{
 			Guard:      ViolationSessionUninitialized,
 			Message:    "Session is showing the trust prompt (not yet initialized).",

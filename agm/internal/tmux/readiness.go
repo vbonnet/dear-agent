@@ -234,6 +234,12 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if harness == "pi-cli" && hasPiManagedPermissionPrompt(tail) {
 		return false, HarnessInputPermission, nil
 	}
+	// Claude's selected trust rows also use the ❯ glyph. Give the live dialog
+	// precedence over composer detection so ANSI styling can never make either
+	// selected option look like a ready input line.
+	if harness == "claude-code" && TrustDialogOwnsInput(content) {
+		return false, HarnessInputOnboarding, nil
+	}
 
 	var ready bool
 	switch harness {
@@ -576,6 +582,19 @@ func handleHarnessStartupState(
 	observedHarness *bool,
 	advanced map[string]bool,
 ) (bool, error) {
+	return handleHarnessStartupStateWithProbe(
+		ctx, sessionName, harness, readiness, observedHarness, advanced, ProbeClaudeInputContext,
+	)
+}
+
+func handleHarnessStartupStateWithProbe(
+	ctx context.Context,
+	sessionName, harness string,
+	readiness HarnessInputReadiness,
+	observedHarness *bool,
+	advanced map[string]bool,
+	probeClaude func(context.Context, string, bool) (ClaudeInputProbe, error),
+) (bool, error) {
 	switch readiness.State {
 	case HarnessInputReady:
 		*observedHarness = true
@@ -596,6 +615,16 @@ func handleHarnessStartupState(
 		}
 		transition := readiness.State + ":" + onboardingKind(readiness.Content, harness)
 		if !advanced[transition] {
+			if harness == "claude-code" {
+				probe, err := probeClaude(ctx, sessionName, true)
+				if err != nil {
+					return false, fmt.Errorf("re-prove Claude startup trust selector in %q: %w", sessionName, err)
+				}
+				if probe.TrustAnswered {
+					advanced[transition] = true
+				}
+				return false, nil
+			}
 			if err := advanceHarnessStartup(ctx, readiness.TargetPane, harness, readiness.Content); err != nil {
 				return false, fmt.Errorf("advance %s startup in %q: %w", harness, sessionName, err)
 			}
@@ -940,12 +969,10 @@ func hasInputOverlay(content, harness string) bool {
 func hasOnboardingPrompt(content, harness string) bool {
 	switch harness {
 	case "claude-code":
-		// Only classify onboarding when the trust selector currently owns input,
-		// so the shared readiness path advances (sends Enter) exactly once the
-		// numbered options are on screen — never on the question alone (which
-		// would fire early and burn the one-shot transition) nor on a stale
-		// answered selector (ce-wn4qe).
-		return TrustSelectorOwnsInput(content)
+		// Classify either selected trust option as onboarding while the dialog
+		// owns the tail. Startup advancement separately requires the affirmative
+		// selection, so a selected "No" blocks input without authorizing Enter.
+		return TrustDialogOwnsInput(content)
 	case "codex-cli":
 		return containsCodexTrustPromptPattern(content) || containsCodexModelUpgradePromptPattern(content) || containsCodexUpdatePromptPattern(content)
 	case "agy":
@@ -977,8 +1004,10 @@ func onboardingKind(content, harness string) string {
 }
 
 func canAdvanceHarnessStartup(state, harness, content string) bool {
-	return state == HarnessInputOnboarding ||
-		(state == HarnessInputOverlay && harness == "agy" && ContainsAgySurveyPrompt(content))
+	if state == HarnessInputOnboarding {
+		return harness != "claude-code" || TrustSelectorOwnsInput(content)
+	}
+	return state == HarnessInputOverlay && harness == "agy" && ContainsAgySurveyPrompt(content)
 }
 
 func advanceHarnessStartup(ctx context.Context, targetPane, harness, content string) error {

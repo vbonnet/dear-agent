@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -489,4 +490,74 @@ func TestCommitCurrentTmuxManifestLogsFailure(t *testing.T) {
 	if !strings.Contains(string(contents), "manifest commit skipped") {
 		t.Fatalf("debug log = %q, want manifest commit failure", contents)
 	}
+}
+
+func TestMonitorAndAnswerTrustPromptUsesCurrentPaneProbe(t *testing.T) {
+	t.Parallel()
+
+	t.Run("live affirmative is answered without control output", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		err := monitorAndAnswerTrustPromptWithProbe(t.Context(), "session", time.Second, time.Millisecond,
+			func(_ context.Context, session string, autoAnswer bool) (tmux.ClaudeInputProbe, error) {
+				calls++
+				if session != "session" || !autoAnswer {
+					t.Fatalf("probe arguments = %q, %t", session, autoAnswer)
+				}
+				return tmux.ClaudeInputProbe{DialogOwnsInput: true, TrustAnswered: true}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("probe calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("selected negative stays blocked until bounded timeout", func(t *testing.T) {
+		t.Parallel()
+		err := monitorAndAnswerTrustPromptWithProbe(t.Context(), "session", 5*time.Millisecond, time.Millisecond,
+			func(context.Context, string, bool) (tmux.ClaudeInputProbe, error) {
+				return tmux.ClaudeInputProbe{DialogOwnsInput: true}, nil
+			})
+		if err == nil || !strings.Contains(err.Error(), "couldn't find its affirmative option") {
+			t.Fatalf("error = %v, want bounded unresolved-dialog failure", err)
+		}
+	})
+
+	t.Run("current composer proves no trust prompt remains", func(t *testing.T) {
+		t.Parallel()
+		err := monitorAndAnswerTrustPromptWithProbe(t.Context(), "session", time.Second, time.Millisecond,
+			func(context.Context, string, bool) (tmux.ClaudeInputProbe, error) {
+				return tmux.ClaudeInputProbe{ComposerOwnsInput: true}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("no pane authority remains a bounded no-prompt result", func(t *testing.T) {
+		t.Parallel()
+		err := monitorAndAnswerTrustPromptWithProbe(t.Context(), "session", 5*time.Millisecond, time.Millisecond,
+			func(context.Context, string, bool) (tmux.ClaudeInputProbe, error) {
+				return tmux.ClaudeInputProbe{}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("caller cancellation stops polling", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		err := monitorAndAnswerTrustPromptWithProbe(ctx, "session", time.Second, time.Millisecond,
+			func(context.Context, string, bool) (tmux.ClaudeInputProbe, error) {
+				t.Fatal("probe called after cancellation")
+				return tmux.ClaudeInputProbe{}, nil
+			})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
+		}
+	})
 }
