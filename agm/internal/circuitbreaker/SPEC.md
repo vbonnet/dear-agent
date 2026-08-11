@@ -37,3 +37,11 @@ machine state without false positives that would block healthy agent sessions.
 **CBRK-11** When a worker's record name differs from its tmux session name, the system shall recognise the session under either name, so a resumed or imported worker still counts against the cap.
 
 **CBRK-12** When the circuit breaker reads an engaged admission brake, the system shall report an overrideable refusal without accepting any reason or authorization option that can make the gate pass; only the launch boundary may apply a committed shared override after repeating every live gate.
+
+**CBRK-13** When a provider-quota gate and a non-empty model are supplied, the system shall evaluate provider subscription quota as an admission gate and shall refuse the spawn when that provider's published guardrail is open.
+
+**CBRK-14** When no provider-quota gate is supplied, or the model is empty, the system shall omit the provider-quota gate from the result.
+
+**CBRK-15** When the provider-quota gate cannot obtain a usable reading, the system shall pass that gate, inverting the fail-closed behaviour of the resource gates because a missing quota reading is not evidence that a budget is spent.
+
+**CBRK-16** When the provider-quota gate refuses a spawn, the system shall report the constraining provider, the reason, the window reset time when known, and the documented override.

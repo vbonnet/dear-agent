@@ -422,7 +422,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	var admission *circuitBreakerAdmission
 	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
 		var admissionErr error
-		admission, admissionErr = enforceCircuitBreakers(supervisorID)
+		admission, admissionErr = enforceCircuitBreakers(supervisorID, supervisorClaudeModel)
 		return admissionErr
 	})
 	if err != nil {

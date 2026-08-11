@@ -2,9 +2,11 @@ package quota_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -292,18 +294,39 @@ func TestParseCodexBarDashboardRejectsGarbage(t *testing.T) {
 	}
 }
 
-// fakeRunner stands in for process execution.
+// fakeRunner stands in for process execution, recording every call so a
+// multi-invocation read can be asserted in full.
 type fakeRunner struct {
 	out  []byte
 	err  error
 	name string
 	args []string
+
+	calls [][]string
+	// paceOut, when set, is returned for the usage invocation.
+	paceOut []byte
 }
 
 func (f *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	f.name = name
 	f.args = args
+	f.calls = append(f.calls, args)
+	if len(args) > 0 && args[0] == "usage" {
+		if f.paceOut == nil {
+			return nil, errors.New("no pace configured")
+		}
+		return f.paceOut, nil
+	}
 	return f.out, f.err
+}
+
+func (f *fakeRunner) callWith(subcommand string) ([]string, bool) {
+	for _, args := range f.calls {
+		if len(args) > 0 && args[0] == subcommand {
+			return args, true
+		}
+	}
+	return nil, false
 }
 
 func TestCodexBarReaderAlwaysRequestsRedactedIdentity(t *testing.T) {
@@ -315,14 +338,149 @@ func TestCodexBarReaderAlwaysRequestsRedactedIdentity(t *testing.T) {
 	if runner.name != quota.DefaultCodexBarCommand {
 		t.Errorf("command = %q, want %q", runner.name, quota.DefaultCodexBarCommand)
 	}
+	got, ok := runner.callWith("dashboard")
+	if !ok {
+		t.Fatalf("no dashboard invocation; calls = %v", runner.calls)
+	}
 	want := []string{"dashboard", "--identity", "redacted"}
-	if len(runner.args) != len(want) {
-		t.Fatalf("args = %v, want %v", runner.args, want)
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
 	}
 	for i := range want {
-		if runner.args[i] != want[i] {
-			t.Fatalf("args = %v, want %v", runner.args, want)
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
 		}
+	}
+}
+
+// The usage surface has no redaction mode, so the guarantee has to come
+// from the parser's shape rather than a flag. This pins the invocation so
+// a future edit cannot quietly start asking for full identities.
+func TestCodexBarReaderNeverRequestsFullIdentity(t *testing.T) {
+	runner := &fakeRunner{out: liveFixture(t)}
+	reader := quota.CodexBarReader{Runner: runner}
+	if _, err := reader.Read(context.Background()); err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	for _, args := range runner.calls {
+		for i, arg := range args {
+			if arg != "--identity" {
+				continue
+			}
+			if i+1 >= len(args) || args[i+1] != "redacted" {
+				t.Errorf("call %v requests a non-redacted identity", args)
+			}
+		}
+	}
+}
+
+func TestCodexBarReaderSkipPaceAvoidsTheSecondInvocation(t *testing.T) {
+	runner := &fakeRunner{out: liveFixture(t)}
+	reader := quota.CodexBarReader{Runner: runner, SkipPace: true}
+	if _, err := reader.Read(context.Background()); err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if _, ok := runner.callWith("usage"); ok {
+		t.Errorf("SkipPace still ran the usage invocation; calls = %v", runner.calls)
+	}
+}
+
+// A burn-rate read that fails must not cost us the quota windows we
+// already have.
+func TestCodexBarReaderKeepsWindowsWhenPaceReadFails(t *testing.T) {
+	runner := &fakeRunner{out: liveFixture(t)} // paceOut nil → usage call errors
+	reader := quota.CodexBarReader{Runner: runner}
+	snapshot, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	openai, ok := snapshot.Provider("openai")
+	if !ok {
+		t.Fatal("openai missing")
+	}
+	if openai.Availability != quota.AvailabilityOK {
+		t.Errorf("Availability = %q, want ok", openai.Availability)
+	}
+	if openai.Pace != nil {
+		t.Errorf("Pace = %+v, want nil after a failed burn-rate read", openai.Pace)
+	}
+}
+
+func TestCodexBarReaderAttachesPaceToTheRightProvider(t *testing.T) {
+	runner := &fakeRunner{
+		out: liveFixture(t),
+		paceOut: []byte(`[{"provider":"codex","pace":{"secondary":{
+		  "stage":"farAhead","deltaPercent":39,"expectedUsedPercent":14,
+		  "willLastToReset":false,"etaSeconds":73570,
+		  "summary":"39% in deficit | Expected 14% used | Runs out in 20h 27m"}}}]`),
+	}
+	reader := quota.CodexBarReader{Runner: runner}
+	snapshot, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	openai, _ := snapshot.Provider("openai")
+	if openai.Pace == nil {
+		t.Fatal("pace was not attached to the openai family")
+	}
+	if !openai.Pace.Overspending() {
+		t.Error("want Overspending for a window that will not last to reset")
+	}
+	if openai.Pace.ExhaustsIn != 73570*time.Second {
+		t.Errorf("ExhaustsIn = %v, want 73570s", openai.Pace.ExhaustsIn)
+	}
+	gemini, _ := snapshot.Provider("gemini")
+	if gemini.Pace != nil {
+		t.Errorf("pace leaked onto gemini: %+v", gemini.Pace)
+	}
+}
+
+// The usage payload carries account emails and has no redaction flag.
+// The parser's field set is the guarantee, so assert the type genuinely
+// cannot carry identity through.
+func TestParseCodexBarPaceDropsAccountIdentity(t *testing.T) {
+	payload := []byte(`[{"provider":"codex","usage":{"accountEmail":"someone@example.com"},
+	  "pace":{"secondary":{"stage":"onTrack","willLastToReset":true,"deltaPercent":1}}}]`)
+	byID, err := quota.ParseCodexBarPace(payload)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	pace, ok := byID["codex"]
+	if !ok {
+		t.Fatal("codex pace missing")
+	}
+	if pace.Overspending() {
+		t.Error("an on-track window must not read as overspending")
+	}
+	rendered, err := json.Marshal(pace)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(rendered), "example.com") {
+		t.Errorf("account identity survived the parse: %s", rendered)
+	}
+}
+
+func TestParseCodexBarPaceTakesTheMostPressingRung(t *testing.T) {
+	payload := []byte(`[{"provider":"codex","pace":{
+	  "primary":{"stage":"onTrack","willLastToReset":true,"deltaPercent":2},
+	  "secondary":{"stage":"farAhead","willLastToReset":false,"deltaPercent":39}}}]`)
+	byID, err := quota.ParseCodexBarPace(payload)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !byID["codex"].Overspending() {
+		t.Error("a provider with any window that will not last must read as overspending")
+	}
+	if byID["codex"].DeltaPercent != 39 {
+		t.Errorf("DeltaPercent = %v, want the worst rung's 39", byID["codex"].DeltaPercent)
+	}
+}
+
+func TestNilPaceIsNotOverspending(t *testing.T) {
+	var p *quota.Pace
+	if p.Overspending() {
+		t.Error("a missing burn-rate reading must never read as overspending")
 	}
 }
 

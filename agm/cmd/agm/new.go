@@ -781,12 +781,16 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // session new` (and its current-tmux variant) and `agm supervisor run`.
 // vroom-dispatch shells out to `agm session new`, so it inherits the same
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
+//
+// model names the model the session will run, so the provider-quota gate
+// can tell which subscription budget this spawn would draw down. An empty
+// model leaves that gate off — it has no budget to check.
 type circuitBreakerAdmission struct {
 	beforeSpawn        func(...*override.Reservation) ([]*override.Reservation, error)
 	afterAuthorization func()
 }
 
-func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error) {
+func enforceCircuitBreakers(sessionName, model string) (*circuitBreakerAdmission, error) {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -806,6 +810,7 @@ func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error
 		circuitbreaker.WithDiskReader(dr),
 		circuitbreaker.WithProcCounter(pc),
 		circuitbreaker.WithBrakeReader(br),
+		circuitbreaker.WithProviderQuota(circuitbreaker.DefaultProviderQuotaGate(), model),
 	}
 	normalizedBrakeOverrideReason := ""
 	if brakeOverrideReason != "" {
