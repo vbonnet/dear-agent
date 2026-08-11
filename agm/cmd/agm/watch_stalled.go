@@ -159,6 +159,9 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	var surfacer *completionSurfacer
 	if stalledWatchCompletions {
 		completions = ops.NewCompletionWatcher(opCtx)
+		// --dry-run must leave no trace: observe and report, but never write
+		// State/FinalOutput onto session records.
+		completions.DryRun = stalledDryRun
 		surfacer, err = newCompletionSurfacer(opCtx, stalledNotifyConfigPath, stalledOrchestratorName, stalledCompletionExcludes)
 		if err != nil {
 			return handleError(err)

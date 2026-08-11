@@ -282,3 +282,38 @@ func TestCompletionWatcher_ReadinessBlindHarnessGetsExtendedDebounce(t *testing.
 		t.Fatalf("extended debounce never completed: %v", events)
 	}
 }
+
+func TestCompletionWatcher_WorkingSessionGoneAtRestartReportsExit(t *testing.T) {
+	// The watcher restarts after a non-persistent worker finished and its
+	// tmux ended: the durable WORKING state is the evidence that this is a
+	// missed completion, not pre-watcher history.
+	m := testManifest("worker-1", manifest.StateWorking, time.Now().Add(-time.Hour))
+	storage := &recordingStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}}
+	tmux := session.NewMockTmux() // tmux target does not exist
+	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
+
+	events := scanOnce(t, watcher)
+	if len(events) != 1 || events[0].TransitionType != "exited" {
+		t.Fatalf("WORKING session gone at restart not reported: %v", events)
+	}
+	// And only once.
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("restart exit re-emitted: %v", events)
+	}
+}
+
+func TestCompletionWatcher_DryRunNeverWritesSessionRecords(t *testing.T) {
+	watcher, storage, tmux := watcherFixture(t)
+	watcher.DryRun = true
+
+	scanOnce(t, watcher) // baseline
+	tmux.PaneContents["worker-1"] = "working…\n"
+	scanOnce(t, watcher) // activity
+	scanOnce(t, watcher) // stable 1
+	if events := scanOnce(t, watcher); len(events) != 1 {
+		t.Fatalf("dry-run suppressed the event itself: %v", events)
+	}
+	if len(storage.updated) != 0 {
+		t.Fatalf("dry-run wrote %d session record(s)", len(storage.updated))
+	}
+}

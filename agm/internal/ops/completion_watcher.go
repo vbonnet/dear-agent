@@ -43,6 +43,10 @@ type CompletionWatcher struct {
 	CaptureLines int
 	// MaxCaptureBytes caps the persisted final output (default 16 KiB).
 	MaxCaptureBytes int
+	// DryRun observes and reports events without mutating durable session
+	// records (no State or FinalOutput writes). Used by watch-stalled
+	// --dry-run so a diagnostic run leaves no trace.
+	DryRun bool
 	// ReadinessBlindConfirmMultiplier extends the idle debounce for harnesses
 	// whose composer stays input-ready while the model is generating
 	// (codex-cli's own test fixture documents this), so readiness cannot
@@ -162,6 +166,11 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 				obs.activitySeen = true
 			}
 		} else if changed {
+			if obs.reportedIdle {
+				// New work arrived after a reported completion: the durable
+				// record must stop claiming DONE while the session works.
+				cw.persistState(m.SessionID, manifest.StateWorking)
+			}
 			obs.activitySeen = true
 			obs.stableTicks = 0
 			obs.reportedIdle = false
@@ -198,10 +207,16 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 }
 
 // observeGone handles a session whose tmux target is confirmed absent. Only
-// sessions the watcher saw alive report an exit: reporting records whose tmux
-// predates the watcher would replay history.
+// sessions the watcher saw alive report an exit — with one restart exception:
+// a session never seen alive whose durable state still says WORKING was
+// mid-work when last persisted, so its disappearance during a watcher restart
+// is a completion the operator must hear about. Everything else with a
+// pre-watcher tmux is history and is not replayed.
 func (cw *CompletionWatcher) observeGone(obs *sessionObservation, m *manifest.Manifest) *CompletionEvent {
-	if !obs.everExisted || obs.reportedGone {
+	if obs.reportedGone {
+		return nil
+	}
+	if !obs.everExisted && !strings.EqualFold(strings.TrimSpace(m.State), manifest.StateWorking) {
 		return nil
 	}
 	obs.reportedGone = true
@@ -289,6 +304,9 @@ func (cw *CompletionWatcher) capturePaneTail(tmuxName string) (string, bool) {
 // so the operator never loses the result), but the failure is logged loudly
 // rather than discarded.
 func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, output string) {
+	if cw.DryRun {
+		return
+	}
 	current, err := cw.ctx.Storage.GetSession(sessionID)
 	if err != nil || current == nil {
 		slog.Warn("completion-watcher: could not load session for durable completion write; notification still carries the output",
@@ -305,5 +323,25 @@ func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, o
 	if err := cw.ctx.Storage.UpdateSession(current); err != nil {
 		slog.Warn("completion-watcher: durable completion write failed; notification still carries the output",
 			"session_id", sessionID, "state", state, "error", err)
+	}
+}
+
+// persistState updates only the durable state fields (no output capture),
+// used when a completed session takes new work. Best-effort under the same
+// contract as persistCompletion.
+func (cw *CompletionWatcher) persistState(sessionID string, state string) {
+	if cw.DryRun {
+		return
+	}
+	current, err := cw.ctx.Storage.GetSession(sessionID)
+	if err != nil || current == nil {
+		slog.Warn("completion-watcher: could not load session for state update", "session_id", sessionID, "error", err)
+		return
+	}
+	current.State = state
+	current.StateUpdatedAt = time.Now()
+	current.StateSource = "completion-watcher"
+	if err := cw.ctx.Storage.UpdateSession(current); err != nil {
+		slog.Warn("completion-watcher: state update failed", "session_id", sessionID, "state", state, "error", err)
 	}
 }

@@ -108,7 +108,11 @@ func captureLiveOutput(ctx *OpContext, result *GetSessionOutputResult, status, t
 		result.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 		return true, nil
 	}
-	if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr == nil && stillExists {
+	// Serve the durable capture only when the pane is PROVEN gone: a liveness
+	// probe failure (socket outage, permission) cannot distinguish a dead
+	// session from an unreachable one, and answering with an earlier task's
+	// capture would misrepresent the current one.
+	if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr != nil || stillExists {
 		return false, ErrInvalidInput("identifier", "Live output capture failed for a running session; retry. (A durable final capture, if any, describes an earlier completion, not the current task.)")
 	}
 	return false, nil
@@ -121,7 +125,10 @@ func tailLines(s string, n int) string {
 	if n <= 0 {
 		return s
 	}
-	lines := strings.Split(s, "\n")
+	// A trailing newline is a delimiter, not an empty final line — without
+	// trimming it, the last requested "line" would be the empty string.
+	trimmed := strings.TrimSuffix(s, "\n")
+	lines := strings.Split(trimmed, "\n")
 	if len(lines) <= n {
 		return s
 	}
