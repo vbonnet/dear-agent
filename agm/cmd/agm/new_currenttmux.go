@@ -427,7 +427,7 @@ func monitorAndAnswerTrustPrompt(ctx context.Context, sessionName string, timeou
 			_ = ctrl.Close()
 
 			// Send Enter key via regular tmux
-			if err := tmux.SendCommand(sessionName, "C-m"); err != nil {
+			if err := tmux.SendKeys(sessionName, "Enter"); err != nil {
 				return fmt.Errorf("failed to answer trust prompt: %w", err)
 			}
 

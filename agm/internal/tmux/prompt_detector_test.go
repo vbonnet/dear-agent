@@ -304,6 +304,16 @@ func TestTrustSelectorOwnsInput(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "ANSI-styled selected affirmative owns the tail",
+			content:  "\x1b[1m❯\x1b[0m 1. \x1b[38;5;105mYes, I trust this folder\x1b[0m\n  2. No, exit",
+			expected: true,
+		},
+		{
+			name:     "selected negative row does not authorize affirmative",
+			content:  "  1. Yes, I trust this folder\n❯ 2. No, exit\n\nEnter to confirm",
+			expected: false,
+		},
+		{
 			// ce-wn4qe :403 — the question is on screen but the numbered options
 			// have not rendered yet; must not answer.
 			name:     "question before options render does not own input",
@@ -342,7 +352,12 @@ func TestContainsClaudeTrustAffirmative(t *testing.T) {
 	}{
 		{name: "legacy affirmative", content: "❯ 1. Yes, proceed\n  2. No, exit", expected: true},
 		{name: "current affirmative", content: "❯ 1. Yes, I trust this folder\n  2. No, exit", expected: true},
-		{name: "numbered option without cursor", content: " 1. Yes, I trust this folder", expected: true},
+		{name: "ASCII greater-than prose is not a selector", content: "> 1. Yes, proceed", expected: false},
+		{name: "guillemet prose is not a selector", content: "» 1. Yes, proceed", expected: false},
+		{name: "numbered option without cursor", content: " 1. Yes, I trust this folder", expected: false},
+		{name: "selected negative with unselected affirmative", content: " 1. Yes, I trust this folder\n❯ 2. No, exit", expected: false},
+		{name: "ANSI-styled selected affirmative", content: "\x1b[1m❯\x1b[0m 1. \x1b[38;5;105mYes, I trust this folder\x1b[0m", expected: true},
+		{name: "selected-looking prose suffix", content: "❯ 1. Yes, I trust this folder (quoted example)", expected: false},
 		{name: "question without selector rendered yet", content: "Quick safety check: Is this a project you created or one you trust?", expected: false},
 		{name: "empty", content: "", expected: false},
 		{name: "unrelated", content: "I trust you completely", expected: false},

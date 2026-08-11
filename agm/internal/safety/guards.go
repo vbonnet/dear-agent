@@ -378,11 +378,10 @@ func detectSessionUninitialized(paneContent string, claudeRunning bool) *Violati
 		}
 	}
 
-	// Check for welcome/trust screen indicators. Claude Code's trust dialog
-	// wording changed across releases (ce-wn4qe); use the canonical detector so
-	// every known variant (including a scrolled dialog showing only its
-	// affirmative option) is flagged as uninitialized, without a divergent copy.
-	if tmux.ContainsClaudeTrustPrompt(paneContent) {
+	// Only a live, tail-owning selected trust row is current onboarding. An
+	// answered selector retained above a newer composer is historical evidence
+	// and must not keep an initialized session blocked.
+	if tmux.TrustSelectorOwnsInput(paneContent) {
 		return &Violation{
 			Guard:      ViolationSessionUninitialized,
 			Message:    "Session is showing the trust prompt (not yet initialized).",

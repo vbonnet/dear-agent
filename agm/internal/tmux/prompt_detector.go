@@ -384,12 +384,10 @@ var claudeTrustQuestionMarkers = []string{
 	"Is this a project you created or one you trust",
 }
 
-// claudeTrustAffirmativeSelectorPattern matches the trust dialog's affirmative
-// option only when it is rendered as an actual selectable choice — a numbered
-// option, optionally cursor-prefixed, e.g. "❯ 1. Yes, I trust this folder" or
-// "1. Yes, proceed". This prevents recent model output that merely mentions the
-// phrase from being misread as a live trust dialog.
-var claudeTrustAffirmativeSelectorPattern = regexp.MustCompile(`(?mi)^\s*(?:[❯>»]\s*)?[12][.)]\s+Yes,\s+(?:proceed|I trust this folder)\b`)
+// claudeTrustAffirmativeSelectorPattern matches only the selected affirmative
+// row. The cursor must be on option 1; an unselected affirmative row above a
+// selected "No" must never authorize Enter.
+var claudeTrustAffirmativeSelectorPattern = regexp.MustCompile(`(?mi)^[ \t]*❯[ \t]*1[.)][ \t]+Yes,[ \t]+(?:proceed|I trust this folder)[ \t\r]*$`)
 
 // ContainsClaudeTrustPrompt reports whether content shows the Claude Code trust
 // dialog in any known wording. The affirmative option alone is sufficient
@@ -415,7 +413,7 @@ func ContainsClaudeTrustPrompt(content string) bool {
 // Enter that confirms it. It requires the numbered-selector structure so prose
 // that merely mentions the phrase does not trigger a false trust-prompt match.
 func ContainsClaudeTrustAffirmative(content string) bool {
-	return claudeTrustAffirmativeSelectorPattern.MatchString(content)
+	return claudeTrustAffirmativeSelectorPattern.MatchString(stripANSI(content))
 }
 
 // TrustSelectorOwnsInput reports whether the trust dialog's affirmative selector
@@ -818,7 +816,7 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 
 				// Use regular tmux send-keys (not via control mode)
 				// This works better for interactive prompts
-				if err := SendCommand(sessionName, "C-m"); err != nil {
+				if err := SendKeys(sessionName, "Enter"); err != nil {
 					debug.Log("⚠ Failed to send Enter: %v", err)
 					return fmt.Errorf("failed to answer trust prompt: %w", err)
 				}
