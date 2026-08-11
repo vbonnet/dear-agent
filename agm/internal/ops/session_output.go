@@ -80,11 +80,19 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 			result.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 			return result, nil
 		}
+		// A transient capture failure on a still-live pane must not silently
+		// answer with a durable capture from an earlier task — the caller
+		// asked for current output and a stale result would misrepresent the
+		// session. Fall back to final-capture only when the pane is actually
+		// gone; otherwise report the failure so the caller retries.
+		if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr == nil && stillExists {
+			return nil, ErrInvalidInput("identifier", "Live output capture failed for a running session; retry. (A durable final capture, if any, describes an earlier completion, not the current task.)")
+		}
 	}
 
 	if m.FinalOutput != "" {
 		result.Source = "final-capture"
-		result.Output = m.FinalOutput
+		result.Output = tailLines(m.FinalOutput, lines)
 		if !m.FinalOutputAt.IsZero() {
 			result.CapturedAt = m.FinalOutputAt.UTC().Format(time.RFC3339)
 		}
@@ -92,6 +100,20 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 	}
 
 	return nil, ErrInvalidInput("identifier", "No output is available for this session: the tmux pane is not readable and no final output was captured.")
+}
+
+// tailLines returns the last n lines of s, honoring the caller's requested
+// line budget for durable final-capture output exactly as the live pane path
+// does.
+func tailLines(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // resolveSessionByIdentifier resolves ID, then name/tmux-name, then Claude UUID

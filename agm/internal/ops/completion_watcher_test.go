@@ -35,6 +35,9 @@ func watcherFixture(t *testing.T) (*CompletionWatcher, *recordingStorage, *sessi
 	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
 	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
 	watcher.IdleConfirmTicks = 2
+	// The choreography below counts plain ticks; the codex-specific extended
+	// debounce has its own dedicated test.
+	watcher.ReadinessBlindConfirmMultiplier = 1
 	return watcher, storage, tmux
 }
 
@@ -183,5 +186,99 @@ func TestCompletionWatcher_NeverSeenSessionExitIsSilent(t *testing.T) {
 
 	if events := scanOnce(t, watcher); len(events) != 0 {
 		t.Fatalf("watcher replayed history for a session it never saw alive: %v", events)
+	}
+}
+
+// strictMockTmux wraps MockTmux with a strict existence checker whose answers
+// (and failures) are controlled independently of the plain HasSession.
+type strictMockTmux struct {
+	*session.MockTmux
+	strictExists bool
+	strictErr    error
+}
+
+func (s *strictMockTmux) HasSessionStrict(_ context.Context, _ string) (bool, error) {
+	return s.strictExists, s.strictErr
+}
+
+func TestCompletionWatcher_TmuxBackendFailureIsNotAnExit(t *testing.T) {
+	m := testManifest("worker-1", "", time.Time{})
+	storage := &recordingStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}}
+	inner := session.NewMockTmux()
+	inner.Sessions["worker-1"] = true
+	inner.PaneContents = map[string]string{"worker-1": "booting…\n"}
+	tmux := &strictMockTmux{MockTmux: inner, strictExists: true}
+	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
+
+	scanOnce(t, watcher) // baseline observes the session alive
+
+	// The tmux backend starts failing: plain HasSession would collapse this
+	// into "absent", but the strict checker reports the failure, so no exit
+	// completion may fire and no OFFLINE state may be persisted.
+	tmux.strictErr = context.DeadlineExceeded
+	for range 3 {
+		if events := scanOnce(t, watcher); len(events) != 0 {
+			t.Fatalf("backend failure reported as exit: %v", events)
+		}
+	}
+	for _, u := range storage.updated {
+		if u.State == manifest.StateOffline {
+			t.Fatalf("backend failure persisted OFFLINE: %+v", u)
+		}
+	}
+
+	// Backend recovers and the session is truly gone: now the exit fires.
+	tmux.strictErr = nil
+	tmux.strictExists = false
+	if events := scanOnce(t, watcher); len(events) != 1 || events[0].TransitionType != "exited" {
+		t.Fatalf("confirmed absence did not report an exit: %v", events)
+	}
+}
+
+func TestCompletionWatcher_PersistedWorkingStateRecoversMissedCompletion(t *testing.T) {
+	// The watcher restarts after a worker already finished: the durable
+	// session state still says WORKING (persisted by this pipeline before the
+	// restart) and the pane is stable and input-ready. The completion must be
+	// emitted rather than swallowed by the baseline.
+	m := testManifest("worker-1", manifest.StateWorking, time.Now().Add(-time.Hour))
+	m.Harness = "claude-code"
+	storage := &recordingStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}}
+	tmux := session.NewMockTmux()
+	tmux.Sessions["worker-1"] = true
+	tmux.PaneContents = map[string]string{"worker-1": "RESULT: finished before restart\n"}
+	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
+	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
+	watcher.IdleConfirmTicks = 2
+
+	// Baseline arms activity from the persisted WORKING state and counts as
+	// the first stable, input-ready observation; the second confirms.
+	scanOnce(t, watcher)
+	events := scanOnce(t, watcher)
+	if len(events) != 1 || events[0].TransitionType != "idle" {
+		t.Fatalf("missed pre-restart completion not recovered: %v", events)
+	}
+	if events[0].Output == "" {
+		t.Fatal("recovered completion carried no output")
+	}
+}
+
+func TestCompletionWatcher_ReadinessBlindHarnessGetsExtendedDebounce(t *testing.T) {
+	watcher, _, tmux := watcherFixture(t)
+	// Restore the default multiplier: codex-cli keeps its composer
+	// input-ready while generating, so completion needs a longer stability
+	// window than readiness-accurate harnesses.
+	watcher.ReadinessBlindConfirmMultiplier = 3
+
+	scanOnce(t, watcher) // baseline
+	tmux.PaneContents["worker-1"] = "working…\n"
+	scanOnce(t, watcher) // activity
+	// 2 × 3 = 6 stable ticks required; the first five must stay silent.
+	for i := range 5 {
+		if events := scanOnce(t, watcher); len(events) != 0 {
+			t.Fatalf("stable tick %d fired early for a readiness-blind harness: %v", i+1, events)
+		}
+	}
+	if events := scanOnce(t, watcher); len(events) != 1 {
+		t.Fatalf("extended debounce never completed: %v", events)
 	}
 }

@@ -43,15 +43,23 @@ func newCompletionSurfacer(opCtx *ops.OpContext, configPath, orchestrator, exclu
 	var dispatchers []notify.Dispatcher
 	if path != "" {
 		if _, statErr := os.Stat(path); statErr == nil {
-			cfg, err := notify.LoadConfig(path)
+			built, err := loadDispatchers(path)
 			if err != nil {
-				return nil, fmt.Errorf("load notify config %s: %w", path, err)
+				if configPath != "" {
+					// An explicitly requested config must be honored exactly.
+					return nil, err
+				}
+				// A malformed IMPLICIT ~/.agm/notify.yaml must never take the
+				// whole watch loop down with it: completion watching defaults
+				// on inside `agm watch-stalled`, whose stall recovery
+				// (permission/no-commit/error-loop monitoring) predates this
+				// feature and must survive an optional notification config.
+				// Fall back to the stderr log dispatcher and say so.
+				slog.Warn("completion-surfacer: implicit notify config is unusable; falling back to log-only notifications (stall recovery unaffected)",
+					"path", path, "error", err)
+			} else {
+				dispatchers = built
 			}
-			built, err := notify.BuildDispatchers(cfg, slog.Default())
-			if err != nil {
-				return nil, fmt.Errorf("build notify dispatchers: %w", err)
-			}
-			dispatchers = built
 		} else if configPath != "" {
 			// An explicitly named config that does not exist is an error; the
 			// implicit default location is allowed to be absent.
@@ -75,6 +83,21 @@ func newCompletionSurfacer(opCtx *ops.OpContext, configPath, orchestrator, exclu
 		orchestrator: orchestrator,
 		excludes:     excludes,
 	}, nil
+}
+
+// loadDispatchers reads and builds the notify dispatcher set from one config
+// path, keeping load and build failures as one seam for the implicit-config
+// fallback above.
+func loadDispatchers(path string) ([]notify.Dispatcher, error) {
+	cfg, err := notify.LoadConfig(path)
+	if err != nil {
+		return nil, fmt.Errorf("load notify config %s: %w", path, err)
+	}
+	built, err := notify.BuildDispatchers(cfg, slog.Default())
+	if err != nil {
+		return nil, fmt.Errorf("build notify dispatchers: %w", err)
+	}
+	return built, nil
 }
 
 // shouldSurface filters out the orchestrator session itself (a relay into it
@@ -125,7 +148,12 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 			event.SessionName, event.Harness, describeTransition(event.TransitionType),
 			tailExcerpt(event.Output, 1200), event.SessionName,
 		)
-		if _, err := ops.SendMessage(cs.opCtx, &ops.SendMessageRequest{
+		// Propagate the caller's cancellation into the relay: OpContext.Context
+		// is the ops layer's cancellation carrier, and the shared cs.opCtx must
+		// not be mutated (Surface can run concurrently with other ops users).
+		relayCtx := *cs.opCtx
+		relayCtx.Context = ctx
+		if _, err := ops.SendMessage(&relayCtx, &ops.SendMessageRequest{
 			Recipient: cs.orchestrator,
 			Message:   message,
 		}); err != nil {

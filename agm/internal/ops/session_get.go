@@ -36,8 +36,13 @@ type SessionDetail struct {
 	ContextUsage     *ContextUsage            `json:"context_usage,omitempty"`
 	PermissionMode   string                   `json:"permission_mode,omitempty"`
 	HarnessHistory   []manifest.HarnessSwitch `json:"harness_history,omitempty"`
-	FinalOutput      string                   `json:"final_output,omitempty"`
-	FinalOutputAt    string                   `json:"final_output_at,omitempty"`
+	// FinalOutputAt is deliberately the ONLY completion-capture field here:
+	// captured terminal contents can hold prompts, responses, credentials,
+	// and paths, so the output itself stays confined to the explicitly
+	// requested get_session_output operation (metadata surfaces such as
+	// agm_get_session_metadata must never return it). The timestamp tells a
+	// caller that a durable capture exists without exposing its contents.
+	FinalOutputAt string `json:"final_output_at,omitempty"`
 }
 
 // ContextUsage mirrors manifest.ContextUsage for JSON output.
@@ -151,7 +156,6 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 		CreatedAt:        m.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:        m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		PermissionMode:   m.PermissionMode,
-		FinalOutput:      m.FinalOutput,
 	}
 	if !m.FinalOutputAt.IsZero() {
 		d.FinalOutputAt = m.FinalOutputAt.UTC().Format("2006-01-02T15:04:05Z")

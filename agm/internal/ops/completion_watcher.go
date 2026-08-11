@@ -2,8 +2,10 @@ package ops
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -41,8 +43,24 @@ type CompletionWatcher struct {
 	CaptureLines int
 	// MaxCaptureBytes caps the persisted final output (default 16 KiB).
 	MaxCaptureBytes int
+	// ReadinessBlindConfirmMultiplier extends the idle debounce for harnesses
+	// whose composer stays input-ready while the model is generating
+	// (codex-cli's own test fixture documents this), so readiness cannot
+	// distinguish idle from a quiet generation or tool interval. A longer
+	// stability window sharply reduces — it cannot fully eliminate —
+	// premature completions for those harnesses; a definitive per-harness
+	// idle signal is tracked as follow-up. Default 3.
+	ReadinessBlindConfirmMultiplier int
 
 	observations map[string]*sessionObservation
+}
+
+func readinessBlindHarness(harness string) bool {
+	switch strings.ToLower(strings.TrimSpace(harness)) {
+	case "codex-cli", "codex":
+		return true
+	}
+	return false
 }
 
 type sessionObservation struct {
@@ -62,11 +80,12 @@ type sessionObservation struct {
 // NewCompletionWatcher creates a watcher with default thresholds.
 func NewCompletionWatcher(ctx *OpContext) *CompletionWatcher {
 	return &CompletionWatcher{
-		ctx:              ctx,
-		IdleConfirmTicks: 2,
-		CaptureLines:     200,
-		MaxCaptureBytes:  16 * 1024,
-		observations:     map[string]*sessionObservation{},
+		ctx:                             ctx,
+		IdleConfirmTicks:                2,
+		CaptureLines:                    200,
+		MaxCaptureBytes:                 16 * 1024,
+		ReadinessBlindConfirmMultiplier: 3,
+		observations:                    map[string]*sessionObservation{},
 	}
 }
 
@@ -110,17 +129,9 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		tmuxName = m.Name
 	}
 
-	exists := false
-	if checker, ok := cw.ctx.Tmux.(interface {
-		HasSession(name string) (bool, error)
-	}); ok {
-		var err error
-		exists, err = checker.HasSession(tmuxName)
-		if err != nil {
-			return nil // an unreadable tmux proves nothing
-		}
-	} else {
-		return nil
+	exists, err := cw.sessionExists(ctx, tmuxName)
+	if err != nil {
+		return nil // a tmux backend failure proves nothing about the session
 	}
 
 	if !exists {
@@ -138,7 +149,7 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 			Output:         obs.lastTail,
 			DetectedAt:     time.Now(),
 		}
-		cw.persistCompletion(m, manifest.StateOffline, obs.lastTail)
+		cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
 		return event
 	}
 	obs.everExisted = true
@@ -152,9 +163,19 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		changed := obs.lastTail != tail
 		obs.lastTail = tail
 		if !obs.baselined {
-			// First observation only establishes the baseline; a difference
-			// from the zero value is not activity.
+			// First observation establishes the content baseline. A restart
+			// (launchd bounce, host reboot) must not swallow a completion
+			// that happened while the watcher was down: the durable session
+			// state — persisted by this same pipeline — says whether the
+			// session was mid-work when last seen. Treat a persisted WORKING
+			// state as observed activity so the normal stability + readiness
+			// path can emit the missed completion; sessions with no such
+			// evidence stay baseline-only, so pre-watcher history is never
+			// replayed.
 			obs.baselined = true
+			if strings.EqualFold(strings.TrimSpace(m.State), manifest.StateWorking) {
+				obs.activitySeen = true
+			}
 		} else if changed {
 			obs.activitySeen = true
 			obs.stableTicks = 0
@@ -172,7 +193,11 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		return nil
 	}
 	obs.stableTicks++
-	if obs.stableTicks < cw.IdleConfirmTicks {
+	required := cw.IdleConfirmTicks
+	if readinessBlindHarness(m.Harness) && cw.ReadinessBlindConfirmMultiplier > 1 {
+		required *= cw.ReadinessBlindConfirmMultiplier
+	}
+	if obs.stableTicks < required {
 		return nil
 	}
 
@@ -187,8 +212,21 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		Output:         obs.lastTail,
 		DetectedAt:     time.Now(),
 	}
-	cw.persistCompletion(m, manifest.StateDone, obs.lastTail)
+	cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
 	return event
+}
+
+// sessionExists resolves tmux ground truth for exit detection. It prefers the
+// strict capability, which distinguishes an absent exact target from socket,
+// permission, and timeout failures — the plain HasSession collapses every
+// tmux exec failure into "absent", which would turn a transient tmux outage
+// into a wave of false "exited" completions and OFFLINE records. When only
+// the plain checker exists (test fakes), its answer is used as-is.
+func (cw *CompletionWatcher) sessionExists(ctx context.Context, tmuxName string) (bool, error) {
+	if strict, ok := cw.ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
+		return strict.HasSessionStrict(ctx, tmuxName)
+	}
+	return cw.ctx.Tmux.HasSession(tmuxName)
 }
 
 // harnessIdle reports whether the harness composer is input-ready. A session
@@ -217,21 +255,43 @@ func (cw *CompletionWatcher) capturePaneTail(tmuxName string) (string, bool) {
 	}
 	if len(tail) > cw.MaxCaptureBytes {
 		tail = tail[len(tail)-cw.MaxCaptureBytes:]
+		// A byte slice can start mid-rune; drop the partial rune so the
+		// persisted capture stays valid UTF-8.
+		for i := 0; i < len(tail) && i < utf8.UTFMax; i++ {
+			if utf8.RuneStart(tail[i]) {
+				tail = tail[i:]
+				break
+			}
+		}
 	}
 	return tail, true
 }
 
 // persistCompletion durably records the completion on the session record so
 // the result survives pane teardown and is readable by every metadata surface.
-// Best-effort: a storage failure must not stop the watch loop, and the event
-// is still reported for notification.
-func (cw *CompletionWatcher) persistCompletion(m *manifest.Manifest, state string, output string) {
-	m.State = state
-	m.StateUpdatedAt = time.Now()
-	m.StateSource = "completion-watcher"
-	if output != "" {
-		m.FinalOutput = output
-		m.FinalOutputAt = time.Now()
+// It re-reads the current record and patches only the completion fields — the
+// manifest observed at scan start may be stale, and rewriting it wholesale
+// could clobber concurrent updates (tags, notes, harness switches) made since.
+// Best-effort: a storage failure must not stop the watch loop and the event is
+// still reported for notification (the notification itself carries the output,
+// so the operator never loses the result), but the failure is logged loudly
+// rather than discarded.
+func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, output string) {
+	current, err := cw.ctx.Storage.GetSession(sessionID)
+	if err != nil || current == nil {
+		slog.Warn("completion-watcher: could not load session for durable completion write; notification still carries the output",
+			"session_id", sessionID, "error", err)
+		return
 	}
-	_ = cw.ctx.Storage.UpdateSession(m)
+	current.State = state
+	current.StateUpdatedAt = time.Now()
+	current.StateSource = "completion-watcher"
+	if output != "" {
+		current.FinalOutput = output
+		current.FinalOutputAt = time.Now()
+	}
+	if err := cw.ctx.Storage.UpdateSession(current); err != nil {
+		slog.Warn("completion-watcher: durable completion write failed; notification still carries the output",
+			"session_id", sessionID, "state", state, "error", err)
+	}
 }
