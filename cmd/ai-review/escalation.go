@@ -25,9 +25,13 @@ var escalationRules = []escalationRule{
 	{
 		reason: "protected review policy, enforcement, or provider rules change",
 		match: func(p string) bool {
-			return p == "REVIEW.md" ||
-				p == ".github/workflows/review.yml" ||
-				strings.HasPrefix(p, ".github/rulesets/")
+			// Git tree paths are case-sensitive, but supported case-insensitive
+			// checkouts can make an added case variant shadow the canonical
+			// trust-root bytes. Match case-fold aliases as protected too.
+			lower := strings.ToLower(p)
+			return lower == "review.md" ||
+				lower == ".github/workflows/review.yml" ||
+				strings.HasPrefix(lower, ".github/rulesets/")
 		},
 	},
 	{
