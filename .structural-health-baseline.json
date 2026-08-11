@@ -90,28 +90,30 @@
       "agm/internal/agent/openai_adapter_test.go (2405 lines)",
       "agm/internal/codexhooks/verify.go (2881 lines)",
       "agm/internal/dolt/adapter_test.go (1032 lines)",
-      "agm/internal/dolt/sessions.go (1665 lines)",
+      "agm/internal/dolt/sessions.go (1709 lines)",
       "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)",
       "agm/internal/harnessexec/exec.go (1291 lines)",
       "agm/internal/harnessexec/handoff.go (1733 lines)",
       "agm/internal/harnessexec/handoff_test.go (2194 lines)",
-      "agm/internal/ops/session_create.go (1207 lines)",
+      "agm/internal/ops/session_create.go (1219 lines)",
       "agm/internal/ops/session_create_test.go (1962 lines)",
       "agm/internal/ops/session_mutation_test.go (1143 lines)",
       "agm/internal/ops/session_resume_test.go (1323 lines)",
       "agm/internal/sentinel/daemon/monitor.go (1036 lines)",
       "agm/internal/session/context_detector_test.go (1432 lines)",
       "agm/internal/tmux/liveness.go (1027 lines)",
-      "agm/internal/tmux/prompt_detector.go (1236 lines)",
+      "agm/internal/tmux/prompt_detector.go (1751 lines)",
+      "agm/internal/tmux/prompt_detector_test.go (1201 lines)",
+      "agm/internal/tmux/readiness.go (1044 lines)",
       "agm/internal/tmux/tmux.go (1283 lines)",
       "agm/internal/tmux/tmux_test.go (1109 lines)",
       "agm/internal/ui/table.go (1054 lines)",
       "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
-      "agm/test/bdd/steps/spec_governance_tooling_steps.go (1621 lines)",
+      "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
       "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
       "agm/test/performance/eventbus_load_test.go (1061 lines)",
-      "cmd/ai-review/spec_contract.go (3088 lines)",
-      "cmd/ai-review/spec_contract_test.go (2345 lines)",
+      "cmd/ai-review/spec_contract.go (3119 lines)",
+      "cmd/ai-review/spec_contract_test.go (2398 lines)",
       "cmd/vroom-dispatch-direct/main.go (1173 lines)",
       "cmd/vroom-dispatch/main.go (1618 lines)",
       "cmd/vroom-dispatch/main_test.go (1240 lines)",
@@ -126,7 +128,7 @@
       "pkg/workflow/runner.go (1296 lines)",
       "tests/githooks/post_merge_test.go (1452 lines)",
       "tools/specaudit/main.go (6090 lines)",
-      "tools/specaudit/main_test.go (3807 lines)",
+      "tools/specaudit/main_test.go (3756 lines)",
       "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
     ],
     "goroutine-recover": [
@@ -687,6 +689,47 @@
         "raw-mem-gate": [],
         "zero-test": []
       }
+    },
+    {
+      "previous_baseline_sha256": "4bf3d15a0da437edd824968347bd4c92b8ab6b218910538ea23cbf2bb14babe9",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions.go (1709 lines)",
+          "agm/internal/ops/session_create.go (1219 lines)",
+          "agm/internal/tmux/prompt_detector.go (1751 lines)",
+          "agm/internal/tmux/prompt_detector_test.go (1201 lines)",
+          "agm/internal/tmux/readiness.go (1044 lines)",
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
+          "cmd/ai-review/spec_contract.go (3119 lines)",
+          "cmd/ai-review/spec_contract_test.go (2398 lines)",
+          "tools/specaudit/main_test.go (3756 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions.go (1665 lines)",
+          "agm/internal/ops/session_create.go (1207 lines)",
+          "agm/internal/tmux/prompt_detector.go (1236 lines)",
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1621 lines)",
+          "cmd/ai-review/spec_contract.go (3088 lines)",
+          "cmd/ai-review/spec_contract_test.go (2345 lines)",
+          "tools/specaudit/main_test.go (3807 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "main advanced under the branch: spec-contract and completion-pipeline files grew past the stale baseline; admitted at merge-main so the newly always-on PR check starts honest",
+      "reference": "PR #1183 / ce-3knl.13.3"
     }
   ]
 }
