@@ -25,15 +25,17 @@ type CompletionEvent struct {
 
 // CompletionWatcher observes sessions from the supervisor side — tmux ground
 // truth, no reliance on in-session hooks — so it works identically for every
-// harness and every create surface (CLI, MCP, supervisor). When a session
-// completes, the watcher durably persists the result tail onto the session
-// record (FinalOutput) and stamps State, then reports the event for
-// notification. This is the capture half of the completion → capture →
-// surface pipeline (ce-0zng9).
+// harness and every create surface (CLI, MCP, supervisor). Work is detected
+// as pane-content change; completion as content stability with an input-ready
+// composer. When a session completes, the watcher durably persists the result
+// tail onto the session record (FinalOutput) and stamps State, then reports
+// the event for notification. This is the capture half of the completion →
+// capture → surface pipeline (ce-0zng9).
 type CompletionWatcher struct {
 	ctx *OpContext
-	// IdleConfirmTicks is how many consecutive idle observations are required
-	// after busy before a completion is reported (debounce; default 2).
+	// IdleConfirmTicks is how many consecutive stable, input-ready
+	// observations are required after activity before a completion is
+	// reported (debounce; default 2).
 	IdleConfirmTicks int
 	// CaptureLines is how many trailing pane lines are captured (default 200).
 	CaptureLines int
@@ -44,12 +46,17 @@ type CompletionWatcher struct {
 }
 
 type sessionObservation struct {
-	busySeen     bool
-	idleTicks    int
+	// activitySeen is set when the pane content changed between ticks —
+	// harness-agnostic proof the session did work since the last completion.
+	// Input readiness alone cannot detect activity: some harnesses (codex-cli)
+	// keep the composer input-ready while the model is generating.
+	activitySeen bool
+	stableTicks  int
 	reportedIdle bool
 	everExisted  bool
 	reportedGone bool
 	lastTail     string
+	baselined    bool
 }
 
 // NewCompletionWatcher creates a watcher with default thresholds.
@@ -137,30 +144,41 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	obs.everExisted = true
 	obs.reportedGone = false
 
-	idle := cw.harnessIdle(ctx, tmuxName, m.Harness)
-	// Keep a rolling tail so an exit between ticks still has output to attach.
-	if tail, ok := cw.capturePaneTail(tmuxName); ok {
+	// Pane activity is the busy signal: content changed since the last tick
+	// means the session did work. This also keeps a rolling tail so an exit
+	// between ticks still has output to attach.
+	tail, captured := cw.capturePaneTail(tmuxName)
+	if captured {
+		changed := obs.lastTail != tail
 		obs.lastTail = tail
+		if !obs.baselined {
+			// First observation only establishes the baseline; a difference
+			// from the zero value is not activity.
+			obs.baselined = true
+		} else if changed {
+			obs.activitySeen = true
+			obs.stableTicks = 0
+			obs.reportedIdle = false
+			return nil
+		}
 	}
-
-	if !idle {
-		obs.busySeen = true
-		obs.idleTicks = 0
-		obs.reportedIdle = false
+	if !obs.activitySeen || obs.reportedIdle {
 		return nil
 	}
-
-	if !obs.busySeen || obs.reportedIdle {
+	// Content is stable. Completion additionally requires the composer to be
+	// input-ready so a session parked on a permission prompt or overlay is
+	// left to the stall detector rather than reported as done.
+	if !cw.harnessIdle(ctx, tmuxName, m.Harness) {
 		return nil
 	}
-	obs.idleTicks++
-	if obs.idleTicks < cw.IdleConfirmTicks {
+	obs.stableTicks++
+	if obs.stableTicks < cw.IdleConfirmTicks {
 		return nil
 	}
 
 	obs.reportedIdle = true
-	obs.busySeen = false
-	obs.idleTicks = 0
+	obs.activitySeen = false
+	obs.stableTicks = 0
 	event := &CompletionEvent{
 		SessionID:      m.SessionID,
 		SessionName:    m.Name,

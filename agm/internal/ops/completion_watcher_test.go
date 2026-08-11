@@ -22,17 +22,20 @@ func (r *recordingStorage) UpdateSession(m *manifest.Manifest) error {
 	return nil
 }
 
-func watcherFixture(t *testing.T) (*CompletionWatcher, *recordingStorage, *session.MockTmux, *manifest.Manifest) {
+func watcherFixture(t *testing.T) (*CompletionWatcher, *recordingStorage, *session.MockTmux) {
 	t.Helper()
 	m := testManifest("worker-1", "", time.Time{})
 	m.Harness = "codex-cli"
 	storage := &recordingStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}}
 	tmux := session.NewMockTmux()
 	tmux.Sessions["worker-1"] = true
-	tmux.PaneContents = map[string]string{"worker-1": "task done\nRESULT: 42\n"}
+	tmux.PaneContents = map[string]string{"worker-1": "booting…\n"}
+	// codex-cli keeps the composer input-ready even while generating, so the
+	// fixture mirrors that: readiness alone must never gate activity detection.
+	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
 	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
 	watcher.IdleConfirmTicks = 2
-	return watcher, storage, tmux, m
+	return watcher, storage, tmux
 }
 
 func scanOnce(t *testing.T, watcher *CompletionWatcher) []CompletionEvent {
@@ -44,19 +47,29 @@ func scanOnce(t *testing.T, watcher *CompletionWatcher) []CompletionEvent {
 	return events
 }
 
-func TestCompletionWatcher_IdleAfterBusyEmitsOnce(t *testing.T) {
-	watcher, storage, tmux, _ := watcherFixture(t)
+func TestCompletionWatcher_ActivityThenStableEmitsOnce(t *testing.T) {
+	watcher, storage, tmux := watcherFixture(t)
 
-	// Tick 1: busy.
-	tmux.InputReadiness = session.InputReadiness{Ready: false, State: "NO"}
+	// Tick 1 establishes the baseline; no activity yet.
 	if events := scanOnce(t, watcher); len(events) != 0 {
-		t.Fatalf("busy tick emitted events: %v", events)
+		t.Fatalf("baseline tick emitted events: %v", events)
 	}
 
-	// Ticks 2-3: idle; second consecutive idle crosses the debounce.
-	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
+	// Tick 2: pane content changed — the session is working.
+	tmux.PaneContents["worker-1"] = "working…\ncomputing primes\n"
 	if events := scanOnce(t, watcher); len(events) != 0 {
-		t.Fatalf("first idle tick should debounce, got %v", events)
+		t.Fatalf("activity tick emitted events: %v", events)
+	}
+
+	// Tick 3: more output, still working.
+	tmux.PaneContents["worker-1"] = "working…\ncomputing primes\nRESULT: 42\n"
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("second activity tick emitted events: %v", events)
+	}
+
+	// Ticks 4-5: content stable and input-ready; second stable tick fires.
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("first stable tick should debounce, got %v", events)
 	}
 	events := scanOnce(t, watcher)
 	if len(events) != 1 {
@@ -82,48 +95,66 @@ func TestCompletionWatcher_IdleAfterBusyEmitsOnce(t *testing.T) {
 		t.Fatalf("final output not persisted: %+v", last)
 	}
 
-	// Staying idle emits nothing further.
+	// Staying stable emits nothing further.
 	if events := scanOnce(t, watcher); len(events) != 0 {
-		t.Fatalf("steady idle re-emitted: %v", events)
+		t.Fatalf("steady state re-emitted: %v", events)
 	}
 }
 
-func TestCompletionWatcher_IdleFromStartIsSilent(t *testing.T) {
-	watcher, _, tmux, _ := watcherFixture(t)
-	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
-	for range 4 {
+func TestCompletionWatcher_StaticFromStartIsSilent(t *testing.T) {
+	watcher, _, _ := watcherFixture(t)
+	for range 5 {
 		if events := scanOnce(t, watcher); len(events) != 0 {
-			t.Fatalf("never-busy session emitted: %v", events)
+			t.Fatalf("static session emitted: %v", events)
 		}
 	}
 }
 
-func TestCompletionWatcher_RearmsAfterNewWork(t *testing.T) {
-	watcher, _, tmux, _ := watcherFixture(t)
+func TestCompletionWatcher_NotInputReadyBlocksCompletion(t *testing.T) {
+	watcher, _, tmux := watcherFixture(t)
 
-	tmux.InputReadiness = session.InputReadiness{Ready: false, State: "NO"}
-	scanOnce(t, watcher)
+	scanOnce(t, watcher) // baseline
+	tmux.PaneContents["worker-1"] = "May I run rm -rf? [y/n]\n"
+	scanOnce(t, watcher) // activity
+	// Content now stable but the composer is a permission prompt — not ready.
+	tmux.InputReadiness = session.InputReadiness{Ready: false, State: "PERMISSION"}
+	for range 4 {
+		if events := scanOnce(t, watcher); len(events) != 0 {
+			t.Fatalf("permission-prompt session reported completed: %v", events)
+		}
+	}
+	// Prompt answered: composer ready again, content stable → completion.
 	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
 	scanOnce(t, watcher)
+	if events := scanOnce(t, watcher); len(events) != 1 {
+		t.Fatalf("expected completion after readiness returned, got %v", events)
+	}
+}
+
+func TestCompletionWatcher_RearmsAfterNewWork(t *testing.T) {
+	watcher, _, tmux := watcherFixture(t)
+
+	scanOnce(t, watcher) // baseline
+	tmux.PaneContents["worker-1"] = "first task output\n"
+	scanOnce(t, watcher) // activity
+	scanOnce(t, watcher) // stable 1
 	if events := scanOnce(t, watcher); len(events) != 1 {
 		t.Fatalf("expected first completion, got %v", events)
 	}
 
-	// New message arrives: busy again, then idle → a second completion.
-	tmux.InputReadiness = session.InputReadiness{Ready: false, State: "NO"}
-	scanOnce(t, watcher)
-	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
-	scanOnce(t, watcher)
+	// New message arrives: fresh output, then stable → a second completion.
+	tmux.PaneContents["worker-1"] = "first task output\nsecond task output\n"
+	scanOnce(t, watcher) // activity
+	scanOnce(t, watcher) // stable 1
 	if events := scanOnce(t, watcher); len(events) != 1 {
 		t.Fatalf("expected second completion, got %v", events)
 	}
 }
 
 func TestCompletionWatcher_ExitEmitsWithLastTail(t *testing.T) {
-	watcher, storage, tmux, _ := watcherFixture(t)
+	watcher, storage, tmux := watcherFixture(t)
 
-	tmux.InputReadiness = session.InputReadiness{Ready: false, State: "NO"}
-	scanOnce(t, watcher) // observes the session alive and busy, caches the tail
+	scanOnce(t, watcher) // baseline observes the session alive, caches the tail
 
 	delete(tmux.Sessions, "worker-1")
 	events := scanOnce(t, watcher)
