@@ -1,10 +1,13 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/lock"
 )
@@ -96,4 +99,70 @@ func withTmuxLock(fn func() error) error {
 	}
 	defer ReleaseTmuxLock()
 	return fn()
+}
+
+// withTmuxLockContext waits for the tmux mutation lock only while ctx remains
+// live. It is used by capture-to-input authority transactions, where an
+// unbounded flock would violate the caller's readiness deadline.
+func withTmuxLockContext(ctx context.Context, fn func() error) (resultErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := acquireTmuxLockContext(ctx); err != nil {
+		return fmt.Errorf("failed to acquire tmux lock: %w", err)
+	}
+	defer func() {
+		if err := ReleaseTmuxLock(); err != nil && resultErr == nil {
+			resultErr = fmt.Errorf("release tmux lock: %w", err)
+		}
+	}()
+	return fn()
+}
+
+func acquireTmuxLockContext(ctx context.Context) error {
+	const retryInterval = 10 * time.Millisecond
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		acquired, err := tryAcquireTmuxLock()
+		if err != nil {
+			return err
+		}
+		if acquired {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func tryAcquireTmuxLock() (bool, error) {
+	if !tmuxServerLockMu.TryLock() {
+		return false, nil
+	}
+	defer tmuxServerLockMu.Unlock()
+	if tmuxServerLock != nil {
+		return false, nil
+	}
+	lockPath := filepath.Join(getStateDir(), "tmux-server.lock")
+	fileLock, err := lock.New(lockPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to create tmux lock: %w", err)
+	}
+	if err := fileLock.TryLock(); err != nil {
+		_ = fileLock.Unlock()
+		var contention *lock.LockError
+		if errors.As(err, &contention) {
+			return false, nil
+		}
+		return false, err
+	}
+	tmuxServerLock = fileLock
+	return true, nil
 }
