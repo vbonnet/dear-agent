@@ -285,9 +285,18 @@ func requireLifecycleDelegation(root string) error {
 			return fmt.Errorf("read lifecycle surface %s: %w", path, err)
 		}
 		for _, call := range required {
-			if !strings.Contains(string(data), call) {
-				return fmt.Errorf("%s does not delegate through %s", path, call)
+			if strings.Contains(string(data), call) {
+				continue
 			}
+			// ops.CreateSessionRouted is a shared-ops wrapper that delegates to
+			// ops.CreateSessionWithContext (adding agy retry/backoff + fallback
+			// routing); a surface that goes through it still delegates through
+			// shared operations. Accept it wherever the direct entrypoint is
+			// required.
+			if call == "ops.CreateSessionWithContext(" && strings.Contains(string(data), "ops.CreateSessionRouted(") {
+				continue
+			}
+			return fmt.Errorf("%s does not delegate through %s", path, call)
 		}
 	}
 	for path, forbidden := range map[string][]string{
