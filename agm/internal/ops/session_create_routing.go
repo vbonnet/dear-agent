@@ -19,33 +19,46 @@ const defaultSpawnRetryBaseDelay = 2 * time.Second
 // cannot produce an unbounded wait.
 const maxSpawnRetryDelay = 30 * time.Second
 
-// CreateSessionRouted wraps CreateSessionWithContext with two routing behaviours
-// that make the throttle-prone agy (Antigravity/Gemini) harness usable instead
-// of a hard failure:
+// CreateSessionRouted adds agy (Antigravity/Gemini) spawn resilience around the
+// self-contained CreateSessionWithContext create path used by the MCP/Dispatch
+// surface.
 //
-//  1. Bounded retry-with-backoff on a transient agy spawn failure — the
-//     Antigravity identity-discovery race. Antigravity persists its
+// It is deliberately NOT used from the interactive CLI create flow: that flow
+// wraps CreateSessionWithContext in per-invocation, non-re-entrant setup
+// (sandbox provisioning, a preparer bound to the requested harness, one-shot
+// circuit-breaker admission, and post-create dispatch keyed on the global
+// harness), so re-running or harness-switching it mid-flow is unsafe. The MCP
+// path builds a fresh request and calls this once, and each attempt is a fully
+// rolled-back create, so retry and fallback are safe there.
+//
+// Behaviours (agy only; non-agy harnesses and reused-tmux requests pass straight
+// through, as do agy requests that opt out via SpawnRetries==0 and no
+// FallbackHarness):
+//
+//  1. Bounded retry-with-backoff on a transient agy identity-discovery race
+//     (AGM-011 agy.identity + ErrConversationNotFound). Antigravity persists its
 //     conversation DB only after the model first responds, so under provider
-//     throttle the discovery window times out and surfaces as an AGM-011
-//     agy.identity error. Each failed attempt is already fully rolled back by
-//     CreateSessionWithContext's deferred cleanup (tmux, DB registration and the
-//     name reservation are released), so every retry re-spawns cleanly and
-//     gives the throttled model another chance to persist its DB.
+//     throttle the discovery window times out. Each failed attempt is fully
+//     rolled back (tmux, DB registration, name reservation), so a retry
+//     re-spawns cleanly. If a rollback itself fails, the next attempt collides
+//     on the still-registered session and returns a non-retryable error, which
+//     ends the loop rather than retrying onto dirty state.
 //
-//  2. Fallback to req.FallbackHarness (typically codex-cli) once the agy retries
-//     are exhausted, re-dispatching the identical request on the fallback
-//     harness. Because the failed agy attempt already released its reservation,
-//     the fallback reuses the same session name with no collision; the
-//     agy-specific model is replaced with the fallback harness default.
-//
-// Non-agy harnesses are dispatched straight through unchanged, as are agy
-// requests that opt out (SpawnRetries==0 and no FallbackHarness).
+//  2. Fallback to req.FallbackHarness (typically codex-cli) once retries are
+//     exhausted, re-dispatching the identical request on the freed session name
+//     with the model re-defaulted for the fallback harness.
 func CreateSessionRouted(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest) (*CreateSessionResult, error) {
-	if req == nil || agent.NormalizeHarnessName(req.Harness) != "agy" {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !agySpawnRoutingApplies(req) {
 		return CreateSessionWithContext(ctx, opCtx, req)
 	}
-	if req.SpawnRetries <= 0 && strings.TrimSpace(req.FallbackHarness) == "" {
-		return CreateSessionWithContext(ctx, opCtx, req)
+	// Resolve and validate the fallback harness up front so an unsupported value
+	// is rejected before any agy attempt is launched.
+	fallback, err := resolveFallbackHarness(req.FallbackHarness)
+	if err != nil {
+		return nil, err
 	}
 
 	attempts := max(req.SpawnRetries, 0)
@@ -56,37 +69,70 @@ func CreateSessionRouted(ctx context.Context, opCtx *OpContext, req *CreateSessi
 
 	var lastErr error
 	for attempt := 0; attempt <= attempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
-		result, err := CreateSessionWithContext(ctx, opCtx, req)
-		if err == nil {
+		result, spawnErr := CreateSessionWithContext(ctx, opCtx, req)
+		if spawnErr == nil {
 			return result, nil
 		}
-		lastErr = err
-		if !isRetryableAgySpawnError(err) {
-			return nil, err
+		lastErr = spawnErr
+		if !isRetryableAgySpawnError(spawnErr) {
+			return nil, spawnErr
 		}
 		if attempt < attempts {
 			delay := spawnRetryBackoff(baseDelay, attempt)
 			debug.Log("agy spawn attempt %d/%d hit a transient discovery race; retrying in %s: %v",
-				attempt+1, attempts+1, delay, err)
+				attempt+1, attempts+1, delay, spawnErr)
 			if waitErr := sleepForSpawnRetry(ctx, delay); waitErr != nil {
 				return nil, waitErr
 			}
 		}
 	}
 
-	fallback := agent.NormalizeHarnessName(req.FallbackHarness)
-	if fallback == "" || fallback == "agy" {
+	if fallback == "" {
 		return nil, lastErr
 	}
-	debug.Log("agy spawn exhausted %d attempt(s) under throttle; falling back to %s for session %q",
-		attempts+1, fallback, req.Title)
+	// The final retryable attempt (and its rollback) may have run under a context
+	// that is now cancelled; do not enter a fresh create if so.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	return createFallbackSession(ctx, opCtx, req, fallback)
+}
+
+// agySpawnRoutingApplies reports whether retry/fallback routing should wrap this
+// request. Only a self-contained agy create that opts in qualifies: a nil
+// request, a non-agy harness, a reused (rollback-preserved) tmux session, or an
+// opt-out (no retries and no fallback) all bypass routing.
+func agySpawnRoutingApplies(req *CreateSessionRequest) bool {
+	if req == nil || agent.NormalizeHarnessName(req.Harness) != "agy" || req.ReuseExistingTmux {
+		return false
+	}
+	return req.SpawnRetries > 0 || strings.TrimSpace(req.FallbackHarness) != ""
+}
+
+// resolveFallbackHarness normalizes and validates the configured fallback
+// harness. It returns "" when there is no usable fallback (unset, or agy
+// itself), and an error for an unsupported value.
+func resolveFallbackHarness(raw string) (string, error) {
+	fallback := agent.NormalizeHarnessName(raw)
+	if fallback == "" || fallback == "agy" {
+		return "", nil
+	}
+	if err := agent.ValidateHarnessName(fallback); err != nil {
+		return "", ErrInvalidInput("fallback-harness", err.Error())
+	}
+	return fallback, nil
+}
+
+// createFallbackSession re-dispatches the request on the fallback harness after
+// agy attempts are exhausted, re-defaulting the model for that harness (the agy
+// model is invalid elsewhere) and clearing the routing fields.
+func createFallbackSession(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest, fallback string) (*CreateSessionResult, error) {
+	debug.Log("agy spawn exhausted under throttle; falling back to %s for session %q", fallback, req.Title)
 	fallbackReq := *req
 	fallbackReq.Harness = fallback
-	// The agy model is invalid for the fallback harness; re-default it to the
-	// fallback's canonical model (same helper CreateSessionWithContext uses).
 	fallbackReq.Model = defaultModelForCreateSession(fallback)
 	fallbackReq.SpawnRetries = 0
 	fallbackReq.FallbackHarness = ""

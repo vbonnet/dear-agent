@@ -257,14 +257,12 @@ func runCreateSessionLifecycle(
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
 	}
-	_, err = ops.CreateSessionRouted(ctx, opCtx, &ops.CreateSessionRequest{
+	_, err = ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
 		Cwd:                  workDir,
 		Prompt:               createPrompt,
 		Title:                sessionName,
 		Model:                modelName,
 		Harness:              harnessName,
-		SpawnRetries:         spawnRetries,
-		FallbackHarness:      fallbackHarness,
 		Persistent:           persistent,
 		SessionID:            sessionID,
 		Caller:               ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},

@@ -496,9 +496,14 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 			return mcpError(opErr), nil, nil
 		}
 
+		// Record the harness/model actually created: CreateSessionRouted may have
+		// fallen back from agy to codex, so the requested agm.harness (set at span
+		// start) is not necessarily what ran.
 		span.SetAttributes(
 			attribute.String("agm.session_id", result.SessionID),
 			attribute.String("agm.session_name", result.Name),
+			attribute.String("agm.effective_harness", result.Harness),
+			attribute.String("agm.effective_model", result.Model),
 		)
 
 		return mcpSuccess(result), result, nil

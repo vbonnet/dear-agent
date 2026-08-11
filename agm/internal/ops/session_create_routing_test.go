@@ -158,6 +158,57 @@ func TestCreateSessionRouted_FallsBackToCodexAfterAgyExhausted(t *testing.T) {
 	}
 }
 
+func TestCreateSessionRouted_ReusedTmuxPassesThroughWithoutRetry(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	var discoverCalls int
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		discoverCalls++
+		return nil, agysession.ErrConversationNotFound
+	}
+	// A reused tmux session is preserved on rollback, so routing must NOT retry
+	// or fall back into it — the request passes straight through.
+	_, err := CreateSessionRouted(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "p", Title: "agy-reuse", Harness: "agy", Model: "3.5-flash-low",
+		SpawnRetries: 3, SpawnRetryBaseDelay: time.Millisecond, FallbackHarness: "codex-cli",
+		ReuseExistingTmux: true,
+	})
+	if err == nil {
+		t.Fatal("expected the discovery error to surface")
+	}
+	if discoverCalls != 1 {
+		t.Fatalf("discover called %d times, want 1 (reused tmux must not retry)", discoverCalls)
+	}
+}
+
+func TestCreateSessionRouted_InvalidFallbackHarnessRejectedBeforeLaunch(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	var discoverCalls int
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		discoverCalls++
+		return successfulCreateTestAgyIdentityTracker().discover(context.Background(), "", "")
+	}
+	_, err := CreateSessionRouted(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "p", Title: "agy-badfb", Harness: "agy", Model: "3.5-flash-low",
+		SpawnRetries: 1, SpawnRetryBaseDelay: time.Millisecond, FallbackHarness: "not-a-harness",
+	})
+	if err == nil {
+		t.Fatal("expected an invalid-fallback error")
+	}
+	if discoverCalls != 0 {
+		t.Fatalf("discover called %d times, want 0 (fallback validation must precede any agy launch)", discoverCalls)
+	}
+}
+
 func TestCreateSessionRouted_NonRetryableAgyErrorDoesNotRetryOrFallback(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
