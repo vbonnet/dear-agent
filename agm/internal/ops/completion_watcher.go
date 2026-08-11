@@ -135,22 +135,7 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	}
 
 	if !exists {
-		// Only report an exit for sessions the watcher saw alive: reporting
-		// records whose tmux predates the watcher would replay history.
-		if !obs.everExisted || obs.reportedGone {
-			return nil
-		}
-		obs.reportedGone = true
-		event := &CompletionEvent{
-			SessionID:      m.SessionID,
-			SessionName:    m.Name,
-			Harness:        m.Harness,
-			TransitionType: "exited",
-			Output:         obs.lastTail,
-			DetectedAt:     time.Now(),
-		}
-		cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
-		return event
+		return cw.observeGone(obs, m)
 	}
 	obs.everExisted = true
 	obs.reportedGone = false
@@ -193,11 +178,7 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		return nil
 	}
 	obs.stableTicks++
-	required := cw.IdleConfirmTicks
-	if readinessBlindHarness(m.Harness) && cw.ReadinessBlindConfirmMultiplier > 1 {
-		required *= cw.ReadinessBlindConfirmMultiplier
-	}
-	if obs.stableTicks < required {
+	if obs.stableTicks < cw.requiredStableTicks(m.Harness) {
 		return nil
 	}
 
@@ -214,6 +195,37 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	}
 	cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
 	return event
+}
+
+// observeGone handles a session whose tmux target is confirmed absent. Only
+// sessions the watcher saw alive report an exit: reporting records whose tmux
+// predates the watcher would replay history.
+func (cw *CompletionWatcher) observeGone(obs *sessionObservation, m *manifest.Manifest) *CompletionEvent {
+	if !obs.everExisted || obs.reportedGone {
+		return nil
+	}
+	obs.reportedGone = true
+	event := &CompletionEvent{
+		SessionID:      m.SessionID,
+		SessionName:    m.Name,
+		Harness:        m.Harness,
+		TransitionType: "exited",
+		Output:         obs.lastTail,
+		DetectedAt:     time.Now(),
+	}
+	cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
+	return event
+}
+
+// requiredStableTicks is the idle debounce for one harness: the configured
+// baseline, extended for readiness-blind harnesses whose composer cannot
+// signal busy.
+func (cw *CompletionWatcher) requiredStableTicks(harness string) int {
+	required := cw.IdleConfirmTicks
+	if readinessBlindHarness(harness) && cw.ReadinessBlindConfirmMultiplier > 1 {
+		required *= cw.ReadinessBlindConfirmMultiplier
+	}
+	return required
 }
 
 // sessionExists resolves tmux ground truth for exit detection. It prefers the

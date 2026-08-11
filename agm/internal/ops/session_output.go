@@ -72,22 +72,10 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 		tmuxName = m.Name
 	}
 
-	if capturer, ok := ctx.Tmux.(session.PaneOutputCapturer); ok && (status == "active" || status == "zombie") {
-		output, captureErr := capturer.CapturePaneTail(tmuxName, lines)
-		if captureErr == nil && strings.TrimSpace(output) != "" {
-			result.Source = "live-pane"
-			result.Output = output
-			result.CapturedAt = time.Now().UTC().Format(time.RFC3339)
-			return result, nil
-		}
-		// A transient capture failure on a still-live pane must not silently
-		// answer with a durable capture from an earlier task — the caller
-		// asked for current output and a stale result would misrepresent the
-		// session. Fall back to final-capture only when the pane is actually
-		// gone; otherwise report the failure so the caller retries.
-		if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr == nil && stillExists {
-			return nil, ErrInvalidInput("identifier", "Live output capture failed for a running session; retry. (A durable final capture, if any, describes an earlier completion, not the current task.)")
-		}
+	if done, err := captureLiveOutput(ctx, result, status, tmuxName, lines); done {
+		return result, err
+	} else if err != nil {
+		return nil, err
 	}
 
 	if m.FinalOutput != "" {
@@ -100,6 +88,30 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 	}
 
 	return nil, ErrInvalidInput("identifier", "No output is available for this session: the tmux pane is not readable and no final output was captured.")
+}
+
+// captureLiveOutput attempts the live-pane read for an active session. It
+// reports done=true with the populated result on success. A transient capture
+// failure on a still-live pane must not silently answer with a durable capture
+// from an earlier task — the caller asked for current output and a stale
+// result would misrepresent the session — so that case returns an error and
+// the final-capture fallback is reserved for a pane that is actually gone.
+func captureLiveOutput(ctx *OpContext, result *GetSessionOutputResult, status, tmuxName string, lines int) (bool, error) {
+	capturer, ok := ctx.Tmux.(session.PaneOutputCapturer)
+	if !ok || (status != "active" && status != "zombie") {
+		return false, nil
+	}
+	output, captureErr := capturer.CapturePaneTail(tmuxName, lines)
+	if captureErr == nil && strings.TrimSpace(output) != "" {
+		result.Source = "live-pane"
+		result.Output = output
+		result.CapturedAt = time.Now().UTC().Format(time.RFC3339)
+		return true, nil
+	}
+	if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr == nil && stillExists {
+		return false, ErrInvalidInput("identifier", "Live output capture failed for a running session; retry. (A durable final capture, if any, describes an earlier completion, not the current task.)")
+	}
+	return false, nil
 }
 
 // tailLines returns the last n lines of s, honoring the caller's requested
