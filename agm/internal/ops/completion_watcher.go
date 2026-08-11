@@ -166,41 +166,8 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	// Pane activity is the busy signal: content changed since the last tick
 	// means the session did work. This also keeps a rolling tail so an exit
 	// between ticks still has output to attach.
-	tail, captured := cw.capturePaneTail(tmuxName)
-	if captured {
-		changed := obs.lastTail != tail
-		obs.lastTail = tail
-		if !obs.baselined {
-			// First observation establishes the content baseline. A restart
-			// (launchd bounce, host reboot) must not swallow a completion
-			// that happened while the watcher was down: the durable session
-			// state — persisted by this same pipeline — says whether the
-			// session was mid-work when last seen. Treat a persisted WORKING
-			// state as observed activity so the normal stability + readiness
-			// path can emit the missed completion; sessions with no such
-			// evidence stay baseline-only, so pre-watcher history is never
-			// replayed.
-			obs.baselined = true
-			if strings.EqualFold(strings.TrimSpace(m.State), manifest.StateWorking) {
-				obs.activitySeen = true
-			}
-		} else if changed {
-			// New work arrived after a completion: the durable record must stop
-			// claiming DONE/OFFLINE while the session works. The in-memory flag
-			// alone is not enough — after a watcher restart the observation is
-			// fresh (reportedIdle false) while the record still carries the
-			// terminal state written before the restart, which would leave an
-			// actively working session looking finished to every durable-state
-			// consumer (filterMergeCandidates and friends) until it completes
-			// again. Rearm from the persisted state too.
-			if obs.reportedIdle || terminalState(m.State) {
-				cw.persistState(m.SessionID, manifest.StateWorking)
-			}
-			obs.activitySeen = true
-			obs.stableTicks = 0
-			obs.reportedIdle = false
-			return nil
-		}
+	if tail, captured := cw.capturePaneTail(tmuxName); captured && cw.observeActivity(obs, m, tail) {
+		return nil
 	}
 	if !obs.activitySeen || obs.reportedIdle {
 		return nil
@@ -229,6 +196,47 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	}
 	cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
 	return event
+}
+
+// observeActivity folds one captured pane tail into the observation state and
+// reports whether the session showed fresh activity this tick (in which case
+// the caller stops: an active session cannot be completing).
+//
+// First observation establishes the content baseline. A restart (launchd
+// bounce, host reboot) must not swallow a completion that happened while the
+// watcher was down: the durable session state — persisted by this same
+// pipeline — says whether the session was mid-work when last seen, so a
+// persisted WORKING state counts as observed activity and the normal
+// stability + readiness path can emit the missed completion. Sessions with no
+// such evidence stay baseline-only, so pre-watcher history is never replayed.
+//
+// On a change after a completion, the durable record must stop claiming
+// DONE/OFFLINE while the session works. The in-memory flag alone is not
+// enough — after a watcher restart the observation is fresh (reportedIdle
+// false) while the record still carries the terminal state written before the
+// restart, which would leave an actively working session looking finished to
+// every durable-state consumer (filterMergeCandidates and friends) until it
+// completes again. Rearm from the persisted state too.
+func (cw *CompletionWatcher) observeActivity(obs *sessionObservation, m *manifest.Manifest, tail string) bool {
+	changed := obs.lastTail != tail
+	obs.lastTail = tail
+	if !obs.baselined {
+		obs.baselined = true
+		if strings.EqualFold(strings.TrimSpace(m.State), manifest.StateWorking) {
+			obs.activitySeen = true
+		}
+		return false
+	}
+	if !changed {
+		return false
+	}
+	if obs.reportedIdle || terminalState(m.State) {
+		cw.persistState(m.SessionID, manifest.StateWorking)
+	}
+	obs.activitySeen = true
+	obs.stableTicks = 0
+	obs.reportedIdle = false
+	return true
 }
 
 // observeGone handles a session whose tmux target is confirmed absent. Only
