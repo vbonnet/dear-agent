@@ -375,26 +375,38 @@ func run(c config) int {
 	// model: the missing credential is NOT its blocker, so it keeps the
 	// ordinary blocking exit even when keyless (AIREV-26 boundary).
 	if plan.needsHuman() && modelUnavailable {
-		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+		code, _ := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+		return code
 	}
 	// A deterministic escalation still benefits from the complete automated
 	// review when credentials are available. Fork and secretless runs cannot
 	// make model calls, so they take the visible human-review fallback instead.
 	// keylessExit relabels only the same-repository, non-override, no-key case
-	// with the distinct cannot-run code — the review that would have
-	// accompanied this escalation can never run, and the escalation evidence
-	// itself has just been posted. It never changes whether this run blocks.
+	// with the distinct cannot-run code — and only when the escalation
+	// evidence comment demonstrably reached the PR, because the workflow's
+	// neutral-with-warning verdict points readers at that evidence. A failed
+	// evidence post keeps the plain blocking exit. It never changes whether
+	// this run blocks.
 	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
-		return keylessExit(c, handleMandatoryEscalation(c, plan.EscalationTriggers))
+		code, evidencePosted := handleMandatoryEscalation(c, plan.EscalationTriggers)
+		if evidencePosted {
+			return keylessExit(c, code)
+		}
+		return code
 	}
 	// An otherwise-reviewable changed SPEC stopped solely by the absent
-	// credential is the canonical cannot-run disposition.
+	// credential is the canonical cannot-run disposition, under the same
+	// evidence-first requirement.
 	if plan.ReviewNeeded && modelUnavailable {
 		reason := "a relevant changed SPEC cannot be reviewed because the reviewer credential is unavailable"
 		if c.isFork {
 			reason = "a relevant changed SPEC originates from a fork and requires human review"
 		}
-		return keylessExit(c, handleSpecHumanReview(c, plan, reason))
+		code, evidencePosted := handleSpecHumanReview(c, plan, reason)
+		if evidencePosted {
+			return keylessExit(c, code)
+		}
+		return code
 	}
 
 	if code, handled := preflightGates(c); handled {
@@ -419,7 +431,8 @@ func run(c config) int {
 	// have no patch to send to the model, but must still require human review.
 	if strings.TrimSpace(diff) == "" {
 		if len(plan.EscalationTriggers) > 0 {
-			return handleMandatoryEscalation(c, plan.EscalationTriggers)
+			code, _ := handleMandatoryEscalation(c, plan.EscalationTriggers)
+			return code
 		}
 		fmt.Println("::notice::empty diff; nothing to review.")
 		return 0
@@ -441,7 +454,8 @@ func run(c config) int {
 	} else if plan.ReviewNeeded {
 		verdict, err := reviewSpecContract(ctx, client, c.model, c.effort, plan)
 		if err != nil {
-			return handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict")
+			code, _ := handleSpecHumanReview(c, plan, "the changed-SPEC reviewer failed or returned an ambiguous verdict")
+			return code
 		}
 		specVerdict = verdict.Status
 		specReports = append(specReports, specContractReport(verdict))
@@ -525,8 +539,11 @@ func reconcileSynthesisDisplay(synthesized, final Outcome, synthesis string) str
 
 // handleSpecHumanReview keeps an unresolved SPEC contract visibly in the
 // existing review lifecycle. A revision-bound override may pass the check on
-// human authority, but it never turns this verdict into approved.
-func handleSpecHumanReview(c config, plan reviewPlan, reason string) int {
+// human authority, but it never turns this verdict into approved. The second
+// result reports whether the human-review evidence comment demonstrably
+// reached the PR (or no PR context exists to post to): the AIREV-26 cannot-run
+// translation is only honest when the evidence it advertises actually exists.
+func handleSpecHumanReview(c config, plan reviewPlan, reason string) (int, bool) {
 	trigger := "SPEC governance change requires human review: " + reason
 	if len(plan.Changes) > 0 {
 		trigger += " (" + plan.Changes[0].Path + ")"
@@ -536,17 +553,18 @@ func handleSpecHumanReview(c config, plan reviewPlan, reason string) int {
 
 // handleMandatoryEscalation makes a deterministic REVIEW.md §3 trigger
 // visible even when no SPEC changed and the reviewer credential is absent.
-func handleMandatoryEscalation(c config, triggers []string) int {
+func handleMandatoryEscalation(c config, triggers []string) (int, bool) {
 	reason := "REVIEW.md §3 requires human review: " + strings.Join(triggers, "; ")
 	return handleHumanReview(c, reason, triggers)
 }
 
-func handleHumanReview(c config, reason string, triggers []string) int {
-	logCommentErr(postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers)))
+func handleHumanReview(c config, reason string, triggers []string) (int, bool) {
+	commentErr := postComment(c, buildComment(NeedsHumanReview, reason, nil, c.override, triggers))
+	logCommentErr(commentErr)
 	if c.override && !requireComment(c, overrideComment(reason)) {
-		return 1
+		return 1, commentErr == nil
 	}
-	return ExitFor(NeedsHumanReview, c.override)
+	return ExitFor(NeedsHumanReview, c.override), commentErr == nil
 }
 
 // failClosed returns the blocking exit code (1) for an intended failure, unless
