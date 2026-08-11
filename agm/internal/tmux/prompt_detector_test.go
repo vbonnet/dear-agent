@@ -287,6 +287,53 @@ func TestContainsTrustPromptPattern(t *testing.T) {
 	}
 }
 
+func TestTrustSelectorOwnsInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		{
+			name:     "live selector owns the tail",
+			content:  " Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			expected: true,
+		},
+		{
+			name:     "legacy live selector owns the tail",
+			content:  "Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit",
+			expected: true,
+		},
+		{
+			// ce-wn4qe :403 — the question is on screen but the numbered options
+			// have not rendered yet; must not answer.
+			name:     "question before options render does not own input",
+			content:  "Quick safety check: Is this a project you created or one you trust?",
+			expected: false,
+		},
+		{
+			// ce-wn4qe :145 — an already-answered selector still in the capture
+			// with a live composer below must not be treated as answerable.
+			name:     "historical selector with composer below does not own input",
+			content:  "❯ 1. Yes, I trust this folder\n  2. No, exit\n\n────────\n❯ \n────────\n  vbonnet@mac:/tmp/wd",
+			expected: false,
+		},
+		{
+			// A newer permission selector below the trust option must not be
+			// answered by the trust path (auto-approve risk).
+			name:     "permission prompt below trust selector does not own input",
+			content:  "❯ 1. Yes, I trust this folder\n  2. No, exit\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No",
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TrustSelectorOwnsInput(tt.content); got != tt.expected {
+				t.Errorf("TrustSelectorOwnsInput(%q) = %v, want %v", tt.content, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestContainsClaudeTrustAffirmative(t *testing.T) {
 	tests := []struct {
 		name     string

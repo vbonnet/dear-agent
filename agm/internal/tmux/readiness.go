@@ -388,7 +388,11 @@ func queuedPastePayloadOwnsTail(lines []string, isChrome func(string) bool) bool
 		return false
 	}
 	payload := lines[1:]
-	for len(payload) > 0 && isChrome(payload[len(payload)-1]) {
+	// Strip only the trailing footer/chrome that sits *below* the declared
+	// payload — never into the payload itself. Otherwise a payload whose final
+	// line happens to contain a footer token (e.g. "· /effort") would be
+	// mis-stripped and the line count would fail (ce-wn4qe).
+	for len(payload) > want && isChrome(payload[len(payload)-1]) {
 		payload = payload[:len(payload)-1]
 	}
 	return len(payload) == want
@@ -755,10 +759,10 @@ func isClaudeComposerFooterChrome(line string) bool {
 	// "not logged in" / "run /login") so ordinary model output that merely
 	// contains a word like "/model" is not mistaken for footer chrome.
 	for _, marker := range []string{
-		"? for shortcuts", "for shortcuts", "shift+tab", "for agents",
+		"? for shortcuts", "for shortcuts", "shift+tab", "← for agents",
 		"bypass permissions on", "accept edits on", "plan mode on", "auto-accept edits",
 		"run /login", "not logged in",
-		"/effort", "context left", "% context",
+		"· /effort", "context left", "% context",
 	} {
 		if strings.Contains(lower, marker) {
 			return true
@@ -936,7 +940,12 @@ func hasInputOverlay(content, harness string) bool {
 func hasOnboardingPrompt(content, harness string) bool {
 	switch harness {
 	case "claude-code":
-		return containsTrustPromptPattern(content)
+		// Only classify onboarding when the trust selector currently owns input,
+		// so the shared readiness path advances (sends Enter) exactly once the
+		// numbered options are on screen — never on the question alone (which
+		// would fire early and burn the one-shot transition) nor on a stale
+		// answered selector (ce-wn4qe).
+		return TrustSelectorOwnsInput(content)
 	case "codex-cli":
 		return containsCodexTrustPromptPattern(content) || containsCodexModelUpgradePromptPattern(content) || containsCodexUpdatePromptPattern(content)
 	case "agy":

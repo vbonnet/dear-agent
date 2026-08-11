@@ -141,8 +141,11 @@ func WaitForClaudePromptContext(parent context.Context, sessionName string, time
 
 		// Detect and auto-answer trust prompt inline.
 		// Without this, the trust prompt blocks Claude's main UI from rendering,
-		// so the ❯ prompt never appears and we time out.
-		if !trustAnswered && containsTrustPromptPattern(content) && ContainsClaudeTrustAffirmative(content) {
+		// so the ❯ prompt never appears and we time out. Only answer when the
+		// selector currently OWNS input, so a historical answered selector still
+		// in the capture, or the question before its options render, never causes
+		// an Enter to land on whatever owns input now (ce-wn4qe).
+		if !trustAnswered && TrustSelectorOwnsInput(content) {
 			debug.Log("🛡️  Trust prompt detected — auto-answering with Enter")
 			if err := SendKeys(sessionName, "Enter"); err != nil {
 				debug.Log("⚠️  Failed to answer trust prompt: %v", err)
@@ -413,6 +416,54 @@ func ContainsClaudeTrustPrompt(content string) bool {
 // that merely mentions the phrase does not trigger a false trust-prompt match.
 func ContainsClaudeTrustAffirmative(content string) bool {
 	return claudeTrustAffirmativeSelectorPattern.MatchString(content)
+}
+
+// TrustSelectorOwnsInput reports whether the trust dialog's affirmative selector
+// is the current tail-owning interactive element: the numbered "Yes, ..." option
+// is present and only trust-dialog chrome (the other option, the confirm/cancel
+// hint, borders, blanks) follows it. This is the safe precondition for auto-
+// answering the dialog — a historical, already-answered selector with newer
+// content below it (a composer, a permission prompt, model output), or the
+// question text before its options have rendered, does NOT own input and must
+// not be answered (ce-wn4qe: otherwise the Enter could approve a permission
+// selector or submit a user draft).
+func TrustSelectorOwnsInput(content string) bool {
+	lines := strings.Split(content, "\n")
+	selectorIndex := -1
+	for i, line := range lines {
+		if claudeTrustAffirmativeSelectorPattern.MatchString(stripANSI(line)) {
+			selectorIndex = i
+		}
+	}
+	if selectorIndex < 0 {
+		return false
+	}
+	for _, line := range lines[selectorIndex+1:] {
+		if !isClaudeTrustDialogChrome(line) {
+			return false
+		}
+	}
+	return true
+}
+
+// isClaudeTrustDialogChrome reports whether a line below the affirmative selector
+// is part of the trust dialog itself (the reject option, the confirm/cancel
+// hint, a box border, or blank) rather than newer content that has taken over
+// input.
+func isClaudeTrustDialogChrome(line string) bool {
+	plain := strings.ToLower(strings.TrimSpace(stripANSI(line)))
+	if plain == "" {
+		return true
+	}
+	if strings.Trim(plain, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+		return true
+	}
+	for _, marker := range []string{"no, exit", "no, quit", "enter to confirm", "esc to cancel", "use arrow keys"} {
+		if strings.Contains(plain, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsTrustPromptPattern checks if content contains the Claude Code trust
