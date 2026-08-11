@@ -138,6 +138,33 @@ func TestRun_KeylessEscalationWithoutEvidenceCommentKeepsOrdinaryBlockingExit(t 
 	}
 }
 
+func TestRun_KeylessOversizeDiffStaysHardFailure(t *testing.T) {
+	// An oversize diff is a hard failure with or without a credential
+	// (AIREV-26): the keyless cannot-run translation must not run before the
+	// size bound is enforced.
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	writeReviewFile(t, dir, ".github/workflows/x.yml", "name: x\n"+strings.Repeat("# padding line\n", 64))
+	git("add", "-A")
+	git("commit", "-q", "-m", "oversize workflow edit")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	c.maxDiff = 16 // force the oversize path
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless oversize diff: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
+
 func TestRun_InvalidTrustedCIDeadlineFailsBeforeReviewEvenWithOverride(t *testing.T) {
 	c := baseConfig()
 	c.githubActions = true

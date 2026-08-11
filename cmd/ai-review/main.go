@@ -338,7 +338,18 @@ func preflightGates(c config) (int, bool) {
 			return 0, true
 		}
 		fmt.Println("::error::ANTHROPIC_API_KEY is not set; the AI review gate cannot run and fails closed. Set the secret, or apply the 'ai-review:override' label after a human review.")
-		return keylessExit(c, 1), true
+		// AIREV-26 is evidence-first even here: the cannot-run status may
+		// only be reported once the disposition is recorded on the PR (or no
+		// PR context exists to post to). A failed post keeps the plain
+		// blocking exit.
+		code := keylessExit(c, 1)
+		if code == exitKeylessCannotRun {
+			if err := postComment(c, buildComment(NeedsHumanReview, "the ANTHROPIC_API_KEY secret is not configured, so no automated review could run", nil, false, nil, true)); err != nil {
+				logCommentErr(err)
+				return 1, true
+			}
+		}
+		return code, true
 	}
 	return 0, false
 }
@@ -377,6 +388,24 @@ func run(c config) int {
 	if plan.needsHuman() && modelUnavailable {
 		code, _ := handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "), false)
 		return code
+	}
+	// AIREV-26 never softens an oversize or uncomputable diff: with a key
+	// those are hard failures at the review stage below, so a keyless run
+	// that would otherwise take the cannot-run translation must probe the
+	// same bound first and fail closed identically. This deliberately
+	// mirrors the keyed oversize handling rather than sharing its code so
+	// each path stays visible at its own trust transition.
+	if keylessTranslatable(c) && (len(plan.EscalationTriggers) > 0 || plan.ReviewNeeded) {
+		_, tooLarge, diffErr := gitDiffContext(ctx, plan.MergeBaseSHA, c.headSHA, c.maxDiff)
+		if diffErr != nil {
+			fmt.Printf("::error::could not compute diff: %v\n", diffErr)
+			return failClosed(c, "the PR diff could not be computed")
+		}
+		if tooLarge {
+			fmt.Printf("::error::diff is over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.\n", c.maxDiff)
+			logCommentErr(postComment(c, oversizeComment(c.maxDiff)))
+			return failClosed(c, "the diff exceeded the auto-review size limit")
+		}
 	}
 	// A deterministic escalation still benefits from the complete automated
 	// review when credentials are available. Fork and secretless runs cannot
