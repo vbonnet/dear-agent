@@ -1,0 +1,123 @@
+name: PR Size and Scope
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-size-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MAX_CHANGED_LINES: "1000"
+  MAX_CHANGED_FILES: "50"
+  MAX_TOP_LEVEL_AREAS: "4"
+
+jobs:
+  size-scope:
+    name: Size and scope signal
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute PR scope
+        id: scope
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags origin "$base" || true
+          git cat-file -e "$head^{commit}" 2>/dev/null || git fetch --no-tags origin "$head" || true
+
+          git diff --numstat "$base" "$head" > /tmp/numstat.txt
+          git diff --name-only --diff-filter=ACMRD "$base" "$head" > /tmp/files.txt
+
+          changed_lines=$(awk '{ add += $1 == "-" ? 0 : $1; del += $2 == "-" ? 0 : $2 } END { print add + del + 0 }' /tmp/numstat.txt)
+          changed_files=$(wc -l < /tmp/files.txt | tr -d ' ')
+          top_level_areas=$(
+            awk '
+              {
+                split($0, parts, "/")
+                if (parts[1] == ".github" && parts[2] != "") {
+                  area = ".github/" parts[2]
+                } else {
+                  area = parts[1]
+                }
+                if (area != "") seen[area] = 1
+              }
+              END {
+                for (area in seen) count++
+                print count + 0
+              }
+            ' /tmp/files.txt
+          )
+
+          reasons=()
+          if [ "$changed_lines" -gt "$MAX_CHANGED_LINES" ]; then
+            reasons+=("- ${changed_lines} changed lines exceeds the ${MAX_CHANGED_LINES}-line review threshold.")
+          fi
+          if [ "$changed_files" -ge "$MAX_CHANGED_FILES" ]; then
+            reasons+=("- ${changed_files} changed files meets or exceeds the ${MAX_CHANGED_FILES}-file scope threshold.")
+          fi
+          if [ "$top_level_areas" -ge "$MAX_TOP_LEVEL_AREAS" ]; then
+            reasons+=("- ${top_level_areas} top-level areas meets or exceeds the ${MAX_TOP_LEVEL_AREAS}-area scope threshold.")
+          fi
+
+          {
+            echo "changed_lines=$changed_lines"
+            echo "changed_files=$changed_files"
+            echo "top_level_areas=$top_level_areas"
+            if [ "${#reasons[@]}" -gt 0 ]; then
+              echo "should_comment=true"
+              echo "reasons<<EOF"
+              printf '%s\n' "${reasons[@]}"
+              echo "EOF"
+            else
+              echo "should_comment=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment with split suggestion
+        if: steps.scope.outputs.should_comment == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          CHANGED_LINES: ${{ steps.scope.outputs.changed_lines }}
+          CHANGED_FILES: ${{ steps.scope.outputs.changed_files }}
+          TOP_LEVEL_AREAS: ${{ steps.scope.outputs.top_level_areas }}
+          REASONS: ${{ steps.scope.outputs.reasons }}
+        run: |
+          set -euo pipefail
+          body=/tmp/pr-size-scope-comment.md
+          {
+            echo "<!-- pr-size-scope -->"
+            echo "## PR size and scope signal"
+            echo
+            echo "This PR crossed the deterministic split-suggestion threshold:"
+            echo
+            printf '%s\n' "$REASONS"
+            echo
+            echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
+            echo
+            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently."
+          } > "$body"
+
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body"
+          gh pr view "$PR_NUMBER" --repo "$REPO" --json comments \
+            --jq '.comments[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id' |
+            head -n -1 |
+            while IFS= read -r comment_id; do
+              [ -n "$comment_id" ] || continue
+              gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
+            done
