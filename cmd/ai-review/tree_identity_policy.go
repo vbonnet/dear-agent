@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 )
 
 func (evidence treeIdentityEvidence) safeAIReviewTestPath(path string) bool {
@@ -122,6 +123,108 @@ func unsafeAIReviewTestIdentityTriggers(evidence treeIdentityEvidence, changedPa
 	triggers := make([]string, 0, len(reasons))
 	for reason := range reasons {
 		triggers = append(triggers, "review test-only path has unsafe checkout identity ("+reason+")")
+	}
+	sort.Strings(triggers)
+	return triggers
+}
+
+func (evidence treeIdentityEvidence) hookOwnerAutomatedPathSafety(path string) (bool, string) {
+	if !isHookOwnerAutomatedPath(path) {
+		return false, "path is not an exact hook-package test or canonical hook-owner SPEC"
+	}
+	components := pathAndAncestors(path)
+	for index, component := range components {
+		identity := normalizedPathIdentity(component)
+		basePeers := evidence.base.byIdentity[identity]
+		headPeers := evidence.head.byIdentity[identity]
+		if len(basePeers) == 0 && len(headPeers) == 0 {
+			return false, "changed hook path identity is absent from both authenticated revisions (" + identity + ")"
+		}
+		if index < len(components)-1 {
+			if reason := exactHookTreeAncestorRisk(component, basePeers, headPeers); reason != "" {
+				return false, reason
+			}
+			continue
+		}
+		if reason := exactHookAutomatedLeafRisk(path, basePeers, headPeers); reason != "" {
+			return false, reason
+		}
+	}
+	return true, ""
+}
+
+func exactHookTreeAncestorRisk(component string, basePeers, headPeers []treeIdentityEntry) string {
+	identity := normalizedPathIdentity(component)
+	for _, peers := range [][]treeIdentityEntry{basePeers, headPeers} {
+		if len(peers) > 1 {
+			return "hook carveout ancestry has normalized alias peers (" + identity + ")"
+		}
+		for _, entry := range peers {
+			if entry.Path != component || entry.Mode != "040000" || entry.Type != "tree" {
+				return "hook carveout ancestry is noncanonical or non-directory (" + identity + ")"
+			}
+		}
+	}
+	return ""
+}
+
+func exactHookAutomatedLeafRisk(path string, basePeers, headPeers []treeIdentityEntry) string {
+	identity := normalizedPathIdentity(path)
+	if len(basePeers) > 1 || len(headPeers) > 1 {
+		return "hook carveout leaf has normalized alias peers (" + identity + ")"
+	}
+	if isHookGoTestPath(path) {
+		return exactHookTestLeafRisk(path, basePeers, headPeers)
+	}
+	return exactHookSpecLeafRisk(path, basePeers, headPeers)
+}
+
+func exactHookTestLeafRisk(path string, basePeers, headPeers []treeIdentityEntry) string {
+	identity := normalizedPathIdentity(path)
+	owner, _ := hookGoPackageOwner(path)
+	for _, peers := range [][]treeIdentityEntry{basePeers, headPeers} {
+		if len(peers) == 0 {
+			continue
+		}
+		entry := peers[0]
+		peerOwner, peerIsTest := hookGoPackageOwner(entry.Path)
+		if !peerIsTest || peerOwner != owner || !strings.HasSuffix(entry.Path, "_test.go") || entry.Type != "blob" || (entry.Mode != "100644" && entry.Mode != "100755") {
+			return "hook test carveout leaf is not a regular exact-suffix test in the same canonical Go package owner (" + identity + ")"
+		}
+	}
+	return ""
+}
+
+func exactHookSpecLeafRisk(path string, basePeers, headPeers []treeIdentityEntry) string {
+	identity := normalizedPathIdentity(path)
+	for _, peers := range [][]treeIdentityEntry{basePeers, headPeers} {
+		if len(peers) == 0 {
+			continue
+		}
+		entry := peers[0]
+		if entry.Path != path || entry.Type != "blob" {
+			return "hook carveout leaf is noncanonical or non-file (" + identity + ")"
+		}
+		if entry.Mode != "100644" {
+			return "hook SPEC carveout leaf is not a regular non-executable blob (" + identity + ")"
+		}
+	}
+	return ""
+}
+
+func unsafeHookOwnerAutomatedPathTriggers(evidence treeIdentityEvidence, changedPaths []string) []string {
+	reasons := make(map[string]bool)
+	for _, path := range changedPaths {
+		if !isHookOwnerAutomatedPath(path) {
+			continue
+		}
+		if safe, reason := evidence.hookOwnerAutomatedPathSafety(path); !safe {
+			reasons[reason] = true
+		}
+	}
+	triggers := make([]string, 0, len(reasons))
+	for reason := range reasons {
+		triggers = append(triggers, "hook test or SPEC path has unsafe checkout identity ("+reason+")")
 	}
 	sort.Strings(triggers)
 	return triggers

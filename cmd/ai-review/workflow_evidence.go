@@ -25,7 +25,6 @@ type workflowBlobEvidence struct {
 func changedWorkflowIdentities(changedPaths []string) map[string][]string {
 	identities := make(map[string][]string)
 	for _, path := range changedPaths {
-		path = strings.TrimSpace(path)
 		identity, ok := workflowIdentity(path)
 		if !ok {
 			continue

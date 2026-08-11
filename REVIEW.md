@@ -56,7 +56,7 @@ Regardless of finding severity, the synthesis agent must escalate when the
 diff touches any of the following:
 
 - **Agent permissions** — any edit to `permissions.allow`, `permissions.ask`, or `permissions.deny`.
-- **Pre/post-tool hooks** — any change to hook scripts or hook registration in `settings.json`.
+- **Pre/post-tool hooks** — any change to hook scripts or hook registration in `settings.json`. Canonical `SPEC.md` contracts under protected hook owners do not escalate solely because of that ownership and continue through the ordinary semantic-governance rules, as do exact lowercase `_test.go` files under authenticated Go-package hook owners; noncanonical aliases, production sources, scripts, registrations, and ambiguous tree evidence remain protected.
 - **Security boundaries** — write guards, deny rules, `~/src` enforcement, PII manifests.
 - **Protected review policy, production enforcement, and provider rules** — this policy, the trusted AI-review workflow, production reviewer implementation, and ruleset declarations. Go files with the exact lowercase ASCII `_test.go` suffix under `cmd/ai-review/` stay in the automated review loop because those files cannot enter the production reviewer binary; a rename crossing that boundary still escalates through its production-side path.
 - **Privileged workflow authority** — executable changes to a workflow whose authenticated base or head can consume custom secrets, mint OIDC, write source/review/gate/deployment/signing state, use a privileged default-branch trigger, target an environment, delegate unresolved reusable-workflow or runner authority, or run on self-hosted infrastructure. Unclassifiable workflow evidence also fails closed.
@@ -173,9 +173,10 @@ fails closed. Protected static leaves and SPEC controls retain their stricter
 canonical spelling rules.
 Changes confined to Go files with the exact lowercase ASCII `_test.go` suffix
 under that package stay automated only when the same tree evidence proves a
-regular-blob test leaf and compatible directory ancestry. Unique case-only
-test-to-test renames and regular/executable mode changes remain automated
-because both exact lowercase-suffix paths stay outside the production package.
+regular-blob test leaf and compatible directory ancestry. Unique
+case/normalization-fold test-to-test renames and regular/executable mode changes
+remain automated because both exact lowercase-suffix paths stay outside the
+production package.
 Changed-path extraction
 disables rename detection and retains both sides, so a rename crossing into or
 out of production still escalates. Other workflow changes stay in the automated
@@ -187,6 +188,18 @@ comment/format/key-order-only edits whose executable YAML is unchanged remain
 automated; critical authority or ambiguous evidence escalates.
 Matrix axis order is retained because Actions uses that order to determine job
 creation order; swapping those keys is therefore an executable change.
+
+The protected OpenCode, Pi, AGM Git-hook, AGM internal-hook, and Codex-hook
+owners apply the same distinction: their executable hook surfaces remain
+human-review triggers, while an exact canonical regular `SPEC.md` is left to
+the ordinary semantic contract rules; independent ownership validation still
+applies, as do independent permission, migration, and infrastructure triggers.
+Exact lowercase `_test.go` changes are additionally
+automated only beneath enumerated Go-package hook owners. Both carveouts depend
+on authenticated canonical directory ancestry and regular Git blobs;
+simultaneous same-revision normalized peers, owner aliases,
+file/directory conflicts, symlinks, gitlinks, and noncanonical suffixes or
+basenames fail closed.
 
 This classifier is deliberately scoped to changed workflow YAML. It does not
 yet compute transitive authority through separately changed scripts, reusable

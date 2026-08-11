@@ -174,6 +174,296 @@ func TestBuildReviewPlan_AIReviewTestOnlySpellingAndModeChangesRemainAutonomous(
 	})
 }
 
+func TestBuildReviewPlan_HookGoPackageTestsRemainAutonomous(t *testing.T) {
+	paths := []string{
+		"agm/hooks/cmd/posttool-cost-guard/main_test.go",
+		"agm/hooks/cmd/sessionstart-chezmoi-drift/main_test.go",
+		"agm/hooks/cmd/stop-session-guard/main_test.go",
+		"agm/internal/hooks/exit_gate_test.go",
+		"agm/internal/codexhooks/verify_test.go",
+	}
+	for _, owner := range toolHookOwners {
+		covered := false
+		for _, testPath := range paths {
+			covered = covered || strings.HasPrefix(testPath, owner.path+"/")
+		}
+		if owner.goPackage && !covered {
+			t.Fatalf("Go-package hook owner lacks an authenticated test regression: %s", owner.path)
+		}
+		if !owner.goPackage && isHookGoTestPath(owner.path+"/backdoor_test.go") {
+			t.Fatalf("script-only hook owner acquired a Go-test carveout: %s", owner.path)
+		}
+	}
+	for _, testPath := range paths {
+		t.Run(testPath, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			writeReviewFile(t, repo, testPath, "package hooks\n")
+			gittest.Run(t, repo, "add", "-A")
+			gittest.Run(t, repo, "commit", "-m", "add hook package test")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+
+			assertAutonomousReviewPlan(t, base, head)
+		})
+	}
+}
+
+func TestBuildReviewPlan_HookGoPackageCaseOnlyTestRenameRemainsAutonomous(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		head string
+	}{
+		{"ASCII case fold", "verify_test.go", "Verify_test.go"},
+		{"Unicode full fold", "safe_test.go", "ſafe_test.go"},
+		{"Unicode normalization", "café_test.go", "cafe\u0301_test.go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, head := caseRenameReviewRepo(t,
+				"agm/internal/codexhooks/"+tt.base,
+				"agm/internal/codexhooks/"+tt.head,
+				"package codexhooks\n",
+			)
+			assertAutonomousReviewPlan(t, base, head)
+		})
+	}
+}
+
+func TestBuildReviewPlan_HookGoPackageTestModeChangeRemainsAutonomous(t *testing.T) {
+	base, head := modeChangeReviewRepo(t, "agm/internal/codexhooks/verify_test.go", "package codexhooks\n")
+	assertAutonomousReviewPlan(t, base, head)
+}
+
+func TestBuildReviewPlan_HookOwnerSpecsRemainAutomated(t *testing.T) {
+	paths := []string{
+		"agm/.githooks/SPEC.md",
+		"agm/internal/hooks/SPEC.md",
+		"agm/internal/codexhooks/SPEC.md",
+	}
+	for _, specPath := range paths {
+		t.Run(specPath, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			const featurePath = "agm/test/bdd/features/hook.feature"
+			writeReviewFile(t, repo, specPath, specDocument("HOOK-01", "When checked, the hook shall report its state.", featurePath))
+			writeReviewFile(t, repo, featurePath, featureDocument("# SPEC: "+specPath+"\n", "hook contract"))
+			gittest.Run(t, repo, "add", "-A")
+			gittest.Run(t, repo, "commit", "-m", "add hook behavioral contract")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+
+			plan, err := buildReviewPlan(context.Background(), base, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.ReviewNeeded || !plan.ReviewRelevant || plan.needsHuman() || len(plan.EscalationTriggers) != 0 {
+				t.Fatalf("hook SPEC did not stay in automated semantic review: %#v", plan)
+			}
+		})
+	}
+}
+
+func TestHookOwnerCanonicalSpecsHaveSafeAuthenticatedIdentity(t *testing.T) {
+	paths := []string{
+		".opencode/hooks/SPEC.md",
+		".pi/guardrails/SPEC.md",
+		"agm/.githooks/SPEC.md",
+		"agm/internal/hooks/SPEC.md",
+		"agm/internal/codexhooks/SPEC.md",
+	}
+	for _, specPath := range paths {
+		t.Run(specPath, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			writeReviewFile(t, repo, specPath, "# Hook contract\n")
+			gittest.Run(t, repo, "add", "-A")
+			gittest.Run(t, repo, "commit", "-m", "add canonical hook contract")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+
+			evidence, err := loadTreeIdentityEvidence(context.Background(), base, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := unsafeHookOwnerAutomatedPathTriggers(evidence, []string{specPath}); len(got) != 0 {
+				t.Fatalf("canonical hook SPEC had unsafe identity: %v", got)
+			}
+			if got := EscalationTriggers([]string{specPath}, "", ""); len(got) != 0 {
+				t.Fatalf("canonical hook SPEC forced deterministic hook escalation: %v", got)
+			}
+		})
+	}
+}
+
+func TestBuildReviewPlan_HarnessLocalHookSpecsRetainIndependentOwnershipGate(t *testing.T) {
+	paths := []string{
+		".opencode/hooks/SPEC.md",
+		".pi/guardrails/SPEC.md",
+	}
+	for _, specPath := range paths {
+		t.Run(specPath, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			const featurePath = "features/hook.feature"
+			writeReviewFile(t, repo, specPath, specDocument("HOOK-01", "When checked, the hook shall report its state.", featurePath))
+			writeReviewFile(t, repo, featurePath, featureDocument("# SPEC: "+specPath+"\n", "hook contract"))
+			gittest.Run(t, repo, "add", "-A")
+			gittest.Run(t, repo, "commit", "-m", "add harness-local hook contract")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+
+			plan, err := buildReviewPlan(context.Background(), base, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.ReviewNeeded || !plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "harness-local normative SPEC ownership") {
+				t.Fatalf("harness-local ownership gate was lost: %#v", plan)
+			}
+			if len(plan.EscalationTriggers) != 0 {
+				t.Fatalf("canonical hook SPEC was separately escalated by hook ownership: %v", plan.EscalationTriggers)
+			}
+		})
+	}
+}
+
+func TestBuildReviewPlan_PreservesProtectedGitPathWhitespace(t *testing.T) {
+	paths := []string{
+		"agm/internal/hooks/SPEC.md ",
+		"agm/internal/hooks/ SPEC.md",
+		"agm/internal/hooks/exit_gate_test.go ",
+		"cmd/ai-review/review_test.go ",
+		"agm/internal/hooks/ exit_gate.go",
+	}
+	for _, changedPath := range paths {
+		t.Run(changedPath, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			writeReviewFile(t, repo, changedPath, "protected path bytes\n")
+			gittest.Run(t, repo, "add", "-A")
+			gittest.Run(t, repo, "commit", "-m", "add protected whitespace path")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+
+			plan, err := buildReviewPlan(context.Background(), base, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.ReviewRelevant || len(plan.EscalationTriggers) == 0 {
+				t.Fatalf("protected path whitespace was trimmed or accepted: %#v", plan)
+			}
+		})
+	}
+}
+
+func TestBuildReviewPlan_HookOwnerProductionAndAliasesRemainProtected(t *testing.T) {
+	paths := []string{
+		"agm/internal/hooks/exit_gate.go",
+		".opencode/hooks/stop-guardrail-feedback",
+		"agm/internal/hooks/backdoor_TEST.go",
+		"agm/internal/codexhooks/backdoor_teſt.go",
+		"agm/.githooks/spec.md",
+		"agm/internal/hooks/SPEC.md/payload",
+	}
+	for _, changedPath := range paths {
+		t.Run(changedPath, func(t *testing.T) {
+			repo := newReviewRepo(t)
+			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			writeReviewFile(t, repo, changedPath, "protected hook authority\n")
+			gittest.Run(t, repo, "add", "-A")
+			gittest.Run(t, repo, "commit", "-m", "add protected hook surface")
+			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+			chdir(t, repo)
+
+			plan, err := buildReviewPlan(context.Background(), base, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.ReviewRelevant || len(plan.EscalationTriggers) == 0 {
+				t.Fatalf("protected hook surface did not fail closed: %#v", plan)
+			}
+		})
+	}
+}
+
+func TestBuildReviewPlan_HookOwnerCaseAliasRemainsProtected(t *testing.T) {
+	repo := newReviewRepo(t)
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	const aliasPath = "AGM/internal/hooks/exit_gate_test.go"
+	addRawTreeBlob(t, repo, aliasPath, "package hooks\n")
+	gittest.Run(t, repo, "commit", "-m", "add hook owner alias")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.ReviewRelevant || len(plan.EscalationTriggers) == 0 {
+		t.Fatalf("hook owner alias did not fail closed: %#v", plan)
+	}
+}
+
+func TestBuildReviewPlan_AGMInternalHookCarveoutRejectsUnsafeEvidence(t *testing.T) {
+	t.Run("test symlink", func(t *testing.T) {
+		repo := newReviewRepo(t)
+		base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+		object := rawBlobObject(t, repo, "target")
+		gittest.Run(t, repo, "update-index", "--add", "--cacheinfo", "120000,"+object+",agm/internal/hooks/exit_gate_test.go")
+		gittest.Run(t, repo, "commit", "-m", "add hook test symlink")
+		head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+		chdir(t, repo)
+
+		plan, err := buildReviewPlan(context.Background(), base, head)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !plan.ReviewRelevant || !containsEscalation(plan.EscalationTriggers, "unsafe checkout identity") {
+			t.Fatalf("hook test symlink did not fail closed: %#v", plan)
+		}
+	})
+
+	t.Run("case-fold test leaf peer", func(t *testing.T) {
+		repo := newReviewRepo(t)
+		writeReviewFile(t, repo, "agm/internal/hooks/exit_gate_test.go", "package hooks\n")
+		gittest.Run(t, repo, "add", "-A")
+		gittest.Run(t, repo, "commit", "-m", "add canonical hook test")
+		base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+		addRawTreeBlob(t, repo, "agm/internal/hooks/Exit_Gate_test.go", "package hooks\n")
+		gittest.Run(t, repo, "commit", "-m", "add hook test alias")
+		head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+		chdir(t, repo)
+
+		plan, err := buildReviewPlan(context.Background(), base, head)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !plan.ReviewRelevant || !containsEscalation(plan.EscalationTriggers, "unsafe checkout identity") {
+			t.Fatalf("hook test alias did not fail closed: %#v", plan)
+		}
+	})
+
+	t.Run("executable SPEC", func(t *testing.T) {
+		repo := newReviewRepo(t)
+		base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+		writeReviewFile(t, repo, "agm/internal/hooks/SPEC.md", specWithoutTrace("HOOK-01", "When checked, the hook shall report its state."))
+		gittest.Run(t, repo, "add", "-A")
+		gittest.Run(t, repo, "update-index", "--chmod=+x", "agm/internal/hooks/SPEC.md")
+		gittest.Run(t, repo, "commit", "-m", "make hook contract executable")
+		head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+		chdir(t, repo)
+
+		plan, err := buildReviewPlan(context.Background(), base, head)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !plan.ReviewRelevant || !containsEscalation(plan.EscalationTriggers, "unsafe checkout identity") {
+			t.Fatalf("executable hook SPEC evidence did not fail closed: %#v", plan)
+		}
+	})
+}
+
 func TestCheckoutIdentityTriggers_DeduplicatesSharedAncestorConflict(t *testing.T) {
 	identity := normalizedPathIdentity("root")
 	evidence := treeIdentityEvidence{
@@ -478,6 +768,9 @@ func caseRenameReviewRepo(t *testing.T, basePath, headPath, contents string) (st
 	gittest.Run(t, repo, "commit", "-m", "add file before case-only rename")
 	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
 	object := strings.TrimSpace(gittest.Run(t, repo, "hash-object", basePath))
+	// Preserve the exact raw path bytes for normalization-only rename fixtures
+	// even on macOS, where Git otherwise precomposes index paths by default.
+	gittest.Run(t, repo, "config", "core.precomposeunicode", "false")
 	gittest.Run(t, repo, "update-index", "--force-remove", basePath)
 	gittest.Run(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+object+","+headPath)
 	gittest.Run(t, repo, "commit", "-m", "rename file by case")

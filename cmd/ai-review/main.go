@@ -306,6 +306,7 @@ func deterministicEscalationTriggersWithEvidence(ctx context.Context, base, head
 	}
 	triggers = append(triggers, identityTriggers...)
 	triggers = append(triggers, unsafeAIReviewTestIdentityTriggers(treeIdentities, changed)...)
+	triggers = append(triggers, unsafeHookOwnerAutomatedPathTriggers(treeIdentities, changed)...)
 	triggers = append(triggers, privilegedWorkflowEscalationTriggersWithEvidence(ctx, treeIdentities, changed)...)
 	triggers = append(triggers, BinaryEscalationTriggers(binaries)...)
 	triggers = append(triggers, GitlinkEscalationTriggers(gitlinks)...)

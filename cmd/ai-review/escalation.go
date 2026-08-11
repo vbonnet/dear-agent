@@ -15,6 +15,10 @@ const humanReviewMarker = "HUMAN REVIEW REQUIRED"
 type escalationRule struct {
 	// match reports whether the path trips this rule.
 	match func(path string) bool
+	// exempt reports whether a path that matches this rule is deliberately
+	// routed elsewhere. Exemptions are rule-local so one carveout cannot erase
+	// an independent permission, migration, or infrastructure trigger.
+	exempt func(path string) bool
 	// reason is the human-readable trigger name for the PR comment.
 	reason string
 }
@@ -53,6 +57,7 @@ var escalationRules = []escalationRule{
 	},
 	{
 		reason: "pre/post-tool hook change or hook registration",
+		exempt: isCanonicalHookOwnerSpec,
 		match: func(p string) bool {
 			lower := normalizedPathIdentity(p)
 			base := basename(lower)
@@ -66,8 +71,8 @@ var escalationRules = []escalationRule{
 			// registration files. A bare "/hooks/" substring also matches
 			// unrelated application packages (e.g. engram/hooks/), which would
 			// force needless human review on routine maintenance.
-			for _, owner := range toolHookDirs {
-				if normalizedPathRelated(p, owner) {
+			for _, owner := range toolHookOwners {
+				if normalizedPathRelated(p, owner.path) {
 					return true
 				}
 			}
@@ -132,22 +137,31 @@ var escalationRules = []escalationRule{
 	},
 }
 
-// toolHookDirs are the directories that own pre/post-tool hooks — the surface
-// REVIEW.md §3 means by "pre/post-tool hooks". Deliberately narrower than any
-// directory named "hooks".
-var toolHookDirs = []string{
-	".claude/hooks",
-	".config/claude-code/hooks",
-	".config/git/hooks",
-	".agents/hooks",
-	".codex/hooks",
-	".opencode/hooks",
-	".pi/guardrails",
-	"agm/.githooks",
-	"agm/hooks",
-	"agm/cmd/agm/hooks",
-	"agm/internal/hooks",
-	"agm/internal/codexhooks",
+type toolHookOwner struct {
+	path      string
+	goPackage bool
+}
+
+// toolHookOwners are the directories that own pre/post-tool hooks — the
+// surface REVIEW.md §3 means by "pre/post-tool hooks". This is deliberately
+// narrower than any directory named "hooks". goPackage is the single source
+// of truth for the exact _test.go carveout; script-only roots remain false.
+var toolHookOwners = []toolHookOwner{
+	{path: ".claude/hooks"},
+	{path: ".config/claude-code/hooks"},
+	{path: ".config/git/hooks"},
+	{path: ".agents/hooks"},
+	{path: ".codex/hooks"},
+	{path: ".opencode/hooks"},
+	{path: ".pi/guardrails"},
+	{path: "agm/.githooks"},
+	{path: "agm/hooks"},
+	{path: "agm/hooks/cmd/posttool-cost-guard", goPackage: true},
+	{path: "agm/hooks/cmd/sessionstart-chezmoi-drift", goPackage: true},
+	{path: "agm/hooks/cmd/stop-session-guard", goPackage: true},
+	{path: "agm/cmd/agm/hooks"},
+	{path: "agm/internal/hooks", goPackage: true},
+	{path: "agm/internal/codexhooks", goPackage: true},
 }
 
 // securityBoundaryDirs are the packages that own a security boundary. A
@@ -168,6 +182,44 @@ func isAIReviewGoTestPath(path string) bool {
 	// package build. Fold the owner directory for checkout-alias safety, but
 	// never fold the suffix: *_TEST.go and *_teſt.go can be production inputs.
 	return strings.HasPrefix(lower, "cmd/ai-review/") && strings.HasSuffix(path, "_test.go")
+}
+
+func isCanonicalHookOwnerSpec(path string) bool {
+	// The raw spellings are intentional. Only a canonical SPEC.md under a
+	// canonical protected hook root is contract evidence rather than hook
+	// implementation authority. Case/normalization aliases stay protected.
+	if basename(path) != "SPEC.md" {
+		return false
+	}
+	for _, owner := range toolHookOwners {
+		if strings.HasPrefix(path, owner.path+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func hookGoPackageOwner(path string) (string, bool) {
+	for _, owner := range toolHookOwners {
+		if owner.goPackage && strings.HasPrefix(path, owner.path+"/") {
+			return owner.path, true
+		}
+	}
+	return "", false
+}
+
+func isHookGoTestPath(path string) bool {
+	// Go excludes only the exact lowercase ASCII _test.go suffix. Keep this
+	// carveout limited to known Go package owners, never arbitrary script roots.
+	if !strings.HasSuffix(path, "_test.go") {
+		return false
+	}
+	_, ok := hookGoPackageOwner(path)
+	return ok
+}
+
+func isHookOwnerAutomatedPath(path string) bool {
+	return isCanonicalHookOwnerSpec(path) || isHookGoTestPath(path)
 }
 
 // basename returns the final path element.
@@ -198,7 +250,6 @@ func pathHasComponentSuffix(path, suffix string) bool {
 func BinaryEscalationTriggers(binaryPaths []string) []string {
 	var triggers []string
 	for _, p := range binaryPaths {
-		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
@@ -214,7 +265,6 @@ func BinaryEscalationTriggers(binaryPaths []string) []string {
 func GitlinkEscalationTriggers(gitlinkPaths []string) []string {
 	var triggers []string
 	for _, p := range gitlinkPaths {
-		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
@@ -231,17 +281,19 @@ func EscalationTriggers(changedPaths []string, prBody, commitMessages string) []
 	var triggers []string
 
 	for _, p := range changedPaths {
-		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
 		// Go test files cannot enter the production reviewer binary. Keep a
 		// pure test-hardening change autonomous while --no-renames ensures that
 		// either production side of a boundary-crossing rename is still seen.
-		if isAIReviewGoTestPath(p) {
+		if isAIReviewGoTestPath(p) || isHookGoTestPath(p) {
 			continue
 		}
 		for _, rule := range escalationRules {
+			if rule.exempt != nil && rule.exempt(p) {
+				continue
+			}
 			if rule.match(p) && !seen[rule.reason] {
 				seen[rule.reason] = true
 				triggers = append(triggers, fmt.Sprintf("%s (%s)", rule.reason, p))

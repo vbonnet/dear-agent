@@ -46,6 +46,28 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"AGM internal hook case alias", []string{"AGM/INTERNAL/HOOKS/exit_gate.go"}, true},
 		{"AGM internal hook Unicode alias", []string{"agm/internal/hookſ/living_docs_check.go"}, true},
 		{"AGM internal hook descendant", []string{"agm/internal/hooks/living_docs_check.go"}, true},
+		{"AGM internal hook Go test", []string{"agm/internal/hooks/exit_gate_test.go"}, false},
+		{"OpenCode hook contract", []string{".opencode/hooks/SPEC.md"}, false},
+		{"Pi guardrail contract", []string{".pi/guardrails/SPEC.md"}, false},
+		{"AGM Git hook contract", []string{"agm/.githooks/SPEC.md"}, false},
+		{"AGM internal hook contract", []string{"agm/internal/hooks/SPEC.md"}, false},
+		{"hook permission contract keeps independent trigger", []string{"agm/internal/hooks/permissions/SPEC.md"}, true},
+		{"hook migration contract keeps independent trigger", []string{"agm/internal/hooks/migrations/SPEC.md"}, true},
+		{"hook security contract keeps independent trigger", []string{"agm/internal/hooks/write-guard/SPEC.md"}, true},
+		{"hook launchd contract keeps independent trigger", []string{"agm/internal/hooks/launchd/SPEC.md"}, true},
+		{"AGM Codex hook contract", []string{"agm/internal/codexhooks/SPEC.md"}, false},
+		{"AGM Codex hook Go test", []string{"agm/internal/codexhooks/verify_test.go"}, false},
+		{"script hook pseudo-Go test", []string{".opencode/hooks/backdoor_test.go"}, true},
+		{"AGM internal hook uppercase test suffix", []string{"agm/internal/hooks/backdoor_TEST.go"}, true},
+		{"AGM internal hook Unicode test suffix", []string{"agm/internal/hooks/backdoor_teſt.go"}, true},
+		{"AGM internal hook lowercase contract alias", []string{"agm/internal/hooks/spec.md"}, true},
+		{"AGM internal hook Unicode contract alias", []string{"agm/internal/hooks/ſPEC.md"}, true},
+		{"AGM internal hook test owner case alias", []string{"AGM/internal/hooks/exit_gate_test.go"}, true},
+		{"AGM hook contract trailing space", []string{"agm/internal/hooks/SPEC.md "}, true},
+		{"AGM hook contract leading basename space", []string{"agm/internal/hooks/ SPEC.md"}, true},
+		{"AGM hook test trailing space", []string{"agm/internal/hooks/exit_gate_test.go "}, true},
+		{"review test trailing space", []string{"cmd/ai-review/review_test.go "}, true},
+		{"hook production leading basename space", []string{"agm/internal/hooks/ exit_gate.go"}, true},
 		{"AGM Git hook root alias", []string{"AGM/.GITHOOKS"}, true},
 		{"AGM Git hook descendant", []string{"agm/.githooks/pre-commit"}, true},
 		{"Codex hook Unicode root alias", []string{"agm/internal/codexhookſ"}, true},
@@ -102,6 +124,19 @@ func TestEscalationTriggers_ExplicitMarker(t *testing.T) {
 	}
 }
 
+func TestChangedWorkflowIdentities_PreservesGitPathWhitespace(t *testing.T) {
+	const canonical = ".github/workflows/ordinary.yml"
+	got := changedWorkflowIdentities([]string{
+		canonical,
+		canonical + " ",
+		" " + canonical,
+	})
+	paths, ok := got[normalizedPathIdentity(canonical)]
+	if !ok || len(got) != 1 || len(paths) != 1 || paths[0] != canonical {
+		t.Fatalf("workflow identities mutated authenticated paths: %#v", got)
+	}
+}
+
 // TestBinaryEscalationTriggers guards the binary bypass: git renders a binary
 // change as a bare "Binary files differ" marker, so the reviewers never see the
 // payload and it must escalate instead of riding an "approved".
@@ -112,8 +147,11 @@ func TestBinaryEscalationTriggers(t *testing.T) {
 	if got := BinaryEscalationTriggers(nil); len(got) != 0 {
 		t.Fatalf("expected no triggers, got %v", got)
 	}
-	if got := BinaryEscalationTriggers([]string{"", "  "}); len(got) != 0 {
-		t.Fatalf("blank paths must not trigger, got %v", got)
+	if got := BinaryEscalationTriggers([]string{""}); len(got) != 0 {
+		t.Fatalf("empty paths must not trigger, got %v", got)
+	}
+	if got := BinaryEscalationTriggers([]string{"  "}); len(got) != 1 || got[0] != "binary file not reviewable from a text diff (  )" {
+		t.Fatalf("authenticated path whitespace was not preserved, got %v", got)
 	}
 	// A binary addition must block even when the model said approved.
 	if ApplyEscalation(Approved, BinaryEscalationTriggers([]string{"build/tool"})) != NeedsHumanReview {
@@ -127,8 +165,11 @@ func TestGitlinkEscalationTriggers(t *testing.T) {
 	if got := GitlinkEscalationTriggers([]string{"vendor/dep"}); len(got) != 1 {
 		t.Fatalf("expected a gitlink trigger, got %v", got)
 	}
-	if got := GitlinkEscalationTriggers([]string{"", " "}); len(got) != 0 {
-		t.Fatalf("blank paths must not trigger, got %v", got)
+	if got := GitlinkEscalationTriggers([]string{""}); len(got) != 0 {
+		t.Fatalf("empty paths must not trigger, got %v", got)
+	}
+	if got := GitlinkEscalationTriggers([]string{" "}); len(got) != 1 || got[0] != "submodule (gitlink) change whose target tree is not in the diff ( )" {
+		t.Fatalf("authenticated path whitespace was not preserved, got %v", got)
 	}
 	if ApplyEscalation(Approved, GitlinkEscalationTriggers([]string{"vendor/dep"})) != NeedsHumanReview {
 		t.Fatal("submodule change must escalate an approved outcome")
@@ -147,6 +188,13 @@ func TestHookEscalationIsScoped(t *testing.T) {
 		"agm/internal/hooksdocs/helper.go",
 		"agm/internal/codexhookdocs/verify.go",
 		".codex/config.toml.example",
+		"agm/internal/hooks/exit_gate_test.go",
+		"agm/internal/hooks/SPEC.md",
+		"agm/internal/codexhooks/verify_test.go",
+		"agm/internal/codexhooks/SPEC.md",
+		".opencode/hooks/SPEC.md",
+		".pi/guardrails/SPEC.md",
+		"agm/.githooks/SPEC.md",
 	}
 	for _, p := range shouldNot {
 		if got := EscalationTriggers([]string{p}, "", ""); len(got) != 0 {
