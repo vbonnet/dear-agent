@@ -52,6 +52,7 @@ func TestMCPCompiledSurfaceMatchesFiniteCompatibilityContract(t *testing.T) {
 		"agm_archive_session",
 		"agm_create_session",
 		"agm_get_session_metadata",
+		"agm_get_session_output",
 		"agm_kill_session",
 		"agm_list_ops",
 		"agm_list_sessions",
@@ -172,7 +173,8 @@ func logicalRegistryContract(t *testing.T) map[string]contractTool {
 	t.Helper()
 	requestTypes := map[string]reflect.Type{
 		"ListSessionsRequest":   reflect.TypeFor[surface.ListSessionsRequest](),
-		"GetSessionRequest":     reflect.TypeFor[surface.GetSessionRequest](),
+		"GetSessionRequest":       reflect.TypeFor[surface.GetSessionRequest](),
+		"GetSessionOutputRequest": reflect.TypeFor[surface.GetSessionOutputRequest](),
 		"SearchSessionsRequest": reflect.TypeFor[surface.SearchSessionsRequest](),
 		"GetStatusRequest":      reflect.TypeFor[surface.GetStatusRequest](),
 		"ArchiveSessionRequest": reflect.TypeFor[surface.ArchiveSessionRequest](),
@@ -729,6 +731,7 @@ func compiledLogicalNames() map[string]string {
 		"agm_list_sessions":              "list_sessions",
 		"agm_search_sessions":            "search_sessions",
 		"agm_get_session_metadata":       "get_session",
+		"agm_get_session_output":         "get_session_output",
 		"agm_archive_session":            "archive_session",
 		"agm_kill_session":               "kill_session",
 		"agm_create_session":             "create_session",
