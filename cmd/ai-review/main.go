@@ -370,19 +370,25 @@ func run(c config) int {
 		c.apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	modelUnavailable := c.isFork || strings.TrimSpace(c.apiKey) == ""
-	// The keylessExit translation below only relabels these already-blocking
-	// dispositions with the distinct cannot-run-without-credential exit code
-	// (same-repository, non-override, no key). It never changes whether they
-	// block, and fork or override runs pass through untranslated.
+	// A deterministic SPEC-governance human-review verdict (ownership edge,
+	// reviewer-dependency, traceability, stale base) is conclusive without a
+	// model: the missing credential is NOT its blocker, so it keeps the
+	// ordinary blocking exit even when keyless (AIREV-26 boundary).
 	if plan.needsHuman() && modelUnavailable {
-		return keylessExit(c, handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; ")))
+		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
 	}
 	// A deterministic escalation still benefits from the complete automated
 	// review when credentials are available. Fork and secretless runs cannot
 	// make model calls, so they take the visible human-review fallback instead.
+	// keylessExit relabels only the same-repository, non-override, no-key case
+	// with the distinct cannot-run code — the review that would have
+	// accompanied this escalation can never run, and the escalation evidence
+	// itself has just been posted. It never changes whether this run blocks.
 	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
 		return keylessExit(c, handleMandatoryEscalation(c, plan.EscalationTriggers))
 	}
+	// An otherwise-reviewable changed SPEC stopped solely by the absent
+	// credential is the canonical cannot-run disposition.
 	if plan.ReviewNeeded && modelUnavailable {
 		reason := "a relevant changed SPEC cannot be reviewed because the reviewer credential is unavailable"
 		if c.isFork {

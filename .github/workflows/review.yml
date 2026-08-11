@@ -543,8 +543,19 @@ jobs:
           # can translate only the credential-starved failure to neutral;
           # every other nonzero code (plan build failure, expired deadline,
           # timeout's 124, fork, override audit failure) keeps failing closed.
+          # Build then execute directly: `go run` reports the child's status
+          # only in its stderr text and itself exits 1 ("The exit status of
+          # Run is not the exit status of the compiled binary"), which would
+          # erase the exit-78 discrimination.
+          timeout --signal=TERM --kill-after=5s "${remaining}s" go build -o "$RUNNER_TEMP/ai-review-gate" ./cmd/ai-review
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline expired while building the reviewer"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
           set +e
-          timeout --signal=TERM --kill-after=5s "${remaining}s" go run ./cmd/ai-review
+          timeout --signal=TERM --kill-after=5s "${remaining}s" "$RUNNER_TEMP/ai-review-gate"
           gate_status=$?
           set -e
           if [ "$gate_status" -eq 78 ]; then

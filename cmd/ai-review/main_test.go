@@ -73,6 +73,33 @@ func TestRun_MissingKeyFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRun_KeylessDeterministicHumanVerdictKeepsOrdinaryBlockingExit(t *testing.T) {
+	// A SPEC.owner edge change is a conclusive SPEC-governance human-review
+	// verdict that needs no model, so the absent credential is not its
+	// blocker: it must keep exit 1, never the AIREV-26 cannot-run code that
+	// the workflow would translate to neutral.
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	writeReviewFile(t, dir, "domains/example/SPEC.owner", "domains/example/SPEC.md\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "owner edge")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless deterministic human verdict: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
+
 func TestRun_InvalidTrustedCIDeadlineFailsBeforeReviewEvenWithOverride(t *testing.T) {
 	c := baseConfig()
 	c.githubActions = true
