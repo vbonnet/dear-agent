@@ -48,10 +48,7 @@ func CreateSessionRouted(ctx context.Context, opCtx *OpContext, req *CreateSessi
 		return CreateSessionWithContext(ctx, opCtx, req)
 	}
 
-	attempts := req.SpawnRetries
-	if attempts < 0 {
-		attempts = 0
-	}
+	attempts := max(req.SpawnRetries, 0)
 	baseDelay := req.SpawnRetryBaseDelay
 	if baseDelay <= 0 {
 		baseDelay = defaultSpawnRetryBaseDelay
@@ -122,7 +119,7 @@ func isRetryableAgySpawnError(err error) bool {
 // exceeding maxSpawnRetryDelay.
 func spawnRetryBackoff(base time.Duration, attempt int) time.Duration {
 	delay := base
-	for i := 0; i < attempt; i++ {
+	for range attempt {
 		delay *= 2
 		if delay >= maxSpawnRetryDelay {
 			return maxSpawnRetryDelay
