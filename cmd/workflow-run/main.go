@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	llmprovider "github.com/vbonnet/dear-agent/pkg/llm/provider"
+	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 	"github.com/vbonnet/dear-agent/pkg/llm/router"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
@@ -46,14 +48,15 @@ func run(args []string, stderr *os.File) int {
 	fs := flag.NewFlagSet("workflow-run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		file    = fs.String("file", "", "path to workflow YAML (required)")
-		dryRun  = fs.Bool("dry-run", false, "validate the workflow and exit without executing")
-		verbose = fs.Bool("verbose", false, "debug logging")
-		cwd     = fs.String("cwd", "", "default working directory for bash nodes")
-		roles   = fs.String("roles", "", "path to roles.yaml for the model router (defaults to config/roles.yaml if present)")
-		dbPath  = fs.String("db", "runs.db", "path to SQLite runs.db (created if missing); empty disables persistence")
-		trigger = fs.String("trigger", "cli", `how this run was started ("cli", "cron", "mcp", ...) — recorded on the runs row`)
-		inputs  multiString
+		file      = fs.String("file", "", "path to workflow YAML (required)")
+		dryRun    = fs.Bool("dry-run", false, "validate the workflow and exit without executing")
+		verbose   = fs.Bool("verbose", false, "debug logging")
+		cwd       = fs.String("cwd", "", "default working directory for bash nodes")
+		roles     = fs.String("roles", "", "path to roles.yaml for the model router (defaults to config/roles.yaml if present)")
+		quotaMode = fs.String("quota", "auto", `quota-aware routing: "auto" (on when the codexbar meter is installed), "on", or "off"`)
+		dbPath    = fs.String("db", "runs.db", "path to SQLite runs.db (created if missing); empty disables persistence")
+		trigger   = fs.String("trigger", "cli", `how this run was started ("cli", "cron", "mcp", ...) — recorded on the runs row`)
+		inputs    multiString
 	)
 	fs.Var(&inputs, "input", "workflow input as name=value (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -90,7 +93,7 @@ func run(args []string, stderr *os.File) int {
 		return 2
 	}
 
-	ai, err := selectAIExecutor(w.Nodes, *roles, logger)
+	ai, err := selectAIExecutor(w.Nodes, *roles, *quotaMode, logger)
 	if err != nil {
 		logger.Error("init AI executor", "err", err)
 		return 1
@@ -156,11 +159,49 @@ func parseInputs(inputs multiString) (map[string]string, error) {
 // selectAIExecutor returns a real AIExecutor when the DAG contains an AI
 // node and a no-op stub otherwise. Keeping the LLM-provider init lazy
 // lets bash-only workflows run in CI without ANTHROPIC_API_KEY set.
-func selectAIExecutor(nodes []workflow.Node, rolesPath string, logger *slog.Logger) (workflow.AIExecutor, error) {
+func selectAIExecutor(nodes []workflow.Node, rolesPath, quotaMode string, logger *slog.Logger) (workflow.AIExecutor, error) {
 	if !hasAINode(nodes) {
 		return nopAI{}, nil
 	}
-	return buildExecutor(rolesPath, logger)
+	return buildExecutor(rolesPath, quotaMode, logger)
+}
+
+// buildQuotaMeter resolves the -quota tri-state into a meter.
+//
+// "auto" enables metering only when the codexbar CLI is already on PATH,
+// so a host without it neither pays for a failed subprocess nor changes
+// behaviour. "on" builds the meter regardless, which surfaces a missing
+// install as an unreadable meter rather than silently doing nothing;
+// routing is unchanged either way, because an unreadable meter yields no
+// verdicts.
+func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
+	switch mode {
+	case "off":
+		return nil, nil
+	case "on":
+	case "", "auto":
+		if _, err := exec.LookPath(quota.DefaultCodexBarCommand); err != nil {
+			logger.Debug("quota routing: disabled, no meter installed", "command", quota.DefaultCodexBarCommand)
+			return nil, nil
+		}
+	default:
+		return nil, fmt.Errorf("bad -quota %q; expect auto, on, or off", mode)
+	}
+
+	meter := quota.New(quota.Options{Reader: quota.CodexBarReader{}})
+
+	// Warm the cache once so the first AI node routes on real data. The
+	// read is slow enough to be worth doing here and never on the
+	// routing path; a failure is logged and leaves routing unchanged.
+	ctx, cancel := context.WithTimeout(context.Background(), quota.DefaultReadTimeout)
+	defer cancel()
+	snapshot, err := meter.Refresh(ctx)
+	if err != nil {
+		logger.Warn("quota routing: no reading, routing as configured", "error", err)
+		return meter, nil
+	}
+	logger.Info("quota routing: enabled", "source", snapshot.Source, "providers", len(snapshot.Providers))
+	return meter, nil
 }
 
 // hasAINode returns true if any node in the (possibly-nested) DAG is an
@@ -190,7 +231,7 @@ func hasAINode(nodes []workflow.Node) bool {
 //     current working directory).
 //  3. Direct-Anthropic fallback so existing single-provider setups keep
 //     working without forcing every operator to ship a roles.yaml.
-func buildExecutor(rolesPath string, logger *slog.Logger) (workflow.AIExecutor, error) {
+func buildExecutor(rolesPath, quotaMode string, logger *slog.Logger) (workflow.AIExecutor, error) {
 	if rolesPath == "" {
 		const defaultPath = "config/roles.yaml"
 		if _, err := os.Stat(defaultPath); err == nil {
@@ -203,11 +244,16 @@ func buildExecutor(rolesPath string, logger *slog.Logger) (workflow.AIExecutor, 
 		if err != nil {
 			return nil, fmt.Errorf("load roles config: %w", err)
 		}
-		r, err := router.New(router.Options{Config: cfg})
+		meter, err := buildQuotaMeter(quotaMode, logger)
+		if err != nil {
+			return nil, err
+		}
+		r, err := router.New(router.Options{Config: cfg, Quota: meter})
 		if err != nil {
 			return nil, fmt.Errorf("init router: %w", err)
 		}
-		logger.Info("AI executor: router-backed", "roles", rolesPath, "default_role", r.DefaultRole())
+		logger.Info("AI executor: router-backed",
+			"roles", rolesPath, "default_role", r.DefaultRole(), "quota_routing", meter.Enabled())
 		return router.NewAIExecutor(r), nil
 	}
 
