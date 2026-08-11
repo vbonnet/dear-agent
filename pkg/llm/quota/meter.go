@@ -153,15 +153,22 @@ func (m *Meter) refreshInBackground() {
 	_, _ = m.Refresh(context.Background())
 }
 
+// disabledDecision is the verdict a meter with no source returns: the
+// same "route as configured" answer as any other unknown.
+func disabledDecision() Decision {
+	return Decision{
+		Class:        ClassUnknown,
+		Availability: AvailabilityUnavailable,
+		Reason:       "quota metering disabled",
+	}
+}
+
 // DecisionFor returns the routing verdict for a provider family.
 func (m *Meter) DecisionFor(family string) Decision {
 	if !m.Enabled() {
-		return Decision{
-			Family:       family,
-			Class:        ClassUnknown,
-			Availability: AvailabilityUnavailable,
-			Reason:       "quota metering disabled",
-		}
+		d := disabledDecision()
+		d.Family = family
+		return d
 	}
 	snapshot, _ := m.Snapshot()
 	return Evaluate(snapshot, family, m.now(), m.policy)
@@ -172,12 +179,14 @@ func (m *Meter) DecisionFor(family string) Decision {
 // ClassUnknown, so an unrecognised model routes unchanged.
 func (m *Meter) DecisionForModel(modelID string) Decision {
 	if !m.Enabled() {
-		return Decision{
-			Class:        ClassUnknown,
-			Availability: AvailabilityUnavailable,
-			Reason:       "quota metering disabled",
-		}
+		return disabledDecision()
 	}
+	snapshot, _ := m.Snapshot()
+	return m.decide(snapshot, m.now(), modelID)
+}
+
+// decide evaluates one model against an already-taken reading.
+func (m *Meter) decide(snapshot *Snapshot, now time.Time, modelID string) Decision {
 	family, _, err := m.families.Resolve(modelID)
 	if err != nil {
 		return Decision{
@@ -186,7 +195,7 @@ func (m *Meter) DecisionForModel(modelID string) Decision {
 			Reason:       "model is not mapped to a provider family",
 		}
 	}
-	return m.DecisionFor(family)
+	return Evaluate(snapshot, family, now, m.policy)
 }
 
 // OrderModels returns the candidates reordered so that providers with
@@ -201,11 +210,20 @@ func (m *Meter) DecisionForModel(modelID string) Decision {
 func (m *Meter) OrderModels(models []string) ([]string, []Decision) {
 	ordered := append([]string(nil), models...)
 	decisions := make([]Decision, len(ordered))
-	for i, id := range ordered {
-		decisions[i] = m.DecisionForModel(id)
-	}
 	if !m.Enabled() {
+		for i := range ordered {
+			decisions[i] = disabledDecision()
+		}
 		return ordered, decisions
+	}
+
+	// One reading for the whole ordering. Evaluating each candidate
+	// against its own Snapshot call could straddle a background refresh
+	// and rank two candidates against different readings.
+	snapshot, _ := m.Snapshot()
+	now := m.now()
+	for i, id := range ordered {
+		decisions[i] = m.decide(snapshot, now, id)
 	}
 
 	index := make([]int, len(ordered))
