@@ -201,6 +201,14 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			// Active output beneath an empty ❯ that merely contains a slash token
+			// like "/model" must not be mistaken for idle footer chrome.
+			name:    "Claude output mentioning a slash token is not ready",
+			harness: "claude-code",
+			content: "❯ \nRunning /model migration\nApplying changes…",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "Claude permission wins over prompt glyph",
 			harness: "claude-code",
 			content: "Do you want to proceed?\n❯ 1. Yes\n  2. No",

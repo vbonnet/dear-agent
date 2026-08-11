@@ -750,12 +750,15 @@ func isClaudeComposerFooterChrome(line string) bool {
 	if strings.Contains(lower, "esc to interrupt") || hasActiveSpinner(plain) {
 		return false
 	}
-	// Known status-footer / hint tokens across Claude Code releases.
+	// Known status-footer / hint tokens across Claude Code releases. These are
+	// deliberately specific (mode lines use their "… on" form, auth uses the full
+	// "not logged in" / "run /login") so ordinary model output that merely
+	// contains a word like "/model" is not mistaken for footer chrome.
 	for _, marker := range []string{
 		"? for shortcuts", "for shortcuts", "shift+tab", "for agents",
-		"bypass permissions", "accept edits", "plan mode", "auto-accept",
-		"run /login", "not logged in", "logged in", "/login",
-		"/effort", "/model", "/status", "context left", "% context",
+		"bypass permissions on", "accept edits on", "plan mode on", "auto-accept edits",
+		"run /login", "not logged in",
+		"/effort", "context left", "% context",
 	} {
 		if strings.Contains(lower, marker) {
 			return true

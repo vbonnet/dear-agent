@@ -295,9 +295,12 @@ func TestContainsClaudeTrustAffirmative(t *testing.T) {
 	}{
 		{name: "legacy affirmative", content: "❯ 1. Yes, proceed\n  2. No, exit", expected: true},
 		{name: "current affirmative", content: "❯ 1. Yes, I trust this folder\n  2. No, exit", expected: true},
+		{name: "numbered option without cursor", content: " 1. Yes, I trust this folder", expected: true},
 		{name: "question without selector rendered yet", content: "Quick safety check: Is this a project you created or one you trust?", expected: false},
 		{name: "empty", content: "", expected: false},
 		{name: "unrelated", content: "I trust you completely", expected: false},
+		{name: "prose mentions the affirmative phrase", content: "The model replied: Yes, proceed with the migration.", expected: false},
+		{name: "prose mentions trust phrase", content: "Answer: Yes, I trust this folder is safe to open.", expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

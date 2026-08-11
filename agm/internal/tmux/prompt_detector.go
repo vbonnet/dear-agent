@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -375,16 +376,17 @@ func containsClaudePromptPattern(content string) bool {
 //	Legacy (≤ 2025): "Do you trust the files in this folder?"  / "Yes, proceed"
 //	Current (2.x):   "Quick safety check: Is this a project you created or one
 //	                  you trust?"                                / "Yes, I trust this folder"
-var (
-	claudeTrustQuestionMarkers = []string{
-		"Do you trust the files in this folder?",
-		"Is this a project you created or one you trust",
-	}
-	claudeTrustAffirmativeMarkers = []string{
-		"Yes, proceed",
-		"Yes, I trust this folder",
-	}
-)
+var claudeTrustQuestionMarkers = []string{
+	"Do you trust the files in this folder?",
+	"Is this a project you created or one you trust",
+}
+
+// claudeTrustAffirmativeSelectorPattern matches the trust dialog's affirmative
+// option only when it is rendered as an actual selectable choice — a numbered
+// option, optionally cursor-prefixed, e.g. "❯ 1. Yes, I trust this folder" or
+// "1. Yes, proceed". This prevents recent model output that merely mentions the
+// phrase from being misread as a live trust dialog.
+var claudeTrustAffirmativeSelectorPattern = regexp.MustCompile(`(?mi)^\s*(?:[❯>»]\s*)?[12][.)]\s+Yes,\s+(?:proceed|I trust this folder)\b`)
 
 // ContainsClaudeTrustPrompt reports whether content shows the Claude Code trust
 // dialog in any known wording. The affirmative option alone is sufficient
@@ -405,15 +407,12 @@ func ContainsClaudeTrustPrompt(content string) bool {
 }
 
 // ContainsClaudeTrustAffirmative reports whether the trust dialog's affirmative
-// ("proceed" / "I trust this folder") option is currently rendered — i.e. the
-// selection UI is on screen and ready to accept the Enter that confirms it.
+// ("proceed" / "I trust this folder") option is currently rendered as a live
+// selectable choice — i.e. the selection UI is on screen and ready to accept the
+// Enter that confirms it. It requires the numbered-selector structure so prose
+// that merely mentions the phrase does not trigger a false trust-prompt match.
 func ContainsClaudeTrustAffirmative(content string) bool {
-	for _, marker := range claudeTrustAffirmativeMarkers {
-		if strings.Contains(content, marker) {
-			return true
-		}
-	}
-	return false
+	return claudeTrustAffirmativeSelectorPattern.MatchString(content)
 }
 
 // containsTrustPromptPattern checks if content contains the Claude Code trust
