@@ -338,7 +338,7 @@ func preflightGates(c config) (int, bool) {
 			return 0, true
 		}
 		fmt.Println("::error::ANTHROPIC_API_KEY is not set; the AI review gate cannot run and fails closed. Set the secret, or apply the 'ai-review:override' label after a human review.")
-		return 1, true
+		return keylessExit(c, 1), true
 	}
 	return 0, false
 }
@@ -370,21 +370,25 @@ func run(c config) int {
 		c.apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	modelUnavailable := c.isFork || strings.TrimSpace(c.apiKey) == ""
+	// The keylessExit translation below only relabels these already-blocking
+	// dispositions with the distinct cannot-run-without-credential exit code
+	// (same-repository, non-override, no key). It never changes whether they
+	// block, and fork or override runs pass through untranslated.
 	if plan.needsHuman() && modelUnavailable {
-		return handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; "))
+		return keylessExit(c, handleSpecHumanReview(c, plan, strings.Join(plan.HumanReasons, "; ")))
 	}
 	// A deterministic escalation still benefits from the complete automated
 	// review when credentials are available. Fork and secretless runs cannot
 	// make model calls, so they take the visible human-review fallback instead.
 	if len(plan.EscalationTriggers) > 0 && modelUnavailable {
-		return handleMandatoryEscalation(c, plan.EscalationTriggers)
+		return keylessExit(c, handleMandatoryEscalation(c, plan.EscalationTriggers))
 	}
 	if plan.ReviewNeeded && modelUnavailable {
 		reason := "a relevant changed SPEC cannot be reviewed because the reviewer credential is unavailable"
 		if c.isFork {
 			reason = "a relevant changed SPEC originates from a fork and requires human review"
 		}
-		return handleSpecHumanReview(c, plan, reason)
+		return keylessExit(c, handleSpecHumanReview(c, plan, reason))
 	}
 
 	if code, handled := preflightGates(c); handled {

@@ -537,7 +537,22 @@ jobs:
             exit 1
           fi
           remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          # Exit 78 is cmd/ai-review's explicit "same-repository review cannot
+          # run because no reviewer credential is configured" disposition.
+          # Record exactly that discrimination as a step output so publication
+          # can translate only the credential-starved failure to neutral;
+          # every other nonzero code (plan build failure, expired deadline,
+          # timeout's 124, fork, override audit failure) keeps failing closed.
+          set +e
           timeout --signal=TERM --kill-after=5s "${remaining}s" go run ./cmd/ai-review
+          gate_status=$?
+          set -e
+          if [ "$gate_status" -eq 78 ]; then
+            echo "keyless_cannot_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "keyless_cannot_run=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$gate_status"
 
       # pull_request_target is pinned to trusted base code, but GitHub attaches
       # its job check suite to that base revision. Publish the authoritative
@@ -560,6 +575,7 @@ jobs:
           DEPENDABOT_OUTCOME: ${{ steps.dependabot.outcome }}
           DEPENDABOT_EXEMPT: ${{ steps.dependabot.outputs.exempt }}
           IS_FORK: ${{ steps.pending.outputs.is_fork }}
+          KEYLESS_CANNOT_RUN: ${{ steps.gate.outputs.keyless_cannot_run }}
         run: |
           set -euo pipefail
           conclusion=failure
@@ -591,20 +607,21 @@ jobs:
             # Honest `neutral`, never a fabricated `success` (SPEC R4).
             conclusion=neutral
             summary='Neutral: ANTHROPIC_API_KEY is not configured and the authenticated plan has no changed SPEC.md, protected SPEC-review owner, or deterministic REVIEW.md escalation. No model approval is claimed.'
-          elif [ "$base_current" = true ] && [ "$OUTCOME" = failure ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "${OVERRIDE:-false}" != true ] && [ "${IS_FORK:-}" != true ]; then
-            # Skip-with-warning: no reviewer credential is configured, so
-            # cmd/ai-review cannot make model calls and fails closed internally
-            # even for review-relevant work. While the secret is absent that
-            # internal failure is a review that can never run, not a review
-            # that found a problem. Publish an honest neutral-with-warning:
-            # no approval is claimed, the gate's human-review evidence stays
-            # in the PR comments, and the sticky comment below records that
-            # human review is recommended. KEY_OUTCOME=success proves key
-            # detection (and every step before it) actually ran, so an
-            # earlier transport failure can never take this branch. Fork PRs
-            # are excluded and keep failing closed. The moment
-            # ANTHROPIC_API_KEY is configured, KEY_PRESENT=true makes this
-            # branch unreachable and every gate failure blocks again.
+          elif [ "$base_current" = true ] && [ "$OUTCOME" = failure ] && [ "${KEYLESS_CANNOT_RUN:-}" = true ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "${OVERRIDE:-false}" != true ] && [ "${IS_FORK:-}" != true ]; then
+            # Skip-with-warning: cmd/ai-review exited with its explicit
+            # cannot-run-without-credential code (78), which it emits only for
+            # a same-repository, non-override run whose sole blocker is the
+            # absent ANTHROPIC_API_KEY. That failure is a review that can
+            # never run, not a review that found a problem, so publish an
+            # honest neutral-with-warning: no approval is claimed, the gate's
+            # own needs-human-review evidence stays on the PR, and the sticky
+            # comment below records that human review is recommended. Every
+            # other nonzero gate exit — plan build failure, expired deadline,
+            # fork, override audit failure — reports keyless_cannot_run=false
+            # and stays a hard failure, and KEY_OUTCOME=success proves key
+            # detection (and every step before it) actually ran. The moment
+            # ANTHROPIC_API_KEY is configured, exit 78 is unreachable and
+            # every gate failure blocks again.
             conclusion=neutral
             summary='Neutral with warning: ANTHROPIC_API_KEY is not configured, so the automated 5-dimension review could NOT run on a review-relevant change. Human review is recommended before merge. No model approval is claimed.'
           fi
@@ -640,13 +657,13 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
           DEPENDABOT_EXEMPT: ${{ steps.dependabot.outputs.exempt }}
-          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          KEYLESS_CANNOT_RUN: ${{ steps.gate.outputs.keyless_cannot_run }}
         run: |
           set -euo pipefail
           if [ "$DEPENDABOT_EXEMPT" = true ]; then
             reason="The authenticated plan for \`$HEAD_SHA\` proves a dependency-version-led Go module update, and trusted API snapshots identify the same-repository Dependabot app bot. This workflow check is neutral; no model approval or human override is claimed."
-          elif [ "${GATE_OUTCOME:-}" = failure ]; then
-            reason="\`ANTHROPIC_API_KEY\` is not configured, so the automated 5-dimension review could **not** run on \`$HEAD_SHA\` even though the authenticated plan flagged it as review-relevant. **Human review is recommended before merge.** The gate's own escalation evidence (if any) is recorded in earlier comments on this PR. No model approval is claimed."
+          elif [ "${KEYLESS_CANNOT_RUN:-}" = true ]; then
+            reason="\`ANTHROPIC_API_KEY\` is not configured, so the automated 5-dimension review could **not** run on \`$HEAD_SHA\` even though the authenticated plan flagged it as review-relevant. **Human review is recommended before merge.** The gate's needs-human-review comment above records the exact evidence. No model approval is claimed."
           else
             reason="\`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed."
           fi
@@ -657,21 +674,29 @@ jobs:
             '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-neutral.md
           gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-neutral.md \
             || echo "::warning::could not post the neutral review comment; the check still carries the verdict."
-          # Prune older marked comments, keeping the one just posted. Cosmetic.
-          ( gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-              --jq '.[] | select(.body | startswith("<!-- ai-review-5d -->")) | .id' \
-            | head -n -1 \
-            | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null || true; done ) || true
+          # Prune older marked comments, keeping the one just posted. Cosmetic —
+          # but NOT in the keyless-cannot-run case: cmd/ai-review has just
+          # posted the current head's needs-human-review evidence under the
+          # same marker, and this comment explicitly points readers at it.
+          if [ "${KEYLESS_CANNOT_RUN:-}" != true ]; then
+            ( gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+                --jq '.[] | select(.body | startswith("<!-- ai-review-5d -->")) | .id' \
+              | head -n -1 \
+              | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null || true; done ) || true
+          fi
 
-      # A keyless same-repo gate failure is published as neutral-with-warning
-      # above, so the orchestration job must not stay red for it either: while
-      # no reviewer credential exists the failure means "review could not run",
-      # not "review found a problem". Every other gate failure — key present,
-      # override in play (its audit trail must be intact), fork PR, or key
-      # detection itself not having succeeded — still fails the job closed.
+      # A keyless same-repo gate failure (cmd/ai-review's explicit exit 78,
+      # surfaced as keyless_cannot_run=true) is published as
+      # neutral-with-warning above, so the orchestration job must not stay red
+      # for it either: while no reviewer credential exists that failure means
+      # "review could not run", not "review found a problem". Every other gate
+      # failure — key present, plan/transport errors, override in play (its
+      # audit trail must be intact), fork PR, or key detection itself not
+      # having succeeded — still fails the job closed.
       - name: Fail if review gate failed
         if: >-
           always() && steps.gate.outcome == 'failure' &&
-          (steps.key.outcome != 'success' || steps.key.outputs.present != 'false' ||
+          (steps.gate.outputs.keyless_cannot_run != 'true' ||
+           steps.key.outcome != 'success' || steps.key.outputs.present != 'false' ||
            steps.override.outputs.active == 'true' || steps.pending.outputs.is_fork == 'true')
         run: exit 1

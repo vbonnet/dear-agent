@@ -65,8 +65,11 @@ func baseConfig() config {
 
 func TestRun_MissingKeyFailsClosed(t *testing.T) {
 	c := noSpecConfig(t)
-	if got := run(c); got != 1 {
-		t.Fatalf("missing key: run() = %d, want 1 (fail closed)", got)
+	// Still blocking (nonzero), but with the distinct cannot-run code so the
+	// trusted workflow can tell the credential-starved disposition apart from
+	// genuine failures. Any caller treating nonzero as failure still blocks.
+	if got := run(c); got != exitKeylessCannotRun {
+		t.Fatalf("missing key: run() = %d, want %d (blocking cannot-run code)", got, exitKeylessCannotRun)
 	}
 }
 
@@ -597,8 +600,8 @@ func TestRun_RelevantSpecWithoutCredentialRequiresHumanReview(t *testing.T) {
 	chdir(t, dir)
 	c := baseConfig()
 	c.baseSHA, c.headSHA = base, head
-	if got := run(c); got != 1 {
-		t.Fatalf("relevant SPEC without credential: run() = %d, want human-review block", got)
+	if got := run(c); got != exitKeylessCannotRun {
+		t.Fatalf("relevant SPEC without credential: run() = %d, want blocking cannot-run code %d", got, exitKeylessCannotRun)
 	}
 }
 
