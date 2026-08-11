@@ -490,7 +490,7 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 		defer cleanup()
 		opCtx.Context = ctx
 
-		result, opErr := ops.CreateSessionWithContext(ctx, opCtx, createSessionRequestFromMCP(input))
+		result, opErr := ops.CreateSessionRouted(ctx, opCtx, createSessionRequestFromMCP(input))
 		if opErr != nil {
 			span.RecordError(opErr)
 			return mcpError(opErr), nil, nil
@@ -514,8 +514,22 @@ func createSessionRequestFromMCP(input CreateSessionInput) *ops.CreateSessionReq
 		Harness:            input.Harness,
 		Caller:             ops.CreateSessionCaller{Surface: ops.CreateSurfaceMCP},
 		ForwardClaudeOAuth: true,
+		// Dispatch-driven (MCP) agy spawns are the ones that hit the Antigravity
+		// identity-discovery race under provider throttle. Default them to
+		// retry-with-backoff and fall back to codex so a throttled Gemini keeps
+		// the pipeline moving instead of dropping the work. Ignored for non-agy
+		// harnesses by CreateSessionRouted.
+		SpawnRetries:    mcpAgySpawnRetries,
+		FallbackHarness: mcpAgyFallbackHarness,
 	}
 }
+
+// Defaults that make Dispatch-spawned agy (Gemini/Antigravity) sessions
+// resilient to the provider-throttle identity-discovery race.
+const (
+	mcpAgySpawnRetries    = 3
+	mcpAgyFallbackHarness = "codex-cli"
+)
 
 func addSendMessageTool(server *mcp.Server, _ *Config) {
 	addSendMessageToolWithFactory(server, newMCPOpContextWithTmux)

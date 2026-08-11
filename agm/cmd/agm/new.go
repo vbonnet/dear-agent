@@ -47,6 +47,8 @@ var (
 	harnessName        string
 	modelName          string
 	modelTierFlag      string // --model-tier: cheap, mid, expensive
+	spawnRetries       int    // --spawn-retries: bounded agy discovery-race retries
+	fallbackHarness    string // --fallback-harness: harness to fall back to when agy is exhausted
 	workspaceName      string
 	workflowName       string
 	projectID          string
@@ -1041,6 +1043,8 @@ func init() {
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session with per-run sandbox isolation")
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
 	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
+	newCmd.Flags().IntVar(&spawnRetries, "spawn-retries", 3, "agy only: bounded retries with exponential backoff on a transient Antigravity identity-discovery race (provider throttle). 0 disables")
+	newCmd.Flags().StringVar(&fallbackHarness, "fallback-harness", "codex-cli", "agy only: harness to fall back to after spawn retries are exhausted; empty disables fallback")
 	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
 	newCmd.Flags().StringVar(&codexHookTrustBypassReason, "dangerously-bypass-hook-trust", "",
