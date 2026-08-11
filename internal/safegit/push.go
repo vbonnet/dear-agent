@@ -147,26 +147,25 @@ func forcePushTargets(currentBranch string, pushArgs []string) []string {
 			skipNext = false
 			continue
 		}
-		switch {
-		case arg == "--force" || arg == "-f" || arg == "--force-with-lease" || arg == "--force-if-includes" || arg == "--mirror":
+		if isBareForceFlag(arg) {
 			continue
-		case strings.HasPrefix(arg, "--force-with-lease=") || strings.HasPrefix(arg, "--force-if-includes="):
-			ref := strings.TrimPrefix(strings.TrimPrefix(arg, "--force-with-lease="), "--force-if-includes=")
-			ref = strings.TrimPrefix(ref, "refs/heads/")
-			if ref != "" && !strings.Contains(ref, ":") {
+		}
+		if ref, ok := leaseRefTarget(arg); ok {
+			if ref != "" {
 				targets = append(targets, ref)
 			}
 			continue
-		case strings.HasPrefix(arg, "-"):
+		}
+		if strings.HasPrefix(arg, "-") {
 			if optionConsumesNext(arg) && i+1 < len(pushArgs) {
 				skipNext = true
 			}
 			continue
-		case arg == "origin" || arg == "upstream":
+		}
+		if arg == "origin" || arg == "upstream" {
 			continue
 		}
-		arg = strings.TrimPrefix(arg, "+")
-		if target := pushTargetBranch(arg); target != "" {
+		if target := pushTargetBranch(strings.TrimPrefix(arg, "+")); target != "" {
 			targets = append(targets, target)
 		}
 	}
@@ -174,6 +173,31 @@ func forcePushTargets(currentBranch string, pushArgs []string) []string {
 		targets = append(targets, currentBranch)
 	}
 	return targets
+}
+
+// isBareForceFlag reports whether arg is a force-family flag with no embedded
+// ref; these never name a push target themselves.
+func isBareForceFlag(arg string) bool {
+	switch arg {
+	case "--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror":
+		return true
+	}
+	return false
+}
+
+// leaseRefTarget extracts the branch from --force-with-lease=<ref>[:expect] or
+// --force-if-includes=<ref>. ok reports that arg was one of those forms even
+// when the embedded ref does not name a usable branch.
+func leaseRefTarget(arg string) (string, bool) {
+	if !strings.HasPrefix(arg, "--force-with-lease=") && !strings.HasPrefix(arg, "--force-if-includes=") {
+		return "", false
+	}
+	ref := strings.TrimPrefix(strings.TrimPrefix(arg, "--force-with-lease="), "--force-if-includes=")
+	ref = strings.TrimPrefix(ref, "refs/heads/")
+	if ref == "" || strings.Contains(ref, ":") {
+		return "", true
+	}
+	return ref, true
 }
 
 func optionConsumesNext(arg string) bool {
