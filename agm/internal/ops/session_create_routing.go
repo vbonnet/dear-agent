@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -98,7 +99,7 @@ func CreateSessionRouted(ctx context.Context, opCtx *OpContext, req *CreateSessi
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
-	return createFallbackSession(ctx, opCtx, req, fallback)
+	return createFallbackSession(ctx, opCtx, req, fallback, lastErr)
 }
 
 // agySpawnRoutingApplies reports whether retry/fallback routing should wrap this
@@ -128,15 +129,25 @@ func resolveFallbackHarness(raw string) (string, error) {
 
 // createFallbackSession re-dispatches the request on the fallback harness after
 // agy attempts are exhausted, re-defaulting the model for that harness (the agy
-// model is invalid elsewhere) and clearing the routing fields.
-func createFallbackSession(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest, fallback string) (*CreateSessionResult, error) {
+// model is invalid elsewhere) and clearing the routing fields. If the fallback
+// itself fails it returns both the original agy-exhaustion error and the
+// fallback error joined, so the throttle cause is not lost behind (e.g.) a
+// "codex unavailable".
+func createFallbackSession(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest, fallback string, agyErr error) (*CreateSessionResult, error) {
 	debug.Log("agy spawn exhausted under throttle; falling back to %s for session %q", fallback, req.Title)
 	fallbackReq := *req
 	fallbackReq.Harness = fallback
 	fallbackReq.Model = defaultModelForCreateSession(fallback)
 	fallbackReq.SpawnRetries = 0
 	fallbackReq.FallbackHarness = ""
-	return CreateSessionWithContext(ctx, opCtx, &fallbackReq)
+	result, err := CreateSessionWithContext(ctx, opCtx, &fallbackReq)
+	if err != nil {
+		return result, errors.Join(
+			fmt.Errorf("agy spawn exhausted under throttle: %w", agyErr),
+			fmt.Errorf("%s fallback also failed: %w", fallback, err),
+		)
+	}
+	return result, nil
 }
 
 // isRetryableAgySpawnError reports whether err is a transient agy spawn failure

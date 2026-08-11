@@ -288,12 +288,15 @@ func requireLifecycleDelegation(root string) error {
 			if strings.Contains(string(data), call) {
 				continue
 			}
-			// ops.CreateSessionRouted is a shared-ops wrapper that delegates to
-			// ops.CreateSessionWithContext (adding agy retry/backoff + fallback
-			// routing); a surface that goes through it still delegates through
-			// shared operations. Accept it wherever the direct entrypoint is
-			// required.
-			if call == "ops.CreateSessionWithContext(" && strings.Contains(string(data), "ops.CreateSessionRouted(") {
+			// ops.CreateSessionRouted is the MCP surface's routing wrapper over
+			// ops.CreateSessionWithContext (agy retry/backoff + codex fallback);
+			// it is safe only on that self-contained create path, not the
+			// interactive CLI flows. Accept it as delegation ONLY for the MCP
+			// server; every other lifecycle surface must call the direct
+			// entrypoint.
+			if path == "agm/cmd/agm-mcp-server/tools.go" &&
+				call == "ops.CreateSessionWithContext(" &&
+				strings.Contains(string(data), "ops.CreateSessionRouted(") {
 				continue
 			}
 			return fmt.Errorf("%s does not delegate through %s", path, call)

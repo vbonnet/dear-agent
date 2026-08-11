@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,40 @@ func TestCreateSessionRouted_FallsBackToCodexAfterAgyExhausted(t *testing.T) {
 	}
 	if len(store.created) != 1 || store.created[0].Harness != "codex-cli" {
 		t.Fatalf("stored manifest = %+v, want exactly one codex-cli (no residual agy registration)", store.created)
+	}
+}
+
+func TestCreateSessionRouted_FallbackFailurePreservesAgyError(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		return nil, agysession.ErrConversationNotFound
+	}
+	// agy launches fine but never discovers (throttle); the codex fallback fails
+	// to launch. The surfaced error must retain both causes.
+	runtime := &createTestRuntime{launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+		if spec.Harness == "codex-cli" {
+			return CreateSessionLaunchResult{}, errors.New("codex unavailable")
+		}
+		return CreateSessionLaunchResult{}, nil
+	}}
+	_, err := CreateSessionRouted(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "p", Title: "agy-fb-fail", Harness: "agy", Model: "3.5-flash-low",
+		SpawnRetries: 0, SpawnRetryBaseDelay: time.Millisecond, FallbackHarness: "codex-cli",
+		SkipCodexRemoteControl: true,
+	})
+	if err == nil {
+		t.Fatal("expected an error when both agy and the fallback fail")
+	}
+	if !errors.Is(err, agysession.ErrConversationNotFound) {
+		t.Errorf("error must preserve the agy discovery race, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "codex unavailable") {
+		t.Errorf("error must include the fallback failure, got: %v", err)
 	}
 }
 
