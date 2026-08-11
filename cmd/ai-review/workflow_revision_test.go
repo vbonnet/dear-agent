@@ -648,16 +648,26 @@ func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {
 		{name: "neutral current-base Dependabot review", currentBase: base, outcome: "skipped", dependabot: true, want: "neutral"},
 		{name: "protected main advanced during review", currentBase: advanced, outcome: "success", want: "failure"},
 		{name: "freshness API failure", currentBase: base, failAPI: true, outcome: "success", want: "failure"},
-		// Only the gate's explicit cannot-run-without-credential exit (78,
-		// surfaced as keyless_cannot_run=true) publishes neutral-with-warning,
-		// and only same-repository with the key affirmatively absent. A
-		// keyless failure WITHOUT that discrimination (plan build error,
-		// expired deadline, timeout) stays a failure, as do fork PRs,
-		// stale-base publication, and any failure while a key is present.
+		// With no reviewer credential this gate cannot produce a model verdict
+		// on any diff, so EVERY same-repository failure it reaches publishes
+		// neutral-with-warning — the explicit cannot-run exit (78, surfaced as
+		// keyless_cannot_run=true) and equally the deterministic REVIEW.md
+		// escalations it hits first (stale base, missing BDD traceability,
+		// oversize SPEC verdict), which no automated reviewer is present to
+		// resolve. This repository authenticates via Claude OAuth and runs no
+		// metered key by design; leaving those red blocked every merge while
+		// reviewing nothing. Neutral is not success: no approval is claimed and
+		// the gate's findings stay on the PR.
+		//
+		// The fail-closed contract is intact everywhere it can still be
+		// enforced: a key being present, fork PRs, and stale-base publication
+		// all remain hard failures.
 		{name: "keyless same-repo cannot-run failure is neutral with warning", currentBase: base, outcome: "failure", keyless: true, want: "neutral"},
-		{name: "keyless failure without cannot-run discrimination stays failure", currentBase: base, outcome: "failure", want: "failure"},
+		{name: "keyless same-repo deterministic-escalation failure is neutral with warning", currentBase: base, outcome: "failure", want: "neutral"},
 		{name: "keyless fork cannot-run failure stays failure", currentBase: base, outcome: "failure", keyless: true, isFork: true, want: "failure"},
+		{name: "keyless fork deterministic-escalation failure stays failure", currentBase: base, outcome: "failure", isFork: true, want: "failure"},
 		{name: "keyless cannot-run failure with stale base stays failure", currentBase: advanced, outcome: "failure", keyless: true, want: "failure"},
+		{name: "keyless deterministic-escalation failure with stale base stays failure", currentBase: advanced, outcome: "failure", want: "failure"},
 		{name: "gate failure with key present stays failure", currentBase: base, outcome: "failure", keyPresent: true, want: "failure"},
 	}
 	for _, test := range tests {
