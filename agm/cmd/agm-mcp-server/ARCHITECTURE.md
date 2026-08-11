@@ -17,6 +17,11 @@ The server delegates all AGM session logic to `agm/internal/ops` (which owns
 the Dolt storage layer) and reads Wayfinder data directly from
 `WAYFINDER-STATUS.md` files on disk.
 
+The running artifact's implementation identity comes from the shared
+`pkg/version` package and is exposed consistently in the process header,
+startup log, and MCP initialization response. This build identity is distinct
+from the wire protocol version, which the MCP SDK negotiates independently.
+
 ## Source Files
 
 | File | Responsibility |

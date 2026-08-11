@@ -1,6 +1,6 @@
 # Governed Build Stamp Integration Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-08-03 -->
+<!-- Last audited at: 2026-08-08 -->
 
 **Version**: 1.0
 **Status**: Active
@@ -40,8 +40,12 @@
 
 **BUILDSTAMP-16** When a caller supplies `GIT_COMMIT`, the governed build shall preserve the supplied value even when default Git discovery is unavailable.
 
-## Test Traceability
+**BUILDSTAMP-17** When AGM-family CI, cross-platform CI, or local preflight build entrypoints are inspected, the system shall require all four canonical `pkg/version` linker assignments and reject every obsolete `main` package assignment.
+
+## BDD Traceability
 
 - Package tests: `tests/buildstamp/*_test.go`
+- BUILDSTAMP-17: `TestAGMFamilyBuildEntrypointsUseSharedVersionPackage`
 - Runtime value contract: `pkg/version/SPEC.md`
 - BDD: `agm/test/bdd/features/hook_parity.feature`
+- Test consequence: Deterministic unit test `TestAGMFamilyBuildEntrypointsUseSharedVersionPackage` scans the exact CI, cross-platform CI, and local preflight entrypoints and fails when any canonical linker field is absent or any obsolete `main` package assignment remains; no new BDD feature is required for this repository-text contract.
