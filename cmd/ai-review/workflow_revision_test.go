@@ -639,16 +639,24 @@ func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {
 		failAPI     bool
 		outcome     string
 		dependabot  bool
+		isFork      bool
 		want        string
 	}{
 		{name: "approved current-base review", currentBase: base, outcome: "success", want: "success"},
 		{name: "neutral current-base Dependabot review", currentBase: base, outcome: "skipped", dependabot: true, want: "neutral"},
 		{name: "protected main advanced during review", currentBase: advanced, outcome: "success", want: "failure"},
 		{name: "freshness API failure", currentBase: base, failAPI: true, outcome: "success", want: "failure"},
+		// The harness always runs with KEY_OUTCOME=success and
+		// KEY_PRESENT=false, so a same-repository gate failure is the
+		// review-that-could-never-run and must publish neutral-with-warning,
+		// while the identical fork failure keeps failing closed.
+		{name: "keyless same-repo gate failure is neutral with warning", currentBase: base, outcome: "failure", want: "neutral"},
+		{name: "keyless fork gate failure stays failure", currentBase: base, outcome: "failure", isFork: true, want: "failure"},
+		{name: "keyless gate failure with stale base stays failure", currentBase: advanced, outcome: "failure", want: "failure"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := runReviewPublication(t, publish.Run, base, test.currentBase, test.outcome, test.dependabot, test.failAPI)
+			got := runReviewPublication(t, publish.Run, base, test.currentBase, test.outcome, test.dependabot, test.isFork, test.failAPI)
 			if got != test.want {
 				t.Fatalf("conclusion = %q, want %q", got, test.want)
 			}
@@ -656,7 +664,7 @@ func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {
 	}
 }
 
-func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, dependabot, failAPI bool) string {
+func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, dependabot, isFork, failAPI bool) string {
 	t.Helper()
 	tmp := t.TempDir()
 	output := filepath.Join(tmp, "github-output")
@@ -716,6 +724,7 @@ func runReviewPublication(t *testing.T, run, base, currentBase, outcome string, 
 		"REVIEW_RELEVANT=false",
 		"DEPENDABOT_OUTCOME="+dependabotOutcome,
 		"DEPENDABOT_EXEMPT="+dependabotExempt,
+		"IS_FORK="+fmt.Sprint(isFork),
 		"FAKE_CURRENT_BASE="+currentBase,
 		"FAKE_GH_FAIL="+fmt.Sprint(failAPI),
 	)
