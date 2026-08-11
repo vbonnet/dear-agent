@@ -107,8 +107,13 @@ reconciliation and the compile-generated-versus-retire-reference-output choice.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/agm_control_surface_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
-- `agm/test/bdd/features/mcp_parity.feature` validates operation discovery parity.
-- `agm/cmd/agm-mcp-server/surface_contract_compatibility_test.go` audits production SDK registration and the finite schema compatibility records.
-- `agm/cmd/agm-mcp-server/surface_contract_test.go` audits request mapping, read and archive request-context cancellation, and discovery output.
-- `agm/cmd/agm-mcp-server/tools_test.go` audits kill request context and cancellation before mutation.
+- Feature: `agm/test/bdd/features/agm_control_surface_guardrails.feature`
+- Feature: `agm/test/bdd/features/mcp_parity.feature`
+- Test consequence: deterministic schema and unit tests own the per-operation
+  contract rows above — `agm/internal/surface/codegen_parity_test.go` audits
+  compiled tool/schema parity, `agm/internal/surface/ops_test.go` audits the
+  registry, and `agm/cmd/agm-mcp-server/surface_contract_compatibility_test.go`,
+  `agm/cmd/agm-mcp-server/surface_contract_test.go`, and
+  `agm/cmd/agm-mcp-server/tools_test.go` audit production SDK registration,
+  request mapping, request-context cancellation, and discovery output. The two
+  features above cover co-located SPEC coverage and operation discovery parity.
