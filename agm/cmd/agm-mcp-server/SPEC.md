@@ -246,7 +246,13 @@ actual SDK registration path.
 - `identifier` is required
 - Reads the live tmux pane for `active`/`zombie` sessions; falls back to the
   durable `final_output` persisted on the session record when the pane is gone
-- Returns an error only when neither source has any output
+- Fallback is not guaranteed whenever `final_output` is populated. The durable
+  capture describes an *earlier* completion, so it is served only when the pane
+  is provably absent. If liveness cannot be confirmed — a tmux socket outage,
+  permission failure, or a failed capture on a still-running pane — the
+  operation returns a retryable error rather than answering with output from a
+  previous task
+- Returns an error when neither source has any output
 
 ### Tool 4: agm_create_session
 

@@ -59,6 +59,16 @@ type CompletionWatcher struct {
 	observations map[string]*sessionObservation
 }
 
+// terminalState reports whether a persisted session state means "finished a
+// unit of work" — the states this watcher itself writes on completion.
+func terminalState(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case manifest.StateDone, manifest.StateOffline:
+		return true
+	}
+	return false
+}
+
 func readinessBlindHarness(harness string) bool {
 	switch strings.ToLower(strings.TrimSpace(harness)) {
 	case "codex-cli", "codex":
@@ -122,6 +132,15 @@ func (cw *CompletionWatcher) Scan(ctx context.Context) ([]CompletionEvent, error
 }
 
 func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) *CompletionEvent {
+	// Pure API sessions have no pane by design (see SendMessage's provider
+	// transaction path). Every signal this watcher reads is tmux ground truth,
+	// so an absent target says nothing about them — without this guard an API
+	// session left in WORKING would take the restart exception in observeGone
+	// and be reported as a false "exited" completion, then persisted OFFLINE.
+	if isAPISessionManifest(m) {
+		return nil
+	}
+
 	obs := cw.observations[m.SessionID]
 	if obs == nil {
 		obs = &sessionObservation{}
@@ -166,9 +185,15 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 				obs.activitySeen = true
 			}
 		} else if changed {
-			if obs.reportedIdle {
-				// New work arrived after a reported completion: the durable
-				// record must stop claiming DONE while the session works.
+			// New work arrived after a completion: the durable record must stop
+			// claiming DONE/OFFLINE while the session works. The in-memory flag
+			// alone is not enough — after a watcher restart the observation is
+			// fresh (reportedIdle false) while the record still carries the
+			// terminal state written before the restart, which would leave an
+			// actively working session looking finished to every durable-state
+			// consumer (filterMergeCandidates and friends) until it completes
+			// again. Rearm from the persisted state too.
+			if obs.reportedIdle || terminalState(m.State) {
 				cw.persistState(m.SessionID, manifest.StateWorking)
 			}
 			obs.activitySeen = true

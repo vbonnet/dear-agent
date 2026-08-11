@@ -101,7 +101,13 @@ func init() {
 
 // emitCompletions scans for finished sessions, prints each event as JSON, and
 // surfaces it through the configured channels.
-func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfacer *completionSurfacer) {
+//
+// A dry run keeps the JSON preview but delivers nothing: dispatchers can POST
+// to webhooks and raise desktop/tmux notifications, and the relay injects a
+// message into a live orchestrator session. Those are externally visible acts,
+// so a command documented as leaving no trace must skip them exactly as the
+// watcher skips its durable writes.
+func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfacer *completionSurfacer, dryRun bool) {
 	events, err := watcher.Scan(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error detecting completions: %v\n", err)
@@ -117,7 +123,7 @@ func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfac
 			TransitionType: event.TransitionType,
 			OutputBytes:    len(event.Output),
 		}
-		if surfacer.shouldSurface(event) {
+		if !dryRun && surfacer.shouldSurface(event) {
 			if errs := surfacer.Surface(ctx, event); len(errs) > 0 {
 				parts := make([]string, len(errs))
 				for i, surfaceErr := range errs {
@@ -180,7 +186,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 			return nil
 		case <-ticker.C:
 			if completions != nil {
-				emitCompletions(ctx, completions, surfacer)
+				emitCompletions(ctx, completions, surfacer, stalledDryRun)
 			}
 			events, err := detector.DetectStalls(ctx)
 			if err != nil {

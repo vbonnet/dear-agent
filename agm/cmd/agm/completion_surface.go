@@ -41,6 +41,11 @@ func newCompletionSurfacer(opCtx *ops.OpContext, configPath, orchestrator, exclu
 	}
 
 	var dispatchers []notify.Dispatcher
+	// An explicitly requested config is honored exactly, including when it
+	// resolves to zero dispatchers (empty list, or every entry disabled) —
+	// that is the only way to turn completion notifications off, and silently
+	// installing the log fallback would make it unexpressible.
+	explicitConfigLoaded := false
 	if path != "" {
 		if _, statErr := os.Stat(path); statErr == nil {
 			built, err := loadDispatchers(path)
@@ -59,6 +64,7 @@ func newCompletionSurfacer(opCtx *ops.OpContext, configPath, orchestrator, exclu
 					"path", path, "error", err)
 			} else {
 				dispatchers = built
+				explicitConfigLoaded = configPath != ""
 			}
 		} else if configPath != "" {
 			// An explicitly named config that does not exist is an error; the
@@ -66,7 +72,7 @@ func newCompletionSurfacer(opCtx *ops.OpContext, configPath, orchestrator, exclu
 			return nil, fmt.Errorf("notify config not found: %s", configPath)
 		}
 	}
-	if len(dispatchers) == 0 {
+	if len(dispatchers) == 0 && !explicitConfigLoaded {
 		dispatchers = []notify.Dispatcher{notify.NewLogDispatcher(slog.New(slog.NewTextHandler(os.Stderr, nil)))}
 	}
 

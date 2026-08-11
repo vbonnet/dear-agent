@@ -79,6 +79,14 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 	}
 
 	if m.FinalOutput != "" {
+		// The durable capture describes an EARLIER completion, so it may only
+		// answer for a pane that is provably gone. Reaching here on a non-live
+		// status is not that proof: a tmux socket outage or permission failure
+		// makes the plain existence check report "absent", which computes as
+		// status=stopped and would serve a previous task's output as current.
+		if err := requireProvenPaneAbsence(ctx, tmuxName); err != nil {
+			return nil, err
+		}
 		result.Source = "final-capture"
 		result.Output = tailLines(m.FinalOutput, lines)
 		if !m.FinalOutputAt.IsZero() {
@@ -88,6 +96,29 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 	}
 
 	return nil, ErrInvalidInput("identifier", "No output is available for this session: the tmux pane is not readable and no final output was captured.")
+}
+
+// requireProvenPaneAbsence returns nil only when the tmux target is confirmed
+// absent. It prefers the strict checker, which separates "no such session"
+// from socket, permission, and timeout failures; the plain checker collapses
+// every exec failure into "absent", so a backend outage would otherwise look
+// like a finished session. When only the plain checker exists (test fakes),
+// its answer is used as-is.
+func requireProvenPaneAbsence(ctx *OpContext, tmuxName string) error {
+	retry := ErrInvalidInput("identifier",
+		"Session liveness could not be confirmed, so the durable final capture (which describes an earlier completion) was not served; retry.")
+	if strict, ok := ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
+		exists, err := strict.HasSessionStrict(requestContext(ctx), tmuxName)
+		if err != nil || exists {
+			return retry
+		}
+		return nil
+	}
+	exists, err := ctx.Tmux.HasSession(tmuxName)
+	if err != nil || exists {
+		return retry
+	}
+	return nil
 }
 
 // captureLiveOutput attempts the live-pane read for an active session. It

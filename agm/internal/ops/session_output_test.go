@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,24 @@ func TestGetSessionOutput_NoOutputAnywhere(t *testing.T) {
 
 	if _, err := GetSessionOutput(&OpContext{Storage: storage, Tmux: tmux}, &GetSessionOutputRequest{Identifier: "worker-empty"}); err == nil {
 		t.Fatal("expected error when no output exists anywhere")
+	}
+}
+
+// TestGetSessionOutput_UnprovenAbsenceDoesNotServeFinalCapture pins the rule
+// that the durable capture describes an EARLIER completion. When the tmux
+// backend is unreachable, the plain existence check collapses the failure into
+// "absent" and the session computes as stopped — serving FinalOutput there
+// would answer a request for current output with a previous task's result.
+func TestGetSessionOutput_UnprovenAbsenceDoesNotServeFinalCapture(t *testing.T) {
+	m := testManifest("worker-flaky", "", time.Time{})
+	m.FinalOutput = "RESULT: from an earlier task"
+	m.FinalOutputAt = time.Now()
+	storage := &mockStorage{sessions: []*manifest.Manifest{m}}
+	tmux := session.NewMockTmux()
+	tmux.HasSessionError = errors.New("tmux socket unreachable")
+
+	if _, err := GetSessionOutput(&OpContext{Storage: storage, Tmux: tmux}, &GetSessionOutputRequest{Identifier: "worker-flaky"}); err == nil {
+		t.Fatal("served a stale final capture without proving the pane was gone")
 	}
 }
 

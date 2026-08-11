@@ -317,3 +317,49 @@ func TestCompletionWatcher_DryRunNeverWritesSessionRecords(t *testing.T) {
 		t.Fatalf("dry-run wrote %d session record(s)", len(storage.updated))
 	}
 }
+
+// TestCompletionWatcher_RearmsFromPersistedTerminalState proves the restart
+// case: a session whose durable record already says DONE (written before the
+// watcher bounced) must be flipped back to WORKING as soon as its pane shows
+// new activity, even though the fresh in-memory observation never reported
+// that completion itself.
+func TestCompletionWatcher_RearmsFromPersistedTerminalState(t *testing.T) {
+	watcher, storage, tmux := watcherFixture(t)
+	storage.sessions[0].State = manifest.StateDone
+
+	// Baseline tick after the "restart": reportedIdle is false.
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("baseline tick emitted events: %v", events)
+	}
+
+	// New work arrives: the record must stop claiming DONE.
+	tmux.PaneContents["worker-1"] = "picked up a new task\n"
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("activity tick emitted events: %v", events)
+	}
+	if len(storage.updated) != 1 {
+		t.Fatalf("expected one durable state write, got %d", len(storage.updated))
+	}
+	if got := storage.updated[0].State; got != manifest.StateWorking {
+		t.Fatalf("state = %q, want %q", got, manifest.StateWorking)
+	}
+}
+
+// TestCompletionWatcher_SkipsPureAPISessions proves a paneless API session is
+// never mistaken for one that exited. Its tmux target is absent by design, and
+// a persisted WORKING state would otherwise take the restart exception in
+// observeGone and emit a false "exited" completion plus an OFFLINE write.
+func TestCompletionWatcher_SkipsPureAPISessions(t *testing.T) {
+	m := testManifest("api-worker", manifest.StateWorking, time.Now())
+	m.Harness = "openai"
+	storage := &recordingStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}}
+	tmux := session.NewMockTmux() // no tmux session registered
+	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
+
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("pure API session emitted completions: %v", events)
+	}
+	if len(storage.updated) != 0 {
+		t.Fatalf("pure API session got durable writes: %+v", storage.updated)
+	}
+}
