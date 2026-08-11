@@ -58,6 +58,7 @@ loses a candidate slot. See `docs/adr/ADR-038-codexbar-quota-routing.md`.
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature`
 - Package tests: `pkg/llm/quota/codexbar_test.go`
 - Package tests: `pkg/llm/quota/policy_test.go`
 - Package tests: `pkg/llm/quota/meter_test.go`
