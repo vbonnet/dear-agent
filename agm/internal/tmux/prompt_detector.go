@@ -120,9 +120,12 @@ func WaitForClaudePromptContext(parent context.Context, sessionName string, time
 
 		// Check for Claude's specific prompt pattern (❯)
 		// Use strict matching to avoid false positives from bash prompts.
-		// Suppress detection for ~2s after answering trust to avoid matching
-		// the still-visible trust prompt UI ("❯ 1. Yes, proceed").
-		if containsClaudePromptPattern(content) {
+		// Before the trust dialog is answered, ignore its selector line
+		// ("❯ 1. Yes, I trust this folder"): it contains the same ❯ glyph and
+		// must not be mistaken for a ready composer (ce-wn4qe). Once we have
+		// answered trust, accept the ❯ even if the dialog text is still on
+		// screen, and rely on the ~2s settle window below.
+		if containsClaudePromptPattern(content) && (trustAnswered || !containsTrustPromptPattern(content)) {
 			if trustAnswered && time.Since(trustAnsweredAt) < 2*time.Second {
 				// Trust prompt UI may still be on screen — ignore false match.
 			} else {
@@ -138,7 +141,7 @@ func WaitForClaudePromptContext(parent context.Context, sessionName string, time
 		// Detect and auto-answer trust prompt inline.
 		// Without this, the trust prompt blocks Claude's main UI from rendering,
 		// so the ❯ prompt never appears and we time out.
-		if !trustAnswered && containsTrustPromptPattern(content) && strings.Contains(content, "Yes, proceed") {
+		if !trustAnswered && containsTrustPromptPattern(content) && ContainsClaudeTrustAffirmative(content) {
 			debug.Log("🛡️  Trust prompt detected — auto-answering with Enter")
 			if err := SendKeys(sessionName, "Enter"); err != nil {
 				debug.Log("⚠️  Failed to answer trust prompt: %v", err)
@@ -363,22 +366,62 @@ func containsClaudePromptPattern(content string) bool {
 	return strings.Contains(trimmed, "❯")
 }
 
-// containsTrustPromptPattern checks if content contains Claude Code trust prompt.
+// Claude Code's trust/onboarding dialog wording has changed across releases.
+// AGM must recognise every known variant, otherwise it never auto-answers the
+// prompt: Claude sits on the dialog forever and harness-readiness detection
+// times out with a misleading AGM-011 (ce-wn4qe). Keep these lists in sync with
+// the shipping Claude Code TUI.
 //
-// Claude Code shows a trust prompt when opening untrusted directories:
-// "Do you trust the files in this folder?"
-//
-// This is used during InitSequence to auto-answer trust prompts that appear
-// during session creation (e.g., after /rename or /agm:agm-assoc commands).
-func containsTrustPromptPattern(content string) bool {
+//	Legacy (≤ 2025): "Do you trust the files in this folder?"  / "Yes, proceed"
+//	Current (2.x):   "Quick safety check: Is this a project you created or one
+//	                  you trust?"                                / "Yes, I trust this folder"
+var (
+	claudeTrustQuestionMarkers = []string{
+		"Do you trust the files in this folder?",
+		"Is this a project you created or one you trust",
+	}
+	claudeTrustAffirmativeMarkers = []string{
+		"Yes, proceed",
+		"Yes, I trust this folder",
+	}
+)
+
+// ContainsClaudeTrustPrompt reports whether content shows the Claude Code trust
+// dialog in any known wording. The affirmative option alone is sufficient
+// evidence because the question text can scroll above a short captured tail
+// (e.g. the 12-line readiness classifier window), while the selectable
+// "Yes, ..." option stays pinned at the bottom of the dialog.
+func ContainsClaudeTrustPrompt(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
+	for _, marker := range claudeTrustQuestionMarkers {
+		if strings.Contains(trimmed, marker) {
+			return true
+		}
+	}
+	return ContainsClaudeTrustAffirmative(trimmed)
+}
 
-	// Exact text match for trust prompt
-	// This text is stable and used consistently by Claude Code
-	return strings.Contains(trimmed, "Do you trust the files in this folder?")
+// ContainsClaudeTrustAffirmative reports whether the trust dialog's affirmative
+// ("proceed" / "I trust this folder") option is currently rendered — i.e. the
+// selection UI is on screen and ready to accept the Enter that confirms it.
+func ContainsClaudeTrustAffirmative(content string) bool {
+	for _, marker := range claudeTrustAffirmativeMarkers {
+		if strings.Contains(content, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsTrustPromptPattern checks if content contains the Claude Code trust
+// prompt in any known wording. It is used during readiness detection and
+// InitSequence to auto-answer trust prompts that appear during session
+// creation (e.g., after /rename or /agm:agm-assoc commands).
+func containsTrustPromptPattern(content string) bool {
+	return ContainsClaudeTrustPrompt(content)
 }
 
 // containsPromptPattern is deprecated. Use containsClaudePromptPattern instead.
@@ -707,15 +750,16 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 		}
 
 		// Check for trust prompt
-		if !trustPromptSeen && strings.Contains(content, "Do you trust the files in this folder?") {
+		if !trustPromptSeen && ContainsClaudeTrustPrompt(content) {
 			trustPromptSeen = true
 			debug.Log("🛡️  Trust prompt detected at line %d", linesChecked)
 		}
 
 		// If trust prompt seen but not answered yet, look for the prompt and answer
 		if trustPromptSeen && !trustPromptAnswered {
-			// Check if this line contains the selection prompt (❯ 1. Yes, proceed)
-			if strings.Contains(content, "Yes, proceed") {
+			// Check if this line contains the affirmative selection option
+			// (e.g. "❯ 1. Yes, I trust this folder").
+			if ContainsClaudeTrustAffirmative(content) {
 				debug.Log("✓ Answering trust prompt with Enter key")
 				trustPromptAnswered = true
 

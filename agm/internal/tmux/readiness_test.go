@@ -165,6 +165,42 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputOnboarding,
 		},
 		{
+			// ce-wn4qe: current Claude Code (2.x) trust wording. The classifier
+			// must report Onboarding (not a false ready and not a hang) so the
+			// shared readiness path auto-answers it with Enter.
+			name:    "Claude current-wording trust owns input",
+			harness: "claude-code",
+			content: " Quick safety check: Is this a project you created or one you trust?\n\n ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			// ce-wn4qe: with the question scrolled above the captured tail, the
+			// affirmative selector alone must still classify as Onboarding.
+			name:    "Claude current-wording trust selector only",
+			harness: "claude-code",
+			content: " ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			// ce-wn4qe: current Claude Code idle composer with the multi-line
+			// status footer (cwd@host, mode, auth, effort) below the ❯ box.
+			// The prior chrome whitelist rejected the cwd/login/effort lines and
+			// timed out every spawn; the composer must classify as ready.
+			name:    "Claude current idle composer with status footer",
+			harness: "claude-code",
+			content: "────────────────────────────────────────\n❯ \n────────────────────────────────────────\n  vbonnet@mac:/private/tmp/wd\n  ⏸ plan mode on (shift+tab to cycle) · ← for agents\n                    Not logged in · Run /login\n                    ● high · /effort",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			// A ❯ with an active-work signal below it is a running turn, not a
+			// ready composer.
+			name:    "Claude composer running a turn is not ready",
+			harness: "claude-code",
+			content: "❯ \n  ✻ Working… (12s · esc to interrupt)\n  vbonnet@mac:/private/tmp/wd",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "Claude permission wins over prompt glyph",
 			harness: "claude-code",
 			content: "Do you want to proceed?\n❯ 1. Yes\n  2. No",

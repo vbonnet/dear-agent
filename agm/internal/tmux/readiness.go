@@ -720,12 +720,55 @@ func hasTailOwnedClaudeComposer(content string) bool {
 	if promptIndex < 0 {
 		return false
 	}
+	// The composer owns the tail only when every line below the ❯ input line is
+	// the composer box's border or its idle status footer — never active
+	// output. Any unrecognised/dynamic line (a spinner, tool progress like
+	// "Running tests") fails closed, which is what keeps a mid-turn ❯ from being
+	// read as ready.
 	for _, line := range lines[promptIndex+1:] {
-		if !isClaudeIdleComposerChrome(line) {
+		if !isClaudeComposerFooterChrome(line) {
 			return false
 		}
 	}
 	return true
+}
+
+// claudeStatusCwdPattern matches the status-footer cwd anchor "user@host:/path".
+var claudeStatusCwdPattern = regexp.MustCompile(`^\S+@\S+:`)
+
+// isClaudeComposerFooterChrome reports whether a line rendered below the ❯ input
+// line is part of the composer's idle box/status footer rather than active
+// output. Claude Code's status footer (cwd@host, mode, auth, effort, hints)
+// grew several lines across releases; recognise those variants so a ready
+// composer is not mistaken for a running turn (ce-wn4qe), while a spinner or any
+// dynamic tool output below the composer still fails closed.
+func isClaudeComposerFooterChrome(line string) bool {
+	plain := strings.TrimSpace(stripANSI(line))
+	if plain == "" {
+		return true
+	}
+	// Box borders / decorative rules.
+	if strings.Trim(plain, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+		return true
+	}
+	lower := strings.ToLower(plain)
+	// A running turn is never idle chrome.
+	if strings.Contains(lower, "esc to interrupt") || hasActiveSpinner(plain) {
+		return false
+	}
+	// Known status-footer / hint tokens across Claude Code releases.
+	for _, marker := range []string{
+		"? for shortcuts", "for shortcuts", "shift+tab", "for agents",
+		"bypass permissions", "accept edits", "plan mode", "auto-accept",
+		"run /login", "not logged in", "logged in", "/login",
+		"/effort", "/model", "/status", "context left", "% context",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	// Status-line cwd anchor, e.g. "vbonnet@mac:/private/tmp/wd".
+	return claudeStatusCwdPattern.MatchString(plain)
 }
 
 func isClaudeIdleComposerChrome(line string) bool {

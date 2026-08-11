@@ -378,8 +378,12 @@ func detectSessionUninitialized(paneContent string, claudeRunning bool) *Violati
 		}
 	}
 
-	// Check for welcome/trust screen indicators
-	if strings.Contains(paneContent, "Do you trust the files in this folder?") {
+	// Check for welcome/trust screen indicators. Claude Code's trust dialog
+	// wording changed across releases (ce-wn4qe); match every known variant so
+	// an unanswered new-style prompt is still flagged as uninitialized.
+	if strings.Contains(paneContent, "Do you trust the files in this folder?") ||
+		strings.Contains(paneContent, "Is this a project you created or one you trust") ||
+		strings.Contains(paneContent, "Yes, I trust this folder") {
 		return &Violation{
 			Guard:      ViolationSessionUninitialized,
 			Message:    "Session is showing the trust prompt (not yet initialized).",

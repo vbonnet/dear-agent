@@ -412,16 +412,16 @@ func monitorAndAnswerTrustPrompt(ctx context.Context, sessionName string, timeou
 
 		content := tmux.ExtractOutputContent(line)
 
-		// Check for trust prompt
-		if strings.Contains(content, "Do you trust the files in this folder?") {
+		// Check for trust prompt (any known Claude Code wording).
+		if tmux.ContainsClaudeTrustPrompt(content) {
 			trustPromptDetected = true
 			debug.Log("Trust prompt detected!")
 			fmt.Println("📋 Trust prompt appeared - answering automatically...")
 		}
 
-		// If we detected the prompt, look for the selection UI
-		if trustPromptDetected && strings.Contains(content, "Yes, proceed") {
-			debug.Log("Sending Enter to select 'Yes, proceed'")
+		// If we detected the prompt, look for the affirmative selection option.
+		if trustPromptDetected && tmux.ContainsClaudeTrustAffirmative(content) {
+			debug.Log("Sending Enter to accept the trust prompt")
 
 			// Close control mode before sending keys (mixing control + send-keys doesn't work well)
 			_ = ctrl.Close()
@@ -438,7 +438,7 @@ func monitorAndAnswerTrustPrompt(ctx context.Context, sessionName string, timeou
 	}
 
 	if trustPromptDetected {
-		return fmt.Errorf("trust prompt detected but couldn't find 'Yes, proceed' option")
+		return fmt.Errorf("trust prompt detected but couldn't find its affirmative option")
 	}
 
 	// No trust prompt seen - this is success

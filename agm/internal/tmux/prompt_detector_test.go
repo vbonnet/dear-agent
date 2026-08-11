@@ -214,6 +214,26 @@ func TestContainsTrustPromptPattern(t *testing.T) {
 			content:  "Claude Code is asking: Do you trust the files in this folder? Please answer.",
 			expected: true,
 		},
+		// Current Claude Code (2.x) wording (ce-wn4qe).
+		{
+			name:     "Current-wording trust question",
+			content:  "Quick safety check: Is this a project you created or one you trust?",
+			expected: true,
+		},
+		{
+			name:     "Current-wording affirmative option only (question scrolled above tail)",
+			content:  " ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			expected: true,
+		},
+		{
+			name: "Real captured new trust prompt tail",
+			content: " ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n" +
+				"   Bash(git status), Bash(git status *), Bash(git -C * status *)\n" +
+				" These will apply without asking. Only proceed if you trust this configuration.\n\n" +
+				" Security guide\n\n" +
+				" ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			expected: true,
+		},
 		// Negative cases - should NOT match
 		{
 			name:     "Empty string",
@@ -262,6 +282,27 @@ func TestContainsTrustPromptPattern(t *testing.T) {
 			result := containsTrustPromptPattern(tt.content)
 			if result != tt.expected {
 				t.Errorf("containsTrustPromptPattern(%q) = %v, want %v", tt.content, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestContainsClaudeTrustAffirmative(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		{name: "legacy affirmative", content: "❯ 1. Yes, proceed\n  2. No, exit", expected: true},
+		{name: "current affirmative", content: "❯ 1. Yes, I trust this folder\n  2. No, exit", expected: true},
+		{name: "question without selector rendered yet", content: "Quick safety check: Is this a project you created or one you trust?", expected: false},
+		{name: "empty", content: "", expected: false},
+		{name: "unrelated", content: "I trust you completely", expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ContainsClaudeTrustAffirmative(tt.content); got != tt.expected {
+				t.Errorf("ContainsClaudeTrustAffirmative(%q) = %v, want %v", tt.content, got, tt.expected)
 			}
 		})
 	}
