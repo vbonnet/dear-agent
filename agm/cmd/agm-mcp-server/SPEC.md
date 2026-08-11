@@ -217,6 +217,43 @@ actual SDK registration path.
 - Returns error if session not found
 - No caching (relies on list cache)
 
+### Tool 3b: agm_get_session_output
+
+**Purpose**: Read the tail of a session's terminal output so orchestrators can collect worker results without attaching to panes
+
+**Input Schema**:
+```json
+{
+  "identifier": "session ID, name, or UUID prefix (required)",
+  "lines": "optional trailing pane lines to capture (default 100, max 2000)"
+}
+```
+
+**Output Schema**:
+```json
+{
+  "session_id": "uuid",
+  "name": "string",
+  "status": "active|zombie|stopped|archived|unknown",
+  "state": "string",
+  "source": "live-pane|final-capture",
+  "output": "string",
+  "captured_at": "RFC3339"
+}
+```
+
+**Constraints**:
+- `identifier` is required
+- Reads the live tmux pane for `active`/`zombie` sessions; falls back to the
+  durable `final_output` persisted on the session record when the pane is gone
+- Fallback is not guaranteed whenever `final_output` is populated. The durable
+  capture describes an *earlier* completion, so it is served only when the pane
+  is provably absent. If liveness cannot be confirmed — a tmux socket outage,
+  permission failure, or a failed capture on a still-running pane — the
+  operation returns a retryable error rather than answering with output from a
+  previous task
+- Returns an error when neither source has any output
+
 ### Tool 4: agm_create_session
 
 **Purpose**: Create and register a new AGM session through the same lifecycle used by the CLI
@@ -284,6 +321,7 @@ mcp_server:
     - agm_list_sessions
     - agm_search_sessions
     - agm_get_session_metadata
+    - agm_get_session_output
     - agm_archive_session
     - agm_kill_session
     - agm_create_session

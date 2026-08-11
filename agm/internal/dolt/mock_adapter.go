@@ -322,6 +322,8 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 		State:            src.State,
 		StateUpdatedAt:   src.StateUpdatedAt,
 		StateSource:      src.StateSource,
+		FinalOutput:      src.FinalOutput,
+		FinalOutputAt:    src.FinalOutputAt,
 		Context: manifest.Context{
 			Project: src.Context.Project,
 			Purpose: src.Context.Purpose,

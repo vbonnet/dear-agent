@@ -79,6 +79,39 @@ func AddGetSessionTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), 
 	})
 }
 
+// GetSessionOutputMCPInput is the MCP input schema for get_session_output.
+type GetSessionOutputMCPInput struct {
+	Identifier string `json:"identifier" jsonschema:"description=Session ID, name, or UUID prefix,required"`
+	Lines      int    `json:"lines,omitempty" jsonschema:"description=Trailing pane lines to capture (default 100, max 2000)"`
+}
+
+// AddGetSessionOutputTool registers the agm_get_session_output MCP tool.
+func AddGetSessionOutputTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), error)) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_session_output",
+		Description: "Read the tail of an AGM session's terminal output — live pane while running, durable final capture after completion. Use to collect a worker's result without attaching to its pane.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetSessionOutputMCPInput) (*mcp.CallToolResult, any, error) {
+		opCtx, cleanup, err := newOpCtx()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+
+		req := &GetSessionOutputRequest{
+
+			Identifier: input.Identifier,
+			Lines:      input.Lines,
+		}
+
+		result, opErr := GetSessionOutput(opCtx, req)
+		if opErr != nil {
+			return mcpError(opErr), nil, nil
+		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
 // SearchSessionsMCPInput is the MCP input schema for search_sessions.
 type SearchSessionsMCPInput struct {
 	Query  string `json:"query" jsonschema:"description=Search query for session names (case-insensitive),required"`

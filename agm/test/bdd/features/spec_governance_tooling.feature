@@ -23,6 +23,10 @@ Feature: SPEC audit tooling evidence boundary
     When AGM runs the focused bounded offline rendering unit check
     Then the focused SPEC audit unit check should pass
 
+  Scenario: Candidate and keep-separate cards obey filters
+    When AGM runs the focused candidate and boundary card filtering unit check
+    Then the focused SPEC audit unit check should pass
+
   Scenario: Successful audit commands preserve the target repository
     When AGM runs the focused read-only audit boundary unit check
     Then the focused SPEC audit unit check should pass

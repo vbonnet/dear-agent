@@ -20,6 +20,7 @@ func ListOps() *ListOpsResult {
 	ops := []OpInfo{
 		{Name: "list_sessions", Description: "List sessions with filters. Use when you need to see all active sessions.", Category: "read", Surface: "cli,mcp,skill"},
 		{Name: "get_session", Description: "Get detailed session metadata by ID or name. Use when you need full session details.", Category: "read", Surface: "cli,mcp,skill"},
+		{Name: "get_session_output", Description: "Read the tail of a session's terminal output — live pane or durable final capture. Use to collect a worker's result.", Category: "read", Surface: "mcp"},
 		{Name: "search_sessions", Description: "Search sessions by name with relevance scoring. Use when finding a specific session.", Category: "read", Surface: "cli,mcp,skill"},
 		{Name: "get_status", Description: "Get live status of all sessions with summary counts. Use for dashboard views.", Category: "read", Surface: "cli,mcp,skill"},
 		{Name: "list_workspaces", Description: "List configured workspaces. Use when checking workspace configuration.", Category: "read", Surface: "cli,mcp"},
