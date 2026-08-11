@@ -163,10 +163,17 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	obs.everExisted = true
 	obs.reportedGone = false
 
-	// Pane activity is the busy signal: content changed since the last tick
-	// means the session did work. This also keeps a rolling tail so an exit
-	// between ticks still has output to attach.
-	if tail, captured := cw.capturePaneTail(tmuxName); captured && cw.observeActivity(obs, m, tail) {
+	// A failed or blank capture is not evidence of stable content. Without
+	// this, repeated capture failures on a live pane would keep falling through
+	// to the readiness probe and advance the stability window, eventually
+	// firing a completion that persists DONE and surfaces a stale lastTail
+	// without a single observation of stable pane contents.
+	tail, captured := cw.capturePaneTail(tmuxName)
+	if !captured {
+		obs.stableTicks = 0
+		return nil
+	}
+	if cw.observeActivity(obs, m, tail) {
 		return nil
 	}
 	if !obs.activitySeen || obs.reportedIdle {

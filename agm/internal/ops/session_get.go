@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -176,6 +177,22 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 	return d
 }
 
+// existenceForStatus resolves tmux existence for status reporting, preferring
+// the strict checker. The plain HasSession collapses every tmux ExitError into
+// "absent" with a nil error, so an inaccessible socket or permission failure
+// would report a live worker as "stopped" — the same false-dead verdict the
+// list path now avoids by answering "unknown" (ce-0zng9). The strict checker
+// separates "no such session" from backend failure, so a failure surfaces as
+// an error here and the caller answers "unknown".
+func existenceForStatus(tmux any, plain interface {
+	HasSession(name string) (bool, error)
+}, tmuxName string) (bool, error) {
+	if strict, ok := tmux.(session.StrictSessionExistenceChecker); ok {
+		return strict.HasSessionStrict(context.Background(), tmuxName)
+	}
+	return plain.HasSession(tmuxName)
+}
+
 func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 	if m.Lifecycle == "archived" {
 		return "archived"
@@ -197,7 +214,7 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 		tmuxName = m.Name
 	}
 
-	has, err := ti.HasSession(tmuxName)
+	has, err := existenceForStatus(tmux, ti, tmuxName)
 	if err != nil {
 		return "unknown"
 	}

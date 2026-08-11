@@ -150,9 +150,9 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 
 	if cs.orchestrator != "" {
 		message := fmt.Sprintf(
-			"[completion-watcher] Session %q (%s) %s. Result tail:\n%s\n(Full output: agm_get_session_output / agm capture %s)",
+			"[completion-watcher] Session %q (%s) %s. Result tail:\n%s\n(Full output: %s)",
 			event.SessionName, event.Harness, describeTransition(event.TransitionType),
-			tailExcerpt(event.Output, 1200), event.SessionName,
+			tailExcerpt(event.Output, 1200), fullOutputHint(event),
 		)
 		// Propagate the caller's cancellation into the relay: OpContext.Context
 		// is the ops layer's cancellation carrier, and the shared cs.opCtx must
@@ -174,6 +174,18 @@ func (cs *completionSurfacer) Close() {
 	for _, d := range cs.dispatchers {
 		_ = d.Close()
 	}
+}
+
+// fullOutputHint names a recovery path that actually works for the transition
+// being reported. `agm capture` reads the live pane and errors once the tmux
+// session is gone, so advertising it for an "exited" event would send the
+// operator to a command that cannot return the durable capture. Only the
+// get_session_output read path falls back to the persisted final output.
+func fullOutputHint(event ops.CompletionEvent) string {
+	if event.TransitionType == "exited" {
+		return "agm_get_session_output — the pane is gone, so only the durable final capture remains"
+	}
+	return fmt.Sprintf("agm_get_session_output / agm capture %s", event.SessionName)
 }
 
 func completionBody(event ops.CompletionEvent) string {

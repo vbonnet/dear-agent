@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -342,6 +343,30 @@ func TestCompletionWatcher_RearmsFromPersistedTerminalState(t *testing.T) {
 	}
 	if got := storage.updated[0].State; got != manifest.StateWorking {
 		t.Fatalf("state = %q, want %q", got, manifest.StateWorking)
+	}
+}
+
+// TestCompletionWatcher_CaptureFailureDoesNotCompleteSession proves a pane the
+// watcher cannot read is never mistaken for a pane whose contents are stable.
+// Readiness alone would otherwise advance the stability window and fire a
+// completion carrying a stale tail, with no observation of stable content.
+func TestCompletionWatcher_CaptureFailureDoesNotCompleteSession(t *testing.T) {
+	watcher, storage, tmux := watcherFixture(t)
+
+	scanOnce(t, watcher) // baseline
+	tmux.PaneContents["worker-1"] = "working…\nhalf a result\n"
+	scanOnce(t, watcher) // activity recorded
+
+	// The pane goes unreadable while the session is still alive. Readiness
+	// keeps answering YES (codex-cli's composer stays input-ready).
+	tmux.CapturePaneError = errors.New("capture-pane failed")
+	for i := range 6 {
+		if events := scanOnce(t, watcher); len(events) != 0 {
+			t.Fatalf("tick %d completed on an unreadable pane: %v", i, events)
+		}
+	}
+	if len(storage.updated) != 0 {
+		t.Fatalf("unreadable pane produced durable writes: %+v", storage.updated)
 	}
 }
 
