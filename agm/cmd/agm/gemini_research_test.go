@@ -109,15 +109,31 @@ func TestResolveGeminiResearchPrompt(t *testing.T) {
 	}
 }
 
-func TestResolveGeminiResearchPromptBoundsStdin(t *testing.T) {
-	// A stream larger than the cap is truncated, not buffered unbounded.
+func TestResolveGeminiResearchPromptRejectsOversizedStdin(t *testing.T) {
+	// A stream larger than the cap is rejected (not silently truncated) so the
+	// caller learns their prompt was cut.
 	huge := strings.NewReader(strings.Repeat("x", maxGeminiResearchStdinBytes+4096))
-	got, err := resolveGeminiResearchPrompt(nil, "", huge)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	_, err := resolveGeminiResearchPrompt(nil, "", huge)
+	if err == nil {
+		t.Fatal("expected an error for oversized piped stdin")
 	}
-	if len(got) != maxGeminiResearchStdinBytes {
-		t.Errorf("stdin prompt length = %d, want capped at %d", len(got), maxGeminiResearchStdinBytes)
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error should explain the size limit, got: %v", err)
+	}
+	// Input exactly at the cap is accepted.
+	atCap := strings.NewReader(strings.Repeat("x", maxGeminiResearchStdinBytes))
+	if _, err := resolveGeminiResearchPrompt(nil, "", atCap); err != nil {
+		t.Errorf("input at the cap must be accepted, got: %v", err)
+	}
+}
+
+func TestRunGeminiResearchRejectsNegativeTimeout(t *testing.T) {
+	run := func(context.Context, string, []string, []string, string) ([]byte, error) {
+		t.Fatal("must not launch agy with a negative timeout")
+		return nil, nil
+	}
+	if _, err := runGeminiResearch(context.Background(), "p", geminiResearchOptions{agyPath: "/fake/agy", timeout: -time.Second}, run); err == nil {
+		t.Fatal("expected an error for a negative timeout")
 	}
 }
 

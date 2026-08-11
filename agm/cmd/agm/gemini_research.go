@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -56,7 +57,28 @@ func defaultGeminiResearchRunner(ctx context.Context, agyPath string, args, env 
 	cmd := exec.CommandContext(ctx, agyPath, args...)
 	cmd.Dir = dir
 	cmd.Env = env
-	return cmd.CombinedOutput()
+	// Keep agy's stderr out of the returned response; surface it only on error.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	// Run agy in its own process group and kill the whole group on cancel, so a
+	// tool or daemon agy spawned cannot outlive the timeout.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 5 * time.Second
+	err := cmd.Run()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			err = fmt.Errorf("%w: %s", err, msg)
+		}
+		return stdout.Bytes(), err
+	}
+	return stdout.Bytes(), nil
 }
 
 type geminiResearchOptions struct {
@@ -111,6 +133,9 @@ func runGeminiResearch(ctx context.Context, prompt string, o geminiResearchOptio
 	if prompt == "" {
 		return "", errors.New("gemini-research: empty prompt")
 	}
+	if o.timeout < 0 {
+		return "", fmt.Errorf("gemini-research: --timeout must not be negative (got %s)", o.timeout)
+	}
 	agyPath := o.agyPath
 	if agyPath == "" {
 		resolved, err := exec.LookPath("agy")
@@ -121,7 +146,11 @@ func runGeminiResearch(ctx context.Context, prompt string, o geminiResearchOptio
 	}
 	// Cross AGM's agy model aliases (e.g. 3.5-flash-low) to the agy-native name.
 	if o.model != "" {
-		o.model = agent.ResolveModelFullName("agy", o.model)
+		resolved := strings.TrimSpace(agent.ResolveModelFullName("agy", o.model))
+		if resolved == "" {
+			return "", fmt.Errorf("gemini-research: unknown --model %q", o.model)
+		}
+		o.model = resolved
 	}
 	runCtx := ctx
 	if o.timeout > 0 {
@@ -162,11 +191,19 @@ func resolveGeminiResearchPrompt(args []string, file string, stdin io.Reader) (s
 	if len(args) > 0 {
 		return strings.Join(args, " "), nil
 	}
-	data, err := io.ReadAll(io.LimitReader(stdin, maxGeminiResearchStdinBytes))
+	data, err := io.ReadAll(io.LimitReader(stdin, maxGeminiResearchStdinBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("gemini-research: read prompt from stdin: %w", err)
 	}
+	if len(data) > maxGeminiResearchStdinBytes {
+		return "", fmt.Errorf("gemini-research: piped prompt exceeds the %d-byte limit; use --prompt-file", maxGeminiResearchStdinBytes)
+	}
 	return string(data), nil
+}
+
+// geminiResearchResult is the JSON shape emitted under -o json.
+type geminiResearchResult struct {
+	Response string `json:"response"`
 }
 
 var (
@@ -204,13 +241,9 @@ var geminiResearchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if outputFormat == "json" {
-			payload, mErr := json.Marshal(map[string]string{"response": out})
-			if mErr != nil {
-				return mErr
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), string(payload))
-			return nil
+		if isJSONOutput() {
+			// Route through the central helper so -o json and --fields are honored.
+			return printJSON(geminiResearchResult{Response: out})
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), out)
 		return nil
