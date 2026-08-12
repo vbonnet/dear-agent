@@ -46,5 +46,6 @@ operator never mistakes a signed-out account for a spent budget.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature` enforces that this command keeps co-located SPEC coverage alongside the LLM runtime packages it reports on.
+- Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature`
+- That feature enforces co-located SPEC coverage for this command alongside the LLM runtime packages it reports on.
 - Behaviour under test: `pkg/llm/quota/codexbar_test.go`, `pkg/llm/quota/policy_test.go`, `pkg/llm/quota/meter_test.go`.
