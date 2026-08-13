@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
@@ -160,6 +161,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	detector.ErrorRepeatThreshold = stalledErrorRepeatThreshold
 
 	recovery := ops.NewStallRecovery(opCtx, stalledOrchestratorName)
+	recovery.SetOrchestratorTargetResolver(resolveCompletionRelayTarget)
 
 	var completions *ops.CompletionWatcher
 	var surfacer *completionSurfacer
@@ -229,6 +231,14 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+}
+
+func resolveCompletionRelayTarget(fallback string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return strings.TrimSpace(fallback)
+	}
+	return dispatchstate.ResolveRelayTarget(home, fallback, os.Getenv).Target
 }
 
 // formatDurationForJSON returns a human-readable duration string.

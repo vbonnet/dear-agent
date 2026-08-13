@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/pkg/notify"
 )
@@ -172,11 +171,7 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 }
 
 func (cs *completionSurfacer) relayTarget() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return strings.TrimSpace(cs.orchestrator)
-	}
-	return dispatchstate.ResolveRelayTarget(home, cs.orchestrator, os.Getenv).Target
+	return resolveCompletionRelayTarget(cs.orchestrator)
 }
 
 func (cs *completionSurfacer) Close() {
