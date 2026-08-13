@@ -1,15 +1,11 @@
 #!/bin/sh
-set -eu
-test "$#" = 4 && test "$0" = dear-agent-root-artifact-installer || exit 2
-IFS= read -r mode; case "$mode" in PROBE|INSTALL) ;; *) exit 2;; esac
-test "$mode" != PROBE || exit 42
-test "$(/usr/bin/id -u)" = 0 || exit 2
-artifact=$1; expected_hash=$2; root_gid=$3; destination=$4
+set -eu; test "$#" = 4 && test "$0" = dear-agent-root-artifact-installer || exit 2
+IFS= read -r mode; case "$mode" in PROBE|INSTALL) ;; *) exit 2;; esac; test "$mode" != PROBE || exit 42
+test "$(/usr/bin/id -u)" = 0 || exit 2; artifact=$1; expected_hash=$2; root_gid=$3; destination=$4
 case "$destination" in /usr/local/libexec/dear-agent-codex-hook-json|/usr/local/libexec/dear-agent-spec-contract-hook|/usr/local/libexec/dear-agent-bead-close-guard) ;; *) exit 2;; esac
 test "${#expected_hash}" = 64 || exit 2; case "$expected_hash" in *[!0-9a-f]*) exit 2;; esac
 pinned_destination=; test "$destination" != /usr/local/libexec/dear-agent-spec-contract-hook || pinned_destination="$destination.$expected_hash"
-staging=; cleanup() { status=$?; trap - EXIT HUP INT TERM; test -z "$staging" || /bin/rm -f "$staging"; exit "$status"; }
-trap 'cleanup' EXIT HUP INT TERM
+staging=; cleanup() { status=$?; trap - EXIT HUP INT TERM; test -z "$staging" || /bin/rm -f "$staging"; exit "$status"; }; trap 'cleanup' EXIT HUP INT TERM
 platform=$(/usr/bin/uname -s); case "$platform" in Darwin|Linux) :;; *) exit 2;; esac
 trusted() { test -d "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits & 0022))" -eq 0 && test "$((0$mode_bits & 0001))" -ne 0; }
 trusted_file() { test -f "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits))" -eq "$((0755))"; }
