@@ -13,9 +13,10 @@ import (
 const watchStalledPlistLabel = "com.dear-agent.watch-stalled"
 const watchStalledPlistFile = "schedules/com.dear-agent.watch-stalled.plist"
 
-// defaultStallOrchestrator is the VROOM mesh session that owns worker
-// monitoring; stall alerts route here unless --orchestrator overrides it.
-const defaultStallOrchestrator = "vroom-orchestrator"
+// defaultStallOrchestrator leaves routing discoverable at runtime. The alert
+// router prefers a live Dispatch/orchestrator/supervisor session and queues
+// when none exists, avoiding an install-time hardcoded dead target.
+const defaultStallOrchestrator = ""
 
 var (
 	watchStalledOrchestrator string
@@ -35,10 +36,10 @@ makes no commits for too long, or loops on the same error. The plist therefore
 uses KeepAlive (restart on crash) rather than StartInterval, with RunAtLoad so
 the monitor comes up at login and after a reboot.
 
-Alert routing: the daemon runs with --orchestrator (default "vroom-orchestrator"),
-so every recovery action — permission-prompt alerts, no-commit nudges, error-loop
-diagnostics, and max-retry escalations — is delivered to the orchestrator
-supervisor session via 'agm send', landing stall alerts in the VROOM mesh.
+Alert routing: by default the daemon leaves --orchestrator empty, so each alert
+discovers a live Dispatch/orchestrator/supervisor session at runtime and falls
+back to the durable alert queue if none is reachable. Passing --orchestrator
+pins routing to a specific live session.
 
 The plist is written to ~/Library/LaunchAgents/ and loaded immediately with
 'launchctl load'. Output (one JSON object per event) is logged to

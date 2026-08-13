@@ -123,7 +123,7 @@ func init() {
 	escalateAskCmd.Flags().StringVar(&escSession, "session", "", "acting session id/name (default: current)")
 	escalateAskCmd.Flags().StringVar(&escRole, "role", "", "acting session role label")
 	escalateAskCmd.Flags().DurationVar(&escTimeout, "timeout", 10*time.Minute, "blocking-mode wait timeout")
-	escalateAskCmd.Flags().StringVar(&escVROOM, "vroom-entry", "vroom-orchestrator", "session to route orphan chains into (\"\" disables)")
+	escalateAskCmd.Flags().StringVar(&escVROOM, "vroom-entry", "", "session to route orphan chains into (default: discover live Dispatch/orchestrator; \"\" after discovery disables)")
 
 	escalateAnswerCmd.Flags().StringVar(&escBy, "by", "", "answering session id/name (use 'human' for the human; default: current)")
 	escalateAnswerCmd.Flags().StringVar(&escRole, "role", "", "answering session role label")
@@ -179,11 +179,11 @@ func newEscalationEnv(vroomEntry string) (*escalationEnv, func(), error) {
 	logger := escalation.NewLogger(sink)
 
 	var entry *escalation.ParentRef
-	if vroomEntry != "" {
-		if m, err := adapter.ResolveIdentifier(vroomEntry); err == nil && m != nil {
-			entry = &escalation.ParentRef{
-				SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m),
-			}
+	if strings.TrimSpace(vroomEntry) == "" {
+		entry = discoverEscalationEntry(adapter)
+	} else if m, err := adapter.ResolveIdentifier(vroomEntry); err == nil && m != nil {
+		entry = &escalation.ParentRef{
+			SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m),
 		}
 	}
 
@@ -254,6 +254,46 @@ func nodeKindFor(m *manifest.Manifest) escalation.NodeKind {
 	default:
 		return escalation.NodeSupervisor
 	}
+}
+
+func discoverEscalationEntry(adapter *dolt.Adapter) *escalation.ParentRef {
+	sessions, err := adapter.ListSessions(&dolt.SessionFilter{ExcludeArchived: true, Limit: 1000})
+	if err != nil {
+		return nil
+	}
+	for _, preferred := range []string{"dispatch", "orchestrator", "overseer", "supervisor", "meta-"} {
+		for _, m := range sessions {
+			if !isLiveEscalationEntry(m) || !strings.Contains(strings.ToLower(m.Name), preferred) {
+				continue
+			}
+			return &escalation.ParentRef{SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m)}
+		}
+	}
+	return nil
+}
+
+func isLiveEscalationEntry(m *manifest.Manifest) bool {
+	if m == nil {
+		return false
+	}
+	state := strings.ToUpper(strings.TrimSpace(m.State))
+	if state == manifest.StateOffline || state == manifest.StateDone || m.Lifecycle == manifest.LifecycleArchived {
+		return false
+	}
+	name := strings.ToLower(m.Name)
+	if strings.Contains(name, "dispatch") || strings.Contains(name, "orchestrator") ||
+		strings.Contains(name, "overseer") || strings.Contains(name, "supervisor") ||
+		strings.Contains(name, "meta-") {
+		return true
+	}
+	for _, tag := range m.Context.Tags {
+		lower := strings.ToLower(tag)
+		if strings.Contains(lower, "role:orchestrator") || strings.Contains(lower, "role:overseer") ||
+			strings.Contains(lower, "role:supervisor") || strings.Contains(lower, "role:meta-orchestrator") {
+			return true
+		}
+	}
+	return false
 }
 
 // doltGraph implements escalation.SessionGraph over AGM's Dolt hierarchy.

@@ -94,23 +94,30 @@ func (sr *StallRecovery) Recover(ctx context.Context, event StallEvent) (Recover
 }
 
 // recoverPermissionPromptStall handles recovery from permission prompt stalls.
-func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "alert_orchestrator",
 	}
 
-	// Send alert to orchestrator
-	if sr.orchestratorName == "" {
-		return action, fmt.Errorf("no orchestrator session configured")
-	}
-
 	msg := fmt.Sprintf("⚠️ PERMISSION_PROMPT stall detected: %s has been stuck for %v%s",
 		event.SessionName, formatDuration(event.Duration), errorContext)
-
-	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: sr.orchestratorName,
-		Message:   msg,
+	router := NewAlertRouter(sr.ctx)
+	rec, err := router.Route(ctx, AlertRequest{
+		Kind:          "stall.permission_prompt",
+		Source:        "agm-watch-stalled",
+		Title:         "Permission prompt stall",
+		Body:          msg,
+		Subject:       event.SessionName,
+		Severity:      AlertSeverityCritical,
+		Actionability: AlertAgentActionable,
+		Target:        sr.orchestratorName,
+		OccurredAt:    event.DetectedAt,
+		Meta: map[string]any{
+			"stall_type": event.StallType,
+			"duration":   event.Duration.String(),
+			"evidence":   event.Evidence,
+		},
 	})
 
 	if err != nil {
@@ -118,8 +125,11 @@ func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event S
 		return action, err
 	}
 
-	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent alert to %s", sr.orchestratorName)
+	action.Sent = rec.Status == AlertStatusDispatched || rec.Status == AlertStatusSuppressed
+	action.Description = fmt.Sprintf("Alert status %s target %s", rec.Status, rec.Target)
+	if rec.Error != "" && rec.Status == AlertStatusQueued {
+		return action, fmt.Errorf("%s", rec.Error)
+	}
 	return action, nil
 }
 
@@ -149,25 +159,28 @@ func (sr *StallRecovery) recoverNoCommitStall(_ context.Context, event StallEven
 }
 
 // recoverErrorLoopStall handles recovery from error loop stalls.
-func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverErrorLoopStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "log_diagnostic",
 	}
 
-	if sr.orchestratorName == "" {
-		// Just log locally if no orchestrator
-		action.Description = fmt.Sprintf("Error loop detected: %s%s", event.Evidence, errorContext)
-		action.Sent = true
-		return action, nil
-	}
-
-	// Send diagnostic to orchestrator
 	msg := fmt.Sprintf("🔄 ERROR_LOOP detected in %s:\n%s%s", event.SessionName, event.Evidence, errorContext)
-
-	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: sr.orchestratorName,
-		Message:   msg,
+	router := NewAlertRouter(sr.ctx)
+	rec, err := router.Route(ctx, AlertRequest{
+		Kind:          "stall.error_loop",
+		Source:        "agm-watch-stalled",
+		Title:         "Error loop diagnostic",
+		Body:          msg,
+		Subject:       event.SessionName,
+		Severity:      AlertSeverityWarning,
+		Actionability: AlertAgentActionable,
+		Target:        sr.orchestratorName,
+		OccurredAt:    event.DetectedAt,
+		Meta: map[string]any{
+			"stall_type": event.StallType,
+			"evidence":   event.Evidence,
+		},
 	})
 
 	if err != nil {
@@ -175,8 +188,8 @@ func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEve
 		return action, err
 	}
 
-	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent diagnostic to %s", sr.orchestratorName)
+	action.Sent = rec.Status == AlertStatusDispatched || rec.Status == AlertStatusSuppressed || rec.Status == AlertStatusQueued
+	action.Description = fmt.Sprintf("Diagnostic status %s target %s", rec.Status, rec.Target)
 	return action, nil
 }
 
@@ -219,14 +232,10 @@ func (sr *StallRecovery) recordFailure(sessionName string, errorMsg string) erro
 }
 
 // escalateFailure escalates a session to the orchestrator after max retries exceeded.
-func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, retryState *RetryState) (RecoveryAction, error) {
+func (sr *StallRecovery) escalateFailure(ctx context.Context, event StallEvent, retryState *RetryState) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "escalate",
-	}
-
-	if sr.orchestratorName == "" {
-		return action, fmt.Errorf("no orchestrator session configured for escalation")
 	}
 
 	// Create escalation message with full context
@@ -239,9 +248,17 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 		retryState.LastAttempt,
 	)
 
-	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: sr.orchestratorName,
-		Message:   msg,
+	router := NewAlertRouter(sr.ctx)
+	rec, err := router.Route(ctx, AlertRequest{
+		Kind:          "stall.escalation",
+		Source:        "agm-watch-stalled",
+		Title:         "Stall recovery escalation",
+		Body:          msg,
+		Subject:       event.SessionName,
+		Severity:      AlertSeverityCritical,
+		Actionability: AlertAgentActionable,
+		Target:        sr.orchestratorName,
+		OccurredAt:    event.DetectedAt,
 	})
 
 	if err != nil {
@@ -249,8 +266,11 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 		return action, err
 	}
 
-	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Escalated to %s after %d failed attempts", sr.orchestratorName, retryState.AttemptCount)
+	action.Sent = rec.Status == AlertStatusDispatched || rec.Status == AlertStatusSuppressed
+	action.Description = fmt.Sprintf("Escalated status %s target %s after %d failed attempts", rec.Status, rec.Target, retryState.AttemptCount)
+	if rec.Error != "" && rec.Status == AlertStatusQueued {
+		return action, fmt.Errorf("%s", rec.Error)
+	}
 
 	sr.publishEscalated(event, retryState.AttemptCount)
 	// Record as final failure - don't record more attempts after escalation

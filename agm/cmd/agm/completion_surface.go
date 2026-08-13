@@ -148,23 +148,25 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 		}
 	}
 
-	if cs.orchestrator != "" {
-		message := fmt.Sprintf(
-			"[completion-watcher] Session %q (%s) %s. Result tail:\n%s\n(Full output: %s)",
-			event.SessionName, event.Harness, describeTransition(event.TransitionType),
-			tailExcerpt(event.Output, 1200), fullOutputHint(event),
-		)
-		// Propagate the caller's cancellation into the relay: OpContext.Context
-		// is the ops layer's cancellation carrier, and the shared cs.opCtx must
-		// not be mutated (Surface can run concurrently with other ops users).
-		relayCtx := *cs.opCtx
-		relayCtx.Context = ctx
-		if _, err := ops.SendMessage(&relayCtx, &ops.SendMessageRequest{
-			Recipient: cs.orchestrator,
-			Message:   message,
-		}); err != nil {
-			errs = append(errs, fmt.Errorf("orchestrator relay: %w", err))
-		}
+	router := ops.NewAlertRouter(cs.opCtx)
+	if _, err := router.Route(ctx, ops.AlertRequest{
+		Kind:          "completion",
+		Source:        "agm-completion-watcher",
+		Title:         fmt.Sprintf("AGM session %s: %s", event.TransitionType, event.SessionName),
+		Body:          completionBody(event) + "\nFull output: " + fullOutputHint(event),
+		Subject:       event.SessionName,
+		Severity:      ops.AlertSeverityInfo,
+		Actionability: ops.AlertAgentActionable,
+		Target:        cs.orchestrator,
+		OccurredAt:    event.DetectedAt,
+		Meta: map[string]any{
+			"session_id":   event.SessionID,
+			"session_name": event.SessionName,
+			"harness":      event.Harness,
+			"transition":   event.TransitionType,
+		},
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("alert route: %w", err))
 	}
 
 	return errs
