@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/pkg/notify"
 )
@@ -110,7 +111,7 @@ func loadDispatchers(path string) ([]notify.Dispatcher, error) {
 // would re-trigger a completion, looping forever) and any name matching the
 // configured exclude substrings.
 func (cs *completionSurfacer) shouldSurface(event ops.CompletionEvent) bool {
-	if cs.orchestrator != "" && event.SessionName == cs.orchestrator {
+	if target := cs.relayTarget(); target != "" && event.SessionName == target {
 		return false
 	}
 	lowerName := strings.ToLower(event.SessionName)
@@ -148,7 +149,7 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 		}
 	}
 
-	if cs.orchestrator != "" {
+	if target := cs.relayTarget(); target != "" {
 		message := fmt.Sprintf(
 			"[completion-watcher] Session %q (%s) %s. Result tail:\n%s\n(Full output: %s)",
 			event.SessionName, event.Harness, describeTransition(event.TransitionType),
@@ -160,7 +161,7 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 		relayCtx := *cs.opCtx
 		relayCtx.Context = ctx
 		if _, err := ops.SendMessage(&relayCtx, &ops.SendMessageRequest{
-			Recipient: cs.orchestrator,
+			Recipient: target,
 			Message:   message,
 		}); err != nil {
 			errs = append(errs, fmt.Errorf("orchestrator relay: %w", err))
@@ -168,6 +169,14 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 	}
 
 	return errs
+}
+
+func (cs *completionSurfacer) relayTarget() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return strings.TrimSpace(cs.orchestrator)
+	}
+	return dispatchstate.ResolveRelayTarget(home, cs.orchestrator, os.Getenv).Target
 }
 
 func (cs *completionSurfacer) Close() {

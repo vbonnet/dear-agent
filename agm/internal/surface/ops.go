@@ -14,10 +14,13 @@ var Registry = []codegen.Op{
 	GetSessionOutput,
 	SearchSessions,
 	GetStatus,
+	GetCompletionRelayTarget,
+	GetQuotaStatus,
 
 	// Mutation operations
 	ArchiveSession,
 	KillSession,
+	SetCompletionRelayTarget,
 
 	// Meta operations
 	ListOps,

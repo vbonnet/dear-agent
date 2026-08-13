@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -317,6 +319,16 @@ func killSessionRequestFromMCP(input KillSessionInput) (*ops.KillSessionRequest,
 type SendMessageInput struct {
 	SessionID string `json:"session_id" jsonschema:"Session ID, name, or UUID prefix of the target session (required)"`
 	Message   string `json:"message" jsonschema:"Message text to send to the session (required)"`
+}
+
+type SetCompletionRelayTargetInput struct {
+	SessionID string `json:"session_id" jsonschema:"Live Dispatch/AGM session ID or name that should receive completion relays (required)"`
+}
+
+type GetCompletionRelayTargetInput struct{}
+
+type QuotaStatusInput struct {
+	Provider string `json:"provider,omitempty" jsonschema:"Provider quota to read. Defaults to codex."`
 }
 
 func addArchiveSessionTool(server *mcp.Server, _ *Config) {
@@ -632,6 +644,55 @@ func addSendMessageToolWithFactory(server *mcp.Server, newOpContext mcpOpContext
 			attribute.String("agm.recipient", result.Recipient),
 		)
 
+		return mcpSuccess(result), result, nil
+	})
+}
+
+func addCompletionRelayTargetTools(server *mcp.Server, _ *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_completion_relay_target",
+		Description: "Read the live AGM completion relay target. Use before relying on completion notifications from AGM-created sessions.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ GetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		result := dispatchstate.ResolveRelayTarget(home, "", os.Getenv)
+		return mcpSuccess(result), result, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_set_completion_relay_target",
+		Description: "Set the live Dispatch/AGM session that receives completion relays from the watcher. Takes effect without restarting the watcher.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input SetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
+		if input.SessionID == "" {
+			return mcpError(ops.ErrInvalidInput("session_id", "Session identifier is required.")), nil, nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		result, err := dispatchstate.SetRelayTarget(home, input.SessionID)
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		return mcpSuccess(result), result, nil
+	})
+}
+
+func addQuotaStatusTool(server *mcp.Server, _ *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_quota_status",
+		Description: "Read the latest provider quota status captured by CodexBar. Use to pace Dispatch work when a provider is throttled or near-empty.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input QuotaStatusInput) (*mcp.CallToolResult, any, error) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		provider := input.Provider
+		if provider == "" {
+			provider = "codex"
+		}
+		result := dispatchstate.ReadQuotaStatus(home, provider, time.Now())
 		return mcpSuccess(result), result, nil
 	})
 }
