@@ -77,13 +77,13 @@ place, so counting either would let a broken reaper suppress its own alarm.
 
 **DW-17** When the sandbox GC has not recorded proof of a completed sweep within the reaper-liveness window (default 6h), the system shall classify the condition as at least WARN and the system shall exit 1.
 
-**DW-18** When the sandbox reaper is stale, the system shall not invoke remediation and the system shall not engage the admission brake.
+**DW-18** When the sandbox reaper is stale and no disk threshold is breached, the system shall not invoke remediation and the system shall not engage the admission brake.
 
 **DW-19** When the sandbox reaper is stale and the sandbox GC recorded an error after its last proof of life, the system shall include that error in the alarm reason.
 
 **DW-20** While the reaper-liveness window is zero or the sandbox GC log path is empty, the system shall not evaluate reaper liveness.
 
-**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors, or a sandbox reap record, as proof of a completed sweep.
+**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.
 
 **DW-22** When evaluating reaper liveness, the system shall ignore records that are not sandbox-GC operations and records timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
 

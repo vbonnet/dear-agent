@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +87,38 @@ func TestCheckGCHealth_OversizedRecordDoesNotHideLaterHeartbeats(t *testing.T) {
 
 	if got := checkGCHealth(cfg, now); got == nil || got.Stale {
 		t.Fatalf("a heartbeat after an oversized record must still be seen, got %+v", got)
+	}
+}
+
+func TestCheckGCHealth_DiscardsUnterminatedOversizedRecord(t *testing.T) {
+	now := time.Now()
+	p := filepath.Join(t.TempDir(), "gc.jsonl")
+	content := `{"operation":"sandbox_gc_junk","pad":"` + strings.Repeat("x", 2*1024*1024)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("write gc log: %v", err)
+	}
+
+	got, err := scanGCLog(p, now)
+	if err != nil {
+		t.Fatalf("scan oversized unterminated record: %v", err)
+	}
+	if !got.LastSuccess.IsZero() || got.HasCompletion {
+		t.Fatalf("unterminated oversized record should be discarded, got %+v", got)
+	}
+}
+
+func TestCheckGCHealth_ReapFallbackCannotOverrideFailedCompletion(t *testing.T) {
+	now := time.Now()
+	failed := `{"timestamp":"` + now.Add(-1*time.Minute).Format(time.RFC3339Nano) +
+		`","operation":"sandbox_gc_completed","errors":1,"reason":"scanned=2 reaped=1 kept=0 errors=1"}`
+	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
+		gcReapAt(now.Add(-1*time.Minute)),
+		failed,
+	)}
+
+	got := checkGCHealth(cfg, now)
+	if got == nil || !got.Stale {
+		t.Fatalf("failed modern completion must not be overridden by reap fallback, got %+v", got)
 	}
 }
 

@@ -307,6 +307,7 @@ const gcOperationPrefix = "sandbox_gc"
 // a negative age — permanently "healthy" — and no later correctly-dated record
 // could displace it.
 const gcClockSkewTolerance = 5 * time.Minute
+const maxGCLogRecordBytes = 1024 * 1024
 
 // healthyHeartbeat reports whether a completion record is evidence the reaper
 // actually did its job. A dry run reclaims nothing, and a sweep whose deletion
@@ -320,6 +321,10 @@ func (e gcLogEntry) healthyHeartbeat() bool {
 type gcLogSummary struct {
 	// LastSuccess is the newest heartbeat that proves a real, error-free sweep.
 	LastSuccess time.Time
+	// HasCompletion is true when the log contains a modern completion record.
+	// Once the producer is modern, reap records are no longer an acceptable
+	// liveness fallback because a partial-failure run can emit both.
+	HasCompletion bool
 	// LastReap is the newest individual reap record. A pre-heartbeat `agm` emits
 	// these but no completion record, so they are the compatibility signal that
 	// keeps a newer watchdog from calling an older-but-working GC dead.
@@ -334,10 +339,9 @@ type gcLogSummary struct {
 // It reads with a bufio.Reader rather than a Scanner deliberately. A Scanner
 // aborts the whole scan with ErrTooLong on any line above its buffer cap, which
 // on an append-only log means one oversized or corrupt record would hide every
-// valid heartbeat appended after it — the watchdog would then sit in a false
-// stale state forever. ReadString has no line-length ceiling, so a malformed
-// record costs one failed Unmarshal and the scan continues. Genuine I/O errors
-// are returned rather than swallowed.
+// valid heartbeat appended after it. Oversized records are discarded with a
+// fixed-size bound, then scanning resumes at the next record. Genuine I/O
+// errors are returned rather than swallowed.
 func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 	var s gcLogSummary
 	f, err := os.Open(path)
@@ -347,26 +351,49 @@ func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 	defer f.Close()
 
 	horizon := now.Add(gcClockSkewTolerance)
-	r := bufio.NewReaderSize(f, 64*1024)
+	r := bufio.NewReaderSize(f, maxGCLogRecordBytes)
 	for {
-		line, readErr := r.ReadString('\n')
-		if len(line) > 0 {
-			s.observe(line, horizon)
-		}
+		line, readErr := r.ReadSlice('\n')
 		if readErr != nil {
+			if errors.Is(readErr, bufio.ErrBufferFull) {
+				if err := discardOversizedGCLogRecord(r); err != nil {
+					return s, err
+				}
+				continue
+			}
 			if errors.Is(readErr, io.EOF) {
+				if len(line) > 0 {
+					s.observe(line, horizon)
+				}
 				return s, nil
 			}
 			return s, readErr
 		}
+		s.observe(line, horizon)
+	}
+}
+
+func discardOversizedGCLogRecord(r *bufio.Reader) error {
+	for {
+		_, err := r.ReadSlice('\n')
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
 	}
 }
 
 // observe folds one raw log line into the summary. Records dated beyond the
 // clock-skew horizon are discarded outright.
-func (s *gcLogSummary) observe(line string, horizon time.Time) {
+func (s *gcLogSummary) observe(line []byte, horizon time.Time) {
 	var e gcLogEntry
-	if json.Unmarshal([]byte(line), &e) != nil {
+	if json.Unmarshal(line, &e) != nil {
 		return
 	}
 	if !strings.HasPrefix(e.Operation, gcOperationPrefix) || e.Timestamp.After(horizon) {
@@ -374,9 +401,12 @@ func (s *gcLogSummary) observe(line string, horizon time.Time) {
 	}
 	switch {
 	case e.healthyHeartbeat():
+		s.HasCompletion = true
 		if e.Timestamp.After(s.LastSuccess) {
 			s.LastSuccess = e.Timestamp
 		}
+	case e.Operation == gcCompletedOperation:
+		s.HasCompletion = true
 	case e.Operation == "sandbox_gc_reap":
 		if e.Timestamp.After(s.LastReap) {
 			s.LastReap = e.Timestamp
@@ -408,7 +438,7 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 	// treating a failing GC's own error records as evidence it is alive would
 	// mask exactly the failure this check exists to catch.
 	last, viaFallback := summary.LastSuccess, false
-	if summary.LastReap.After(last) {
+	if !summary.HasCompletion && summary.LastReap.After(last) {
 		last, viaFallback = summary.LastReap, true
 	}
 

@@ -1042,7 +1042,7 @@ build-disk-watchdog:
 	go build $(BUILD_STAMP_FLAGS) -o bin/disk-watchdog ./cmd/disk-watchdog/
 	@echo "Built: bin/disk-watchdog"
 
-install-disk-watchdog: build-disk-watchdog
+install-disk-watchdog: build-disk-watchdog install-agm
 	$(call install-go-bin,bin/disk-watchdog)
 
 install-disk-watchdog-launchagent: install-disk-watchdog
