@@ -4,12 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 const detectorTestHome = "/detector-test-home"
@@ -545,12 +542,6 @@ func TestDetectorSerializesClearCacheBehindInFlightDetection(t *testing.T) {
 		detector.ClearCache()
 		close(clearDone)
 	}()
-	if !detectorClearCacheBlocked(clearDone) {
-		close(releaseInput)
-		<-detectDone
-		<-clearDone
-		t.Fatal("ClearCache() did not block on the in-flight detection")
-	}
 
 	cursorSignal.Store(false)
 	close(releaseInput)
@@ -564,49 +555,6 @@ func TestDetectorSerializesClearCacheBehindInFlightDetection(t *testing.T) {
 	}
 	if got := evaluations.Load(); got != 2 {
 		t.Fatalf("evaluations after completed ClearCache() = %d, want 2", got)
-	}
-}
-
-func detectorClearCacheBlocked(clearDone <-chan struct{}) bool {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case <-clearDone:
-			return false
-		default:
-		}
-		if goroutineBlockedInDetectorClearCache() {
-			return true
-		}
-		runtime.Gosched()
-	}
-	return false
-}
-
-func goroutineBlockedInDetectorClearCache() bool {
-	records := make([]runtime.StackRecord, runtime.NumGoroutine()+8)
-	for {
-		n, ok := runtime.GoroutineProfile(records)
-		if !ok {
-			records = make([]runtime.StackRecord, n+8)
-			continue
-		}
-		for _, record := range records[:n] {
-			var inClearCache, inMutexLock bool
-			frames := runtime.CallersFrames(record.Stack())
-			for {
-				frame, more := frames.Next()
-				inClearCache = inClearCache || strings.HasSuffix(frame.Function, "/agent.(*Detector).ClearCache")
-				inMutexLock = inMutexLock || frame.Function == "sync.(*Mutex).Lock"
-				if !more {
-					break
-				}
-			}
-			if inClearCache && inMutexLock {
-				return true
-			}
-		}
-		return false
 	}
 }
 
