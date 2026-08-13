@@ -126,8 +126,8 @@
       "pkg/llm/provider/provider_test.go (1307 lines)",
       "pkg/override/override.go (1036 lines)",
       "pkg/workflow/runner.go (1296 lines)",
-      "tests/githooks/post_merge_test.go (1452 lines)",
-      "tools/specaudit/main.go (6090 lines)",
+      "tests/githooks/post_merge_test.go (1441 lines)",
+      "tools/specaudit/main.go (6093 lines)",
       "tools/specaudit/main_test.go (3756 lines)",
       "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
     ],
@@ -730,6 +730,35 @@
       },
       "reason": "main advanced under the branch: spec-contract and completion-pipeline files grew past the stale baseline; admitted at merge-main so the newly always-on PR check starts honest",
       "reference": "PR #1183 / ce-3knl.13.3"
+    },
+    {
+      "previous_baseline_sha256": "393dfe8a88494fc202bf15226ca07e86749873eeaacddaed97f602e5eaf4dfd9",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "tests/githooks/post_merge_test.go (1441 lines)",
+          "tools/specaudit/main.go (6093 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "tests/githooks/post_merge_test.go (1452 lines)",
+          "tools/specaudit/main.go (6090 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Admit the three-line 6090-to-6093 budget increase in the already-baselined specaudit orchestrator: PR #1133 only wires and documents the guard subcommand whose implementation remains isolated in tools/specaudit/guard.go; future growth remains ratcheted.",
+      "reference": "vbonnet/dear-agent#1133; dear-agent@94f94f7ea34d9de875df39db9b305db6f6071b1d"
     }
   ]
 }

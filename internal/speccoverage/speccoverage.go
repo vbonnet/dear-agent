@@ -318,14 +318,6 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 	return findings
 }
 
-func featureSpecPath(featureText string) (string, bool) {
-	paths, ok := featureSpecPaths(featureText)
-	if !ok {
-		return "", false
-	}
-	return paths[0], true
-}
-
 func featureSpecPaths(featureText string) ([]string, bool) {
 	var paths []string
 	hasPrimary := false

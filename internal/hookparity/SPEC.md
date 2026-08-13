@@ -73,5 +73,9 @@ extension events projected through `.pi/hooks.json`.
 
 ## Package Test Traceability
 
+- `internal/hookparity/hookparity_test.go`
+- `internal/hookparity/opencode_plugin_test.go`
 - `cmd/spec-contract-hook/main_test.go`
+- `cmd/spec-contract-hook/reminder_state_test.go`
+- `cmd/spec-contract-hook-status/main_test.go`
 - `tests/buildstamp/buildstamp_test.go`

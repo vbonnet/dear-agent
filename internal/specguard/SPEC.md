@@ -81,4 +81,5 @@ installed, registered, or running.
 ## Package Test Traceability
 
 - `internal/specguard/guard_test.go`
+- `internal/specguard/git_test.go`
 - `agm/internal/agent/specguard_boundary_test.go`

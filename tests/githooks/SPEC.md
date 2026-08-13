@@ -28,5 +28,5 @@
 
 ## Test Traceability
 
-- Package tests: `tests/githooks/post_merge_test.go`, `tests/githooks/post_merge_provenance_test.go`
+- Package tests: `tests/githooks/post_merge_test.go`, `tests/githooks/post_merge_provenance_test.go`, `tests/githooks/post_merge_spec_contract_test.go`
 - BDD: `agm/test/bdd/features/developer_tool_package_guardrails.feature`
