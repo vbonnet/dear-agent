@@ -1,5 +1,5 @@
 // Command spec-contract-hook-status performs a read-only content and trust
-// audit of the operator-installed SPEC terminal-hook helper.
+// audit of both operator-installed SPEC terminal-hook helper identities.
 package main
 
 import (
@@ -17,14 +17,18 @@ func main() {
 }
 
 func run(args []string, output, stderr io.Writer) int {
+	return runWithPolicy(args, output, stderr, hookparity.ProductionHelperTrustPolicy())
+}
+
+func runWithPolicy(args []string, output, stderr io.Writer, policy hookparity.HelperTrustPolicy) int {
 	flags := flag.NewFlagSet("spec-contract-hook-status", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	artifact := flags.String("artifact", "bin/spec-contract-hook", "built helper artifact to compare")
-	deployed := flags.String("deployed", "/usr/local/libexec/dear-agent-spec-contract-hook", "deployed helper path")
+	deployed := flags.String("deployed", "/usr/local/libexec/dear-agent-spec-contract-hook", "stable deployed helper path")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return 2
 	}
-	status, err := hookparity.InspectDeployedHelper(*artifact, *deployed, hookparity.ProductionHelperTrustPolicy())
+	status, err := hookparity.InspectHelperDeployment(*artifact, *deployed, policy)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "spec-contract-hook-status: %v\n", err)
 		return 2

@@ -47,12 +47,24 @@ var (
 	validateTrustedSystemExecutable   = validateTrustedHookExecutable
 	validateTrustedHookDependency     = validateTrustedExecutableCommand
 	validateTrustedExecutableLeaf     = validateTrustedHookExecutable
-	verifyPinnedSpecContractHook      = func() error {
-		return hookparity.VerifyDeployedHelperDigest(
-			trustedSpecContractHookPath,
-			expectedSpecContractHookSHA256,
-			hookparity.ProductionHelperTrustPolicy(),
+	resolvePinnedSpecContractHook     = func(expectedDigest string) (string, error) {
+		if expectedDigest != expectedSpecContractHookSHA256 {
+			return "", fmt.Errorf("requested helper digest does not match the governed AGM build")
+		}
+		pinned, err := hookparity.ContentAddressedHelperPath(
+			trustedSpecContractHookPath, expectedDigest,
 		)
+		if err != nil {
+			return "", err
+		}
+		if err := hookparity.VerifyDeployedHelperDigest(
+			pinned,
+			expectedDigest,
+			hookparity.ProductionHelperTrustPolicy(),
+		); err != nil {
+			return "", err
+		}
+		return pinned, nil
 	}
 )
 
@@ -252,10 +264,11 @@ func neutralizeWorkspaceExecutingHooks(hooks map[string]any, projectRoot, expect
 				}
 				command, _ := handler["command"].(string)
 				if isSPECContractAdapter(command, eventName) {
-					if err := verifyPinnedSpecContractHook(); err != nil {
+					pinnedHelper, err := resolvePinnedSpecContractHook(expectedDigest)
+					if err != nil {
 						return fmt.Errorf("validate revision-bound SPEC contract hook (run make install-spec-contract-hook from the same reviewed revision): %w", err)
 					}
-					handler["command"] = trustedSpecContractHookPath +
+					handler["command"] = pinnedHelper +
 						" --expected-helper-sha256 " + expectedDigest +
 						" --root " + shellSingleQuote(projectRoot) +
 						" --provider codex --event " + eventName

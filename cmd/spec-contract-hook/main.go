@@ -42,7 +42,12 @@ const (
 var errIncompleteReminderMarker = errors.New("reminder marker content is incomplete")
 
 var verifyOperatorOwnedHelperDigest = func(expectedSHA256 string) error {
-	return hookparity.VerifyDeployedHelperDigest(
+	runningHelper, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve running helper executable: %w", err)
+	}
+	return hookparity.VerifyContentAddressedHelperInvocation(
+		runningHelper,
 		operatorOwnedHelper,
 		expectedSHA256,
 		hookparity.ProductionHelperTrustPolicy(),
@@ -927,7 +932,10 @@ func emitJSON(output io.Writer, response hookResponse) int {
 		if isLowerHexDigest(response.DearAgentSpecFeedbackID) {
 			fallback.DearAgentSpecFeedbackID = response.DearAgentSpecFeedbackID
 		}
-		encoded, _ = json.Marshal(fallback)
+		encoded, err = json.Marshal(fallback)
+		if err != nil {
+			return 1
+		}
 		encoded = append(encoded, '\n')
 	}
 	written, err := output.Write(encoded)

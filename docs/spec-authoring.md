@@ -65,7 +65,9 @@ surviving reciprocal BDD or implementation ownership edge to a deleted path
 and every replacement passes the ordinary strict checks.
 Deleting `SPEC.owner` while implementation source survives is therefore
 blocked unless that directory gains a permitted local `SPEC.md` replacement
-that passes the same strict neutrality and contract checks.
+that passes the same strict neutrality and contract checks. An object-identical
+implementation relocation carries that requirement to its target directory;
+unrelated implementation additions or modifications do not.
 
 That result is structural admission, not proof that deleting an observable or
 changing a stable ID is correct. The changed-path evidence and reviewed diff

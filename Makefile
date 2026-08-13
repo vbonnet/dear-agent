@@ -149,9 +149,9 @@ override _GOVERNED_BUILD_TARGETS := \
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
 #   build-spec-contract-hook Build the portable terminal SPEC contract helper
-#   build-spec-contract-hook-status Build the read-only installed-helper auditor
+#   build-spec-contract-hook-status Build the read-only dual-identity helper auditor
 #   install-spec-contract-hook Operator-install the digest-bound SPEC contract helper
-#   status-spec-contract-hook Read-only audit of the installed SPEC contract helper
+#   status-spec-contract-hook Read-only audit of both installed SPEC helper identities
 #   build-codex-hook-json    Build the fixed JSON helper for attested Codex hooks
 #   install-codex-hook-json  Operator-install the digest-bound JSON helper
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
@@ -675,13 +675,15 @@ build-spec-contract-hook-status:
 
 # GNU Make intentionally maps any failed recipe to its own exit status 2. Run
 # the built status artifact directly when automation needs the CLI's exact
-# 0=current, 1=missing/stale/untrusted, 2=inspection-error contract.
+# 0=both-current, 1=either-missing/stale/untrusted, 2=inspection-error contract.
 status-spec-contract-hook: build-spec-contract-hook build-spec-contract-hook-status
 	@"$(abspath $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT))" --artifact "$(abspath $(SPEC_CONTRACT_HOOK_ARTIFACT))" --deployed "$(SPEC_CONTRACT_HOOK_DEPLOYED)"
 
-# Antigravity source and AGM's unattended Codex materialization invoke this
-# absolute OS-owned helper. Source wiring remains cooperative; this target does
-# not claim installation or runtime loading until an operator completes review.
+# Antigravity source invokes the stable OS-owned helper. The same transaction
+# publishes a no-clobber digest path that AGM invokes for unattended Codex so a
+# later stable-path activation cannot change a running session's executable.
+# Source wiring remains cooperative; this target does not claim installation
+# or runtime loading until an operator completes review.
 install-spec-contract-hook: build-spec-contract-hook
 	@set -eu; \
 		test -t 0 || { echo "refusing non-interactive privileged Antigravity hook helper installation" >&2; exit 2; }; \
@@ -713,7 +715,8 @@ install-spec-contract-hook: build-spec-contract-hook
 		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
 		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" & privileged_child=$$!; \
 		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
-		echo "Installed digest-bound operator-owned Antigravity SPEC contract helper: $$helper"
+		echo "Installed operator-owned SPEC contract helper: $$helper"; \
+		echo "Pinned unattended Codex helper: $$helper.$$expected_hash"
 
 build-codex-hook-json:
 	@echo "Building codex-hook-json..."

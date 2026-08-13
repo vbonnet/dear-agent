@@ -263,25 +263,28 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 		assertDecisionAndCode(t, result, DecisionBlock, "missing-implementation-spec-owner")
 	})
 
-	t.Run("owner and implementation retirement reaches semantic review", func(t *testing.T) {
+	t.Run("owner retirement ignores unrelated implementation changes", func(t *testing.T) {
 		fixture := newFixture(t)
 		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
 		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
-		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner")
+		fixture.write("internal/unrelated/existing.go", "package unrelated\n\nconst value = 1\n")
+		fixture.git("add", "--", ".opencode/plugins/adapter.mjs", ".opencode/plugins/SPEC.owner", "internal/unrelated/existing.go")
 		fixture.git("commit", "-m", "add implementation owner edge")
 		for _, relative := range []string{".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs"} {
 			if err := os.Remove(filepath.Join(fixture.root, filepath.FromSlash(relative))); err != nil {
 				t.Fatal(err)
 			}
 		}
-		fixture.git("add", "-u", "--", ".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs")
+		fixture.write("internal/unrelated/existing.go", "package unrelated\n\nconst value = 2\n")
+		fixture.write("internal/added/new.go", "package added\n")
+		fixture.git("add", "-A", "--", ".opencode/plugins/SPEC.owner", ".opencode/plugins/adapter.mjs", "internal/unrelated/existing.go", "internal/added/new.go")
 		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
 		if result.Decision != DecisionReminder || len(result.Findings) != 0 || strings.Join(result.Changed, "\n") != ".opencode/plugins/SPEC.owner" {
-			t.Fatalf("result = %#v, want reviewed implementation retirement reminder", result)
+			t.Fatalf("result = %#v, want retirement reminder without unrelated ownership findings", result)
 		}
 	})
 
-	t.Run("owner deletion cannot hide an unowned implementation relocation", func(t *testing.T) {
+	t.Run("owner deletion cannot hide an object-identical implementation relocation", func(t *testing.T) {
 		fixture := newFixture(t)
 		fixture.write(".opencode/plugins/adapter.mjs", "export default {};\n")
 		fixture.write(".opencode/plugins/SPEC.owner", "pkg/example/SPEC.md\n")
@@ -362,6 +365,47 @@ func TestGovernedDeletionValidatesSurvivingGraphAndAllowsReviewedRetirement(t *t
 			t.Fatalf("result = %#v, want valid relocation reminder", result)
 		}
 	})
+}
+
+func TestImplementationRelocationsKeepRepeatedObjectAssociationsCompact(t *testing.T) {
+	const directoryCount = 2048
+	const sharedOID = "0123456789abcdef0123456789abcdef01234567"
+
+	baseEntries := make([]treeEntry, 0, directoryCount)
+	targetEntries := make([]treeEntry, 0, directoryCount)
+	changes := make([]change, 0, directoryCount*2)
+	for index := range directoryCount {
+		source := fmt.Sprintf("internal/source-%04d/adapter.go", index)
+		target := fmt.Sprintf("internal/target-%04d/adapter.go", index)
+		baseEntries = append(baseEntries, treeEntry{path: source, oid: sharedOID, mode: "100644", objectType: "blob"})
+		targetEntries = append(targetEntries, treeEntry{path: target, oid: sharedOID, mode: "100644", objectType: "blob"})
+		changes = append(changes, change{path: source, status: "D"}, change{path: target, status: "A"})
+	}
+
+	moves := implementationRelocations(baseEntries, targetEntries, changes)
+	if len(moves.deletedOIDsByDir) != directoryCount {
+		t.Fatalf("deleted source directories = %d, want %d", len(moves.deletedOIDsByDir), directoryCount)
+	}
+	if got := len(moves.addedDirsByOID[sharedOID]); got != directoryCount {
+		t.Fatalf("added target directories = %d, want %d", got, directoryCount)
+	}
+	for sourceDir, objectIDs := range moves.deletedOIDsByDir {
+		if len(objectIDs) != 1 {
+			t.Fatalf("deleted object identities for %s = %d, want 1", sourceDir, len(objectIDs))
+		}
+	}
+
+	deletedOwnerDirs := make(map[string]bool, directoryCount)
+	for index := range directoryCount {
+		deletedOwnerDirs[fmt.Sprintf("internal/source-%04d", index)] = true
+	}
+	visited := make(map[string]bool)
+	moves.visitTargets(deletedOwnerDirs, func(targetDir string) {
+		visited[targetDir] = true
+	})
+	if len(visited) != directoryCount {
+		t.Fatalf("visited relocation targets = %d, want %d", len(visited), directoryCount)
+	}
 }
 
 func TestParseSpecOwnerAcceptsNeutralCanonicalTargets(t *testing.T) {

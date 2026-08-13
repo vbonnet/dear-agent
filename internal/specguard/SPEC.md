@@ -1,8 +1,8 @@
 # Provider-Neutral SPEC Guard Specification
 
-<!-- Last audited at: 2026-08-08 -->
+<!-- Last audited at: 2026-08-13 -->
 
-**Version:** 1.7
+**Version:** 1.8
 **Status:** Draft
 **Scope:** `internal/specguard`
 
@@ -68,7 +68,7 @@ installed, registered, or running.
 
 **SPEC-GUARD-22** Where a governed path is deleted, when the selected immutable snapshot has no surviving reciprocal BDD edge or implementation ownership edge to that path and every same-change replacement passes strict validation, the guard shall retain the deletion in its changed-path evidence and shall permit it to reach mandatory semantic retirement and stable-ID preservation review instead of blocking every deletion unconditionally.
 
-**SPEC-GUARD-23** When a `SPEC.owner` edge is deleted, the guard shall require its surviving implementation directory and every directory represented by a surviving changed implementation source in the same immutable diff to retain a valid `SPEC.owner` edge or a permitted local `SPEC.md` replacement that passes strict contract and neutrality validation.
+**SPEC-GUARD-23** When a `SPEC.owner` edge is deleted, the guard shall require its surviving implementation directory and every target directory of an object-identical same-change implementation relocation from that directory to retain a valid `SPEC.owner` edge or a permitted local `SPEC.md` replacement that passes strict contract and neutrality validation, and shall not treat unrelated implementation additions or modifications as relocation provenance.
 
 **SPEC-GUARD-24** When staged validation observes `assume-unchanged` or `skip-worktree` on a governed path, or those index flags change during evaluation, the guard shall block before accepting a snapshot whose dirty contract state Git may suppress. Sparse checkouts that mark governed paths `skip-worktree` are explicitly unsupported.
 

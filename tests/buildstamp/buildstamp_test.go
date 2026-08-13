@@ -567,6 +567,9 @@ func TestSpecContractHookExpectedArtifactIsReproducible(t *testing.T) {
 }
 
 func TestSpecContractHookStatusArtifactPreservesDirectExitContract(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("operator-owned SPEC helper auditing requires Unix ownership and mode semantics")
+	}
 	requireMake(t)
 	root := sourceRoot(t)
 	directory := t.TempDir()
@@ -600,9 +603,18 @@ func TestSpecContractHookStatusArtifactPreservesDirectExitContract(t *testing.T)
 	}
 	var status struct {
 		Status string `json:"status"`
+		Stable struct {
+			Status string `json:"status"`
+		} `json:"stable"`
+		ContentAddressed struct {
+			Status string `json:"status"`
+		} `json:"content_addressed"`
 	}
-	if err := json.Unmarshal(stdout, &status); err != nil || status.Status != "missing" {
-		t.Fatalf("direct status output = %q, status=%q, error=%v", stdout, status.Status, err)
+	if err := json.Unmarshal(stdout, &status); err != nil ||
+		status.Status != "untrusted" ||
+		status.Stable.Status != "untrusted" ||
+		status.ContentAddressed.Status != "untrusted" {
+		t.Fatalf("direct composite status output = %q, status=%#v, error=%v", stdout, status, err)
 	}
 }
 

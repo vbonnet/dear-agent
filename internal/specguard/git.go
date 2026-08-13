@@ -36,7 +36,7 @@ type gitSnapshot struct {
 	identity            string
 	files               map[string]sourceFile
 	implementationDirs  map[string]bool
-	implementationPaths map[string]bool
+	implementationMoves implementationRelocationIndex
 	changed             []change
 }
 
@@ -422,6 +422,15 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 	if failure != nil {
 		return gitSnapshot{}, failure.withCode("missing-head")
 	}
+	baseTree, failure := git.run(ctx, root, nil, git.limits.maxGitOutput,
+		"ls-tree", "-r", "-z", "--full-tree", head)
+	if failure != nil {
+		return gitSnapshot{}, failure
+	}
+	baseEntries, failure := parseTreeEntries(baseTree, git.limits)
+	if failure != nil {
+		return gitSnapshot{}, failure
+	}
 	indexBefore, failure := git.run(ctx, root, nil, git.limits.maxGitOutput,
 		"ls-files", "--cached", "--stage", "-z", "--")
 	if failure != nil {
@@ -549,7 +558,7 @@ func (git gitClient) stagedSnapshot(ctx context.Context, root string, afterDirty
 		identity:            snapshotIdentity("staged", []byte(head), indexBefore, indexFlagsBefore, diffBefore),
 		files:               files,
 		implementationDirs:  implementationDirs(entries),
-		implementationPaths: implementationPaths(entries),
+		implementationMoves: implementationRelocations(baseEntries, entries, changed),
 		changed:             changed,
 	}, nil
 }
@@ -647,6 +656,15 @@ func (git gitClient) committedSnapshot(ctx context.Context, root, baseRevision s
 	if strings.TrimSpace(string(mergeBase)) != base {
 		return gitSnapshot{}, fail("base-not-ancestor", "", "committed guard base must be an ancestor of HEAD")
 	}
+	baseTree, failure := git.run(ctx, root, nil, git.limits.maxGitOutput,
+		"ls-tree", "-r", "-z", "--full-tree", base)
+	if failure != nil {
+		return gitSnapshot{}, failure
+	}
+	baseEntries, failure := parseTreeEntries(baseTree, git.limits)
+	if failure != nil {
+		return gitSnapshot{}, failure
+	}
 	tree, failure := git.run(ctx, root, nil, git.limits.maxGitOutput,
 		"ls-tree", "-r", "-z", "--full-tree", head)
 	if failure != nil {
@@ -684,7 +702,7 @@ func (git gitClient) committedSnapshot(ctx context.Context, root, baseRevision s
 		identity:            snapshotIdentity("committed", []byte(base), []byte(head)),
 		files:               files,
 		implementationDirs:  implementationDirs(entries),
-		implementationPaths: implementationPaths(entries),
+		implementationMoves: implementationRelocations(baseEntries, entries, changed),
 		changed:             changed,
 	}, nil
 }

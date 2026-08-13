@@ -315,7 +315,13 @@ func validateSnapshot(ctx context.Context, snapshot gitSnapshot, changed map[str
 	affectedSpecs := make(map[string]bool)
 	affectedFeatures := make(map[string]bool)
 	ownerAffectedSpecs := make(map[string]bool)
+	deletedOwnerDirs := make(map[string]bool)
+	checkedImplementationOwnership := make(map[string]bool)
 	requireImplementationOwnership := func(implementationDir, evidencePath string) {
+		if checkedImplementationOwnership[implementationDir] {
+			return
+		}
+		checkedImplementationOwnership[implementationDir] = true
 		localSpecPath := path.Join(implementationDir, "SPEC.md")
 		ownerPath := path.Join(implementationDir, "SPEC.owner")
 		_, localExists := specs[localSpecPath]
@@ -370,18 +376,10 @@ func validateSnapshot(ctx context.Context, snapshot gitSnapshot, changed map[str
 					}
 				}
 			case isSpecOwnerPath(filePath):
-				implementationDirs := make(map[string]bool)
-				if implementationDir := path.Dir(filePath); snapshot.implementationDirs[implementationDir] {
-					implementationDirs[implementationDir] = true
-				}
-				for _, implementationChange := range snapshot.changed {
-					if implementationChange.status != "D" && snapshot.implementationPaths[implementationChange.path] {
-						implementationDirs[path.Dir(implementationChange.path)] = true
-					}
-				}
-				for implementationDir := range implementationDirs {
-					evidencePath := path.Join(implementationDir, "SPEC.owner")
-					requireImplementationOwnership(implementationDir, evidencePath)
+				implementationDir := path.Dir(filePath)
+				deletedOwnerDirs[implementationDir] = true
+				if snapshot.implementationDirs[implementationDir] {
+					requireImplementationOwnership(implementationDir, filePath)
 				}
 			}
 			continue
@@ -418,6 +416,9 @@ func validateSnapshot(ctx context.Context, snapshot gitSnapshot, changed map[str
 			affectedFeatures[filePath] = true
 		}
 	}
+	snapshot.implementationMoves.visitTargets(deletedOwnerDirs, func(relocatedDir string) {
+		requireImplementationOwnership(relocatedDir, path.Join(relocatedDir, "SPEC.owner"))
+	})
 	featuresBySpec, specsByFeature := buildGraphIndexes(specs, features)
 	if !expandAffectedGraph(ctx, specs, features, featuresBySpec, specsByFeature, affectedSpecs, affectedFeatures) {
 		return fail("guard-time-limit", "", "SPEC graph evaluation exceeded its wall-time limit")
@@ -516,14 +517,64 @@ func implementationDirs(entries []treeEntry) map[string]bool {
 	return dirs
 }
 
-func implementationPaths(entries []treeEntry) map[string]bool {
-	paths := make(map[string]bool)
-	for _, entry := range entries {
-		if isImplementationEntry(entry) {
-			paths[entry.path] = true
+type implementationRelocationIndex struct {
+	deletedOIDsByDir map[string]map[string]struct{}
+	addedDirsByOID   map[string]map[string]struct{}
+}
+
+func implementationRelocations(baseEntries, targetEntries []treeEntry, changes []change) implementationRelocationIndex {
+	statuses := make(map[string]string, len(changes))
+	for _, item := range changes {
+		statuses[item.path] = item.status
+	}
+	index := implementationRelocationIndex{
+		deletedOIDsByDir: make(map[string]map[string]struct{}),
+		addedDirsByOID:   make(map[string]map[string]struct{}),
+	}
+	for _, entry := range targetEntries {
+		if statuses[entry.path] == "A" && isImplementationEntry(entry) {
+			if index.addedDirsByOID[entry.oid] == nil {
+				index.addedDirsByOID[entry.oid] = make(map[string]struct{})
+			}
+			index.addedDirsByOID[entry.oid][path.Dir(entry.path)] = struct{}{}
 		}
 	}
-	return paths
+	for _, entry := range baseEntries {
+		if statuses[entry.path] != "D" || !isImplementationEntry(entry) {
+			continue
+		}
+		sourceDir := path.Dir(entry.path)
+		if index.deletedOIDsByDir[sourceDir] == nil {
+			index.deletedOIDsByDir[sourceDir] = make(map[string]struct{})
+		}
+		index.deletedOIDsByDir[sourceDir][entry.oid] = struct{}{}
+	}
+	return index
+}
+
+func (index implementationRelocationIndex) visitTargets(sourceDirs map[string]bool, visit func(string)) {
+	objectIDs := make(map[string]struct{})
+	for sourceDir := range sourceDirs {
+		for oid := range index.deletedOIDsByDir[sourceDir] {
+			objectIDs[oid] = struct{}{}
+		}
+	}
+	targets := make(map[string]struct{})
+	for oid := range objectIDs {
+		for targetDir := range index.addedDirsByOID[oid] {
+			if !sourceDirs[targetDir] {
+				targets[targetDir] = struct{}{}
+			}
+		}
+	}
+	ordered := make([]string, 0, len(targets))
+	for targetDir := range targets {
+		ordered = append(ordered, targetDir)
+	}
+	sort.Strings(ordered)
+	for _, targetDir := range ordered {
+		visit(targetDir)
+	}
 }
 
 func isImplementationEntry(entry treeEntry) bool {
