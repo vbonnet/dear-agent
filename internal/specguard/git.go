@@ -1108,6 +1108,8 @@ func (git gitClient) run(ctx context.Context, root string, input []byte, outputL
 		"-c", "protocol.allow=never",
 		"-c", "core.fsmonitor=false",
 		"-c", "core.untrackedCache=false",
+		"-c", "core.trustctime=true",
+		"-c", "core.checkStat=default",
 		"-c", "diff.external=",
 	}
 	if root != "" {

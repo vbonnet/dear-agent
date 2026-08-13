@@ -299,6 +299,46 @@ func TestStagedSnapshotBlocksDirtyGovernedWorktreeWithoutParsingMutableBody(t *t
 	}
 }
 
+func TestStagedSnapshotOverridesRepositoryMetadataTrustConfiguration(t *testing.T) {
+	fixture := newGuardRepository(t)
+	const specPath = "pkg/example/SPEC.md"
+	const featurePath = "agm/test/bdd/features/example.feature"
+	original := validSpec(featurePath)
+	mutated := strings.Replace(original, "provider-neutral", "attacker-neutral", 1)
+	if mutated == original || len(mutated) != len(original) {
+		t.Fatal("metadata-spoof fixture must change content without changing size")
+	}
+	fixture.write(specPath, original)
+	fixture.write(featurePath, validFeature(specPath))
+
+	// Keep the worktree entry older than the index so Git's racy-clean
+	// mitigation cannot independently force a content comparison.
+	stableTime := time.Unix(946684800, 0)
+	fullPath := filepath.Join(fixture.root, filepath.FromSlash(specPath))
+	if err := os.Chtimes(fullPath, stableTime, stableTime); err != nil {
+		t.Fatal(err)
+	}
+	fixture.git("add", "--", specPath, featurePath)
+	fixture.git("commit", "-m", "add governed baseline")
+
+	fixture.git("config", "core.trustctime", "false")
+	fixture.git("config", "core.checkStat", "minimal")
+	// Cross a whole-second boundary so the changed ctime is distinct even on
+	// filesystems whose stat cache has only second-level ctime precision.
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)) + 50*time.Millisecond)
+	fixture.write(specPath, mutated)
+	if err := os.Chtimes(fullPath, stableTime, stableTime); err != nil {
+		t.Fatal(err)
+	}
+
+	if raw := fixture.git("diff-files", "--name-only", "--", specPath); raw != "" {
+		t.Fatalf("repository-configured raw Git detected metadata-spoofed change: %q", raw)
+	}
+
+	result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+	assertDecisionAndCode(t, result, DecisionBlock, "dirty-governed-worktree")
+}
+
 func TestStagedSnapshotUsesImmutableStagedContentWhenWorktreeIsClean(t *testing.T) {
 	t.Parallel()
 	fixture := newGuardRepository(t)

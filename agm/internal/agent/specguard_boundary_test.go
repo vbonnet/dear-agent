@@ -136,7 +136,7 @@ func TestActiveHarnessesHaveOneCooperativeNativeSPECGuardAdapter(t *testing.T) {
 	if len(agy["spec-contract-guard"]["Stop"]) != 1 || agy["spec-contract-guard"]["SubagentStop"] != nil {
 		t.Fatalf("Antigravity disposition = %#v", agy["spec-contract-guard"])
 	}
-	plugin, err := os.ReadFile(filepath.Join(repositoryRoot, ".opencode", "plugins", "spec-contract-guard.mjs"))
+	plugin, err := os.ReadFile(filepath.Join(repositoryRoot, ".opencode", "plugins", "spec-contract-guard.js"))
 	if err != nil || !strings.Contains(string(plugin), "session.idle") || !strings.Contains(string(plugin), "promptAsync") {
 		t.Fatalf("OpenCode plugin disposition missing: %v", err)
 	}

@@ -226,7 +226,8 @@ func TestPiTerminalHookTimeoutKillsTermIgnoringProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	childPIDPath := filepath.Join(t.TempDir(), "term-ignoring-child.pid")
-	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"trap '' TERM; (trap '' TERM; while :; do sleep 1; done) & child=$!; printf '%s' \"$child\" > \"$PI_CHILD_PID_FILE\"; while :; do sleep 1; done","timeout":0.2}]}]}}`
+	childReadyPath := filepath.Join(t.TempDir(), "term-ignoring-child.ready")
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"trap '' TERM; (trap '' TERM; printf ready > \"$PI_CHILD_READY_FILE\"; while :; do sleep 1; done) & child=$!; while test ! -s \"$PI_CHILD_READY_FILE\"; do sleep 0.01; done; printf '%s' \"$child\" > \"$PI_CHILD_PID_FILE\"; while :; do sleep 1; done","timeout":1}]}]}}`
 	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ try {
 }
 `
 	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project), filepath.Clean(childPIDPath))
-	command.Env = append(os.Environ(), "PI_CHILD_PID_FILE="+childPIDPath)
+	command.Env = append(os.Environ(), "PI_CHILD_PID_FILE="+childPIDPath, "PI_CHILD_READY_FILE="+childReadyPath)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("TERM-ignoring Pi hook cleanup: %v\n%s", err, output)
 	}
@@ -558,7 +559,35 @@ func TestPiHookSupervisorRejectsAcknowledgedUnexpectedExitWithoutParentSignal(t 
 			}
 		}
 	})
-	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"(trap '' HUP INT TERM; while :; do sleep 1; done) & child=$!; printf '%s' \"$child\" > \"$PI_CHILD_PID_FILE\"; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"hook completed\"}}\\n'","timeout":2}]}]}}`
+	escapeHelperPath := filepath.Join(t.TempDir(), "escape-unexpected-exit-child.mjs")
+	const escapeHelper = `
+import {spawn} from "node:child_process";
+import {writeFileSync} from "node:fs";
+const childSource = [
+  'for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) process.on(signal, () => {});',
+  'if (typeof process.send === "function") process.send({type: "ready"});',
+  'setInterval(() => {}, 60000);',
+].join("\n");
+const escaped = spawn(process.execPath, ["--input-type=module", "-e", childSource], {
+  detached: true,
+  stdio: ["ignore", "ignore", "ignore", "ipc"],
+});
+await new Promise((resolve, reject) => {
+  escaped.once("error", reject);
+  escaped.once("exit", (status, signal) => reject(new Error("escaped child exited before readiness: " + JSON.stringify({status, signal}))));
+  escaped.once("message", (message) => {
+    if (message?.type === "ready") resolve();
+    else reject(new Error("escaped child sent an invalid readiness message: " + JSON.stringify(message)));
+  });
+});
+writeFileSync(process.env.PI_CHILD_PID_FILE, String(escaped.pid));
+escaped.disconnect();
+escaped.unref();
+`
+	if err := os.WriteFile(escapeHelperPath, []byte(escapeHelper), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const hooks = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"$PI_NODE\" \"$PI_ESCAPE_HELPER\" && printf '{\"hookSpecificOutput\":{\"additionalContext\":\"hook completed\"}}\\n'","timeout":2}]}]}}`
 	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -617,6 +646,7 @@ for (const [index, name, replacements, want] of [
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, filepath.Clean(extensionPath), filepath.Clean(project), filepath.Clean(pidPaths[0]), filepath.Clean(pidPaths[1]), filepath.Clean(pidPaths[2]))
+	command.Env = append(os.Environ(), "PI_ESCAPE_HELPER="+escapeHelperPath, "PI_NODE="+node)
 	if output, err := command.CombinedOutput(); err != nil {
 		if ctx.Err() != nil {
 			t.Fatalf("unexpected Pi supervisor exit exceeded the test deadline: %v\n%s", ctx.Err(), output)

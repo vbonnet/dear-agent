@@ -14,12 +14,12 @@ func TestOpenCodeLegacyProjectionIsInactive(t *testing.T) {
 		want     bool
 	}{
 		{name: "absent", want: true},
-		{name: "retirement tombstone", present: true, want: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"none"}}`},
+		{name: "retirement tombstone", present: true, want: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"none"}}`},
 		{name: "legacy hooks", present: true, manifest: `{"hooks":{"Stop":[]}}`},
-		{name: "tombstone with hooks", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"none"},"hooks":{}}`},
+		{name: "tombstone with hooks", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"none"},"hooks":{}}`},
 		{name: "unapproved replacement", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":"other.mjs","runtime_claim":"none"}}`},
-		{name: "runtime claim", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"installed"}}`},
-		{name: "extra metadata", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"none","extra":true}}`},
+		{name: "runtime claim", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"installed"}}`},
+		{name: "extra metadata", present: true, manifest: `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"none","extra":true}}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -59,8 +59,8 @@ func TestOpenCodeLegacyProjectionRejectsMalformedJSON(t *testing.T) {
 
 func TestOpenCodeLegacyProjectionRejectsDuplicateKeys(t *testing.T) {
 	for _, manifest := range []string{
-		`{"_dear_agent":{"status":"active","status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"none"}}`,
-		`{"_dear_agent":{"status":"active"},"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"none"}}`,
+		`{"_dear_agent":{"status":"active","status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"none"}}`,
+		`{"_dear_agent":{"status":"active"},"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"none"}}`,
 	} {
 		root := t.TempDir()
 		directory := filepath.Join(root, ".opencode")
@@ -91,7 +91,7 @@ func TestOpenCodeLegacyProjectionRejectsSymlinkIdentities(t *testing.T) {
 				t.Fatal(err)
 			}
 			if test.target == "tombstone.json" {
-				body := `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.mjs","runtime_claim":"none"}}`
+				body := `{"_dear_agent":{"status":"retired","replacement":".opencode/plugins/spec-contract-guard.js","runtime_claim":"none"}}`
 				if err := os.WriteFile(filepath.Join(root, test.target), []byte(body), 0o600); err != nil {
 					t.Fatal(err)
 				}

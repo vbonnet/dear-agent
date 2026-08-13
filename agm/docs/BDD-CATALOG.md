@@ -538,7 +538,9 @@ entrypoints should only add model/harness-specific guidance.
 
 **Key scenarios:**
 - Claude Code, Codex CLI, and Pi expose the shared guardrails through native
-  hook manifests; AGY and OpenCode omit unsupported legacy hook projections.
+  hook manifests; OpenCode exposes the same pre-tool outcomes through its
+  native project plugin while its unsupported legacy JSON projection remains
+  inert, and AGY omits unsupported legacy pre-tool projections.
 - Every active harness exposes bounded SPEC review through its available native
   capability, including terminal feedback or an idle-session fallback.
 - Codex CLI and Pi expose Beads lifecycle hooks through their native hook

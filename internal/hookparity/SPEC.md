@@ -1,8 +1,8 @@
 # Hook Harness Parity Specification
 
-<!-- Last audited at: 2026-08-10 -->
+<!-- Last audited at: 2026-08-13 -->
 
-**Version:** 1.6
+**Version:** 1.7
 **Status:** Baseline
 **Scope:** Repository-scoped hook manifests and shared guardrail hook scripts.
 
@@ -64,6 +64,8 @@ extension events projected through `.pi/hooks.json`.
 **HHP-23** When Pi aggregates terminal handlers, the SPEC adapter shall return a bounded deterministic feedback identity and the persistent Pi extension shall allow one follow-up for each fresh identity despite sibling continuation state, suppress repeats, retain a finite per-turn continuation budget, and reset that budget on a real interactive or RPC turn.
 
 **HHP-24** When a provider-native hook response exceeds the serialized output limit, the adapter shall emit a complete compact response without changing the terminal outcome: a block remains a block, an AGY continuation remains a continuation, and a top-level or hook-specific yield remains non-blocking while preserving its native event and valid deterministic feedback identity.
+
+**HHP-25** When OpenCode invokes its native `tool.execute.before` plugin hook for Bash or the scheduled-task creation tool, the plugin shall translate the native tool arguments to the repository PreToolUse envelope and execute only the applicable routing, bead-close, bypass, and PR-lifecycle scripts from the project worktree with fixed per-script deadlines and a per-script incrementally enforced shared stdout-plus-stderr 64 KiB budget; each script shall run under the same isolated trusted-supervisor, supervisor-owned cleanup, bounded drain, and validated group-reap invariants as the OpenCode terminal adapter; a denial, timeout, malformed response, execution failure, or unverified cleanup shall block before the tool runs, an advisory result shall use non-blocking native toast feedback without mutating the tool arguments, unrelated tools shall not run Bash-only scripts, and the legacy JSON projection shall remain exact inert retirement metadata.
 
 ## BDD Traceability
 

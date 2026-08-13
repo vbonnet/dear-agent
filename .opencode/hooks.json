@@ -1,7 +1,7 @@
 {
   "_dear_agent": {
     "status": "retired",
-    "replacement": ".opencode/plugins/spec-contract-guard.mjs",
+    "replacement": ".opencode/plugins/spec-contract-guard.js",
     "runtime_claim": "none"
   }
 }

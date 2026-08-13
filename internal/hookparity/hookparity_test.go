@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -186,7 +187,7 @@ func TestOpenCodeSPECContractPluginUsesIdleEventAndConservativeTransport(t *test
 		t.Fatal(err)
 	}
 	if len(tombstone.Hooks) != 0 || tombstone.DearAgent.Status != "retired" ||
-		tombstone.DearAgent.Replacement != ".opencode/plugins/spec-contract-guard.mjs" || tombstone.DearAgent.RuntimeClaim != "none" {
+		tombstone.DearAgent.Replacement != ".opencode/plugins/spec-contract-guard.js" || tombstone.DearAgent.RuntimeClaim != "none" {
 		t.Fatalf("OpenCode hooks.json must be an inert retirement tombstone, got %#v", tombstone)
 	}
 	owner, err := os.ReadFile(filepath.Join(root, ".opencode", "plugins", "SPEC.owner"))
@@ -200,7 +201,7 @@ func TestOpenCodeSPECContractPluginUsesIdleEventAndConservativeTransport(t *test
 	if err != nil {
 		t.Skip("node is required to execute the OpenCode plugin transport contract")
 	}
-	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
 	script := `
 import {pathToFileURL} from "node:url";
 const calls = [];
@@ -288,8 +289,8 @@ if (calls.length !== 1) throw new Error("session.idle did not run exactly one ad
 const [args, options] = calls[0];
 if (args.slice(0, 4).join("|") !== ["/bin/sh", "-c", args[2], "dear-agent-opencode-spec-supervisor"].join("|")) throw new Error("supervisor argv: " + JSON.stringify(args));
 if (args.slice(4).join("|") !== ["go", "run", "./cmd/spec-contract-hook", "--root", process.argv[2], "--provider", "opencode", "--event", "Stop"].join("|")) throw new Error("adapter argv: " + JSON.stringify(args));
-if (!args[2].includes('trap - HUP INT QUIT TERM PIPE') || !args[2].includes('exec 3>&-') || !args[2].includes('exec </dev/null') || !args[2].includes('exec "$@"') || !args[2].includes('kill -KILL 0') || args[2].includes("go run ./cmd/spec-contract-hook")) throw new Error("supervisor did not preserve its structural argv, signal, private-fd, and identity-relative cleanup contract");
-if (options.cwd !== process.argv[2] || options.detached !== true || JSON.stringify(options.stdio) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || "stdin" in options || "stdout" in options || "stderr" in options || "timeout" in options || "maxBuffer" in options) throw new Error("adapter options: " + JSON.stringify(options));
+if (!args[2].includes('trap - HUP INT QUIT TERM PIPE') || !args[2].includes('exec 3>&-') || !args[2].includes('exec 0<&4') || !args[2].includes('exec "$@"') || !args[2].includes('kill -KILL 0') || args[2].includes("go run ./cmd/spec-contract-hook")) throw new Error("supervisor did not preserve its structural argv, signal, private-fd, and identity-relative cleanup contract");
+if (options.cwd !== process.argv[2] || options.detached !== true || JSON.stringify(options.stdio.slice(0, 4)) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || options.stdio.length !== 5 || !Number.isInteger(options.stdio[4]) || "stdin" in options || "stdout" in options || "stderr" in options || "timeout" in options || "maxBuffer" in options) throw new Error("adapter options: " + JSON.stringify(options));
 if (timers.length !== 1 || timers[0].milliseconds !== 60000 || !timers[0].cleared) throw new Error("adapter timeout was not explicit and cleared: " + JSON.stringify(timers));
 if (groupSignals.length !== 0 || directKills.length !== 0) throw new Error("successful adapter used parent-side numeric process signalling: " + JSON.stringify({groupSignals, directKills}));
 if (processes[0].cleanupRequests !== 1) throw new Error("successful adapter did not issue exactly one supervisor-owned cleanup frame");
@@ -453,6 +454,217 @@ if (logs.length !== logsBeforeControlLoss + 1 || prompts.length !== promptsBefor
 	}
 }
 
+func TestOpenCodeSPECContractPluginUsesNativeDiscoveryExtension(t *testing.T) {
+	root := repoRoot(t)
+	want := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
+	var discovered []string
+	for _, directory := range []string{"plugin", "plugins"} {
+		entries, err := os.ReadDir(filepath.Join(root, ".opencode", directory))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			extension := filepath.Ext(entry.Name())
+			if extension == ".js" || extension == ".ts" {
+				discovered = append(discovered, filepath.Join(root, ".opencode", directory, entry.Name()))
+			}
+		}
+	}
+	if !slices.Contains(discovered, want) {
+		t.Fatalf("OpenCode native project-plugin scan did not discover %s; discovered %v", want, discovered)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retired unsupported .mjs plugin remains present: %v", err)
+	}
+}
+
+func TestOpenCodeSPECContractPluginProjectsNativePreToolGuards(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("OpenCode repository guard scripts require a POSIX shell")
+	}
+	root := repoRoot(t)
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the OpenCode native pre-tool contract")
+	}
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
+	script := `
+import {readFileSync} from "node:fs";
+import {pathToFileURL} from "node:url";
+const encoded = (value) => new TextEncoder().encode(value);
+const allow = () => ({exitCode: 0, stdout: new Uint8Array(), stderr: new Uint8Array()});
+const calls = [];
+const results = [];
+const toasts = [];
+const logs = [];
+const statusStreams = new Map();
+const timers = [];
+let holdToast = false;
+globalThis.setTimeout = (callback, milliseconds) => { const timer = {callback, milliseconds, cleared: false}; timers.push(timer); return timer; };
+globalThis.clearTimeout = (timer) => { timer.cleared = true; };
+const controlledStream = (value, holdOpen) => {
+  let controller;
+  const stream = new ReadableStream({
+    start(next) { controller = next; if (value?.byteLength) next.enqueue(value); if (!holdOpen) next.close(); },
+  });
+  return {stream, close() { try { controller.close(); } catch {} }};
+};
+globalThis.Bun = {
+  file(fd) {
+    const stream = statusStreams.get(fd);
+    if (!stream) throw new Error("unknown supervisor status descriptor " + fd);
+    return {stream() { return stream; }};
+  },
+  spawn(args, options) {
+    const result = results.shift();
+    if (!result) throw new Error("missing native guard result");
+    const payload = readFileSync(options.stdio[4], "utf8");
+    calls.push({args, options, payload});
+    const stdout = controlledStream(result.stdout || new Uint8Array(), Boolean(result.pending));
+    const stderr = controlledStream(result.stderr || new Uint8Array(), Boolean(result.pending));
+    const status = controlledStream(result.pending ? new Uint8Array() : encoded(String(result.exitCode ?? 0) + "\n"), Boolean(result.pending));
+    const statusFD = 3000 + calls.length;
+    statusStreams.set(statusFD, status.stream);
+    let signalCode = null;
+    let resolveExit;
+    const exited = new Promise((resolve) => { resolveExit = resolve; });
+    const proc = {
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      stdio: [null, null, null, statusFD],
+      exited,
+      get signalCode() { return signalCode; },
+      cleanupRequests: 0,
+      stdin: {
+        write(value) { if (value !== "cleanup\n") throw new Error("invalid cleanup frame"); proc.cleanupRequests++; return value.length; },
+        end() { signalCode = "SIGKILL"; resolveExit?.(1); return 0; },
+      },
+    };
+    return proc;
+  },
+};
+const mod = await import(pathToFileURL(process.argv[1]).href);
+const client = {
+  app: {async log(entry) { logs.push(entry); }},
+  tui: {async showToast(entry) { toasts.push(entry); if (holdToast) await new Promise(() => {}); }},
+  session: {async promptAsync() { throw new Error("pre-tool guard must not prompt the model"); }},
+};
+const hooks = await mod.SpecContractGuard({worktree: process.argv[2], client});
+const before = hooks["tool.execute.before"];
+if (typeof before !== "function") throw new Error("native tool.execute.before hook is absent");
+
+results.push(allow(), allow(), allow(), allow());
+await before({tool: "bash", sessionID: "safe-session", callID: "safe-call"}, {args: {command: "go test ./..."}});
+if (calls.length !== 4) throw new Error("safe Bash call did not traverse four guards: " + calls.length);
+const expectedPaths = [
+  ".opencode/hooks/pretool-spawn-routing",
+  ".opencode/hooks/pretool-bead-close-guard",
+  ".opencode/hooks/pretool-bypass-guard",
+  ".opencode/hooks/pretool-pr-guard",
+];
+const expectedTimeouts = [5000, 30000, 5000, 5000];
+for (let index = 0; index < 4; index++) {
+  const call = calls[index];
+  if (call.args.slice(4).join("|") !== [process.argv[2] + "/" + expectedPaths[index]].join("|")) throw new Error("guard argv: " + JSON.stringify(call.args));
+  if (call.options.cwd !== process.argv[2] || call.options.detached !== true || JSON.stringify(call.options.stdio.slice(0, 4)) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || call.options.stdio.length !== 5 || !Number.isInteger(call.options.stdio[4]) || "timeout" in call.options || "maxBuffer" in call.options) throw new Error("guard supervisor bounds: " + JSON.stringify(call.options));
+  if (!call.args[2].includes('exec 0<&4') || !call.args[2].includes('kill -KILL 0')) throw new Error("guard did not use the trusted payload and cleanup supervisor");
+  const payload = JSON.parse(call.payload);
+  if (payload.tool_name !== "Bash" || payload.tool_input.command !== "go test ./...") throw new Error("legacy guard envelope: " + JSON.stringify(payload));
+  if (timers[index].milliseconds !== expectedTimeouts[index] || !timers[index].cleared) throw new Error("guard deadline was not explicit and cleared: " + JSON.stringify(timers[index]));
+}
+if (toasts.length !== 0 || logs.length !== 0) throw new Error("safe guards produced feedback");
+
+results.push({exitCode: 0, stdout: encoded(JSON.stringify({hookSpecificOutput: {additionalContext: "route this launch through AGM"}})), stderr: new Uint8Array()});
+holdToast = true;
+await before({tool: "scheduled-tasks_create_scheduled_task", sessionID: "route-session", callID: "route-call"}, {args: {name: "nightly"}});
+if (calls.length !== 5 || !calls.at(-1).args.at(-1).endsWith(expectedPaths[0])) throw new Error("scheduled-task routing used the wrong guard set");
+if (toasts.length !== 1 || toasts[0].body.variant !== "warning" || !toasts[0].body.message.includes("through AGM")) throw new Error("routing reminder did not preserve non-blocking native feedback: " + JSON.stringify(toasts));
+const scheduledPayload = JSON.parse(calls.at(-1).payload);
+if (scheduledPayload.tool_name !== "mcp__scheduled-tasks__create_scheduled_task" || scheduledPayload.tool_input.name !== "nightly") throw new Error("scheduled-task guard envelope: " + JSON.stringify(scheduledPayload));
+holdToast = false;
+
+results.push(
+  allow(),
+  allow(),
+  {exitCode: 2, stdout: encoded(JSON.stringify({hookSpecificOutput: {permissionDecision: "deny", additionalContext: "use the approved wrapper"}})), stderr: new Uint8Array()},
+);
+let denied = "";
+try {
+  await before({tool: "bash", sessionID: "deny-session", callID: "deny-call"}, {args: {command: "git commit --no-verify"}});
+} catch (error) { denied = String(error?.message || error); }
+if (!denied.includes("approved wrapper")) throw new Error("native denial was not preserved: " + denied);
+if (calls.length !== 8) throw new Error("denied guard allowed later scripts to run: " + calls.length);
+
+results.push(
+  allow(),
+  allow(),
+  allow(),
+  {exitCode: 2, stdout: new Uint8Array(), stderr: encoded("route raw gh lifecycle through safe-pr")},
+);
+let stderrDenied = "";
+try {
+  await before({tool: "bash", sessionID: "pr-deny-session", callID: "pr-deny-call"}, {args: {command: "gh pr create"}});
+} catch (error) { stderrDenied = String(error?.message || error); }
+if (!stderrDenied.includes("safe-pr")) throw new Error("stderr-only native denial was not preserved: " + stderrDenied);
+if (calls.length !== 12) throw new Error("stderr-denied guard used the wrong script sequence: " + calls.length);
+
+results.push(
+  allow(),
+  {exitCode: 0, stdout: encoded(JSON.stringify({hookSpecificOutput: {additionalContext: "bead-close-guard error (failing open): dependency unavailable"}})), stderr: new Uint8Array()},
+  allow(),
+  allow(),
+);
+await before({tool: "bash", sessionID: "advisory-session", callID: "advisory-call"}, {args: {command: "bd close ce-test"}});
+if (calls.length !== 16 || toasts.length !== 2 || !toasts.at(-1).body.message.includes("failing open")) throw new Error("legacy advisory was upgraded to a block or lost: " + JSON.stringify(toasts));
+
+results.push({exitCode: 0, stdout: encoded("null"), stderr: new Uint8Array()});
+let malformed = "";
+try {
+  await before({tool: "bash", sessionID: "malformed-session", callID: "malformed-call"}, {args: {command: "echo safe"}});
+} catch (error) { malformed = String(error?.message || error); }
+if (!malformed.includes("non-object JSON response")) throw new Error("malformed guard output did not fail closed: " + malformed);
+if (calls.length !== 17) throw new Error("malformed guard output allowed later scripts to run: " + calls.length);
+
+results.push({exitCode: 0, stdout: encoded(JSON.stringify({hookSpecificOutput: {permissionDecision: "allow"}, permissionDecision: "deny"})), stderr: new Uint8Array()});
+let conflicting = "";
+try {
+  await before({tool: "bash", sessionID: "conflicting-session", callID: "conflicting-call"}, {args: {command: "echo safe"}});
+} catch (error) { conflicting = String(error?.message || error); }
+if (!conflicting.includes("conflicting permission decisions")) throw new Error("conflicting guard decisions did not fail closed: " + conflicting);
+if (calls.length !== 18) throw new Error("conflicting guard decisions allowed later scripts to run: " + calls.length);
+
+results.push({pending: true});
+const timerCount = timers.length;
+let timedOut = "";
+const timeoutRun = before({tool: "bash", sessionID: "timeout-session", callID: "timeout-call"}, {args: {command: "echo safe"}}).catch((error) => { timedOut = String(error?.message || error); });
+while (timers.length === timerCount) await Promise.resolve();
+timers.at(-1).callback();
+await timeoutRun;
+if (!timedOut.includes("failed (timeout)")) throw new Error("guard timeout did not fail closed: " + timedOut);
+
+const beforeOversize = calls.length;
+let oversize = "";
+try {
+  await before({tool: "bash", sessionID: "oversize-session", callID: "oversize-call"}, {args: {command: "x".repeat(1024 * 1024)}});
+} catch (error) { oversize = String(error?.message || error); }
+if (!oversize.includes("input exceeds 1048576 bytes") || calls.length !== beforeOversize) throw new Error("oversized guard input did not fail before launch: " + oversize);
+
+const beforeUnknown = calls.length;
+await before({tool: "read", sessionID: "read-session", callID: "read-call"}, {args: {filePath: "README.md"}});
+if (calls.length !== beforeUnknown) throw new Error("unrelated tool executed Bash-only guards");
+`
+	command := exec.Command(node, "--input-type=module", "-e", script, plugin, root)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("OpenCode native pre-tool guard projection: %v\n%s", err, output)
+	}
+}
+
 func TestOpenCodeSPECContractPluginTerminatesProcessGroup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("OpenCode source transport deliberately requires POSIX process groups")
@@ -485,7 +697,7 @@ wait "$child"
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
 	script := `
 import {readFileSync} from "node:fs";
 import {spawn} from "node:child_process";
@@ -505,8 +717,8 @@ globalThis.Bun = {
 file(fd) { return {stream() { const stream = statusStreams.get(fd); if (!stream) throw new Error("unknown status fd"); return stream; }}; },
 spawn(args, options) {
   if (options.detached !== true) throw new Error("adapter was not isolated in a process group");
-  if (JSON.stringify(options.stdio) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"])) throw new Error("adapter did not request private control/status pipes");
-  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: true, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe"]});
+  if (JSON.stringify(options.stdio.slice(0, 4)) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || options.stdio.length !== 5 || !Number.isInteger(options.stdio[4])) throw new Error("adapter did not request private control/status/payload descriptors");
+  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: true, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe", options.stdio[4]]});
   supervisorPID = child.pid;
   const statusFD = child.pid + 100000;
   statusStreams.set(statusFD, Readable.toWeb(child.stdio[3]));
@@ -596,7 +808,7 @@ exec "$OPENCODE_NODE" "$OPENCODE_ESCAPE_FIXTURE"
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
 	script := `
 import {readFileSync, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
@@ -615,8 +827,8 @@ const statusStreams = new Map();
 globalThis.Bun = {
 file(fd) { return {stream() { const stream = statusStreams.get(fd); if (!stream) throw new Error("unknown status fd"); return stream; }}; },
 spawn(args, options) {
-  if (JSON.stringify(options.stdio) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"])) throw new Error("adapter did not request private control/status pipes");
-  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: options.detached, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe"]});
+  if (JSON.stringify(options.stdio.slice(0, 4)) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || options.stdio.length !== 5 || !Number.isInteger(options.stdio[4])) throw new Error("adapter did not request private control/status/payload descriptors");
+  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: options.detached, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe", options.stdio[4]]});
   supervisorPID = child.pid;
   const statusFD = child.pid + 100000;
   statusStreams.set(statusFD, Readable.toWeb(child.stdio[3]));
@@ -704,7 +916,7 @@ printf '{}'
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
 	script := `
 import {spawn} from "node:child_process";
 import {Readable} from "node:stream";
@@ -722,8 +934,8 @@ const statusStreams = new Map();
 globalThis.Bun = {
 file(fd) { return {stream() { const stream = statusStreams.get(fd); if (!stream) throw new Error("unknown status fd"); return stream; }}; },
 spawn(args, options) {
-  if (JSON.stringify(options.stdio) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"])) throw new Error("adapter did not request private control/status pipes");
-  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: options.detached, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe"]});
+  if (JSON.stringify(options.stdio.slice(0, 4)) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || options.stdio.length !== 5 || !Number.isInteger(options.stdio[4])) throw new Error("adapter did not request private control/status/payload descriptors");
+  const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: options.detached, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe", options.stdio[4]]});
   supervisorPID = child.pid;
   const statusFD = child.pid + 100000;
   statusStreams.set(statusFD, Readable.toWeb(child.stdio[3]));
@@ -800,7 +1012,7 @@ wait "$child"
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+	plugin := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
 	script := `
 import {existsSync, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
@@ -815,7 +1027,8 @@ const statusStreams = new Map();
 globalThis.Bun = {
   file(fd) { return {stream() { const stream = statusStreams.get(fd); if (!stream) throw new Error("unknown status fd"); return stream; }}; },
   spawn(args, options) {
-    const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: options.detached, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe"]});
+    if (JSON.stringify(options.stdio.slice(0, 4)) !== JSON.stringify(["pipe", "pipe", "pipe", "pipe"]) || options.stdio.length !== 5 || !Number.isInteger(options.stdio[4])) throw new Error("adapter did not request private control/status/payload descriptors");
+    const child = spawn(args[0], args.slice(1), {cwd: options.cwd, detached: options.detached, env: process.env, stdio: ["pipe", "pipe", "pipe", "pipe", options.stdio[4]]});
     const statusFD = child.pid + 100000;
     statusStreams.set(statusFD, Readable.toWeb(child.stdio[3]));
     let signalCode = null;

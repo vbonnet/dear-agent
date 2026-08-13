@@ -1,16 +1,129 @@
 import process from "node:process";
-import {closeSync} from "node:fs";
+import {closeSync, constants as fsConstants, mkdtempSync, openSync, rmdirSync, unlinkSync, writeSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {isAbsolute, join} from "node:path";
 import {setTimeout as delay} from "node:timers/promises";
 
-// Source-only OpenCode transport. It cannot block session termination; a
-// failing result is one bounded follow-up prompt per real session turn.
+// Repository-local OpenCode transport. Native before-tool hooks preserve the
+// repository guard decisions; session termination itself cannot be blocked,
+// so terminal feedback remains one bounded follow-up per real session turn.
 const maxAdapterOutputBytes = 64 * 1024;
+const maxGuardOutputBytes = 64 * 1024;
+const maxGuardInputBytes = 1024 * 1024;
 const maxSupervisorStatusBytes = 4;
 const adapterTimeoutMs = 60_000;
 const adapterDrainMs = 250;
 const supervisorReapMs = 1_000;
 const maxTrackedMessageIDs = 4096;
 const maxTrackedSessions = 256;
+const preToolGuards = Object.freeze([
+  {path: ".opencode/hooks/pretool-spawn-routing", timeout: 5_000},
+  {path: ".opencode/hooks/pretool-bead-close-guard", timeout: 30_000},
+  {path: ".opencode/hooks/pretool-bypass-guard", timeout: 5_000},
+  {path: ".opencode/hooks/pretool-pr-guard", timeout: 5_000},
+]);
+
+function preToolGuardPlan(tool) {
+  if (tool === "bash") return preToolGuards;
+  if (tool === "scheduled-tasks_create_scheduled_task" || tool === "mcp__scheduled-tasks__create_scheduled_task") return preToolGuards.slice(0, 1);
+  return [];
+}
+
+function legacyToolName(tool) {
+  if (tool === "bash") return "Bash";
+  if (tool === "scheduled-tasks_create_scheduled_task") return "mcp__scheduled-tasks__create_scheduled_task";
+  return tool;
+}
+
+function decodeGuardOutput(value) {
+  if (typeof value === "string") return {bytes: new TextEncoder().encode(value).byteLength, text: value.trim()};
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value || []);
+  return {bytes: bytes.byteLength, text: new TextDecoder().decode(bytes).trim()};
+}
+
+function parseGuardResponse(stdout) {
+  if (!stdout) return {};
+  let response;
+  try { response = JSON.parse(stdout); } catch (error) {
+    return {error: `returned invalid JSON: ${error?.message || error}`};
+  }
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    return {error: "returned a non-object JSON response"};
+  }
+  const hookOutput = response?.hookSpecificOutput;
+  if (hookOutput !== undefined && (!hookOutput || typeof hookOutput !== "object" || Array.isArray(hookOutput))) {
+    return {error: "returned an invalid hookSpecificOutput"};
+  }
+  for (const [name, value] of [
+    ["hookSpecificOutput.additionalContext", hookOutput?.additionalContext],
+    ["denialReason", response?.denialReason],
+    ["reason", response?.reason],
+  ]) {
+    if (value !== undefined && typeof value !== "string") return {error: `returned a non-string ${name}`};
+  }
+  const message = [
+    hookOutput?.additionalContext,
+    response?.denialReason,
+    response?.reason,
+  ].find((value) => typeof value === "string" && value.trim())?.trim();
+  const decisions = [hookOutput?.permissionDecision, response?.permissionDecision].filter((value) => value !== undefined);
+  if (decisions.some((decision) => decision !== "allow" && decision !== "deny")) {
+    return {error: "returned an unsupported permission decision"};
+  }
+  if (decisions.length === 2 && decisions[0] !== decisions[1]) return {error: "returned conflicting permission decisions"};
+  const decision = decisions[0];
+  return {blocked: decision === "deny", message};
+}
+
+function anonymousPayloadFD(payload) {
+  const directory = mkdtempSync(join(tmpdir(), "dear-agent-opencode-hook-"));
+  const path = join(directory, "payload");
+  let descriptor;
+  try {
+    descriptor = openSync(path, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_RDWR, 0o600);
+    unlinkSync(path);
+    rmdirSync(directory);
+    const bytes = new TextEncoder().encode(payload);
+    let written = 0;
+    while (written < bytes.byteLength) written += writeSync(descriptor, bytes, written, bytes.byteLength - written, written);
+    return descriptor;
+  } catch (error) {
+    if (descriptor !== undefined) try { closeSync(descriptor); } catch { /* Preserve the creation error. */ }
+    try { unlinkSync(path); } catch { /* The file may already be anonymous. */ }
+    try { rmdirSync(directory); } catch { /* Preserve the creation error. */ }
+    throw error;
+  }
+}
+
+async function runPreToolGuard(root, guard, payload) {
+  if (typeof root !== "string" || !isAbsolute(root)) {
+    return {error: "OpenCode did not provide an absolute project worktree"};
+  }
+  if (process.platform === "win32") {
+    return {error: "OpenCode repository pre-tool guards require a POSIX shell"};
+  }
+  const result = await runAdapter(root, {
+    args: [join(root, guard.path)],
+    input: payload,
+    timeout: guard.timeout,
+    raw: true,
+  });
+  if (result.error) return {error: `${guard.path}: ${result.error}`};
+  const stdout = decodeGuardOutput(result?.stdout);
+  const stderr = decodeGuardOutput(result?.stderr);
+  if (stdout.bytes + stderr.bytes > maxGuardOutputBytes) {
+    return {error: `${guard.path} exceeded ${maxGuardOutputBytes} combined output bytes`};
+  }
+  const parsed = parseGuardResponse(stdout.text);
+  if (parsed.error) return {error: `${guard.path} ${parsed.error}`};
+  if (result?.exitCode === 2 || parsed.blocked) {
+    return {blocked: true, message: parsed.message || stderr.text || `${guard.path} denied this tool call`};
+  }
+  if (result?.exitCode !== 0) {
+    return {error: `${guard.path} failed with exit ${result?.exitCode}${stderr.text ? `: ${stderr.text}` : ""}`};
+  }
+  return parsed.message ? {message: parsed.message} : {};
+}
 
 // The detached shell remains the group leader until its private stdin control
 // pipe receives cleanup or EOF. Its monitor then self-signals the current
@@ -18,26 +131,30 @@ const maxTrackedSessions = 256;
 // receives neither control stdin nor the supervisor-only status descriptor.
 const supervisorProgram = `
 trap '' HUP INT QUIT TERM PIPE
-exec 4<&0
+exec 5<&0
 (
   trap '' HUP INT QUIT TERM PIPE
   exec 3>&-
-  exec 4<&-
+  exec 4>&-
+  exec 5>&-
   IFS= read -r _ || :
   while :; do
     kill -KILL 0
     /bin/sleep 0.05 || :
   done
-) 0<&4 >/dev/null 2>&1 &
+) 0<&5 >/dev/null 2>&1 &
 cleanup_monitor=$!
-exec 4<&-
+exec 5<&-
 (
   trap - HUP INT QUIT TERM PIPE
   exec 3>&-
-  exec </dev/null
+  exec 5>&-
+  exec 0<&4
+  exec 4>&-
   exec "$@"
 ) &
 hook_pid=$!
+exec 4>&-
 wait "$hook_pid"
 hook_status=$?
 printf '%s\\n' "$hook_status" >&3 || :
@@ -92,7 +209,7 @@ function boundedReader(stream, streamName, budget, terminate, maxBytes = maxAdap
   return {cancel, read};
 }
 
-async function runAdapter(worktree) {
+async function runAdapter(worktree, invocation = {}) {
   if (typeof worktree !== "string" || !worktree) {
     return {error: "OpenCode did not provide a project worktree"};
   }
@@ -100,15 +217,19 @@ async function runAdapter(worktree) {
     return {error: "OpenCode SPEC contract adapter requires POSIX process-group termination"};
   }
   let proc;
+  let payloadFD;
   try {
+    payloadFD = anonymousPayloadFD(invocation.input || "");
     proc = Bun.spawn([
       "/bin/sh", "-c", supervisorProgram, "dear-agent-opencode-spec-supervisor",
-      "go", "run", "./cmd/spec-contract-hook", "--root", worktree, "--provider", "opencode", "--event", "Stop",
+      ...(invocation.args || ["go", "run", "./cmd/spec-contract-hook", "--root", worktree, "--provider", "opencode", "--event", "Stop"]),
     ], {
-      cwd: worktree, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"],
+      cwd: worktree, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe", payloadFD],
     });
   } catch (error) {
     return {error: `could not start shared Go SPEC contract adapter supervisor: ${error?.message || error}`};
+  } finally {
+    if (payloadFD !== undefined) try { closeSync(payloadFD); } catch { /* The child owns its duplicated descriptor. */ }
   }
 
   const readers = [];
@@ -127,9 +248,10 @@ async function runAdapter(worktree) {
   );
   const requestSupervisorCleanup = () => {
     if (cleanupRequestPromise) return cleanupRequestPromise;
-    // stdin is a supervisor-only control pipe. The real hook receives
-    // /dev/null, while EOF also gives the monitor an independent parent-death
-    // cleanup signal. No parent-side numeric process identity is ever used.
+    // stdin is a supervisor-only control pipe. The real hook receives only
+    // the anonymous payload descriptor as stdin, while control-pipe EOF gives
+    // the monitor an independent parent-death cleanup signal. No parent-side
+    // numeric process identity is ever used.
     cleanupRequestPromise = (async () => {
       try {
         if (!proc.stdin?.write || !proc.stdin?.end) throw new Error("supervisor control pipe is unavailable");
@@ -218,7 +340,7 @@ async function runAdapter(worktree) {
       }
       return {exitCode};
     });
-    timeout = setTimeout(() => terminate({kind: "timeout"}), adapterTimeoutMs);
+    timeout = setTimeout(() => terminate({kind: "timeout"}), invocation.timeout || adapterTimeoutMs);
     const phase = await Promise.race([
       statusPromise.then((status) => ({kind: "status", status})),
       supervisorExit.then((outcome) => ({kind: "supervisor-exit", outcome})),
@@ -287,6 +409,7 @@ async function runAdapter(worktree) {
     if (rejected) return {error: `shared Go SPEC contract adapter transport failed: ${rejected.reason?.message || rejected.reason}`};
     const stdout = readerSettlement.results[0].value.trim();
     const stderr = readerSettlement.results[1].value.trim();
+    if (invocation.raw) return {exitCode: adapterExitCode, stdout, stderr};
     if (adapterExitCode !== 0) {
       return {error: `shared Go SPEC contract adapter failed${stderr ? `: ${stderr}` : ""}`};
     }
@@ -342,7 +465,34 @@ export const SpecContractGuard = async ({client, worktree, directory}) => {
     collection.add(messageID);
     return "new";
   };
-  return {event: async ({event}) => {
+  const beforeTool = async (input, output) => {
+    const plan = preToolGuardPlan(input?.tool);
+    if (plan.length === 0) return;
+    const root = worktree || directory;
+    const toolName = legacyToolName(input.tool);
+    const payload = JSON.stringify({tool_name: toolName, tool_input: output?.args || {}});
+    if (new TextEncoder().encode(payload).byteLength > maxGuardInputBytes) {
+      throw new Error(`OpenCode repository guard input exceeds ${maxGuardInputBytes} bytes`);
+    }
+    for (const guard of plan) {
+      const result = await runPreToolGuard(root, guard, payload);
+      if (result.error) throw new Error(`OpenCode repository guard unavailable: ${result.error}`);
+      if (result.blocked) throw new Error(result.message);
+      if (!result.message) continue;
+      const discloseFailure = (error) => void log({
+          service: "dear-agent-pretool-guard",
+          level: "warn",
+          message: `${result.message} (OpenCode toast unavailable: ${error?.message || error})`,
+        });
+      try {
+        if (!client.tui?.showToast) throw new Error("TUI toast transport is unavailable");
+        void Promise.resolve(client.tui.showToast({body: {message: result.message, variant: "warning"}})).catch(discloseFailure);
+      } catch (error) {
+        discloseFailure(error);
+      }
+    }
+  };
+  const event = async ({event}) => {
     if (event.type === "session.deleted") {
       const sessionID = event.properties?.info?.id || event.properties?.sessionID;
       if (sessionID && sessions.delete(sessionID)) sessionCapacityWarned = false;
@@ -388,5 +538,6 @@ export const SpecContractGuard = async ({client, worktree, directory}) => {
     } catch (error) {
       void log({service: "dear-agent-spec-contract", level: "warn", message: `OpenCode SPEC contract follow-up failed: ${error?.message || error}`});
     }
-  }};
+  };
+  return {"tool.execute.before": beforeTool, event};
 };

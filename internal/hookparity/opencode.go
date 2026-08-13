@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 )
 
-const openCodePluginReplacement = ".opencode/plugins/spec-contract-guard.mjs"
+const openCodePluginReplacement = ".opencode/plugins/spec-contract-guard.js"
 
 // OpenCodeLegacyProjectionIsInactive accepts either an absent legacy manifest
 // or the exact governed retirement tombstone. Any hook payload, extra metadata,

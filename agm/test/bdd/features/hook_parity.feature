@@ -1,4 +1,6 @@
 # SPEC: internal/hookparity/SPEC.md
+# RELATED-SPEC: .opencode/SPEC.md
+# RELATED-SPEC: .opencode/hooks/SPEC.md
 # RELATED-SPEC: .codex/hooks/SPEC.md
 # RELATED-SPEC: .pi/guardrails/SPEC.md
 # RELATED-SPEC: agm/internal/permissionparity/piadapter/SPEC.md
@@ -43,6 +45,10 @@ Feature: Hook harness parity
       | codex-cli    | pretool-bypass-guard       |
       | codex-cli    | pretool-pr-guard           |
       | codex-cli    | stop-guardrail-feedback    |
+      | opencode-cli | pretool-spawn-routing      |
+      | opencode-cli | pretool-bead-close-guard   |
+      | opencode-cli | pretool-bypass-guard       |
+      | opencode-cli | pretool-pr-guard           |
       | pi-cli       | pretool-spawn-routing      |
       | pi-cli       | pretool-bead-close-guard   |
       | pi-cli       | pretool-bypass-guard       |

@@ -123,13 +123,19 @@ func agmValidatesHookParityForThatHarness(ctx context.Context) error {
 		state.specContractReview = len(entries) == 1 && entries[0].Command == "/usr/local/libexec/dear-agent-spec-contract-hook --root-from-workspace-stdin --provider antigravity --event Stop"
 		state.unsupportedOmitted = len(settings) == 1 && len(settings["spec-contract-guard"]) == 1
 	case "opencode-cli":
-		path := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.mjs")
+		path := filepath.Join(root, ".opencode", "plugins", "spec-contract-guard.js")
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read hook plugin %s: %w", path, err)
 		}
 		plugin := string(data)
 		state.specContractReview = strings.Contains(plugin, "session.idle") && strings.Contains(plugin, "cmd/spec-contract-hook") && strings.Contains(plugin, `"opencode"`) && strings.Contains(plugin, "promptAsync")
+		state.hooks = map[string][]bddHookGroup{"PreToolUse": {{Hooks: []bddHookEntry{
+			{Command: pluginGuardCommand(plugin, ".opencode/hooks/pretool-spawn-routing")},
+			{Command: pluginGuardCommand(plugin, ".opencode/hooks/pretool-bead-close-guard")},
+			{Command: pluginGuardCommand(plugin, ".opencode/hooks/pretool-bypass-guard")},
+			{Command: pluginGuardCommand(plugin, ".opencode/hooks/pretool-pr-guard")},
+		}}}}
 		state.unsupportedOmitted, err = hookparity.OpenCodeLegacyProjectionIsInactive(root)
 		if err != nil {
 			return err
@@ -154,6 +160,13 @@ func agmValidatesHookParityForThatHarness(ctx context.Context) error {
 		return fmt.Errorf("harness %q has no validated hook capability", state.harness)
 	}
 	return nil
+}
+
+func pluginGuardCommand(plugin, command string) string {
+	if strings.Contains(plugin, `"tool.execute.before"`) && strings.Contains(plugin, command) {
+		return command
+	}
+	return ""
 }
 
 func hookHarnessShouldIncludeGuardrailHook(ctx context.Context, harness, guardrail string) error {
