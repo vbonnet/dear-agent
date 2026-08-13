@@ -63,6 +63,34 @@ func TestReadQuotaStatusWarnsOnThrottleAndLowRemaining(t *testing.T) {
 	}
 }
 
+func TestReadQuotaStatusSelectsCodexBarProviderRecord(t *testing.T) {
+	home := t.TempDir()
+	path := QuotaPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	data := `{
+		"generatedAt":"2026-08-12T12:00:00Z",
+		"providers":[
+			{"family":"anthropic","sourceId":"claude","remainingPercent":81,"breakerState":"closed"},
+			{"family":"openai","sourceId":"codex","remainingPercent":46,"breakerState":"throttled","overspending":true}
+		]
+	}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	got := ReadQuotaStatus(home, "codex", time.Date(2026, 8, 12, 12, 5, 0, 0, time.UTC))
+	if !got.Available {
+		t.Fatalf("quota available = false, reason %q", got.Reason)
+	}
+	if !got.Warning {
+		t.Fatalf("quota warning = false, want throttled provider warning")
+	}
+	if got.Data["sourceId"] != "codex" {
+		t.Fatalf("selected provider = %v, want codex record", got.Data["sourceId"])
+	}
+}
+
 func TestReadQuotaStatusUnavailableWhenStateMissing(t *testing.T) {
 	got := ReadQuotaStatus(t.TempDir(), "codex", time.Now())
 	if got.Available {

@@ -90,16 +90,43 @@ func ReadQuotaStatus(homeDir, provider string, now time.Time) QuotaStatus {
 		result.Reason = "parse quota state: " + err.Error()
 		return result
 	}
+	selected := selectProvider(payload, provider)
 	result.Available = true
-	result.Data = payload
-	result.UpdatedAt = firstString(payload, "updated_at", "timestamp", "captured_at", "generated_at")
+	result.Data = selected
+	result.UpdatedAt = firstString(payload, "updated_at", "updatedAt", "timestamp", "captured_at", "capturedAt", "generated_at", "generatedAt", "writtenAt")
 	if result.UpdatedAt != "" {
 		if ts, err := time.Parse(time.RFC3339, result.UpdatedAt); err == nil {
 			result.Stale = now.Sub(ts) > 30*time.Minute
 		}
 	}
-	result.Warning = result.Stale || boolValue(payload, "throttled") || lowRemaining(payload) || strings.TrimSpace(firstString(payload, "warning", "reason")) != ""
+	result.Warning = result.Stale || boolValue(selected, "throttled", "warning", "overspending") ||
+		strings.EqualFold(firstString(selected, "breaker_state", "breakerState"), "throttled") ||
+		lowRemaining(selected)
 	return result
+}
+
+func selectProvider(payload map[string]any, provider string) map[string]any {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return payload
+	}
+	if providers, ok := payload["providers"].([]any); ok {
+		for _, item := range providers {
+			candidate, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, key := range []string{"provider", "source_id", "sourceId", "family"} {
+				if strings.EqualFold(firstString(candidate, key), provider) {
+					return candidate
+				}
+			}
+		}
+	}
+	if nested, ok := payload[provider].(map[string]any); ok {
+		return nested
+	}
+	return payload
 }
 
 func firstString(m map[string]any, keys ...string) string {
@@ -111,13 +138,18 @@ func firstString(m map[string]any, keys ...string) string {
 	return ""
 }
 
-func boolValue(m map[string]any, key string) bool {
-	value, _ := m[key].(bool)
-	return value
+func boolValue(m map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		value, _ := m[key].(bool)
+		if value {
+			return true
+		}
+	}
+	return false
 }
 
 func lowRemaining(m map[string]any) bool {
-	for _, key := range []string{"remaining_percent", "remaining_pct", "percent_remaining"} {
+	for _, key := range []string{"remaining_percent", "remainingPercent", "remaining_pct", "percent_remaining"} {
 		switch value := m[key].(type) {
 		case float64:
 			return value <= 20
