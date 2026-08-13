@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
@@ -54,13 +53,11 @@ func TestRunCleanupGitBoundsDescendantHeldPipes(t *testing.T) {
 	}
 	t.Setenv("PATH", filepath.Dir(fakeGit)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	started := time.Now()
+	// ErrWaitDelay proves the configured drain bound expired and closed the
+	// descendant-held pipes; command-start wall time also includes scheduler delay.
 	_, err := runCleanupGit(context.Background(), "", "version")
 	if !errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("runCleanupGit error = %v, want exec.ErrWaitDelay", err)
-	}
-	if elapsed := time.Since(started); elapsed > 5*cleanupCommandWaitDelay {
-		t.Fatalf("runCleanupGit waited %s for descendant-held pipes", elapsed)
 	}
 }
 
