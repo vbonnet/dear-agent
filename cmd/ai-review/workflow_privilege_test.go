@@ -400,7 +400,7 @@ jobs:
 	}
 }
 
-func TestBuildReviewPlan_PrivilegedWorkflowCannotTakeCredentiallessNeutral(t *testing.T) {
+func TestBuildReviewPlan_PrivilegedWorkflowProducesKeylessCannotRunEvidence(t *testing.T) {
 	guardWeakened := strings.Replace(criticalWorkflow, `contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association)`, "contains(github.event.comment.body, '@agent')", 1)
 	base, head, _ := workflowGitFixture(t, ".github/workflows/claude.yml", new(criticalWorkflow), new(guardWeakened))
 
@@ -417,8 +417,8 @@ func TestBuildReviewPlan_PrivilegedWorkflowCannotTakeCredentiallessNeutral(t *te
 
 	c := baseConfig()
 	c.baseSHA, c.headSHA = base, head
-	if got := run(c); got != 1 {
-		t.Fatalf("credentialless privileged workflow run = %d, want human-review block", got)
+	if got := run(c); got != exitKeylessCannotRun {
+		t.Fatalf("credentialless privileged workflow run = %d, want blocking cannot-run code %d", got, exitKeylessCannotRun)
 	}
 }
 
