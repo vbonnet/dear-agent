@@ -17,10 +17,10 @@
 //	free   : < 20 GiB WARN, < 5 GiB CRITICAL
 //	inodes : > 90% WARN, > 95% CRITICAL
 //
-// Remediation reuses the sanctioned safe hook `agm worktree sweep --execute`,
-// which removes only provably-MERGED, clean worktrees (squash-safe ancestor/PR
-// oracle; dirty, active, and unpushed work is never touched — see
-// agm/internal/ops.Sweep). No new destructive cleanup is invented here.
+// Remediation reuses sanctioned safe hooks: first `agm sandbox gc --reap`,
+// then `agm worktree sweep --execute`. The sandbox GC re-verifies live-session,
+// process, mount, path, and age gates; the worktree sweep removes only
+// provably-MERGED, clean worktrees. No new destructive cleanup is invented here.
 //
 // Usage:
 //
@@ -198,9 +198,18 @@ func defaultTrailPath() string {
 // sweepResult is the parsed JSON contract of `agm worktree sweep -o json`
 // (a subset; field names mirror agm/internal/ops.SweepResult).
 type sweepResult struct {
-	Removed []string          `json:"removed"`
-	Failed  map[string]string `json:"failed,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	SandboxGC *sandboxGCSummary `json:"sandbox_gc,omitempty"`
+	Removed   []string          `json:"removed"`
+	Failed    map[string]string `json:"failed,omitempty"`
+	Error     string            `json:"error,omitempty"`
+}
+
+type sandboxGCSummary struct {
+	Scanned int    `json:"scanned"`
+	Reaped  int    `json:"reaped"`
+	Kept    int    `json:"kept"`
+	Errors  int    `json:"errors"`
+	Error   string `json:"error,omitempty"`
 }
 
 // sweepMergedWorktrees delegates remediation to the canonical worktree sweep,
@@ -225,15 +234,26 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 		}
 	}
 
+	result := &sweepResult{}
+	gcOut, gcErr := run(ctx, cfg.agmBin, "sandbox", "gc", "--reap", "--json")
+	if gcErr != nil {
+		result.SandboxGC = &sandboxGCSummary{Error: gcErr.Error()}
+	} else if err := json.Unmarshal(gcOut, &result.SandboxGC); err != nil {
+		result.SandboxGC = &sandboxGCSummary{Error: fmt.Sprintf("parse sandbox gc output: %v", err)}
+	}
+
 	out, err := run(ctx, cfg.agmBin, "worktree", "sweep", "--execute", "-o", "json")
 	if err != nil {
-		return nil, fmt.Errorf("%s worktree sweep --execute: %w", cfg.agmBin, err)
+		result.Error = fmt.Sprintf("%s worktree sweep --execute: %v", cfg.agmBin, err)
+		return result, fmt.Errorf("%s worktree sweep --execute: %w", cfg.agmBin, err)
 	}
-	var r sweepResult
-	if err := json.Unmarshal(out, &r); err != nil {
+	if err := json.Unmarshal(out, result); err != nil {
 		return nil, fmt.Errorf("parse worktree sweep output: %w", err)
 	}
-	return &r, nil
+	if result.SandboxGC != nil && result.SandboxGC.Error != "" {
+		result.Error = fmt.Sprintf("%s sandbox gc --reap: %s", cfg.agmBin, result.SandboxGC.Error)
+	}
+	return result, nil
 }
 
 // brakeSource identifies this watchdog in the admission-brake record.
@@ -339,6 +359,9 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 			"worktrees_removed": len(rem.Removed),
 			"removed":           rem.Removed,
 		}
+		if rem.SandboxGC != nil {
+			remediation["sandbox_gc"] = rem.SandboxGC
+		}
 		if len(rem.Failed) > 0 {
 			remediation["failed"] = rem.Failed
 		}
@@ -412,7 +435,12 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	case rem.Error != "":
 		fmt.Fprintf(out, "Remediation: FAILED (%s)\n", rem.Error)
 	default:
-		fmt.Fprintf(out, "Remediation: reaped %d provably-merged worktree(s)", len(rem.Removed))
+		if rem.SandboxGC != nil {
+			fmt.Fprintf(out, "Remediation: reaped %d sandbox(es); reaped %d provably-merged worktree(s)",
+				rem.SandboxGC.Reaped, len(rem.Removed))
+		} else {
+			fmt.Fprintf(out, "Remediation: reaped %d provably-merged worktree(s)", len(rem.Removed))
+		}
 		if len(rem.Failed) > 0 {
 			fmt.Fprintf(out, " (%d failed)", len(rem.Failed))
 		}
