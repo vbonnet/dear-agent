@@ -290,7 +290,7 @@ func WaitForSocket(timeout time.Duration) error {
 		if err != nil {
 			return false
 		}
-		_ = conn.Close()
+		conn.Close()
 		return true
 	}, time.Sleep)
 }
