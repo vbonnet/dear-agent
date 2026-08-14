@@ -405,9 +405,7 @@ func loadConfigWithFlags() (*config.Config, error) {
 	// (e.g., ~/src/ws/oss/repos/engram-research/.agm)
 	if cfg.Storage.Mode == "centralized" {
 		if err := config.EnsureSymlinkBootstrap(cfg); err != nil {
-			// Log warning but don't fail - allow AGM to continue in degraded mode
-			fmt.Fprintf(os.Stderr, "Warning: Failed to setup centralized storage symlink: %v\n", err)
-			fmt.Fprintf(os.Stderr, "Continuing with dotfile mode. Run 'agm storage verify' for details.\n")
+			return nil, fmt.Errorf("setup centralized storage: %w", err)
 		}
 	}
 

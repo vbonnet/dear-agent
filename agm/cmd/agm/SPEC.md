@@ -77,6 +77,10 @@ Provide a production-ready CLI that:
 
 **CLI-56** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
 
+**CLI-57** When AGM provisions a sandbox, the command shall validate one loaded runtime authority and one exact session child beneath its retained physical sandbox root before provider selection, and repository fallback discovery shall use the retained physical HOME rather than later process environment changes.
+
+**CLI-58** When centralized-storage compatibility bootstrap cannot complete for loaded configuration, the system shall return no usable configuration before command activation and shall not claim a dotfile fallback.
+
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
 **CLI-25** When `agm new` runs inside tmux without `--detached` for Claude Code, Codex, OpenCode, Pi, or deprecated Gemini compatibility, the system shall route into current-pane creation, require the harness's canonical executable, queue the canonical launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns; Pi shall use its managed canonical launch contract, and Claude's SessionStart hook shall persist the resulting conversation UUID.
@@ -1133,6 +1137,11 @@ agm 3.0.0 (/usr/local/bin/agm)
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+
+## Package Test Traceability
+
+- `agm/cmd/agm/new_sandbox_test.go`
+- `agm/cmd/agm/runtime_authority_test.go`
 
 ## References
 

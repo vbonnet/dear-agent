@@ -122,10 +122,10 @@ func TestSandboxIntegration_Documentation(t *testing.T) {
 
 func TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation(t *testing.T) {
 	testHome := t.TempDir()
-	t.Setenv("HOME", testHome)
+	_, authority := loadSandboxRuntimeAuthority(t, testHome)
 
 	const sessionID = "retired-claudecode-provider"
-	got, err := provisionSandbox(context.Background(), "claudecode-worktree", sessionID, testHome)
+	got, err := provisionSandbox(context.Background(), authority, "claudecode-worktree", sessionID, testHome)
 	if err == nil {
 		t.Fatal("provisionSandbox() error = nil, want retired provider rejection")
 	}
@@ -139,6 +139,187 @@ func TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation
 	if _, statErr := os.Stat(filepath.Join(testHome, ".agm", "sandboxes", sessionID)); !os.IsNotExist(statErr) {
 		t.Fatalf("retired provider materialized a workspace: %v", statErr)
 	}
+}
+
+func TestProvisionSandboxUsesCapturedAuthority(t *testing.T) {
+	for _, mode := range []string{"dotfile", "centralized"} {
+		t.Run(mode, func(t *testing.T) {
+			originalCfg := cfg
+			t.Cleanup(func() { cfg = originalCfg })
+			for _, key := range []string{"ENGRAM_TEST_MODE", "ENGRAM_TEST_WORKSPACE", "ENGRAM_WORKSPACE"} {
+				t.Setenv(key, "")
+			}
+
+			root := t.TempDir()
+			physicalHome := mkdirPhysical(t, filepath.Join(root, "physical-home"))
+			driftHome := mkdirPhysical(t, filepath.Join(root, "drift-home"))
+			driftSentinel := filepath.Join(driftHome, "sentinel")
+			if err := os.WriteFile(driftSentinel, []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logicalHome := filepath.Join(root, "logical-home")
+			if err := os.Symlink(physicalHome, logicalHome); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			t.Setenv("HOME", logicalHome)
+			repoRoot := mkdirPhysical(t, filepath.Join(root, "repo"))
+			driftWorkspace := mkdirPhysical(t, filepath.Join(root, "drift-workspace"))
+
+			configPath := ""
+			selectedWorkspace := ""
+			if mode == "centralized" {
+				selectedWorkspace = mkdirPhysical(t, filepath.Join(root, "selected-workspace"))
+				t.Setenv("ENGRAM_WORKSPACE", selectedWorkspace)
+				configPath = filepath.Join(root, "config.yaml")
+				contents := "storage:\n  mode: centralized\n  workspace: selected\n  relative_path: .agm-work\n"
+				if err := os.WriteFile(configPath, []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			loaded, err := config.Load(configPath)
+			if err != nil {
+				t.Fatalf("config.Load() error = %v", err)
+			}
+			loaded.Sandbox = config.SandboxConfig{
+				Enabled:    true,
+				Repos:      []string{repoRoot},
+				Onboarding: config.OnboardingConfig{Enabled: false},
+			}
+			cfg = loaded
+			authority, err := loaded.RuntimeAuthority()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Remove(logicalHome); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(driftHome, logicalHome); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", driftHome)
+			t.Setenv("ENGRAM_WORKSPACE", driftWorkspace)
+			t.Chdir(driftWorkspace)
+			loaded.Storage = config.StorageConfig{
+				Mode:         "centralized",
+				Workspace:    driftWorkspace,
+				RelativePath: ".drift",
+			}
+
+			const sessionID = "captured-authority-session"
+			sandboxInfo, err := provisionSandbox(context.Background(), authority, "mock", sessionID, repoRoot)
+			if err != nil {
+				t.Fatalf("provisionSandbox() error = %v", err)
+			}
+			sandboxRoot, err := authority.Sandboxes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspacePath, err := sandboxRoot.Workspace(sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := sandboxInfo.MergedPath, filepath.Join(workspacePath, "merged"); got != want {
+				t.Fatalf("MergedPath = %q, want authority-derived %q", got, want)
+			}
+			if mode == "centralized" && !strings.HasPrefix(workspacePath, filepath.Join(selectedWorkspace, ".agm-work", "sandboxes")+string(filepath.Separator)) {
+				t.Fatalf("centralized workspace %q is outside selected .agm-work", workspacePath)
+			}
+			if _, err := os.Lstat(filepath.Join(driftHome, ".agm")); !os.IsNotExist(err) {
+				t.Fatalf("sandbox provisioning mutated drift HOME: %v", err)
+			}
+			if contents, err := os.ReadFile(driftSentinel); err != nil {
+				t.Fatal(err)
+			} else if string(contents) != "preserve" {
+				t.Fatalf("drift sentinel = %q, want preserved", contents)
+			}
+		})
+	}
+}
+
+func TestProvisionSandboxRejectsZeroAuthorityBeforeProviderLookup(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	cfg = &config.Config{Sandbox: config.SandboxConfig{Repos: []string{t.TempDir()}}}
+
+	_, err := provisionSandbox(
+		context.Background(),
+		config.RuntimeAuthority{},
+		"intentionally-unknown-provider",
+		"session",
+		t.TempDir(),
+	)
+	if !errors.Is(err, config.ErrRuntimeAuthorityUnavailable) {
+		t.Fatalf("provisionSandbox() error = %v, want ErrRuntimeAuthorityUnavailable", err)
+	}
+}
+
+func TestProvisionSandboxRejectsEscapingSessionBeforeProviderLookup(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+
+	home := mkdirPhysical(t, t.TempDir())
+	loaded, authority := loadSandboxRuntimeAuthority(t, home)
+	loaded.Sandbox = config.SandboxConfig{
+		Enabled:    true,
+		Repos:      []string{t.TempDir()},
+		Onboarding: config.OnboardingConfig{Enabled: false},
+	}
+	cfg = loaded
+
+	sandboxRoot := filepath.Join(home, ".agm", "sandboxes")
+	if err := os.MkdirAll(sandboxRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	external := mkdirPhysical(t, filepath.Join(t.TempDir(), "external"))
+	const sessionID = "escaping-session"
+	if err := os.Symlink(external, filepath.Join(sandboxRoot, sessionID)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := provisionSandbox(
+		context.Background(),
+		authority,
+		"intentionally-unknown-provider",
+		sessionID,
+		t.TempDir(),
+	)
+	if err == nil {
+		t.Fatal("provisionSandbox() error = nil, want session authority rejection")
+	}
+	if strings.Contains(err.Error(), "failed to create sandbox provider") {
+		t.Fatalf("provisionSandbox() looked up provider before session authority validation: %v", err)
+	}
+	if !strings.Contains(err.Error(), "resolves outside its retained path") {
+		t.Fatalf("provisionSandbox() error = %v, want escaping workspace context", err)
+	}
+}
+
+func loadSandboxRuntimeAuthority(t *testing.T, home string) (*config.Config, config.RuntimeAuthority) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	loaded, err := config.Load("")
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	authority, err := loaded.RuntimeAuthority()
+	if err != nil {
+		t.Fatalf("RuntimeAuthority() error = %v", err)
+	}
+	return loaded, authority
+}
+
+func mkdirPhysical(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	physical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return physical
 }
 
 // withEmptySandboxRepoConfig points cfg at an empty Sandbox.Repos list (so
@@ -352,6 +533,46 @@ func TestResolveSandboxLowerDirs_FailsLoudOnHomeDir(t *testing.T) {
 	}
 }
 
+func TestResolveSandboxLowerDirsAtHomeRejectsRetainedHomeAfterAmbientDrift(t *testing.T) {
+	withEmptySandboxRepoConfig(t)
+	for _, withScannedRepo := range []bool{false, true} {
+		name := "without-scanned-repos"
+		if withScannedRepo {
+			name = "with-unrelated-scanned-repo"
+		}
+		t.Run(name, func(t *testing.T) {
+			retainedHome := mkdirPhysical(t, t.TempDir())
+			if err := os.Mkdir(filepath.Join(retainedHome, ".git"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			nested := filepath.Join(retainedHome, "src", "project")
+			if err := os.MkdirAll(nested, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if withScannedRepo {
+				scannedRepo := filepath.Join(retainedHome, "src", "ws", "oss", "repos", "unrelated")
+				if err := os.MkdirAll(filepath.Join(scannedRepo, ".git"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("HOME", t.TempDir())
+
+			for _, workDir := range []string{retainedHome, nested} {
+				t.Run(filepath.Base(workDir), func(t *testing.T) {
+					dirs, err := resolveSandboxLowerDirsAtHome(workDir, retainedHome)
+					if err == nil {
+						t.Fatalf("resolveSandboxLowerDirsAtHome(%q) = %v, nil; want retained-HOME rejection", workDir, dirs)
+					}
+					var sandboxErr *sandbox.Error
+					if !errors.As(err, &sandboxErr) || sandboxErr.Code != sandbox.ErrCodeNoLowerDirs {
+						t.Fatalf("resolveSandboxLowerDirsAtHome() error = %v, want ErrCodeNoLowerDirs", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestResolveSandboxLowerDirs_FailsLoudOnNonRepoWorkDir covers the general
 // case behind the $HOME check: any workDir that isn't itself a git
 // repository is unsafe to clone as a sandbox lower dir.
@@ -456,7 +677,7 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 		sandboxProvider = originalProvider
 	})
 
-	homeDir := t.TempDir()
+	homeDir := mkdirPhysical(t, t.TempDir())
 	t.Setenv("HOME", homeDir)
 	repoRoot := t.TempDir()
 	requestedDir := filepath.Join(repoRoot, ".agents", "skills")
@@ -467,14 +688,16 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 	if err := os.WriteFile(templatePath, []byte("workspace-root={{.MergedPath}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg = &config.Config{Sandbox: config.SandboxConfig{
+	loaded, _ := loadSandboxRuntimeAuthority(t, homeDir)
+	cfg = loaded
+	cfg.Sandbox = config.SandboxConfig{
 		Enabled: true,
 		Repos:   []string{repoRoot},
 		Onboarding: config.OnboardingConfig{
 			Enabled:      true,
 			TemplatePath: templatePath,
 		},
-	}}
+	}
 	enableSandbox = false
 	noSandbox = false
 	sandboxProvider = "mock"
@@ -528,16 +751,18 @@ func (p *emptyWorkingDirProvider) Destroy(_ context.Context, _ string) error {
 func TestProvisionSandboxPreservesContractAndCleanupFailures(t *testing.T) {
 	originalCfg := cfg
 	t.Cleanup(func() { cfg = originalCfg })
-	t.Setenv("HOME", t.TempDir())
+	homeDir := t.TempDir()
+	loaded, authority := loadSandboxRuntimeAuthority(t, homeDir)
 	repoRoot := t.TempDir()
 	destroyed := false
 	cleanupErr := errors.New("fixture cleanup failure")
 	sandbox.RegisterProvider("empty-working-dir-cleanup-failure-test", func() sandbox.Provider {
 		return &emptyWorkingDirProvider{destroyed: &destroyed, destroyErr: cleanupErr}
 	})
-	cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}}
+	cfg = loaded
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}
 
-	_, err := provisionSandbox(context.Background(), "empty-working-dir-cleanup-failure-test", "contract-session", repoRoot)
+	_, err := provisionSandbox(context.Background(), authority, "empty-working-dir-cleanup-failure-test", "contract-session", repoRoot)
 	if err == nil || !errors.Is(err, cleanupErr) {
 		t.Fatalf("provisionSandbox() error = %v, want joined cleanup failure", err)
 	}
@@ -553,15 +778,16 @@ func TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract(t 
 	originalCfg := cfg
 	t.Cleanup(func() { cfg = originalCfg })
 	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	loaded, authority := loadSandboxRuntimeAuthority(t, homeDir)
 	repoRoot := t.TempDir()
 	destroyed := false
 	sandbox.RegisterProvider("empty-working-dir-test", func() sandbox.Provider {
 		return &emptyWorkingDirProvider{destroyed: &destroyed}
 	})
-	cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}}
+	cfg = loaded
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}
 
-	_, err := provisionSandbox(context.Background(), "empty-working-dir-test", "contract-session", repoRoot)
+	_, err := provisionSandbox(context.Background(), authority, "empty-working-dir-test", "contract-session", repoRoot)
 	if err == nil {
 		t.Fatal("provisionSandbox() error = nil, want provider contract failure")
 	}

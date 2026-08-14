@@ -39,9 +39,15 @@ decisions.
 
 **CONFIG-13** When sandbox configuration is present, the system shall require a canonical mapping, canonical true or false `enabled`, non-empty canonical string `provider`, and canonical sequences of non-empty strings for `repos` and `writable_dirs`, while preserving aliases, YAML merge precedence, registered provider extensibility, and explicit `repos: []` compatibility.
 
-**CONFIG-14** When sandbox repository or writable-directory paths use exact `~` or `~/...`, the system shall expand them against one physical HOME identity, reject dot components, and require absolute effective paths before sandbox consumers run.
+**CONFIG-14** When sandbox repository or writable-directory paths use exact `~` or `~/...`, the system shall expand them against one physical HOME path selection, reject dot components, and require absolute effective paths before sandbox consumers run.
 
 **CONFIG-15** When sandbox configuration selects a provider, the system shall project it into the effective command configuration unless an explicitly changed provider flag takes precedence.
+
+**CONFIG-16** When configuration loading succeeds, the system shall retain one opaque, structurally immutable tuple of physically normalized HOME, storage, and sandbox-root paths selected from that snapshot, and later changes to HOME, workspace discovery, working directory, or public storage fields shall not replace those paths; default, directly constructed, and zero-value configurations shall provide no runtime authority.
+
+**CONFIG-17** When a retained storage or sandbox path is projected for use, the system shall revalidate its existing filesystem components at projection time and reject dangling links, physical escape, or post-load symlink substitution; destructive consumers shall still require an operation-local filesystem check, while an existing dotfile-mode `~/.agm` symlink shall retain its resolved physical target for compatibility.
+
+**CONFIG-18** When centralized storage is bootstrapped or verified, the configuration module shall derive the compatibility-link location and target from the same retained runtime authority, repair a wrong compatibility link without deleting its target, and return any bootstrap or integrity failure instead of claiming a dotfile fallback.
 
 ## BDD Traceability
 
@@ -52,6 +58,7 @@ decisions.
 
 - `agm/internal/config/config_test.go`
 - `agm/internal/config/config_strict_test.go`
+- `agm/internal/config/runtime_authority_test.go`
 - `agm/internal/config/storage_test.go`
 - `agm/internal/config/parser_golden_test.go`
 - `agm/internal/config/fuzz_test.go`

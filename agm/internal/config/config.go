@@ -52,6 +52,10 @@ type Config struct {
 
 	// Budget enforcement configuration
 	Budget BudgetConfig `yaml:"budget"`
+
+	// runtimeAuthority is captured only by Load after validation succeeds. It is
+	// intentionally excluded from YAML and cannot be manufactured by callers.
+	runtimeAuthority RuntimeAuthority
 }
 
 // StorageConfig holds centralized storage configuration
@@ -397,6 +401,12 @@ func Load(cfgFile string) (*Config, error) {
 	if err := validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
+
+	authority, err := captureRuntimeAuthority(cfg, homeDir)
+	if err != nil {
+		return nil, fmt.Errorf("config runtime authority failed: %w", err)
+	}
+	cfg.runtimeAuthority = authority
 
 	return cfg, nil
 }

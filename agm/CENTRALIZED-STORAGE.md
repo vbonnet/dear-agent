@@ -40,12 +40,12 @@ Storage in workspace repository with symlink:
 # ~/.config/agm/config.yaml
 storage:
   mode: centralized
-  workspace: engram-research         # Workspace name or absolute path
+  workspace: engram-research         # Name, absolute path, or exact ~/... path
   relative_path: .agm                # Path within workspace
 ```
 
 **Storage location**: `.agm/`
-**Symlink**: `~/.agm` → `.agm/`
+**Symlink**: `~/.agm` → the selected storage root's absolute physical path
 
 ## Quick Start
 
@@ -69,7 +69,7 @@ EOF
 agm session list
 # AGM will:
 # 1. Detect workspace at ./engram-research
-# 2. Create ~/.agm -> engram-research/.agm symlink
+# 2. Create ~/.agm -> /absolute/physical/path/to/engram-research/.agm symlink
 # 3. Migrate existing data (if any)
 # 4. Create backup at ~/.agm.backup.<pid>
 ```
@@ -78,7 +78,7 @@ agm session list
 
 ```bash
 ls -la ~/.agm
-# Expected output: lrwxrwxrwx ... ~/.agm -> .agm
+# Expected output: lrwxrwxrwx ... ~/.agm -> /absolute/physical/path/to/engram-research/.agm
 
 ls .agm/
 # Expected output: sessions/ config.yaml (your data, now git-tracked)
@@ -118,7 +118,7 @@ AGM uses a 6-priority workspace detection algorithm:
    - `~/src/ws/engram-research/repos/engram-research`
    - `~/src/engram-research`
    - `~/engram-research`
-6. **Error**: Workspace not found (AGM will warn and continue in dotfile mode)
+6. **Error**: Workspace not found (AGM rejects configuration activation; it does not claim a dotfile fallback)
 
 ## Configuration Schema
 
@@ -130,7 +130,7 @@ AGM uses a 6-priority workspace detection algorithm:
 # Storage configuration (centralized component storage)
 storage:
   mode: centralized              # Mode: "dotfile" or "centralized"
-  workspace: engram-research     # Workspace name or absolute path
+  workspace: engram-research     # Name, absolute path, or exact ~ / ~/... path
   relative_path: .agm            # Path within workspace (default: .agm)
 
 # Legacy workspace detection (still supported)
@@ -161,7 +161,7 @@ health_check:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `storage.mode` | string | `"dotfile"` | Storage mode: `"dotfile"` or `"centralized"` |
-| `storage.workspace` | string | `""` | Workspace name or absolute path (for centralized mode) |
+| `storage.workspace` | string | `""` | Workspace name, absolute path, or exact `~` / `~/...` path (for centralized mode) |
 | `storage.relative_path` | string | `".agm"` | Path within workspace (default: `.agm`) |
 
 ### Environment Variables
@@ -179,7 +179,7 @@ health_check:
 When centralized mode is enabled, AGM automatically creates a symlink:
 
 ```
-~/.agm → .agm
+~/.agm → /absolute/physical/path/to/workspace/.agm
 ```
 
 **Bootstrap workflow**:
@@ -196,14 +196,16 @@ When centralized mode is enabled, AGM automatically creates a symlink:
 
 ```
 internal/config/
-├── config.go        # Config struct with StorageConfig field
-├── storage.go       # Storage path resolution and symlink management
-└── storage_test.go  # Tests for storage functionality
+├── config.go                  # Config struct and load-time authority capture
+├── runtime_authority.go       # Opaque retained root tuple and projections
+├── runtime_authority_test.go  # Authority drift and escape regressions
+├── storage.go                 # Storage bootstrap and integrity management
+└── storage_test.go            # Storage behavior regressions
 ```
 
 **Key functions**:
 
-- `GetStoragePath(cfg)` - Resolves absolute storage path based on mode
+- `GetStoragePath(cfg)` - Projects and revalidates the storage path retained by `config.Load`
 - `DetectWorkspace(nameOrPath)` - 6-priority workspace detection
 - `EnsureSymlinkBootstrap(cfg)` - Creates/updates symlink for centralized mode
 - `VerifyStorageIntegrity(cfg)` - Validates storage configuration
@@ -216,11 +218,11 @@ Bootstrap is called during AGM startup in `cmd/agm/main.go`:
 func loadConfigWithFlags() (*config.Config, error) {
     // ... load config ...
 
-    // Centralized storage support: Create symlink if centralized mode is enabled
+    // Centralized storage support: create the compatibility link from the
+    // runtime authority captured by config.Load.
     if cfg.Storage.Mode == "centralized" {
         if err := config.EnsureSymlinkBootstrap(cfg); err != nil {
-            // Log warning but don't fail - allow AGM to continue in degraded mode
-            fmt.Fprintf(os.Stderr, "Warning: Failed to setup centralized storage symlink: %v\n", err)
+            return nil, fmt.Errorf("setup centralized storage: %w", err)
         }
     }
 

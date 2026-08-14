@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
@@ -19,13 +20,17 @@ func maybeProvisionSandbox(ctx context.Context, sessionID, workDir string) (*man
 	if !shouldEnableSandbox(enableSandbox, noSandbox) {
 		return nil, workDir, nil
 	}
-	sandboxInfo, err := provisionSandbox(ctx, sandboxProvider, sessionID, workDir)
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		return nil, workDir, fmt.Errorf("resolve sandbox runtime authority: %w", err)
+	}
+	sandboxInfo, err := provisionSandbox(ctx, authority, sandboxProvider, sessionID, workDir)
 	if err != nil {
 		ui.PrintError(err,
 			"Failed to provision sandbox",
 			"  • Check sandbox provider is available\n"+
 				"  • Use --no-sandbox to disable sandbox isolation\n"+
-				"  • Check ~/.agm/sandboxes/ directory permissions")
+				"  • Check the configured sandbox storage directory permissions")
 		return nil, workDir, err
 	}
 	if sandboxInfo.WorkingDir == "" {
@@ -52,15 +57,25 @@ func shouldEnableSandbox(enable bool, disable bool) bool {
 }
 
 // provisionSandbox creates a sandbox environment for the session
-func provisionSandbox(ctx context.Context, providerName string, sessionID string, workDir string) (*manifest.SandboxConfig, error) {
+func provisionSandbox(
+	ctx context.Context,
+	authority config.RuntimeAuthority,
+	providerName string,
+	sessionID string,
+	workDir string,
+) (*manifest.SandboxConfig, error) {
 	debug.Phase("Provision Sandbox")
 	debug.Log("Provisioning sandbox for session: %s", sessionID)
 	debug.Log("Provider: %s", providerName)
 	debug.Log("WorkDir: %s", workDir)
 
-	// Get provider
+	sandboxWorkspace, homeDir, err := resolveSandboxProvisioningPaths(authority, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get provider only after the complete workspace authority is valid.
 	var provider sandbox.Provider
-	var err error
 	if providerName == "auto" {
 		provider, err = sandbox.NewProvider()
 	} else {
@@ -72,14 +87,7 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 
 	debug.Log("Using provider: %s", provider.Name())
 
-	// Prepare sandbox workspace directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
-	sandboxWorkspace := filepath.Join(homeDir, ".agm", "sandboxes", sessionID)
-
-	lowerDirs, err := resolveSandboxLowerDirs(workDir)
+	lowerDirs, err := resolveSandboxLowerDirsAtHome(workDir, homeDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve sandbox lower directories: %w", err)
 	}
@@ -149,8 +157,28 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 	}, nil
 }
 
+func resolveSandboxProvisioningPaths(authority config.RuntimeAuthority, sessionID string) (string, string, error) {
+	sandboxRoot, err := authority.Sandboxes()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve sandbox root: %w", err)
+	}
+	sandboxWorkspace, err := sandboxRoot.Workspace(sessionID)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve sandbox workspace: %w", err)
+	}
+	homeRoot, err := authority.Home()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve sandbox HOME: %w", err)
+	}
+	homeDir, err := homeRoot.Path()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve sandbox HOME path: %w", err)
+	}
+	return sandboxWorkspace, homeDir, nil
+}
+
 // resolveSandboxLowerDirs returns the provider lower directories for a new
-// sandbox: prefer cfg.Sandbox.Repos, otherwise scan ~/src/ws/oss/repos for
+// sandbox: prefer cfg.Sandbox.Repos, otherwise scan HOME/src/ws/oss/repos for
 // git repos and ensure the repository containing workDir remains included.
 // If nothing usable is configured or found, resolution
 // fails loud (sandbox.ErrCodeNoLowerDirs) rather than silently cloning an
@@ -158,11 +186,15 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 // $HOME, with no --directory or $PWD) would otherwise trigger an unbounded
 // clone of the wrong directory tree.
 func resolveSandboxLowerDirs(workDir string) ([]string, error) {
+	return resolveSandboxLowerDirsAtHome(workDir, os.Getenv("HOME"))
+}
+
+func resolveSandboxLowerDirsAtHome(workDir, homeDir string) ([]string, error) {
 	lowerDirs := cfg.Sandbox.Repos
 	if len(lowerDirs) > 0 {
 		return lowerDirs, nil
 	}
-	wsRoot := filepath.Join(os.Getenv("HOME"), "src", "ws", "oss", "repos")
+	wsRoot := filepath.Join(homeDir, "src", "ws", "oss", "repos")
 	if entries, err := os.ReadDir(wsRoot); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -179,7 +211,7 @@ func resolveSandboxLowerDirs(workDir string) ([]string, error) {
 			debug.Log("Found %d repos in workspace including requested project: %v", len(lowerDirs), lowerDirs)
 			return lowerDirs, nil
 		}
-		requestedRoot, reason := sandboxFallbackRoot(workDir)
+		requestedRoot, reason := sandboxFallbackRootAtHome(workDir, homeDir)
 		if reason != "" {
 			return nil, sandbox.NewNoSandboxLowerDirsError(workDir, reason)
 		}
@@ -188,7 +220,7 @@ func resolveSandboxLowerDirs(workDir string) ([]string, error) {
 		return lowerDirs, nil
 	}
 
-	fallbackRoot, reason := sandboxFallbackRoot(workDir)
+	fallbackRoot, reason := sandboxFallbackRootAtHome(workDir, homeDir)
 	if reason != "" {
 		return nil, sandbox.NewNoSandboxLowerDirsError(workDir, reason)
 	}
@@ -208,6 +240,11 @@ func unsafeSandboxFallbackReason(workDir string) string {
 // preserves an explicitly requested subdirectory while ensuring providers
 // clone only the repository boundary, never an arbitrary ancestor tree.
 func sandboxFallbackRoot(workDir string) (string, string) {
+	homeDir, _ := os.UserHomeDir()
+	return sandboxFallbackRootAtHome(workDir, homeDir)
+}
+
+func sandboxFallbackRootAtHome(workDir, homeDir string) (string, string) {
 	if workDir == "" {
 		return "", "workDir is empty"
 	}
@@ -219,19 +256,17 @@ func sandboxFallbackRoot(workDir string) (string, string) {
 	if err != nil {
 		return "", fmt.Sprintf("cannot make workDir absolute: %v", err)
 	}
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		resolvedHome, _ := filepath.EvalSymlinks(homeDir)
-		if resolvedWorkDir == resolvedHome {
-			return "", "resolved to $HOME — refusing to clone the entire home directory"
-		}
+	resolvedHome := ""
+	if homeDir != "" {
+		resolvedHome, _ = filepath.EvalSymlinks(homeDir)
+	}
+	if resolvedHome != "" && resolvedWorkDir == resolvedHome {
+		return "", "resolved to $HOME — refusing to clone the entire home directory"
 	}
 	for candidate := resolvedWorkDir; ; candidate = filepath.Dir(candidate) {
 		if _, statErr := os.Stat(filepath.Join(candidate, ".git")); statErr == nil {
-			if homeDir, homeErr := os.UserHomeDir(); homeErr == nil {
-				resolvedHome, _ := filepath.EvalSymlinks(homeDir)
-				if candidate == resolvedHome {
-					return "", "Git root resolved to $HOME — refusing to clone the entire home directory"
-				}
+			if resolvedHome != "" && candidate == resolvedHome {
+				return "", "Git root resolved to $HOME — refusing to clone the entire home directory"
 			}
 			return candidate, ""
 		}
