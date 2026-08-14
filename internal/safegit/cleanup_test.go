@@ -68,8 +68,8 @@ func TestAttemptMergeCleanupHelper(t *testing.T) {
 		PRNumber:        42,
 		Repo:            "owner/repo",
 		Watch:           os.Getenv(attemptMergeWatchEnv) == "1",
-		WatchTimeout:    2_000_000_000,
-		WatchInterval:   1_000_000,
+		WatchTimeout:    30 * time.Second,
+		WatchInterval:   time.Millisecond,
 		SkipReviewCheck: true,
 	}
 	var err error
