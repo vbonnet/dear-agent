@@ -179,20 +179,8 @@ Global Flags:
 			fmt.Fprintf(os.Stderr, "agm %s (%s)\n", Version, executable)
 		}
 
-		// Load UI config and apply flag overrides
-		uiCfg := ui.LoadConfig()
-		if noColor {
-			uiCfg.UI.NoColor = true
-		}
-		if screenReader {
-			uiCfg.UI.ScreenReader = true
-		}
-		// Agent mode drops color and Unicode glyphs: machine consumers want plain,
-		// stable text. Explicit human flags above still apply when both are set.
-		if outputMode == ModeAgent {
-			uiCfg.UI.NoColor = true
-		}
-		ui.SetGlobalConfig(uiCfg)
+		// Project UI settings from the same validated config snapshot.
+		projectUIConfig(cfg, noColor, screenReader, outputMode)
 
 		// Set global timeout for tmux commands
 		if cfg.Timeout.Enabled {
@@ -277,6 +265,22 @@ Global Flags:
 	},
 }
 
+// projectUIConfig installs presentation settings from the already validated
+// shared snapshot without rereading configuration or mutating cfg.
+func projectUIConfig(cfg *config.Config, noColor, screenReader bool, mode OutputMode) {
+	uiCfg := cfg.UISettings
+	if noColor {
+		uiCfg.UI.NoColor = true
+	}
+	if screenReader {
+		uiCfg.UI.ScreenReader = true
+	}
+	if mode == ModeAgent {
+		uiCfg.UI.NoColor = true
+	}
+	ui.SetGlobalConfig(&uiCfg)
+}
+
 func init() {
 	// Silence the cobra Usage block on errors to save ~324 tokens per failed command.
 	// SilenceErrors stays false so errors still print.
@@ -352,14 +356,9 @@ func buildCommandInfo(cmd *cobra.Command) CommandInfo {
 }
 
 func loadConfigWithFlags() (*config.Config, error) {
-	// Load config file or defaults
-	configPath := cfgFile
-	if configPath == "" {
-		home, _ := os.UserHomeDir()
-		configPath = filepath.Join(home, ".config", "agm", "config.yaml")
-	}
-
-	cfg, err := config.Load(configPath)
+	// Pass an explicit source through unchanged so config.Load can distinguish it
+	// from the ordinarily absent canonical default.
+	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +379,10 @@ func loadConfigWithFlags() (*config.Config, error) {
 	if skipHealthCheck {
 		cfg.HealthCheck.Enabled = false
 	}
+	if !newCmd.Flags().Changed("sandbox-provider") {
+		sandboxProvider = cfg.Sandbox.Provider
+	}
+	cfg.Sandbox.Provider = sandboxProvider
 
 	// Workspace detection: Auto-detect workspace from current directory
 	// to enable workspace-specific session storage.
@@ -529,7 +532,7 @@ func workspaceSessionsDir(ws *workspace.Workspace) string {
 }
 
 func runDefaultCommand(cmd *cobra.Command, args []string) error {
-	uiCfg := ui.LoadConfig()
+	uiCfg := ui.GetGlobalConfig()
 
 	// Get current working directory
 	projectDir := cli.GetProjectDirectory()

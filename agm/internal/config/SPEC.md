@@ -31,6 +31,18 @@ decisions.
 
 **CONFIG-09** When adapter, sandbox, budget, or status-line defaults are changed, the system shall keep active harnesses on shared defaults unless a harness-specific setting is explicit.
 
+**CONFIG-10** When AGM reads an existing shared configuration file, the system shall decode exactly one non-empty YAML mapping onto established core and operator-UI defaults with known fields enforced at every declared nested struct, and shall reject unknown fields, malformed known values, and every second YAML document.
+
+**CONFIG-11** When no explicit configuration source is selected and the canonical source is ordinarily absent, the system shall retain defaults; when an explicit source is absent, any source path is dangling, or any other selected-source read fails, the system shall return no usable configuration before sandbox repository resolution.
+
+**CONFIG-12** When an existing selected configuration source is read, the system shall authenticate one regular-file snapshot of at most 1 MiB before decoding it.
+
+**CONFIG-13** When sandbox configuration is present, the system shall require a canonical mapping, canonical true or false `enabled`, non-empty canonical string `provider`, and canonical sequences of non-empty strings for `repos` and `writable_dirs`, while preserving aliases, YAML merge precedence, registered provider extensibility, and explicit `repos: []` compatibility.
+
+**CONFIG-14** When sandbox repository or writable-directory paths use exact `~` or `~/...`, the system shall expand them against one physical HOME identity, reject dot components, and require absolute effective paths before sandbox consumers run.
+
+**CONFIG-15** When sandbox configuration selects a provider, the system shall project it into the effective command configuration unless an explicitly changed provider flag takes precedence.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/config_directory_parity.feature`
@@ -39,6 +51,7 @@ decisions.
 ## Package Test Traceability
 
 - `agm/internal/config/config_test.go`
+- `agm/internal/config/config_strict_test.go`
 - `agm/internal/config/storage_test.go`
 - `agm/internal/config/parser_golden_test.go`
 - `agm/internal/config/fuzz_test.go`
