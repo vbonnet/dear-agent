@@ -202,10 +202,10 @@ func TestInvalidSandboxConfigCannotBroadenLowerDirs(t *testing.T) {
 		name    string
 		content *string
 	}{
-		{name: "misspelled repositories", content: stringPointer("sandbox:\n  repoz: []\n")},
-		{name: "null repository list", content: stringPointer("sandbox: {repos: null}\n")},
-		{name: "null repository item", content: stringPointer("sandbox: {repos: [null]}\n")},
-		{name: "second document", content: stringPointer("sandbox: {repos: [/configured]}\n---\nsandbox: {repos: []}\n")},
+		{name: "misspelled repositories", content: new("sandbox:\n  repoz: []\n")},
+		{name: "null repository list", content: new("sandbox: {repos: null}\n")},
+		{name: "null repository item", content: new("sandbox: {repos: [null]}\n")},
+		{name: "second document", content: new("sandbox: {repos: [/configured]}\n---\nsandbox: {repos: []}\n")},
 		{name: "missing explicit source"},
 	}
 	for _, tt := range invalid {
@@ -244,8 +244,6 @@ func TestInvalidSandboxConfigCannotBroadenLowerDirs(t *testing.T) {
 		t.Fatalf("resolveSandboxLowerDirs() fixture = %v, want both %s and %s", discovered, repoA, repoB)
 	}
 }
-
-func stringPointer(value string) *string { return &value }
 
 func TestLoadConfigWithFlagsProjectsSandboxProviderPrecedence(t *testing.T) {
 	home := t.TempDir()

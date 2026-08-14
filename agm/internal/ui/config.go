@@ -20,11 +20,16 @@ func GetGlobalConfig() *Config {
 	return globalConfig
 }
 
-// Aliases preserve the UI package's consumer-facing types while config owns
-// the complete schema for the one shared YAML document.
+// Config aliases the shared UI settings owned by the config package.
 type Config = config.UISettings
+
+// DefaultsConfig aliases the shared default-behavior settings.
 type DefaultsConfig = config.DefaultsConfig
+
+// UIConfig aliases the shared presentation settings.
 type UIConfig = config.UIConfig
+
+// AdvancedConfig aliases the shared advanced UI settings.
 type AdvancedConfig = config.AdvancedConfig
 
 // DefaultConfig returns the shared UI defaults.

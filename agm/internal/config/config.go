@@ -483,7 +483,7 @@ func configPathAbsent(path string) bool {
 		remainder = filepath.ToSlash(remainder)
 	}
 
-	for _, component := range strings.Split(remainder, "/") {
+	for component := range strings.SplitSeq(remainder, "/") {
 		if component == "" || component == "." {
 			continue
 		}
@@ -680,7 +680,7 @@ func validateConfiguredPathSpelling(cfg *Config) error {
 func containsDotPathComponent(path string) bool {
 	volume := filepath.VolumeName(path)
 	remainder := strings.TrimPrefix(path, volume)
-	for _, component := range strings.Split(filepath.ToSlash(remainder), "/") {
+	for component := range strings.SplitSeq(filepath.ToSlash(remainder), "/") {
 		if component == "." || component == ".." {
 			return true
 		}
