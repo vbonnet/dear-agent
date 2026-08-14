@@ -230,6 +230,47 @@ func TestProviderMergeCommandFailureStopsBeforeConfirmationAndCleanup(t *testing
 	assertBranchRef(t, fixture, true)
 }
 
+func TestProviderMergeRetriesLocalConfirmationTimeoutWithinTransaction(t *testing.T) {
+	fakeDir := t.TempDir()
+	provider := filepath.Join(fakeDir, "provider")
+	marker := filepath.Join(fakeDir, "provider-calls")
+	if err := os.WriteFile(provider, []byte("#!/bin/sh\nprintf 'provider\\n' >> \"$1\"\n"), 0o700); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	confirmCalls := 0
+	confirmedCalls := 0
+	failure := runProviderMergeTransaction(
+		context.Background(),
+		"",
+		[]string{provider, marker},
+		func() error {
+			return waitForMergeCompletion(context.Background(), time.Second, time.Millisecond, func() error {
+				confirmCalls++
+				if confirmCalls == 1 {
+					return context.DeadlineExceeded
+				}
+				return nil
+			})
+		},
+		func() { confirmedCalls++ },
+	)
+	if failure != nil {
+		t.Fatalf("provider merge failure = %#v, want success", failure)
+	}
+	providerCalls, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read provider marker: %v", err)
+	}
+	if got := string(providerCalls); got != "provider\n" {
+		t.Fatalf("provider calls = %q, want exactly one invocation", got)
+	}
+	if confirmCalls != 2 || confirmedCalls != 1 {
+		t.Fatalf("callback counts = confirm:%d confirmed:%d, want 2:1",
+			confirmCalls, confirmedCalls)
+	}
+}
+
 func TestProviderMergeCleanupHonorsCancellationAfterConfirmation(t *testing.T) {
 	fixture := newCleanupFixture(t)
 	t.Chdir(fixture.primary)

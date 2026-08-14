@@ -43,6 +43,15 @@ const MinSoak = 5 * time.Minute
 // DefaultWatchTimeout is the default time limit for watch mode.
 const DefaultWatchTimeout = 45 * time.Minute
 
+// mergeConfirmationCommandTimeout bounds each exact-head provider query. A
+// provider merge can be accepted immediately before caller cancellation kills
+// the local gh process, so one bounded query must remain possible afterward.
+const mergeConfirmationCommandTimeout = 30 * time.Second
+
+// mergeConfirmationCommandWaitDelay bounds pipe draining if a provider-query
+// descendant outlives the direct gh process while retaining stdout or stderr.
+const mergeConfirmationCommandWaitDelay = time.Second
+
 // MergeConfig holds options for a safe merge.
 type MergeConfig struct {
 	PRNumber      int
@@ -321,7 +330,10 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
 	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
-	confirm := func() error { return confirmMerged(cfg.PRNumber, cfg.Repo, headInfo.SHA) }
+	confirm := func() error {
+		return confirmMergedWithin(ctx, mergeConfirmationCommandTimeout,
+			cfg.PRNumber, cfg.Repo, headInfo.SHA)
+	}
 	confirmCompletion := func() error {
 		// Keep provider acceptance, exact-head polling, and cleanup in one
 		// transaction so a pending merge cannot discard the retained local root.
@@ -366,15 +378,28 @@ var (
 	errMergeHeadChanged = errors.New("merge completion head changed")
 )
 
-// confirmMerged prevents a successful `gh pr merge --auto` invocation from
+// confirmMergedWithin prevents a successful `gh pr merge --auto` invocation from
 // being mistaken for a completed merge. GitHub exits zero when auto-merge is
 // merely enabled, so cleanup is safe only after the PR reports MERGED at the
 // exact head SHA that passed the gates.
-func confirmMerged(prNum int, repo, expectedHeadSHA string) error {
-	out, err := runCommand(exec.Command("gh", "pr", "view",
+func confirmMergedWithin(
+	parent context.Context,
+	timeout time.Duration,
+	prNum int,
+	repo, expectedHeadSHA string,
+) error {
+	confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(confirmCtx, "gh", "pr", "view",
 		fmt.Sprintf("%d", prNum), "--repo", repo,
-		"--json", "state,headRefOid"))
+		"--json", "state,headRefOid")
+	cmd.WaitDelay = mergeConfirmationCommandWaitDelay
+	out, err := runCommand(cmd)
 	if err != nil {
+		if ctxErr := confirmCtx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
 		return fmt.Errorf("confirming merge completion: %w", err)
 	}
 
@@ -417,7 +442,7 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("waiting for merge completion: %w", ctxErr)
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.Canceled) {
 			return err
 		}
 		remaining := time.Until(deadline)
@@ -427,7 +452,10 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		wait := min(interval, remaining)
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for merge completion: %w", ctx.Err())
+			// Provider acceptance can race with caller cancellation between
+			// polls. Perform one final bounded exact-head check before the
+			// parent cancellation becomes terminal on the next iteration.
+			continue
 		case <-time.After(wait):
 		}
 	}

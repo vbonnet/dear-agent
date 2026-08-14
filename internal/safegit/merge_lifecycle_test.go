@@ -3,6 +3,9 @@ package safegit
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,85 @@ func TestMergeResultHeadChangeUsesTerminalSentinel(t *testing.T) {
 	if !errors.Is(err, errMergeHeadChanged) {
 		t.Fatalf("validateMergeResult() error = %v, want errMergeHeadChanged", err)
 	}
+}
+
+func TestConfirmMergedWithinSurvivesCallerCancellation(t *testing.T) {
+	installMergeConfirmationFakeGH(t, `printf '%s\n' '{"state":"MERGED","headRefOid":"abc123"}'`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := confirmMergedWithin(ctx, 10*time.Second, 42, "owner/repo", "abc123"); err != nil {
+		t.Fatalf("confirmMergedWithin() error = %v", err)
+	}
+}
+
+func TestConfirmMergedWithinBoundsBlockingProviderQuery(t *testing.T) {
+	installMergeConfirmationFakeGH(t, `exec sleep 2`)
+	err := confirmMergedWithin(context.Background(), 50*time.Millisecond,
+		42, "owner/repo", "abc123")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("confirmMergedWithin() error = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+func TestConfirmMergedWithinBoundsDescendantHeldPipe(t *testing.T) {
+	installMergeConfirmationFakeGH(t, `sleep 3 &`)
+	err := confirmMergedWithin(context.Background(), 5*time.Second,
+		42, "owner/repo", "abc123")
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("confirmMergedWithin() error = %v, want exec.ErrWaitDelay", err)
+	}
+}
+
+type cancelBetweenPollsContext struct {
+	context.Context
+	done     chan struct{}
+	errCalls int
+}
+
+func (c *cancelBetweenPollsContext) Done() <-chan struct{} { return c.done }
+
+func (c *cancelBetweenPollsContext) Err() error {
+	c.errCalls++
+	if c.errCalls == 1 {
+		// Model cancellation occurring immediately after the polling loop's
+		// non-canceled observation and before it enters the wait select.
+		close(c.done)
+		return nil
+	}
+	return context.Canceled
+}
+
+func TestWaitForMergeCompletionChecksOnceAfterCancellationBetweenPolls(t *testing.T) {
+	ctx := &cancelBetweenPollsContext{
+		Context: context.Background(),
+		done:    make(chan struct{}),
+	}
+	attempts := 0
+	err := waitForMergeCompletion(ctx, time.Second, time.Hour, func() error {
+		attempts++
+		if attempts == 1 {
+			return errMergePending
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waitForMergeCompletion() error = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("waitForMergeCompletion() attempts = %d, want final confirmation attempt", attempts)
+	}
+}
+
+func installMergeConfirmationFakeGH(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gh")
+	script := "#!/bin/sh\nset -eu\n" + body + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestWaitForMergeCompletionRetriesTransientConfirmationError(t *testing.T) {
