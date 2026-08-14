@@ -77,10 +77,13 @@ func runProviderMergeTransaction(
 	if err := ctx.Err(); err != nil {
 		return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
 	}
-	mergeCmd := exec.Command(mergeArgs[0], mergeArgs[1:]...)
+	mergeCmd := exec.CommandContext(ctx, mergeArgs[0], mergeArgs[1:]...)
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
 	if err := mergeCmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
 		return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
 	}
 	if err := confirm(); err != nil {

@@ -411,9 +411,13 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, errMergeHeadChanged) ||
-			errors.Is(err, context.Canceled) ||
-			errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, errMergeHeadChanged) {
+			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("waiting for merge completion: %w", ctxErr)
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
 		remaining := time.Until(deadline)

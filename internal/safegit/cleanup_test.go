@@ -130,6 +130,52 @@ func TestProviderMergeDoesNotStartAfterCleanupPreparationCancellation(t *testing
 	}
 }
 
+func TestProviderMergeCommandHonorsCancellationDuringExecution(t *testing.T) {
+	fakeDir := t.TempDir()
+	provider := filepath.Join(fakeDir, "provider")
+	marker := filepath.Join(fakeDir, "started")
+	if err := os.WriteFile(provider, []byte("#!/bin/sh\nprintf started > \"$1\"\nwhile :; do :; done\n"), 0o700); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan *providerMergeFailure, 1)
+	go func() {
+		result <- runProviderMergeTransaction(
+			ctx,
+			"",
+			[]string{provider, marker},
+			func() error { return nil },
+			nil,
+		)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat provider marker: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("provider did not start before timeout")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case failure := <-result:
+		if failure == nil || failure.stage != providerMergeCommandStage ||
+			!errors.Is(failure.err, context.Canceled) {
+			t.Fatalf("provider merge failure = %#v, want command-stage context.Canceled", failure)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider command did not stop after cancellation")
+	}
+}
+
 func TestProviderMergeCommandFailureStopsBeforeConfirmationAndCleanup(t *testing.T) {
 	fixture := newCleanupFixture(t)
 	confirmed := 0

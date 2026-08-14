@@ -33,6 +33,21 @@ func TestWaitForMergeCompletionRetriesTransientConfirmationError(t *testing.T) {
 	}
 }
 
+func TestWaitForMergeCompletionPrefersCallerCancellationAfterCheck(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	transient := errors.New("provider unavailable")
+	err := waitForMergeCompletion(ctx, -time.Second, time.Hour, func() error {
+		cancel()
+		return transient
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForMergeCompletion() error = %v, want context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "merge completion timeout") {
+		t.Fatalf("caller cancellation was misreported as polling timeout: %v", err)
+	}
+}
+
 func TestWatchMergeStopsOnCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	attempts := 0
