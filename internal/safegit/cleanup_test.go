@@ -130,49 +130,76 @@ func TestProviderMergeDoesNotStartAfterCleanupPreparationCancellation(t *testing
 	}
 }
 
-func TestProviderMergeCommandHonorsCancellationDuringExecution(t *testing.T) {
-	fakeDir := t.TempDir()
-	provider := filepath.Join(fakeDir, "provider")
-	marker := filepath.Join(fakeDir, "started")
-	if err := os.WriteFile(provider, []byte("#!/bin/sh\nprintf started > \"$1\"\nwhile :; do :; done\n"), 0o700); err != nil {
-		t.Fatalf("write provider: %v", err)
+func TestProviderMergeCommandCancellationRequiresConfirmation(t *testing.T) {
+	tests := []struct {
+		name              string
+		confirmationErr   error
+		wantFailure       bool
+		wantConfirmedCall int
+	}{
+		{name: "unconfirmed", confirmationErr: context.Canceled, wantFailure: true},
+		{name: "confirmed", wantConfirmedCall: 1},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	result := make(chan *providerMergeFailure, 1)
-	go func() {
-		result <- runProviderMergeTransaction(
-			ctx,
-			"",
-			[]string{provider, marker},
-			func() error { return nil },
-			nil,
-		)
-	}()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeDir := t.TempDir()
+			provider := filepath.Join(fakeDir, "provider")
+			marker := filepath.Join(fakeDir, "started")
+			if err := os.WriteFile(provider, []byte("#!/bin/sh\nprintf started > \"$1\"\nwhile :; do :; done\n"), 0o700); err != nil {
+				t.Fatalf("write provider: %v", err)
+			}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		} else if !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("stat provider marker: %v", err)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("provider did not start before timeout")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			confirmCalls := 0
+			confirmedCalls := 0
+			result := make(chan *providerMergeFailure, 1)
+			go func() {
+				result <- runProviderMergeTransaction(
+					ctx,
+					"",
+					[]string{provider, marker},
+					func() error {
+						confirmCalls++
+						return tc.confirmationErr
+					},
+					func() { confirmedCalls++ },
+				)
+			}()
 
-	cancel()
-	select {
-	case failure := <-result:
-		if failure == nil || failure.stage != providerMergeCommandStage ||
-			!errors.Is(failure.err, context.Canceled) {
-			t.Fatalf("provider merge failure = %#v, want command-stage context.Canceled", failure)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("provider command did not stop after cancellation")
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				if _, err := os.Stat(marker); err == nil {
+					break
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("stat provider marker: %v", err)
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("provider did not start before timeout")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			cancel()
+			select {
+			case failure := <-result:
+				if tc.wantFailure {
+					if failure == nil || failure.stage != providerMergeConfirmationStage ||
+						!errors.Is(failure.err, context.Canceled) {
+						t.Fatalf("provider merge failure = %#v, want confirmation-stage context.Canceled", failure)
+					}
+				} else if failure != nil {
+					t.Fatalf("confirmed provider outcome failed: %#v", failure)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider command did not stop after cancellation")
+			}
+			if confirmCalls != 1 || confirmedCalls != tc.wantConfirmedCall {
+				t.Fatalf("callback counts = confirm:%d confirmed:%d, want 1:%d",
+					confirmCalls, confirmedCalls, tc.wantConfirmedCall)
+			}
+		})
 	}
 }
 

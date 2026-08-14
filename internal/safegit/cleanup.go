@@ -81,10 +81,11 @@ func runProviderMergeTransaction(
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
 	if err := mergeCmd.Run(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			err = ctxErr
+		if ctx.Err() == nil {
+			return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
 		}
-		return &providerMergeFailure{stage: providerMergeCommandStage, err: err}
+		// Cancellation can race with provider acceptance. Treat the outcome as
+		// indeterminate until exact-head confirmation establishes provider truth.
 	}
 	if err := confirm(); err != nil {
 		return &providerMergeFailure{stage: providerMergeConfirmationStage, err: err}
