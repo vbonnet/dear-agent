@@ -55,6 +55,26 @@ func TestCheckGCHealth_CompletionWithReapErrorsIsNotProofOfLife(t *testing.T) {
 	}
 }
 
+// A safety probe (lsof, the mount table, the session store) can fail
+// systemically — binary missing, sandboxed environment, permissions — and
+// every sandbox is then fail-closed "kept" with Errors staying at 0. That
+// completion record must not read as proof of life either: it proves nothing
+// was actually evaluated, which is the same blind spot reap errors close.
+func TestCheckGCHealth_CompletionWithProbeFailuresIsNotProofOfLife(t *testing.T) {
+	now := time.Now()
+	blind := `{"timestamp":"` + now.Add(-1*time.Minute).Format(time.RFC3339Nano) +
+		`","operation":"sandbox_gc_completed","errors":0,"probe_failures":5,"reason":"scanned=5 reaped=0 kept=5 errors=0 probe_failures=5"}`
+	cfg := config{gcMaxAge: 6 * time.Hour, gcLogPath: writeGCLog(t,
+		gcCompletedAt(now.Add(-48*time.Hour)),
+		blind,
+	)}
+
+	got := checkGCHealth(cfg, now)
+	if got == nil || !got.Stale {
+		t.Fatalf("a completion with probe failures and zero errors must not refresh liveness, got %+v", got)
+	}
+}
+
 // gc.jsonl is shared with the session GC. Attributing one of its failures to a
 // stale sandbox reaper sends whoever reads the alarm to the wrong subsystem.
 func TestCheckGCHealth_IgnoresUnrelatedSessionGCErrors(t *testing.T) {

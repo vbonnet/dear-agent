@@ -1,6 +1,6 @@
 # Sandbox Garbage Collection Safety Specification
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-08-14 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -50,6 +50,10 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 **SGC-09** When the re-read mount table shows any mount point at or under the sandbox, the system shall refuse the removal.
 
 **SGC-10** When the mount table cannot be read, the system shall fail closed and refuse the removal.
+
+### Probe-Failure Reporting
+
+**SGC-15** When a fail-closed refusal (SGC-04, SGC-07, SGC-10) is raised because a safety check could not run, rather than because it positively found the sandbox live, mounted, or referenced, the system shall mark the `RefusalError` as a probe failure so that callers can distinguish "not evaluated" from "evaluated and kept" instead of accreting silently into a heartbeat that then reads as healthy.
 
 ### Sweep Behaviour
 

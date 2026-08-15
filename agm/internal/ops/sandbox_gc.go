@@ -60,14 +60,21 @@ type SandboxGCEntry struct {
 
 // SandboxGCResult summarises a sweep.
 type SandboxGCResult struct {
-	Operation string           `json:"operation"`
-	DryRun    bool             `json:"dry_run"`
-	Scanned   int              `json:"scanned"`
-	Reaped    int              `json:"reaped"` // deleted (or would-reap in dry-run)
-	Kept      int              `json:"kept"`   // refused by a safety gate or too young
-	Errors    int              `json:"errors"` // removal attempted and failed
-	Warnings  []string         `json:"warnings,omitempty"`
-	Entries   []SandboxGCEntry `json:"entries,omitempty"`
+	Operation string `json:"operation"`
+	DryRun    bool   `json:"dry_run"`
+	Scanned   int    `json:"scanned"`
+	Reaped    int    `json:"reaped"` // deleted (or would-reap in dry-run)
+	Kept      int    `json:"kept"`   // refused by a safety gate or too young
+	Errors    int    `json:"errors"` // removal attempted and failed
+	// ProbeFailures counts entries kept because a safety gate could not be
+	// EVALUATED (lsof timed out, the mount table or session store was
+	// unreadable) rather than because it positively found the sandbox in
+	// use. These are a subset of Kept: a sweep can report zero Errors while
+	// every entry was actually a probe failure, which looks identical to a
+	// healthy idle sweep unless a reader checks this field too.
+	ProbeFailures int              `json:"probe_failures,omitempty"`
+	Warnings      []string         `json:"warnings,omitempty"`
+	Entries       []SandboxGCEntry `json:"entries,omitempty"`
 }
 
 // SandboxGC sweeps ~/.agm/sandboxes for reapable sandbox dirs.
@@ -143,6 +150,9 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 			// running them once per entry avoids duplicate lsof/mount scans).
 			if err := checker.CheckReapable(dir); err != nil {
 				result.Kept++
+				if isProbeFailure(err) {
+					result.ProbeFailures++
+				}
 				result.Entries = append(result.Entries, SandboxGCEntry{
 					Name: name, Action: "kept", Reason: refusalReason(err),
 				})
@@ -159,6 +169,9 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 			var refusal *sandboxgc.RefusalError
 			if errors.As(err, &refusal) {
 				result.Kept++
+				if refusal.ProbeFailure {
+					result.ProbeFailures++
+				}
 				result.Entries = append(result.Entries, SandboxGCEntry{
 					Name: name, Action: "kept", Reason: refusalReason(err),
 				})
@@ -237,4 +250,12 @@ func refusalReason(err error) string {
 		return fmt.Sprintf("%s: %s", ref.Reason, ref.Detail)
 	}
 	return err.Error()
+}
+
+// isProbeFailure reports whether err is a RefusalError raised because a
+// safety gate could not be evaluated, as opposed to one that positively
+// detected a live session/process/mount.
+func isProbeFailure(err error) bool {
+	var ref *sandboxgc.RefusalError
+	return errors.As(err, &ref) && ref.ProbeFailure
 }

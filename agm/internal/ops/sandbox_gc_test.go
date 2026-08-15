@@ -158,6 +158,9 @@ func TestSandboxGCKeepsMountedSandbox(t *testing.T) {
 	if res.Reaped != 0 || res.Kept != 1 {
 		t.Errorf("reaped=%d kept=%d, want 0/1", res.Reaped, res.Kept)
 	}
+	if res.ProbeFailures != 0 {
+		t.Errorf("ProbeFailures = %d, want 0 — the mount table was read fine and genuinely found a mount", res.ProbeFailures)
+	}
 	if _, err := os.Stat(mounted); err != nil {
 		t.Errorf("mounted sandbox must never be removed: %v", err)
 	}
@@ -181,8 +184,58 @@ func TestSandboxGCKeepsSandboxWithLiveProcess(t *testing.T) {
 	if res.Reaped != 0 || res.Kept != 1 {
 		t.Errorf("reaped=%d kept=%d, want 0/1", res.Reaped, res.Kept)
 	}
+	if res.ProbeFailures != 0 {
+		t.Errorf("ProbeFailures = %d, want 0 — lsof ran fine and genuinely found a live process", res.ProbeFailures)
+	}
 	if _, err := os.Stat(busy); err != nil {
 		t.Errorf("in-use sandbox must never be removed: %v", err)
+	}
+}
+
+// TestSandboxGCCountsProbeFailuresSeparately guards the review gap where a
+// systemic safety-probe failure (lsof missing, mount table unreadable) was
+// indistinguishable from a genuine live-process/mount finding: both landed in
+// Kept with Errors left at 0, so a sweep that could not evaluate ANY sandbox
+// still looked like a healthy idle sweep to the disk-watchdog heartbeat.
+func TestSandboxGCCountsProbeFailuresSeparately(t *testing.T) {
+	base := sandboxTestBase(t)
+	mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+		return nil, errors.New("lsof: command not found")
+	}
+
+	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	if err != nil {
+		t.Fatalf("sandboxGCWithChecker: %v", err)
+	}
+	if res.Reaped != 0 || res.Kept != 1 {
+		t.Errorf("reaped=%d kept=%d, want 0/1", res.Reaped, res.Kept)
+	}
+	if res.Errors != 0 {
+		t.Errorf("Errors = %d, want 0 — a probe failure is a refusal, not a removal failure", res.Errors)
+	}
+	if res.ProbeFailures != 1 {
+		t.Errorf("ProbeFailures = %d, want 1 — the sweep could not evaluate this sandbox at all", res.ProbeFailures)
+	}
+}
+
+// TestSandboxGCDryRunCountsProbeFailures covers the dry-run classification
+// path (CheckReapable, not Reap), which computes ProbeFailures separately.
+func TestSandboxGCDryRunCountsProbeFailures(t *testing.T) {
+	base := sandboxTestBase(t)
+	mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+		return nil, errors.New("lsof: command not found")
+	}
+
+	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: false}, base, checker)
+	if err != nil {
+		t.Fatalf("sandboxGCWithChecker: %v", err)
+	}
+	if res.Kept != 1 || res.ProbeFailures != 1 {
+		t.Errorf("kept=%d probeFailures=%d, want 1/1", res.Kept, res.ProbeFailures)
 	}
 }
 

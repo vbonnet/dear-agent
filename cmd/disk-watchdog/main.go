@@ -283,11 +283,12 @@ type gcHealth struct {
 
 // gcLogEntry is the subset of agm/internal/gclog.Entry this watchdog reads.
 type gcLogEntry struct {
-	Timestamp time.Time `json:"timestamp"`
-	Operation string    `json:"operation"`
-	Error     string    `json:"error,omitempty"`
-	DryRun    bool      `json:"dry_run,omitempty"`
-	Errors    int       `json:"errors,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
+	Operation     string    `json:"operation"`
+	Error         string    `json:"error,omitempty"`
+	DryRun        bool      `json:"dry_run,omitempty"`
+	Errors        int       `json:"errors,omitempty"`
+	ProbeFailures int       `json:"probe_failures,omitempty"`
 }
 
 // The operation emitted once per successful sweep, reap or no reap. A sweep
@@ -310,11 +311,14 @@ const gcClockSkewTolerance = 5 * time.Minute
 const maxGCLogRecordBytes = 1024 * 1024
 
 // healthyHeartbeat reports whether a completion record is evidence the reaper
-// actually did its job. A dry run reclaims nothing, and a sweep whose deletion
-// attempts failed leaves the sandboxes in place; counting either would let a
-// broken reaper suppress its own alarm indefinitely.
+// actually did its job. A dry run reclaims nothing, a sweep whose deletion
+// attempts failed leaves the sandboxes in place, and a sweep whose safety
+// gates couldn't even run (lsof/mount table/session store unreadable) proves
+// nothing was evaluated — every entry it "kept" was a refusal to look, not a
+// finding. Counting any of the three would let a broken reaper suppress its
+// own alarm indefinitely.
 func (e gcLogEntry) healthyHeartbeat() bool {
-	return e.Operation == gcCompletedOperation && !e.DryRun && e.Errors == 0
+	return e.Operation == gcCompletedOperation && !e.DryRun && e.Errors == 0 && e.ProbeFailures == 0
 }
 
 // gcLogSummary is what one pass over the GC log yields.

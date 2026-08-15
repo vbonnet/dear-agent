@@ -4,7 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-14 -->
 
 ## Purpose
 
@@ -83,7 +83,9 @@ place, so counting either would let a broken reaper suppress its own alarm.
 
 **DW-20** While the reaper-liveness window is zero or the sandbox GC log path is empty, the system shall not evaluate reaper liveness.
 
-**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.
+**DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.
+
+**DW-24** When a sandbox-GC completion record reports probe failures (a safety gate such as lsof, the mount table, or the session store could not be evaluated, as distinct from a gate that positively found a sandbox in use), the system shall treat that record the same as a record with reap errors: not proof of a completed sweep, so a reaper whose probes are systematically broken cannot suppress its own staleness alarm by reporting "kept" with zero errors.
 
 **DW-22** When evaluating reaper liveness, the system shall ignore records that are not sandbox-GC operations and records timestamped beyond the clock-skew tolerance (5 minutes) ahead of the current time.
 

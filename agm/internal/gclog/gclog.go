@@ -26,6 +26,12 @@ type Entry struct {
 	// deletions fail, so readers that treat a completion record as evidence of
 	// health must be able to see that count rather than infer it from Reason.
 	Errors int `json:"errors,omitempty"`
+	// ProbeFailures counts entries a sweep could not EVALUATE (a safety check
+	// like lsof or the mount table itself failed to run) rather than entries
+	// it correctly found in use. A sweep can report Errors == 0 while every
+	// entry was actually unevaluated, which reads as healthy unless this
+	// count is checked too.
+	ProbeFailures int `json:"probe_failures,omitempty"`
 }
 
 // DefaultPath returns the default gc.jsonl path (~/.agm/logs/gc.jsonl).

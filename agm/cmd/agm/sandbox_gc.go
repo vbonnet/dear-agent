@@ -144,14 +144,18 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	// disk-watchdog consumes this entry to alarm on a stale reaper.
 	logSandboxGCEntry(gclog.Entry{
 		Operation: "sandbox_gc_completed",
-		Reason: fmt.Sprintf("scanned=%d reaped=%d kept=%d errors=%d",
-			result.Scanned, result.Reaped, result.Kept, result.Errors),
-		// DryRun and Errors are load-bearing for the reader, not decoration.
-		// A dry run proves nothing was reclaimed, and a sweep whose deletions
-		// all failed is not a healthy sweep; disk-watchdog refuses to count
-		// either as a liveness heartbeat.
-		DryRun: result.DryRun,
-		Errors: result.Errors,
+		Reason: fmt.Sprintf("scanned=%d reaped=%d kept=%d errors=%d probe_failures=%d",
+			result.Scanned, result.Reaped, result.Kept, result.Errors, result.ProbeFailures),
+		// DryRun, Errors, and ProbeFailures are load-bearing for the reader,
+		// not decoration. A dry run proves nothing was reclaimed, a sweep
+		// whose deletions all failed is not a healthy sweep, and a sweep that
+		// could not evaluate its safety gates (lsof/mount table/session store
+		// unreadable) proves nothing was correctly evaluated either — even
+		// though every entry reports "kept", not "error". disk-watchdog
+		// refuses to count any of the three as a liveness heartbeat.
+		DryRun:        result.DryRun,
+		Errors:        result.Errors,
+		ProbeFailures: result.ProbeFailures,
 	})
 
 	if sandboxGCJSON {
@@ -190,6 +194,9 @@ func printSandboxGCText(result *ops.SandboxGCResult) {
 	if result.Errors > 0 {
 		summary += fmt.Sprintf(", errors %d", result.Errors)
 	}
+	if result.ProbeFailures > 0 {
+		summary += fmt.Sprintf(", probe failures %d", result.ProbeFailures)
+	}
 	switch {
 	case result.DryRun:
 		ui.PrintSuccess(fmt.Sprintf("Dry run: %s", summary))
@@ -200,6 +207,9 @@ func printSandboxGCText(result *ops.SandboxGCResult) {
 	}
 	if result.Errors > 0 {
 		ui.PrintWarning(fmt.Sprintf("%d sandbox(es) failed to remove — check ~/.agm/logs/gc.jsonl", result.Errors))
+	}
+	if result.ProbeFailures > 0 {
+		ui.PrintWarning(fmt.Sprintf("%d sandbox(es) could not be evaluated (lsof/mount/session-store probe failed) — check ~/.agm/logs/gc.jsonl", result.ProbeFailures))
 	}
 }
 
