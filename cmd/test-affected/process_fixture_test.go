@@ -117,8 +117,14 @@ func TestAwaitProcessFixtureReportsEarlyCommandExit(t *testing.T) {
 	root := t.TempDir()
 	var stderr bytes.Buffer
 	result := make(chan int, 1)
+	// Bounded even though this runs synchronously (not in a goroutine, to
+	// remove the scheduling race with awaitProcessFixture below): the stub
+	// exits immediately, but a hung command must still not block the test
+	// suite forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	result <- runGoTestCommand(
-		context.Background(),
+		ctx,
 		time.Second,
 		options{root: root},
 		[]string{"example.com/m/a"},
