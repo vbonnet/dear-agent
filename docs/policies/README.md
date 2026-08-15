@@ -20,7 +20,7 @@ which points here). Also discoverable via `engram guidance search`.
 | [dear-retro](dear-retro.ai.md) | Every seam, every systemic error gets a DEAR retro. A fix without a retro recurs. |
 | [definition-of-done](definition-of-done.ai.md) | Done = merged to main, deployed, verified in prod. Not "code written" or "PR open". |
 | [wayfinder-v2-canonical](wayfinder-v2-canonical.ai.md) | Wayfinder V2 (9 phases) is canonical. V1 (13 phases) is dead. |
-| [autonomous-merge](autonomous-merge.ai.md) | Agents review+merge their own PRs — except security/product/money, which a human merges. |
+| [autonomous-merge](autonomous-merge.ai.md) | Agents mark ready, review, and merge their own PRs — except security/product/money/governance/control-surface, which a human takes ready and merges. |
 
 ## Adding or changing a policy
 Policy changes define agent behavior — treat as **governance**: open a Wayfinder V2
