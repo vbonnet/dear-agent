@@ -39,8 +39,8 @@ jobs:
           git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags origin "$base" || true
           git cat-file -e "$head^{commit}" 2>/dev/null || git fetch --no-tags origin "$head" || true
 
-          git diff --numstat "$base" "$head" > /tmp/numstat.txt
-          git diff --name-only --diff-filter=ACMRD "$base" "$head" > /tmp/files.txt
+          git diff --numstat "$base"..."$head" > /tmp/numstat.txt
+          git diff --name-only --diff-filter=ACMRD "$base"..."$head" > /tmp/files.txt
 
           changed_lines=$(awk '{ add += $1 == "-" ? 0 : $1; del += $2 == "-" ? 0 : $2 } END { print add + del + 0 }' /tmp/numstat.txt)
           changed_files=$(wc -l < /tmp/files.txt | tr -d ' ')
@@ -88,7 +88,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Comment with split suggestion
-        if: steps.scope.outputs.should_comment == 'true'
+        # A pull_request run from a fork gets a read-only GITHUB_TOKEN, so
+        # posting/deleting comments would fail; skip rather than error out.
+        if: steps.scope.outputs.should_comment == 'true' && !github.event.pull_request.head.repo.fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -114,9 +116,26 @@ jobs:
           } > "$body"
 
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body"
-          gh pr view "$PR_NUMBER" --repo "$REPO" --json comments \
-            --jq '.comments[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id' |
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id' |
             head -n -1 |
+            while IFS= read -r comment_id; do
+              [ -n "$comment_id" ] || continue
+              gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
+            done
+
+      - name: Remove stale split-suggestion comment
+        # A later synchronize run can drop below every threshold; clear any
+        # marker comment left by an earlier, larger revision of this PR.
+        if: steps.scope.outputs.should_comment == 'false' && !github.event.pull_request.head.repo.fork
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id' |
             while IFS= read -r comment_id; do
               [ -n "$comment_id" ] || continue
               gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
