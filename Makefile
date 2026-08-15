@@ -486,8 +486,9 @@ install-token-refresher: build-token-refresher
 	$(call install-go-bin,bin/token-refresher)
 
 # Wire token-refresher into the supervisor mesh (ce-cs3v): deploy the launchd
-# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes, and
-# print the single host-side, ask-gated activation step for you to run yourself.
+# idle-backstop that checks ~/.claude/.credentials.json every 30 minutes and
+# refreshes only near access-token expiry, then print the single host-side,
+# ask-gated activation step for you to run yourself.
 #
 # The scheduled job is the ONLY sanctioned wiring. Do NOT also point Claude
 # Code's apiKeyHelper at this binary: since claude-code 2.1.205 a configured

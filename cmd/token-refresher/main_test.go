@@ -115,6 +115,20 @@ func TestRun_ForceRefreshesFreshToken(t *testing.T) {
 	}
 }
 
+func TestLaunchdCadenceDoesNotForceRefresh(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "launchd", "com.dear-agent.token-refresher.plist"))
+	if err != nil {
+		t.Fatalf("read launchd template: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "<string>-cadence</string>") {
+		t.Fatal("launchd token-refresher must run in cadence mode")
+	}
+	if strings.Contains(body, "<string>-force</string>") {
+		t.Fatal("launchd token-refresher must not force refresh every tick; forced rotations race native Claude Code refreshers")
+	}
+}
+
 func TestRun_InvalidGrantExits2(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

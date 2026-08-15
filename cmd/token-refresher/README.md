@@ -100,10 +100,13 @@ stalled refresh cycle.
 
 ## Wiring options
 
-- **launchd (idle backstop):** schedule `token-refresher -force` so the
-  credentials file stays fresh — and the single-use refresh-token family stays
-  alive — even when no session is running. This covers *idle* time. **This is
-  the only sanctioned wiring.**
+- **launchd (idle backstop):** schedule `token-refresher -cadence` so the
+  credentials file is checked every 30 minutes and refreshed only when the
+  access token is near expiry. Do not use `-force` in the scheduled job: Claude
+  Code runtimes also refresh this shared file without taking dear-agent's lock,
+  and forced 30-minute refresh-token rotations increase the chance that another
+  client presents a rotated-away token. This covers *idle* time. **This is the
+  only sanctioned wiring.**
 - **In-process:** callers already using `auth.ResolveOAuthToken()` get the same
   refresh for free.
 

@@ -23,12 +23,13 @@
   single-writer guarantee is tracked in ce-77ip; until then this job carries
   -cadence so a death is at least ALERTED and SURVIVED rather than silent.
 
-  Runs with -force so every tick guarantees a fresh token regardless of the
-  remaining lifetime (the binary is the single-owner, file-locked refresher
-  mandated by ce-rnpt / ce-f3e3, designed for exactly this cadence). stdout
-  carries ONLY the access token (stdout-only token contract), so it is routed to
-  /dev/null to keep the secret out of the log file; structured logs and the
-  JSONL audit trail go to stderr / ~/.local/state/dear-agent.
+  Runs without -force so each tick refreshes only when the access token is near
+  expiry. Claude Code runtimes also refresh this shared credentials file and do
+  not take dear-agent's lock, so forced 30-minute rotations widen the refresh
+  replay race instead of preventing it. stdout carries ONLY the access token
+  (stdout-only token contract), so it is routed to /dev/null to keep the secret
+  out of the log file; structured logs and the JSONL audit trail go to stderr /
+  ~/.local/state/dear-agent.
 
   The plist is a TEMPLATE: the install target
   (make install-token-refresher-launchagent) substitutes __HOME__ for the real
@@ -42,7 +43,6 @@
   <key>ProgramArguments</key>
   <array>
     <string>__HOME__/go/bin/token-refresher</string>
-    <string>-force</string>
     <string>-cadence</string>
   </array>
 
@@ -54,7 +54,7 @@
     <string>__HOME__</string>
   </dict>
 
-  <!-- One refresh every 30 minutes, well ahead of access-token expiry. -->
+  <!-- Check every 30 minutes; refresh only when the access token is near expiry. -->
   <key>StartInterval</key>
   <integer>1800</integer>
 
