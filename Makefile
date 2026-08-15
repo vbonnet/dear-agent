@@ -505,8 +505,11 @@ install-token-refresher-launchagent: install-token-refresher
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 	@echo "Activate it yourself (ask-gated host action):"
-	@echo "  Schedule the idle backstop:"
-	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
+	@echo "  Reload the idle backstop (bootout first -- a bare 'launchctl load' is a"
+	@echo "  no-op against an already-loaded label and keeps running the STALE"
+	@echo "  in-memory ProgramArguments, not what's on disk):"
+	@echo "     launchctl bootout gui/\$$(id -u)/com.dear-agent.token-refresher 2>/dev/null || true"
+	@echo "     launchctl bootstrap gui/\$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 	@if grep -q '"apiKeyHelper"' $(HOME)/.claude/settings.json 2>/dev/null; then \
 		echo ""; \
 		echo "  WARNING: this host still has a retired apiKeyHelper in ~/.claude/settings.json."; \
