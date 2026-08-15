@@ -127,6 +127,13 @@ var HarnessModels = map[string][]ModelSpec{
 // harness replaced its public model catalog. Values point to current aliases
 // so every caller still crosses the normal registry and exact-label boundary.
 var legacyModelAliases = map[string]map[string]string{
+	"codex-cli": {
+		// These provider-style names are accepted by AGM input paths but are
+		// rejected by ChatGPT-account Codex auth. Resolve them to the native
+		// account-supported spellings before the private executor launches codex.
+		"gpt-5.6":       "5.6-sol",
+		"gpt-5.5-codex": "5.5",
+	},
 	"agy": {
 		"2.5-flash":             "3.5-flash",
 		"gemini-2.5-flash":      "3.5-flash",
@@ -255,6 +262,11 @@ func ValidateModel(harnessName, modelAlias string) error {
 	models := GetModelsForHarness(harnessName)
 	for _, m := range models {
 		if m.Alias == modelAlias || m.FullName == modelAlias {
+			return nil
+		}
+	}
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
+		if _, ok := legacy[modelAlias]; ok {
 			return nil
 		}
 	}

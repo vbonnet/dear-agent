@@ -10,6 +10,11 @@ func TestValidateModel(t *testing.T) {
 	if err := ValidateModel("claude-code", "sonnet"); err != nil {
 		t.Errorf("expected nil for known model, got %v", err)
 	}
+	for _, model := range []string{"gpt-5.6", "gpt-5.5-codex"} {
+		if err := ValidateModel("codex-cli", model); err != nil {
+			t.Errorf("expected nil for mapped Codex model %q, got %v", model, err)
+		}
+	}
 	// Unknown model should also return nil (warn but allow)
 	if err := ValidateModel("claude-code", "unknown-model"); err != nil {
 		t.Errorf("expected nil for unknown model (warn policy), got %v", err)
@@ -37,6 +42,8 @@ func TestResolveModelFullName(t *testing.T) {
 		{"agy", "2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
 		{"agy", "gemini-2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
 		{"codex-cli", "5.6", "gpt-5.6-terra"},
+		{"codex-cli", "gpt-5.6", "gpt-5.6-sol"},
+		{"codex-cli", "gpt-5.5-codex", "gpt-5.5"},
 		{"codex-cli", "5.5", "gpt-5.5"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough
