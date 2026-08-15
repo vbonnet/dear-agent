@@ -107,6 +107,21 @@ stalled refresh cycle.
   and forced 30-minute refresh-token rotations increase the chance that another
   client presents a rotated-away token. This covers *idle* time. **This is the
   only sanctioned wiring.**
+
+  Pair `-cadence` with an `-expiry-skew` **larger than the scheduler's tick**
+  (the shipped plist uses `45m` against a 1800s `StartInterval`). The default
+  skew is 60s, so a 30-minute tick will almost always find the token "fresh"
+  with minutes of life left, decline to refresh, and return after it has already
+  expired. Observed on 2026-08-15: expiry at 09:21:24Z, a tick at 08:53:43Z that
+  did nothing, and a tick at 09:23:43Z that refreshed 2m19s late — every request
+  in between got a 401 "login expired".
+
+  The wide skew is also the closest thing to a single-writer guarantee that is
+  available today. Refreshing well ahead of expiry means no other OAuth client
+  on the host ever observes a near-expiry token, so none of them has cause to
+  rotate it. This is a *probabilistic* mitigation, not a lock — those clients
+  still do not take `~/.claude/.credentials.lock`, and a real single-writer
+  guarantee remains tracked in ce-77ip.
 - **In-process:** callers already using `auth.ResolveOAuthToken()` get the same
   refresh for free.
 
