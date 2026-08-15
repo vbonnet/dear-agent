@@ -131,7 +131,9 @@ var legacyModelAliases = map[string]map[string]string{
 		// These provider-style names are accepted by AGM input paths but are
 		// rejected by ChatGPT-account Codex auth. Resolve them to the native
 		// account-supported spellings before the private executor launches codex.
-		"gpt-5.6":       "5.6-sol",
+		// "gpt-5.6" mirrors bare "5.6" below: the worker default (terra), NOT
+		// the frontier tier — callers must opt into "gpt-5.6-sol" explicitly.
+		"gpt-5.6":       "5.6-terra",
 		"gpt-5.5-codex": "5.5",
 	},
 	"agy": {
@@ -265,13 +267,13 @@ func ValidateModel(harnessName, modelAlias string) error {
 			return nil
 		}
 	}
+	if modelAlias == "" {
+		return fmt.Errorf("model is empty")
+	}
 	if legacy, ok := legacyModelAliases[harnessName]; ok {
 		if _, ok := legacy[modelAlias]; ok {
 			return nil
 		}
-	}
-	if modelAlias == "" {
-		return fmt.Errorf("model is empty")
 	}
 	for _, r := range modelAlias {
 		if !modelCharOK(r) {

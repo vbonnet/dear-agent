@@ -42,7 +42,7 @@ func TestResolveModelFullName(t *testing.T) {
 		{"agy", "2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
 		{"agy", "gemini-2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
 		{"codex-cli", "5.6", "gpt-5.6-terra"},
-		{"codex-cli", "gpt-5.6", "gpt-5.6-sol"},
+		{"codex-cli", "gpt-5.6", "gpt-5.6-terra"},
 		{"codex-cli", "gpt-5.5-codex", "gpt-5.5"},
 		{"codex-cli", "5.5", "gpt-5.5"},
 		{"codex-cli", "5.4", "gpt-5.4"},
