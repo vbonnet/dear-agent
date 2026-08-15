@@ -1,9 +1,12 @@
-# AGM Configuration Example - OpenCode Multi-Agent Integration
+# Historical OpenCode Multi-Agent Configuration Proposal
 #
-# This example configuration enables OpenCode SSE monitoring while maintaining
-# backward compatibility with Claude/Gemini tmux-based monitoring.
+# This document includes proposed logging, eventbus, sessions, multi_agent,
+# notification, metrics, and daemon namespaces that are not part of AGM's
+# runtime configuration schema. It is retained as design context only.
 #
-# Copy to ~/.agm/config.yaml and customize for your environment.
+# DO NOT copy this file to ~/.config/agm/config.yaml: the strict runtime loader
+# intentionally rejects these unimplemented keys. See
+# docs/OPENCODE-INTEGRATION.md for a strict-compatible adapters.opencode example.
 
 # ============================================================================
 # Multi-Agent Adapter Configuration

@@ -302,15 +302,15 @@ internal/ui/
 ### Global Config Pattern
 
 ```go
-// main.go - Set config from flags
-uiCfg := ui.LoadConfig()
+// main.go - Project the already validated shared config snapshot
+uiCfg := cfg.UISettings
 if noColor {
     uiCfg.UI.NoColor = true
 }
 if screenReader {
     uiCfg.UI.ScreenReader = true
 }
-ui.SetGlobalConfig(uiCfg)
+ui.SetGlobalConfig(&uiCfg)
 
 // Anywhere in codebase - Access config
 cfg := ui.GetGlobalConfig()

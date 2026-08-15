@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
@@ -163,6 +164,168 @@ func TestResolveSandboxLowerDirs_ConfiguredReposWins(t *testing.T) {
 	}
 	if len(dirs) != 1 || dirs[0] != "/configured/repo" {
 		t.Errorf("resolveSandboxLowerDirs() = %v, want [/configured/repo]", dirs)
+	}
+}
+
+// TestInvalidSandboxConfigCannotBroadenLowerDirs is the ce-1hu9.61 command
+// boundary regression. If the loader ignores the misspelled authority field,
+// the seeded empty repository list reaches resolution and scans both repos in
+// the fixture. A strict load must stop before that widening can occur.
+func TestInvalidSandboxConfigCannotBroadenLowerDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspaceRepos := filepath.Join(home, "src", "ws", "oss", "repos")
+	repoA := filepath.Join(workspaceRepos, "repo-a")
+	repoB := filepath.Join(workspaceRepos, "repo-b")
+	for _, repo := range []string{repoA, repoB} {
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o700); err != nil {
+			t.Fatalf("create repository fixture %s: %v", repo, err)
+		}
+	}
+
+	originalConfigFile, originalCfg := cfgFile, cfg
+	originalSessionsDir, originalProvider := sessionsDir, sandboxProvider
+	providerFlag := newCmd.Flags().Lookup("sandbox-provider")
+	originalProviderChanged := providerFlag.Changed
+	t.Cleanup(func() {
+		cfgFile = originalConfigFile
+		cfg = originalCfg
+		sessionsDir = originalSessionsDir
+		sandboxProvider = originalProvider
+		providerFlag.Changed = originalProviderChanged
+	})
+	sessionsDir = filepath.Join(home, "sessions")
+	sandboxProvider = "auto"
+	providerFlag.Changed = false
+
+	invalid := []struct {
+		name    string
+		content *string
+	}{
+		{name: "misspelled repositories", content: new("sandbox:\n  repoz: []\n")},
+		{name: "null repository list", content: new("sandbox: {repos: null}\n")},
+		{name: "null repository item", content: new("sandbox: {repos: [null]}\n")},
+		{name: "second document", content: new("sandbox: {repos: [/configured]}\n---\nsandbox: {repos: []}\n")},
+		{name: "missing explicit source"},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			if tt.content != nil {
+				if err := os.WriteFile(configPath, []byte(*tt.content), 0o600); err != nil {
+					t.Fatalf("write invalid config: %v", err)
+				}
+			}
+			cfgFile = configPath
+			loaded, err := loadConfigWithFlags()
+			if err == nil {
+				cfg = loaded
+				broadened, resolveErr := resolveSandboxLowerDirs(repoA)
+				t.Fatalf("loadConfigWithFlags() accepted invalid authority config and reached repository discovery: dirs=%v err=%v", broadened, resolveErr)
+			}
+			if loaded != nil {
+				t.Fatalf("loadConfigWithFlags() config = %#v, want nil on invalid authority config", loaded)
+			}
+		})
+	}
+
+	// Prove the two-repository fixture is capable of exposing the original
+	// fail-open path instead of passing vacuously because discovery is empty.
+	cfg = config.Default()
+	discovered, err := resolveSandboxLowerDirs(repoA)
+	if err != nil {
+		t.Fatalf("resolveSandboxLowerDirs() fixture error = %v", err)
+	}
+	seen := make(map[string]bool, len(discovered))
+	for _, repo := range discovered {
+		seen[repo] = true
+	}
+	if len(discovered) != 2 || !seen[repoA] || !seen[repoB] {
+		t.Fatalf("resolveSandboxLowerDirs() fixture = %v, want both %s and %s", discovered, repoA, repoB)
+	}
+}
+
+func TestLoadConfigWithFlagsProjectsSandboxProviderPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(path, []byte("sandbox: {provider: overlayfs-native, repos: []}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	originalCfgFile, originalSessionsDir := cfgFile, sessionsDir
+	originalProvider := sandboxProvider
+	providerFlag := newCmd.Flags().Lookup("sandbox-provider")
+	originalProviderChanged := providerFlag.Changed
+	t.Cleanup(func() {
+		cfgFile = originalCfgFile
+		sessionsDir = originalSessionsDir
+		sandboxProvider = originalProvider
+		providerFlag.Changed = originalProviderChanged
+	})
+	cfgFile = path
+	sessionsDir = filepath.Join(home, "sessions")
+
+	sandboxProvider = "auto"
+	providerFlag.Changed = false
+	loaded, err := loadConfigWithFlags()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sandboxProvider != "overlayfs-native" || loaded.Sandbox.Provider != "overlayfs-native" {
+		t.Fatalf("configured provider projection = global %q snapshot %q, want registered compatibility name", sandboxProvider, loaded.Sandbox.Provider)
+	}
+
+	sandboxProvider = "gvisor"
+	providerFlag.Changed = true
+	loaded, err = loadConfigWithFlags()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sandboxProvider != "gvisor" || loaded.Sandbox.Provider != "gvisor" {
+		t.Fatalf("explicit provider projection = global %q snapshot %q, want gvisor", sandboxProvider, loaded.Sandbox.Provider)
+	}
+}
+
+func TestProjectUIConfigUsesSelectedSnapshotWithoutReread(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(path, []byte("ui: {theme: selected, no_color: false, screen_reader: false}\nsandbox: {repos: []}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	originalCfgFile, originalSessionsDir := cfgFile, sessionsDir
+	originalProvider := sandboxProvider
+	providerFlag := newCmd.Flags().Lookup("sandbox-provider")
+	originalProviderChanged := providerFlag.Changed
+	ui.SetGlobalConfig(nil)
+	t.Cleanup(func() {
+		cfgFile = originalCfgFile
+		sessionsDir = originalSessionsDir
+		sandboxProvider = originalProvider
+		providerFlag.Changed = originalProviderChanged
+		ui.SetGlobalConfig(nil)
+	})
+	cfgFile = path
+	sessionsDir = filepath.Join(home, "sessions")
+	sandboxProvider = "auto"
+	providerFlag.Changed = false
+	loaded, err := loadConfigWithFlags()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("invalid: [yaml"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	projectUIConfig(loaded, true, true, ModeHuman)
+	if loaded.UISettings.UI.NoColor || loaded.UISettings.UI.ScreenReader {
+		t.Fatalf("loaded snapshot mutated by projection: %#v", loaded.UISettings.UI)
+	}
+	projected := ui.GetGlobalConfig()
+	if projected.UI.Theme != "selected" || !projected.UI.NoColor || !projected.UI.ScreenReader {
+		t.Fatalf("projected UI = %#v, want selected cached snapshot plus overrides", projected.UI)
 	}
 }
 

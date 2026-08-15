@@ -85,8 +85,9 @@ func TestDefault(t *testing.T) {
 }
 
 func TestLoad_DefaultsWhenMissing(t *testing.T) {
-	// Load non-existent file
-	cfg, err := Load("/nonexistent/config.yaml")
+	// An ordinarily absent canonical default retains defaults.
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -193,11 +194,10 @@ func TestLoad_EnvironmentOverrides(t *testing.T) {
 	// Set environment variables
 	t.Setenv("AGM_SESSIONS_DIR", "/tmp/env-sessions")
 	t.Setenv("AGM_LOG_LEVEL", "warn")
-	defer os.Unsetenv("AGM_SESSIONS_DIR")
-	defer os.Unsetenv("AGM_LOG_LEVEL")
+	t.Setenv("HOME", t.TempDir())
 
 	// Load config
-	cfg, err := Load("/nonexistent/config.yaml")
+	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -268,6 +268,7 @@ sandbox:
 	}
 
 	homeDir, _ := os.UserHomeDir()
+	homeDir, _ = filepath.EvalSymlinks(homeDir)
 
 	// All paths should be expanded
 	if cfg.SessionsDir != filepath.Join(homeDir, "my-sessions") {
@@ -396,11 +397,10 @@ func TestLoad_OpenCodeEnvironmentOverrides(t *testing.T) {
 	// Set environment variables
 	t.Setenv("OPENCODE_SERVER_URL", "http://localhost:7777")
 	t.Setenv("OPENCODE_ADAPTER_ENABLED", "true")
-	defer os.Unsetenv("OPENCODE_SERVER_URL")
-	defer os.Unsetenv("OPENCODE_ADAPTER_ENABLED")
+	t.Setenv("HOME", t.TempDir())
 
 	// Load config with no file
-	cfg, err := Load("/nonexistent/config.yaml")
+	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -430,12 +430,12 @@ func TestLoad_OpenCodeEnvironmentEnabled_BooleanVariants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
 			if tt.envValue != "" {
 				t.Setenv("OPENCODE_ADAPTER_ENABLED", tt.envValue)
-				defer os.Unsetenv("OPENCODE_ADAPTER_ENABLED")
 			}
 
-			cfg, err := Load("/nonexistent/config.yaml")
+			cfg, err := Load("")
 			if err != nil {
 				t.Fatalf("Load() failed: %v", err)
 			}
