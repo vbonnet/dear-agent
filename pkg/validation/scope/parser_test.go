@@ -1,10 +1,22 @@
 package scope
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func largeMarkdownDocument(headings int) string {
+	var markdown strings.Builder
+	for i := range headings {
+		markdown.WriteString("## Heading ")
+		markdown.WriteString(strconv.Itoa(i))
+		markdown.WriteString("\nContent here\n")
+	}
+
+	return markdown.String()
+}
 
 func TestParser_Parse(t *testing.T) {
 	parser := NewParser()
@@ -351,13 +363,7 @@ func TestParser_Performance(t *testing.T) {
 	parser := NewParser()
 
 	t.Run("parses large document quickly", func(t *testing.T) {
-		// Generate document with 1000 headings
-		var lines []string
-		for i := 0; i < 1000; i++ {
-			lines = append(lines, "## Heading "+string(rune(i)))
-			lines = append(lines, "Content here")
-		}
-		markdown := strings.Join(lines, "\n")
+		markdown := largeMarkdownDocument(1000)
 
 		start := time.Now()
 		sections := parser.Parse(markdown)
@@ -370,6 +376,25 @@ func TestParser_Performance(t *testing.T) {
 		// Threshold set to 500ms to account for CI variability and race detector overhead
 		if duration > 500*time.Millisecond {
 			t.Errorf("parsing too slow: %v (expected <500ms)", duration)
+		}
+	})
+
+	t.Run("bounds large document allocations", func(t *testing.T) {
+		markdown := largeMarkdownDocument(1000)
+		var sections []Section
+
+		allocations := testing.AllocsPerRun(5, func() {
+			sections = parser.Parse(markdown)
+		})
+		if len(sections) != 1000 {
+			t.Fatalf("expected 1000 sections, got %d", len(sections))
+		}
+
+		// Keep enough headroom for race instrumentation and Go runtime changes,
+		// while catching accidental per-heading regexp compilation (>200k).
+		const maxAllocations = 60_000
+		if allocations > maxAllocations {
+			t.Errorf("parsing allocated too much: %.0f allocations (expected <=%d)", allocations, maxAllocations)
 		}
 	})
 
@@ -387,6 +412,20 @@ func TestParser_Performance(t *testing.T) {
 			t.Errorf("fuzzy matching too slow: %v (expected <1s for 10k iterations)", duration)
 		}
 	})
+}
+
+func BenchmarkParser_ParseLargeDocument(b *testing.B) {
+	parser := NewParser()
+	markdown := largeMarkdownDocument(1000)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		sections := parser.Parse(markdown)
+		if len(sections) != 1000 {
+			b.Fatalf("expected 1000 sections, got %d", len(sections))
+		}
+	}
 }
 
 func TestLevenshteinDistance(t *testing.T) {

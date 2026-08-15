@@ -42,6 +42,8 @@ used to obtain those outcomes.
 
 **SPECAUDIT-16** When inventory, validation, or rendering runs, the target repository, working tree, Git index and references, specifications, BDD features, issue state, and delivery state shall remain unchanged, and the command shall not apply a consolidation recommendation.
 
+**SPECAUDIT-17** When a user applies a search or verdict filter in a rendered audit artifact, the artifact shall evaluate any non-empty search query against complete card text independently of the card's current hidden state and hide every candidate and keep-separate finding card that does not match the active search and verdict criteria.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_governance_tooling.feature`

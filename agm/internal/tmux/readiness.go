@@ -234,6 +234,12 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if harness == "pi-cli" && hasPiManagedPermissionPrompt(tail) {
 		return false, HarnessInputPermission, nil
 	}
+	// Claude's selected trust rows also use the ❯ glyph. Give the live dialog
+	// precedence over composer detection so ANSI styling can never make either
+	// selected option look like a ready input line.
+	if harness == "claude-code" && TrustDialogOwnsInput(content) {
+		return false, HarnessInputOnboarding, nil
+	}
 
 	var ready bool
 	switch harness {
@@ -349,7 +355,11 @@ func queuedComposerOwnsTail(region, content, harness string) bool {
 	}
 	switch harness {
 	case "claude-code":
-		return hasTerminalIdleFooter(lines, isClaudeIdleFooter) && queuedPastePayloadOwnsTail(lines, isClaudeIdleComposerChrome)
+		// Share the composer footer parser with hasTailOwnedClaudeComposer so a
+		// queued AGM paste on a modern cwd/login/effort footer is still
+		// recognized as idle-composer-owned (ce-wn4qe); the legacy whitelist
+		// rejected those lines and downgraded the paste to human input.
+		return hasTerminalIdleFooter(lines, isClaudeComposerFooterChrome) && queuedPastePayloadOwnsTail(lines, isClaudeComposerFooterChrome)
 	case "codex-cli":
 		// Codex keeps its model footer visible while a turn is active, and a
 		// queued paste replaces the empty cursor that would otherwise prove idle
@@ -384,7 +394,11 @@ func queuedPastePayloadOwnsTail(lines []string, isChrome func(string) bool) bool
 		return false
 	}
 	payload := lines[1:]
-	for len(payload) > 0 && isChrome(payload[len(payload)-1]) {
+	// Strip only the trailing footer/chrome that sits *below* the declared
+	// payload — never into the payload itself. Otherwise a payload whose final
+	// line happens to contain a footer token (e.g. "· /effort") would be
+	// mis-stripped and the line count would fail (ce-wn4qe).
+	for len(payload) > want && isChrome(payload[len(payload)-1]) {
 		payload = payload[:len(payload)-1]
 	}
 	return len(payload) == want
@@ -396,16 +410,6 @@ func hasTerminalIdleFooter(lines []string, isFooter func(string) bool) bool {
 			continue
 		}
 		return isFooter(line)
-	}
-	return false
-}
-
-func isClaudeIdleFooter(line string) bool {
-	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
-	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
 	}
 	return false
 }
@@ -578,6 +582,19 @@ func handleHarnessStartupState(
 	observedHarness *bool,
 	advanced map[string]bool,
 ) (bool, error) {
+	return handleHarnessStartupStateWithProbe(
+		ctx, sessionName, harness, readiness, observedHarness, advanced, ProbeClaudeInputContext,
+	)
+}
+
+func handleHarnessStartupStateWithProbe(
+	ctx context.Context,
+	sessionName, harness string,
+	readiness HarnessInputReadiness,
+	observedHarness *bool,
+	advanced map[string]bool,
+	probeClaude func(context.Context, string, bool) (ClaudeInputProbe, error),
+) (bool, error) {
 	switch readiness.State {
 	case HarnessInputReady:
 		*observedHarness = true
@@ -598,6 +615,16 @@ func handleHarnessStartupState(
 		}
 		transition := readiness.State + ":" + onboardingKind(readiness.Content, harness)
 		if !advanced[transition] {
+			if harness == "claude-code" {
+				probe, err := probeClaude(ctx, sessionName, true)
+				if err != nil {
+					return false, fmt.Errorf("re-prove Claude startup trust selector in %q: %w", sessionName, err)
+				}
+				if probe.TrustAnswered {
+					advanced[transition] = true
+				}
+				return false, nil
+			}
 			if err := advanceHarnessStartup(ctx, readiness.TargetPane, harness, readiness.Content); err != nil {
 				return false, fmt.Errorf("advance %s startup in %q: %w", harness, sessionName, err)
 			}
@@ -720,32 +747,58 @@ func hasTailOwnedClaudeComposer(content string) bool {
 	if promptIndex < 0 {
 		return false
 	}
+	// The composer owns the tail only when every line below the ❯ input line is
+	// the composer box's border or its idle status footer — never active
+	// output. Any unrecognised/dynamic line (a spinner, tool progress like
+	// "Running tests") fails closed, which is what keeps a mid-turn ❯ from being
+	// read as ready.
 	for _, line := range lines[promptIndex+1:] {
-		if !isClaudeIdleComposerChrome(line) {
+		if !isClaudeComposerFooterChrome(line) {
 			return false
 		}
 	}
 	return true
 }
 
-func isClaudeIdleComposerChrome(line string) bool {
-	line = strings.TrimSpace(stripANSI(line))
-	if line == "" {
+// claudeStatusCwdPattern matches the status-footer cwd anchor "user@host:/path".
+var claudeStatusCwdPattern = regexp.MustCompile(`^\S+@\S+:`)
+
+// isClaudeComposerFooterChrome reports whether a line rendered below the ❯ input
+// line is part of the composer's idle box/status footer rather than active
+// output. Claude Code's status footer (cwd@host, mode, auth, effort, hints)
+// grew several lines across releases; recognise those variants so a ready
+// composer is not mistaken for a running turn (ce-wn4qe), while a spinner or any
+// dynamic tool output below the composer still fails closed.
+func isClaudeComposerFooterChrome(line string) bool {
+	plain := strings.TrimSpace(stripANSI(line))
+	if plain == "" {
 		return true
 	}
-	if strings.Trim(line, "─━┄┈╌╍ ") == "" {
+	// Box borders / decorative rules.
+	if strings.Trim(plain, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
 		return true
 	}
-	lower := strings.ToLower(line)
-	if strings.Contains(lower, "esc to interrupt") {
+	lower := strings.ToLower(plain)
+	// A running turn is never idle chrome.
+	if strings.Contains(lower, "esc to interrupt") || hasActiveSpinner(plain) {
 		return false
 	}
-	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
+	// Known status-footer / hint tokens across Claude Code releases. These are
+	// deliberately specific (mode lines use their "… on" form, auth uses the full
+	// "not logged in" / "run /login") so ordinary model output that merely
+	// contains a word like "/model" is not mistaken for footer chrome.
+	for _, marker := range []string{
+		"? for shortcuts", "for shortcuts", "shift+tab", "← for agents",
+		"bypass permissions on", "accept edits on", "plan mode on", "auto-accept edits",
+		"run /login", "not logged in",
+		"· /effort", "context left", "% context",
+	} {
 		if strings.Contains(lower, marker) {
 			return true
 		}
 	}
-	return false
+	// Status-line cwd anchor, e.g. "vbonnet@mac:/private/tmp/wd".
+	return claudeStatusCwdPattern.MatchString(plain)
 }
 
 func hasTailOwnedGeminiComposer(content string) bool {
@@ -916,7 +969,10 @@ func hasInputOverlay(content, harness string) bool {
 func hasOnboardingPrompt(content, harness string) bool {
 	switch harness {
 	case "claude-code":
-		return containsTrustPromptPattern(content)
+		// Classify either selected trust option as onboarding while the dialog
+		// owns the tail. Startup advancement separately requires the affirmative
+		// selection, so a selected "No" blocks input without authorizing Enter.
+		return TrustDialogOwnsInput(content)
 	case "codex-cli":
 		return containsCodexTrustPromptPattern(content) || containsCodexModelUpgradePromptPattern(content) || containsCodexUpdatePromptPattern(content)
 	case "agy":
@@ -948,8 +1004,10 @@ func onboardingKind(content, harness string) string {
 }
 
 func canAdvanceHarnessStartup(state, harness, content string) bool {
-	return state == HarnessInputOnboarding ||
-		(state == HarnessInputOverlay && harness == "agy" && ContainsAgySurveyPrompt(content))
+	if state == HarnessInputOnboarding {
+		return harness != "claude-code" || TrustSelectorOwnsInput(content)
+	}
+	return state == HarnessInputOverlay && harness == "agy" && ContainsAgySurveyPrompt(content)
 }
 
 func advanceHarnessStartup(ctx context.Context, targetPane, harness, content string) error {

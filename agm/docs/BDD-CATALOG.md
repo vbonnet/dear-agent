@@ -1346,6 +1346,20 @@ diff-based package guard gives fast changed-package diagnostics, and the
 actual-checkout gate prevents any implementation directory from remaining
 outside strict SPEC and executable BDD enforcement.
 
+### Visible Markdown Classification
+
+**File:** [`markdown_visibility.feature`](../test/bdd/features/markdown_visibility.feature)
+
+**Drives:** provider-neutral whole-document CommonMark classification used by
+SPEC policy tools. It preserves source line alignment while excluding complete
+indented-code, fenced-code, raw-HTML, and inline-comment ranges from normative
+prose. Container-nested fenced blocks are exercised through the same shared
+classifier rather than through a harness adapter.
+
+**Key scenario:** Hidden CommonMark examples, including container-prefixed
+fences, do not become normative requirements while following visible prose
+retains its original line position.
+
 ### SPEC Audit Tooling Evidence Boundary
 
 **File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)

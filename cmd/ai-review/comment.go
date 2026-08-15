@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,16 +28,22 @@ func emojiFor(o Outcome) string {
 	}
 }
 
-// buildComment renders the sticky review comment body.
-func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, override bool, triggers []string) string {
+// buildComment renders the sticky review comment body. keylessNeutral marks
+// the AIREV-26 cannot-run disposition, whose banner must describe the
+// neutral-with-warning publication instead of claiming a failed check the
+// workflow will not report.
+func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, override bool, triggers []string, keylessNeutral bool) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, commentMarker)
 	fmt.Fprintf(&b, "## %s AI Code Review — %s\n\n", emojiFor(outcome), outcome)
-	// Deliberately says nothing about whether this context is a *required*
-	// status check: that lives in .github/rulesets/main.json and changes
-	// independently of this binary. Wording that hard-codes either state
-	// would make the PR-facing audit record false the moment it flips.
-	fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This check is **fail-closed**: any non-approved outcome fails it.\n\n")
+	// Deliberately says nothing about whether this context is provider-required:
+	// live ruleset/IaC state changes independently of this binary. Wording that
+	// hard-codes either state would make the PR-facing audit record false.
+	if keylessNeutral {
+		fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). No reviewer credential is configured, so this run cannot execute the model review and publishes as **neutral-with-warning** (AIREV-26): no approval is claimed, and **human review is recommended before merge**.\n\n")
+	} else {
+		fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This check is **fail-closed**: any non-approved outcome fails it.\n\n")
+	}
 	if len(triggers) > 0 {
 		fmt.Fprintf(&b, "### 🔴 Mandatory escalation (REVIEW.md §3)\n\nThis diff trips escalation triggers, so the outcome is forced to `needs-human-review` regardless of the dimension findings:\n\n")
 		for _, t := range triggers {
@@ -74,11 +81,11 @@ func overrideComment(reason string) string {
 }
 
 // oversizeComment is posted when the diff exceeds the auto-review size limit.
-func oversizeComment(size, limit int) string {
+func oversizeComment(limit int) string {
 	return fmt.Sprintf(commentMarker+"\n## ⚠️ AI Code Review — diff too large\n\n"+
-		"> The diff is %d bytes, over the %d-byte auto-review limit, so it was **not** reviewed (the gate refuses to review a truncated diff).\n\n"+
+		"> The diff exceeds the %d-byte auto-review limit, so it was **not** reviewed (the gate refuses to review a truncated diff).\n\n"+
 		"Split this PR into smaller reviewable changes, or apply the `ai-review:override` label after a human review.\n\n"+
-		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n", size, limit)
+		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n", limit)
 }
 
 // postComment upserts the sticky comment and reports whether the result was
@@ -90,7 +97,7 @@ func oversizeComment(size, limit int) string {
 // must not — see requireComment.
 func postComment(c config, body string) error {
 	if c.pr == "" || c.repo == "" {
-		// No PR context (e.g. merge_group): nothing to post to.
+		// No PR context: nothing to post to.
 		return nil
 	}
 	if _, err := exec.LookPath("gh"); err != nil {
@@ -98,7 +105,11 @@ func postComment(c config, body string) error {
 	}
 
 	// Post first so the audit record exists before anything is removed.
-	post := exec.Command("gh", "pr", "comment", c.pr, "--repo", c.repo, "--body-file", "-")
+	ctx := c.reviewContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	post := exec.CommandContext(ctx, "gh", "pr", "comment", c.pr, "--repo", c.repo, "--body-file", "-")
 	post.Stdin = strings.NewReader(body)
 	post.Stdout = os.Stdout
 	post.Stderr = os.Stderr
@@ -109,15 +120,15 @@ func postComment(c config, body string) error {
 
 	// Then prune older marked comments, keeping the one just posted. Pruning is
 	// cosmetic — the audit record already exists — so failures are ignored.
-	pruneOldComments(c)
+	pruneOldComments(ctx, c)
 	return nil
 }
 
 // pruneOldComments removes all but the newest marked sticky comment. Best
 // effort by design: the freshly posted comment is the audit record, and losing
 // a tidy-up must never turn into a gate failure.
-func pruneOldComments(c config) {
-	list := exec.Command("gh", "api",
+func pruneOldComments(ctx context.Context, c config) {
+	list := exec.CommandContext(ctx, "gh", "api",
 		fmt.Sprintf("repos/%s/issues/%s/comments", c.repo, c.pr),
 		"--jq", fmt.Sprintf(`.[] | select(.body | startswith("%s")) | .id`, commentMarker))
 	out, err := list.Output()
@@ -126,7 +137,7 @@ func pruneOldComments(c config) {
 	}
 	ids := strings.Fields(string(out))
 	for _, id := range ids[:max(len(ids)-1, 0)] { // all but the newest
-		_ = exec.Command("gh", "api", "-X", "DELETE",
+		_ = exec.CommandContext(ctx, "gh", "api", "-X", "DELETE",
 			fmt.Sprintf("repos/%s/issues/comments/%s", c.repo, id)).Run()
 	}
 }
