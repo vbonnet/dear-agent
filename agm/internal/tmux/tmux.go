@@ -910,6 +910,18 @@ func ListSessionsWithInfoStrict() ([]SessionInfo, error) {
 	socketPath := GetSocketPath()
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}:#{session_attached_list}")
 	if err != nil {
+		// A running server with zero sessions exits 1 ("no sessions"); that
+		// is a successful observation of an empty list, not a failure to
+		// observe. Mirror ListSessionsWithInfo's classification: only a
+		// non-ExitError (socket/permission/timeout) is a real failure.
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
+			return nil, err
+		}
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			return []SessionInfo{}, nil
+		}
 		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
 	}
 	return parseSessionInfoLines(string(output)), nil

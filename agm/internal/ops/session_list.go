@@ -237,10 +237,7 @@ func refineActiveStatusesWithLiveness(manifests []*manifest.Manifest, statuses m
 		if statuses[m.Name] != "active" {
 			continue
 		}
-		tmuxName := m.Tmux.SessionName
-		if tmuxName == "" {
-			tmuxName = m.Name
-		}
+		tmuxName := session.TmuxSessionName(m)
 		manifestByTmuxName[tmuxName] = m.Name
 		tmuxNames = append(tmuxNames, tmuxName)
 	}
@@ -291,10 +288,7 @@ func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interfac
 		}
 
 		for _, m := range manifests {
-			tmuxName := m.Tmux.SessionName
-			if tmuxName == "" {
-				tmuxName = m.Name
-			}
+			tmuxName := session.TmuxSessionName(m)
 			if info, exists := sessionMap[tmuxName]; exists {
 				statuses[m.Name] = "active"
 				attached[m.Name] = info.AttachedClients > 0
@@ -325,10 +319,7 @@ func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interfac
 	}
 
 	for _, m := range manifests {
-		tmuxName := m.Tmux.SessionName
-		if tmuxName == "" {
-			tmuxName = m.Name
-		}
+		tmuxName := session.TmuxSessionName(m)
 		if tmuxSet[tmuxName] {
 			statuses[m.Name] = "active"
 		} else {
@@ -349,10 +340,7 @@ func computeStatusesFromInfo(manifests []*manifest.Manifest, tmuxSessions []sess
 	}
 
 	for _, m := range manifests {
-		tmuxName := m.Tmux.SessionName
-		if tmuxName == "" {
-			tmuxName = m.Name
-		}
+		tmuxName := session.TmuxSessionName(m)
 		if info, exists := sessionMap[tmuxName]; exists {
 			statuses[m.Name] = "active"
 			attached[m.Name] = info.AttachedClients > 0
@@ -374,10 +362,7 @@ func findOrphanTmuxSessions(manifests []*manifest.Manifest, tmuxSessions []sessi
 	// Build set of known AGM tmux session names
 	agmNames := make(map[string]bool, len(manifests)*2)
 	for _, m := range manifests {
-		tmuxName := m.Tmux.SessionName
-		if tmuxName == "" {
-			tmuxName = m.Name
-		}
+		tmuxName := session.TmuxSessionName(m)
 		agmNames[tmuxName] = true
 		agmNames[m.Name] = true
 	}

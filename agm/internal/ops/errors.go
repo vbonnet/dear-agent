@@ -243,7 +243,7 @@ func ErrSessionNotReady(name, readiness string) *OpError {
 // caller made a permanent mistake and hands it suggestions about correcting the
 // identifier, when the correct advice is to retry an unchanged request. 503
 // matches ErrTmuxNotRunning, the other backend-unavailable case.
-func ErrOutputUnavailable(name, reason string) *OpError {
+func ErrOutputUnavailable(name, reason string, cause error) *OpError {
 	return &OpError{
 		Status:   503,
 		Type:     "session/output_unavailable",
@@ -255,6 +255,7 @@ func ErrOutputUnavailable(name, reason string) *OpError {
 			"Retry the same request; no change to the identifier is needed.",
 			"Check that the AGM tmux socket is reachable: `tmux -S ~/.agm/agm.sock list-sessions`.",
 		},
+		cause: cause,
 		Parameters: map[string]string{
 			"session": name,
 			"reason":  reason,
