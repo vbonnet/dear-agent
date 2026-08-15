@@ -233,6 +233,9 @@ func loadRegistry(path string) (*roles.Registry, string, error) {
 		}
 		return reg, path, nil
 	}
+	// cwd/home are best-effort search roots for AutoLoad, which already
+	// falls back across multiple candidate locations; an empty string from
+	// either lookup just narrows that search, so their errors aren't fatal.
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	return roles.AutoLoad(os.Getenv("DEAR_AGENT_ROLES"), cwd, home)

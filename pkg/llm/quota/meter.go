@@ -148,9 +148,10 @@ func (m *Meter) refreshInBackground() {
 		m.refreshing = false
 		m.mu.Unlock()
 	}()
-	// The error is deliberately dropped here: Refresh has already stored
-	// it on the meter, where Snapshot's caller can see it.
-	_, _ = m.Refresh(context.Background())
+	if _, err := m.Refresh(context.Background()); err != nil {
+		// Ignored here: Refresh has already stored it on the meter, where
+		// Snapshot's caller can see and report it.
+	}
 }
 
 // disabledDecision is the verdict a meter with no source returns: the
@@ -170,8 +171,12 @@ func (m *Meter) DecisionFor(family string) Decision {
 		d.Family = family
 		return d
 	}
-	snapshot, _ := m.Snapshot()
-	return Evaluate(snapshot, family, m.now(), m.policy)
+	snapshot, err := m.Snapshot()
+	decision := Evaluate(snapshot, family, m.now(), m.policy)
+	if err != nil && decision.Class == ClassUnknown {
+		decision.Reason = "quota unreadable: " + err.Error()
+	}
+	return decision
 }
 
 // DecisionForModel resolves a model id to its family and returns that
@@ -181,8 +186,12 @@ func (m *Meter) DecisionForModel(modelID string) Decision {
 	if !m.Enabled() {
 		return disabledDecision()
 	}
-	snapshot, _ := m.Snapshot()
-	return m.decide(snapshot, m.now(), modelID)
+	snapshot, err := m.Snapshot()
+	decision := m.decide(snapshot, m.now(), modelID)
+	if err != nil && decision.Class == ClassUnknown {
+		decision.Reason = "quota unreadable: " + err.Error()
+	}
+	return decision
 }
 
 // decide evaluates one model against an already-taken reading.
@@ -220,10 +229,13 @@ func (m *Meter) OrderModels(models []string) ([]string, []Decision) {
 	// One reading for the whole ordering. Evaluating each candidate
 	// against its own Snapshot call could straddle a background refresh
 	// and rank two candidates against different readings.
-	snapshot, _ := m.Snapshot()
+	snapshot, err := m.Snapshot()
 	now := m.now()
 	for i, id := range ordered {
 		decisions[i] = m.decide(snapshot, now, id)
+		if err != nil && decisions[i].Class == ClassUnknown {
+			decisions[i].Reason = "quota unreadable: " + err.Error()
+		}
 	}
 
 	index := make([]int, len(ordered))
