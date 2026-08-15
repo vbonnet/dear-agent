@@ -248,10 +248,16 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 		return result, fmt.Errorf("%s worktree sweep --execute: %w", cfg.agmBin, err)
 	}
 	if err := json.Unmarshal(out, result); err != nil {
-		return nil, fmt.Errorf("parse worktree sweep output: %w", err)
+		result.Error = fmt.Sprintf("parse worktree sweep output: %v", err)
+		return result, fmt.Errorf("parse worktree sweep output: %w", err)
 	}
 	if result.SandboxGC != nil && result.SandboxGC.Error != "" {
-		result.Error = fmt.Sprintf("%s sandbox gc --reap: %s", cfg.agmBin, result.SandboxGC.Error)
+		sboxErr := fmt.Sprintf("%s sandbox gc --reap: %s", cfg.agmBin, result.SandboxGC.Error)
+		if result.Error != "" {
+			result.Error = fmt.Sprintf("%s; %s", sboxErr, result.Error)
+		} else {
+			result.Error = sboxErr
+		}
 	}
 	return result, nil
 }
