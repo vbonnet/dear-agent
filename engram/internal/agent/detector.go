@@ -33,6 +33,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // Agent represents a detected AI coding agent platform
@@ -47,9 +48,13 @@ const (
 	AgentUnknown    Agent = "unknown"
 )
 
-// Detector detects which AI agent is currently running
+// Detector detects which AI agent is currently running.
+//
+// A Detector is safe for concurrent use. Its zero value is ready for use. A
+// Detector must not be copied after first use.
 type Detector struct {
-	cachedAgent *Agent // Cache detection result after first call
+	cacheMu     sync.Mutex // Guards cachedAgent and serializes input evaluation.
+	cachedAgent *Agent     // Cache detection result after first call
 	inputs      *detectorInputs
 }
 
@@ -77,6 +82,9 @@ func newDetector(inputs detectorInputs) *Detector {
 // Detection result is cached after the first call for performance.
 // Environment variables and files are not expected to change during runtime.
 func (d *Detector) Detect() Agent {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+
 	// Return cached result if available
 	if d.cachedAgent != nil {
 		return *d.cachedAgent
@@ -145,6 +153,9 @@ func (d *Detector) detect() Agent {
 // ClearCache clears the cached detection result, forcing re-detection on next Detect() call
 // This is primarily useful for testing scenarios where environment or files change
 func (d *Detector) ClearCache() {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+
 	d.cachedAgent = nil
 }
 
