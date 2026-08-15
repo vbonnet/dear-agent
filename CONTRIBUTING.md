@@ -136,6 +136,23 @@ pass the relevant tests, and be independently understandable from its diff and
 description. Do not bundle unrelated concerns into one monster PR just because
 they were discovered in the same session.
 
+**Caveat — the five-dimension review protocol (see [REVIEW.md](REVIEW.md))
+only triggers for PRs based on `main`.** A PR whose base is another open PR's
+branch does not get that review. Two ways to stay honest about this:
+- Open each stack member only after its predecessor has landed on `main`, so
+  every PR in the sequence is itself based on `main` and gets reviewed, or
+- If you do stack branch-on-branch, treat the non-`main`-based members as
+  unreviewed until the stack's root lands, and don't rely on `safe-merge`'s
+  fallback "validate all reported checks" path as a substitute for the real
+  review.
+
+**Bead tracking:** `safe-pr create` defaults every PR in a session to the
+same first bead and stamps `Closes <bead>`. In a stack, that closes the bead
+the moment the *first* PR merges, while later stack members are still open —
+`agm pr scan-orphaned` will then flag them as tracking a closed bead. Give
+each PR in a stack its own bead, or omit the closing reference on every PR
+except the final one in the stack.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the

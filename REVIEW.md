@@ -66,20 +66,28 @@ diff touches any of the following:
 Escalation is not a failure state — it is a correct outcome that preserves
 human authority over irreversible decisions.
 
-These triggers are enforced **deterministically in code** (`cmd/ai-review`
-inspects the changed paths, the PR body, and the commit messages), not left to
-the synthesis agent's judgement — §3 says escalation is mandatory "regardless of
-finding severity", so it must not depend on a nondeterministic model call. A
-diff that trips any trigger is forced to `needs-human-review` even if all five
-dimensions report clean.
+The permissions/hooks/security-boundary/infra/label triggers above are
+enforced **deterministically in code** (`cmd/ai-review` inspects the changed
+paths, the PR body, and the commit messages), not left to the synthesis
+agent's judgement — §3 says escalation is mandatory "regardless of finding
+severity", so those five must not depend on a nondeterministic model call. A
+diff that trips any of them is forced to `needs-human-review` even if all
+five dimensions report clean.
 
-For scope, deterministic checks should flag obvious size risk before an LLM is
-involved: more than 1,000 changed lines, 50 or more changed files, or changes
-spanning four or more top-level areas should produce a split suggestion. The
-LLM review may add a separate judgement when the diff appears to mix unrelated
-concerns, but size and changed-area thresholds must not depend on model output.
-Reviewers should ask authors to split these PRs into small, independently
-reviewable and independently testable stacked PRs whenever possible.
+Size and scope are flagged separately: a deterministic GitHub Action (`.github/workflows/pr-size-scope.yml`)
+computes changed lines, changed files, and top-level areas on every push and
+posts a split-suggestion comment once a PR crosses 1,000 changed lines, 50
+changed files, or 4 top-level areas. This is advisory today — it comments
+but does not force `needs-human-review` inside `cmd/ai-review` the way the
+other five triggers do. Reviewers should still treat a flagged PR as needing
+a split before line-by-line review, but should not assume the synthesis
+outcome itself was forced to `needs-human-review` by size alone.
+
+**Stacked PRs and this protocol:** the five-dimension review workflow only
+triggers for `branches: [main]`. A stacked PR (base ≠ `main`) does not get
+this review at all. Until that gap is closed, treat each stack member's
+merge into its parent branch as unreviewed by this protocol — the review
+only applies once the stack's root PR lands on `main`.
 
 ---
 
