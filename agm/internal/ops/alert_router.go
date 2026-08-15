@@ -294,6 +294,9 @@ func sessionIsLiveSupervisorCandidate(m *manifest.Manifest) bool {
 }
 
 func (r *AlertRouter) send(ctx context.Context, recipient, message string) error {
+	if r.ctx == nil {
+		return fmt.Errorf("nil OpContext in AlertRouter")
+	}
 	relayCtx := *r.ctx
 	relayCtx.Context = ctx
 	result, err := SendMessage(&relayCtx, &SendMessageRequest{Recipient: recipient, Message: message})
@@ -331,6 +334,9 @@ func appendAlertRecord(path string, rec AlertRecord) error {
 	if err := enc.Encode(rec); err != nil {
 		return fmt.Errorf("write alert queue: %w", err)
 	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close alert queue: %w", err)
+	}
 	return nil
 }
 
@@ -351,9 +357,11 @@ func ReadAlertRecords(path string, limit int) ([]AlertRecord, error) {
 		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
 			continue
 		}
-		records = append(records, rec)
-		if limit > 0 && len(records) > limit {
-			records = records[len(records)-limit:]
+		if limit > 0 && len(records) >= limit {
+			copy(records, records[1:])
+			records[limit-1] = rec
+		} else {
+			records = append(records, rec)
 		}
 	}
 	if err := scanner.Err(); err != nil {
