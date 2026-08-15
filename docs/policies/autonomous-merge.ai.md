@@ -5,7 +5,7 @@ status: active
 created: 2026-07-01
 tokens: 280
 title: Autonomous Merge Policy
-description: Agents mark ready, review, and merge their own PRs autonomously — except changes touching security, product behavior, money, agent governance, or agent control surfaces, which a human takes ready and merge.
+description: Agents mark ready, review, and merge their own PRs autonomously — except changes touching security, product behavior, money, agent governance, or agent control surfaces, which a human marks ready and merges.
 tags: [policy, merge, autonomy, security]
 ---
 
