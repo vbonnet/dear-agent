@@ -232,13 +232,17 @@ func WriteStateFile(path string, state *State) error {
 		_ = tmp.Close()
 		return fmt.Errorf("quota: write temp state file: %w", err)
 	}
+	// Owner-only: the reading names the account's subscription plan, and
+	// every consumer runs as the same user. Chmod the open file descriptor,
+	// not the path, so a symlink swapped in at tmpName between create and
+	// chmod cannot redirect the permission change onto another file
+	// (CWE-377/CWE-59).
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("quota: set state file mode: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("quota: close temp state file: %w", err)
-	}
-	// Owner-only: the reading names the account's subscription plan, and
-	// every consumer runs as the same user.
-	if err := os.Chmod(tmpName, 0o600); err != nil {
-		return fmt.Errorf("quota: set state file mode: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("quota: publish state file %s: %w", path, err)

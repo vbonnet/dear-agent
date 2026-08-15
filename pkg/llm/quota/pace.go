@@ -84,7 +84,7 @@ func parseCodexBarPace(data []byte) (map[string]*Pace, error) {
 				DeltaPercent:        rung.DeltaPercent,
 				ExpectedUsedPercent: rung.ExpectedUsedPercent,
 				WillLastToReset:     rung.WillLastToReset,
-				ExhaustsIn:          time.Duration(rung.ETASeconds) * time.Second,
+				ExhaustsIn:          time.Duration(rung.ETASeconds * float64(time.Second)),
 				Summary:             rung.Summary,
 			}
 			worst = morePressing(worst, candidate)
