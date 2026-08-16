@@ -303,8 +303,62 @@ jobs:
   # invocation from security-scan.yml. To make this gate enforced, add
   # "CI / govulncheck" to the branch-protection required-status-checks
   # list (admin step — tracked by BL-061).
-  govulncheck:
-    name: govulncheck
+  #
+  # Scoping (ce-1234-ci-health): "govulncheck" is a required status check,
+  # so it must post on every PR/push or branch protection blocks the PR
+  # forever. detect-go-changes always runs and decides whether the
+  # dependency graph could have changed; the real scan only runs then
+  # (Go compiles + govulncheck's DB download aren't free, and a PR that
+  # touches neither Go code nor go.mod/go.sum can't have altered the
+  # vulnerable-package set). govulncheck-gate always runs and carries the
+  # required-check name, succeeding whenever the scan was skipped or
+  # actually passed. schedule/workflow_dispatch runs always scan for
+  # real — that's the daily drift-catcher for newly published CVEs
+  # against unchanged dependencies.
+  detect-go-changes:
+    name: Detect Go dependency changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed Go files
+        id: changed
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            range="${before}...${{ github.event.after }}"
+          fi
+
+          if git diff --name-only --diff-filter=ACMR "$range" \
+              | grep -E '(^|/)go\.(mod|sum)$|\.go$' -q; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  govulncheck-scan:
+    name: govulncheck (scan)
+    needs: detect-go-changes
+    if: needs.detect-go-changes.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -353,3 +407,31 @@ jobs:
           echo "No unallowed vulnerabilities."
         env:
           GOWORK: "off"
+
+  govulncheck:
+    # This job's name is the required-status-check context. It always
+    # runs (never itself path-skipped), so branch protection always gets
+    # a result. It mirrors govulncheck-scan's outcome when that job ran,
+    # and succeeds when govulncheck-scan was legitimately skipped (no Go
+    # dependency changes to scan).
+    name: govulncheck
+    needs: [detect-go-changes, govulncheck-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate
+        run: |
+          if [[ "${{ needs.detect-go-changes.result }}" != "success" ]]; then
+            echo "detect-go-changes did not complete successfully: ${{ needs.detect-go-changes.result }}"
+            exit 1
+          fi
+          if [[ "${{ needs.detect-go-changes.outputs.has_changes }}" != "true" ]]; then
+            echo "No Go/go.mod/go.sum changes in this push/PR — nothing to scan."
+            exit 0
+          fi
+          if [[ "${{ needs.govulncheck-scan.result }}" != "success" ]]; then
+            echo "govulncheck-scan reported: ${{ needs.govulncheck-scan.result }}"
+            exit 1
+          fi
+          echo "govulncheck-scan passed."
