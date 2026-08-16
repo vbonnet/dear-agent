@@ -25,8 +25,23 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+
   header-lint:
     name: Header block format
+    needs: changes
+    # This linter reads Markdown and nothing else. A PR that touches no
+    # Markdown cannot introduce a header-block violation, so running it there
+    # was pure setup cost to reprove the previous answer.
+    #
+    # Path-scoped but NOT diff-scoped, deliberately. The two pre-existing
+    # violations were fixed when the linter landed, so the tree is clean and a
+    # whole-repo pass costs the same as a changed-files pass while catching
+    # strictly more (e.g. a violation introduced by a file rename). Diff-scoping
+    # a check with no backlog trades coverage away for nothing.
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.global == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

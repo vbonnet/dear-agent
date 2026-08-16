@@ -11,6 +11,13 @@ name: Routing Enforcement
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # Post-merge full-tree enforcement. The whole-tree regression guard used to
+  # block PRs (see the job below); it now blocks main instead, where a
+  # violation is one person's problem for one commit rather than every open
+  # PR's problem at once.
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 # Cancel an in-flight run when a new commit is pushed to the same PR — only the
 # latest revision's routing matters.
@@ -43,22 +50,41 @@ jobs:
         id: check
         env:
           BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -o pipefail
-          git fetch origin "$BASE_REF" --depth=1
           go build -o /tmp/routing-guard ./cmd/routing-guard
 
           : > report.txt
           rc=0
 
-          # 1) Block any forbidden file ADDED/renamed in this PR.
-          if ! /tmp/routing-guard --diff "origin/$BASE_REF" >>report.txt 2>&1; then
-            rc=1
+          # 1) DIFF-SCOPED, BLOCKING. Any forbidden file added or renamed by
+          #    this PR fails the job, on every event, with no exceptions. This
+          #    is the gate and it is not weakened by anything below.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch origin "$BASE_REF" --depth=1
+            if ! /tmp/routing-guard --diff "origin/$BASE_REF" >>report.txt 2>&1; then
+              rc=1
+            fi
           fi
 
-          # 2) Whole-tree regression guard: no grandfathered exceptions.
+          # 2) WHOLE-TREE REGRESSION GUARD. Still runs everywhere, but it only
+          #    *fails* off pull_request.
+          #
+          #    Why: a violation already on main is not caused by, and usually
+          #    not fixable by, the PR that happens to be open. Failing every PR
+          #    on it converts one person's mistake into a repo-wide merge freeze
+          #    and trains people to reach for admin bypass — which is a worse
+          #    outcome than the violation. On a PR the finding is reported as a
+          #    warning and lands in the PR comment; on push to main it fails,
+          #    turning main red and waking the main-health watchdog, which is
+          #    the party that can actually fix it.
           if ! /tmp/routing-guard --all >>report.txt 2>&1; then
-            rc=1
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "::warning ::Pre-existing routing violation on the base branch — reported, not blocking this PR. It blocks pushes to main."
+            else
+              rc=1
+            fi
           fi
 
           echo "--- routing report ---"
@@ -71,7 +97,9 @@ jobs:
           exit 0
 
       - name: Post PR comment on violation
-        if: steps.check.outputs.violations == 'true'
+        # `context.issue.number` only exists on pull_request events; this step
+        # would throw on the push-to-main run added above.
+        if: github.event_name == 'pull_request' && steps.check.outputs.violations == 'true'
         uses: actions/github-script@v9
         with:
           script: |

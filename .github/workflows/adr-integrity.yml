@@ -16,8 +16,28 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+
   integrity:
     name: Identity, index, and lifecycle parity
+    needs: changes
+    # adr-lint validates ADR records and their indexes — all Markdown. A PR
+    # that touches no Markdown cannot change identity, index, or lifecycle
+    # parity, so this was ~1 minute of Go toolchain setup per Go-only PR to
+    # reprove the previous answer.
+    #
+    # Gated on `docs`, not `adr`: ADR scopes live in a dozen directories
+    # (docs/adr, agm/docs/adr, engram/cmd/engram, …) per .dear-agent.yml >
+    # adr-governance.scopes, and encoding that list a second time here is
+    # exactly the drift that let the Wayfinder wf/ leak through
+    # routing-enforcement. Any Markdown change runs the full check.
+    #
+    # Scope of the scan itself is unchanged: still whole-repo. The repo is
+    # clean today, so a whole-repo pass costs the same as a diff-scoped one and
+    # catches strictly more — diff-scoping here would be a weakening, not a fix.
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.global == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
