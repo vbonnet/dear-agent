@@ -1,11 +1,33 @@
 # GitHub Actions Workflows
 
+## Change detection (`changed-paths.yml`)
+
+Reusable workflow (`on: workflow_call`) that owns the repo's path taxonomy and
+emits boolean outputs (`go`, `agm`, `engram`, `deps`, `docs`, `adr`, `global`).
+Callers consume them in job-level `if:` conditions.
+
+**Do not use workflow-level `on.<event>.paths` for anything that produces a
+required status check.** A workflow dropped by a path filter never creates a
+check run, so the required context sits at "Expected — Waiting for status to be
+reported" and the PR can never merge. A job skipped by an `if:` condition does
+report, with conclusion `skipped`, which GitHub accepts. See
+[ADR-039](../../docs/adr/ADR-039-ci-path-scoping-and-gateway.md).
+
+Every output fails safe to `true`: no base ref, a git error, a non-`pull_request`
+event, or a change to a global input (`go.mod`, `go.sum`, `Makefile`,
+`.github/**`, lint config) forces every consumer to run.
+
 ## CI (`ci.yml`)
 
 Required-status workflow. Core test jobs:
 
 - **Build & Test** — runs `go test -race -count=1 ./...` on Ubuntu and
-  macOS. The full unit-test surface, every PR, no exceptions.
+  macOS. Runs on every PR that touches Go source or build metadata; skips
+  only on pure docs/asset PRs, which cannot change what it produces.
+- **CI Gateway** — aggregate summary of the path-scoped jobs. Fails if any
+  upstream job failed or was cancelled, and *also* fails if a job was skipped
+  when the change set says it was relevant. That second assertion is what stops
+  a mis-scoped filter from silently turning a required gate into a green tick.
 - **Integration Tests (affected)** — PR-only. Uses
   [`cmd/test-affected`](../../cmd/test-affected) to compute which
   `-tags=integration` test packages are reachable from the PR's diff and

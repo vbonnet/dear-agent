@@ -1,0 +1,158 @@
+name: Changed Paths
+
+# Single source of truth for "what kind of change is this PR?".
+#
+# Callers get boolean outputs and use them in job-level `if:` conditions.
+# They must NOT use workflow-level `on.<event>.paths` for anything that is a
+# required status check: a workflow skipped by a path filter never reports a
+# check run at all, so branch protection sits at "Expected — Waiting for status
+# to be reported" forever. A job skipped by an `if:` condition DOES report, with
+# conclusion `skipped`, which GitHub treats as satisfying a required check.
+# See ADR-038 and docs/ci-scoping.md.
+#
+# Why a hand-rolled git diff instead of dorny/paths-filter or
+# tj-actions/changed-files: security-audit.yml's workflow-hygiene job requires
+# third-party actions to be SHA-pinned, and tj-actions/changed-files is on this
+# repo's known-compromised list. `git diff --name-only` against the merge base
+# has no supply chain.
+#
+# FAIL-SAFE CONTRACT: every output defaults to "true". Anything that makes the
+# change set unknowable (no base ref, git failure, non-pull_request event)
+# forces every consumer to run. Under-running is a silent hole in the gate;
+# over-running only costs runner minutes.
+
+on:
+  workflow_call:
+    outputs:
+      go:
+        description: "Go source, go.mod/go.sum, or a global input changed — build/test/analyze must run"
+        value: ${{ jobs.detect.outputs.go }}
+      agm:
+        description: "agm/** or a global input changed"
+        value: ${{ jobs.detect.outputs.agm }}
+      engram:
+        description: "engram/** or a global input changed"
+        value: ${{ jobs.detect.outputs.engram }}
+      deps:
+        description: "A dependency manifest or lockfile changed"
+        value: ${{ jobs.detect.outputs.deps }}
+      docs:
+        description: "Markdown changed"
+        value: ${{ jobs.detect.outputs.docs }}
+      adr:
+        description: "docs/adr/** changed"
+        value: ${{ jobs.detect.outputs.adr }}
+      global:
+        description: "A global input changed — every consumer is forced on"
+        value: ${{ jobs.detect.outputs.global }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.detect.outputs.go }}
+      agm: ${{ steps.detect.outputs.agm }}
+      engram: ${{ steps.detect.outputs.engram }}
+      deps: ${{ steps.detect.outputs.deps }}
+      docs: ${{ steps.detect.outputs.docs }}
+      adr: ${{ steps.detect.outputs.adr }}
+      global: ${{ steps.detect.outputs.global }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Shallow clones make `git diff base...HEAD` lie about which files
+          # changed — the merge base is simply not in the object store, and the
+          # diff silently degrades to "everything" or errors out. Full history
+          # is the only correct setting for merge-base computation.
+          fetch-depth: 0
+
+      - name: Detect
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          emit_all_true() {
+            reason="$1"
+            echo "::notice ::changed-paths: forcing all consumers ON — ${reason}"
+            for key in go agm engram deps docs adr global; do
+              echo "${key}=true" >> "$GITHUB_OUTPUT"
+            done
+          }
+
+          # Only pull_request events have a meaningful base to diff against.
+          # push / schedule / workflow_dispatch always run everything: they are
+          # the post-merge safety valve that catches whatever PR-time selection
+          # missed, so narrowing them would defeat the entire design.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            emit_all_true "event '${EVENT_NAME}' is not a pull_request"
+            exit 0
+          fi
+
+          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+            emit_all_true "missing base or head SHA on the event payload"
+            exit 0
+          fi
+
+          if ! changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1); then
+            emit_all_true "git diff failed: ${changed}"
+            exit 0
+          fi
+
+          if [ -z "$changed" ]; then
+            emit_all_true "empty diff (nothing to select on)"
+            exit 0
+          fi
+
+          echo "Changed files (${EVENT_NAME}):"
+          echo "$changed" | sed 's/^/  /'
+
+          matches() {
+            echo "$changed" | grep -qE "$1"
+          }
+
+          # ---- Global inputs -------------------------------------------------
+          # Anything that can invalidate the meaning of the selection itself.
+          # A change here forces every consumer on, mirroring the forced-full
+          # fallback that cmd/test-affected already uses (ADR-028).
+          #   - build/dep metadata: go.mod, go.sum, go.work*, vendor/
+          #   - the CI definition itself, including this file
+          #   - lint/tool configuration that changes what a check means
+          GLOBAL_RE='(^|/)(go\.mod|go\.sum|go\.work|go\.work\.sum|Makefile)$|^vendor/|^\.github/|^\.golangci\.ya?ml$|^\.dear-agent\.ya?ml$'
+          if matches "$GLOBAL_RE"; then
+            emit_all_true "a global input changed (build metadata, .github/**, or lint config)"
+            exit 0
+          fi
+          echo "global=false" >> "$GITHUB_OUTPUT"
+
+          # ---- Per-area detection --------------------------------------------
+          set_flag() {
+            key="$1"; regex="$2"
+            if matches "$regex"; then
+              echo "${key}=true" >> "$GITHUB_OUTPUT"
+              echo "  ${key}=true"
+            else
+              echo "${key}=false" >> "$GITHUB_OUTPUT"
+              echo "  ${key}=false"
+            fi
+          }
+
+          echo "Selection:"
+          # Any Go file anywhere, plus generated/embedded inputs that Go code
+          # compiles against. Deliberately broad: the cost of a false positive
+          # is runner minutes, the cost of a false negative is an unchecked merge.
+          set_flag go     '\.go$|\.tmpl$|(^|/)testdata/|\.golden$'
+          set_flag agm    '^agm/'
+          set_flag engram '^engram/'
+          set_flag deps   '(^|/)(go\.mod|go\.sum|package\.json|package-lock\.json|pnpm-lock\.yaml)$|\.lock$'
+          set_flag docs   '\.md$'
+          set_flag adr    '^docs/adr/'

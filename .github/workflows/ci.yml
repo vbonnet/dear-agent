@@ -20,8 +20,25 @@ permissions:
   contents: read
 
 jobs:
+  # Shared change detection. Job-level `if:` conditions below consume these
+  # outputs. Never move this selection into workflow-level `on.pull_request.paths`
+  # — a workflow skipped by a path filter reports no check run at all, and the
+  # required "Build & Test (…)" contexts would sit at "Expected — Waiting for
+  # status to be reported" forever. A job skipped by `if:` reports `skipped`,
+  # which GitHub accepts for a required check. See ADR-038.
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+
   ci:
     name: Build & Test (${{ matrix.os }})
+    needs: changes
+    # Skips only when the PR touches no Go source, no build metadata, and
+    # nothing under .github/ — i.e. a pure docs/asset PR, which cannot change
+    # what `go build`, `go vet`, or `go test` produce. Every other PR runs the
+    # full matrix exactly as before. changed-paths.yml fails safe to `true`, so
+    # an unknowable diff still runs the full gate.
+    if: needs.changes.outputs.go == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -145,11 +162,17 @@ jobs:
     # This 100m ultimate backstop leaves 25m around those phases; the BDD gate
     # requires at least one 20m native interval for setup, cleanup, and reports.
     timeout-minutes: 100
+    needs: changes
     # Only meaningful on PRs — we need a base ref to diff against. For
     # pushes to main/develop, the unit-test matrix above is the gate;
     # full integration sweeps belong in a scheduled or release workflow,
     # not on every commit to a long-lived branch.
-    if: github.event_name == 'pull_request'
+    #
+    # The `go` clause is an optimisation, not a second gate: cmd/test-affected
+    # already returns an empty selection for a docs-only PR. Skipping the job
+    # outright avoids paying for checkout + tmux install + `go mod download`
+    # just to be told there is nothing to run.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
     # Suite has been green across multiple consecutive PRs (verified
     # 2026-06-12). Ratchet step: removed continue-on-error so failures
     # now block CI. Next admin step: add to branch-protection
@@ -192,6 +215,12 @@ jobs:
 
   agm-codex-contracts:
     name: AGM Codex Contracts
+    needs: changes
+    # These are Go contract tests over agm/**. A PR that changes neither Go
+    # source nor anything under agm/ cannot move them. `go` is ANDed in so a
+    # docs-only edit inside agm/ (agm/README.md) does not drag a 15-minute
+    # contract suite along with it.
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.agm == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -270,6 +299,11 @@ jobs:
 
   engram-storage-hardening:
     name: Engram Storage Hardening
+    needs: changes
+    # Race tests, fuzz seeds, and a gosec scan, all scoped to
+    # engram/internal/providers/simple and engram/internal/reflection. A PR
+    # that touches no Go source under engram/ cannot change their outcome.
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.engram == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -294,6 +328,123 @@ jobs:
 
       - name: Run focused gosec scan
         run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet ./engram/internal/providers/simple/...
+
+  # ==========================================================================
+  # AGGREGATE GATEWAY. One check that summarises every path-scoped job above.
+  #
+  # Why this exists. GitHub reports a job skipped by an `if:` condition as
+  # `skipped`, and branch protection accepts `skipped` as satisfying a required
+  # status check. That is what makes path scoping safe — and it is also the
+  # sharp edge: a typo in a filter, or a path taxonomy that drifts away from
+  # the tree, silently turns a required gate into a no-op that still shows a
+  # green tick. "Skippable required checks aren't really required."
+  #
+  # So this job does two things, not one:
+  #   1. The standard aggregate: fail if any upstream job failed or was
+  #      cancelled. `if: always()` is mandatory — with the default `success()`
+  #      a single skipped upstream would skip the gateway itself, and a gateway
+  #      that skips is a gateway that passes.
+  #   2. The part most published versions of this pattern omit: re-derive, from
+  #      the same `changes` outputs the jobs consumed, which jobs SHOULD have
+  #      run, and fail if any of them reports `skipped`. A filter that wrongly
+  #      excludes a relevant PR turns red here instead of merging green.
+  #
+  # Honours DECL-WORKFLOW-02: a failing required job cannot be reported as
+  # success through this aggregate. See ADR-038.
+  #
+  # NOT in `needs`: the `govulncheck` job. It is independently listed in the
+  # repository ruleset, is unconditional, and is being modified concurrently
+  # under ce-lz9ny — it needs no gateway coverage and this job must not
+  # conflict with that work.
+  # ==========================================================================
+  ci-gateway:
+    name: CI Gateway
+    needs:
+      - changes
+      - ci
+      - integration-tests
+      - agm-codex-contracts
+      - engram-storage-hardening
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail on any upstream failure or cancellation
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "Upstream job results:"
+          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+
+          bad=$(echo "$NEEDS_JSON" \
+            | jq -r 'to_entries[]
+                     | select(.value.result == "failure" or .value.result == "cancelled")
+                     | "\(.key) -> \(.value.result)"')
+          if [ -n "$bad" ]; then
+            echo "::error ::CI Gateway: upstream job(s) did not pass:"
+            echo "$bad" | sed 's/^/  /'
+            exit 1
+          fi
+
+      - name: Verify every skipped job was legitimately skipped
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+          SEL_GO: ${{ needs.changes.outputs.go }}
+          SEL_AGM: ${{ needs.changes.outputs.agm }}
+          SEL_ENGRAM: ${{ needs.changes.outputs.engram }}
+        run: |
+          set -euo pipefail
+
+          # Expected-to-run, recomputed from the same inputs the jobs used.
+          # Kept deliberately as a duplicate expression rather than a shared
+          # variable: if someone edits a job's `if:` without editing this, the
+          # two disagree and the gateway fails loudly. That divergence is the
+          # signal, not a bug.
+          expect_ci="$SEL_GO"
+          expect_integration=false
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$SEL_GO" = "true" ]; then
+            expect_integration=true
+          fi
+          expect_agm=false
+          if [ "$SEL_GO" = "true" ] && [ "$SEL_AGM" = "true" ]; then
+            expect_agm=true
+          fi
+          expect_engram=false
+          if [ "$SEL_GO" = "true" ] && [ "$SEL_ENGRAM" = "true" ]; then
+            expect_engram=true
+          fi
+
+          result_of() {
+            echo "$NEEDS_JSON" | jq -r --arg k "$1" '.[$k].result // "missing"'
+          }
+
+          violations=""
+          assert() {
+            job="$1"; expected="$2"
+            actual=$(result_of "$job")
+            echo "  ${job}: result=${actual} expected_to_run=${expected}"
+            if [ "$expected" = "true" ] && [ "$actual" = "skipped" ]; then
+              violations="${violations}\n  - ${job} was SKIPPED but the change set says it was relevant"
+            fi
+          }
+
+          echo "Selection: go=${SEL_GO} agm=${SEL_AGM} engram=${SEL_ENGRAM} event=${EVENT_NAME}"
+          echo "Skip audit:"
+          assert ci "$expect_ci"
+          assert integration-tests "$expect_integration"
+          assert agm-codex-contracts "$expect_agm"
+          assert engram-storage-hardening "$expect_engram"
+
+          if [ -n "$violations" ]; then
+            echo "::error ::CI Gateway: a relevant job was skipped — path scoping is wrong, not the PR."
+            printf '%b\n' "$violations"
+            echo "Fix the filters in .github/workflows/changed-paths.yml or the job \`if:\` conditions."
+            exit 1
+          fi
+
+          echo "All jobs either ran or were legitimately out of scope for this change set."
 
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln

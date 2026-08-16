@@ -30,6 +30,10 @@ permissions:
   security-events: write
 
 jobs:
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+
   sbom-generation:
     name: Generate SBOM
     # SBOM artifacts are consumed for release/compliance, not per-PR review.
@@ -65,8 +69,33 @@ jobs:
             sbom-spdx.json
           retention-days: 90
 
+  # DIFF-SCOPED ENFORCEMENT. This job produces the required "Vulnerability Scan"
+  # context, so it must keep reporting on every PR — but what it *blocks* on is
+  # now scoped to what the PR changed.
+  #
+  # The problem it fixes: Trivy scans the whole tree against a live advisory
+  # database. The moment a CRITICAL is published against a dependency nobody
+  # touched, this job goes red on every open PR simultaneously and the whole
+  # repo is unmergeable until someone bumps the dep — pre-existing debt blocking
+  # unrelated work, the exact failure mode ce-lz9ny hit with govulncheck.
+  #
+  # The scoping: a PR that changes no dependency manifest or lockfile cannot
+  # introduce a dependency vulnerability. Such a PR gets the advisory scan
+  # (findings still land in the Security tab) but is not blocked by it. A PR
+  # that DOES touch go.mod / go.sum / package.json / *.lock is gated exactly as
+  # strictly as before — this weakens nothing for the changes that can actually
+  # cause the failure.
+  #
+  # The catch, stated plainly: this is manifest-scoping, not true baseline
+  # diffing — Trivy has no --baseline-commit. A PR that bumps one dependency is
+  # still blocked by an unrelated pre-existing CRITICAL elsewhere in the tree.
+  # Closing that gap needs a checked-in baseline; tracked separately. What
+  # catches the debt in the meantime is the unchanged full blocking scan on
+  # push-to-main, on release, and on the weekly schedule, plus the main-health
+  # watchdog that files a retro when main goes red.
   vulnerability-scan:
     name: Vulnerability Scan
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -88,7 +117,11 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
+      # Blocking pass. Runs unconditionally off pull_request (push to main,
+      # release, weekly schedule) and on any PR that touches a dependency
+      # manifest or lockfile.
       - name: Run Trivy with exit code
+        if: github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'fs'
@@ -96,6 +129,15 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+
+      - name: Explain non-blocking pass
+        if: github.event_name == 'pull_request' && needs.changes.outputs.deps != 'true'
+        run: |
+          echo "::notice ::Vulnerability Scan is advisory for this PR: no dependency"
+          echo "::notice ::manifest or lockfile changed, so it cannot introduce a new"
+          echo "::notice ::dependency vulnerability. Findings above are recorded in the"
+          echo "::notice ::Security tab. The full blocking scan runs on push to main,"
+          echo "::notice ::on release, and weekly."
 
   go-vulnerability-check:
     name: Go Vulnerability Check

@@ -21,8 +21,23 @@ concurrency:
 permissions: {}
 
 jobs:
+  # See ADR-038. Job-level `if:` rather than `on.pull_request.paths`, because
+  # "Analyze Go Code (go)" is a required status check and a workflow dropped by
+  # a path filter never reports one.
+  changes:
+    name: Change Detection
+    uses: ./.github/workflows/changed-paths.yml
+
   analyze:
     name: Analyze Go Code
+    needs: changes
+    # CodeQL builds and analyses the Go program. A PR that touches no Go source
+    # and no build metadata produces a byte-identical database, so re-running
+    # costs ~10 minutes to reprove the previous answer. Every push to main, the
+    # weekly schedule, and any workflow_dispatch still analyse unconditionally
+    # (changed-paths.yml forces all outputs true off pull_request), so a CVE in
+    # a query pack or a rule update is still caught within a week.
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
