@@ -114,26 +114,28 @@ func TestAwaitProcessFixtureReportsEarlyCommandExit(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	ctx, cancel := context.WithCancelCause(context.Background())
-	t.Cleanup(func() { cancel(context.Canceled) })
 	root := t.TempDir()
 	var stderr bytes.Buffer
 	result := make(chan int, 1)
-	go func() {
-		result <- runGoTestCommand(
-			ctx,
-			time.Second,
-			options{root: root},
-			[]string{"example.com/m/a"},
-			&bytes.Buffer{},
-			&stderr,
-		)
-	}()
+	// Bounded even though this runs synchronously (not in a goroutine, to
+	// remove the scheduling race with awaitProcessFixture below): the stub
+	// exits immediately, but a hung command must still not block the test
+	// suite forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result <- runGoTestCommand(
+		ctx,
+		time.Second,
+		options{root: root},
+		[]string{"example.com/m/a"},
+		&bytes.Buffer{},
+		&stderr,
+	)
 
 	_, err := awaitProcessFixture(
 		filepath.Join(t.TempDir(), "never-created"),
 		result,
-		func() { cancel(context.Canceled) },
+		func() {},
 		func(code int) string {
 			return fmt.Sprintf("exit code %d: %s", code, stderr.String())
 		},
