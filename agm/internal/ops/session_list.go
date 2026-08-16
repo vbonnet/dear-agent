@@ -111,14 +111,26 @@ func ListSessions(ctx *OpContext, req *ListSessionsRequest) (*ListSessionsResult
 	// Fetch tmux session info once (single tmux call) and reuse for
 	// both status computation and orphan detection.
 	var tmuxSessions []session.SessionInfo
+	tmuxObserved := false
 	if ctx.Tmux != nil {
 		if ti, ok := ctx.Tmux.(tmuxInfoProvider); ok {
-			tmuxSessions, _ = ti.ListSessionsWithInfo()
+			if infos, err := ti.ListSessionsWithInfo(); err == nil {
+				tmuxSessions = infos
+				tmuxObserved = true
+			}
 		}
 	}
 
 	// Compute statuses and attachment from cached tmux data
 	statuses, attached := computeStatusesFromInfo(manifests, tmuxSessions)
+	if !tmuxObserved {
+		// No tmux observation happened, so "not in the tmux set" proves
+		// nothing. Reporting "stopped" here made every live session look dead
+		// to tmux-less consumers such as the MCP read tools (ce-0zng9).
+		for name := range statuses {
+			statuses[name] = "unknown"
+		}
+	}
 	// Session existence alone is a false-green liveness signal (ce-axsr):
 	// demote "active" to "zombie" where the harness process is provably dead.
 	refineActiveStatusesWithLiveness(manifests, statuses, ctx.Tmux)

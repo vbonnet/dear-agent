@@ -46,6 +46,8 @@ type Manifest struct {
 	WorkflowPhaseUpdatedAt  *time.Time        `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
 	CostTracking            *CostTracking     `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
 	Resources               *ResourceManifest `yaml:"resources,omitempty"`                  // Git worktrees and branches created by this session
+	FinalOutput             string            `yaml:"final_output,omitempty"`               // Tail of the session's terminal output, captured at completion so results survive pane teardown
+	FinalOutputAt           time.Time         `yaml:"final_output_at,omitempty"`            // When FinalOutput was captured
 }
 
 // PermissionPolicy records the resolved role/profile permission policy used

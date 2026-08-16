@@ -1,6 +1,6 @@
 # AGM MCP Server - Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-08 -->
 
 ## Overview
 
@@ -52,10 +52,17 @@ actual SDK registration path.
 
 **MCS-16** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 
+**MCS-17** When an MCP client completes initialization, the system shall advertise the version identity of the running AGM artifact in `serverInfo.version`.
+
+**MCS-18** When the server reports startup identity, the system shall use the same version identity that it advertises to an initialized MCP client.
+
+**MCS-19** When a build lacks release-version metadata, the system shall expose a nonempty development fallback identity without claiming a numbered release.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Test consequence: Deterministic integration test `TestMCPInitializeReportsSharedBuildVersion` observes `serverInfo.version` and the independently negotiated protocol through a real in-memory SDK initialization handshake; no new BDD feature is required because the external session BDD harness does not expose MCP initialization metadata.
 
 ## Use Cases
 
@@ -217,6 +224,43 @@ actual SDK registration path.
 - Returns error if session not found
 - No caching (relies on list cache)
 
+### Tool 3b: agm_get_session_output
+
+**Purpose**: Read the tail of a session's terminal output so orchestrators can collect worker results without attaching to panes
+
+**Input Schema**:
+```json
+{
+  "identifier": "session ID, name, or UUID prefix (required)",
+  "lines": "optional trailing pane lines to capture (default 100, max 2000)"
+}
+```
+
+**Output Schema**:
+```json
+{
+  "session_id": "uuid",
+  "name": "string",
+  "status": "active|zombie|stopped|archived|unknown",
+  "state": "string",
+  "source": "live-pane|final-capture",
+  "output": "string",
+  "captured_at": "RFC3339"
+}
+```
+
+**Constraints**:
+- `identifier` is required
+- Reads the live tmux pane for `active`/`zombie` sessions; falls back to the
+  durable `final_output` persisted on the session record when the pane is gone
+- Fallback is not guaranteed whenever `final_output` is populated. The durable
+  capture describes an *earlier* completion, so it is served only when the pane
+  is provably absent. If liveness cannot be confirmed — a tmux socket outage,
+  permission failure, or a failed capture on a still-running pane — the
+  operation returns a retryable error rather than answering with output from a
+  previous task
+- Returns an error when neither source has any output
+
 ### Tool 4: agm_create_session
 
 **Purpose**: Create and register a new AGM session through the same lifecycle used by the CLI
@@ -284,6 +328,7 @@ mcp_server:
     - agm_list_sessions
     - agm_search_sessions
     - agm_get_session_metadata
+    - agm_get_session_output
     - agm_archive_session
     - agm_kill_session
     - agm_create_session
@@ -368,7 +413,7 @@ mcp_server:
 
 ### MCP Stdio Transport
 
-- **Protocol**: Model Context Protocol v1.2.0
+- **Protocol**: Model Context Protocol version negotiated by the pinned SDK
 - **Transport**: stdio (stdin/stdout)
 - **Logging**: stderr only (critical requirement)
 - **Format**: JSON-RPC 2.0
@@ -414,28 +459,16 @@ mcp_server:
 - No stack traces to clients (log to stderr)
 - Graceful degradation (return empty results on non-fatal errors)
 
-## Versioning
+## Implementation Identity and Protocol
 
-### Version Information
+The server's implementation identity is the running AGM artifact version. The
+build system supplies release provenance through the repository's shared
+version package; an unstamped developer build uses that package's nonempty
+development fallback. The first process header, structured startup log, and
+MCP `serverInfo.version` all expose this same identity.
 
-```go
-var (
-    Version   = "1.0.0-dev"
-    GitCommit = "unknown"
-    BuildDate = "unknown"
-    BuiltBy   = "unknown"
-)
-```
-
-- Set via ldflags at build time
-- Printed to stderr on startup
-- Exposed in MCP server implementation
-
-### API Versioning
-
-- MCP Protocol: v1.2.0 (go-sdk)
-- AGM MCP Server: v1.0.0
-- No breaking changes planned for v1.x
+Implementation identity is not the MCP wire protocol version. The pinned MCP
+SDK independently negotiates protocol support with each client.
 
 ## Future Enhancements (V2+)
 
@@ -478,7 +511,7 @@ var (
 
 ### MCP Specification Compliance
 
-- Implements MCP v1.2.0 protocol
+- Negotiates supported MCP protocol versions through the pinned SDK
 - Uses official `github.com/modelcontextprotocol/go-sdk`
 - Follows stdio transport requirements
 - Adheres to JSON-RPC 2.0 format

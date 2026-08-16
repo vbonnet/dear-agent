@@ -1377,34 +1377,9 @@ func TestSemanticOwnerIndexPartitionsEveryUnchangedSPECExactlyOnce(t *testing.T)
 
 func TestCurrentSPECCorpusFitsSemanticOwnerShardBounds(t *testing.T) {
 	repositoryRoot := filepath.Clean(filepath.Join("..", ".."))
-	corpus := make(map[string][]byte)
-	err := filepath.Walk(repositoryRoot, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			switch info.Name() {
-			case ".git", "node_modules", ".cache":
-				if path != repositoryRoot {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if info.Name() != "SPEC.md" {
-			return nil
-		}
-		relative, err := filepath.Rel(repositoryRoot, path)
-		if err != nil {
-			return err
-		}
-		blob, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		corpus[filepath.ToSlash(relative)] = blob
-		return nil
-	})
+	head := strings.TrimSpace(gittest.Run(t, repositoryRoot, "rev-parse", "--verify", "HEAD^{commit}"))
+	chdir(t, repositoryRoot)
+	corpus, err := loadHeadSpecCorpus(context.Background(), head)
 	if err != nil {
 		t.Fatal(err)
 	}

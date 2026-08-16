@@ -17,7 +17,8 @@ func main() {
 		Ops: surface.Registry,
 		RequestTypes: map[string]reflect.Type{
 			"ListSessionsRequest":   reflect.TypeOf(surface.ListSessionsRequest{}),
-			"GetSessionRequest":     reflect.TypeOf(surface.GetSessionRequest{}),
+			"GetSessionRequest":       reflect.TypeFor[surface.GetSessionRequest](),
+			"GetSessionOutputRequest": reflect.TypeFor[surface.GetSessionOutputRequest](),
 			"SearchSessionsRequest": reflect.TypeOf(surface.SearchSessionsRequest{}),
 			"GetStatusRequest":      reflect.TypeOf(surface.GetStatusRequest{}),
 			"ArchiveSessionRequest": reflect.TypeOf(surface.ArchiveSessionRequest{}),
