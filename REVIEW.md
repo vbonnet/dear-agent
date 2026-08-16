@@ -1,7 +1,7 @@
 # REVIEW.md — Multi-agent PR review protocol
 
 - **Status:** authoritative
-- **Last updated:** 2026-06-11
+- **Last updated:** 2026-08-10
 
 Every PR against this repo goes through the review protocol below before
 merging. The protocol is designed for a dark-factory loop: an LLM review agent
@@ -94,6 +94,22 @@ per-dimension API failure, synthesis failure, an unparseable outcome, or an
 oversize diff, all fail the workflow check. They block a merge only when the
 provider has separately made that exact check required.
 
+**Keyless exception (skip-with-warning).** While `ANTHROPIC_API_KEY` is not
+configured as a repository secret, a same-repository, non-override run whose
+*sole* blocker is the absent credential — an otherwise-reviewable changed
+SPEC, or a §3 escalation whose accompanying model review cannot run — exits
+with the distinct code 78 ("review cannot run"), and the workflow publishes
+that one disposition as a **neutral-with-warning** check instead of a
+failure: no approval is claimed, the command still posts its
+`needs-human-review` evidence on the PR, and the neutral comment states that
+human review is recommended before merge. Conclusive SPEC-governance verdicts
+that need no model (ownership edges, reviewer-dependency changes,
+traceability failures, stale-base evidence) stay blocking even keyless, as do
+fork PRs, plan build errors, expired deadlines, override audit failures, and
+any failure while a key *is* configured. Configuring the secret makes exit 78
+unreachable and restores the full fail-closed contract above with no further
+change.
+
 > [!NOTE]
 > **Provider state verified 2026-07-31**: `ANTHROPIC_API_KEY` is unset and the
 > active GitHub ruleset has no AI-review required context. The workflow source
@@ -128,18 +144,55 @@ The semantic reviewer must keep uncertain ownership separate from confirmed
 defects: incomplete or low-confidence semantic evidence is
 `needs-human-review`, not an invented canonical owner or a blocking conclusion.
 
+### Authenticated dependency automation
+
+A dependency version bump does not change a SPEC contract. The trusted review
+plan therefore identifies a narrow automation candidate when Git proves that a
+current-base change modifies only `go.mod` (optionally with `go.sum`), preserves
+the module, Go, toolchain, and all non-require directives, changes at least one
+existing requirement version, and has no other review or escalation evidence.
+The parsed require graph may add or remove only requirements marked indirect,
+or reclassify retained requirements between direct and indirect, as part of
+that authenticated update. Direct requirements may not be added or removed.
+Membership of any policy-annotated require block and every non-tool-managed
+requirement or require-block annotation remain fixed. The workflow may publish
+a neutral, non-model verdict only after GitHub's trusted API resolves current
+open-PR and protected-main snapshots and every diff, identity, body, label,
+base, and publication decision is bound to their exact object IDs rather than
+the event's possibly stale payload, embedded base, or a mutable pull-request
+ref. Override authority exists only in an exact-current-head labeled event by
+an actor whose current `maintain` or `admin` permission is verified. Synchronize
+and every other event ignore retained labels and bot-authored markers without
+mutating the cosmetic label. The trusted APIs must
+also match Dependabot's immutable app-bot ID and numeric repository identity,
+bind the exact current head to the canonical Dependabot/GitHub commit identities
+and the current protected-base parent, and show either an unmodified original
+head or an exact-head force push by Dependabot or an existing maintain/admin
+principal.
+
+This is not a contributor-facing bypass. A fork, a claimed bot login, a branch
+name, a label, a graph-only change with no existing version bump, any `replace`,
+non-require directive change, extra path, stale-base evidence, or parsing
+failure keeps the ordinary fail-closed path. Patch/minor merge
+eligibility remains owned separately by `.github/workflows/dependabot-automerge.yml`
+and all provider-required checks must still pass.
+
 An organization-level required workflow remains defence in depth against a
 malicious maintainer with push access.
 
 ### Human override (the verified fallback)
 
 A repository maintainer or administrator who has consciously reviewed the
-change can apply the `ai-review:override` label. The trusted workflow verifies
-that label actor's GitHub permission, then records the current head SHA
-in a bot-authored PR comment, and the gate passes only while that attestation
-matches the current head. A later push removes the label and invalidates the
-attestation. The override is therefore auditable, revision-bound, and requires
-a human action — it is the sanctioned path to merge a fork PR, a
+current revision can apply the `ai-review:override` label. The trusted workflow
+activates the override only in that exact `labeled` event when the event head
+matches the current API-resolved head and GitHub currently reports the event
+actor has `maintain` or `admin` permission. A persistent label or bot-authored
+comment carries no authority on a synchronize or any other event. A later push
+therefore invalidates the override. The workflow deliberately leaves the now-
+cosmetic label in place to avoid a delayed synchronize run racing a newer label
+application; to approve the same or a later revision after another event, remove
+the stale label and apply it again. The override is therefore auditable,
+revision-bound, and requires a fresh maintainer action — it is the sanctioned path to merge a fork PR, a
 `needs-human-review` escalation, or a change the automated review could not
 process.
 

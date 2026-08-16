@@ -145,12 +145,15 @@ func TestDaemonDisplayStateUsesManifestForNonTmuxSession(t *testing.T) {
 	}
 
 	d := NewDaemon(Config{Logger: logging.NewTextLogger(io.Discard), DoltAdapter: storage})
-	if got := d.recordDisplayState("api-recipient"); got != "unknown" {
-		t.Fatalf("recordDisplayState() = %q, want unknown for an unpersisted API display state", got)
+	// Session state is now persisted at creation (the completion pipeline
+	// depends on it), so a non-tmux session surfaces its manifest state
+	// instead of the old "unknown" that unpersisted state produced.
+	if got := d.recordDisplayState("api-recipient"); got != string(manifest.StateReady) {
+		t.Fatalf("recordDisplayState() = %q, want %q from the persisted manifest state", got, manifest.StateReady)
 	}
 	metrics := d.GetMetrics()
-	if len(metrics.StateDetectionAccuracy) != 0 {
-		t.Fatalf("display-state detections = %v, want none", metrics.StateDetectionAccuracy)
+	if len(metrics.StateDetectionAccuracy) != 1 {
+		t.Fatalf("display-state detections = %v, want exactly the manifest-state detection", metrics.StateDetectionAccuracy)
 	}
 	if metrics.StateDetectionErrors != 0 {
 		t.Fatalf("display-state errors = %d, want 0", metrics.StateDetectionErrors)

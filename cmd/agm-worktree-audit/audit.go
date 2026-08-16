@@ -4,8 +4,13 @@
 //
 // It is a read-only diagnostic: it never removes a worktree or deletes a
 // branch. Its job is to produce a clear report a human (or a follow-up
-// cleanup task) can act on. Reclamation lives elsewhere
-// (`agm worktree sweep`, `scripts/cleanup-worktrees.sh`).
+// cleanup task) can act on. For linked worktrees beneath its configured base,
+// the dry-run-default `agm worktree sweep` can reclaim only worktrees
+// positively classified as clean and merged after fail-closed active-session
+// checks. After successful removal, the sweep attempts to force-delete the
+// selected local branch; a failed branch deletion warns and leaves that branch
+// in place. Findings outside that base remain report-only for separately
+// reviewed, repository-scoped cleanup.
 //
 // Four finding categories are reported (see [FindingKind]):
 //
