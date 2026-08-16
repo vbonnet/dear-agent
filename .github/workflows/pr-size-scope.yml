@@ -2,7 +2,10 @@ name: PR Size and Scope
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    # `edited` covers a base-branch retarget (e.g. develop -> main), which
+    # GitHub reports without a new head commit — without it a retargeted PR
+    # keeps stale metrics from its former base until the next push.
+    types: [opened, reopened, synchronize, ready_for_review, edited]
     branches: [main, develop]
 
 permissions:
@@ -40,7 +43,10 @@ jobs:
           git cat-file -e "$head^{commit}" 2>/dev/null || git fetch --no-tags origin "$head" || true
 
           git diff --numstat "$base"..."$head" > /tmp/numstat.txt
-          git diff --name-only --diff-filter=ACMRD "$base"..."$head" > /tmp/files.txt
+          # ACMRDT: Added/Copied/Modified/Renamed/Deleted/Type-changed. T
+          # covers e.g. a regular file replaced by a symlink — omitting it
+          # let such files vanish from both changed_files and top_level_areas.
+          git diff --name-only --diff-filter=ACMRDT "$base"..."$head" > /tmp/files.txt
 
           changed_lines=$(awk '{ add += $1 == "-" ? 0 : $1; del += $2 == "-" ? 0 : $2 } END { print add + del + 0 }' /tmp/numstat.txt)
           changed_files=$(wc -l < /tmp/files.txt | tr -d ' ')
@@ -88,9 +94,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Comment with split suggestion
-        # A pull_request run from a fork gets a read-only GITHUB_TOKEN, so
-        # posting/deleting comments would fail; skip rather than error out.
-        if: steps.scope.outputs.should_comment == 'true' && !github.event.pull_request.head.repo.fork
+        # A pull_request run from a fork, or one opened by Dependabot (whose
+        # workflow runs also get a read-only GITHUB_TOKEN even though the head
+        # branch lives in this repo), can't post/delete comments; skip rather
+        # than error out.
+        if: steps.scope.outputs.should_comment == 'true' && !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -127,7 +135,7 @@ jobs:
       - name: Remove stale split-suggestion comment
         # A later synchronize run can drop below every threshold; clear any
         # marker comment left by an earlier, larger revision of this PR.
-        if: steps.scope.outputs.should_comment == 'false' && !github.event.pull_request.head.repo.fork
+        if: steps.scope.outputs.should_comment == 'false' && !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
