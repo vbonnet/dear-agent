@@ -585,6 +585,34 @@ stat -f /workspace/path
 
 ---
 
+### ErrCodeNoLowerDirs
+
+**Category**: Configuration
+**What it means**: Sandbox lower-dir resolution found no configured repositories, and the only fallback would have been an unsafe directory (e.g. `$HOME` or a directory that is not a git repository). AGM fails loud rather than cloning an arbitrary tree into the sandbox.
+
+**Common causes**:
+- `sandbox.repos` is empty in `~/.config/agm/config.yaml` and no workspace repos were found
+- The session was started with an unset or misresolved working directory (e.g. launchd's default cwd of `$HOME`)
+- The working directory is not inside a git repository
+
+**How to fix**:
+1. **Configure repositories** in `~/.config/agm/config.yaml`:
+   ```yaml
+   sandbox:
+     repos:
+       - /absolute/path/to/repo
+   ```
+2. **Or run from inside a git repository** so the containing repo can be used as the lower dir:
+   ```bash
+   git -C . rev-parse --show-toplevel
+   ```
+
+**Prevention**:
+- Set `sandbox.repos` explicitly for unattended/launchd-spawned sessions
+- Always start sessions from a directory inside a git repository
+
+---
+
 ## General Troubleshooting Steps
 
 ### 1. Check System Requirements

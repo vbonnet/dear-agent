@@ -43,7 +43,7 @@ maintain harness-specific policy copies or claim runtime discovery.
 
 ### Prerequisites
 
-- Go 1.26.4+
+- Go 1.26.5+ (see the `go` directive in `go.mod`)
 - tmux
 - Git
 
@@ -166,11 +166,11 @@ not a dashboard.
 │              AGM CLI  ·  MCP Server  ·  Skills        │
 ├──────────────────────────────────────────────────────┤
 │              Shared Operations Layer                  │
-│  (all three API surfaces route through agm/internal/ops/) │
-├──────────┬───────────┬───────────┬───────────────────┤
-│  Claude  │  Gemini   │  Codex    │  OpenCode         │
-│  Adapter │  Adapter  │  Adapter  │  Adapter          │
-├──────────┴───────────┴───────────┴───────────────────┤
+│  (most lifecycle operations share agm/internal/ops/)  │
+├──────────┬──────────┬─────────┬───────────┬──────────┤
+│  Claude  │  Codex   │   Agy   │ OpenCode  │    Pi    │
+│  Adapter │  Adapter │ Adapter │  Adapter  │ Adapter  │
+├──────────┴──────────┴─────────┴───────────┴──────────┤
 │              Local Runtime Boundary                   │
 │  session.RealTmux (strict existence/readiness/input)  │
 ├──────────────────────────────────────────────────────┤
@@ -179,11 +179,11 @@ not a dashboard.
 └──────────────────────────────────────────────────────┘
 ```
 
-Three API surfaces — CLI, MCP server, Claude Code Skills — share a common
-operations layer (`agm/internal/ops/`). An operation implemented once is
-available everywhere.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full component breakdown.
+Three API surfaces — CLI, MCP server, Claude Code Skills — share the
+operations layer (`agm/internal/ops/`) for most lifecycle operations; a few
+CLI commands (session creation, message send) still carry their own logic. See
+[ARCHITECTURE.md](ARCHITECTURE.md) — "Operations Layer and CLI Lifecycle
+Split" — for the exact boundary and the full component breakdown.
 
 ## Directory Structure
 
@@ -194,7 +194,6 @@ dear-agent/
 ├── wayfinder/        # Wayfinder (SDLC workflow)
 ├── tools/            # Standalone CLI tools
 ├── cmd/              # Additional CLI entry points
-├── codegen/          # Code generation framework
 ├── pkg/              # Shared Go packages
 │   └── workflow/     # Workflow engine (YAML DAG, SQLite substrate)
 ├── internal/         # Private implementation packages

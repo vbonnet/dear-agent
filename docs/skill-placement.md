@@ -1,14 +1,10 @@
-<!-- Last audited at: 2026-07-28 -->
+<!-- Last audited at: 2026-08-11 -->
 
 # Skill Placement — which repo owns a skill, and how it reaches a session
 
 Companion to `docs/skill-tiers.md` (model/effort contract) and
 `docs/skill-verification-criteria.md` (exit-condition contract). Those two say
 what a skill must *declare*. This one says where it must *live*.
-
-Derived from a cross-model pass (synthesis + adversarial review) on a real
-case: a `research-pipeline` orchestrator skill proposed in a private,
-single-operator dotfiles repo.
 
 ---
 
@@ -68,7 +64,8 @@ Placement decides which repo versions and reviews the source of truth.
 Distribution decides which running sessions can load it. **They are separate
 obligations**, and conflating them is a defect class we have already shipped:
 the writing pipeline lives correctly in `~/.claude/skills/`, and Cowork Dispatch
-sessions therefore draft prose with no Vale gate, because nothing there loads it.
+sessions therefore draft prose with no Vale gate, because nothing there loads it
+(closing that gap is tracked in bead `ce-zv6d`).
 
 A placement decision is incomplete until every consumer class has a named load
 path — and **a named path is not proof**. Each one needs a smoke test that the
@@ -122,7 +119,7 @@ followed by a discovery smoke test in each claimed consumer.
 | Skill | Rule it enforces | Owner |
 |---|---|---|
 | `research-pipeline` (a candidate skill proposed in a private dotfiles repo) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
-| writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
+| writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap, tracked in `ce-zv6d`) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
 | a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |
 

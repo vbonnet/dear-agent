@@ -2,7 +2,7 @@
 
 Status: Accepted (2026-06-15; amended 2026-07-17)
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-11 -->
 
 ## Context
 

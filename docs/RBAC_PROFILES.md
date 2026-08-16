@@ -14,6 +14,11 @@ Permission profiles allow you to create AGM sessions with pre-approved permissio
 
 ## Available Profiles
 
+The authoritative profile inventory is `agm/internal/rbac/profiles.go`
+(`rbac.ProfileNames()`); tab completion on `agm session new
+--permission-profile` lists the same set. The sections below describe each
+profile's intent and typical usage.
+
 ### worker
 **Purpose**: General-purpose code implementation with full build toolchain
 
@@ -165,6 +170,51 @@ agm session new requirements-planning --permission-profile=requester
 agm session new session-monitor --permission-profile=monitor
 ```
 
+### implementer
+**Purpose**: Code development scoped to worktree paths — no tmux/orchestration
+
+Like `worker` but without tmux access: full code read/write, build tools, and
+git including `add`/`commit`/`push`/`merge`, plus `agm session status`.
+
+**Use When**:
+- Running a coding agent that should build, test, and commit but never manage
+  other sessions
+
+**Example**:
+```bash
+agm session new feature-impl --permission-profile=implementer
+```
+
+### supervisor
+**Purpose**: Unified supervisor profile — git, tmux, agm, docs, `.agm/` access
+
+Alias covering the supervisor-tier roles. Use it when the specific sub-role
+(orchestrator, overseer, meta-orchestrator) is not yet known.
+
+**Example**:
+```bash
+agm session new supervisor-main --permission-profile=supervisor
+```
+
+### meta-orchestrator
+**Purpose**: Supervisory oversight — observes, advises, detects cross-session patterns
+
+Same trust tier as `orchestrator` with read-oriented code access plus full git,
+tmux, and AGM orchestration commands.
+
+**Example**:
+```bash
+agm session new meta-orchestrator --permission-profile=meta-orchestrator
+```
+
+### overseer
+**Purpose**: Read-only monitoring with dashboards and AGM admin commands
+
+**Example**:
+```bash
+agm session new mesh-overseer --permission-profile=overseer
+```
+
 ## Usage
 
 ### Creating a Session with a Profile
@@ -206,7 +256,7 @@ Permission profiles are assigned trust levels that affect sandboxing and securit
 
 | Trust Level | Profiles | Description |
 |---|---|---|
-| **TrustTrusted** (Level 4) | `orchestrator`, `meta-orchestrator`, `overseer` | Highest trust, full system access allowed |
+| **TrustTrusted** (Level 4) | `orchestrator`, `meta-orchestrator`, `overseer`, `supervisor` | Highest trust, full system access allowed |
 | **TrustStandard** (Level 2) | `worker`, `researcher`, `monitor`, `implementer` | Standard trust for productive work |
 | **TrustSandboxed** (Level 1) | `auditor`, `verifier`, `requester` | Minimal trust, restricted to specific operations |
 
@@ -327,7 +377,5 @@ If you find yourself adding many permissions to a profile:
 
 ## See Also
 
-- [RBAC Architecture](adr/rbac-architecture.md) - Design decisions
-- [Permission Patterns](reference/permission-patterns.md) - Complete pattern reference
+- [RBAC Specification](../agm/internal/rbac/SPEC.md) - Authoritative behavior and profile definitions
 - [User Guide](USER_GUIDE.md) - AGM general usage
-- [Security Policy](../SECURITY.md) - Security guidelines

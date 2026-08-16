@@ -8,7 +8,7 @@ mission_ref: docs/alignment/MISSION.md
 
 # Values
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-08-11 -->
 
 MISSION.md is canonical for project purpose and ownership. These values are
 non-ranked constraints that guide VROOM decisions; they do not define an

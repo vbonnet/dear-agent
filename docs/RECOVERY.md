@@ -151,12 +151,17 @@ umount ~/.agm/sandboxes/SESSION_ID/merged
 **Automatic cleanup using AGM tools:**
 
 ```bash
-# Use the built-in cleanup utility
-go run ./cmd/agm-sandbox cleanup --all
+# Preview what would be reaped (dry-run, the default)
+agm sandbox gc
 
-# Or cleanup mounts older than 1 hour
-go run ./cmd/agm-sandbox cleanup --older-than=1h
+# Actually delete eligible sandboxes
+agm sandbox gc --reap
 ```
+
+`agm sandbox gc` reaps a sandbox only when every safety gate passes: no
+non-archived session references it, no live process has a cwd or open fd
+inside it, no mount point remains at or under it after a best-effort
+unmount, and it is older than `--min-age`.
 
 **Manual cleanup:**
 
@@ -212,6 +217,12 @@ if mountpoint -q ~/.agm/sandboxes/SESSION_ID/merged; then
     umount ~/.agm/sandboxes/SESSION_ID/merged || umount -f ~/.agm/sandboxes/SESSION_ID/merged
 fi
 
+# Gate: verify nothing is mounted before ANY rm — deleting through a live
+# overlay mount can destroy the source repo
+if mountpoint -q ~/.agm/sandboxes/SESSION_ID/merged; then
+    echo "still mounted, aborting"; exit 1
+fi
+
 # Phase 2: Remove merged (usually a symlink or mount point)
 rm -rf ~/.agm/sandboxes/SESSION_ID/merged
 
@@ -260,6 +271,13 @@ if mountpoint -q "$MERGED_DIR" 2>/dev/null; then
     umount "$MERGED_DIR" || umount -f "$MERGED_DIR" || umount -l "$MERGED_DIR"
 fi
 
+# Gate: verify unmounted before removing anything — deleting through a
+# live overlay mount can destroy the source repo
+if mountpoint -q "$MERGED_DIR" 2>/dev/null; then
+    echo "ERROR: $MERGED_DIR is still mounted; aborting before rm"
+    exit 1
+fi
+
 # Step 2: Remove directories
 echo "Removing directories..."
 rm -rf "$MERGED_DIR"
@@ -281,32 +299,20 @@ chmod +x cleanup-sandbox.sh
 
 ### Cleanup All Old Sandboxes
 
+Bulk cleanup goes through `agm sandbox gc`, never a hand-rolled unmount/`rm`
+loop: deleting through a live overlay mount can destroy the source repo, and
+the gc refuses to reap while any mount, live session, or live process still
+references a sandbox.
+
 ```bash
-#!/bin/bash
-# Cleanup sandboxes older than 24 hours
+# Preview (dry-run, the default)
+agm sandbox gc
 
-SANDBOX_BASE="$HOME/.agm/sandboxes"
-CUTOFF_HOURS=24
+# Delete every sandbox that provably belongs to no live session
+agm sandbox gc --reap
 
-echo "Finding sandboxes older than $CUTOFF_HOURS hours..."
-
-find "$SANDBOX_BASE" -maxdepth 1 -type d -mtime +1 | while read -r dir; do
-    if [ "$dir" == "$SANDBOX_BASE" ]; then
-        continue
-    fi
-
-    echo "Cleaning: $dir"
-
-    # Unmount if mounted
-    if mountpoint -q "$dir/merged" 2>/dev/null; then
-        umount -f "$dir/merged" 2>/dev/null || true
-    fi
-
-    # Remove directory
-    rm -rf "$dir"
-done
-
-echo "Cleanup complete"
+# Machine-readable output
+agm sandbox gc --reap --json
 ```
 
 ## Prevention Best Practices
@@ -356,11 +362,11 @@ go func() {
 
 ### 4. Regular Orphan Cleanup
 
-Set up a cron job or systemd timer:
+A launchd sweep runs `agm sandbox gc --reap` on a schedule
+(`deploy/launchd/com.dear-agent.sandbox-gc.plist`). Verify it is loaded:
 
 ```bash
-# Run every hour
-0 * * * * /path/to/agm-sandbox cleanup --older-than=1h
+launchctl print gui/$(id -u)/com.dear-agent.sandbox-gc | grep -E 'state|last exit'
 ```
 
 ### 5. Monitor Disk Usage
@@ -447,7 +453,7 @@ cat /proc/self/gid_map
 
 If you encounter issues not covered in this guide:
 
-1. **Check logs:** `~/.agm/logs/sandbox.log`
+1. **Check debug logs:** `~/.agm/debug/` (written when debug logging is enabled)
 2. **Enable debug mode:** `export AGM_DEBUG=1`
 3. **Collect diagnostics:**
    ```bash
@@ -459,6 +465,4 @@ If you encounter issues not covered in this guide:
 
 ## Related Documentation
 
-- [Architecture](./ARCHITECTURE.md) - Understanding sandbox internals
-- [Testing Guide](./TESTING.md) - Running sandbox tests
-- [API Reference](./API.md) - Provider interface documentation
+- [Sandbox Architecture](../internal/sandbox/ARCHITECTURE.md) - Understanding sandbox internals

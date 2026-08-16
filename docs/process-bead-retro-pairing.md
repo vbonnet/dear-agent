@@ -44,7 +44,7 @@ There is no built-in `retro` issue type (defaults are
 `dear-retro` label — matching the existing `ce-x9ul.1` bead.
 
 ```sh
-bd --db ~/beads/context-engine/.beads create \
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on create \
   "retro: 2026-06-20-ci-cascade — CI red 6h" \
   --type task \
   --priority 1 \
@@ -69,7 +69,7 @@ Link the bead and the PR **both ways** so either side reaches the other:
 2. **Bead comment** — after the PR opens, record the URL:
 
    ```sh
-   bd --db ~/beads/context-engine/.beads comment <bead-id> \
+   bd --db ~/beads/context-engine/.beads --dolt-auto-commit on comment <bead-id> \
      "PR: https://github.com/vbonnet/dear-agent/pull/<num>"
    ```
 
@@ -86,7 +86,7 @@ A retro bead is closed only when **all three** hold:
 Then:
 
 ```sh
-bd --db ~/beads/context-engine/.beads close <bead-id>
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on close <bead-id>
 ```
 
 ## Backfill guidance
@@ -103,12 +103,12 @@ For the existing floating retro docs in `engram-research/retrospectives/`:
 
 ```sh
 DATE=2026-06-20; SLUG=ci-cascade
-bd --db ~/beads/context-engine/.beads create \
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on create \
   "retro: ${DATE}-${SLUG} — <summary>" \
   --type task --priority 1 --labels dear-retro,retro \
   --description "DEAR retro. Doc: engram-research/retrospectives/${DATE}-${SLUG}.md"
 # → write engram-research/retrospectives/${DATE}-${SLUG}.md
 # → open PR, body cites the bead ID
-# → bd comment <bead-id> "PR: <url>"
-# → on merge: bd close <bead-id>
+# → bd --db ~/beads/context-engine/.beads --dolt-auto-commit on comment <bead-id> "PR: <url>"
+# → on merge: bd --db ~/beads/context-engine/.beads --dolt-auto-commit on close <bead-id>
 ```

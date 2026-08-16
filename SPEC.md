@@ -1,6 +1,6 @@
 # Repository Command Wrappers Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-08-11 -->
 
 ## EARS Requirements
 

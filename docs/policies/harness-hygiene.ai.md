@@ -52,8 +52,8 @@ past incident). They have OPPOSITE urgency — split the timer.
 
 ## REMINDER
 
-A fix is only "done" when it is (a) wired into a closed observation loop
-(see [broken-windows](broken-windows.ai.md) — wire it or delete it) AND
-(b) carries a liveness counter-check so it cannot strangle what it protects.
+A fix is only "done" when it is (a) wired into a closed observation loop —
+wire it or delete it — AND (b) carries a liveness counter-check so it cannot
+strangle what it protects.
 Ship nothing that fails either test. Don't let perfect be the enemy of good —
 these are a review LENS, not a new gate.

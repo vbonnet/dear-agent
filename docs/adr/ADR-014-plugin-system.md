@@ -38,5 +38,6 @@ registration).
 
 Builds on [ADR-010](ADR-010-workflow-engine-architecture.md) and
 [ADR-011](ADR-011-dear-audit-subsystem.md). The bet: HookProvider +
-CheckProvider cover most demand; reserving names in D7 means adding a third
-capability is small.
+CheckProvider cover most demand; reserving the capability names in the
+manifest schema (`pkg/plugin/manifest.go`) means adding a third capability
+is small.

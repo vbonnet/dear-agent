@@ -10,7 +10,7 @@ scope: dear-agent
 
 # Mission
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-08-11 -->
 
 `MISSION.md` is the canonical source for this project's purpose and the
 VROOM/AGM ownership boundary.

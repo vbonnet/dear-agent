@@ -1,6 +1,6 @@
 # Workflow Engine — Operator Guide
 
-**Status:** Active (Phase 3 shipped 2026-05-03)
+**Status:** Active
 **Audience:** developers running, authoring, or migrating workflows
 **Source of truth for:** how to use the engine end-to-end. Architecture
 lives in [ADR-010](adr/ADR-010-workflow-engine-architecture.md); current work
@@ -132,12 +132,16 @@ Anthropic, OpenAI, and Google. The benefits:
 - Each role's secondary/tertiary tiers spill onto the other two providers,
   so any single role survives the loss of any single vendor.
 
-| Role           | Primary (vendor)             | Secondary       | Tertiary        | Why this primary                        |
-|----------------|------------------------------|-----------------|-----------------|------------------------------------------|
-| `research`     | `gemini-3.1-pro` (Google)    | `claude-opus-4-7` | `gpt-5.5-pro` | 1M-context window, strong synthesis      |
-| `implementer`  | `claude-opus-4-7` (Anthropic)| `gpt-5.5-pro`   | `gemini-3.1-pro`| Highest accepted-patch rate in evals     |
-| `reviewer`     | `gpt-5.5-pro` (OpenAI)       | `claude-opus-4-7` | `gemini-2.5-pro` | Off-vendor critic — different blind spots |
-| `orchestrator` | `claude-sonnet-4-6` (Anthropic)| `gemini-3.5-flash` | `gpt-5.4-mini` | Cheap/fast for high-volume routing       |
+| Role           | Primary-tier vendor | Why this primary                          |
+|----------------|---------------------|-------------------------------------------|
+| `research`     | Google              | 1M-context window, strong synthesis       |
+| `implementer`  | Anthropic           | Highest accepted-patch rate in evals      |
+| `reviewer`     | OpenAI              | Off-vendor critic — different blind spots |
+| `orchestrator` | Anthropic (small/fast tier) | Cheap/fast for high-volume routing |
+
+The exact model ID pinned to each role's primary/secondary/tertiary *model
+tier* (not the Primary/Secondary/Tertiary task-ownership roles of
+`CONTEXT.md`) lives in `config/roles.yaml`, the source of truth.
 
 The `Resolver` walks tiers in order and skips any tier whose model fails the
 node's capability or budget filters, or that the optional
@@ -186,7 +190,7 @@ nodes:
       report:
         path: "notes/{{ .RunID }}/report.md"
         content_type: text/markdown
-        durability: engram_indexed     # ← Phase 3
+        durability: engram_indexed
 ```
 
 When the node finishes, the engine writes the file to disk **and**
@@ -212,7 +216,7 @@ can drill back into the work-item:
 
 ### 8. Migrate legacy `FileState` snapshots (≈30s)
 
-Pre-Phase-0 runs persisted as JSON via `FileState`. The migrate tool
+Legacy runs persisted as JSON via `FileState`. The migrate tool
 folds them into `runs.db` without rewriting the runner:
 
 ```bash
@@ -242,9 +246,9 @@ started)`.
 | `workflow-migrate` | Port a `FileState` snapshot into `runs.db` |
 | `dear-agent-mcp` | JSON-RPC server: `workflow_*` + `FetchSource` + `AddSource` |
 | `dear-agent-search` | Search the knowledge corpus, joined to `runs` |
-| `workflow-codemod` | v0.1 → v0.2 upgrade; `from-wayfinder` synthesis (Phase 4.1/4.2) |
-| `workflow-dev` | Interactive dev shell with mocked-by-default fixtures (Phase 4.4) |
-| `workflow-inspector` | Read-only HTML view of `runs.db` (Phase 5.5) |
+| `workflow-codemod` | v0.1 → v0.2 upgrade; `from-wayfinder` synthesis |
+| `workflow-dev` | Interactive dev shell with mocked-by-default fixtures |
+| `workflow-inspector` | Read-only HTML view of `runs.db` |
 
 ---
 
@@ -260,8 +264,8 @@ tools out of the box:
 | `workflow_approve` | Resolve a HITL request as approved |
 | `workflow_reject` | Resolve a HITL request as rejected |
 | `workflow_cancel` | Cancel an in-flight run |
-| `FetchSource` | Search the knowledge corpus (Phase 3) |
-| `AddSource` | Add or update a knowledge entry (Phase 3) |
+| `FetchSource` | Search the knowledge corpus |
+| `AddSource` | Add or update a knowledge entry |
 
 Backend mismatches on `FetchSource` / `AddSource` return JSON-RPC
 error code `-32004` with `expected` / `actual` fields, so a
@@ -277,7 +281,7 @@ misconfigured client gets a clear signal rather than silent results.
 | `runs` | runner; `workflow-migrate`; `workflow_run` MCP | `workflow-status / list`, `dear-agent-search` join |
 | `nodes` | runner; `workflow-migrate` | `workflow-status` |
 | `node_attempts` | runner | `workflow-logs` |
-| `node_outputs` | `OutputWriter` (Phase 1.6) | future inspector |
+| `node_outputs` | `OutputWriter` | future inspector |
 | `audit_events` | every state transition | `workflow-logs`, audit sinks (JSONL, OTel, Engram) |
 | `approvals` | HITL backend (CLI / Discord / MCP) | runner poll loop, `workflow-approve` |
 | `sources` (+`sources_fts`) | `pkg/source/sqlite` adapter | `dear-agent-search`, `FetchSource` MCP |
@@ -286,19 +290,6 @@ The default deployment puts every table in **one** SQLite file. JOINs
 across runs ↔ sources are local; nothing has to be fanned out across
 processes. Override with `--sources` on the MCP / search CLI if you
 want the knowledge corpus in a separate file.
-
----
-
-## Phase status (as of 2026-05-03)
-
-| Phase | Scope | Status |
-|---|---|---|
-| 0 | SQLite + audit_events | done (#38) |
-| 1 | Roles + budget | done (#39) |
-| 2 | Workflow lifecycle hooks + HITL + audit sinks + MCP + Discord | done (#40) |
-| 3 | FetchSource / AddSource (this guide is current as of here) | done |
-| 4 | Migration + `workflow dev` | done — `workflow-migrate`, `workflow-codemod`, `workflow-dev` |
-| 5 | Adapters + visual inspector + `kind: spawn` | done — Obsidian/llm-wiki/registry adapters, `workflow-inspector`, `kind: spawn`; OpenViking ships as a stub |
 
 Release history is preserved in Git and current follow-up work is tracked in
 Beads rather than a second Markdown backlog.

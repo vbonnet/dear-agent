@@ -13,15 +13,11 @@ codebase, that collision is documented in
 [§ Known Terminology Collisions](#known-terminology-collisions) and treated as a
 bug to be paid down, not a fact to live with.
 
-> **Status note (2026-07-19):** This file was created alongside a correction of
-> the VROOM architecture docs. Several pre-existing documents described an
-> earlier, inaccurate VROOM model (a five-role "Verifier/Requester/Orchestrator/
-> Overseer/Meta-Orchestrator" mesh with a lexicographic value evaluator). That
-> model is **superseded**. This file owns vocabulary,
-> [MISSION.md](docs/alignment/MISSION.md) owns current project purpose and the
-> VROOM/AGM ownership boundary, and
-> [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md) owns the
-> architecture rationale.
+**Ownership:** this file owns vocabulary,
+[MISSION.md](docs/alignment/MISSION.md) owns current project purpose and the
+VROOM/AGM ownership boundary, and
+[ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md) owns the
+architecture rationale.
 
 ---
 
@@ -80,9 +76,7 @@ and documents that file it under AGM (e.g. `agm/docs/...`) are misfiled.
 > backronymed **V**erifier / **R**equester / **O**rchestrator / **O**verseer /
 > **M**eta-Orchestrator. That five-role expansion is **inaccurate and
 > superseded** — there is no "Verifier" or "Requester" *supervisor* role. Treat
-> VROOM as the name of the framework. (This was a judgment call made while
-> correcting the docs; if a canonical expansion is desired, the maintainer can
-> set one and this note becomes the place to record it.)
+> VROOM as the name of the framework.
 
 ### Per-task responsibility: Primary / Secondary / Tertiary
 
@@ -190,9 +184,8 @@ AGM workspaces**. Start with a single set; expand only if necessary.
 ### Decision trail
 
 Consequential VROOM decisions are recorded to an append-only decision trail.
-This concept is sound and survives the model correction. ⚠️ The current code
-seam (`pkg/vroom`) still encodes the *old* role set — see
-[Known Terminology Collisions](#known-terminology-collisions).
+The append-only persistence lives in `pkg/vroom/decisiontrail`; the in-memory
+event topics live in `pkg/vroom/vroom`.
 
 ---
 
@@ -275,17 +268,7 @@ These are or were **bugs in the vocabulary**, recorded here per the "call
 conflicts out immediately" rule. Some entries are resolved by ADRs and remain
 listed so older docs and identifiers can be interpreted correctly.
 
-1. **"VROOM" — old five-role model vs. corrected model — RESOLVED
-   (2026-07-18).**
-   Many pre-2026-05-17 docs describe VROOM as Verifier/Requester/Orchestrator/
-   Overseer/Meta-Orchestrator with a lexicographic value evaluator. That model
-   is superseded. Current purpose and ownership live in
-   [MISSION.md](docs/alignment/MISSION.md), vocabulary lives in this file, and
-   architecture rationale lives in
-   [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The superseded
-   AGM ADRs 020–025 were removed; ADR-002 is the retained decision.
-
-2. **"DEAR" — resolved two-level model plus historical identifiers.**
+1. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
      **Retro**. *Bare "DEAR" means this process loop.*
    - **(b) Workflow lifecycle hooks:** `pkg/workflow.Hooks` and ADR-010/ADR-011
@@ -298,34 +281,18 @@ listed so older docs and identifiers can be interpreted correctly.
      loop. Current work uses Beads IDs.
    Canonical authority: [ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md).
 
-3. **`pkg/vroom` code encodes the superseded model.**
-   `pkg/vroom/vroom/topics.go` defines decision-trail topics
-   (`vroom.decision.evaluated` with a "Verifier" comment, etc.) tied to
-   "ADR-020's decision trail specification". The decision-trail *idea* is fine;
-   the *role enum* is stale. Not changed in the docs PR (breaking API change) —
-   tracked as a follow-up.
-
-4. **Two top-level ADR directories — RESOLVED (2026-05-17).**
-   There used to be both `docs/adr/` (singular) and `docs/adrs/` (plural).
-   They are now **consolidated into `docs/adr/`** (the conventional name, also
-   used by `agm/docs/adr/`). The canonical top-level ADR directory is
-   **`docs/adr/`**; `docs/adrs/` no longer exists. ADR numbers were left
-   unchanged (gaps are fine; renumbering would break inbound references and
-   ADR identity). Nested per-package dirs like `pkg/engram/docs/adrs/` are a
-   separate concern and were intentionally left alone.
-
-5. **ADR sprawl (~100+ ADRs of mixed quality).**
-   Most ADRs in the repo fail the "hard-to-reverse + surprising + real
-   trade-off" test (many are bug-fix notes, standard-pattern conventions, or
-   LLM-padded design dumps). A full repo-wide audit with per-ADR dispositions
-   is in `vbonnet/engram-research` `audits/2026-05-17-adr-inventory-prune.md`.
-   Only the top-level governance set + one exact duplicate are pruned in the
-   originating PR; the rest are grouped into follow-up surgical PRs.
+2. **ADR sprawl (~70 ADRs of mixed quality).**
+   Many ADRs in the repo fail the "hard-to-reverse + surprising + real
+   trade-off" test in [docs/adr/README.md](docs/adr/README.md) (bug-fix notes,
+   standard-pattern conventions, LLM-padded design dumps). Per-ADR dispositions
+   live in `vbonnet/engram-research`
+   `audits/2026-05-17-adr-inventory-prune.md`; remediation is tracked in bead
+   `ce-g62j` (with `ce-y3zh.3`).
 
 ---
 
 ## When you find a term that disagrees with this file
 
 Fix the other document, not this file — unless the disagreement reveals that
-*this file* is wrong, in which case update this file in the same change and note
-it in the status line at the top. Do not let two definitions coexist silently.
+*this file* is wrong, in which case update this file in the same change. Do not
+let two definitions coexist silently.

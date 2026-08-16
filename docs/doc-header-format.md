@@ -4,21 +4,11 @@
 
 ## The anti-pattern
 
-Two docs in this repo previously (and many more in the sibling
-`engram-research` repo still) opened with a metadata block written as inline bold `key: value` pairs
-crammed onto one physical line, separated only by `·`, `|`, or nothing
-consistent. These were the two real examples before this check landed:
-
-`REVIEW.md:3`:
+A document metadata block written as inline bold `key: value` pairs crammed
+onto one physical line, separated only by `·`, `|`, or nothing consistent:
 
 ```
-**Status:** authoritative · **Last updated:** 2026-06-11
-```
-
-`docs/code-review-automation-setup.md:3`:
-
-```
-**Status:** authoritative · **Last audited:** 2026-07-23
+**Status:** authoritative · **Last updated:** DATE
 ```
 
 There is no line break between `**Status:**` and `**Last updated:**` — just a
@@ -35,31 +25,7 @@ fields:
 
 ```
 - **Status:** authoritative
-- **Last updated:** 2026-06-11
-```
-
-Applied to the two examples above:
-
-`REVIEW.md`, before → after:
-
-```
-**Status:** authoritative · **Last updated:** 2026-06-11
-```
-
-```
-- **Status:** authoritative
-- **Last updated:** 2026-06-11
-```
-
-`docs/code-review-automation-setup.md`, before → after:
-
-```
-**Status:** authoritative · **Last audited:** 2026-07-23
-```
-
-```
-- **Status:** authoritative
-- **Last audited:** 2026-07-23
+- **Last updated:** DATE
 ```
 
 A single field alone (e.g. the `Status: Accepted (2026-04-24)` line ADRs use)
@@ -72,7 +38,7 @@ Markdown table is also acceptable:
 ```
 | Status        | Last updated |
 | ------------- | ------------ |
-| authoritative | 2026-06-11   |
+| authoritative | DATE         |
 ```
 
 The one hard rule is: every distinct metadata field gets its own line. Never
@@ -129,7 +95,4 @@ go run ./tools/header-lint -repo .
 
 It runs in fast preflight and in CI via
 `.github/workflows/doc-header-lint.yml` on every pull request and on push to
-`main`/`develop`. The two pre-existing dear-agent violations quoted above
-were fixed with the linter's introduction, so both enforcement paths fail on
-any tracked violation from the first revision. The roughly 67 files with this
-pattern in `engram-research` remain a separate repository backfill.
+`main`/`develop`. Both enforcement paths fail on any tracked violation.

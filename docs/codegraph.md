@@ -34,10 +34,10 @@ docs/papers/images would call the agent's API; we don't use that.
 ```
 ~/.local/share/codegraph/
 ├── dear-agent/                  # this repo
-│   ├── GRAPH_REPORT.md          # tens of thousands of nodes / edges
+│   ├── GRAPH_REPORT.md          # current node/edge/community counts live here
 │   └── graph.json
 └── brain-v2/                    # ~/src/brain-v2
-    ├── GRAPH_REPORT.md          # 4k nodes / 5.5k edges / 346 communities
+    ├── GRAPH_REPORT.md
     ├── graph.html               # interactive viz (open in browser)
     └── graph.json
 ```

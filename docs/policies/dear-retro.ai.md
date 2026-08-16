@@ -27,7 +27,8 @@ Define/Enforce/Audit/Resolve hooks; see the DEAR disambiguation in the ADRs.)
 ## ALWAYS
 
 - After any seam, systemic error, or "how did this ship?" moment, write a DEAR
-  retro to the knowledge base (`~/src/engram-research`, via a worktree).
+  retro to the knowledge base — the research repository configured in
+  [`.dear-agent.yml`](../../.dear-agent.yml), via a worktree.
 - Name the root cause and a concrete prevention (a test, a gate, a constant, a
   policy), then file follow-up beads for each prevention. Check for an existing
   bead on the same prevention first — +1/comment it instead of filing a

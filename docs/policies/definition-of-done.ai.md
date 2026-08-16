@@ -24,12 +24,13 @@ open PR are checkpoints, not completion.
 
 - Done = **merged to `main`** + **deployed** (where a deploy step exists) +
   **verified** in the real system.
-- Drive each change through to merge; resolve review threads; then close the bead
-  with a link to the merged PR.
+- Drive each change through to merge; resolve review threads; then, once deployed
+  (where applicable) and verified, close the bead with a link to the merged PR.
 - If something blocks the merge, escalate it — do not silently park it as "done."
 
 ## REMINDER
 
-`Definition of Done = PR MERGED to main` (AGENTS.md). Unmerged work rots,
-diverges from `main`, and becomes the next agent's confusing half-state. The last
-mile — merge, deploy, verify — is the job, not an optional epilogue.
+Done means merged, deployed where applicable, and verified in the real system.
+Unmerged work rots, diverges from `main`, and becomes the next agent's confusing
+half-state. The last mile — merge, deploy, verify — is the job, not an optional
+epilogue.

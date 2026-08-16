@@ -248,18 +248,13 @@ ulimit -n 8192        # Increase FD soft limit
 
 **Recommendation**: Allocate 200 MB minimum for AGM sandbox system with 50 sandboxes. Add 50 MB per additional 50 sandboxes.
 
-### macOS (APFS) - Projected
+### macOS (APFS)
 
-#### Per-Sandbox Resource Usage
-
-| Resource | Usage per Sandbox | Notes |
-|----------|------------------|-------|
-| File Descriptors | ~5 FDs | Multiple file handles for reflink tracking |
-| Disk Space | ~0 bytes initially | Copy-on-write, space used only on modification |
-| Memory | ~200 KB | Less overhead than OverlayFS (no mounts) |
-| Disk I/O | Minimal | Reflinks are metadata-only until CoW |
-
-**Note**: APFS does not use mount points, reducing resource overhead compared to OverlayFS.
+APFS sandboxes use reflink clones and no mount points, so per-sandbox
+overhead is lower than OverlayFS on the mount side; disk space is
+copy-on-write (consumed only by modified files). No measured per-sandbox
+resource baseline is recorded here — measure with the suite in
+`internal/sandbox/apfs/benchmark_test.go` (see [PERFORMANCE.md](./PERFORMANCE.md)).
 
 ## System Capacity Limits
 
@@ -326,9 +321,9 @@ mount -t tmpfs -o size=4G tmpfs /tmp/agm-workspaces
 # 3. Ensure SSD storage for persistent workspaces
 # (Already default on most systems)
 
-# 4. Monitor resource usage
+# 4. Monitor resource usage (sandboxes are provisioned by the agm process)
 watch -n 1 'cat /proc/mounts | grep overlay | wc -l'
-watch -n 1 'lsof -p $(pidof agm-sandbox) | wc -l'
+watch -n 1 'lsof -p $(pgrep -x agm | head -1) | wc -l'
 ```
 
 **For Development (1-10 sandboxes)**:
@@ -357,8 +352,8 @@ cat /proc/mounts | grep overlay | wc -l
 # Monitor file descriptors for process
 lsof -p <pid> | wc -l
 
-# Monitor memory usage
-ps aux | grep agm-sandbox
+# Monitor memory usage (sandboxes are provisioned by the agm process)
+ps aux | grep '[a]gm'
 
 # Check for mount leaks
 diff <(cat /proc/mounts | grep overlay | sort) \
@@ -370,8 +365,8 @@ diff <(cat /proc/mounts | grep overlay | sort) \
 **System Health Validation**:
 
 ```bash
-# Test sandbox creation still works
-go test -tags=integration ./internal/sandbox/ -run=TestBasicCreate -v
+# Test sandbox creation still works (creates 50 sandboxes — takes minutes)
+go test -tags=integration ./internal/sandbox/ -run=TestLoadTest_50Sandboxes -v
 
 # Verify resource cleanup
 # (Run after stopping all sandboxes)
@@ -470,11 +465,8 @@ ps aux --sort=-%mem | head
 
 **Recovery**:
 ```bash
-# Destroy oldest sandboxes first
-# (Implement age-based cleanup in application)
-
-# Or restart AGM sandbox system
-systemctl restart agm-sandbox
+# Reap sandboxes that belong to no live session
+agm sandbox gc --reap
 ```
 
 **Prevention**: Set maximum sandbox count based on available memory. Monitor memory usage.
@@ -531,8 +523,8 @@ cat /proc/mounts | grep overlay
 # Count active sandboxes
 cat /proc/mounts | grep overlay | wc -l
 
-# Check file descriptors for process
-lsof -p $(pidof agm-sandbox) | wc -l
+# Check file descriptors for the agm process
+lsof -p $(pgrep -x agm | head -1) | wc -l
 
 # Find sandbox directories
 find ~/.agm/sandboxes -type d -name merged
@@ -625,13 +617,3 @@ All test types complement each other:
 - [Concurrency Tests](../internal/sandbox/concurrency_test.go)
 - [OverlayFS Documentation](https://www.kernel.org/doc/html/latest/filesystems/overlayfs.html)
 - [Linux ulimit Guide](https://www.kernel.org/doc/html/latest/admin-guide/sysctl/fs.html)
-
-## Changelog
-
-- 2026-03-20: Initial scaling documentation
-  - Load test suite implementation (5 comprehensive tests)
-  - Performance characterization at 10/25/50/75/100 concurrency levels
-  - Resource limit documentation and monitoring guide
-  - Failure mode analysis and recovery procedures
-  - Production deployment recommendations for AGM sandbox swarm MVP
-  - Validated: 50+ concurrent sandboxes with stable performance

@@ -1,6 +1,9 @@
 # ADR-033: Commit-Anchored Progress Ledger for Long-Running Workers
 
-Status: Accepted (2026-06-21) · Bead ce-ek4f · advisory 2026-06-21 ID-002 · relates [018](ADR-018-graceful-exit-framework-default.md)
+Status: Accepted (2026-06-21)
+
+- **Bead:** ce-ek4f
+- **Relates:** [ADR-018](ADR-018-graceful-exit-framework-default.md)
 
 A long-running Worker that compacts or restarts loses its in-flight progress:
 the context window is lossy, the bead note is written once at the end, and a
@@ -35,7 +38,7 @@ history stays clean. The ledger is branch-local and ephemeral by construction.
 **Rejected.** *Context window only* — lossy, the problem statement. *Bead note
 only* — coarse (one terminal write) and a network/DB round-trip per update, too
 expensive to be per-milestone. *External ledger file* (`.progress.md`) — drifts
-from the tree (the §H6 failure mode) and itself needs committing to survive.
+from the tree and itself needs committing to survive.
 *Handoff manifest* — heavyweight and semantically wrong: it models a cut to a
 *new* session, whereas this models continuity *within* one. The ledger
 complements bead notes (coarse, cross-session, queryable) by being granular and

@@ -10,13 +10,16 @@ The term denylist pre-commit hook reads a configurable list of forbidden terms a
 
 ### 1. Create a Denylist File
 
-Copy the example denylist to `.agm/term-denylist.txt`:
+Create `.agm/term-denylist.txt` at the repo root (neither the directory nor
+the file is tracked — the hook is skipped silently while the file is absent):
 
 ```bash
-cp .agm/term-denylist.txt.example .agm/term-denylist.txt
+mkdir -p .agm
+touch .agm/term-denylist.txt
 ```
 
-Edit `.agm/term-denylist.txt` to add your organization's terms:
+Edit `.agm/term-denylist.txt` to add your organization's terms, one pattern
+per line:
 
 ```
 # Internal terminology
@@ -34,11 +37,7 @@ secret_key
 Add the hook to your git repository's pre-commit hooks:
 
 ```bash
-# Option A: Manual setup
 cp agm/hooks/precommit-term-denylist.sh .git/hooks/pre-commit
-
-# Option B: Use AGM hook manager
-agm hook register precommit-term-denylist.sh
 ```
 
 ### 3. Make Hook Executable

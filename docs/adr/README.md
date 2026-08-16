@@ -1,6 +1,6 @@
 # Architecture decisions
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-08-11 -->
 
 This directory records current, durable Dear Agent trade-offs. Keep a record
 only when the choice is hard to reverse, surprising without context, and the

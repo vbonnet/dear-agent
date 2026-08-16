@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-06-24 -->
+<!-- Last audited at: 2026-08-11 -->
 
 # Per-Skill Verification Criteria
 
@@ -17,9 +17,10 @@ skill runs. A skill that writes a design doc has different exit conditions than
 one that deploys a service.
 
 Per-skill verification criteria fix that gap: each skill declares its own
-falsifiable checklist. When the DEAR Auditor (VROOM's Secondary) reaches the
-A step, it checks the skill's criteria list as a pass/fail gate — no judgment
-required.
+falsifiable checklist. When the Secondary executes DEAR's Audit step, it
+checks the skill's criteria list as a pass/fail gate — no judgment
+required. (Per `CONTEXT.md`, verification is the Secondary's responsibility;
+"Auditor" names the separate standing role that mines logs and retros.)
 
 ---
 
@@ -56,7 +57,7 @@ before any appendices:
 ```markdown
 ## Verification Criteria
 
-The DEAR Auditor checks the following after this skill runs:
+The Secondary checks the following in DEAR's Audit step after this skill runs:
 
 - [ ] Condition one (artifact: file exists at path X)
 - [ ] Condition two (exit code: `cmd` exits 0)
@@ -101,7 +102,7 @@ Audit               ←   each criterion item checked: pass → continue; fail �
 Retro               ←   unmet criteria become findings → fed back to Wayfinder/roadmap
 ```
 
-If a skill has no criteria declared, the Auditor falls back to the global DoD.
+If a skill has no criteria declared, the Secondary falls back to the global DoD.
 Declaring criteria is an opt-in upgrade: add them incrementally as skills mature.
 A skill with criteria is **strictly more auditable** than one without.
 
@@ -122,7 +123,7 @@ verification_criteria:
 ```
 
 Each item is checkable with a shell one-liner: `test -f`, `grep -q`, `ls | wc -l`.
-An Auditor can run them in sequence with no judgment required.
+The Secondary can run them in sequence with no judgment required.
 
 ---
 
@@ -152,8 +153,9 @@ framework). Enforcement tiers today:
 | Criteria present, not a nonempty string list | Hard lint failure |
 | Criteria present, structurally valid | No finding; reviewers assess whether each statement is falsifiable |
 
-Future: `cmd/bead-close-guard` may gate bead closure on the Auditor having
-checked each declared criterion. This doc will be updated when that gate lands.
+Future: `cmd/bead-close-guard` may gate bead closure on each declared
+criterion having been checked in the Audit step. This doc will be updated when
+that gate lands.
 
 ---
 

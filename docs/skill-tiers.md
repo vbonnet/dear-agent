@@ -1,6 +1,6 @@
 # Skill Model/Effort Tiers
 
-<!-- Last audited: 2026-07-19 -->
+<!-- Last audited at: 2026-08-11 -->
 
 Every provider command (`agm/agm-plugin/commands/*.md` and
 `wayfinder/**/commands/*.md`) must declare `model:` and `effort:` in its YAML
@@ -32,7 +32,7 @@ mechanical skills (string formatting, data extraction, simple CLI wrappers).
 | Tier              | When to use                                          | Example skills              |
 |-------------------|------------------------------------------------------|------------------------------|
 | `haiku` + `low`   | Mechanical wrapper around a deterministic command    | `agm-list`, `agm-status`, `agm-assoc`, `agm-new` |
-| `sonnet` + `low`  | Light judgment over structured output                | `agm-exit` (delegates to `/bow`) |
+| `sonnet` + `low`  | Light judgment over structured output                | `agm-exit`                   |
 | `sonnet` + `medium` | Multi-step reasoning, synthesis                     | `wiki-query-save`            |
 | `sonnet` + `high` | Complex research / planning                          | (rare — prefer splitting)    |
 | `opus` + any      | Reserved for unavoidable high-capability reasoning   | (avoid — document why)       |

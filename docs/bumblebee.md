@@ -84,8 +84,8 @@ launchctl kickstart gui/$UID/com.dear-agent.bumblebee
 ```
 
 On Linux, set up an equivalent `systemd --user` timer or a cron entry that
-runs `dear-agent-bumblebee scan`. We don't ship one yet; see ADR-027 for
-why.
+runs `dear-agent-bumblebee scan`. We don't ship one — macOS is the only
+endpoint scheduling surface `cmd/dear-agent-bumblebee` implements and tests.
 
 ## Exposure catalog (optional, recommended later)
 

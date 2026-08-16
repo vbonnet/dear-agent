@@ -4,36 +4,39 @@
 
 The AGM sandbox system provides platform-specific implementations for creating isolated filesystem environments. Each provider is optimized for its target platform's native capabilities.
 
+The authoritative subsystem reference is
+[`internal/sandbox/ARCHITECTURE.md`](../internal/sandbox/ARCHITECTURE.md); this
+page covers per-platform setup and troubleshooting. Registered providers are
+`bubblewrap`, `overlayfs` (also `overlayfs-native`), `gvisor`, and `apfs`, plus
+the built-in `mock` provider for tests.
+
 ## Linux
 
 ### Requirements
 
-**Option 1: Native OverlayFS (Recommended)**
+**Option 1: Bubblewrap (preferred by automatic selection when installed)**
+- `bwrap` binary available (`sudo apt-get install bubblewrap` on Debian/Ubuntu)
+- Works regardless of kernel OverlayFS support
+
+**Option 2: Native OverlayFS**
 - Linux kernel 5.11+ for rootless operation
 - No additional packages required
 
-**Option 2: FUSE OverlayFS (Fallback)**
-- Any kernel version
-- Requires `fuse-overlayfs` package
-- Install: `sudo apt-get install fuse-overlayfs` (Debian/Ubuntu)
+**Option 3: gVisor**
+- Requires `runsc`; workspace materialization only — command wrapping inside
+  the OCI bundle is the caller's responsibility
+
+There is no registered `fuse-overlayfs` provider: on a kernel older than 5.11
+with no `bwrap` installed, automatic selection returns an unsupported-provider
+error rather than falling back.
 
 ### Performance
-
-| Implementation | Creation Time | I/O Overhead | Notes |
-|---------------|---------------|--------------|-------|
-| Native OverlayFS | <100ms | <5% | Recommended for kernel 5.11+ |
-| FUSE OverlayFS | ~700ms | 30-40% | Fallback for older kernels |
 
 **Native OverlayFS Benefits:**
 - Minimal overhead: Near-native filesystem performance
 - Rootless operation: No sudo required
 - Kernel-level copy-on-write: Instant file cloning
 - inotify propagation: Full file watching support
-
-**FUSE OverlayFS Trade-offs:**
-- 7x slower creation time (still acceptable for most use cases)
-- Higher I/O overhead due to userspace implementation
-- Compatible with older kernels
 
 ### Testing
 
@@ -56,14 +59,15 @@ info, err := sandbox.DetectPlatform()
 // info.OS = "linux"
 // info.KernelVersion = "6.6.123"
 // info.HasOverlayFS = true (if kernel >= 5.11)
-// info.Recommended = "overlayfs"
+// info.Recommended = "bubblewrap" when bwrap is installed,
+//                    otherwise "overlayfs" (kernel 5.11+)
 ```
 
 ### Troubleshooting
 
 **Error: "kernel version too old"**
 - Your kernel is < 5.11
-- Solution: Install fuse-overlayfs and use "fuse-overlayfs" provider
+- Solution: Install bubblewrap (`bwrap`) and use the "bubblewrap" provider
 - Or: Upgrade to a newer kernel
 
 **Error: "permission denied" during mount**
@@ -142,7 +146,7 @@ info, err := sandbox.DetectPlatform()
 **Error: "operation not supported"**
 - macOS version may be too old (< 10.13)
 - Check version: `sw_vers`
-- Solution: Upgrade macOS or use fallback provider
+- Solution: Upgrade macOS, or use the mock provider for development
 
 ## Windows
 
@@ -204,11 +208,14 @@ provider, err := sandbox.NewProvider()
 ### Manual Selection
 
 ```go
+// Linux with bubblewrap
+provider, err := sandbox.NewProviderForPlatform("bubblewrap")
+
 // Linux with OverlayFS
 provider, err := sandbox.NewProviderForPlatform("overlayfs")
 
-// Linux with FUSE fallback
-provider, err := sandbox.NewProviderForPlatform("fuse-overlayfs")
+// Linux with gVisor (requires runsc)
+provider, err := sandbox.NewProviderForPlatform("gvisor")
 
 // macOS with APFS
 provider, err := sandbox.NewProviderForPlatform("apfs")
@@ -216,6 +223,8 @@ provider, err := sandbox.NewProviderForPlatform("apfs")
 // Testing/development
 provider := sandbox.NewMockProvider()
 ```
+
+Any other name returns a "provider not available" error.
 
 ## Platform-Specific Behavior
 
@@ -252,6 +261,5 @@ provider := sandbox.NewMockProvider()
 
 ## Related Documentation
 
-- [Architecture Overview](./architecture.md)
-- [FAQ & Troubleshooting](./FAQ-TROUBLESHOOTING.md)
-- [Development Guide](./DEVELOPMENT.md)
+- [Sandbox architecture](../internal/sandbox/ARCHITECTURE.md)
+- [Sandbox SPEC](../internal/sandbox/SPEC.md)

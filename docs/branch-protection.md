@@ -4,11 +4,9 @@
 [`.github/rulesets/main.json`](../.github/rulesets/main.json) and applied via
 `gh api`. The ruleset is **zero-bypass** (`bypass_actors: []`) — it binds
 *everyone*, including the repo owner. This is the source of truth; the GitHub UI
-mirrors it but should not be edited by hand.
-
-Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
-**classic** branch-protection rules, which allowed admin bypass
-(`enforce_admins: false`).
+mirrors it but should not be edited by hand. The ruleset is the **only**
+protection mechanism on `main` — no classic branch-protection rules are
+configured.
 
 ## What the ruleset enforces
 
@@ -43,22 +41,17 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 | `Identity, index, and lifecycle parity` | `adr-integrity.yml` |
 | `Header block format` | `doc-header-lint.yml` |
 
-`5-Dimension AI Review` (`review.yml`) is **not** currently in this list. It was
-added by #991, then paused 2026-07-27 — `ANTHROPIC_API_KEY` was never funded
-(no quota outside the Max plan, which the workflow can't bill against), so the
-gate ran fail-closed on every PR. It was removed here rather than left in
-`main.json` unapplied, so a routine `gh api ... --method PUT` sync of this file
-can't silently start blocking merges on a check nobody is funding.
-
-To re-enable: set the `ANTHROPIC_API_KEY` repo secret, and re-add the context
-to `main.json` + re-apply (below) if you also want it required again. Nothing
-else changes — the workflow gates itself on a `Detect review key` preflight
-step that reads the secret via `env:` and writes `present=true|false` to
-`$GITHUB_OUTPUT`, which the review step then tests as
-`steps.key.outputs.present == 'true'`. That indirection is load-bearing:
-GitHub does **not** expose the `secrets` context inside a step `if:`, so
-`if: secrets.ANTHROPIC_API_KEY != ''` does not work. See the PAUSED comment at
-the top of `review.yml`.
+`5-Dimension AI Review` (`review.yml`) is deliberately **not** in this list, so
+a check nobody is funding cannot block merges. The workflow gates itself on a
+`Detect review key` preflight step that reads the `ANTHROPIC_API_KEY` secret
+via `env:` and writes `present=true|false` to `$GITHUB_OUTPUT`, which later
+steps test as `steps.key.outputs.present == 'true'`. That indirection is
+load-bearing: GitHub does **not** expose the `secrets` context inside a step
+`if:`, so `if: secrets.ANTHROPIC_API_KEY != ''` does not work. The fail-closed
+contract, including the neutral paths taken while no reviewer credential is
+configured, is documented in the comment at the top of `review.yml`. To make
+the check required: set the `ANTHROPIC_API_KEY` repo secret, then add the
+context to `main.json` and re-apply (below).
 
 **Before adding/removing a required check, confirm a job emits a check run
 with that exact context name** (matrix suffixes included) on PRs to `main` —
@@ -93,18 +86,10 @@ gh api repos/vbonnet/dear-agent/rulesets/<RULESET_ID> \
   | jq '{enforcement, bypass_actors, rules: [.rules[].type]}'
 ```
 
-## Retiring classic branch protection
+## Branch Protection Audit
 
-Once the ruleset is active and verified, remove the legacy classic protection
-so there is a single source of truth:
-
-```sh
-gh api -X DELETE repos/vbonnet/dear-agent/branches/main/protection
-```
-
-> [!IMPORTANT]
-> The daily **Branch Protection Audit** (`.github/workflows/branch-protection-audit.yml`)
-> historically read only the classic-protection endpoint. It has been updated to
-> also accept a qualifying active ruleset, so retiring classic protection will
-> **not** trigger false-positive `branch-protection` issues. Retire classic
-> protection only on a version of `main` that already contains that audit update.
+The daily **Branch Protection Audit**
+(`.github/workflows/branch-protection-audit.yml`) verifies each fleet repo is
+protected by classic protection **or** a qualifying active ruleset
+(default-branch target, no bypass actors, required status checks + pull
+request), so ruleset-only repos like this one do not raise false positives.

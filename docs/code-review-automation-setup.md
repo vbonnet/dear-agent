@@ -29,8 +29,8 @@ everything else is codified (workflow files + OpenTofu).
    ```
    claude setup-token
    ```
-   This prints a token. It's already been added as the `CLAUDE_CODE_OAUTH_TOKEN`
-   secret on `vbonnet/dear-agent` (confirmed present, added 2026-07-19). For
+   This prints a token. It is stored as the `CLAUDE_CODE_OAUTH_TOKEN`
+   secret on `vbonnet/dear-agent`. For
    every other repo in the rollout, this same token value becomes
    `TF_VAR_claude_code_oauth_token` for `tofu apply` (see below) — GitHub
    secrets are per-repo, there's no fleet-wide secret on a personal account.
@@ -56,8 +56,8 @@ everything else is codified (workflow files + OpenTofu).
 5. **Roll out to other repos** — see `infra/claude_review.tf` for the default
    split. Non-PII repos default to `enable_claude_review = true`
    (ai-tools, codebase-analyzer, gdoc-sync, vbonnet.ai).
-   **`engram-research` is also enabled** — a deliberate private-repo opt-in
-   (owner sign-off 2026-07-19), not part of the default non-PII set: it's
+   **`engram-research` is also enabled** — a deliberate private-repo opt-in,
+   not part of the default non-PII set: it's
    private, and enabling review still ships its code to Anthropic's API on
    every PR, same as the public repos. The remaining PII repos (engram-kb,
    brain-v2, ai-conversation-logs) stay a commented opt-in block —
@@ -76,31 +76,25 @@ everything else is codified (workflow files + OpenTofu).
    branch/PR resources from Terraform state without recreating them; the secret
    remains managed by `enable_claude_review = true`.
 
-## What PR #944 got right, and what this change fixes
+## Workflow guards
 
-PR #944 added two workflows using the current (2026-07) recommended
-`claude_code_oauth_token` auth path and the official `code-review` plugin —
-that part didn't need replacing. What was missing:
+Both workflows use the `claude_code_oauth_token` auth path and the official
+`code-review` plugin. Because dear-agent is public, they carry these guards:
 
-- **No fork/same-repo guard.** dear-agent is public; GitHub does not pass
-  Actions secrets to a `pull_request` workflow from a fork. Added a guard so
-  the privileged review action only runs for same-repo branches, plus a
-  draft-PR skip.
-- **`claude.yml`'s `@claude` mention trigger had no author check** — any
-  GitHub user commenting "@claude" on this public repo could trigger it
-  (subscription cost + prompt-injection surface). Added an
-  `author_association` allowlist (OWNER/MEMBER/COLLABORATOR).
-- **No IaC**, so the same setup couldn't be reproduced on other repos without
-  manually recreating both workflow files. Added `infra/claude_review.tf` +
-  `modules/managed-repo` support.
+- **Same-repo + draft guard** (`claude-code-review.yml`): the privileged
+  review action runs only for non-draft PRs from same-repo branches — GitHub
+  does not pass Actions secrets to a `pull_request` workflow from a fork.
+- **`@claude` author allowlist** (`claude.yml`): the mention trigger fires
+  only for OWNER/MEMBER/COLLABORATOR authors, so an arbitrary GitHub user
+  cannot spend the repo owner's subscription or exercise the prompt-injection
+  surface.
+- **IaC reproducibility**: `infra/claude_review.tf` + `modules/managed-repo`
+  stage the same setup on every opted-in repo.
 
-## Known adjacent finding (not touched by this change)
+## Adjacent workflow: 5-dimension review
 
-`.github/workflows/review.yml` ("AI Code Review (5-dimension)") implements
-the review protocol documented in `REVIEW.md` §2 via raw `curl` calls to the
-Claude Messages API, gated on an `ANTHROPIC_API_KEY` secret that is **not
-currently set** on this repo — every run silently no-ops (`skip=true`) and
-still reports success. It is not a required check, so it isn't blocking
-anything, but it also isn't reviewing anything. Left alone here since
-`REVIEW.md` marks it "authoritative" and rearchitecting or retiring it is a
-separate decision, not a byproduct of setting up `claude-code-review.yml`.
+`.github/workflows/review.yml` ("AI Code Review (5-dimension)") is a separate,
+fail-closed check driven by `cmd/ai-review` (Go); the contract, including the
+neutral paths taken while no reviewer credential is configured, is documented
+in the comment at the top of the workflow file. It is not a required context
+in `.github/rulesets/main.json` — see `docs/branch-protection.md`.

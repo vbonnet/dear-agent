@@ -1,6 +1,10 @@
 # ADR-034: Squash-only merge contract + auto-merge arming
 
-Status: Accepted (2026-06-24) · Epic ce-kf6j · closes ce-kf6j.7 · relates ce-kf6j.1, ce-kf6j.5, ce-r81r, ce-kf6j.3
+Status: Accepted (2026-06-24)
+
+- **Epic:** ce-kf6j
+- **Closes:** ce-kf6j.7
+- **Relates:** ce-kf6j.1, ce-kf6j.5, ce-r81r, ce-kf6j.3
 
 Three changes landed together to form a new merge pipeline:
 
@@ -27,7 +31,9 @@ advanced.
 - **Only run `safe-rebase` when there are actual merge conflicts.** The conflict check
   is sufficient; staleness is not.
 
-**Merge-velocity health** (manual thresholds until ce-kf6j.3 adds automated telemetry):
+**Merge-velocity health** (automated: `cmd/merge-velocity` emits the
+`merge.velocity.*` OTel instruments via `internal/telemetry`; these thresholds
+interpret those signals):
 
 | Signal | Healthy | Warning |
 |--------|---------|---------|
@@ -35,7 +41,7 @@ advanced.
 | Median time-to-merge | ≤ 24 h | > 48 h |
 | Open PR count trend | flat/falling | growing week-over-week |
 
-Manual check: `gh pr list --json number,createdAt | jq length`. The firehose recurred
+Manual fallback check: `gh pr list --json number,createdAt | jq length`. The firehose recurred
 in ce-qpg9 when +72 PRs/day went unnoticed for days; these thresholds are set to catch
 the trend before it compounds.
 

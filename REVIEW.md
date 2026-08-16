@@ -1,10 +1,10 @@
 # REVIEW.md — Multi-agent PR review protocol
 
 - **Status:** authoritative
-- **Last updated:** 2026-08-10
+- **Last updated:** 2026-08-11
 
 Every PR against this repo goes through the review protocol below before
-merging. The protocol is designed for a dark-factory loop: an LLM review agent
+merging. The protocol is designed for an autonomous merge loop: an LLM review agent
 handles everything except decisions that are genuinely novel or irreversible.
 
 ---
@@ -75,15 +75,21 @@ dimensions report clean.
 
 ## 4. Review agent invocation
 
+The reviewer is the `cmd/ai-review` Go command. Its only CLI flag is
+`--review-plan` (print the deterministic review plan as JSON and exit);
+everything else is environment-driven. A local run:
+
 ```
-/code-review [--dimension bugs|security|perf|style|regression|all] [--effort low|medium|high]
+BASE_SHA=<base> HEAD_SHA=<head> go run ./cmd/ai-review
 ```
 
-- Default: `--dimension all --effort medium`
-- High-effort runs use larger context windows and take ~3× longer; use for
-  security-sensitive or architecture-changing PRs.
-- `--comment` posts findings as inline GitHub PR comments.
-- `--fix` applies fixable findings to the working tree (style, trivial bugs).
+- All five §2 dimensions run on every invocation; there is no per-dimension
+  selection.
+- `AI_REVIEW_EFFORT` overrides the reasoning effort (default: high).
+- `AI_REVIEW_MODEL` overrides the model.
+- `AI_REVIEW_MAX_DIFF_BYTES` overrides the oversize-diff refusal threshold.
+- `PR`, `PR_BODY`, `REPO`, `EVENT_NAME`, `IS_FORK`, and `OVERRIDE` carry the
+  GitHub event context when invoked from CI.
 
 The review protocol is wired into CI via `.github/workflows/review.yml`, which
 invokes the `cmd/ai-review` Go command. That check is **fail-closed** when it

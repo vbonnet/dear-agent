@@ -11,12 +11,14 @@ dead; it extends it. Now two implementations exist and both accrete changes.
   left coexisting. By 2026-07-01 there were **five** `cmd/vroom-*` entrypoints
   (`vroom-dispatch`, `vroom-dispatch-direct`, `vroom-governor`, `vroom-mesh`,
   `vroom-prompt-gen`). Nobody chose one and deleted the rest, so each new agent
-  extended whichever it found. (Audit finding C1.)
+  extended whichever it found. All five entrypoints still exist; consolidation
+  is tracked as ce-93lw.5.
 - **Phantom TypeScript engine.** `wayfinder/SKILL.md` still described a
   `core/cortex/*.ts` engine that does not exist — the Go rewrite never removed the
   old design docs, so agents were guided toward a codebase that was gone.
-- **Dead `--workflow` flag.** `agm session new --workflow` was parsed, validated,
-  logged — and never used. A non-functional surface presented as real.
+- **Dead `--workflow` flag.** `agm session new --workflow` is parsed, validated,
+  logged — and never consumed. A non-functional surface presented as real; still
+  present, removal tracked in ce-93lw.12.
 - **Wayfinder V1 alongside V2.** Code defaulted `AllPhases()` to V1 while declaring
   V2 canonical — the old model was never deleted, so the gate was ambiguous.
 

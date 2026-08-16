@@ -6,7 +6,7 @@ Thank you for your interest in contributing!
 
 ### Prerequisites
 
-- Go 1.25 or later
+- Go 1.26.5 or later (see the `go` directive in `go.mod`)
 - tmux (for AGM integration tests)
 - Git
 - [act](https://github.com/nektos/act) (optional, for local CI)
@@ -67,12 +67,13 @@ make act-test
 Pushing to the default branch runs `make preflight` (lint + build + vet) and
 aborts on failure, so a broken push fails fast before the GitHub round-trip.
 
-On the maintainer host this is wired up globally via `core.hooksPath`
-(`~/.config/git/hooks`, chezmoi-managed): the global `pre-push` hook runs
-`make preflight` for any repo that defines a `preflight` target — no per-repo
-install needed. (There used to be a `make install-preflight-hook` target; it was
-removed in bead ce-hft2 because a repo-local `.git/hooks/pre-push` is silently
-bypassed when `core.hooksPath` is set, making it a redundant no-op.)
+On the maintainer host this is intended to be wired up globally via
+`core.hooksPath` (`~/.config/git/hooks`, chezmoi-managed): the global
+`pre-push` hook runs `make preflight` for any repo that defines a `preflight`
+target — no per-repo install needed. Verify the wiring before relying on it
+(`git config core.hooksPath`, then confirm the directory and hook exist) and
+run `make preflight` manually if it is absent; bead `ce-002z` tracks a case
+where the configured hook path was inert.
 
 On a host **without** a global `core.hooksPath`, run `make preflight` manually
 before pushing, or drop a one-line `exec make preflight` pre-push hook into
@@ -111,7 +112,6 @@ before pushing, or drop a one-line `exec make preflight` pre-push hook into
 | `wayfinder/` | Wayfinder SDLC workflow product |
 | `tools/` | Standalone CLI utilities |
 | `cmd/` | Additional CLI entry points |
-| `codegen/` | Code generation framework |
 | `pkg/` | Shared packages (importable by external projects) |
 | `internal/` | Private packages (not importable externally) |
 | `scripts/` | Build, CI, and utility scripts |

@@ -22,9 +22,9 @@ every mechanism.
 Two corrections make it right:
 
 1. **It's per-capability, not two phases.** A "big pare-back later" invites a
-   phase boundary that keeps sliding right — and demonstrably has (25:1
-   filed-to-deployed; 3 of 9 flywheel edges wired). Earn the complexity
-   continuously instead.
+   phase boundary that keeps sliding right — and demonstrably has (measured
+   2026-07: 25:1 filed-to-deployed; 3 of 9 flywheel edges wired). Earn the
+   complexity continuously instead.
 2. **Over-fit and over-harness have opposite urgency.**
    - *Over-fits are paged.* They cause outages NOW. Repair on sight.
    - *Over-harness consolidation is deferrable.* Collapsing the 3 spawn builders,
@@ -73,6 +73,5 @@ guard equally against premature stripping.
   longer exists; what should software enforce instead of a paragraph; is this one
   general mechanism or N per-incident ones.
 
-See also: [broken-windows](broken-windows.why.md) (wire it or delete it),
-[dear-retro](dear-retro.why.md) (pare continuously), and the strategy memo
-`engram-research/memos/dear-agent-harness-audit-strategy-memo.md`.
+See also: [broken-windows](broken-windows.why.md) (delete the replaced path in
+the same change) and [dear-retro](dear-retro.why.md) (pare continuously).

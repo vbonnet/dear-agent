@@ -18,9 +18,8 @@ how it is labeled, or how it hands off. This decision formalizes it.
 
 The pattern is well-known from Scrum/XP. Our adaptation: a spike feeds grounded
 implementation requirements and a cost/benefit decision; the implementation bead is created
-separately and prioritized on its own merits. `bd` already ships a first-class
-`spike` type ("timeboxed investigation to reduce uncertainty before committing
-to a story"), so no tooling change is needed.
+separately and prioritized on its own merits. `bd` needs no extension: a spike
+is an ordinary `task` bead identified by labels (§3).
 
 ---
 
@@ -46,27 +45,32 @@ splitting it.
 
 ### 3. Labels and type
 
-Use the **built-in `--type spike`** (not `--type task`). Required labels:
-`spike,investigation`. Add a domain label (`process`, `workflow-engine`, etc.)
-for triage. We do **not** extend `bd` — the native type already exists and
-queries (`bd list --type spike`) work today.
+`bd` has no `spike` issue type (built-ins are
+`bug|feature|task|epic|chore|decision`), so use **`--type task`** with the
+required labels `spike,investigation` — the same labeled-task convention
+`docs/process-bead-retro-pairing.md` uses for retro beads. Add a domain label
+(`process`, `workflow-engine`, etc.) for triage. We do **not** extend `bd`;
+queries work via labels (`bd list --label spike`).
 
 ```
-bd --db ~/beads/context-engine/.beads create \
-  --type spike --labels spike,investigation,<domain> \
-  --title "Spike: <question to resolve>"
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on create \
+  "Spike: <question to resolve>" \
+  --type task --labels spike,investigation,<domain>
 ```
 
 ### 4. Handoff convention
 
-A spike completes via a **PR containing a single decision/design doc**
-(`docs/design-*.md` or `docs/decision-*.md`). On merge, the spike worker:
+A spike completes with a **single design doc routed to the research
+repository** per `.dear-agent.yml` — design and investigation artifacts do not
+land in this repo; only durable decisions graduate to `docs/adr/`. Once the doc
+lands, the spike worker:
 
 1. Creates the implementation bead with `bd create`, linking back with a
    `[[ce-xxxx]]` reference in both directions.
 2. Records the handoff as a **trail entry** on the spike bead naming the new
    impl bead ID and the confidence band ([[ce-90si]]).
-3. Closes the spike bead only after the PR is **MERGED**.
+3. Closes the spike bead only after the doc has **landed** and the
+   implementation bead exists.
 
 The doc's final section MUST list **requirements for the implementation bead**
 — this is the actual deliverable the handoff carries.

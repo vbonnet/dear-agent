@@ -1,7 +1,7 @@
 # Runbook: OAuth token family death (recurring manual `/login`)
 
 Epic: `ce-77ip` — Eliminate recurring manual `/login` for the 24/7 mesh.
-Related: `ce-de4v` (hot-reload for long-lived sessions), `ce-cknn`, `ce-rnpt`, `ce-cs3v`.
+Related: `ce-de4v` (hot-reload for long-lived sessions), `ce-cknn`, `ce-cs3v`.
 
 ## Symptom
 
@@ -22,19 +22,17 @@ an already-spent token, the authorisation server reads that as a replay attack
 and revokes the **entire token family** — every client dies at once, not just
 the one that replayed.
 
-The design that was supposed to prevent this: `token-refresher` performs the
-whole read-check-exchange-write cycle under a cross-process file lock
-(`~/.claude/.credentials.lock`), so no two refreshes overlap.
-
-**That guarantee has been void since 2026-07-10.** The lock only binds callers
-of `token-refresher` itself. It was wired in as Claude Code's `apiKeyHelper` so
-that CLI sessions refreshed *through* it, but apiKeyHelper was removed because
-Claude Code >= 2.1.205 treats a configured helper as an external API key that
-shadows healthy OAuth and refuses to fall back
+`token-refresher` performs the whole read-check-exchange-write cycle under a
+cross-process file lock (`~/.claude/.credentials.lock`), so its own refreshes
+never overlap. **There is no cross-client single-writer guarantee**: the lock
+binds only callers of `token-refresher` itself, and it cannot be wired in as
+Claude Code's `apiKeyHelper` because Claude Code >= 2.1.205 treats a
+configured helper as an external API key that shadows healthy OAuth and
+refuses to fall back
 ([anthropics/claude-code#11587](https://github.com/anthropics/claude-code/issues/11587)).
 
-Since then the host runs roughly 15 independent, unlocked OAuth clients against
-one `~/.claude/.credentials.json`:
+The host runs roughly 15 independent, unlocked OAuth clients against one
+`~/.claude/.credentials.json`:
 
 | Client | Observed count | Notes |
 | --- | --- | --- |
@@ -61,10 +59,9 @@ it keeps the access token so fresh that other clients rarely need to refresh at
 all. Removing it without evidence would widen the window in which some other
 client decides to refresh on its own.
 
-An earlier sleep/wake thundering-herd hypothesis was superseded by the
-fingerprint evidence below. The many-client structure is a standing risk, but
-it was not the cause of either observed death.
+## The confirmed cause: lost-response replay (ce-77ip.7)
 
+<<<<<<< Updated upstream
 **2026-08-15 update:** the analysis above still holds for the *narrow*
 steady-state-rotation-doesn't-kill-the-family claim it was measuring, but do
 not read it as "keep `-force` on the token-refresher LaunchAgent." A stale
@@ -81,34 +78,19 @@ LaunchAgent to `-force` based on the zero-deaths evidence above -- that
 evidence never covered the case a stale forced-refresh install actually hit.
 
 ## The confirmed cause (2026-07-21, ce-77ip.7)
+=======
+The killer is a refresh request that **reaches the server but whose response is
+lost** (e.g. a client timeout while awaiting headers). The server consumes the
+single-use token and issues a replacement that never arrives, so the on-disk
+token is spent but still looks valid. The next tick presents it again — a
+replay — and the family is revoked. Fingerprint instrumentation
+(`refresh_token_fp` / `credentials_mtime` in the audit log) confirmed this
+mechanism in the refresher itself: no third-party rotation was involved in
+either observed death. The many-clients structure above is a standing risk,
+but it is not the known cause.
+>>>>>>> Stashed changes
 
-**The refresher was killing its own token family.** The fingerprint post-mortem
-found no third-party rotation at all — across 98 instrumented ticks over ~48h,
-including a sleep/wake gap, every `credentials_mtime` was our own previous
-tick's timestamp. The many-clients structure below is real, but it did not cause
-either observed death.
-
-What did: a refresh request that **reaches the server but whose response is
-lost**. The server consumes the single-use token and issues a replacement that
-never arrives, so the on-disk token is spent but still looks valid. The next tick
-presents it again — a replay — and the family is revoked.
-
-The 2026-07-18 death, from the audit log:
-
-```
-07:27:46Z  force/ok     refreshed=true            last good rotation
-07:57:57Z  force/error  TLS handshake timeout     request never sent (harmless)
-08:28:07Z  force/error  TLS handshake timeout     request never sent (harmless)
-08:58:37Z  force/error  Client.Timeout ... headers REQUEST SENT, reply lost  <-- token spent here
-09:28:50Z  force/error  TLS handshake timeout     request never sent (harmless)
-09:59:02Z  force/error  TLS handshake timeout     request never sent (harmless)
-10:29:06Z  force/token_family_dead  invalid_grant <-- replay; family revoked
-```
-
-That `Client.Timeout exceeded while awaiting headers` is the only occurrence in
-33 days of log, and it sits 90 minutes before the only clean death onset.
-
-**Fixed by the refresh-token quarantine.** The refresher now distinguishes the
+**The refresh-token quarantine prevents this.** The refresher distinguishes the
 two failure modes by observing whether the transport consumed the refresh-token
 body (a conservative signal, not proof of wire transmission) and
 refuses to re-present a token whose fate is unknown. See
@@ -147,28 +129,18 @@ grep -E 'token_family_dead|"refreshed":true' ~/.local/state/dear-agent/token-ref
 
 ## Recovery
 
+The LaunchAgent runs the refresher with `-cadence`, which raises a desktop
+notification on the first tick of a death episode and always exits 0 so
+launchd keeps the schedule (launchd throttles, then stops scheduling, a
+`StartInterval` job that repeatedly exits non-zero quickly).
+
 ```sh
 claude /login
 
-# The cadence job may have been throttled off launchd's schedule by the
-# exit-2 storm (this is what -cadence prevents going forward). Re-arm it:
+# Re-arm the cadence job and verify it is running:
 launchctl kickstart -k gui/$(id -u)/com.dear-agent.token-refresher
 launchctl print gui/$(id -u)/com.dear-agent.token-refresher | grep -E 'runs|last exit'
 ```
-
-## Why the outage used to be silent
-
-Two compounding failures, both fixed by `-cadence`:
-
-1. The death was written only to a log file nobody tails, so it was discovered
-   by failing to authenticate hours later. `-cadence` raises a desktop
-   notification on the first tick of each death episode.
-2. launchd throttles a `StartInterval` job that exits non-zero quickly and
-   repeatedly. After a death, the job exited 2 every 30 minutes until launchd
-   stopped scheduling it entirely — observed on 2026-07-19, when it ran 26 times
-   and then went silent for 17 hours. So even after the operator re-authenticated,
-   nothing was keeping credentials fresh, which made the next death certain.
-   `-cadence` reports success so the schedule survives.
 
 ## Open work
 

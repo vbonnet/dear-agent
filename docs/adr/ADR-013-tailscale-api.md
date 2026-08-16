@@ -17,9 +17,10 @@ so the audit trail stays uniform.
 - **Identity is the tailnet.** `tsnet.Server.WhoIs(remoteAddr)` resolves the
   caller; `LoginName` lands in `audit_events.actor` alongside CLI-driven
   decisions. No bearer tokens, no OAuth — Tailscale is the auth boundary.
-- **The API does not embed the runner.** `POST /run` writes a queued-run row
-  and shells out to `workflow-run` in a child. If the API crashes mid-day,
-  in-flight runs continue under the existing supervisor.
+- **The API does not embed the runner.** `POST /run` validates the request,
+  spawns `workflow-run` as a child process, and returns its PID; the child
+  registers the run row in `runs.db`. If the API crashes mid-day, in-flight
+  runs continue under the existing supervisor.
 - **Split: `pkg/api` (handlers, takes an `Identifier` interface) +
   `cmd/dear-agent-api` (wires `tsnet`).** Tests use `httptest` against the
   package; the tsnet integration is exercised by hand on the operator's box.

@@ -23,7 +23,7 @@ Requester roles; no value function over a five-level order.
 ### Canonical topology source
 
 `pkg/vroom/supervisor` is the single code source for the exactly three
-supervisor identities, compact aliases, roles, and Primary/Tertiary peer
+supervisor identities, compact aliases, roles, and Secondary/Tertiary peer
 relationships. CLI and runtime surfaces resolve topology through that package;
 they do not maintain parallel identity or peer tables.
 
@@ -68,13 +68,12 @@ and Secondary unstuck). Verification is a Secondary *responsibility*, not
 a standing role — which is why the old "Verifier" and "Requester" roles
 are removed.
 
-### Decision trail and code-vs-spec gap
+### Decision trail
 
-Consequential VROOM decisions land on an append-only decision trail.
-⚠️ `pkg/vroom/vroom/topics.go` still encodes the *superseded* role enum (a
-`vroom.decision.evaluated` "Verifier" topic). Renaming exported constants
-is a hard-to-reverse API change and is **out of scope** here; it is tracked
-as a CONTEXT.md collision and a follow-up.
+Consequential VROOM decisions land on an append-only decision trail
+(`pkg/vroom/decisiontrail`). The in-memory event topics in
+`pkg/vroom/vroom/topics.go` follow the same model, attributing evaluation
+to the Secondary responsibility rather than a standing role.
 
 ### Alternatives rejected
 

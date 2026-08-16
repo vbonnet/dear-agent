@@ -48,18 +48,18 @@ default:
 
 ### 2. Install the Hook
 
-The pre-merge-commit hook is automatically installed when you set up the AGM sandbox. To manually install:
+Build the hook from `agm/cmd/agm-hooks/pre-merge-commit` and install it into `.git/hooks/`:
 
 ```bash
+# Build the hook binary
+go build -o pre-merge-commit ./agm/cmd/agm-hooks/pre-merge-commit
+
 # Copy hook to .git/hooks/. Stage and rename: this is a compiled binary, and
 # overwriting one that has already run can leave a stale code-signing cache
 # entry that macOS kills on next exec (ce-77ip.8).
 stage=$(mktemp .git/hooks/pre-merge-commit.XXXXXX) \
-  && cp cmd/agm-hooks/pre-merge-commit/pre-merge-commit "$stage" \
+  && cp pre-merge-commit "$stage" \
   && chmod 755 "$stage" && mv -f "$stage" .git/hooks/pre-merge-commit
-
-# Make executable
-chmod +x .git/hooks/pre-merge-commit
 ```
 
 ### 3. Test the Configuration
@@ -764,10 +764,7 @@ rm .git/ci-gate-bypass.log
 
 If you're upgrading from the basic pre-merge-commit hook:
 
-1. **Create configuration file**:
-   ```bash
-   cp .ci-policy.yaml.example .ci-policy.yaml
-   ```
+1. **Edit the policy file**: the repository root ships `.ci-policy.yaml`; adjust its workflow lists for your branches.
 
 2. **Configure your workflows**:
    ```yaml
@@ -779,7 +776,7 @@ If you're upgrading from the basic pre-merge-commit hook:
 
 3. **Update hook** (if needed):
    ```bash
-   go install ./cmd/agm-hooks/pre-merge-commit
+   go install ./agm/cmd/agm-hooks/pre-merge-commit
    ```
 
 4. **Test configuration**:
@@ -835,9 +832,6 @@ Policy:
 ---
 
 **Related Documentation:**
-- [AGM Sandbox Overview](./README.md)
-- [Workflow Development Guide](./WORKFLOWS.md)
-- [Troubleshooting Guide](./TROUBLESHOOTING.md)
-
-**Version:** 1.0.0
-**Last Updated:** 2026-03-20
+- [CI Executor Specification](../internal/ci/SPEC.md)
+- [pre-merge-commit Hook README](../agm/cmd/agm-hooks/pre-merge-commit/README.md)
+- [GitHub Actions Workflows](../.github/workflows/)

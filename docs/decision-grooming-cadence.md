@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-06-21
 **Bead:** ce-h59v
-**Companions:** [[ce-7xyz]] bead lifecycle hygiene · [[ce-ynyb]] spike pattern adoption
+**Companions:** [[ce-ynyb]] spike pattern adoption
 
 ---
 

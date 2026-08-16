@@ -8,7 +8,7 @@ mission_ref: docs/alignment/MISSION.md
 
 # Goals
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-08-11 -->
 
 MISSION.md is canonical for project purpose and ownership. These goals describe
 qualitative outcomes; they carry no fixed weights, invented targets, or review

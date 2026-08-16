@@ -73,6 +73,7 @@ rather block locally.
 
 ## CI (`deepsec.yml`)
 
+<<<<<<< Updated upstream
 Runs for same-repository PRs against `main` that carry the `full-ci` label. It
 evaluates the PR when it is opened, synchronized, reopened, or when `full-ci`
 is added; adding an unrelated label does not start another paid scan. The
@@ -80,6 +81,16 @@ workflow scans the exact current PR head, posts candidate findings as a PR
 comment, and is **currently non-blocking**. Promote it to required once
 signal-to-noise stabilises
 (`.ci-policy.yaml > branch_policies.main.required_workflows`).
+=======
+Runs on every PR against `main`, scans the PR diff, and posts findings as
+a PR comment. **Currently non-blocking** — the workflow always reports
+success so it doesn't gate merges. To promote it to required once
+signal-to-noise stabilises, add its check context to
+`.github/rulesets/main.json` and re-apply the ruleset (the source of truth for
+required checks — see `docs/branch-protection.md`), and mirror the change in
+`.ci-policy.yaml > branch_policies.main.required_workflows` so `internal/ci`
+tooling stays in agreement.
+>>>>>>> Stashed changes
 
 Setup steps to enable in CI:
 
@@ -110,11 +121,6 @@ pnpm deepsec revalidate  --concurrency 5         # cuts false-positive rate
 pnpm deepsec export      --format md-dir --out ./findings
 ```
 
-A full repo scan was previously bootstrapped in a dedicated worktree
-(`~/worktrees/dear-agent/deepsec-scan/`). The findings there are a
-point-in-time snapshot; the incremental flow above is the steady-state
-mechanism going forward.
-
 ## Triage workflow for new findings
 
 1. PR comment lands → reviewer clicks into the linked file/line.
@@ -127,10 +133,9 @@ mechanism going forward.
 
 ## Known gaps
 
-- The previously-mentioned weekly-security-audit scheduled task writes
-  to a sandbox path Cowork can't access. That's a separate bug —
-  tracked outside this automation. The PR-based gate above replaces
-  weekly-audit as the primary signal until the scheduled task is fixed.
+- The PR-based gate above is the primary deepsec signal. The
+  `weekly-security-audit` scheduled task writes to a sandbox path Cowork
+  can't access; fixing that task is tracked in bead `ce-0tp87`.
 - Output routing: deepsec writes findings under `.deepsec/findings/` in
   this repo. That's tooling output, not research analysis, so it
   doesn't violate `.dear-agent.yml > forbidden-paths`.

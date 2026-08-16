@@ -11,7 +11,7 @@ horizon: "6-12 months"
 
 # Vision
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-08-11 -->
 
 MISSION.md is canonical for project purpose and ownership. The target state is
 safe, auditable autonomous delivery in which VROOM makes and verifies work
@@ -35,9 +35,8 @@ be re-validated before the change is deployed.
 If repeated outcomes conflict with declared values, then VROOM should record a
 DEAR finding and route a durable fix through the project tracker.
 
-If a new capability is added to an agent, then its scope boundary in the
-Orchestrator's dispatch table must be updated before the capability is used
-in production.
+If a new capability is added to an agent, then its permission grants and role
+configuration must be updated before the capability is used in production.
 
 If resource use becomes materially higher than the task warrants, then VROOM
 should preserve safety and correctness while choosing a cheaper route or

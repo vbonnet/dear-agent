@@ -25,8 +25,8 @@ older subsystem documentation:
 - [Wayfinder canonical workflow](docs/policies/wayfinder-v2-canonical.ai.md):
   the nine-phase workflow is the only active Wayfinder model.
 - [Autonomous merge](docs/policies/autonomous-merge.ai.md): routine changes may
-  merge after all gates pass; security, product-behavior, and money changes
-  require a human merge.
+  merge after all gates pass; security, product-behavior, money, and
+  agent-governance changes require a human merge.
 
 Repository policy never overrides system, user, or orchestrator instructions.
 When two repository documents disagree, stop relying on the example, verify the
@@ -87,7 +87,7 @@ current code, and repair or quarantine the stale living document in scope.
 | Harness contract and active set | `agm/internal/agent/interface.go`, `agm/internal/agent/harnesses.go` |
 | Engram memory implementation | `engram/` |
 | Wayfinder workflow and validator | `wayfinder/` |
-| VROOM typed control commands | `cmd/vroom-*`, with role prompts in `agm/supervisors/` |
+| VROOM typed control commands | `cmd/vroom-*`, with supervisor role prompts in `cmd/vroom-dispatch/skills/` (overview in `agm/supervisors/README.md`) |
 | Shared packages | `pkg/` |
 | Repository-only implementation | `internal/` |
 | Living architecture and decisions | nearest `ARCHITECTURE.md` and ADR directory |

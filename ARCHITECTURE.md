@@ -1,6 +1,6 @@
 # Architecture
 
-<!-- Last audited at: 2026-07-27 -->
+<!-- Last audited at: 2026-08-11 -->
 
 ## High-Level Overview
 
@@ -31,10 +31,12 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
 │                    Concrete Harness Adapters                     │
 │                    (internal/agent/)                             │
 │                                                                 │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────────┐  │
-│  │  Claude   │ │  Gemini   │ │  Codex    │ │   OpenCode    │  │
-│  │  Adapter  │ │  Adapter  │ │  Adapter  │ │   Adapter     │  │
-│  └───────────┘ └───────────┘ └───────────┘ └───────────────┘  │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐ ┌────────┐     │
+│  │ Claude │ │ Codex  │ │  Agy   │ │ OpenCode │ │   Pi   │     │
+│  └────────┘ └────────┘ └────────┘ └──────────┘ └────────┘     │
+│                                                                 │
+│  Active set owned by agm/internal/agent/harnesses.go;           │
+│  gemini-cli remains as a deprecated back-compat adapter.        │
 │                                                                 │
 │  Concrete adapters expose harness-specific mechanisms.          │
 │  Heterogeneous discovery sees only Harness metadata:            │
@@ -55,8 +57,8 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
 │                                                                 │
 │  ┌─────────┐ ┌───────────┐ ┌──────────┐ ┌────────────────┐    │
 │  │  Dolt   │ │ Manifests │ │ Message  │ │   Sandbox      │    │
-│  │  DB     │ │  (YAML)   │ │  Queue   │ │  (OverlayFS /  │    │
-│  │         │ │           │ │          │ │   APFS)        │    │
+│  │  DB     │ │  (YAML)   │ │  Queue   │ │  (providers)   │    │
+│  │         │ │           │ │          │ │                │    │
 │  └─────────┘ └───────────┘ └──────────┘ └────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -70,7 +72,11 @@ The primary user interface. Cobra-based command tree with these groups:
 - **Session commands** — `new`, `resume`, `list`, `archive`, `kill`, `associate`
 - **Admin commands** — `doctor`, `fix-uuid`, `clean`, `unlock`, `migrate`,
   `check-worktrees`, `cleanup-worktrees`
-- **Workflow commands** — `deep-research`, `code-review`, `architect`
+- **Workflow commands** — `workflow list`, `workflow create`, `workflow run`,
+  `workflow status`. Workflow *types* (`deep-research`, `code-review`,
+  `architect`) can be named via `session new --workflow`, but that flag only
+  validates harness compatibility and is never otherwise consumed (removal is
+  tracked in bead `ce-93lw.12`)
 - **Communication** — `send`, `compact`
 
 ### Operations Layer and CLI Lifecycle Split
@@ -132,7 +138,8 @@ lifecycle switches must be audited as well.
 
 Sessions are the primary resource. Each session has:
 
-- **Manifest** (YAML, v3 schema) — metadata, lifecycle state, harness type,
+- **Manifest** (YAML, v2 schema; `agm/internal/manifest` owns the version and
+  defines the v3 migration) — metadata, lifecycle state, harness type,
   model, sandbox config, context usage
 - **Dolt record** — queryable session metadata with Git-like versioned SQL
 - **State** — READY, THINKING, PERMISSION_PROMPT, COMPACTING, OFFLINE
@@ -144,17 +151,21 @@ State is detected via a priority chain: hook → tmux → manual.
 Copy-on-write filesystem isolation so agents work in contained environments:
 
 ```
-┌────────────────────────────────────────┐
-│          Provider Interface            │
-├────────────┬────────────┬──────────────┤
-│ Bubblewrap │ OverlayFS  │     APFS     │
-│ (Linux)    │ (Linux)    │   (macOS)    │
-└────────────┴────────────┴──────────────┘
+┌───────────────────────────────────────────────────────┐
+│                  Provider Interface                   │
+├────────────┬────────────┬──────────────┬──────────────┤
+│ Bubblewrap │ OverlayFS  │    gVisor    │     APFS     │
+│ (Linux)    │ (Linux)    │   (Linux)    │   (macOS)    │
+└────────────┴────────────┴──────────────┴──────────────┘
 ```
 
 - **Bubblewrap** — Linux: materialized worktree with namespace validation
 - **OverlayFS** — Linux: upper/lower/work/merged directory structure
+- **gVisor** — Linux: user-space kernel isolation via `runsc`
 - **APFS** — macOS: cloned directories with isolated project-path mapping
+
+The registered set is owned by the `RegisterProvider` callers under
+`internal/sandbox/`.
 
 Sandbox lifecycle is tied to session lifecycle: provisioned on `new`, cleaned
 up on `archive`.
@@ -184,9 +195,7 @@ AGM supports coordinated parallel agent work through several mechanisms:
 > Primary/Secondary/Tertiary ownership, Workers, Auditors, and SRE agents. It
 > is intentionally *not* an `internal/` package here. See
 > [CONTEXT.md](CONTEXT.md) and
-> [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). (The
-> earlier "five-role Verifier/Requester/…" description was inaccurate and is
-> superseded.)
+> [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md).
 
 ### State Monitor — Astrocyte (`agm/internal/monitor/`)
 
@@ -211,7 +220,7 @@ User → CLI validates flags
      → SessionManager generates UUID
      → Adapter selected (--harness flag or default)
      → Sandbox provisioned (OverlayFS/APFS/worktree)
-     → Manifest written (YAML v3)
+     → Manifest written (YAML v2)
      → Dolt record inserted
      → Tmux session started with agent CLI
      → User attached to tmux session
@@ -273,7 +282,7 @@ dear-agent/
 │   └── retrieval/       #   Memory retrieval strategies
 ├── wayfinder/           # Wayfinder: SDLC workflow
 │   ├── cmd/             #   CLI entry point
-│   └── review/          #   Phase review tooling
+│   └── coordinator/     #   Concurrent project execution
 ├── pkg/                 # Shared packages
 │   ├── cliframe/        #   CLI framework utilities
 │   ├── llm/             #   Unified LLM provider interface

@@ -19,7 +19,8 @@ divergent branches instead of a moving `main`.
 
 ## How to apply
 - Treat merge → deploy → verify as part of the task, not follow-up.
-- Close the bead only on merge, with the PR link in the closing note.
+- Close the bead only after merge, deploy (where applicable), and verification —
+  with the merged-PR link in the closing note.
 - Blocked from merging? Escalate the blocker up the chain; keep the pipeline
   moving on the next unblocked item. Parking silently is not "done."
 - Never reach "done" via `--admin` / `--force` / `--no-verify`.

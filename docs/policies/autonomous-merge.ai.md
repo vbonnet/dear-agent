@@ -5,7 +5,7 @@ status: active
 created: 2026-07-01
 tokens: 240
 title: Autonomous Merge Policy
-description: Agents review and merge their own PRs autonomously — except changes touching security, product behavior, or money, which a human merges.
+description: Agents review and merge their own PRs autonomously — except changes touching security, product behavior, money, or agent governance, which a human merges.
 tags: [policy, merge, autonomy, security]
 ---
 
@@ -16,9 +16,10 @@ boundary that keeps consequential changes in front of a human.
 
 ## NEVER
 
-- Autonomously merge a change touching **security**, **product behavior**, or
-  **money/billing** — create those PRs as drafts and hold them for a human to
-  mark ready and merge.
+- Autonomously merge a change touching **security**, **product behavior**,
+  **money/billing**, or **agent governance** (`docs/policies/`, alignment docs,
+  and other documents that define agent behavior) — create those PRs as drafts
+  and hold them for a human to mark ready and merge.
 - Use `safe-merge --skip-review-check` or `safe-merge break-glass` in an agent
   or routine merge flow. The audited, TTY-only break-glass path is reserved for
   an explicit human emergency action.
@@ -29,11 +30,12 @@ boundary that keeps consequential changes in front of a human.
 - For routine changes, review and merge your own PR once checks are green and
   threads are resolved — `safe-merge --pr <number>`, via the normal gate.
 - Route every PR through Wayfinder V2 + `safe-pr`.
-- When unsure whether something is security/product/money, treat it as yes and
-  create the PR as a draft for a human.
+- When unsure whether something is security/product/money/governance, treat it
+  as yes and create the PR as a draft for a human.
 
 ## REMINDER
 
 The carve-out exists because the changes that most need eyes — a guard, an auth
-path, a price — are exactly the ones an over-eager agent will wave through. When
-in doubt, open a draft PR and stop. Autonomy is a default, not an obligation.
+path, a price, a policy — are exactly the ones an over-eager agent will wave
+through. When in doubt, open a draft PR and stop. Autonomy is a default, not an
+obligation.

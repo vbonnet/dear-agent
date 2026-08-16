@@ -188,31 +188,13 @@ Per-layer overhead: ~0.5ms (well within target)
 - ✅ Destroy time: less than 50ms for typical workloads
 - ✅ Multi-layer scaling: ~0.5ms per layer (target: less than 1ms)
 
-### APFS Performance (macOS - Projected)
+### APFS Performance (macOS)
 
-**Note:** Actual measurements should be taken on macOS hardware. These are projected based on APFS characteristics.
+No measured APFS baseline is recorded here. To establish one, run the suite on
+macOS APFS hardware and save the dated output:
 
-```
-BenchmarkCreate-8                     150     8.5 ms/op     512 B/op     8 allocs/op
-BenchmarkReflink/Small_10files_1KB-8  300     4.0 ms/op     384 B/op     6 allocs/op
-BenchmarkReflink/Medium_100files_10KB-8 100  18.0 ms/op    1024 B/op    12 allocs/op
-
-BenchmarkReflinkDirect/Small_10files_1KB-8  400  3.5 ms/op   256 B/op    4 allocs/op
-
-BenchmarkFallback/Small_10files_1KB-8        50  25.0 ms/op  2048 B/op   20 allocs/op
-(Note: Fallback is 7x slower than reflink, only used on non-APFS filesystems)
-
-BenchmarkRead/1KB-8                 50000    0.026 ms/op    1024 B/op     1 allocs/op
-BenchmarkRead/1MB-8                  5000    0.325 ms/op    1.0 MB/op     1 allocs/op
-BenchmarkReadNative/1MB-8            5000    0.315 ms/op    1.0 MB/op     1 allocs/op
-
-Read Overhead: ~3.2% (within target)
-
-BenchmarkWrite/1KB-8                10000    0.115 ms/op    1024 B/op     2 allocs/op
-BenchmarkWrite/1MB-8                 1000    1.45 ms/op     1.0 MB/op     2 allocs/op
-BenchmarkWriteNative/1MB-8           1000    1.38 ms/op     1.0 MB/op     1 allocs/op
-
-Write Overhead: ~5.1% (within target, CoW is efficient)
+```bash
+go test -bench=. -benchmem ./internal/sandbox/apfs/ | tee benchmarks-apfs.txt
 ```
 
 ## Performance Tuning
@@ -256,37 +238,20 @@ Write Overhead: ~5.1% (within target, CoW is efficient)
 
 ## Continuous Performance Monitoring
 
-### Regression Testing
-
-Add benchmark runs to CI/CD:
-
-```bash
-# In .github/workflows/benchmarks.yml
-- name: Run benchmarks
-  run: |
-    go test -bench=. -benchmem ./internal/sandbox/overlayfs/ \
-      | tee benchmarks-new.txt
-
-    # Compare with baseline
-    benchstat benchmarks-baseline.txt benchmarks-new.txt
-```
-
-### Performance Budgets
-
-Set performance budgets in CI to catch regressions:
+No CI job currently runs the sandbox benchmark suites. To check for
+regressions, compare a fresh run against a saved baseline locally:
 
 ```bash
-# scripts/check-perf-budget.sh
-#!/bin/bash
-# Fail if any operation exceeds budget
+# Save a baseline once
+go test -bench=. -benchmem ./internal/sandbox/overlayfs/ | tee benchmarks-baseline.txt
 
-MAX_CREATE_MS=100
-MAX_READ_OVERHEAD_PCT=5
-MAX_WRITE_OVERHEAD_PCT=10
-
-# Parse benchmark output and validate
-# (Implementation depends on CI system)
+# Later: rerun and compare
+go test -bench=. -benchmem ./internal/sandbox/overlayfs/ | tee benchmarks-new.txt
+benchstat benchmarks-baseline.txt benchmarks-new.txt
 ```
+
+Validate any regression against the targets in
+[Performance Targets](#performance-targets) before merging.
 
 ## Troubleshooting Slow Performance
 
@@ -338,11 +303,3 @@ time umount /path/to/merged
 - [APFS Reference](https://developer.apple.com/documentation/foundation/file_system/about_apple_file_system)
 - [Go Benchmarking Guide](https://dave.cheney.net/2013/06/30/how-to-write-benchmarks-in-go)
 - [benchstat Tool](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
-
-## Changelog
-
-- 2026-03-20: Initial performance benchmarks and documentation
-  - OverlayFS benchmark suite (Linux)
-  - APFS benchmark suite (macOS)
-  - Baseline measurements on Linux kernel 6.6.123+
-  - Performance targets validated (less than 5% overhead achieved)

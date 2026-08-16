@@ -23,8 +23,9 @@ prevention portable across harnesses and machines.
 ## How to apply
 - Trigger: any systemic defect, any surprising seam, any "that shouldn't have
   been possible." Not every trivial bug — the *class*-worthy ones.
-- Location: `~/src/engram-research` (temporal/knowledge store), via a worktree —
-  `~/src` is read-only golden.
+- Location: the research repository configured in `.dear-agent.yml`
+  (temporal/knowledge store), via a worktree — the golden `~/src` checkout is
+  read-only.
 - Output: Define / Execute / Audit / Retro, then one bead per prevention.
 
 ## Pare over-fits in the retro, not "later"

@@ -8,8 +8,8 @@ The repository historically used "DEAR" for two related but different loops:
 
 - **Process DEAR**: Define / Execute / Audit / Retro. This is the
   governance and retrospective loop used by `AGENTS.md`, VROOM process
-  guidance, and the pending policy document
-  `docs/policies/dear-retro.ai.md` from PR #800.
+  guidance, and the policy document
+  [`docs/policies/dear-retro.ai.md`](../policies/dear-retro.ai.md).
 - **Workflow lifecycle hooks**: Define / Enforce / Audit / Resolve & Refine.
   This is the workflow-engine extension surface exposed as
   `pkg/workflow.Hooks` (`OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve`) and
@@ -40,9 +40,10 @@ Rules:
    `OnResolve` would be an API break and is not part of this ADR.
 4. `DEAR-X.*` backlog IDs are historical identifiers only. They do not define
    either lifecycle.
-5. The process-level policy source is `docs/policies/dear-retro.ai.md` once PR
-   #800 lands. Until then, this ADR records that dependency and must not be
-   copied into a competing policy file.
+5. The process-level policy source is
+   [`docs/policies/dear-retro.ai.md`](../policies/dear-retro.ai.md). This ADR
+   owns only the terminology disambiguation and must not be copied into a
+   competing policy file.
 
 ## Consequences
 
@@ -59,4 +60,4 @@ Rules:
 - [ADR-010: Workflow Engine Architecture](ADR-010-workflow-engine-architecture.md)
 - [ADR-011: Scheduled Repository Audit Subsystem](ADR-011-dear-audit-subsystem.md)
 - [/CONTEXT.md](../../CONTEXT.md) § DEAR and § Known Terminology Collisions
-- Pending PR #800: `docs/policies/dear-retro.ai.md` documents Process DEAR.
+- [`docs/policies/dear-retro.ai.md`](../policies/dear-retro.ai.md) — Process DEAR policy.
