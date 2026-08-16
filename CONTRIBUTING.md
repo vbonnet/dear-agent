@@ -141,17 +141,24 @@ only triggers for PRs based on `main`.** A PR whose base is another open PR's
 branch does not get that review. Two ways to stay honest about this:
 - Open each stack member only after its predecessor has landed on `main`, so
   every PR in the sequence is itself based on `main` and gets reviewed, or
-- If you do stack branch-on-branch, treat the non-`main`-based members as
-  unreviewed until the stack's root lands, and don't rely on `safe-merge`'s
-  fallback "validate all reported checks" path as a substitute for the real
-  review.
+- If you do stack branch-on-branch, retarget each descendant's base to `main`
+  as soon as its predecessor lands, then wait for that PR's own exact-head
+  five-dimension review before merging it. Until it is retargeted and
+  reviewed, treat it as unreviewed by this protocol and don't rely on
+  `safe-merge`'s fallback "validate all reported checks" path as a substitute
+  for the real review.
 
 **Bead tracking:** `safe-pr create` defaults every PR in a session to the
-same first bead and stamps `Closes <bead>`. In a stack, that closes the bead
-the moment the *first* PR merges, while later stack members are still open —
-`agm pr scan-orphaned` will then flag them as tracking a closed bead. Give
-each PR in a stack its own bead, or omit the closing reference on every PR
-except the final one in the stack.
+same first bead and stamps `Closes <bead>` — unless the PR body you pass
+already mentions that bead ID anywhere, in which case `safe-pr` skips the
+auto-stamp (see `internal/safepr.StampedArgs`/`referencesBead`). In a stack,
+the default behavior closes the bead the moment the *first* PR merges, while
+later stack members are still open — `agm pr scan-orphaned` will then flag
+them as tracking a closed bead. Give each PR in a stack its own bead, or, to
+share one bead across the stack without early-closing it, reference the bead
+yourself in each non-final PR's body using non-closing language (e.g. "Part
+of `<bead>`", not "Closes `<bead>`") so `safe-pr`'s auto-stamp is suppressed;
+only the stack's final PR should carry an actual `Closes <bead>`.
 
 ## License
 

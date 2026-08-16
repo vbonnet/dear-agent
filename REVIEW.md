@@ -60,28 +60,26 @@ diff touches any of the following:
 - **Security boundaries** — write guards, deny rules, `~/src` enforcement, PII manifests.
 - **Infrastructure that is expensive to reverse** — database schema changes, launchd plist installs, CI/CD pipeline edits.
 - **Explicit `HUMAN REVIEW REQUIRED` label** in the PR description or commit message.
-- **Oversized or poorly scoped PR** — the diff is too large to review reliably
-  as one unit, or it combines unrelated concerns that should be split.
 
 Escalation is not a failure state — it is a correct outcome that preserves
 human authority over irreversible decisions.
 
-The permissions/hooks/security-boundary/infra/label triggers above are
-enforced **deterministically in code** (`cmd/ai-review` inspects the changed
-paths, the PR body, and the commit messages), not left to the synthesis
-agent's judgement — §3 says escalation is mandatory "regardless of finding
-severity", so those five must not depend on a nondeterministic model call. A
-diff that trips any of them is forced to `needs-human-review` even if all
-five dimensions report clean.
+The triggers above are enforced **deterministically in code** (`cmd/ai-review`
+inspects the changed paths, the PR body, and the commit messages), not left to
+the synthesis agent's judgement — §3 says escalation is mandatory "regardless
+of finding severity", so those must not depend on a nondeterministic model
+call. A diff that trips any of them is forced to `needs-human-review` even if
+all five dimensions report clean.
 
-Size and scope are flagged separately: a deterministic GitHub Action (`.github/workflows/pr-size-scope.yml`)
-computes changed lines, changed files, and top-level areas on every push and
-posts a split-suggestion comment once a PR crosses 1,000 changed lines, 50
-changed files, or 4 top-level areas. This is advisory today — it comments
-but does not force `needs-human-review` inside `cmd/ai-review` the way the
-other five triggers do. Reviewers should still treat a flagged PR as needing
-a split before line-by-line review, but should not assume the synthesis
-outcome itself was forced to `needs-human-review` by size alone.
+**Size and scope are flagged separately, and are advisory, not a §3 trigger:**
+a deterministic GitHub Action (`.github/workflows/pr-size-scope.yml`) computes
+changed lines, changed files, and top-level areas on every push and posts a
+split-suggestion comment once a PR crosses 1,000 changed lines, 50 changed
+files, or 4 top-level areas. It comments only — it does not call into
+`cmd/ai-review` and does not force `needs-human-review`. Reviewers should
+still treat a flagged PR as needing a split before line-by-line review, but an
+oversized diff does not by itself force escalation the way the triggers above
+do.
 
 **Stacked PRs and this protocol:** the five-dimension review workflow only
 triggers for `branches: [main]`. A stacked PR (base ≠ `main`) does not get
