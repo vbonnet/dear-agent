@@ -1,0 +1,140 @@
+name: Main Health Watchdog
+
+# Watches main for red checks and, when it finds one, answers the question a
+# bare "main is red" alert does not: HOW did this get past pre-merge, and can
+# filter selection be refined so the next one does not?
+#
+# Relationship to ci-health-monitor.yml: that job alarms on a SUSTAINED red
+# streak (3 of the last 5 CI runs, every 8 hours) and only watches the CI
+# workflow. This one fires on the FIRST red, covers every workflow that gates
+# main, and files a DEAR retro with an escape classification and a
+# prevention-vs-cure calculation. They overlap on "main is red" and are
+# deliberately left separate for now — consolidating them is ce-xulg.13.
+#
+# Why a GitHub scheduled workflow rather than launchd: the facts it needs
+# (check conclusions, required contexts, run durations) all live in the GitHub
+# API, and the runner is already authenticated. A host job would add a machine
+# that has to be up for main to be watched.
+#
+# The analysis is Go (tools/ci-escape-analysis, pkg/cihealth) rather than
+# inline bash, so the classification and the ROI arithmetic are unit-tested
+# instead of being a shell script nobody dares change.
+
+on:
+  # Fast path: react to a workflow finishing on main.
+  workflow_run:
+    workflows:
+      - CI
+      - CodeQL Security Analysis
+      - SBOM and Security Scan
+      - Language Policy Enforcement
+      - Structural Health
+      - ADR Integrity
+      - Doc Header Lint
+      - Instruction Policy Integrity
+      - Routing Enforcement
+    types: [completed]
+  # Safety net: catches anything the event path missed (dropped webhook, a
+  # workflow added to main without being added to the list above, a red run
+  # that predates this workflow).
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: main-health-watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  sweep:
+    name: Sweep main for red checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      red: ${{ steps.sweep.outputs.red }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # One code path for both triggers: always sweep. The workflow_run event
+      # is only a reason to look sooner, never a separate branch of logic —
+      # two code paths would mean the scheduled one rots unexercised.
+      #
+      # The sweep is idempotent: it files a retro per red workflow, comments on
+      # the existing one if it is already open, and closes retros whose
+      # workflow has recovered.
+      - name: Sweep main, file or update DEAR retros
+        id: sweep
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          go run ./tools/ci-escape-analysis --repo "${{ github.repository }}" --sweep | tee sweep.log
+          if grep -qE '^=== RED:' sweep.log; then
+            echo "red=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "red=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Triggering the fix. This deliberately does NOT post "@claude" on the issue
+  # and hope: an issue opened by GITHUB_TOKEN does not fire the `issues` event
+  # (GitHub's own recursion guard), and the bot's author_association would fail
+  # claude.yml's OWNER/MEMBER/COLLABORATOR check anyway. So the watchdog runs
+  # the fix agent itself, with the retro as its brief.
+  fix:
+    name: Trigger a fix
+    needs: sweep
+    if: needs.sweep.outputs.red == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Dispatch fix agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            `main` is red on ${{ github.repository }}. The Main Health Watchdog has
+            filed a DEAR retro issue labelled `ci-red` for each failing workflow;
+            read the open ones with `gh issue list --label ci-red --state open`.
+
+            Each retro already contains an escape classification and a
+            prevention-vs-cure ROI calculation. Do not redo that analysis — act on it.
+
+            Your job, in order:
+            1. Fix the actual failure so main goes green. That is the priority.
+            2. Then act on the retro's classification, and ONLY on it:
+               - `selection-gap` or `never-ran`: a path filter was wrong. Widen the
+                 pattern in .github/workflows/changed-paths.yml, or add the input to
+                 the global-inputs list if it invalidates selection itself.
+               - `merge-skew`: do NOT touch path filters. Re-run the job to separate
+                 flake from semantic merge skew, and say which it was.
+               - `scope-gap`: the diff-scoping is working as designed. Only widen the
+                 pre-merge scope if the retro's ROI ratio cleared 10:1.
+               - `gating-gap` or `bypassed`: this is a ruleset/branch-protection
+                 question, not a CI-filtering one. Write up what should change and
+                 stop — ruleset edits are a control surface and need a human.
+
+            Open one focused PR. Do not modify the repository ruleset. Do not
+            self-merge. If the fix is not obvious within your budget, comment your
+            findings on the retro issue and stop rather than guessing.
