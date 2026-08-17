@@ -52,29 +52,52 @@ jobs:
           # pkg/x.go) touches two top-level areas, and reviewing it means
           # reading both; --name-only reports only the destination and so
           # undercounts exactly the sprawling moves this gate exists to catch.
-          git diff --name-status --diff-filter=ACMRDT "$base"..."$head" \
-            | awk -F'\t' '{ for (i = 2; i <= NF; i++) if ($i != "") print $i }' \
-            | sort -u > /tmp/files.txt
+          # -z, because Git's default output quotes and backslash-escapes any
+          # pathname with non-ASCII bytes. `docs/café.md` would arrive as
+          # "docs/caf\303\251.md" and parse under the area `"docs`, reporting
+          # two areas for one directory and posting a false warning. With -z
+          # pathnames are emitted verbatim.
+          #
+          # In -z mode --name-status emits STATUS\0path\0, except rename and
+          # copy records, which emit STATUS\0source\0dest\0. Read the records
+          # explicitly so both halves of a rename are available.
+          git diff -z --name-status --diff-filter=ACMRDT "$base"..."$head" \
+            > /tmp/namestatus.z
+
+          changed_files=0
+          : > /tmp/areas.txt
+          # A rename is ONE file change but TWO areas: reviewing agm/x.go ->
+          # pkg/x.go means reading both trees, while counting it as two files
+          # would make 25 ordinary renames trip the 50-file threshold. So the
+          # record is counted once and every pathname it carries feeds areas.
+          record_area() {
+            case "$1" in
+              .github/*) printf '%s\n' "$(printf '%s' "$1" | cut -d/ -f1-2)" >> /tmp/areas.txt ;;
+              */*)       printf '%s\n' "${1%%/*}" >> /tmp/areas.txt ;;
+              *)         printf '%s\n' "$1" >> /tmp/areas.txt ;;
+            esac
+          }
+
+          # `rec`, not `status`: `status` is a read-only special variable in
+          # some shells, which turns this loop into a hard error there.
+          while IFS= read -r -d '' rec; do
+            case "$rec" in
+              R*|C*)
+                IFS= read -r -d '' src || break
+                IFS= read -r -d '' dst || break
+                record_area "$src"
+                record_area "$dst"
+                ;;
+              *)
+                IFS= read -r -d '' path || break
+                record_area "$path"
+                ;;
+            esac
+            changed_files=$((changed_files + 1))
+          done < /tmp/namestatus.z
 
           changed_lines=$(awk '{ add += $1 == "-" ? 0 : $1; del += $2 == "-" ? 0 : $2 } END { print add + del + 0 }' /tmp/numstat.txt)
-          changed_files=$(wc -l < /tmp/files.txt | tr -d ' ')
-          top_level_areas=$(
-            awk '
-              {
-                split($0, parts, "/")
-                if (parts[1] == ".github" && parts[2] != "") {
-                  area = ".github/" parts[2]
-                } else {
-                  area = parts[1]
-                }
-                if (area != "") seen[area] = 1
-              }
-              END {
-                for (area in seen) count++
-                print count + 0
-              }
-            ' /tmp/files.txt
-          )
+          top_level_areas=$(sort -u /tmp/areas.txt | grep -c . || true)
 
           reasons=()
           if [ "$changed_lines" -gt "$MAX_CHANGED_LINES" ]; then
