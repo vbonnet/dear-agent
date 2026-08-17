@@ -150,14 +150,29 @@ the check's text rather than its colour before concluding a PR was reviewed.
 Two ways to stay honest about this:
 - Open each stack member only after its predecessor has landed on `main`, so
   every PR in the sequence is itself based on `main`, or
-- If you do stack branch-on-branch, **rebase** each descendant onto `main`
+- If you do stack branch-on-branch, **restack** each descendant onto `main`
   once its predecessor lands, then retarget its base. A `safe-merge` landing
   is a squash (`internal/safegit/merge.go` passes `--squash`), so the
   predecessor's new `main` commit is not an ancestor of a descendant created
   from the pre-merge branch — retargeting alone leaves the descendant's diff
-  carrying its predecessor's changes again. Rebase first, then wait for that
-  PR's own exact-head review before merging, and don't rely on `safe-merge`'s
-  fallback "validate all reported checks" path as a substitute for it.
+  carrying its predecessor's changes again.
+
+  Use `--onto`, not a plain rebase. A plain `git rebase main` still selects
+  every one of the predecessor's commits for replay, because none of them is
+  an ancestor of `main` by SHA after the squash — so a multi-commit
+  predecessor conflicts against its own already-landed changes. Restack with
+  the old parent tip as the cut point:
+
+  ```sh
+  git rebase --onto main <old-parent-tip> <descendant-branch>
+  ```
+
+  Note that `safe-rebase` does **not** do this for you: it runs a plain
+  `git rebase <base>` (`internal/safegit/rebase.go`, `attemptRebase`) and has
+  no `--onto` mode, so a squash-merged parent is exactly the case it handles
+  badly. Restack by hand, then wait for that PR's own exact-head review before
+  merging, and don't rely on `safe-merge`'s fallback "validate all reported
+  checks" path as a substitute for it.
 
 **Bead tracking:** `safe-pr create` defaults every PR in a session to the
 same first bead and stamps `Closes <bead>` — unless the PR body you pass
