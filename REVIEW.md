@@ -82,10 +82,21 @@ oversized diff does not by itself force escalation the way the triggers above
 do.
 
 **Stacked PRs and this protocol:** the five-dimension review workflow only
-triggers for `branches: [main]`. A stacked PR (base ≠ `main`) does not get
-this review at all. Until that gap is closed, treat each stack member's
-merge into its parent branch as unreviewed by this protocol — the review
-only applies once the stack's root PR lands on `main`.
+triggers for `branches: [main]`, and additionally validates that
+`.base.ref == "main"`. A stacked PR (base ≠ `main`) does not get this review
+at all.
+
+Landing the stack's root does **not** fix this on its own: merging the root
+changes no descendant's base, so every descendant stays outside the protocol
+until it is explicitly rebased onto `main` and retargeted there (see
+[CONTRIBUTING.md](CONTRIBUTING.md) — a squash landing means retargeting alone
+would leave the descendant re-carrying its predecessor's diff). Treat each
+stack member as unreviewed by this protocol until it has itself run with
+`main` as its base.
+
+Even then, a `main` base is necessary but not sufficient — `review.yml` takes
+a neutral path when its plan reports `review_relevant=false`, which publishes
+a green-looking check that is not a review.
 
 ---
 
