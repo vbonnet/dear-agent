@@ -45,6 +45,9 @@ from the wire protocol version, which the MCP SDK negotiates independently.
 | `agm_create_session` | `tools.go` | Create an AGM-managed session |
 | `agm_send_message` | `tools.go` | Send a message to an AGM-managed session |
 | `agm_list_ops` | `tools.go` | List all available ops (schema discovery) |
+| `agm_get_quota_status` | `tools.go` | Read the recorded provider quota status for routing decisions |
+| `agm_get_completion_relay_target` | `codegen_mcp.go` | Read the Dispatch session completions are currently relayed to |
+| `agm_set_completion_relay_target` | `codegen_mcp.go` | Point completion relay at a live Dispatch session |
 | `engram_list_wayfinder_sessions` | `tools.go` + `wayfinder.go` | List Wayfinder sessions from `wf/` directory |
 | `engram_get_wayfinder_session` | `tools.go` + `wayfinder.go` | Get full frontmatter for one Wayfinder session |
 
