@@ -348,8 +348,26 @@ jobs:
             range="${before}...${{ github.event.after }}"
           fi
 
-          if git diff --name-only --diff-filter=ACMR "$range" \
-              | grep -E '(^|/)go\.(mod|sum)$|\.go$' -q; then
+          # ACMRT, not ACMR: a symlink replaced by a regular .go file is
+          # status T, which ACMR drops — the file would enter the package
+          # graph while this detector reported nothing and the required
+          # gate skip-passed.
+          #
+          # Write to a file rather than piping into `grep -q`: under
+          # `set -o pipefail`, grep -q exits at its first match, git diff
+          # takes SIGPIPE and returns 141, and the whole pipeline fails —
+          # which this `if` would misread as "nothing to scan" on exactly
+          # the largest diffs.
+          git diff --name-only --diff-filter=ACMRT "$range" > /tmp/go_changed.txt
+
+          # The scanner's own policy counts as a scan input. A PR that
+          # edits the govulncheck invocation or its vulnerability
+          # allowlist but no Go file would otherwise satisfy the required
+          # gate without ever executing the policy it just changed — a
+          # broken scanner could merge and stay hidden until the next
+          # scheduled run.
+          if grep -E '(^|/)go\.(mod|sum)$|\.go$|^\.github/workflows/(ci|security-scan)\.yml$' \
+               -q /tmp/go_changed.txt; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"

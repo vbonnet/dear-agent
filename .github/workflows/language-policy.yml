@@ -20,14 +20,22 @@ name: Language Policy Enforcement
 # if bash-line-limit actually ran and found violations.
 #
 # Catching drift in files nobody's PR touches (e.g. a waiver's sunset_date
-# quietly passing) is out of scope here by design — that's a periodic
-# full-repo audit's job, not every unrelated PR's gate.
+# quietly passing) is not the per-PR gate's job — but it still needs an
+# owner, or diff-scoping would simply stop anyone from ever noticing an
+# expired waiver. `full-sweep` below is that owner: a nightly,
+# non-required whole-repo scan.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly full-repo sweep. Diff-scoping means an expired waiver on a
+    # file nobody touches is invisible to every PR; this is the job that
+    # sees it.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -39,6 +47,8 @@ permissions:
 jobs:
   detect:
     name: Detect changed shell scripts
+    # The scheduled sweep has no diff to scope to; it runs full-sweep instead.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -71,9 +81,19 @@ jobs:
             range="${before}...${{ github.event.after }}"
           fi
 
-          # ACMR: Added, Copied, Modified, Renamed — files that exist
-          # post-change and need to comply. Deleted files are irrelevant.
-          if git diff --name-only --diff-filter=ACMR "$range" -- '*.sh' | grep -q .; then
+          # ACMRT: Added, Copied, Modified, Renamed, Type-changed — files
+          # that exist post-change and need to comply. Deleted files are
+          # irrelevant. T matters because a symlink replaced by a regular
+          # .sh file enters the policy while ACMR alone reports nothing.
+          #
+          # Write to a file rather than piping into `grep -q`: with
+          # `set -o pipefail`, grep -q exits at its first match, git diff
+          # takes SIGPIPE and returns 141, and the pipeline fails — which
+          # this `if` would read as "no changes" and skip-pass a required
+          # gate on exactly the largest diffs.
+          git diff --name-only --diff-filter=ACMRT "$range" -- '*.sh' > /tmp/detect_sh.txt
+
+          if [[ -s /tmp/detect_sh.txt ]]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -106,16 +126,29 @@ jobs:
           else
             before="${{ github.event.before }}"
             if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              # NUL-delimited to match the git diff -z path below, so the
+              # consumer can use one `read -d ''` loop for both.
               find . -type f -name "*.sh" \
                 -not -path "*/.archived/*" -not -path "*/node_modules/*" \
                 -not -path "*/vendor/*" -not -path "*/.git/*" \
-                -not -path "*/.worktrees/*" | sed 's#^\./##' > changed_sh_files.txt
+                -not -path "*/.worktrees/*" -printf '%P\0' > changed_sh_files.txt
               exit 0
             fi
             range="${before}...${{ github.event.after }}"
           fi
-          git diff --name-only --diff-filter=ACMR "$range" -- '*.sh' \
-            | grep -v -E '^(\.archived|node_modules|vendor|\.worktrees)/' > changed_sh_files.txt || true
+          # -z emits NUL-delimited, *unquoted* pathnames. Without it Git
+          # quotes and backslash-escapes any path with non-ASCII bytes or a
+          # newline, and the checker below then fails its -f test and
+          # silently skips that script while the gate still passes.
+          #
+          # Excluded directories are filtered in the consumer loop below,
+          # not here: NUL-delimited filtering would mean either awk with
+          # RS="\0" (unsupported outside gawk) or `grep -z -v` (exit 1
+          # when everything is filtered out, which `set -e` would treat as
+          # a failure). A plain `case` in the reader is portable and has
+          # no exit-code edge.
+          git diff -z --name-only --diff-filter=ACMRT "$range" -- '*.sh' \
+            > changed_sh_files.txt
 
       - name: Check bash script line counts
         run: |
@@ -197,7 +230,17 @@ jobs:
           exceptions_used=()
           compliant=()
 
-          while IFS= read -r file; do
+          # -d '' consumes the NUL-delimited list written above, so paths
+          # containing spaces, non-ASCII bytes, or newlines survive intact.
+          while IFS= read -r -d '' file; do
+            # Match the excluded directory names as path *segments* at any
+            # depth, the way the previous `find -not -path "*/vendor/*"`
+            # predicates did. An anchored '^vendor/' would let
+            # third_party/vendor/tool.sh through and start failing PRs over
+            # vendored scripts this policy was never meant to cover.
+            case "/${file#./}" in
+              */.archived/*|*/node_modules/*|*/vendor/*|*/.worktrees/*) continue ;;
+            esac
             file="./${file#./}"
             # Skip if file doesn't exist (e.g. renamed away in a later commit)
             [[ ! -f "$file" ]] && continue
@@ -281,7 +324,7 @@ jobs:
     # changes to check).
     name: Bash Script Size Check (20-line limit)
     needs: [detect, bash-line-limit]
-    if: always()
+    if: always() && (github.event_name == 'push' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -300,3 +343,66 @@ jobs:
             exit 1
           fi
           echo "bash-line-limit passed."
+
+  full-sweep:
+    # The periodic owner the per-PR diff scoping deliberately gives up.
+    # Diff-scoping means an over-limit script whose waiver quietly passed
+    # its sunset_date is invisible to every PR that does not touch it —
+    # this nightly whole-repo scan is what still sees it.
+    #
+    # Deliberately NOT a required status check: it must never be able to
+    # block an unrelated PR, which is the exact failure mode the rest of
+    # this workflow exists to remove. It fails the scheduled run so the
+    # red run and its notification are the signal.
+    name: Full-repo bash policy sweep (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Scan every tracked shell script
+        run: |
+          set -euo pipefail
+          db="${GITHUB_WORKSPACE}/.github/language-policy/exceptions.db"
+          limit=20
+          rc=0
+
+          count_lines() {
+            grep -vE '^\s*(#|$)' "$1" | grep -vE '^#!' | wc -l | tr -d ' '
+          }
+
+          echo "== expired or expiring waivers =="
+          sqlite3 "$db" \
+            "SELECT file_path, sunset_date FROM exceptions
+             WHERE rule_name = 'bash-20-line-limit' AND status = 'active'
+               AND sunset_date IS NOT NULL AND sunset_date <= date('now');" \
+            | while IFS='|' read -r f d; do
+                echo "::warning::waiver for $f expired on $d"
+              done
+
+          echo "== over-limit scripts without an active waiver =="
+          while IFS= read -r -d '' file; do
+            case "/${file#./}" in
+              */.archived/*|*/node_modules/*|*/vendor/*|*/.worktrees/*) continue ;;
+            esac
+            n=$(count_lines "$file")
+            [[ "$n" -le "$limit" ]] && continue
+            waived=$(sqlite3 "$db" \
+              "SELECT COUNT(*) FROM exceptions
+               WHERE rule_name = 'bash-20-line-limit' AND status = 'active'
+                 AND file_path IN ('$file', './${file#./}')
+                 AND (sunset_date IS NULL OR sunset_date > date('now'));" 2>/dev/null || echo 0)
+            if [[ "$waived" == "0" ]]; then
+              echo "::error::$file is $n lines (limit $limit) with no active waiver"
+              rc=1
+            fi
+          done < <(git ls-files -z '*.sh')
+
+          exit $rc
