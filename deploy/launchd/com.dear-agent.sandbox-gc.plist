@@ -56,6 +56,8 @@
     <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin</string>
     <key>HOME</key>
     <string>__HOME__</string>
+    <key>DOLT_PORT</key>
+    <string>3307</string>
   </dict>
 
   <!-- One tick per hour. Each tick is idempotent; every reap re-verifies all
@@ -64,7 +66,7 @@
   <integer>3600</integer>
 
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
 
   <key>AbandonProcessGroup</key>
   <false/>
