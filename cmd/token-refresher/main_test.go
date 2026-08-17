@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,6 +114,87 @@ func TestRun_ForceRefreshesFreshToken(t *testing.T) {
 	if got := strings.TrimSpace(stdout.String()); got != "forced-token" {
 		t.Errorf("stdout = %q, want forced-token (force should refresh a fresh token)", got)
 	}
+}
+
+func TestLaunchdCadenceDoesNotForceRefresh(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "launchd", "com.dear-agent.token-refresher.plist"))
+	if err != nil {
+		t.Fatalf("read launchd template: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "<string>-cadence</string>") {
+		t.Fatal("launchd token-refresher must run in cadence mode")
+	}
+	if strings.Contains(body, "<string>-force</string>") {
+		t.Fatal("launchd token-refresher must not force refresh every tick; forced rotations race native Claude Code refreshers")
+	}
+}
+
+// TestLaunchdExpirySkewExceedsStartInterval pins the invariant that actually
+// keeps the credentials file valid. Dropping -force stopped the 30-minute
+// rotations, but the resolver's default skew is 60s while the job only looks
+// every 1800s, so nearly every tick found the token "fresh" with minutes left
+// and the next one arrived after it had already expired (observed 2026-08-15:
+// expiry 09:21:24Z, ticks at 08:53:43Z and 09:23:43Z, 2m19s of 401s in
+// between). The skew has to be wider than the sampling interval or the cadence
+// job samples straight past the expiry it exists to prevent.
+func TestLaunchdExpirySkewExceedsStartInterval(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "launchd", "com.dear-agent.token-refresher.plist"))
+	if err != nil {
+		t.Fatalf("read launchd template: %v", err)
+	}
+	body := string(data)
+
+	skewArg := plistArgAfter(t, body, "-expiry-skew")
+	skew, err := time.ParseDuration(skewArg)
+	if err != nil {
+		t.Fatalf("parse -expiry-skew %q: %v", skewArg, err)
+	}
+
+	var interval time.Duration
+	if _, err := fmt.Sscanf(plistIntegerAfter(t, body, "StartInterval"), "%d", &interval); err != nil {
+		t.Fatalf("parse StartInterval: %v", err)
+	}
+	interval *= time.Second
+
+	if skew <= interval {
+		t.Fatalf("-expiry-skew (%s) must exceed StartInterval (%s); otherwise a tick can find the token fresh and the next tick arrives after it expired", skew, interval)
+	}
+}
+
+// plistArgAfter returns the <string> element following the given argument in
+// the ProgramArguments array.
+func plistArgAfter(t *testing.T, body, arg string) string {
+	t.Helper()
+	marker := "<string>" + arg + "</string>"
+	idx := strings.Index(body, marker)
+	if idx < 0 {
+		t.Fatalf("launchd template must pass %s", arg)
+	}
+	rest := body[idx+len(marker):]
+	open := strings.Index(rest, "<string>")
+	closeIdx := strings.Index(rest, "</string>")
+	if open < 0 || closeIdx < open {
+		t.Fatalf("%s has no value in the launchd template", arg)
+	}
+	return rest[open+len("<string>") : closeIdx]
+}
+
+// plistIntegerAfter returns the <integer> value for the given plist key.
+func plistIntegerAfter(t *testing.T, body, key string) string {
+	t.Helper()
+	marker := "<key>" + key + "</key>"
+	idx := strings.Index(body, marker)
+	if idx < 0 {
+		t.Fatalf("launchd template must set %s", key)
+	}
+	rest := body[idx+len(marker):]
+	open := strings.Index(rest, "<integer>")
+	closeIdx := strings.Index(rest, "</integer>")
+	if open < 0 || closeIdx < open {
+		t.Fatalf("%s has no integer value in the launchd template", key)
+	}
+	return strings.TrimSpace(rest[open+len("<integer>") : closeIdx])
 }
 
 func TestRun_InvalidGrantExits2(t *testing.T) {

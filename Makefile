@@ -493,8 +493,9 @@ install-token-refresher: build-token-refresher
 	$(call install-go-bin,bin/token-refresher)
 
 # Wire token-refresher into the supervisor mesh (ce-cs3v): deploy the launchd
-# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes, and
-# print the single host-side, ask-gated activation step for you to run yourself.
+# idle-backstop that checks ~/.claude/.credentials.json every 30 minutes and
+# refreshes only near access-token expiry, then print the single host-side,
+# ask-gated activation step for you to run yourself.
 #
 # The scheduled job is the ONLY sanctioned wiring. Do NOT also point Claude
 # Code's apiKeyHelper at this binary: since claude-code 2.1.205 a configured
@@ -511,8 +512,11 @@ install-token-refresher-launchagent: install-token-refresher
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 	@echo "Activate it yourself (ask-gated host action):"
-	@echo "  Schedule the idle backstop:"
-	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
+	@echo "  Reload the idle backstop (bootout first -- a bare 'launchctl load' is a"
+	@echo "  no-op against an already-loaded label and keeps running the STALE"
+	@echo "  in-memory ProgramArguments, not what's on disk):"
+	@echo "     launchctl bootout gui/\$$(id -u)/com.dear-agent.token-refresher 2>/dev/null || true"
+	@echo "     launchctl bootstrap gui/\$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 	@if grep -q '"apiKeyHelper"' $(HOME)/.claude/settings.json 2>/dev/null; then \
 		echo ""; \
 		echo "  WARNING: this host still has a retired apiKeyHelper in ~/.claude/settings.json."; \

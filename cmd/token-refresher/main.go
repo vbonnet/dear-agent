@@ -92,6 +92,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		clientID    = fs.String("client-id", "", "OAuth client ID override (default built-in / $CLAUDE_OAUTH_CLIENT_ID)")
 		cadence     = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
 		lockTimeout = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
+		expirySkew  = fs.Duration("expiry-skew", 0, "treat the access token as stale this long before it expires; MUST exceed the scheduler's tick or the cadence job will sample straight past the expiry (default 60s)")
 		auditPath   = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
 		quarPath    = fs.String("quarantine", defaultQuarantinePath(), "refresh-token quarantine marker path (empty to disable quarantine)")
 		clearQuar   = fs.Bool("clear-quarantine", false, "clear the refresh-token quarantine and exit (operator override)")
@@ -133,6 +134,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		TokenEndpoint:   *endpoint,
 		ClientID:        *clientID,
 		LockTimeout:     *lockTimeout,
+		ExpirySkew:      *expirySkew,
 		QuarantinePath:  *quarPath,
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},

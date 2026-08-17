@@ -1,0 +1,200 @@
+name: PR Size and Scope
+
+on:
+  pull_request:
+    # `edited` covers a base-branch retarget (e.g. develop -> main), which
+    # GitHub reports without a new head commit — without it a retargeted PR
+    # keeps stale metrics from its former base until the next push.
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-size-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MAX_CHANGED_LINES: "1000"
+  MAX_CHANGED_FILES: "50"
+  MAX_TOP_LEVEL_AREAS: "4"
+
+jobs:
+  size-scope:
+    name: Size and scope signal
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute PR scope
+        id: scope
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags origin "$base" || true
+          git cat-file -e "$head^{commit}" 2>/dev/null || git fetch --no-tags origin "$head" || true
+
+          git diff --numstat "$base"..."$head" > /tmp/numstat.txt
+          # ACMRDT: Added/Copied/Modified/Renamed/Deleted/Type-changed. T
+          # covers e.g. a regular file replaced by a symlink — omitting it
+          # let such files vanish from both changed_files and top_level_areas.
+          #
+          # --name-status (not --name-only) so renames/copies report BOTH the
+          # source and destination path. A cross-area rename (agm/x.go ->
+          # pkg/x.go) touches two top-level areas, and reviewing it means
+          # reading both; --name-only reports only the destination and so
+          # undercounts exactly the sprawling moves this gate exists to catch.
+          # -z, because Git's default output quotes and backslash-escapes any
+          # pathname with non-ASCII bytes. `docs/café.md` would arrive as
+          # "docs/caf\303\251.md" and parse under the area `"docs`, reporting
+          # two areas for one directory and posting a false warning. With -z
+          # pathnames are emitted verbatim.
+          #
+          # In -z mode --name-status emits STATUS\0path\0, except rename and
+          # copy records, which emit STATUS\0source\0dest\0. Read the records
+          # explicitly so both halves of a rename are available.
+          git diff -z --name-status --diff-filter=ACMRDT "$base"..."$head" \
+            > /tmp/namestatus.z
+
+          changed_files=0
+          : > /tmp/areas.txt
+          # A rename is ONE file change but TWO areas: reviewing agm/x.go ->
+          # pkg/x.go means reading both trees, while counting it as two files
+          # would make 25 ordinary renames trip the 50-file threshold. So the
+          # record is counted once and every pathname it carries feeds areas.
+          record_area() {
+            case "$1" in
+              .github/*) printf '%s\n' "$(printf '%s' "$1" | cut -d/ -f1-2)" >> /tmp/areas.txt ;;
+              */*)       printf '%s\n' "${1%%/*}" >> /tmp/areas.txt ;;
+              *)         printf '%s\n' "$1" >> /tmp/areas.txt ;;
+            esac
+          }
+
+          # `rec`, not `status`: `status` is a read-only special variable in
+          # some shells, which turns this loop into a hard error there.
+          while IFS= read -r -d '' rec; do
+            case "$rec" in
+              R*|C*)
+                IFS= read -r -d '' src || break
+                IFS= read -r -d '' dst || break
+                record_area "$src"
+                record_area "$dst"
+                ;;
+              *)
+                IFS= read -r -d '' path || break
+                record_area "$path"
+                ;;
+            esac
+            changed_files=$((changed_files + 1))
+          done < /tmp/namestatus.z
+
+          changed_lines=$(awk '{ add += $1 == "-" ? 0 : $1; del += $2 == "-" ? 0 : $2 } END { print add + del + 0 }' /tmp/numstat.txt)
+          top_level_areas=$(sort -u /tmp/areas.txt | grep -c . || true)
+
+          reasons=()
+          if [ "$changed_lines" -gt "$MAX_CHANGED_LINES" ]; then
+            reasons+=("- ${changed_lines} changed lines exceeds the ${MAX_CHANGED_LINES}-line review threshold.")
+          fi
+          if [ "$changed_files" -ge "$MAX_CHANGED_FILES" ]; then
+            reasons+=("- ${changed_files} changed files meets or exceeds the ${MAX_CHANGED_FILES}-file scope threshold.")
+          fi
+          if [ "$top_level_areas" -ge "$MAX_TOP_LEVEL_AREAS" ]; then
+            reasons+=("- ${top_level_areas} top-level areas meets or exceeds the ${MAX_TOP_LEVEL_AREAS}-area scope threshold.")
+          fi
+
+          {
+            echo "changed_lines=$changed_lines"
+            echo "changed_files=$changed_files"
+            echo "top_level_areas=$top_level_areas"
+            if [ "${#reasons[@]}" -gt 0 ]; then
+              echo "should_comment=true"
+              echo "reasons<<EOF"
+              printf '%s\n' "${reasons[@]}"
+              echo "EOF"
+            else
+              echo "should_comment=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment with split suggestion
+        # A pull_request run from a fork, or one opened by Dependabot (whose
+        # workflow runs also get a read-only GITHUB_TOKEN even though the head
+        # branch lives in this repo), can't post/delete comments; skip rather
+        # than error out.
+        #
+        # Gate on the PR *author*, not github.actor: actor is whoever triggered
+        # this particular run, so a human pushing to (or reopening) a Dependabot
+        # PR flips actor to that human while the token stays read-only — the
+        # step would then run and fail. The author is stable across every event
+        # on the PR.
+        if: steps.scope.outputs.should_comment == 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          CHANGED_LINES: ${{ steps.scope.outputs.changed_lines }}
+          CHANGED_FILES: ${{ steps.scope.outputs.changed_files }}
+          TOP_LEVEL_AREAS: ${{ steps.scope.outputs.top_level_areas }}
+          REASONS: ${{ steps.scope.outputs.reasons }}
+        run: |
+          set -euo pipefail
+          body=/tmp/pr-size-scope-comment.md
+          {
+            echo "<!-- pr-size-scope -->"
+            echo "## PR size and scope signal"
+            echo
+            echo "This PR crossed the deterministic split-suggestion threshold:"
+            echo
+            printf '%s\n' "$REASONS"
+            echo
+            echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
+            echo
+            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently."
+          } > "$body"
+
+          # Edit the existing marker comment in place when there is one. The
+          # previous post-then-delete-the-rest order re-notified every PR
+          # subscriber on each synchronize; an edit notifies nobody, so the
+          # signal stops training people to mute the thread.
+          mapfile -t existing < <(
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+              --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id'
+          )
+
+          if [ "${#existing[@]}" -gt 0 ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/${existing[0]}" \
+              -F "body=@$body" > /dev/null
+          else
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body"
+          fi
+
+          # Collapse any duplicates left by earlier revisions of this workflow.
+          for comment_id in "${existing[@]:1}"; do
+            [ -n "$comment_id" ] || continue
+            gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
+          done
+
+      - name: Remove stale split-suggestion comment
+        # A later synchronize run can drop below every threshold; clear any
+        # marker comment left by an earlier, larger revision of this PR.
+        if: steps.scope.outputs.should_comment == 'false' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- pr-size-scope -->")) | .id' |
+            while IFS= read -r comment_id; do
+              [ -n "$comment_id" ] || continue
+              gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
+            done
