@@ -2,6 +2,8 @@ package surface
 
 import "github.com/vbonnet/dear-agent/pkg/codegen"
 
+// GetCompletionRelayTarget is the op that reports which Dispatch session
+// completions are currently relayed to.
 var GetCompletionRelayTarget = codegen.Op{
 	Name:         "get_completion_relay_target",
 	Description:  "Read the live AGM completion relay target",
@@ -15,6 +17,8 @@ var GetCompletionRelayTarget = codegen.Op{
 	},
 }
 
+// SetCompletionRelayTarget is the op that points completion relay at a
+// live Dispatch session.
 var SetCompletionRelayTarget = codegen.Op{
 	Name:         "set_completion_relay_target",
 	Description:  "Set the live AGM completion relay target",
@@ -28,6 +32,7 @@ var SetCompletionRelayTarget = codegen.Op{
 	},
 }
 
+// GetQuotaStatus is the op that reports the recorded provider quota state.
 var GetQuotaStatus = codegen.Op{
 	Name:         "get_quota_status",
 	Description:  "Read the latest provider quota status captured by CodexBar",
@@ -41,12 +46,16 @@ var GetQuotaStatus = codegen.Op{
 	},
 }
 
+// GetCompletionRelayTargetInput is the (empty) request for
+// GetCompletionRelayTarget.
 type GetCompletionRelayTargetInput struct{}
 
+// SetCompletionRelayTargetInput carries the Dispatch session to relay to.
 type SetCompletionRelayTargetInput struct {
 	SessionID string `json:"session_id" ef:"session_id,pos=0,required" desc:"Live Dispatch/AGM session ID or name that should receive completion relays (required)"`
 }
 
+// QuotaStatusInput selects which provider's quota state to report.
 type QuotaStatusInput struct {
 	Provider string `json:"provider,omitempty" ef:"provider" desc:"Provider quota to read. Defaults to codex."`
 }

@@ -46,6 +46,9 @@ func NewStallRecovery(ctx *OpContext, orchestratorName string) *StallRecovery {
 	}
 }
 
+// SetOrchestratorTargetResolver overrides how a stalled session's
+// orchestrator target is resolved, so the target can be looked up live
+// instead of being fixed at construction.
 func (sr *StallRecovery) SetOrchestratorTargetResolver(resolve func(string) string) {
 	sr.orchestratorTarget = resolve
 }

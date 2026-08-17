@@ -1,3 +1,9 @@
+// Package dispatchstate holds the host-local state AGM needs to route
+// worker completions: which Dispatch session receives them, and the
+// provider quota snapshot routing decisions consult. Both live as plain
+// files under the user's home directory rather than in the session store,
+// so they stay readable when that store is unreachable — which is exactly
+// when completion routing matters most. See SPEC.md.
 package dispatchstate
 
 import (
@@ -16,6 +22,8 @@ const (
 	quotaStateFile  = ".local/state/dear-agent/quota/latest.json"
 )
 
+// RelayTargetResult reports a resolved completion relay target and
+// which source it came from (environment, state file, or fallback).
 type RelayTargetResult struct {
 	Operation string `json:"operation"`
 	Target    string `json:"target,omitempty"`
@@ -23,10 +31,17 @@ type RelayTargetResult struct {
 	Path      string `json:"path,omitempty"`
 }
 
+// RelayTargetPath returns the path of the relay-target state file.
 func RelayTargetPath(homeDir string) string {
 	return filepath.Join(homeDir, ".agm", relayTargetFile)
 }
 
+// ResolveRelayTarget resolves the Dispatch session completions should be
+// relayed to, preferring the AGM_COMPLETION_RELAY_TARGET environment
+// variable, then the state file, then the caller's fallback. An
+// unreadable state file falls through to the fallback rather than
+// failing: a completion sent to the fallback is recoverable, a hard
+// error loses it.
 func ResolveRelayTarget(homeDir, fallback string, getenv func(string) string) RelayTargetResult {
 	if getenv == nil {
 		getenv = os.Getenv
@@ -43,6 +58,8 @@ func ResolveRelayTarget(homeDir, fallback string, getenv func(string) string) Re
 	return RelayTargetResult{Operation: "completion_relay_target", Target: strings.TrimSpace(fallback), Source: "fallback"}
 }
 
+// SetRelayTarget persists target as the relay destination. A blank
+// target is rejected so an empty write cannot silently disable relaying.
 func SetRelayTarget(homeDir, target string) (RelayTargetResult, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -58,6 +75,8 @@ func SetRelayTarget(homeDir, target string) (RelayTargetResult, error) {
 	return RelayTargetResult{Operation: "completion_relay_target", Target: target, Source: "file", Path: path}, nil
 }
 
+// QuotaStatus is a read of the provider quota snapshot, including
+// whether it is stale and whether callers should back off.
 type QuotaStatus struct {
 	Operation string         `json:"operation"`
 	Available bool           `json:"available"`
@@ -70,10 +89,15 @@ type QuotaStatus struct {
 	Data      map[string]any `json:"data,omitempty"`
 }
 
+// QuotaPath returns the path of the quota snapshot written by the meter.
 func QuotaPath(homeDir string) string {
 	return filepath.Join(homeDir, quotaStateFile)
 }
 
+// ReadQuotaStatus reads the quota snapshot for provider. A missing or
+// unparseable snapshot yields an unavailable result with a reason rather
+// than an error, because callers consult this on completion and stall
+// paths where failing hard would drop the output being routed.
 func ReadQuotaStatus(homeDir, provider string, now time.Time) QuotaStatus {
 	path := QuotaPath(homeDir)
 	result := QuotaStatus{Operation: "quota_status", Provider: provider, Path: path}
