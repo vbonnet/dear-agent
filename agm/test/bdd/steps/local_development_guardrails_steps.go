@@ -111,8 +111,6 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
 	ctx.Step(`^AGM runs the protected cleanup regressions$`, agmRunsProtectedCleanupRegressions)
 	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
-	ctx.Step(`^AGM runs the protected repository cleanup regression$`, agmRunsProtectedRepositoryCleanupRegression)
-	ctx.Step(`^repository cleanup should preserve the worktree and its branches$`, repositoryCleanupShouldPreserveWorktreeAndBranches)
 	registerSafePRRegressionGuardrailSteps(ctx)
 	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
 	ctx.Step(`^bounded affected runner commands should terminate their descendants$`, boundedAffectedRunnerCommandsShouldTerminateTheirDescendants)
@@ -239,29 +237,6 @@ func cleanupShouldPreserveGitLockedCheckouts(ctx context.Context) error {
 	}
 	if state.cleanupRegressionErr != nil {
 		return fmt.Errorf("protected cleanup regressions: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
-	}
-	return nil
-}
-
-func agmRunsProtectedRepositoryCleanupRegression(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	state.cleanupRegression, state.cleanupRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails$`,
-		"./internal/safepr",
-	)
-	return nil
-}
-
-func repositoryCleanupShouldPreserveWorktreeAndBranches(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.cleanupRegressionErr != nil {
-		return fmt.Errorf("protected repository cleanup regression: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
 	}
 	return nil
 }
