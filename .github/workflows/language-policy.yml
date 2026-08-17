@@ -38,8 +38,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Scheduled/dispatched sweeps get their own group. Keyed only on
+  # github.ref they would share `refs/heads/main` with ordinary pushes, and
+  # cancel-in-progress would let routine main activity around the cron time
+  # kill the run — which is now the only periodic owner of expired-waiver
+  # detection, so cancelling it silently drops that coverage.
+  group: >-
+    ${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        && 'sweep' || (github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
@@ -53,6 +60,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       has_changes: ${{ steps.changed.outputs.has_changes }}
+      full_scan: ${{ steps.changed.outputs.full_scan }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -93,10 +101,28 @@ jobs:
           # gate on exactly the largest diffs.
           git diff --name-only --diff-filter=ACMRT "$range" -- '*.sh' > /tmp/detect_sh.txt
 
-          if [[ -s /tmp/detect_sh.txt ]]; then
+          # The policy's own inputs count as changes. A PR editing this
+          # workflow or the waiver database, but no .sh file, would
+          # otherwise satisfy the required gate without ever exercising the
+          # enforcement code or waiver set it just changed — a broken
+          # checker or a revoked waiver could merge untested.
+          git diff --name-only --diff-filter=ACMRT "$range" \
+            -- .github/workflows/language-policy.yml \
+               .github/language-policy/exceptions.db > /tmp/detect_policy.txt
+
+          # A policy-input change forces a FULL scan, not a diff-scoped one:
+          # revoking a waiver can turn any tracked script into a violation,
+          # and the diff that revoked it names no .sh file at all. Scoping
+          # to the (empty) diff would run the job against nothing and pass.
+          if [[ -s /tmp/detect_policy.txt ]]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "full_scan=true" >> "$GITHUB_OUTPUT"
+          elif [[ -s /tmp/detect_sh.txt ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "full_scan=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "full_scan=false" >> "$GITHUB_OUTPUT"
           fi
 
   bash-line-limit:
@@ -121,6 +147,15 @@ jobs:
         id: files
         run: |
           set -euo pipefail
+
+          # A policy-input change scans everything: revoking a waiver can
+          # turn any tracked script into a violation, and the revoking diff
+          # names no .sh file to scope to.
+          if [[ "${{ needs.detect.outputs.full_scan }}" == "true" ]]; then
+            git ls-files -z '*.sh' > changed_sh_files.txt
+            exit 0
+          fi
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
           else
@@ -374,8 +409,13 @@ jobs:
           limit=20
           rc=0
 
+          # `|| true` on each grep: a script that is only a shebang,
+          # comments, and blank lines makes grep exit 1 after producing no
+          # output, and under `set -euo pipefail` that aborts the whole
+          # sweep on a perfectly compliant file. Zero countable lines is a
+          # valid answer, not an error.
           count_lines() {
-            grep -vE '^\s*(#|$)' "$1" | grep -vE '^#!' | wc -l | tr -d ' '
+            { grep -vE '^\s*(#|$)' "$1" || true; } | { grep -vE '^#!' || true; } | wc -l | tr -d ' '
           }
 
           echo "== expired or expiring waivers =="

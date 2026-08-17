@@ -358,20 +358,32 @@ jobs:
           # takes SIGPIPE and returns 141, and the whole pipeline fails —
           # which this `if` would misread as "nothing to scan" on exactly
           # the largest diffs.
-          git diff --name-only --diff-filter=ACMRT "$range" > /tmp/go_changed.txt
+          # -z so pathnames arrive verbatim. Under Git's default output a
+          # path with non-ASCII bytes, a tab, or a newline is quoted and
+          # backslash-escaped — `pkg/é.go` becomes "pkg/\303\251.go", the
+          # `.go` suffix test fails, and govulncheck skip-passes on a PR
+          # that did change Go source.
+          git diff -z --name-only --diff-filter=ACMRT "$range" > /tmp/go_changed.z
 
           # The scanner's own policy counts as a scan input. A PR that
           # edits the govulncheck invocation or its vulnerability
           # allowlist but no Go file would otherwise satisfy the required
           # gate without ever executing the policy it just changed — a
           # broken scanner could merge and stay hidden until the next
-          # scheduled run.
-          if grep -E '(^|/)go\.(mod|sum)$|\.go$|^\.github/workflows/(ci|security-scan)\.yml$' \
-               -q /tmp/go_changed.txt; then
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          fi
+          # scheduled run. security-audit.yml carries the mirrored
+          # invocation; ci.yml carries the required one.
+          has_changes=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              *.go|go.mod|go.sum|*/go.mod|*/go.sum \
+              |.github/workflows/ci.yml|.github/workflows/security-audit.yml)
+                has_changes=true
+                break
+                ;;
+            esac
+          done < /tmp/go_changed.z
+
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
 
   govulncheck-scan:
     name: govulncheck (scan)
