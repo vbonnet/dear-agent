@@ -1,12 +1,16 @@
 name: Stale Branch Audit
 
-# Weekly audit of agent branches that have not been merged or updated in
-# more than STALE_DAYS days. Unmerged branches with no associated open PR
-# are potential orphaned worktrees — the local worktree was abandoned
-# without running the cleanup steps (agm worktree sweep).
+# Weekly branch hygiene pass, powered by scripts/branch-reaper.sh:
 #
-# Opens a rolling GitHub issue when orphans are found; auto-closes when clean.
-# This is a visibility job, not a merge gate.
+#   1. Auto-deletes branches whose PR already merged and got nothing pushed to
+#      them afterward -- GitHub's own "delete head branches on merge" setting is
+#      on but silently misses ~1.4% of merges for no discernible reason, and
+#      nothing ever retries those. This step is that retry, and it is provably
+#      safe: the branch's content is already in main's history via the squash
+#      commit, so deleting the ref loses nothing.
+#   2. Reports (never deletes) branches that never had a PR, had a PR closed
+#      without merging, or got new commits pushed after their PR merged --
+#      those need a human judgment call, not automation.
 #
 # Cadence mirrors the weekly tier:
 #   daily:   branch-protection-audit.yml
@@ -16,123 +20,88 @@ name: Stale Branch Audit
 on:
   schedule:
     # Fridays 08:00 UTC — run after the weekly health-check (Mon 14:00)
-    # so orphan reports land at a natural weekly review point.
+    # so branch reports land at a natural weekly review point.
     - cron: "0 8 * * 5"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 env:
   GIT_TERMINAL_PROMPT: "0"
-  # Branches not pushed or PRed within this many days are flagged.
-  STALE_DAYS: "14"
-  # Only branches matching this prefix are inspected (agent work branches).
-  BRANCH_PREFIX: "feat/"
 
 jobs:
   audit:
-    name: Stale branch audit
+    name: Branch reaper
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Find stale agent branches
-        id: stale
+      - name: Fetch all remote branches
+        # actions/checkout only wires up refs for the triggering ref by
+        # default even with fetch-depth: 0 -- the reaper needs every branch's
+        # tip + committer date, so fetch the full refs/heads/* namespace.
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+      - name: Run branch reaper (auto-delete safe set, report the rest)
+        id: reaper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          cutoff=$(date -d "${STALE_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
-            || date -v-${STALE_DAYS}d '+%Y-%m-%dT%H:%M:%SZ')
-
-          findings=""
-
-          # List all branches whose last push predates the cutoff.
-          # gh api --paginate returns all pages; jq filters to our prefix.
-          while IFS= read -r line; do
-            branch=$(echo "$line" | jq -r '.name')
-            pushed=$(echo "$line" | jq -r '.commit.commit.committer.date // empty')
-            [ -z "$pushed" ] && continue
-
-            # Only inspect agent work branches.
-            case "$branch" in
-              ${BRANCH_PREFIX}*) ;;
-              *) continue ;;
-            esac
-
-            # Skip branches more recent than the cutoff.
-            if [[ "$pushed" > "$cutoff" ]]; then
-              continue
-            fi
-
-            # Check if this branch has an open PR.
-            pr_count=$(timeout 15 gh pr list \
-              --repo "$REPO" \
-              --head "$branch" \
-              --state open \
-              --json number \
-              --jq 'length')
-
-            if [ "${pr_count:-0}" -eq 0 ]; then
-              findings="${findings}\n- \`${branch}\` — last push ${pushed} (no open PR)"
-            fi
-          done < <(timeout 30 gh api --paginate \
-            "repos/${REPO}/branches" \
-            --jq '.[]')
+          set -uo pipefail
+          bash scripts/branch-reaper.sh --json --execute > reaper-report.json
+          review_rc=$?
 
           {
-            echo "stale_branches<<__EOF__"
-            printf '%b\n' "$findings"
-            echo "__EOF__"
-          } >> "$GITHUB_ENV"
+            echo "## Branch audit — $(date -u '+%Y-%m-%d')"
+            echo
+            echo "### Auto-deleted this run (merged, nothing pushed since)"
+            jq -r '.safe_delete[]? | "- `\(.)`"' reaper-report.json
+            echo
+            echo "### Never had a PR — review for abandoned work"
+            jq -r '.review_no_pr[]? | "- `\(.)`"' reaper-report.json
+            echo
+            echo "### PR closed without merging — may be deliberate, review before deleting"
+            jq -r '.review_closed_unmerged[]? | "- `\(.)`"' reaper-report.json
+            echo
+            echo "### Merged, but new commits pushed after — unmerged follow-up work"
+            jq -r '.review_new_commits_after_merge[]? | "- `\(.)`"' reaper-report.json
+          } > stale-branch-report.md
 
-          if [ -n "$findings" ]; then
-            echo "has_stale=true" >> "$GITHUB_OUTPUT"
-            echo "Stale agent branches found:"
-            printf '%b\n' "$findings"
+          if [ "$review_rc" -eq 1 ]; then
+            echo "has_review=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_stale=false" >> "$GITHUB_OUTPUT"
-            echo "ok: no stale agent branches (>${STALE_DAYS}d, no open PR)"
+            echo "has_review=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build summary
         run: |
-          {
-            echo "## Stale Branch Audit — $(date -u '+%Y-%m-%d')"
-            echo ""
-            echo "Branches matching \`${BRANCH_PREFIX}*\` with no open PR, not pushed in ${STALE_DAYS}+ days."
-            echo "These are likely orphaned worktrees — run \`agm worktree sweep\` locally to triage."
-            echo ""
-            if [ -n "${stale_branches:-}" ]; then
-              printf '%b\n' "${stale_branches:-}"
-            else
-              echo "✓ No stale agent branches"
-            fi
-          } | tee stale-branch-report.md >> "$GITHUB_STEP_SUMMARY"
+          cat stale-branch-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: stale-branch-report
-          path: stale-branch-report.md
+          path: |
+            stale-branch-report.md
+            reaper-report.json
           retention-days: 30
 
-      - name: Open / update stale-branch issue on findings
-        if: steps.stale.outputs.has_stale == 'true'
+      - name: Open / update review-needed issue
+        if: steps.reaper.outputs.has_review == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          title="stale-branch-audit: orphaned agent branches $(date -u '+%Y-%m')"
+          title="stale-branch-audit: branches needing review $(date -u '+%Y-%m')"
           body=$(cat stale-branch-report.md)
           existing=$(timeout 30 gh issue list \
             --repo "$REPO" \
@@ -150,8 +119,8 @@ jobs:
               --label stale-branch-audit
           fi
 
-      - name: Auto-close stale-branch issue when clean
-        if: steps.stale.outputs.has_stale == 'false'
+      - name: Auto-close review-needed issue when clean
+        if: steps.reaper.outputs.has_review == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -165,5 +134,5 @@ jobs:
             --jq '.[].number')
           for n in $existing; do
             timeout 30 gh issue close "$n" --repo "$REPO" \
-              --comment "Stale-branch audit: no orphaned branches found; auto-closing."
+              --comment "Branch audit: nothing left needing review; auto-closing."
           done
