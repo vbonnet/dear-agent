@@ -188,6 +188,18 @@ type CreateSessionRequest struct {
 	ManifestDirOptional    bool                  `json:"-"`
 	SkipCodexRemoteControl bool                  `json:"-"`
 	CodexRemoteBootTimeout time.Duration         `json:"-"`
+
+	// SpawnRetries bounds how many additional times a transient agy spawn
+	// failure (the Antigravity identity-discovery race under provider throttle,
+	// surfaced as an AGM-011 agy.identity error) is retried by
+	// CreateSessionRouted, with exponential backoff seeded by
+	// SpawnRetryBaseDelay. Zero disables retries. Ignored for non-agy harnesses.
+	SpawnRetries        int           `json:"-"`
+	SpawnRetryBaseDelay time.Duration `json:"-"`
+	// FallbackHarness, when set, is the harness CreateSessionRouted re-dispatches
+	// to after an agy spawn exhausts its retries — so a throttled Gemini becomes
+	// usable-with-fallback instead of a hard failure. Typically "codex-cli".
+	FallbackHarness string `json:"-"`
 }
 
 // CreateSessionResult is the output of CreateSession.

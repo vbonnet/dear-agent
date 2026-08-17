@@ -378,8 +378,10 @@ func detectSessionUninitialized(paneContent string, claudeRunning bool) *Violati
 		}
 	}
 
-	// Check for welcome/trust screen indicators
-	if strings.Contains(paneContent, "Do you trust the files in this folder?") {
+	// Only a live, tail-owning trust dialog is current onboarding. An answered
+	// dialog retained above a newer composer is historical evidence and must not
+	// keep an initialized session blocked.
+	if tmux.TrustDialogOwnsInput(paneContent) {
 		return &Violation{
 			Guard:      ViolationSessionUninitialized,
 			Message:    "Session is showing the trust prompt (not yet initialized).",

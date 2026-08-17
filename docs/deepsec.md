@@ -73,20 +73,28 @@ rather block locally.
 
 ## CI (`deepsec.yml`)
 
-Runs on every PR against `main`, scans the PR diff, and posts findings as
-a PR comment. **Currently non-blocking** — the workflow always reports
-success so it doesn't gate merges. Promote to required once signal-to-noise
-stabilises (`.ci-policy.yaml > branch_policies.main.required_workflows`).
+Runs for same-repository PRs against `main` that carry the `full-ci` label. It
+evaluates the PR when it is opened, synchronized, reopened, or when `full-ci`
+is added; adding an unrelated label does not start another paid scan. The
+workflow scans the exact current PR head, posts candidate findings as a PR
+comment, and is **currently non-blocking**. Promote it to required once
+signal-to-noise stabilises
+(`.ci-policy.yaml > branch_policies.main.required_workflows`).
 
 Setup steps to enable in CI:
 
 1. Add an `ANTHROPIC_API_KEY` secret at the repo level (Settings →
    Secrets → Actions).
-2. The workflow will activate on the next PR. Without the secret, it
-   logs a notice and no-ops — safe to merge in advance.
+2. Add `full-ci` to the PR. If the label is already present and the head is
+   unchanged, remove and re-add it to request a rerun. Use the GitHub UI, a
+   GitHub App, or a PAT-backed automation: a label written by an Actions
+   workflow's default `GITHUB_TOKEN` does not recursively start this workflow.
 
-Fork PRs are skipped automatically: forks don't have repo secrets and
-would fail-noisy.
+Without the secret, an eligible run logs an explicit notice and leaves the
+scan job visibly skipped; it does not claim that the head was scanned.
+
+Fork PRs are rejected before the credential probe, even if they carry
+`full-ci`.
 
 ## Where findings live
 

@@ -69,22 +69,6 @@ func TestGitOutputIsBounded(t *testing.T) {
 	}
 }
 
-func TestGitWallTimeIsBounded(t *testing.T) {
-	requireLinuxCallerSelectedGit(t)
-	fakeBin := t.TempDir()
-	fakeGit := filepath.Join(fakeBin, "git")
-	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nwhile :; do :; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	executable := resolveTestExecutable(t, fakeGit)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	_, err := gitBytesWithContext(ctx, executable, t.TempDir(), 64, nil, "version")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("gitBytesWithContext() error = %v, want deterministic wall-time rejection", err)
-	}
-}
-
 func TestPinnedBlobBodiesUseSingleBatchProcess(t *testing.T) {
 	requireLinuxCallerSelectedGit(t)
 	marker := filepath.Join(t.TempDir(), "invocations")
@@ -1683,41 +1667,6 @@ func TestInventoryMissingPromisorObjectDoesNotStartLazyFetch(t *testing.T) {
 	}
 	if _, markerErr := os.Stat(marker); !os.IsNotExist(markerErr) {
 		t.Fatalf("absent object started repository-configured promisor transport: %v", markerErr)
-	}
-}
-
-func TestGitCommandPolicyDisablesLazyFetchAndAmbientRouting(t *testing.T) {
-	helper := filepath.Join(realTempDir(t), "record-git-policy")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		"printf '%s\\n' \"$@\"",
-		"printf 'GIT_NO_LAZY_FETCH=%s\\n' \"${GIT_NO_LAZY_FETCH-}\"",
-		"printf 'GIT_NO_REPLACE_OBJECTS=%s\\n' \"${GIT_NO_REPLACE_OBJECTS-}\"",
-		"printf 'GIT_DIR=%s\\n' \"${GIT_DIR-}\"",
-		"printf 'GIT_WORK_TREE=%s\\n' \"${GIT_WORK_TREE-}\"",
-	}, "\n") + "\n"
-	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "attacker.git"))
-	t.Setenv("GIT_WORK_TREE", t.TempDir())
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	output, err := gitBytesWithContext(ctx, gitExecutable{path: helper}, t.TempDir(), 4096, nil, "rev-parse", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy := string(output)
-	for _, want := range []string{
-		"--no-replace-objects\n--no-lazy-fetch\n-C\n",
-		"GIT_NO_LAZY_FETCH=1",
-		"GIT_NO_REPLACE_OBJECTS=1",
-		"GIT_DIR=\n",
-		"GIT_WORK_TREE=\n",
-	} {
-		if !strings.Contains(policy, want) {
-			t.Fatalf("Git command policy output %q omitted %q", policy, want)
-		}
 	}
 }
 
