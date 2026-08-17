@@ -148,10 +148,10 @@ func (m *Meter) refreshInBackground() {
 		m.refreshing = false
 		m.mu.Unlock()
 	}()
-	if _, err := m.Refresh(context.Background()); err != nil {
-		// Ignored here: Refresh has already stored it on the meter, where
-		// Snapshot's caller can see and report it.
-	}
+	// The error is deliberately dropped here: Refresh has already stored it
+	// on the meter, where Snapshot's caller can see and report it. There is
+	// no caller on this path to return it to.
+	_, _ = m.Refresh(context.Background())
 }
 
 // disabledDecision is the verdict a meter with no source returns: the
