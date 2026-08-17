@@ -138,15 +138,26 @@ they were discovered in the same session.
 
 **Caveat — the five-dimension review protocol (see [REVIEW.md](REVIEW.md))
 only triggers for PRs based on `main`.** A PR whose base is another open PR's
-branch does not get that review. Two ways to stay honest about this:
+branch does not get that review at all.
+
+Targeting `main` is necessary but **not** sufficient. In the current keyless
+configuration `.github/workflows/review.yml` skips the gate when its plan
+reports `review_relevant=false` and publishes a neutral result that says so
+explicitly — so an ordinary stack member with no changed SPEC and no REVIEW.md
+§3 escalation trigger gets a green-looking neutral check, not a review. Read
+the check's text rather than its colour before concluding a PR was reviewed.
+
+Two ways to stay honest about this:
 - Open each stack member only after its predecessor has landed on `main`, so
-  every PR in the sequence is itself based on `main` and gets reviewed, or
-- If you do stack branch-on-branch, retarget each descendant's base to `main`
-  as soon as its predecessor lands, then wait for that PR's own exact-head
-  five-dimension review before merging it. Until it is retargeted and
-  reviewed, treat it as unreviewed by this protocol and don't rely on
-  `safe-merge`'s fallback "validate all reported checks" path as a substitute
-  for the real review.
+  every PR in the sequence is itself based on `main`, or
+- If you do stack branch-on-branch, **rebase** each descendant onto `main`
+  once its predecessor lands, then retarget its base. A `safe-merge` landing
+  is a squash (`internal/safegit/merge.go` passes `--squash`), so the
+  predecessor's new `main` commit is not an ancestor of a descendant created
+  from the pre-merge branch — retargeting alone leaves the descendant's diff
+  carrying its predecessor's changes again. Rebase first, then wait for that
+  PR's own exact-head review before merging, and don't rely on `safe-merge`'s
+  fallback "validate all reported checks" path as a substitute for it.
 
 **Bead tracking:** `safe-pr create` defaults every PR in a session to the
 same first bead and stamps `Closes <bead>` — unless the PR body you pass
