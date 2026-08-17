@@ -55,6 +55,16 @@ func TestParity_GetStatus_MCPExists(t *testing.T) {
 	t.Log("MCP tool 'agm_get_status' declared for op 'get_status'")
 }
 
+func TestParity_GetCompletionRelayTarget_MCPExists(t *testing.T) {
+	// Verify MCP tool "agm_get_completion_relay_target" is registered
+	t.Log("MCP tool 'agm_get_completion_relay_target' declared for op 'get_completion_relay_target'")
+}
+
+func TestParity_GetQuotaStatus_MCPExists(t *testing.T) {
+	// Verify MCP tool "agm_get_quota_status" is registered
+	t.Log("MCP tool 'agm_get_quota_status' declared for op 'get_quota_status'")
+}
+
 func TestParity_ArchiveSession_CLIExists(t *testing.T) {
 	// Verify CLI command "session archive" is registered
 	t.Log("CLI command 'session archive' declared for op 'archive_session'")
@@ -73,6 +83,11 @@ func TestParity_KillSession_CLIExists(t *testing.T) {
 func TestParity_KillSession_MCPExists(t *testing.T) {
 	// Verify MCP tool "agm_kill_session" is registered
 	t.Log("MCP tool 'agm_kill_session' declared for op 'kill_session'")
+}
+
+func TestParity_SetCompletionRelayTarget_MCPExists(t *testing.T) {
+	// Verify MCP tool "agm_set_completion_relay_target" is registered
+	t.Log("MCP tool 'agm_set_completion_relay_target' declared for op 'set_completion_relay_target'")
 }
 
 func TestParity_ListOps_MCPExists(t *testing.T) {
