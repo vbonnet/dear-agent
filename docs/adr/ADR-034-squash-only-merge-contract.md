@@ -29,14 +29,12 @@ Three changes landed together to form a new merge pipeline:
 2. **Squash-only enforced via IaC** (ce-kf6j.5) — rebase and merge-commit strategies
    are blocked by the `modules/managed-repo` branch-protection ruleset; only squash
    merges land on `main`.
-3. **Historical: auto-merge armed on routine `safe-pr create`** (ce-r81r) — `cmd/safe-pr`
-   runs `gh pr merge --auto --squash <url>` after opening a non-draft PR, so it
-   merges once required checks and reviews pass. This decision is superseded by
-   the amendment above.
-
-**Historical routine pipeline:** push branch → open a non-draft PR via
-`safe-pr` → CI green → auto-merge fires. Human-required work stays draft until
-explicitly advanced. The amendment above replaces this agent-authored path.
+3. **Superseded: auto-merge armed on routine `safe-pr create`** (ce-r81r) —
+   routine PR creation used to arm GitHub auto-merge, so a PR could land on
+   `main` without a human ever acting. The amendment above retires that path.
+   The retired invocation and its pipeline are deliberately not reproduced
+   here; Git history holds them, and this is a living document an agent may
+   read as a recipe.
 
 **Supervisor contract (what changed for burndown workers):**
 
