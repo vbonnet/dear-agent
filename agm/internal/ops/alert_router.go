@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,24 +17,32 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
+// AlertSeverity is how urgent an alert is, as classified from its text.
 type AlertSeverity string
 
+// Severity levels, ordered most to least urgent.
 const (
 	AlertSeverityCritical AlertSeverity = "critical"
 	AlertSeverityWarning  AlertSeverity = "warning"
 	AlertSeverityInfo     AlertSeverity = "info"
 )
 
+// AlertActionability is who can actually act on an alert, and so decides
+// whether it is routed to an agent, paged to a human, or recorded quietly.
 type AlertActionability string
 
+// Actionability classes. AlertAgentActionable is the default routing path.
 const (
 	AlertAgentActionable AlertActionability = "agent_actionable"
 	AlertHumanOnly       AlertActionability = "human_only"
 	AlertInformational   AlertActionability = "informational"
 )
 
+// AlertStatus is the outcome of routing one alert.
 type AlertStatus string
 
+// Routing outcomes. Queued means delivery failed or had no target and the
+// record is retained for a later attempt.
 const (
 	AlertStatusQueued     AlertStatus = "queued"
 	AlertStatusDispatched AlertStatus = "dispatched"
@@ -42,6 +51,7 @@ const (
 	AlertStatusSuppressed AlertStatus = "suppressed"
 )
 
+// AlertRequest is an inbound alert before classification and routing.
 type AlertRequest struct {
 	Kind          string
 	Source        string
@@ -55,6 +65,8 @@ type AlertRequest struct {
 	Meta          map[string]any
 }
 
+// AlertRecord is the durable record of one routed alert, appended to the
+// queue file so later routing can dedupe against it.
 type AlertRecord struct {
 	ID            string             `json:"id"`
 	Fingerprint   string             `json:"fingerprint"`
@@ -74,6 +86,8 @@ type AlertRecord struct {
 	Meta          map[string]any     `json:"meta,omitempty"`
 }
 
+// AlertRouter classifies alerts and delivers them to a live agent session or
+// a human recipient, recording every outcome to the queue file.
 type AlertRouter struct {
 	ctx            *OpContext
 	queuePath      string
@@ -82,6 +96,7 @@ type AlertRouter struct {
 	now            func() time.Time
 }
 
+// NewAlertRouter builds a router with default queue path and dedupe window.
 func NewAlertRouter(ctx *OpContext) *AlertRouter {
 	return &AlertRouter{
 		ctx:            ctx,
@@ -92,6 +107,7 @@ func NewAlertRouter(ctx *OpContext) *AlertRouter {
 	}
 }
 
+// DefaultAlertQueuePath returns the default alert queue file path.
 func DefaultAlertQueuePath() string {
 	if path := strings.TrimSpace(os.Getenv("AGM_ALERT_QUEUE")); path != "" {
 		return path
@@ -103,14 +119,19 @@ func DefaultAlertQueuePath() string {
 	return filepath.Join(home, ".agm", "alerts", "queue.jsonl")
 }
 
+// SetQueuePath overrides where routed alerts are recorded.
 func (r *AlertRouter) SetQueuePath(path string) {
 	r.queuePath = path
 }
 
+// SetDedupeWindow overrides how long an identical alert is suppressed.
 func (r *AlertRouter) SetDedupeWindow(window time.Duration) {
 	r.dedupeWindow = window
 }
 
+// Route classifies req, delivers it to the appropriate target, and appends
+// the outcome to the queue. A delivery failure is recorded on the returned
+// record rather than returned as an error, so the alert is never lost.
 func (r *AlertRouter) Route(ctx context.Context, req AlertRequest) (AlertRecord, error) {
 	req = classifyAlert(req)
 	if req.OccurredAt.IsZero() {
@@ -142,7 +163,11 @@ func (r *AlertRouter) Route(ctx context.Context, req AlertRequest) (AlertRecord,
 		} else {
 			rec.Target = r.humanRecipient
 		}
+	case AlertAgentActionable:
+		fallthrough
 	default:
+		// Unclassified actionability routes as agent-actionable: an alert
+		// nobody classified is better delivered to an agent than dropped.
 		target := strings.TrimSpace(req.Target)
 		if target == "" || !r.sessionLooksLive(target) {
 			target = r.discoverSupervisor()
@@ -231,8 +256,7 @@ func (r *AlertRouter) recentRecord(fp string, occurredAt time.Time) (AlertRecord
 	if err != nil {
 		return AlertRecord{}, false
 	}
-	for i := len(records) - 1; i >= 0; i-- {
-		rec := records[i]
+	for _, rec := range slices.Backward(records) {
 		if rec.Fingerprint != fp || rec.Status == AlertStatusSuppressed {
 			continue
 		}
@@ -340,6 +364,7 @@ func appendAlertRecord(path string, rec AlertRecord) error {
 	return nil
 }
 
+// ReadAlertRecords reads up to limit most-recent alert records from path.
 func ReadAlertRecords(path string, limit int) ([]AlertRecord, error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
