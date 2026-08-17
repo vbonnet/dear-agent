@@ -828,41 +828,63 @@ func TestSpecReviewOwnerPath_CoversExactCanonicalSpecAuthoringSurface(t *testing
 	}
 }
 
-func TestBuildReviewPlan_RequiresHumanForReviewEnforcementOwnerChanges(t *testing.T) {
+func TestSpecReviewDependencyPathDoesNotCallManifestsSpecOwners(t *testing.T) {
+	for _, path := range []string{"go.mod", "go.sum", "go.work", "go.work.sum", "vendor/example/module.go"} {
+		if !specReviewDependencyPath(path) {
+			t.Errorf("reviewer dependency path %q is not protected", path)
+		}
+		if specReviewOwnerPath(path) {
+			t.Errorf("reviewer dependency path %q is mislabeled as a SPEC owner", path)
+		}
+	}
+	for _, path := range []string{"nested/go.mod", "go.mod.backup", "vendors/example.go", "docs/ordinary.md"} {
+		if specReviewDependencyPath(path) {
+			t.Errorf("ordinary path %q entered the reviewer dependency boundary", path)
+		}
+	}
+}
+
+func TestBuildReviewPlan_RequiresHumanForReviewEnforcementChanges(t *testing.T) {
 	for _, tc := range []struct {
 		path       string
 		wantReview bool
+		reason     string
 	}{
-		{path: specAuthoringPolicyPath, wantReview: true},
-		{path: "docs/templates/SPEC.md.tmpl", wantReview: true},
-		{path: "spec-governance/skills/write-spec/SKILL.md", wantReview: true},
-		{path: "spec-governance/skills/write-spec/references/contract-model.md", wantReview: true},
-		{path: "spec-governance/skills/write-spec/references/ears-and-bdd.md", wantReview: true},
-		{path: "spec-governance/skills/audit-specs/SKILL.md", wantReview: true},
-		{path: "spec-governance/skills/audit-specs/references/audit-verdicts.md", wantReview: true},
-		{path: "spec-governance/skills/audit-specs/references/report-schema.md", wantReview: true},
-		{path: activeHarnessRegistryPath, wantReview: true},
-		{path: ".github/workflows/review.yml", wantReview: true},
-		{path: "cmd/ai-review/main.go", wantReview: true},
-		{path: "internal/earslint/lint.go", wantReview: true},
-		{path: "internal/markdownvisible/markdown.go", wantReview: true},
-		{path: ".github/rulesets/main.json", wantReview: true},
-		{path: "go.mod", wantReview: true},
-		{path: "go.sum", wantReview: true},
-		{path: "go.work", wantReview: true},
-		{path: "go.work.sum", wantReview: true},
-		{path: "vendor/example/module.go", wantReview: true},
+		{path: specAuthoringPolicyPath, wantReview: true, reason: "enforcement owner change"},
+		{path: "docs/templates/SPEC.md.tmpl", wantReview: true, reason: "enforcement owner change"},
+		{path: "spec-governance/skills/write-spec/SKILL.md", wantReview: true, reason: "enforcement owner change"},
+		{path: "spec-governance/skills/write-spec/references/contract-model.md", wantReview: true, reason: "enforcement owner change"},
+		{path: "spec-governance/skills/write-spec/references/ears-and-bdd.md", wantReview: true, reason: "enforcement owner change"},
+		{path: "spec-governance/skills/audit-specs/SKILL.md", wantReview: true, reason: "enforcement owner change"},
+		{path: "spec-governance/skills/audit-specs/references/audit-verdicts.md", wantReview: true, reason: "enforcement owner change"},
+		{path: "spec-governance/skills/audit-specs/references/report-schema.md", wantReview: true, reason: "enforcement owner change"},
+		{path: activeHarnessRegistryPath, wantReview: true, reason: "enforcement owner change"},
+		{path: ".github/workflows/review.yml", wantReview: true, reason: "enforcement owner change"},
+		{path: "cmd/ai-review/main.go", wantReview: true, reason: "enforcement owner change"},
+		{path: "internal/earslint/lint.go", wantReview: true, reason: "enforcement owner change"},
+		{path: "internal/markdownvisible/markdown.go", wantReview: true, reason: "enforcement owner change"},
+		{path: ".github/rulesets/main.json", wantReview: true, reason: "enforcement owner change"},
+		{path: "go.mod", wantReview: true, reason: "reviewer dependency graph change"},
+		{path: "go.sum", wantReview: true, reason: "reviewer dependency graph change"},
+		{path: "go.work", wantReview: true, reason: "reviewer dependency graph change"},
+		{path: "go.work.sum", wantReview: true, reason: "reviewer dependency graph change"},
+		{path: "vendor/example/module.go", wantReview: true, reason: "reviewer dependency graph change"},
 		{path: "docs/ordinary.md"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			repo := newReviewRepo(t)
+			before, after := "before\n", "after\n"
+			if tc.path == "go.mod" {
+				before = dependabotCandidateBaseGoMod
+				after = strings.Replace(dependabotCandidateBaseGoMod, "v1.2.3", "v1.2.4", 1)
+			}
 			if tc.path != specAuthoringPolicyPath && tc.path != activeHarnessRegistryPath {
-				writeReviewFile(t, repo, tc.path, "before\n")
+				writeReviewFile(t, repo, tc.path, before)
 				gittest.Run(t, repo, "add", tc.path)
 				gittest.Run(t, repo, "commit", "-m", "add review input")
 			}
 			base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
-			writeReviewFile(t, repo, tc.path, "after\n")
+			writeReviewFile(t, repo, tc.path, after)
 			gittest.Run(t, repo, "add", tc.path)
 			gittest.Run(t, repo, "commit", "-m", "change review input")
 			head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
@@ -875,13 +897,69 @@ func TestBuildReviewPlan_RequiresHumanForReviewEnforcementOwnerChanges(t *testin
 			if plan.ReviewNeeded != tc.wantReview {
 				t.Fatalf("ReviewNeeded = %t, want %t; reasons=%v", plan.ReviewNeeded, tc.wantReview, plan.HumanReasons)
 			}
-			if tc.wantReview && (!plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), "enforcement owner change")) {
-				t.Fatalf("protected owner change did not require maintainer review: %#v", plan)
+			if tc.wantReview && (!plan.needsHuman() || !strings.Contains(strings.Join(plan.HumanReasons, "\n"), tc.reason)) {
+				t.Fatalf("protected enforcement change did not require maintainer review: %#v", plan)
 			}
 			if tc.wantReview && !plan.ReviewRelevant {
 				t.Fatalf("protected owner change could publish a neutral review plan: %#v", plan)
 			}
 		})
+	}
+}
+
+func TestBuildReviewPlanMarksOnlySafeModuleDeltaAsDependabotCandidate(t *testing.T) {
+	repo := newReviewRepo(t)
+	baseSum := "example.com/direct v1.2.3 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
+	writeReviewFile(t, repo, "go.mod", dependabotCandidateBaseGoMod)
+	writeReviewFile(t, repo, "go.sum", baseSum)
+	gittest.Run(t, repo, "add", "go.mod", "go.sum")
+	gittest.Run(t, repo, "commit", "-m", "add module inputs")
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+
+	headMod := strings.Replace(dependabotCandidateBaseGoMod, "v1.2.3", "v1.2.4", 1)
+	writeReviewFile(t, repo, "go.mod", headMod)
+	writeReviewFile(t, repo, "go.sum", "example.com/direct v1.2.4 h1:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\n")
+	gittest.Run(t, repo, "add", "go.mod", "go.sum")
+	gittest.Run(t, repo, "commit", "-m", "bump dependency version")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	plan, err := buildReviewPlan(context.Background(), base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.DependabotModuleOnlyCandidate || !plan.ReviewNeeded || !plan.ReviewRelevant || !plan.needsHuman() {
+		t.Fatalf("dependency-version-led module plan = %#v", plan)
+	}
+	if len(plan.HumanReasons) != 2 || !onlyReviewerDependencyReasons(plan.HumanReasons) {
+		t.Fatalf("dependency-version-led module reasons = %v", plan.HumanReasons)
+	}
+
+	marked, err := buildReviewPlanWithPRBody(context.Background(), base, head, "HUMAN REVIEW REQUIRED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.DependabotModuleOnlyCandidate || len(marked.EscalationTriggers) == 0 {
+		t.Fatalf("explicit escalation entered dependency automation path: %#v", marked)
+	}
+}
+
+func TestBuildReviewPlanSurfacesDependabotCandidateEvidenceErrors(t *testing.T) {
+	repo := newReviewRepo(t)
+	writeReviewFile(t, repo, "go.mod", dependabotCandidateBaseGoMod)
+	gittest.Run(t, repo, "add", "go.mod")
+	gittest.Run(t, repo, "commit", "-m", "add module input")
+	base := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+
+	writeReviewFile(t, repo, "go.mod", "module example.com/project\nrequire (\n")
+	gittest.Run(t, repo, "add", "go.mod")
+	gittest.Run(t, repo, "commit", "-m", "malform module input")
+	head := strings.TrimSpace(gittest.Run(t, repo, "rev-parse", "HEAD"))
+	chdir(t, repo)
+
+	_, err := buildReviewPlan(context.Background(), base, head)
+	if err == nil || !strings.Contains(err.Error(), "evaluate Dependabot module-only candidate") || !strings.Contains(err.Error(), "parse head go.mod") {
+		t.Fatalf("buildReviewPlan() error = %v, want wrapped malformed candidate evidence", err)
 	}
 }
 
@@ -1299,34 +1377,9 @@ func TestSemanticOwnerIndexPartitionsEveryUnchangedSPECExactlyOnce(t *testing.T)
 
 func TestCurrentSPECCorpusFitsSemanticOwnerShardBounds(t *testing.T) {
 	repositoryRoot := filepath.Clean(filepath.Join("..", ".."))
-	corpus := make(map[string][]byte)
-	err := filepath.Walk(repositoryRoot, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			switch info.Name() {
-			case ".git", "node_modules", ".cache":
-				if path != repositoryRoot {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if info.Name() != "SPEC.md" {
-			return nil
-		}
-		relative, err := filepath.Rel(repositoryRoot, path)
-		if err != nil {
-			return err
-		}
-		blob, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		corpus[filepath.ToSlash(relative)] = blob
-		return nil
-	})
+	head := strings.TrimSpace(gittest.Run(t, repositoryRoot, "rev-parse", "--verify", "HEAD^{commit}"))
+	chdir(t, repositoryRoot)
+	corpus, err := loadHeadSpecCorpus(context.Background(), head)
 	if err != nil {
 		t.Fatal(err)
 	}

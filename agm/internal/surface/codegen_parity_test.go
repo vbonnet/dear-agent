@@ -30,6 +30,11 @@ func TestParity_GetSession_MCPExists(t *testing.T) {
 	t.Log("MCP tool 'agm_get_session' declared for op 'get_session'")
 }
 
+func TestParity_GetSessionOutput_MCPExists(t *testing.T) {
+	// Verify MCP tool "agm_get_session_output" is registered
+	t.Log("MCP tool 'agm_get_session_output' declared for op 'get_session_output'")
+}
+
 func TestParity_SearchSessions_CLIExists(t *testing.T) {
 	// Verify CLI command "session search" is registered
 	t.Log("CLI command 'session search' declared for op 'search_sessions'")
