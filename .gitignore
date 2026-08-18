@@ -119,3 +119,6 @@ infra/*.tfvars
 
 # Compiled ci-escape-analysis binary (built into the repo root by `go build ./...`)
 /ci-escape-analysis
+
+# Compiled docref-lint binary (built into the repo root by `go build ./tools/docref-lint`)
+/docref-lint
