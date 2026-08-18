@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -152,9 +153,13 @@ func captureLiveOutput(ctx *OpContext, result *GetSessionOutputResult, status, t
 		stillExists, existsErr = ctx.Tmux.HasSession(tmuxName)
 	}
 	if existsErr != nil || stillExists {
+		// Carry the capture failure, joined with the probe failure when both
+		// exist. Passing existsErr alone meant that a successful liveness
+		// probe on a live pane produced an AGM-017 unwrapping to nil, so
+		// in-process callers could not identify what actually failed (OPS-92).
 		return false, ErrOutputUnavailable(tmuxName,
 			"live capture failed for a running session (a durable final capture, if any, describes an earlier completion, not the current task)",
-			existsErr)
+			errors.Join(captureErr, existsErr))
 	}
 	return false, nil
 }

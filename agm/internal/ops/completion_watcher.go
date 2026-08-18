@@ -92,6 +92,12 @@ type sessionObservation struct {
 	// failed write can be retried on later scans without re-notifying the
 	// operator about the same exit on every tick.
 	exitPersisted bool
+	// idlePersisted tracks whether the DONE/final-output write for a reported
+	// idle completion actually landed. Separate from reportedIdle so a failed
+	// write is retried on later stable scans without re-emitting the event to
+	// the operator; without it a durable session stayed WORKING with no final
+	// capture until new pane activity or a watcher restart.
+	idlePersisted bool
 	lastTail      string
 	baselined     bool
 }
@@ -184,7 +190,16 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	if cw.observeActivity(obs, m, tail) {
 		return nil
 	}
-	if !obs.activitySeen || obs.reportedIdle {
+	if obs.reportedIdle {
+		// The completion was already reported. If its durable write failed,
+		// quietly retry it here rather than re-emitting the event, so the
+		// session does not stay WORKING with no final capture.
+		if !obs.idlePersisted {
+			obs.idlePersisted = cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
+		}
+		return nil
+	}
+	if !obs.activitySeen {
 		return nil
 	}
 	// Content is stable. Completion additionally requires the composer to be
@@ -209,7 +224,7 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 		Output:         obs.lastTail,
 		DetectedAt:     time.Now(),
 	}
-	cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
+	obs.idlePersisted = cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
 	return event
 }
 

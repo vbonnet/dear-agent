@@ -4,7 +4,7 @@
 
 ## Overview
 
-The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations without accessing conversation content.
+The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations. Every tool exposes metadata only, with one deliberate exception: `agm_get_session_output` returns captured pane content and is therefore the single conversation-content surface (see Privacy & Security).
 
 One private production registration seam owns the exact compiled tool set.
 The logical-registry-to-compiled-wire relationship and its finite compatibility
@@ -15,7 +15,7 @@ actual SDK registration path.
 
 1. **Discoverability**: Enable MCP clients to discover and query AGM sessions
 2. **Performance**: Achieve p99 <100ms response times for 1000+ sessions
-3. **Privacy**: Expose only metadata, never conversation content
+3. **Privacy**: Expose only metadata, with the single audited exception of `agm_get_session_output`, whose captured pane content may include prompts, responses, file paths, and rendered credentials. No other tool returns conversation content.
 4. **Integration**: Seamless integration with supported harness clients via MCP protocol
 
 ## EARS Requirements

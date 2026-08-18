@@ -20,21 +20,46 @@ func ListSessionsWithInfoStrict() ([]SessionInfo, error) {
 	socketPath := GetSocketPath()
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}:#{session_attached_list}")
 	if err != nil {
-		// A running server with zero sessions exits 1 ("no sessions"); that
-		// is a successful observation of an empty list, not a failure to
-		// observe. Mirror ListSessionsWithInfo's classification: only a
-		// non-ExitError (socket/permission/timeout) is a real failure.
 		timeoutError := &TimeoutError{}
 		if errors.As(err, &timeoutError) {
 			return nil, err
 		}
+		// tmux exits non-zero both when it observed an empty server and when
+		// it could not reach one at all, so the exit status alone cannot tell
+		// them apart. Classifying on *exec.ExitError — as ListSessionsWithInfo
+		// does — turns a permission-denied or otherwise unreachable socket
+		// into a successful observation of zero sessions, which is exactly the
+		// misclassification this strict form exists to prevent. Decide on the
+		// message tmux actually printed instead.
 		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
+		if errors.As(err, &exitErr) && isEmptyServerOutput(string(output)) {
 			return []SessionInfo{}, nil
 		}
-		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
+		return nil, fmt.Errorf("failed to list tmux sessions: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return parseSessionInfoLines(string(output)), nil
+}
+
+// isEmptyServerOutput reports whether tmux's own message describes a server
+// that was reached and holds no sessions, or no server at all — both of which
+// are genuine observations that nothing is running. Anything else (permission
+// denied, a socket that exists but cannot be spoken to, an unexpected
+// diagnostic) is a failure to observe and must not read as "no sessions".
+func isEmptyServerOutput(output string) bool {
+	msg := strings.ToLower(strings.TrimSpace(output))
+	if msg == "" {
+		return false
+	}
+	switch {
+	case strings.Contains(msg, "no server running"):
+		return true
+	case strings.Contains(msg, "no sessions"):
+		return true
+	case strings.Contains(msg, "error connecting") && strings.Contains(msg, "no such file or directory"):
+		return true
+	default:
+		return false
+	}
 }
 
 // parseSessionInfoLines parses the shared "name:count:attached_list" format
