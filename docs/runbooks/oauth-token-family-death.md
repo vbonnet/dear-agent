@@ -51,7 +51,7 @@ It shadows healthy OAuth on >= 2.1.205 and reintroduces a worse failure
 (anthropics/claude-code#11587, #9694, #23568). Any broker-style fix must not
 reintroduce that shadowing.
 
-## Do NOT assume `-force` is the culprit
+## Do NOT assume `-force` is the culprit (superseded 2026-08-15 for the LaunchAgent -- see below)
 
 The 30-minute `-force` cadence rotates the token ~48x/day, which looks like an
 obvious suspect. The evidence contradicts it: the audit log shows ~380 forced
@@ -64,6 +64,21 @@ client decides to refresh on its own.
 An earlier sleep/wake thundering-herd hypothesis was superseded by the
 fingerprint evidence below. The many-client structure is a standing risk, but
 it was not the cause of either observed death.
+
+**2026-08-15 update:** the analysis above still holds for the *narrow*
+steady-state-rotation-doesn't-kill-the-family claim it was measuring, but do
+not read it as "keep `-force` on the token-refresher LaunchAgent." A stale
+installed LaunchAgent (`-force`, no `-cadence`) was caught mid-incident
+running forced successful refreshes every ~30 minutes for hours after a
+reauth (ce-sjgxo). Native Claude Code runtimes refresh the same credentials
+file without taking dear-agent's lock, so an unconditional forced rotation on
+this job widens the replay race described above instead of shrinking it. The
+LaunchAgent now runs `-cadence -expiry-skew 45m` (see
+`deploy/launchd/com.dear-agent.token-refresher.plist`): it only rotates when
+the access token is actually near expiry, with a skew wide enough that some
+tick always catches it before the next `StartInterval`. Do not revert the
+LaunchAgent to `-force` based on the zero-deaths evidence above -- that
+evidence never covered the case a stale forced-refresh install actually hit.
 
 ## The confirmed cause (2026-07-21, ce-77ip.7)
 
