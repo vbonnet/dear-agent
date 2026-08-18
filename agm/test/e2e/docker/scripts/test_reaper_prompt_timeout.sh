@@ -19,54 +19,27 @@ AGM_SOCKET="/tmp/agm.sock"
 
 # Cleanup from previous runs
 tmux -S "$AGM_SOCKET" kill-session -t "$TEST_SESSION" 2>/dev/null || true
-rm -rf "$SESSIONS_DIR/$TEST_SESSION" 2>/dev/null || true
+rm -rf "$SESSIONS_DIR"/* 2>/dev/null || true
 rm -f "$REAPER_LOG" 2>/dev/null || true
 
 echo "Step 1: Create tmux session with stuck Claude (never shows prompt)..."
-# Create a Python script that simulates stuck Claude - outputs text but never shows prompt
-cat > /tmp/mock_claude_stuck.py <<'PYTHON'
-#!/usr/bin/env python3
-"""
-Mock Claude that never shows prompt (simulates stuck/busy state).
-Used to test reaper's timeout and fallback behavior.
-"""
-
-import sys
-import time
-
-def main():
-    print("Mock Claude Code v1.0 (Stuck Simulation)")
-    print("Processing request... (will never finish)")
-    print()
-
-    # Never show prompt, just keep outputting dots to simulate activity
-    try:
-        while True:
-            sys.stdout.write(".")
-            sys.stdout.flush()
-            time.sleep(5)
-    except KeyboardInterrupt:
-        print()
-        print("Interrupted")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-PYTHON
-
-chmod +x /tmp/mock_claude_stuck.py
-
-# Run stuck Python script directly in tmux session
-tmux -S "$AGM_SOCKET" new-session -d -s "$TEST_SESSION" python3 /tmp/mock_claude_stuck.py
+# `claude --stuck` never reaches the prompt, exercising the reaper's
+# prompt-detection timeout and its timer fallback. Same binary as the other
+# tests: the pane process must be named `claude` for AGM to see a live
+# harness rather than a zombie.
+tmux -S "$AGM_SOCKET" new-session -d -s "$TEST_SESSION" claude --stuck
 sleep 2  # Wait for mock Claude to start
 echo "✓ Tmux session created with stuck Claude (socket: $AGM_SOCKET)"
 
 echo ""
 echo "Step 2: Create AGM session manifest..."
-SESSION_DIR="$SESSIONS_DIR/$TEST_SESSION"
-mkdir -p "$SESSION_DIR"
-
 SESSION_UUID=$(uuidgen 2>/dev/null || echo "test-uuid-$(date +%s)")
+# Keyed by session ID, not session name: ops.ArchiveSession looks for the
+# legacy directory at <sessions-dir>/<session-id>/manifest.yaml and moves it to
+# <sessions-dir>/.archive-old-format/<session-id>/. A name-keyed directory is
+# invisible to that migration, so the archive assertions below never fired.
+SESSION_DIR="$SESSIONS_DIR/$SESSION_UUID"
+mkdir -p "$SESSION_DIR"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 cat > "$SESSION_DIR/manifest.yaml" <<EOF
@@ -86,6 +59,17 @@ EOF
 
 echo "✓ AGM manifest created: $SESSION_DIR/manifest.yaml"
 
+# The reaper resolves its target through the AGM lifecycle store, not through
+# this manifest: ops.ArchiveSession looks the session up by identifier, and the
+# reaper's archive preflight runs before it touches the pane. A fixture with
+# only a manifest.yaml dies at preflight with AGM-001 and never reaps anything.
+/home/testuser/bin/seed-session \
+    --session-id "$SESSION_UUID" \
+    --name "$TEST_SESSION" \
+    --harness claude-code \
+    --project "$SESSION_DIR"
+echo "✓ AGM lifecycle record seeded: $SESSION_UUID"
+
 echo ""
 echo "Step 3: Verify stuck Claude is running (no prompt expected)..."
 sleep 1
@@ -102,10 +86,16 @@ fi
 echo ""
 echo "Step 4: Spawn async archive with agm-reaper..."
 echo "Expected: Reaper will timeout after 90s, fall back to 60s wait"
-echo "Total expected time: ~150s (90s timeout + 60s fallback)"
+# 90s prompt detection + 60s fallback gets only as far as sending /exit. A
+# stuck harness does not act on it, so the reaper then runs the full pane-close
+# escalation — wait for close, SIGTERM, SIGKILL, kill-session — before it can
+# archive. Budgeting the old ~150s cut the run off mid-escalation and reported
+# a timeout for a reaper that was working exactly as designed.
+echo "Total expected time: ~230s (90s prompt + 60s fallback + pane-close escalation)"
 
 /home/testuser/bin/agm-reaper \
     --session "$TEST_SESSION" \
+    --session-id "$SESSION_UUID" \
     --log-file "$REAPER_LOG" \
     --sessions-dir "$SESSIONS_DIR" &
 
@@ -113,12 +103,13 @@ REAPER_PID=$!
 echo "✓ Reaper spawned with PID: $REAPER_PID"
 
 echo ""
-echo "Step 5: Monitor reaper log for timeout fallback (max 180s)..."
+echo "Step 5: Monitor reaper log for timeout fallback (max 300s)..."
 START_TIME=$(date +%s)
-TIMEOUT=180
+TIMEOUT=300
 
 # Wait for timeout message in log
 TIMEOUT_DETECTED=false
+FALLBACK_DETECTED=false
 while true; do
     CURRENT_TIME=$(date +%s)
     ELAPSED=$((CURRENT_TIME - START_TIME))
@@ -139,9 +130,13 @@ while true; do
         fi
     fi
 
-    # Check for fallback message
+    # Check for fallback message. Latched like the one above: unlatched, it
+    # re-printed every 2s for the rest of the run.
     if [ -f "$REAPER_LOG" ] && grep -q "Falling back" "$REAPER_LOG"; then
-        echo "✓ Fallback to fixed wait activated (${ELAPSED}s)"
+        if [ "$FALLBACK_DETECTED" = "false" ]; then
+            echo "✓ Fallback to fixed wait activated (${ELAPSED}s)"
+            FALLBACK_DETECTED=true
+        fi
     fi
 
     # Check for successful completion (reaper should complete even without prompt)
@@ -166,33 +161,36 @@ if [ $ELAPSED_FINAL -lt 140 ]; then
     exit 1
 fi
 
-if [ $ELAPSED_FINAL -gt 180 ]; then
-    echo "⚠️  Took longer than expected (${ELAPSED_FINAL}s > 180s)"
+if [ $ELAPSED_FINAL -gt 280 ]; then
+    echo "⚠️  Took longer than expected (${ELAPSED_FINAL}s > 280s)"
     echo "Still acceptable, just slower than ideal"
 fi
 
-echo "✓ Timing is reasonable (${ELAPSED_FINAL}s, expected ~150s)"
+echo "✓ Timing is reasonable (${ELAPSED_FINAL}s, expected ~230s)"
 
 echo ""
 echo "Step 7: Verify session archived despite timeout..."
-ARCHIVE_DIR="$SESSIONS_DIR/.archive-old-format/$TEST_SESSION"
-
-# Find the archived directory (may have timestamp suffix)
-ACTUAL_ARCHIVE=$(find "$SESSIONS_DIR/.archive-old-format" -name "${TEST_SESSION}*" -type d 2>/dev/null | head -1)
+# The legacy directory is keyed by session ID, and may carry a timestamp
+# suffix when a previous archive of the same id already exists.
+ACTUAL_ARCHIVE=$(find "$SESSIONS_DIR/.archive-old-format" -name "${SESSION_UUID}*" -type d 2>/dev/null | head -1)
 
 if [ -z "$ACTUAL_ARCHIVE" ]; then
-    echo "✗ Archived session not found"
+    echo "✗ Archived session directory not found"
     ls -la "$SESSIONS_DIR/.archive-old-format" 2>/dev/null || echo "(archive dir not found)"
     exit 1
 fi
+echo "✓ Legacy session directory moved to $ACTUAL_ARCHIVE"
 
-MANIFEST_PATH="$ACTUAL_ARCHIVE/manifest.yaml"
-
-if grep -q "lifecycle: archived" "$MANIFEST_PATH"; then
-    echo "✓ Session manifest shows lifecycle: archived"
+# Assert the archive in the lifecycle store — the only thing ArchiveSession
+# updates. The legacy directory is MOVED verbatim, so its manifest.yaml still
+# carries whatever lifecycle it had on disk.
+SESSION_STATUS=$(agm session get "$SESSION_UUID" -o json 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["status"])' 2>/dev/null || echo "")
+if [ "$SESSION_STATUS" = "archived" ]; then
+    echo "✓ Lifecycle store reports the session archived"
 else
-    echo "✗ Session not archived in manifest"
-    cat "$MANIFEST_PATH"
+    echo "✗ Lifecycle store reports status '${SESSION_STATUS:-<unavailable>}', expected 'archived'"
+    agm session get "$SESSION_UUID" -o json 2>&1 | head -5
     exit 1
 fi
 
