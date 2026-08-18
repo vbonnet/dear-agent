@@ -65,6 +65,12 @@ type Escape struct {
 	PRNumber int
 	// PRChecks is every check that reported on the pull request head.
 	PRChecks []CheckRun
+	// PRChecksKnown records whether the check lookup succeeded. A denied or
+	// timed-out query returns an empty slice, which is indistinguishable from
+	// "the check genuinely never reported" — and that reading produces
+	// `never-ran` plus advice to widen a path filter, off the back of a
+	// transient API error.
+	PRChecksKnown bool
 	// RequiredContexts is the repository ruleset's required status checks.
 	RequiredContexts []RequiredContext
 	// RequiredKnown records whether the ruleset lookup actually succeeded.
@@ -125,6 +131,10 @@ const (
 	// scope-gap nor the merge-skew story applies, and asserting either would
 	// send the reader after a scoping or determinism problem that is not there.
 	ClassInconclusive Class = "inconclusive"
+	// ClassUnknown — the facts needed to classify could not be gathered. Not a
+	// verdict, an admission: every other class would be asserting something
+	// about a pull request whose checks were never successfully read.
+	ClassUnknown Class = "unknown"
 )
 
 // Finding is the classification plus the prose the retro needs.
@@ -154,7 +164,7 @@ func (f Finding) PricesPlacement() bool {
 	switch f.Class {
 	case ClassNeverRan, ClassSelectionGap, ClassScopeGap:
 		return true
-	case ClassBypassed, ClassGatingGap, ClassPostMergeOnly, ClassMergeSkew, ClassInconclusive:
+	case ClassBypassed, ClassGatingGap, ClassPostMergeOnly, ClassMergeSkew, ClassInconclusive, ClassUnknown:
 		return false
 	default:
 		return false
@@ -200,6 +210,20 @@ func Classify(e Escape) Finding {
 			SuggestedActions: []string{
 				"Confirm against bypassed-merge-audit.yml whether this was an authorised bypass.",
 				"If it was not, the gap is in branch protection, not in CI selection.",
+			},
+		}
+	}
+
+	// Guard before any statement about what did or did not report. Without it,
+	// a denied check-runs query produces an empty slice, `never-ran`, and a
+	// recommendation to widen a path filter that was never involved.
+	if !e.PRChecksKnown {
+		return Finding{
+			Class:   ClassUnknown,
+			Summary: fmt.Sprintf("The checks that reported on PR #%d could not be read, so how %q got past pre-merge is unresolved. This is a gap in the evidence, not a finding about the pull request.", e.PRNumber, e.FailingCheck),
+			SuggestedActions: []string{
+				"Fix the failure on main first; the classification can be redone once the lookup succeeds.",
+				fmt.Sprintf("Re-run the analysis by hand to establish the class: `ci-escape-analysis -repo <repo> -check %q -sha %s -pr %d`.", e.FailingCheck, shortSHA(e.MainSHA), e.PRNumber),
 			},
 		}
 	}
@@ -316,6 +340,10 @@ type ROI struct {
 	CureAssumed bool
 	// Escapes is how many failures were counted in the window.
 	Escapes float64
+	// EscapesTruncated is true when the failure history hit the API page limit,
+	// so older failures inside the window were never seen and the numerator is
+	// a lower bound.
+	EscapesTruncated bool
 	// EscapesScope names what Escapes actually counted. The sweep counts
 	// distinct failing commits for the whole producing workflow, not for the
 	// individual check, because a multi-job workflow reports one run per job
@@ -390,6 +418,9 @@ func (r ROI) caveats() []string {
 	if r.PreventionTruncated {
 		out = append(out, "prevention cost is a lower bound: the run history was truncated at the API page limit")
 	}
+	if r.EscapesTruncated {
+		out = append(out, "the escape count is a lower bound: the failure history was truncated at the API page limit")
+	}
 	return out
 }
 
@@ -434,6 +465,10 @@ func (r ROI) Explain() string {
 		scope = "unspecified scope"
 	}
 	fmt.Fprintf(&b, "  Frequency  = %.0f — counted over %s\n", r.Escapes, scope)
+	if r.EscapesTruncated {
+		fmt.Fprintf(&b, "               LOWER BOUND; failure history truncated at the API page\n")
+		fmt.Fprintf(&b, "               limit, so older failures in the window were not counted.\n")
+	}
 	scope = r.PreventionScope
 	if scope == "" {
 		scope = "unspecified scope"

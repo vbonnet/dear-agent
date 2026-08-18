@@ -126,15 +126,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if escape.PRNumber < 0 {
 		escape.PRNumber = lookupPR(*repo, *sha, stderr)
 	}
+	escape.PRChecksKnown = true
 	if escape.PRNumber > 0 {
-		escape.PRChecks = lookupPRChecks(*repo, escape.PRNumber, stderr)
+		escape.PRChecks, escape.PRChecksKnown = lookupPRChecks(*repo, escape.PRNumber, stderr)
 	}
 	escape.RequiredContexts, escape.RequiredKnown = lookupRequiredContexts(*repo, stderr)
 
 	escapes := *escapesFlag
+	escapesTruncated := false
 	escapeScope := fmt.Sprintf("escapes supplied on the command line for %d days", *windowDays)
 	if escapes < 0 {
-		escapes = countEscapes(*repo, *workflow, *windowDays, stderr)
+		escapes, escapesTruncated = countEscapes(*repo, *workflow, *windowDays, stderr)
 		escapeScope = fmt.Sprintf("distinct failing commits for workflow %q over %d days", *workflow, *windowDays)
 	}
 
@@ -157,6 +159,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			CureMinutes:         *cureMinutes,
 			CureAssumed:         !set["cure-minutes"],
 			Escapes:             escapes,
+			EscapesTruncated:    escapesTruncated,
 			EscapesScope:        escapeScope,
 			PreventionMinutes:   prevention,
 			PreventionMeasured:  preventionMeasured,
@@ -215,8 +218,18 @@ func runGH(what string, stderr io.Writer, args ...string) error {
 	return nil
 }
 
+// lookupPR finds the pull request that actually introduced this commit on main.
+//
+// GitHub associates a commit with every pull request that contains it, so the
+// first result is not necessarily the one that merged it: an unrelated open
+// pull request, or one targeting another branch, would otherwise supply the
+// head checks and the merge timestamp for the whole classification — and a
+// direct push could be dressed up as a merge. Only a pull request that merged
+// into main with this exact merge commit qualifies; anything else is no pull
+// request at all, which is the honest answer for a direct push.
 func lookupPR(repo, sha string, stderr io.Writer) int {
-	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/commits/%s/pulls", repo, sha), "--jq", ".[0].number // 0")
+	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/commits/%s/pulls", repo, sha),
+		"--jq", fmt.Sprintf(`[.[] | select(.merged_at != null and .base.ref == "main" and .merge_commit_sha == %q)] | .[0].number // 0`, sha))
 	if !ok {
 		return 0
 	}
@@ -235,15 +248,15 @@ func lookupPR(repo, sha string, stderr io.Writer) int {
 // behind a success that did not exist at merge time. Attempts that completed
 // after the merge are therefore discarded, and the latest attempt that had
 // completed before it wins.
-func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
+func lookupPRChecks(repo string, pr int, stderr io.Writer) ([]cihealth.CheckRun, bool) {
 	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, pr),
 		"--jq", `"\(.head.sha) \(.merged_at // "")"`)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	head, mergedAtRaw, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
 	if head == "" {
-		return nil
+		return nil, false
 	}
 	// An open pull request has no merge time; everything currently attached is
 	// the current truth for it.
@@ -256,14 +269,21 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
 		fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, head),
 		"--jq", ".check_runs[] | {name: .name, conclusion: .conclusion, appId: .app.id, completedAt: .completed_at}")
 	if !ok {
-		return nil
+		return nil, false
 	}
 
 	type attempt struct {
 		run       cihealth.CheckRun
 		completed time.Time
 	}
-	latest := map[string]attempt{}
+	// Keyed by name AND producing app. Collapsing on the name alone lets a
+	// foreign app's later same-named check displace the GitHub Actions attempt
+	// before isRequired ever gets to compare identities.
+	type key struct {
+		name  string
+		appID int64
+	}
+	latest := map[key]attempt{}
 
 	decoder := json.NewDecoder(strings.NewReader(string(out)))
 	for {
@@ -284,10 +304,11 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
 		if mergedKnown && completed.After(mergedAt) {
 			continue // a re-run after the merge; not what the gate saw
 		}
-		if seen, ok := latest[raw.Name]; ok && seen.completed.After(completed) {
+		k := key{name: raw.Name, appID: raw.AppID}
+		if seen, ok := latest[k]; ok && seen.completed.After(completed) {
 			continue
 		}
-		latest[raw.Name] = attempt{
+		latest[k] = attempt{
 			run:       cihealth.CheckRun{Name: raw.Name, Conclusion: raw.Conclusion, AppID: raw.AppID},
 			completed: completed,
 		}
@@ -297,7 +318,7 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
 	for _, a := range latest {
 		runs = append(runs, a.run)
 	}
-	return runs
+	return runs, true
 }
 
 // lookupRequiredContexts reads the branch ruleset. The second return value says
@@ -342,9 +363,9 @@ func lookupRequiredContexts(repo string, stderr io.Writer) ([]cihealth.RequiredC
 // as a separate escape lets one unresolved incident inflate the numerator until
 // it crosses a threshold and argues for a pre-merge gate that no additional
 // change ever escaped.
-func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) float64 {
+func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) (count float64, truncated bool) {
 	if workflow == "" {
-		return 0
+		return 0, false
 	}
 	// Every red conclusion, not just `failure`. Detection treats a timed-out or
 	// startup-failed workflow as red; counting only `failure` here would hand
@@ -353,16 +374,18 @@ func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) float
 	out, ok := gh(stderr, "run", "list", "--repo", repo, "--workflow", workflow,
 		"--branch", "main", "--limit", fmt.Sprint(runPageLimit),
 		"--json", "createdAt,headSha,conclusion",
-		"--jq", fmt.Sprintf("[.[] | select(.createdAt > (now - %d*86400 | todate)) | select(%s) | .headSha] | unique | length",
+		"--jq", fmt.Sprintf(`"\(length) \([.[] | select(.createdAt > (now - %d*86400 | todate)) | select(%s) | .headSha] | unique | length)"`,
 			windowDays, jqInSet(".conclusion", redConclusions)))
 	if !ok {
-		return 0
+		return 0, false
 	}
-	var count float64
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%f", &count); err != nil {
-		return 0
+	var fetched int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %f", &fetched, &count); err != nil {
+		return 0, false
 	}
-	return count
+	// `--limit` is a fetch cap, not pagination: hitting it means older failures
+	// inside the window were never seen, so the numerator is a lower bound.
+	return count, fetched >= runPageLimit
 }
 
 // estimatePrevention is the Prevention Cost term: the wall-clock this workflow

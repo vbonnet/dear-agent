@@ -67,6 +67,16 @@ talk to GitHub, and mutate issues.
 
 **CI-ESCAPE-21** When the system counts escapes, the system shall count every conclusion it treats as red, so detection and the ROI numerator cannot disagree.
 
+**CI-ESCAPE-22** When the system judges whether a workflow is currently red on main, the system shall consider only runs from events that evaluate main, and shall exclude workflows whose checked-out definition has no trigger reaching main; the system shall not expire health state on the ROI lookback window.
+
+**CI-ESCAPE-23** When the system identifies the pull request that introduced a commit on main, the system shall require that the pull request merged into main with that commit as its merge commit, and shall otherwise report no pull request.
+
+**CI-ESCAPE-24** When the check lookup for a pull request fails, the system shall report the checks as unknown rather than as an empty set.
+
+**CI-ESCAPE-25** When the system deduplicates check attempts, the system shall key them by producing app as well as name.
+
+**CI-ESCAPE-26** When the escape-count query reaches the API page limit, the system shall report the count as truncated.
+
 **CI-ESCAPE-17** When any retrospective mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
 
 ## Test Traceability

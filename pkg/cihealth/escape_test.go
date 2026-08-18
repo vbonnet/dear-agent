@@ -28,6 +28,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         0,
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 			},
 			wantClass:      ClassBypassed,
 			wantSummaryHas: "0123456",
@@ -41,6 +42,7 @@ func TestClassify(t *testing.T) {
 				PRChecks:         []CheckRun{{Name: "govulncheck", Conclusion: ConclusionSuccess}},
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 			},
 			wantClass:      ClassNeverRan,
 			wantRefinable:  true,
@@ -55,6 +57,7 @@ func TestClassify(t *testing.T) {
 				PRChecks:         []CheckRun{{Name: buildCheck, Conclusion: ConclusionSkipped}},
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 			},
 			wantClass:      ClassSelectionGap,
 			wantRefinable:  true,
@@ -69,6 +72,7 @@ func TestClassify(t *testing.T) {
 				PRChecks:         []CheckRun{{Name: "Structural Health (baselined)", Conclusion: ConclusionFailure}},
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 			},
 			wantClass:      ClassGatingGap,
 			wantSummaryHas: "not a required status check",
@@ -82,6 +86,7 @@ func TestClassify(t *testing.T) {
 				PRChecks:         []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}},
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 			},
 			wantClass:      ClassGatingGap,
 			wantSummaryHas: "administrative bypass",
@@ -95,6 +100,7 @@ func TestClassify(t *testing.T) {
 				PRChecks:         []CheckRun{{Name: "Vulnerability Scan", Conclusion: ConclusionSuccess}},
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 				DiffScoped:       true,
 			},
 			wantClass:      ClassScopeGap,
@@ -109,6 +115,7 @@ func TestClassify(t *testing.T) {
 				PRChecks:         []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}},
 				RequiredContexts: required,
 				RequiredKnown:    true,
+				PRChecksKnown:    true,
 			},
 			wantClass:      ClassMergeSkew,
 			wantSummaryHas: "non-deterministic",
@@ -140,10 +147,10 @@ func TestClassify(t *testing.T) {
 func TestFilterRefinableOnlyForSelectionClasses(t *testing.T) {
 	required := []RequiredContext{{Name: buildCheck}}
 	cases := map[Class]Escape{
-		ClassBypassed:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 0},
-		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required, RequiredKnown: true},
-		ClassScopeGap:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, DiffScoped: true},
-		ClassMergeSkew: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}},
+		ClassBypassed:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 0, PRChecksKnown: true},
+		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required, RequiredKnown: true, PRChecksKnown: true},
+		ClassScopeGap:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, DiffScoped: true, PRChecksKnown: true},
+		ClassMergeSkew: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, PRChecksKnown: true},
 	}
 	for class, escape := range cases {
 		if got := Classify(escape); got.FilterRefinable {
@@ -307,6 +314,7 @@ func TestNonSuccessConclusionIsNotTreatedAsAPass(t *testing.T) {
 				PRNumber:        7,
 				PRChecks:        []CheckRun{{Name: "Integration Tests (affected)", Conclusion: conclusion}},
 				RequiredKnown:   true,
+				PRChecksKnown:   true,
 			}
 
 			if got := Classify(base); got.Class != ClassInconclusive {
@@ -335,6 +343,7 @@ func TestUnknownRequiredContextsDoNotAssertAdvisory(t *testing.T) {
 		MainSHA:         "abc1234def",
 		PRNumber:        9,
 		PRChecks:        []CheckRun{{Name: "Build & Test (ubuntu-latest)", Conclusion: ConclusionFailure}},
+		PRChecksKnown:   true,
 		RequiredKnown:   false,
 	})
 	if got.Class != ClassGatingGap {
@@ -409,8 +418,8 @@ func TestFullyMeasuredROIIsNotProvisional(t *testing.T) {
 // exist in this repository sends it to edit a file it cannot find.
 func TestRetroNamesOnlyMechanismsThatExist(t *testing.T) {
 	for _, escape := range []Escape{
-		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true},
-		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecks: []CheckRun{{Name: "c", Conclusion: ConclusionSkipped}}},
+		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true},
+		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true, PRChecks: []CheckRun{{Name: "c", Conclusion: ConclusionSkipped}}},
 	} {
 		body := Retro{FailingCheck: "c", Finding: Classify(escape), RequiredKnown: true}.Body()
 		for _, ghost := range []string{"changed-paths.yml", "global-inputs", "ADR-038"} {
@@ -497,6 +506,7 @@ func TestRequiredContextMatchesOnProducingApp(t *testing.T) {
 		PRNumber:         5,
 		RequiredContexts: required,
 		RequiredKnown:    true,
+		PRChecksKnown:    true,
 	}
 
 	// A foreign App's same-named failing check is not the required context, so
@@ -529,7 +539,7 @@ func TestRequiredContextMatchesOnProducingApp(t *testing.T) {
 func TestBriefDoesNotClaimToBeACompletedRetro(t *testing.T) {
 	r := Retro{
 		FailingCheck:  "Build & Test (ubuntu-latest)",
-		Finding:       Classify(Escape{PreMergeCapable: true, FailingCheck: "Build & Test (ubuntu-latest)", PRNumber: 1, RequiredKnown: true}),
+		Finding:       Classify(Escape{PreMergeCapable: true, FailingCheck: "Build & Test (ubuntu-latest)", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true}),
 		RequiredKnown: true,
 	}
 
@@ -563,6 +573,7 @@ func TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape(t *testing.T) {
 			PRNumber:        3,
 			PRChecks:        []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}},
 			RequiredKnown:   true,
+			PRChecksKnown:   true,
 		}),
 		RequiredKnown: true,
 		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true},
@@ -578,5 +589,42 @@ func TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape(t *testing.T) {
 		if strings.Contains(body, banned) {
 			t.Errorf("merge-skew brief renders a placement verdict %q", banned)
 		}
+	}
+}
+
+// A denied or timed-out check-runs query returns an empty slice, which reads
+// exactly like "the check genuinely never reported" — and that reading produces
+// `never-ran` plus advice to widen a path filter, off the back of a transient
+// API error.
+func TestFailedCheckLookupIsNotEvidenceOfNeverRan(t *testing.T) {
+	got := Classify(Escape{
+		PreMergeCapable: true,
+		FailingCheck:    buildCheck,
+		MainSHA:         "abc1234def",
+		PRNumber:        12,
+		PRChecks:        nil,
+		PRChecksKnown:   false,
+		RequiredKnown:   true,
+	})
+	if got.Class != ClassUnknown {
+		t.Errorf("Class = %q, want %q", got.Class, ClassUnknown)
+	}
+	if got.FilterRefinable {
+		t.Error("FilterRefinable = true on an unread lookup")
+	}
+	if got.PricesPlacement() {
+		t.Error("PricesPlacement() = true with no evidence to price")
+	}
+}
+
+// A truncated failure history undercounts escapes, and the numerator moving is
+// what crosses the placement thresholds.
+func TestTruncatedEscapeCountIsReportedAsALowerBound(t *testing.T) {
+	roi := ROI{CureMinutes: 90, Escapes: 100, EscapesTruncated: true, PreventionMinutes: 30, PreventionMeasured: true}
+	if verdict := roi.Verdict(); !strings.HasPrefix(verdict, "PROVISIONAL") {
+		t.Errorf("Verdict() = %q, want a PROVISIONAL prefix", verdict)
+	}
+	if explain := roi.Explain(); !strings.Contains(explain, "LOWER BOUND") {
+		t.Errorf("Explain() should mark the numerator a lower bound, got %q", explain)
 	}
 }

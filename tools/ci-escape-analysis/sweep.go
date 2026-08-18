@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/cihealth"
 )
@@ -105,7 +104,7 @@ func (r mainRun) scheduledDetection() bool {
 // deliver its alert must not report success: the workflow would go on to
 // dispatch a fix agent whose entire brief is an issue that does not exist.
 func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
-	runs, complete, err := latestRunPerWorkflowOnMain(opts.Repo, opts.WindowDays, stderr)
+	runs, complete, err := latestRunPerWorkflowOnMain(opts, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "ci-escape-analysis: %v\n", err)
 		return 1
@@ -222,19 +221,12 @@ func ensureLabel(repo string, stderr io.Writer) {
 // The second return value reports whether every active workflow was actually
 // observed. A workflow whose run lookup failed is unknown, not healthy, and the
 // caller must not read its absence as recovery.
-func latestRunPerWorkflowOnMain(repo string, windowDays int, stderr io.Writer) (map[string]mainRun, bool, error) {
+func latestRunPerWorkflowOnMain(opts sweepOptions, stderr io.Writer) (map[string]mainRun, bool, error) {
+	repo := opts.Repo
 	workflows, err := activeWorkflows(repo)
 	if err != nil {
 		return nil, false, err
 	}
-
-	// A run older than the lookback window is not evidence about main today.
-	// Routing Enforcement is the case that forced this: it dropped its push
-	// trigger months ago, so its newest run on main is a failure from a tree
-	// that no longer exists — and without a cutoff the watchdog would re-file
-	// a retro for it on every sweep, forever, for a workflow that cannot go
-	// green because it no longer runs.
-	cutoff := time.Now().AddDate(0, 0, -windowDays)
 
 	latest := map[string]mainRun{}
 	complete := true
@@ -246,10 +238,18 @@ func latestRunPerWorkflowOnMain(repo string, windowDays int, stderr io.Writer) (
 			complete = false
 			continue
 		}
-		created, err := time.Parse(time.RFC3339, run.CreatedAt)
-		if err != nil || created.Before(cutoff) {
-			// Nothing recent enough to speak for main today. Not a gap in
-			// observation: we looked, and there was no current evidence.
+		if run.WorkflowName == "" {
+			continue // nothing has ever run this workflow against main
+		}
+		// A workflow that no longer has any trigger reaching main cannot be
+		// red on main today, whatever its history says. Routing Enforcement
+		// dropped its push trigger, so its newest main run is a failure from a
+		// tree that no longer exists; without this it re-files forever.
+		//
+		// Deliberately NOT an age cutoff. Health state must not expire on the
+		// ROI lookback: a genuinely unresolved failure stays red past any
+		// window, and monthly-audit.yml alone can leave 31-day gaps.
+		if !opts.EvaluatesMain(run.WorkflowName) {
 			continue
 		}
 		latest[run.WorkflowName] = run
@@ -333,6 +333,13 @@ func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, bool) {
 		if inconclusiveRunConclusions[run.Conclusion] || run.WorkflowName == "" {
 			continue
 		}
+		// Only events that actually evaluate main count. `Claude Code` runs on
+		// the default branch for issue and review events, so a failed @claude
+		// invocation would otherwise be filed as main being broken and hand a
+		// repair agent an incident that never existed.
+		if !mainEvaluatingEvents[run.Event] {
+			continue
+		}
 		return run, true
 	}
 	return mainRun{}, false
@@ -357,14 +364,16 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 	}
 	// A scheduled detection is not attributable to the head commit, so do not
 	// go looking for "the pull request that caused it" — there isn't one.
+	escape.PRChecksKnown = true // no lookup attempted means nothing was lost
 	if !escape.ScheduledDetection {
 		escape.PRNumber = lookupPR(opts.Repo, run.HeadSHA, stderr)
 		if escape.PRNumber > 0 {
-			escape.PRChecks = lookupPRChecks(opts.Repo, escape.PRNumber, stderr)
+			escape.PRChecks, escape.PRChecksKnown = lookupPRChecks(opts.Repo, escape.PRNumber, stderr)
 		}
 	}
 
 	prevention, preventionMeasured, truncated := estimatePrevention(opts.Repo, run.WorkflowName, opts.WindowDays, stderr)
+	escapes, escapesTruncated := countEscapes(opts.Repo, run.WorkflowName, opts.WindowDays, stderr)
 
 	return cihealth.Retro{
 		Repo:         opts.Repo,
@@ -374,9 +383,10 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 		RunURL:       run.URL,
 		Finding:      cihealth.Classify(escape),
 		ROI: cihealth.ROI{
-			CureMinutes: opts.CureMinutes,
-			CureAssumed: !opts.CureMeasured,
-			Escapes:     countEscapes(opts.Repo, run.WorkflowName, opts.WindowDays, stderr),
+			CureMinutes:      opts.CureMinutes,
+			CureAssumed:      !opts.CureMeasured,
+			Escapes:          escapes,
+			EscapesTruncated: escapesTruncated,
 			// Counted for the workflow, not the individual check: a
 			// multi-job workflow reports one run whichever job failed, so
 			// attributing every one of those runs to the check that happens

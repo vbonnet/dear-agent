@@ -243,3 +243,53 @@ func TestIfPermitsPullRequestParsesTheOperator(t *testing.T) {
 		}
 	}
 }
+
+// A workflow with no trigger reaching main cannot be red on main today,
+// whatever its run history says. Getting this wrong in either direction is
+// costly: too strict and the sweep sees nothing at all, too loose and a
+// workflow that stopped running on main re-files an incident forever.
+func TestParseWorkflowDetectsMainTriggers(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "block-form push trigger",
+			content: "name: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n",
+			want:    true,
+		},
+		{
+			name:    "schedule alone reaches main",
+			content: "name: Drift\n\non:\n  schedule:\n    - cron: \"0 6 * * *\"\n",
+			want:    true,
+		},
+		{
+			name:    "pull_request alone does not",
+			content: "name: Routing Enforcement\n\non:\n  pull_request:\n    types: [opened]\n",
+			want:    false,
+		},
+		{
+			name:    "interaction events alone do not",
+			content: "name: Claude Code\n\non:\n  issue_comment:\n    types: [created]\n  pull_request_review:\n    types: [submitted]\n",
+			want:    false,
+		},
+		{
+			name:    "inline form",
+			content: "name: Inline\n\non: [push, pull_request]\n",
+			want:    true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, info, ok := parseWorkflow(test.content)
+			if !ok {
+				t.Fatal("parseWorkflow() returned ok=false")
+			}
+			if info.MainTriggered != test.want {
+				t.Errorf("MainTriggered = %v, want %v", info.MainTriggered, test.want)
+			}
+		})
+	}
+}

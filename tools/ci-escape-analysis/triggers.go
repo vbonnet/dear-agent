@@ -46,6 +46,12 @@ type workflowInfo struct {
 	// PreMerge is whether the workflow's `on:` block names a pull_request
 	// trigger.
 	PreMerge bool
+	// MainTriggered is whether the workflow still has any trigger that runs it
+	// against main: a push, a schedule, a manual dispatch, or a merge queue.
+	// A workflow that has none cannot be red on main today whatever its run
+	// history says — Routing Enforcement dropped its push trigger and its last
+	// main run is a failure from a tree that no longer exists.
+	MainTriggered bool
 	// Jobs maps a job's display name to whether its `if:` condition permits a
 	// pull-request event. Jobs with no `if:` are absent — absent means "no
 	// job-level restriction", which the lookup reads as capable.
@@ -100,6 +106,23 @@ func workflowIndex() map[string]workflowInfo {
 // request itself, and a prefix test folds them in — which marks the Claude Code
 // workflow pre-merge capable when it has neither trigger.
 var pullRequestTriggers = []string{"pull_request", "pull_request_target"}
+
+// mainTriggers are the `on:` keys that can run a workflow against main.
+// Everything else — issue_comment, issues, the pull_request_review family —
+// fires on human interaction and says nothing about whether main builds.
+var mainTriggers = []string{"push", "schedule", "workflow_dispatch", "merge_group", "repository_dispatch"}
+
+// mainEvaluatingEvents are the run `event` values that actually evaluate main.
+// `Claude Code` runs on the default branch for issue and review events, so a
+// failed `@claude` invocation would otherwise be read as main being broken.
+var mainEvaluatingEvents = map[string]bool{
+	"push":                true,
+	"schedule":            true,
+	"workflow_dispatch":   true,
+	"merge_group":         true,
+	"repository_dispatch": true,
+	"dynamic":             true,
+}
 
 // parseWorkflow extracts the workflow's display name, whether its trigger block
 // names a pull request, and which named jobs are guarded away from pull
@@ -159,8 +182,12 @@ func (p *workflowParser) topLevel(line string) {
 	case strings.HasPrefix(line, "on:"):
 		p.inTriggers = true
 		// Inline forms: `on: pull_request` or `on: [push, pull_request]`.
-		if namesPullRequestTrigger(strings.TrimPrefix(line, "on:")) {
+		inline := strings.TrimPrefix(line, "on:")
+		if namesTrigger(inline, pullRequestTriggers) {
 			p.info.PreMerge = true
+		}
+		if namesTrigger(inline, mainTriggers) {
+			p.info.MainTriggered = true
 		}
 	case strings.HasPrefix(line, "jobs:"):
 		p.inJobs = true
@@ -171,6 +198,9 @@ func (p *workflowParser) nested(line, trimmed string) {
 	if p.inTriggers {
 		if isPullRequestTriggerKey(trimmed) {
 			p.info.PreMerge = true
+		}
+		if isTriggerKey(trimmed, mainTriggers) {
+			p.info.MainTriggered = true
 		}
 		return
 	}
@@ -196,22 +226,38 @@ func (p *workflowParser) nested(line, trimmed string) {
 // isPullRequestTriggerKey matches a whole `pull_request:` / `pull_request_target:`
 // mapping key, with or without quotes, and the bare list-item forms.
 func isPullRequestTriggerKey(trimmed string) bool {
+	return isTriggerKey(trimmed, pullRequestTriggers)
+}
+
+// isTriggerKey matches a whole `<trigger>:` mapping key, with or without quotes,
+// and the bare list-item forms.
+func isTriggerKey(trimmed string, triggers []string) bool {
 	candidate := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
 	candidate = strings.TrimSuffix(candidate, ":")
 	candidate = strings.Trim(candidate, `"'`)
-	return slices.Contains(pullRequestTriggers, candidate)
+	return slices.Contains(triggers, candidate)
 }
 
-// namesPullRequestTrigger handles the inline `on:` forms, where the triggers sit
-// on the same line as the key.
-func namesPullRequestTrigger(rest string) bool {
+// namesTrigger handles the inline `on:` forms, where the triggers sit on the
+// same line as the key.
+func namesTrigger(rest string, triggers []string) bool {
 	rest = strings.Trim(strings.TrimSpace(rest), "[]")
 	for field := range strings.SplitSeq(rest, ",") {
-		if isPullRequestTriggerKey(strings.TrimSpace(field)) {
+		if isTriggerKey(strings.TrimSpace(field), triggers) {
 			return true
 		}
 	}
 	return false
+}
+
+// EvaluatesMain reports whether the named workflow still has a trigger that
+// runs it against main. Unknown workflows default to true.
+func (o sweepOptions) EvaluatesMain(workflowName string) bool {
+	wf, known := workflowIndex()[workflowName]
+	if !known {
+		return true
+	}
+	return wf.MainTriggered
 }
 
 // eventNameComparison matches a `github.event_name == 'x'` or `!= 'x'` test,

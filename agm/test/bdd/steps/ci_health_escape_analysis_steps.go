@@ -54,6 +54,7 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape",
 		"TestPlacementIsPricedOnlyWhereItIsTheDecision",
 		"TestRequiredContextMatchesOnProducingApp",
+		"TestFailedCheckLookupIsNotEvidenceOfNeverRan",
 		"TestBriefDoesNotClaimToBeACompletedRetro",
 	)
 	return nil
@@ -84,6 +85,7 @@ func agmRunsCIEscapeROIRegressions(ctx context.Context) error {
 		"TestUnmeasuredPreventionIsNotFreePrevention",
 		"TestAssumedCureCostYieldsAProvisionalVerdict",
 		"TestTruncatedPreventionIsReportedAsALowerBound",
+		"TestTruncatedEscapeCountIsReportedAsALowerBound",
 		"TestFullyMeasuredROIIsNotProvisional",
 	)
 	return nil

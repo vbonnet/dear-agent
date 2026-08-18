@@ -85,6 +85,12 @@ detection time nothing has been executed and there is no outcome to audit.
 
 **CIHEALTH-28** When the system reports a prevention cost, the system shall state the scope that cost was measured over, because a figure timed across a whole workflow does not license a claim about one job.
 
+**CIHEALTH-29** When the checks that reported on the pull request are unknown, the system shall classify the failure as `unknown` before evaluating any other condition, because every other class asserts something about checks that were never read.
+
+**CIHEALTH-30** When the system renders required contexts, the system shall state that they are the ruleset as read at analysis time, not as it stood at the merge.
+
+**CIHEALTH-31** When the escape count is truncated, the system shall treat the verdict as provisional and report the numerator as a lower bound.
+
 **CIHEALTH-27** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
 
 ## BDD Traceability

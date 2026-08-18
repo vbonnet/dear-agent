@@ -102,10 +102,11 @@ func (r Retro) footer(b *strings.Builder) string {
 	case !r.RequiredKnown:
 		fmt.Fprintf(b, "> **Required status checks: not established.** Reading the branch ruleset needs Administration (read), which the watchdog's token does not have. Any statement above about whether this check gates merges is unresolved, not a finding.\n\n")
 	case len(r.Required) > 0:
-		fmt.Fprintf(b, "<details><summary>Required status checks at time of failure</summary>\n\n")
+		fmt.Fprintf(b, "<details><summary>Required status checks (current ruleset, read at analysis time)</summary>\n\n")
 		for _, context := range SortedContexts(r.Required) {
 			fmt.Fprintf(b, "- `%s`\n", context)
 		}
+		fmt.Fprintf(b, "\nThis is the ruleset as it stands now, not as it stood at the merge. If a requirement was added or removed in between, the gating classification above is about today's rules applied to an older merge.\n")
 		fmt.Fprintf(b, "\n</details>\n\n")
 	}
 
@@ -131,6 +132,8 @@ func placementNotApplicable(class Class) string {
 		return "The check ran pre-merge and reported. Enforcement let the merge through anyway, which is a ruleset decision, not a placement one."
 	case ClassPostMergeOnly:
 		return "This is not an escape. The check either cannot run on a pull request, or the failure was a scheduled detection no pull request caused."
+	case ClassUnknown:
+		return "The evidence needed to classify this was never gathered, so there is nothing to price."
 	case ClassNeverRan, ClassSelectionGap, ClassScopeGap:
 		return "" // priced; never reached
 	default:
