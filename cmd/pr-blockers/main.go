@@ -67,13 +67,14 @@ func run(argv []string, stdout *os.File) int {
 		return 2
 	}
 
-	repo, err := resolveRepo(*repoFlag)
+	ctx := context.Background()
+	repo, err := resolveRepo(ctx, *repoFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pr-blockers: %v\n", err)
 		return 2
 	}
 
-	d, err := safegit.Diagnose(context.Background(), prNum, repo)
+	d, err := safegit.Diagnose(ctx, prNum, repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pr-blockers: %v\n", err)
 		return 2
@@ -98,14 +99,14 @@ func run(argv []string, stdout *os.File) int {
 	}
 }
 
-func resolveRepo(flagVal string) (string, error) {
+func resolveRepo(ctx context.Context, flagVal string) (string, error) {
 	if flagVal != "" {
 		return flagVal, nil
 	}
 	if env := os.Getenv("GITHUB_REPOSITORY"); env != "" {
 		return env, nil
 	}
-	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").Output()
+	out, err := exec.CommandContext(ctx, "gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").Output()
 	if err == nil {
 		if repo := strings.TrimSpace(string(out)); strings.Contains(repo, "/") {
 			return repo, nil

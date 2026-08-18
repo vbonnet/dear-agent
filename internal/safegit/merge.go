@@ -308,7 +308,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: SKIPPED via --skip-review-check")
 		fmt.Fprintln(os.Stderr, "safe-merge: ⚠ review-thread gate skipped (--skip-review-check)")
 	} else {
-		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(cfg.PRNumber, cfg.Repo) }); err != nil {
+		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
 			parts := strings.SplitN(cfg.Repo, "/", 2)
 			owner, repoName := parts[0], parts[1]
@@ -1118,7 +1118,7 @@ type ReviewThread struct {
 
 // ListReviewThreads pages through every review thread on the PR, outdated
 // threads included.
-func ListReviewThreads(prNum int, repo string) ([]ReviewThread, error) {
+func ListReviewThreads(ctx context.Context, prNum int, repo string) ([]ReviewThread, error) {
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid repo %q", repo)
@@ -1138,7 +1138,7 @@ func ListReviewThreads(prNum int, repo string) ([]ReviewThread, error) {
 		if cursor != "" {
 			args = append(args, "--field", fmt.Sprintf("cursor=%s", cursor))
 		}
-		out, err := runCommand(exec.Command("gh", args...))
+		out, err := runCommand(exec.CommandContext(ctx, "gh", args...))
 		if err != nil {
 			return nil, fmt.Errorf("GraphQL query failed: %w", err)
 		}
@@ -1172,8 +1172,8 @@ func flattenThreads(nodes []gqlReviewThread) []ReviewThread {
 	return out
 }
 
-func checkReviewThreads(prNum int, repo string) error {
-	threads, err := ListReviewThreads(prNum, repo)
+func checkReviewThreads(ctx context.Context, prNum int, repo string) error {
+	threads, err := ListReviewThreads(ctx, prNum, repo)
 	if err != nil {
 		return err
 	}

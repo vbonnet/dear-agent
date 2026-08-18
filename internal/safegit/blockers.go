@@ -259,7 +259,7 @@ func Diagnose(ctx context.Context, prNum int, repo string) (Diagnosis, error) {
 		return d, nil
 	}
 
-	threads, err := ListReviewThreads(prNum, repo)
+	threads, err := ListReviewThreads(ctx, prNum, repo)
 	if err != nil {
 		return Diagnosis{}, fmt.Errorf("listing review threads: %w", err)
 	}
