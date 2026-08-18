@@ -175,3 +175,49 @@ func TestEffectiveSandboxGCReapRefusesPartialInventory(t *testing.T) {
 		})
 	}
 }
+
+// The scheduler that launched this sweep must be stamped on every record it
+// writes. Without it, a reader cannot tell the hourly schedule's heartbeats
+// from the ones some other component's remediation triggered on its own
+// behalf — and a reader that grades the schedule on its own sweeps reports a
+// dead schedule as alive (cmd/disk-watchdog, DW-27).
+func TestLogSandboxGCEntryStampsTheDeclaredSource(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "declared runner is stamped", env: "disk-watchdog", want: "disk-watchdog"},
+		{name: "surrounding whitespace is trimmed", env: "  disk-watchdog\n", want: "disk-watchdog"},
+		{name: "undeclared runner stays empty", env: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restoreSandboxGCDepsForTest(t)
+			var got gclog.Entry
+			logSandboxGCEntry = func(entry gclog.Entry) { got = entry }
+			t.Setenv(sandboxGCSourceEnv, tt.env)
+
+			logSandboxGCEntryTagged(gclog.Entry{Operation: "sandbox_gc_completed"})
+
+			if got.Source != tt.want {
+				t.Errorf("Source = %q, want %q", got.Source, tt.want)
+			}
+		})
+	}
+}
+
+// An explicit source on the entry wins over the environment, so a caller that
+// knows better is never overwritten by an inherited variable.
+func TestLogSandboxGCEntryKeepsAnExplicitSource(t *testing.T) {
+	restoreSandboxGCDepsForTest(t)
+	var got gclog.Entry
+	logSandboxGCEntry = func(entry gclog.Entry) { got = entry }
+	t.Setenv(sandboxGCSourceEnv, "disk-watchdog")
+
+	logSandboxGCEntryTagged(gclog.Entry{Operation: "sandbox_gc_completed", Source: "launchd"})
+
+	if got.Source != "launchd" {
+		t.Errorf("Source = %q, want the explicit %q", got.Source, "launchd")
+	}
+}

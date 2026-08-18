@@ -118,7 +118,7 @@ func TestCheckGCHealth_DiscardsUnterminatedOversizedRecord(t *testing.T) {
 		t.Fatalf("write gc log: %v", err)
 	}
 
-	got, err := scanGCLog(p, now)
+	got, err := scanGCLog(p, now, defaultGCMaxAge)
 	if err != nil {
 		t.Fatalf("scan oversized unterminated record: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestCheckGCHealth_ErrorRecordsAreNotProofOfLife(t *testing.T) {
 // A real I/O failure must surface as stale rather than be swallowed into a
 // zero-value summary that reads as "never swept" with no explanation.
 func TestScanGCLog_PropagatesOpenErrors(t *testing.T) {
-	if _, err := scanGCLog(t.TempDir()+"/absent.jsonl", time.Now()); err == nil {
+	if _, err := scanGCLog(t.TempDir()+"/absent.jsonl", time.Now(), defaultGCMaxAge); err == nil {
 		t.Fatal("expected an error opening a missing log")
 	}
 }

@@ -76,6 +76,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,6 +152,13 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 	cfg.thresholds.FreeWarnBytes = uint64(freeWarnGB * supervisor.GiB)
 	cfg.thresholds.FreeCriticalBytes = uint64(freeCriticalGB * supervisor.GiB)
+	// Only zero disables the liveness check (DW-20). A negative duration parses
+	// happily, and silently disabling on it would let one typo in a launchd
+	// plist leave a dead reaper unmonitored while every tick still reports OK —
+	// the monitoring gap this watchdog exists to close. Refuse it out loud.
+	if cfg.gcMaxAge < 0 {
+		return 2, fmt.Errorf("invalid -gc-max-age %s: the reaper-liveness window cannot be negative (use 0 to disable the check)", cfg.gcMaxAge)
+	}
 
 	snap, err := takeSnapshot(cfg.path)
 	if err != nil {
@@ -168,6 +176,14 @@ func run(args []string, out io.Writer) (int, error) {
 	// stay tied to actual space pressure — a stale reaper on a host with 200 GiB
 	// free is a bug to report, not a reason to re-sweep every five minutes.
 	diskBreached := level != supervisor.PressureNone
+
+	// Read reaper liveness BEFORE remediating. Remediation runs the sandbox
+	// sweep itself, which appends a completion record; evaluating afterwards
+	// would grade the schedule on a heartbeat this tick just produced. The
+	// producer tag (gcSelfSource) keeps later ticks from counting it too, and
+	// this ordering keeps the current tick honest even against an older `agm`
+	// that does not stamp the tag.
+	gc := checkGCHealth(cfg, time.Now())
 
 	var remediation *sweepResult
 	if diskBreached && !cfg.dryRun {
@@ -187,7 +203,6 @@ func run(args []string, out io.Writer) (int, error) {
 	// a parallel notification channel to keep in sync. It deliberately does not
 	// touch the brake: blocking every spawn because a GC is behind would be a
 	// worse outage than the leak it warns about.
-	gc := checkGCHealth(cfg, time.Now())
 	if gc != nil && gc.Stale {
 		if level == supervisor.PressureNone {
 			level = supervisor.PressureWarn
@@ -277,14 +292,29 @@ type gcHealth struct {
 	// LastError is the newest GC error message, when the log records one after
 	// the last success. It turns "the reaper is stale" into an actionable line.
 	LastError string
+	// Indeterminate is true when liveness could not be established either way:
+	// no heartbeat was found, but the scan did not read far enough back to
+	// prove none exists. It is reported as an alarm — an unanswerable question
+	// is not a healthy answer — but distinctly from a reaper that provably
+	// never ran, because the two have different suspects and different fixes.
+	Indeterminate bool
 	// Reason is the human-readable summary for the alarm and the report.
 	Reason string
+}
+
+// oldestSeenLabel renders the reach of a truncated scan for an operator.
+func oldestSeenLabel(t time.Time) string {
+	if t.IsZero() {
+		return "an unknown point in time"
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // gcLogEntry is the subset of agm/internal/gclog.Entry this watchdog reads.
 type gcLogEntry struct {
 	Timestamp     time.Time `json:"timestamp"`
 	Operation     string    `json:"operation"`
+	Source        string    `json:"source,omitempty"`
 	Error         string    `json:"error,omitempty"`
 	DryRun        bool      `json:"dry_run,omitempty"`
 	Errors        int       `json:"errors,omitempty"`
@@ -302,6 +332,18 @@ const gcCompletedOperation = "sandbox_gc_completed"
 // whoever reads the alarm at an unrelated subsystem.
 const gcOperationPrefix = "sandbox_gc"
 
+// gcSelfSource is the value this watchdog stamps on the sweeps it triggers
+// itself (remediationEnv), and the one value the liveness check must ignore.
+//
+// Remediation runs `agm sandbox gc --reap` on every breached tick, which writes
+// a fresh completion record. Counting those, the question "is the hourly
+// schedule still alive?" is answered by evidence this process manufactured five
+// minutes ago: under sustained disk pressure a dead schedule would look healthy
+// indefinitely, exactly inverting the leading indicator. An unstamped record is
+// NOT assumed to be ours — a manual run or an older agm leaves the field empty,
+// and treating unknown as self would discard real heartbeats.
+const gcSelfSource = brakeSource
+
 // gcClockSkewTolerance bounds how far ahead of now a heartbeat may be dated and
 // still count. An append-only log keeps the maximum timestamp forever, so a
 // single heartbeat written while the host clock ran fast would otherwise yield
@@ -318,7 +360,22 @@ const maxGCLogRecordBytes = 1024 * 1024
 // instances of the same job — a slow enough scan silently starves every
 // later disk sample and alarm. Only the newest heartbeat and the newest error
 // matter, so read a fixed tail and start at the first whole record inside it.
-const maxGCLogScanBytes = 8 * 1024 * 1024
+// A var, not a const, so a test can exercise the widening below without
+// writing hundreds of megabytes to a disk this tool exists to protect.
+var maxGCLogScanBytes int64 = 8 * 1024 * 1024
+
+// maxGCLogTotalScanBytes caps the escalation below.
+//
+// A fixed tail alone answers the wrong question. Record volume is not bounded
+// by elapsed time: enough session-GC chatter after a healthy sandbox sweep
+// pushes that heartbeat out of the window, and the scan then reports "no
+// completed sweep was ever recorded" for a reaper that is well inside its SLA.
+// So when the first window holds no heartbeat, widen it — but only while older
+// history could still change the answer, i.e. while the window has not yet
+// reached back past the liveness horizon. Beyond this hard cap the scan stops
+// and reports that it could not determine liveness, which is a different
+// answer from "the reaper never ran" and is reported as such.
+var maxGCLogTotalScanBytes int64 = 128 * 1024 * 1024
 
 // healthyHeartbeat reports whether a completion record is evidence the reaper
 // actually did its job. A dry run reclaims nothing, a sweep whose deletion
@@ -367,6 +424,19 @@ type gcLogSummary struct {
 	LastReap    time.Time
 	LastError   string
 	LastErrorAt time.Time
+	// OldestSeen is the oldest timestamped record inside the scanned window,
+	// of any GC kind. With Truncated it bounds what the unscanned history could
+	// still contain: every record before the window is older than this.
+	OldestSeen time.Time
+	// Truncated is true when the scan started past byte zero, so records older
+	// than OldestSeen exist but were not read.
+	Truncated bool
+	// Indeterminate is true when the scan found no heartbeat, stopped at the
+	// hard byte cap, and the unread history is recent enough that it could
+	// still hold one inside the liveness window. The caller must not report
+	// this as "the reaper never completed a sweep": absent and could-not-tell
+	// are different answers, and only one of them names the right suspect.
+	Indeterminate bool
 }
 
 // scanGCLog reads every sandbox-GC record in the log and keeps the newest
@@ -378,7 +448,39 @@ type gcLogSummary struct {
 // valid heartbeat appended after it. Oversized records are discarded with a
 // fixed-size bound, then scanning resumes at the next record. Genuine I/O
 // errors are returned rather than swallowed.
-func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
+// The window widens only while a wider one could still change the answer:
+// once a heartbeat is found, once the window reaches byte zero, or once its
+// oldest record predates the liveness window (nothing before it can be a
+// non-stale heartbeat), reading further is wasted I/O on a disk already under
+// pressure. maxAge <= 0 disables the widening entirely.
+func scanGCLog(path string, now time.Time, maxAge time.Duration) (gcLogSummary, error) {
+	window := maxGCLogScanBytes
+	for {
+		s, err := scanGCLogWindow(path, now, window)
+		switch {
+		case err != nil:
+			return s, err
+		case !s.Truncated || !s.LastSuccess.IsZero() || !s.LastReap.IsZero():
+			return s, nil
+		case maxAge <= 0:
+			return s, nil
+		case !s.OldestSeen.IsZero() && now.Sub(s.OldestSeen) > maxAge:
+			// Everything still unread is older than a record that is already
+			// outside the SLA, so no heartbeat there could be a live one.
+			// "Stale" is a sound conclusion; stop.
+			return s, nil
+		case window >= maxGCLogTotalScanBytes:
+			s.Indeterminate = true
+			return s, nil
+		}
+		if window *= 2; window > maxGCLogTotalScanBytes {
+			window = maxGCLogTotalScanBytes
+		}
+	}
+}
+
+// scanGCLogWindow folds the last `window` bytes of the log into a summary.
+func scanGCLogWindow(path string, now time.Time, window int64) (gcLogSummary, error) {
 	var s gcLogSummary
 	f, err := os.Open(path)
 	if err != nil {
@@ -387,9 +489,11 @@ func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 	defer f.Close()
 
 	horizon := now.Add(gcClockSkewTolerance)
-	if err := seekGCLogTail(f); err != nil {
+	truncated, err := seekGCLogTail(f, window)
+	if err != nil {
 		return s, err
 	}
+	s.Truncated = truncated
 	r := bufio.NewReaderSize(f, maxGCLogRecordBytes)
 	for {
 		line, readErr := r.ReadSlice('\n')
@@ -413,19 +517,20 @@ func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 }
 
 // seekGCLogTail positions f at the start of the first whole record within the
-// last maxGCLogScanBytes. A file at or below the bound is read in full. The
-// partial record straddling the cut is skipped rather than parsed, so a
-// truncated line is never mistaken for a malformed one.
-func seekGCLogTail(f *os.File) error {
+// last `window` bytes, and reports whether anything before that point exists.
+// A file at or below the bound is read in full. The partial record straddling
+// the cut is skipped rather than parsed, so a truncated line is never mistaken
+// for a malformed one.
+func seekGCLogTail(f *os.File, window int64) (bool, error) {
 	info, err := f.Stat()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if info.Size() <= maxGCLogScanBytes {
-		return nil
+	if info.Size() <= window {
+		return false, nil
 	}
-	if _, err := f.Seek(info.Size()-maxGCLogScanBytes, io.SeekStart); err != nil {
-		return err
+	if _, err := f.Seek(info.Size()-window, io.SeekStart); err != nil {
+		return true, err
 	}
 	// Drop bytes up to and including the next newline: they are the tail of a
 	// record whose head lies before the cut.
@@ -443,10 +548,10 @@ func seekGCLogTail(f *os.File) error {
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		return err
+		return true, err
 	}
-	_, err = f.Seek(info.Size()-maxGCLogScanBytes+int64(discarded), io.SeekStart)
-	return err
+	_, err = f.Seek(info.Size()-window+int64(discarded), io.SeekStart)
+	return true, err
 }
 
 func discardOversizedGCLogRecord(r *bufio.Reader) error {
@@ -468,13 +573,45 @@ func discardOversizedGCLogRecord(r *bufio.Reader) error {
 // observe folds one raw log line into the summary. Records dated beyond the
 // clock-skew horizon are discarded outright.
 func (s *gcLogSummary) observe(line []byte, horizon time.Time) {
+	e, ok := s.admit(line, horizon)
+	if !ok {
+		return
+	}
+	s.fold(e)
+}
+
+// admit decodes one line and reports whether it is liveness evidence at all,
+// recording the window's reach on the way through.
+func (s *gcLogSummary) admit(line []byte, horizon time.Time) (gcLogEntry, bool) {
 	var e gcLogEntry
 	if json.Unmarshal(line, &e) != nil {
-		return
+		return e, false
 	}
-	if !strings.HasPrefix(e.Operation, gcOperationPrefix) || e.Timestamp.After(horizon) {
-		return
+	if e.Timestamp.After(horizon) {
+		return e, false
 	}
+	// Track how far back this window reaches before filtering by operation: the
+	// bound is a property of the file, and the log is shared with the session
+	// GC, so the oldest record of ANY kind is what says whether history older
+	// than the window could still hold a heartbeat inside the liveness SLA.
+	if !e.Timestamp.IsZero() && (s.OldestSeen.IsZero() || e.Timestamp.Before(s.OldestSeen)) {
+		s.OldestSeen = e.Timestamp
+	}
+	if !strings.HasPrefix(e.Operation, gcOperationPrefix) {
+		return e, false
+	}
+	// A sweep this watchdog triggered says nothing about the schedule it is
+	// watching, in either direction: its successes are self-manufactured proof
+	// of life, and its failures are already surfaced as this tick's remediation
+	// outcome. Drop it from the liveness evidence entirely.
+	if e.Source == gcSelfSource {
+		return e, false
+	}
+	return e, true
+}
+
+// fold merges one admitted sandbox-GC record into the summary.
+func (s *gcLogSummary) fold(e gcLogEntry) {
 	switch {
 	case e.healthyHeartbeat():
 		s.HasCompletion = true
@@ -505,10 +642,12 @@ func (s *gcLogSummary) observe(line []byte, horizon time.Time) {
 // unreadable log is treated as stale: the check exists precisely for the case
 // where the reaper is not running, and that case often means no log at all.
 func checkGCHealth(cfg config, now time.Time) *gcHealth {
-	if cfg.gcLogPath == "" || cfg.gcMaxAge <= 0 {
+	// Zero, and only zero, disables the check: `run` rejects a negative window
+	// as a usage error rather than reading a typo as "monitoring off".
+	if cfg.gcLogPath == "" || cfg.gcMaxAge == 0 {
 		return nil
 	}
-	summary, err := scanGCLog(cfg.gcLogPath, now)
+	summary, err := scanGCLog(cfg.gcLogPath, now, cfg.gcMaxAge)
 	if err != nil {
 		return &gcHealth{
 			Stale: true,
@@ -534,6 +673,19 @@ func checkGCHealth(cfg config, now time.Time) *gcHealth {
 		h.LastError = summary.LastError
 	}
 	switch {
+	case last.IsZero() && summary.Indeterminate:
+		// The scan hit its hard byte cap without reaching back past the
+		// liveness window, so a heartbeat inside the SLA may still sit in the
+		// unread history. Alarm — a watchdog that cannot answer its own
+		// question is not reporting health — but never claim the reaper never
+		// ran: that names the wrong suspect and sends a responder to restart a
+		// job whose real problem is the volume of this log.
+		h.Stale = true
+		h.Indeterminate = true
+		h.Reason = fmt.Sprintf(
+			"sandbox GC liveness is undetermined: the newest %d MiB of %s holds no completed sweep "+
+				"and older history was not scanned (records back to %s)",
+			maxGCLogTotalScanBytes/(1024*1024), cfg.gcLogPath, oldestSeenLabel(summary.OldestSeen))
 	case last.IsZero():
 		h.Stale = true
 		h.Reason = fmt.Sprintf("sandbox GC has never recorded a completed sweep in %s", cfg.gcLogPath)
@@ -569,6 +721,49 @@ type sandboxGCSummary struct {
 	Kept    int    `json:"kept"`
 	Errors  int    `json:"errors"`
 	Error   string `json:"error,omitempty"`
+	// DryRun and ReapRefused are how a refused reap reaches this consumer.
+	// This watchdog always passes --reap, so `dry_run: true` in the reply means
+	// the sweep declined to delete anything (today: a partial live-session
+	// inventory). In that state `Reaped` counts would-reaps, not deletions —
+	// reading it as reclaimed space would report remediation that never
+	// happened and leave the admission brake open on a host that is still
+	// filling up. ReapRefused carries the reason from a sweep new enough to
+	// state it; DryRun is the signal from one that is not.
+	DryRun      bool   `json:"dry_run,omitempty"`
+	ReapRefused string `json:"reap_refused,omitempty"`
+}
+
+// refusalError renders a refused reap as a remediation failure, or "" when the
+// sweep did what it was asked. A refusal is not an ordinary outcome here: the
+// watchdog only invokes the sweep under disk pressure, so a tick that deletes
+// nothing has not remediated, and saying so is what latches the brake.
+func (s *sandboxGCSummary) refusalError() string {
+	if s == nil || s.Error != "" {
+		return ""
+	}
+	switch {
+	case s.ReapRefused != "":
+		return "requested reap was refused: " + s.ReapRefused
+	case s.DryRun:
+		return "requested reap was downgraded to a scan; no sandbox was deleted " +
+			"(reaped=" + strconv.Itoa(s.Reaped) + " counts would-reaps)"
+	default:
+		return ""
+	}
+}
+
+// remediationEnv is the environment overlay for every command this watchdog
+// shells out to.
+//
+// GIT_TERMINAL_PROMPT: the sweep shells out to git/gh; with no TTY a credential
+// prompt would hang the launchd job until the timeout.
+//
+// AGM_GC_SOURCE: the sandbox sweep stamps this on every record it writes, so
+// the liveness check below can tell the hourly schedule's heartbeats from the
+// ones this watchdog's own remediation just produced. Without it, remediation
+// forges proof of life for the very schedule it is meant to be watching.
+func remediationEnv() []string {
+	return []string{"GIT_TERMINAL_PROMPT=0", "AGM_GC_SOURCE=" + gcSelfSource}
 }
 
 // sweepMergedWorktrees delegates remediation to the canonical worktree sweep,
@@ -584,9 +779,7 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 	if run == nil {
 		run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			cmd := exec.CommandContext(ctx, name, args...)
-			// The sweep shells out to git/gh; with no TTY a credential prompt
-			// would hang the launchd job until the timeout, so forbid prompts.
-			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+			cmd.Env = append(os.Environ(), remediationEnv()...)
 			// Capture stdout only; the sweep logs progress to stderr, which we
 			// intentionally drop so JSON parsing sees clean output.
 			return cmd.Output()
@@ -595,10 +788,15 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 
 	result := &sweepResult{}
 	gcOut, gcErr := run(ctx, cfg.agmBin, "sandbox", "gc", "--reap", "--json")
-	if gcErr != nil {
+	switch {
+	case gcErr != nil:
 		result.SandboxGC = &sandboxGCSummary{Error: gcErr.Error()}
-	} else if err := json.Unmarshal(gcOut, &result.SandboxGC); err != nil {
-		result.SandboxGC = &sandboxGCSummary{Error: fmt.Sprintf("parse sandbox gc output: %v", err)}
+	default:
+		if err := json.Unmarshal(gcOut, &result.SandboxGC); err != nil {
+			result.SandboxGC = &sandboxGCSummary{Error: fmt.Sprintf("parse sandbox gc output: %v", err)}
+		} else if refusal := result.SandboxGC.refusalError(); refusal != "" {
+			result.SandboxGC.Error = refusal
+		}
 	}
 
 	out, err := run(ctx, cfg.agmBin, "worktree", "sweep", "--execute", "-o", "json")
@@ -761,6 +959,11 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		LastSuccess string `json:"last_success,omitempty"`
 		AgeSeconds  int64  `json:"age_seconds,omitempty"`
 		LastError   string `json:"last_error,omitempty"`
+		// Undetermined distinguishes "the scan could not tell" from "no sweep
+		// was ever recorded" for a machine reader, the same way Reason does
+		// for a human one.
+		Undetermined bool   `json:"undetermined,omitempty"`
+		Reason       string `json:"reason,omitempty"`
 	}
 	type report struct {
 		Level             string                         `json:"level"`
@@ -776,7 +979,7 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 	}
 	var gcr *gcReport
 	if gc != nil {
-		gcr = &gcReport{Stale: gc.Stale, LastError: gc.LastError}
+		gcr = &gcReport{Stale: gc.Stale, LastError: gc.LastError, Undetermined: gc.Indeterminate, Reason: gc.Reason}
 		if !gc.LastSuccess.IsZero() {
 			gcr.LastSuccess = gc.LastSuccess.UTC().Format(time.RFC3339)
 			gcr.AgeSeconds = int64(gc.Age.Seconds())
@@ -811,6 +1014,8 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 		snap.InodeUsedFraction*100, cfg.thresholds.InodeWarn*100, cfg.thresholds.InodeCritical*100)
 	if gc != nil {
 		switch {
+		case gc.Indeterminate:
+			fmt.Fprintf(out, "  sandbox GC  : UNDETERMINED (log too large to scan back)  [max age %s]\n", cfg.gcMaxAge)
 		case gc.LastSuccess.IsZero():
 			fmt.Fprintf(out, "  sandbox GC  : NEVER completed a sweep  [max age %s]\n", cfg.gcMaxAge)
 		default:

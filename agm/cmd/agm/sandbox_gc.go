@@ -93,7 +93,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	liveSessionIDs, warnings, err := sandboxGCLiveSessionIDs()
 	if err != nil {
 		for _, warning := range warnings {
-			logSandboxGCEntry(gclog.Entry{
+			logSandboxGCEntryTagged(gclog.Entry{
 				Operation: "sandbox_gc_warning",
 				Reason:    "workspace_store_skipped",
 				Error:     warning,
@@ -103,7 +103,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 				ui.PrintWarning(warning)
 			}
 		}
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "live_session_inventory_failed",
 			Error:     err.Error(),
@@ -112,7 +112,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build live-session inventory: %w", err)
 	}
 	for _, warning := range warnings {
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_warning",
 			Reason:    "workspace_store_skipped",
 			Error:     warning,
@@ -128,7 +128,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	// fixes the topology, and the next tick reaps normally.
 	reap, notice := effectiveSandboxGCReap(sandboxGCReap, warnings)
 	if notice != "" {
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_warning",
 			Reason:    "partial_inventory_reap_refused",
 			Error:     notice,
@@ -148,7 +148,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		Warnings:       warnings,
 	})
 	if err != nil {
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "sweep_failed",
 			Error:     err.Error(),
@@ -157,13 +157,20 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		return handleError(err)
 	}
 
+	// Carry the refusal into the machine-readable result. `dry_run: true` alone
+	// is ambiguous — it is the ordinary shape of a preview run — so an automated
+	// caller that asked for --reap and got a scan would otherwise read a refusal
+	// as a successful no-op sweep, and its `reaped` count (which now means
+	// would-reap) as deleted sandboxes.
+	result.ReapRefused = notice
+
 	// Heartbeat: a sweep that reaps nothing is still a healthy sweep, and until
 	// now it left no trace at all. Without a record for the reap-nothing case,
 	// "the reaper last ran at T" is indistinguishable from "the reaper has been
 	// dead since T" — which is exactly how the hourly sandbox GC stayed broken
 	// from 2026-07-05 to 2026-08-07 while ~/.agm/sandboxes grew to 239 GB.
 	// disk-watchdog consumes this entry to alarm on a stale reaper.
-	logSandboxGCEntry(gclog.Entry{
+	logSandboxGCEntryTagged(gclog.Entry{
 		Operation: "sandbox_gc_completed",
 		Reason: fmt.Sprintf("scanned=%d reaped=%d kept=%d errors=%d probe_failures=%d",
 			result.Scanned, result.Reaped, result.Kept, result.Errors, result.ProbeFailures),
@@ -361,6 +368,25 @@ func effectiveSandboxGCReap(requested bool, warnings []string) (bool, string) {
 	return false, fmt.Sprintf(
 		"refusing to reap: live-session inventory is partial (%d workspace store(s) skipped); "+
 			"scanning only. Fix the workspace Dolt endpoints, then re-run.", len(warnings))
+}
+
+// sandboxGCSourceEnv names the environment variable a scheduler sets to declare
+// itself in every record this sweep writes.
+//
+// It is an environment variable rather than a flag deliberately: an older `agm`
+// on the host ignores an unknown variable, whereas an unknown flag would turn
+// an automated caller's remediation into a hard "unknown flag" failure the
+// moment the caller was upgraded first.
+const sandboxGCSourceEnv = "AGM_GC_SOURCE"
+
+// logSandboxGCEntryTagged stamps the declared runner onto an entry before it is
+// written. Readers use it to tell a scheduled sweep from one that some other
+// component triggered on its own behalf; see gclog.Entry.Source.
+func logSandboxGCEntryTagged(entry gclog.Entry) {
+	if entry.Source == "" {
+		entry.Source = strings.TrimSpace(os.Getenv(sandboxGCSourceEnv))
+	}
+	logSandboxGCEntry(entry)
 }
 
 func logSandboxGCEntryDefault(entry gclog.Entry) {

@@ -42,7 +42,7 @@ func TestScanGCLog_RejectedCompletionSurfacesItsFailureCounts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := scanGCLog(writeGCLog(t, tt.record), now)
+			got, err := scanGCLog(writeGCLog(t, tt.record), now, defaultGCMaxAge)
 			if err != nil {
 				t.Fatalf("scanGCLog: %v", err)
 			}
@@ -64,7 +64,7 @@ func TestScanGCLog_RejectedCompletionSurfacesItsFailureCounts(t *testing.T) {
 
 func TestScanGCLog_HealthyCompletionRecordsNoFailure(t *testing.T) {
 	now := time.Now()
-	got, err := scanGCLog(writeGCLog(t, gcCompletedAt(now.Add(-1*time.Minute))), now)
+	got, err := scanGCLog(writeGCLog(t, gcCompletedAt(now.Add(-1*time.Minute))), now, defaultGCMaxAge)
 	if err != nil {
 		t.Fatalf("scanGCLog: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestScanGCLog_NewerExplicitErrorWinsOverRejectedCompletion(t *testing.T) {
 	got, err := scanGCLog(writeGCLog(t,
 		`{"timestamp":"`+older+`","operation":"sandbox_gc_completed","errors":1}`,
 		`{"timestamp":"`+newer+`","operation":"sandbox_gc_error","error":"mount table unreadable"}`,
-	), now)
+	), now, defaultGCMaxAge)
 	if err != nil {
 		t.Fatalf("scanGCLog: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestScanGCLog_ReadsOnlyABoundedTail(t *testing.T) {
 	b.WriteString(`{"timestamp":"` + now.Add(-48*time.Hour).Format(time.RFC3339Nano) +
 		`","operation":"sandbox_gc_completed","reason":"ancient"}` + "\n")
 	filler := `{"operation":"gc_archive","reason":"` + strings.Repeat("y", 4096) + `"}` + "\n"
-	for written := 0; written < maxGCLogScanBytes+(2*1024*1024); written += len(filler) {
+	for written := int64(0); written < maxGCLogScanBytes+(2*1024*1024); written += int64(len(filler)) {
 		b.WriteString(filler)
 	}
 	b.WriteString(gcCompletedAt(now.Add(-2*time.Minute)) + "\n")
@@ -123,7 +123,7 @@ func TestScanGCLog_ReadsOnlyABoundedTail(t *testing.T) {
 		t.Fatalf("fixture must exceed the scan bound, got %d bytes", info.Size())
 	}
 
-	got, err := scanGCLog(p, now)
+	got, err := scanGCLog(p, now, defaultGCMaxAge)
 	if err != nil {
 		t.Fatalf("scanGCLog: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestScanGCLog_ReadsOnlyABoundedTail(t *testing.T) {
 // only heartbeat on an ordinary host.
 func TestScanGCLog_SmallLogIsReadInFull(t *testing.T) {
 	now := time.Now()
-	got, err := scanGCLog(writeGCLog(t, gcCompletedAt(now.Add(-3*time.Minute))), now)
+	got, err := scanGCLog(writeGCLog(t, gcCompletedAt(now.Add(-3*time.Minute))), now, defaultGCMaxAge)
 	if err != nil {
 		t.Fatalf("scanGCLog: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestScanGCLog_SkipsRecordStraddlingTheCut(t *testing.T) {
 
 	var b strings.Builder
 	filler := `{"operation":"gc_archive","reason":"` + strings.Repeat("z", 8192) + `"}` + "\n"
-	for written := 0; written < maxGCLogScanBytes+4096; written += len(filler) {
+	for written := int64(0); written < maxGCLogScanBytes+4096; written += int64(len(filler)) {
 		b.WriteString(filler)
 	}
 	for i := range 3 {
@@ -167,7 +167,7 @@ func TestScanGCLog_SkipsRecordStraddlingTheCut(t *testing.T) {
 		t.Fatalf("write gc log: %v", err)
 	}
 
-	got, err := scanGCLog(p, now)
+	got, err := scanGCLog(p, now, defaultGCMaxAge)
 	if err != nil {
 		t.Fatalf("scanGCLog on a straddled cut: %v", err)
 	}

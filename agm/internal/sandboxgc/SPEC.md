@@ -37,6 +37,10 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 **SGC-14** When the periodic sandbox sweep builds its live-session source from the configured workspace registry and one configured Dolt database does not exist, the system shall record a visible warning and continue with the remaining reachable configured stores; if no configured store is reachable or all reachable stores return zero sessions, the system shall fail closed and refuse the sweep.
 
+**SGC-16** When `agm sandbox gc --reap` runs and any configured workspace store was skipped, the system shall downgrade the run to a scan and delete nothing, because a skipped store contributes none of its live session IDs and its sandboxes would otherwise pass the live-session gate for the sole reason that the store proving them live could not be read.
+
+**SGC-17** When a requested reap is downgraded to a scan under SGC-16, the system shall report the refusal to the caller as an explicit `reap_refused` reason in the machine-readable result, in addition to the warning, so that an automated caller cannot read the refusal as an ordinary preview run nor read the resulting would-reap count as sandboxes deleted.
+
 ### Live-Process Gate
 
 **SGC-06** When any process holds a working directory or an open file descriptor at or under the sandbox, the system shall refuse the reap before attempting any unmount.
@@ -67,3 +71,5 @@ sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
 - Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, store-down, path escapes), `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage), and `agm/cmd/agm/sandbox_gc_test.go` (configured workspace missing-database degradation).
+- SGC-16 evidence: `agm/cmd/agm/sandbox_gc_test.go::TestEffectiveSandboxGCReapRefusesPartialInventory` (a requested reap with any skipped workspace yields scan-only plus a notice; a complete inventory reaps as asked).
+- SGC-17 evidence: `agm/internal/ops/sandbox_gc_test.go::TestSandboxGCResultPublishesTheRefusalOnTheWire` and `::TestSandboxGCResultOmitsTheRefusalWhenItReaped` (the refusal, and only a real refusal, reaches the caller as `reap_refused`); the reciprocal consumer check is `cmd/disk-watchdog/reaper_liveness_honesty_test.go::TestSweepMergedWorktrees_RefusedReapIsARemediationFailure`, which asserts the watchdog treats it as failed remediation rather than a completed sweep.

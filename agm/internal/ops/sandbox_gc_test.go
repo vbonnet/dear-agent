@@ -1,10 +1,12 @@
 package ops
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -371,5 +373,45 @@ func TestLiveSessionIDsNilContextFailsClosed(t *testing.T) {
 	}
 	if _, err := liveSessionIDsFromStorage(&OpContext{})(); err == nil {
 		t.Error("nil Storage must fail closed")
+	}
+}
+
+// The refusal has to survive the process boundary. An automated caller (today
+// cmd/disk-watchdog, which always passes --reap) reads these exact field names
+// off stdout to tell "the deletion you asked for did not happen" from an
+// ordinary preview run; renaming either one turns a refused reap back into a
+// success the caller reports as reclaimed space. cmd/ cannot import this
+// internal package, so the consumer pins the same literals on its side.
+func TestSandboxGCResultPublishesTheRefusalOnTheWire(t *testing.T) {
+	out, err := json.Marshal(&SandboxGCResult{
+		DryRun:      true,
+		Scanned:     9,
+		Reaped:      4,
+		ReapRefused: "refusing to reap: live-session inventory is partial",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["dry_run"] != true {
+		t.Errorf("dry_run missing from %s", out)
+	}
+	if _, ok := got["reap_refused"].(string); !ok {
+		t.Errorf("reap_refused missing from %s", out)
+	}
+}
+
+// The mirror: a sweep that did what it was asked publishes no refusal, so a
+// caller cannot read one where there is none.
+func TestSandboxGCResultOmitsTheRefusalWhenItReaped(t *testing.T) {
+	out, err := json.Marshal(&SandboxGCResult{Scanned: 9, Reaped: 4, Kept: 5})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(out), "reap_refused") {
+		t.Errorf("a completed sweep published a refusal: %s", out)
 	}
 }

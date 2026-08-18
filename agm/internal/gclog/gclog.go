@@ -11,16 +11,24 @@ import (
 
 // Entry represents a single GC log entry.
 type Entry struct {
-	Timestamp      time.Time `json:"timestamp"`
-	Operation      string    `json:"operation"`
-	SessionID      string    `json:"session_id,omitempty"`
-	SessionName    string    `json:"session_name,omitempty"`
-	Reason         string    `json:"reason,omitempty"`
-	SandboxRemoved string    `json:"sandbox_removed,omitempty"`
-	WorktreesPaths []string  `json:"worktrees_removed,omitempty"`
-	BytesReclaimed int64     `json:"bytes_reclaimed,omitempty"`
-	DryRun         bool      `json:"dry_run,omitempty"`
-	Error          string    `json:"error,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Operation string    `json:"operation"`
+	// Source names who ran this GC, when the runner declares itself. It exists
+	// because a reader that infers "the scheduled reaper is alive" from any
+	// completion record cannot tell a scheduled sweep from one the reader's own
+	// remediation just triggered — and a watchdog that answers its own liveness
+	// question manufactures proof of life for a schedule that is dead. Empty
+	// means an undeclared runner (a manual invocation, or an agm predating the
+	// tag); readers must not treat empty as "scheduled".
+	Source         string   `json:"source,omitempty"`
+	SessionID      string   `json:"session_id,omitempty"`
+	SessionName    string   `json:"session_name,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
+	SandboxRemoved string   `json:"sandbox_removed,omitempty"`
+	WorktreesPaths []string `json:"worktrees_removed,omitempty"`
+	BytesReclaimed int64    `json:"bytes_reclaimed,omitempty"`
+	DryRun         bool     `json:"dry_run,omitempty"`
+	Error          string   `json:"error,omitempty"`
 	// Errors counts sub-operations that were attempted and failed within a
 	// single sweep. A sweep can return success overall while individual
 	// deletions fail, so readers that treat a completion record as evidence of

@@ -85,6 +85,18 @@
     -->
     <key>DOLT_PORT</key>
     <string>3307</string>
+
+    <!--
+      Declares which runner produced each record this sweep writes. The disk
+      watchdog reads the same log to answer "is this hourly schedule still
+      alive?", and it invokes `agm sandbox gc --reap` itself on every breached
+      tick; without a producer tag it would accept its own remediation as proof
+      that this job is alive and report a dead schedule as healthy for as long
+      as disk pressure lasted (cmd/disk-watchdog, DW-29). An older agm ignores
+      an unknown variable, so setting it is safe on a mixed-version host.
+    -->
+    <key>AGM_GC_SOURCE</key>
+    <string>launchd-sandbox-gc</string>
   </dict>
 
   <!-- One tick per hour. Each tick is idempotent; every reap re-verifies all

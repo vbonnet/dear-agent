@@ -3,6 +3,16 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Reaper-liveness evidence: `cmd/disk-watchdog/reaper_liveness_test.go` (DW-17..DW-23),
+  `cmd/disk-watchdog/reaper_liveness_review_test.go` (DW-19, DW-24, DW-25),
+  `cmd/disk-watchdog/reaper_liveness_bounds_test.go` (DW-26), and
+  `cmd/disk-watchdog/reaper_liveness_honesty_test.go` (DW-27 through DW-31:
+  widening past the tail, undetermined-is-not-never, self-produced heartbeats
+  ignored and liveness read before remediation, a refused reap latching the
+  brake, and a negative window rejected as a usage error). The producer half of
+  the refusal and producer-tag wire contracts is pinned in
+  `agm/internal/ops/sandbox_gc_test.go` and `agm/internal/gclog/gclog_test.go`
+  (SGC-17), since `cmd/` cannot import `agm/internal/...`.
 
 <!-- Last audited at: 2026-08-14 -->
 
@@ -85,7 +95,17 @@ place, so counting either would let a broken reaper suppress its own alarm.
 
 **DW-26** When scanning the sandbox-GC log, the system shall read at most a bounded tail of the file and shall resume at the first whole record inside that tail, so per-tick work does not grow with total log history and a long-lived host cannot starve later disk samples.
 
+**DW-27** When the bounded tail contains no proof of a completed sweep and records older than the tail exist, the system shall widen the scanned window until it finds proof, reaches the start of the file, reads a record older than the reaper-liveness window, or reaches a hard byte cap — because record volume is not bounded by elapsed time and enough unrelated session-GC records can push a heartbeat that is well inside the SLA out of a fixed tail.
+
+**DW-28** When the widening scan reaches its hard byte cap without proof of a completed sweep and without reading back past the reaper-liveness window, the system shall classify the reaper as stale and shall report the condition as undetermined liveness rather than as a reaper that never completed a sweep, because absent and could-not-determine are different findings with different causes.
+
+**DW-29** When evaluating reaper liveness, the system shall ignore sandbox-GC records this watchdog's own remediation produced (identified by the producer tag it sets on the sweeps it invokes), and shall evaluate liveness before invoking remediation on the same tick, so that a remediating watchdog cannot accept its own sweep as proof that the scheduled reaper is alive. A record with no producer tag is not attributed to this watchdog.
+
+**DW-30** When remediation invokes `agm sandbox gc --reap` and the sweep reports that the requested reap was refused or downgraded to a scan, the system shall treat the remediation as failed — it deleted nothing and its reap count means would-reap — and shall therefore engage the admission brake under DW-11.
+
 **DW-20** While the reaper-liveness window is zero or the sandbox GC log path is empty, the system shall not evaluate reaper liveness.
+
+**DW-31** When the configured reaper-liveness window is negative, the system shall reject it as a usage error and exit 2 rather than disabling the check, so a typo cannot leave a dead reaper unmonitored while every tick reports OK. Only zero disables the check (DW-20).
 
 **DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.
 

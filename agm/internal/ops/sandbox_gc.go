@@ -72,9 +72,17 @@ type SandboxGCResult struct {
 	// use. These are a subset of Kept: a sweep can report zero Errors while
 	// every entry was actually a probe failure, which looks identical to a
 	// healthy idle sweep unless a reader checks this field too.
-	ProbeFailures int              `json:"probe_failures,omitempty"`
-	Warnings      []string         `json:"warnings,omitempty"`
-	Entries       []SandboxGCEntry `json:"entries,omitempty"`
+	ProbeFailures int `json:"probe_failures,omitempty"`
+	// ReapRefused explains why a caller that explicitly asked to delete got a
+	// scan instead. Without it the refusal is only inferable from `dry_run`,
+	// which an automated caller reads as "this run was a dry run" — an ordinary
+	// outcome — rather than "the deletion you requested did not happen". A
+	// refusal that reads as a normal outcome is a failure reported as a healthy
+	// state, which is precisely how a reap-nothing sweep passed for a working
+	// one for a month (ce-uxju). Empty means the run did what it was asked.
+	ReapRefused string           `json:"reap_refused,omitempty"`
+	Warnings    []string         `json:"warnings,omitempty"`
+	Entries     []SandboxGCEntry `json:"entries,omitempty"`
 }
 
 // SandboxGC sweeps ~/.agm/sandboxes for reapable sandbox dirs.
