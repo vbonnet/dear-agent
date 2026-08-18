@@ -309,6 +309,34 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintln(os.Stderr, "safe-merge: ✓ expected reviewers have fresh reviews")
 	}
 
+	headInfo, err := prHeadInfo(cfg.PRNumber, cfg.Repo)
+	if err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "cannot read PR head: "+err.Error())
+		return fmt.Errorf("cannot read PR head info (needed for --match-head-commit): %w", err)
+	}
+
+	// Gate 5: the head must sit on the current base tip. A strict
+	// required-status-checks policy rejects any behind branch, and `gh pr merge
+	// --auto` only queues the merge — it never advances the branch — so without
+	// this gate an out-of-date PR stays queued forever. Running it last means a
+	// CI cycle is only ever spent on a PR that already cleared every other gate.
+	if err := runGate(ctx, "freshness", func() error {
+		return checkBranchFreshness(cfg.PRNumber, cfg.Repo, headInfo.SHA, cfg.DryRun)
+	}); err != nil {
+		if errors.Is(err, ErrBranchUpdated) {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "branch_updated",
+				fmt.Sprintf("advanced to base tip from head=%s", headInfo.SHA))
+			fmt.Fprintf(os.Stderr,
+				"safe-merge: ↻ PR #%d was behind its base; branch advanced to the base tip\n"+
+					"safe-merge: guidance: required checks are re-running — re-run with --watch to merge on green\n",
+				cfg.PRNumber)
+			return err
+		}
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "freshness: "+err.Error())
+		return fmt.Errorf("base-freshness gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ head is on the current base tip")
+
 	if cfg.DryRun {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "dry_run", "all gates passed; merge skipped")
 		fmt.Fprintln(os.Stderr, "safe-merge: dry-run — all gates passed; no merge executed")
@@ -320,13 +348,6 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	defer mergeSpan.End()
 
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
-	headInfo, err := prHeadInfo(cfg.PRNumber, cfg.Repo)
-	if err != nil {
-		mergeSpan.RecordError(err)
-		mergeSpan.SetStatus(codes.Error, err.Error())
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "cannot read PR head: "+err.Error())
-		return fmt.Errorf("cannot read PR head info (needed for --match-head-commit): %w", err)
-	}
 	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
 	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
