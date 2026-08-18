@@ -24,7 +24,7 @@ rejects malformed timeout arguments before invoking git.
 
 **SAFE-PUSH-05** When arguments are valid, the system shall call the safe push policy with the selected repository, push arguments, and timeout.
 
-**SAFE-PUSH-06** When forwarded push arguments contain a force flag in any spelling git accepts — including a bundled short-option cluster such as `-uf` — the system shall reject the invocation before running git, per SAFEGIT-01.
+**SAFE-PUSH-06** When forwarded push arguments contain a force flag in any spelling git accepts — including a bundled short-option cluster such as `-uf` — the system shall reject the invocation before running git, per SAFEGIT-01 and SAFEGIT-25.
 
 ## BDD Traceability
 
