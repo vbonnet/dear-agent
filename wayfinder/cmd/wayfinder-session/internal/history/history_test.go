@@ -68,11 +68,9 @@ func TestAppendEvent(t *testing.T) {
 
 func TestAppendEventSanitizesNewDataWithoutMutationOrHistoryRewrite(t *testing.T) {
 	tmpDir := t.TempDir()
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("os.UserHomeDir() error = %v", err)
-	}
+	homeDir := t.TempDir()
 	h := New(tmpDir)
+	h.userHomeDir = func() (string, error) { return homeDir, nil }
 
 	legacyBytes := []byte("{\"data\":{\"path\":\"/legacy/absolute/path\"}}\n")
 	if err := os.WriteFile(h.path, legacyBytes, 0o600); err != nil {
