@@ -86,7 +86,7 @@
   <integer>3600</integer>
 
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
 
   <key>AbandonProcessGroup</key>
   <false/>

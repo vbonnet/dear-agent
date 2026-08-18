@@ -16,13 +16,14 @@ import (
 )
 
 func TestSweepMergedWorktrees_InvokesExecuteJSON(t *testing.T) {
-	var gotName string
-	var gotArgs []string
+	var calls []string
 	cfg := config{
 		agmBin: "agm",
 		runCommand: func(_ context.Context, name string, args ...string) ([]byte, error) {
-			gotName = name
-			gotArgs = args
+			calls = append(calls, name+" "+strings.Join(args, " "))
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":3,"reaped":1,"kept":2,"errors":0}`), nil
+			}
 			return []byte(`{"worktrees":[],"removed":["/x/a","/x/b"],"failed":{"/x/c":"boom"}}`), nil
 		},
 	}
@@ -30,22 +31,28 @@ func TestSweepMergedWorktrees_InvokesExecuteJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweepMergedWorktrees: %v", err)
 	}
-	if gotName != "agm" {
-		t.Errorf("binary = %q, want agm", gotName)
+	want := []string{
+		"agm sandbox gc --reap --json",
+		"agm worktree sweep --execute -o json",
 	}
-	want := []string{"worktree", "sweep", "--execute", "-o", "json"}
-	if strings.Join(gotArgs, " ") != strings.Join(want, " ") {
-		t.Errorf("args = %v, want %v", gotArgs, want)
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls = %v, want %v", calls, want)
 	}
 	if len(r.Removed) != 2 || len(r.Failed) != 1 {
 		t.Errorf("parsed result wrong: %+v", r)
+	}
+	if r.SandboxGC == nil || r.SandboxGC.Reaped != 1 {
+		t.Errorf("sandbox gc summary = %+v, want reaped=1", r.SandboxGC)
 	}
 }
 
 func TestSweepMergedWorktrees_ErrorPropagates(t *testing.T) {
 	cfg := config{
 		agmBin: "agm",
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":0,"reaped":0,"kept":0,"errors":0}`), nil
+			}
 			return nil, errors.New("exit 1")
 		},
 	}
@@ -57,7 +64,10 @@ func TestSweepMergedWorktrees_ErrorPropagates(t *testing.T) {
 func TestSweepMergedWorktrees_GarbageOutputIsError(t *testing.T) {
 	cfg := config{
 		agmBin: "agm",
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":0,"reaped":0,"kept":0,"errors":0}`), nil
+			}
 			return []byte("not json"), nil
 		},
 	}
