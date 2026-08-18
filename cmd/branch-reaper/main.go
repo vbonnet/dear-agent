@@ -35,6 +35,11 @@
 // --force-with-lease=<branch>:<sha> pinned to the exact SHA that was
 // classified, so a push that lands between classification and deletion
 // makes the delete fail loudly instead of silently destroying the new tip.
+// A lease cannot catch a PR opened in that same window -- opening one does
+// not move the tip -- so every delete also re-asks for open head and base
+// PRs immediately beforehand and fails closed if it cannot get an answer.
+// A delete rejected because the ref is already gone counts as done, not
+// failed: that is the end state this asked for.
 // The report then names what actually happened -- `deleted` versus
 // `delete_failed` -- so a branch still sitting on the remote is never
 // listed as reaped. Because PR history is read from GH_REPO while deletes
@@ -199,7 +204,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	deleteFailed := 0
 	if *execute {
-		del := func(b branchInfo) error { return deleteBranch(ctx, b) }
+		del := func(b branchInfo) error {
+			// Classification walked every branch in the repo, which takes
+			// long enough for someone to open a PR from or onto this one in
+			// the meantime. The SHA lease would not catch that: opening a
+			// PR does not move the tip. Re-ask right before the delete, and
+			// fail closed if the answer cannot be obtained.
+			if err := confirmNoOpenPRs(ctx, repo, b.Name); err != nil {
+				return err
+			}
+			return deleteBranch(ctx, b)
+		}
 		// Deletion runs before the report is emitted so the report can say
 		// what actually happened: `deleted` versus `delete_failed`, never a
 		// blanket "auto-deleted" list that includes refs still on the
@@ -794,8 +809,57 @@ func deleteBranch(ctx context.Context, b branchInfo) error {
 	// external input.
 	cmd := exec.CommandContext(ctx, "git", "push", "origin",
 		"--force-with-lease="+b.Name+":"+b.TipSHA, "--delete", b.Name)
-	_, err := runCombined(cmd)
-	return err
+	if _, err := runCombined(cmd); err != nil {
+		// The requested end state may already hold: GitHub's own
+		// delete-on-merge, or a human, can remove the ref between
+		// enumeration and this push, and git then errors because there is
+		// nothing to delete. Reporting that as a failure would claim the
+		// branch is still on the remote when it is not.
+		if gone, checkErr := remoteBranchAbsent(ctx, b.Name); checkErr == nil && gone {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// remoteBranchAbsent reports whether branch no longer exists on origin.
+func remoteBranchAbsent(ctx context.Context, branch string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
+	defer cancel()
+	// #nosec G204,G702 -- fixed "git" binary; branch comes from this repo's
+	// own remote refs, not external input.
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", "origin",
+		"refs/heads/"+branch)
+	out, err := runCombined(cmd)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "", nil
+}
+
+// confirmNoOpenPRs re-verifies, immediately before a deletion, that nothing
+// open depends on branch -- neither a PR opened FROM it nor one based ON
+// it. Any open PR, or any failure to find out, is an error: the caller must
+// treat "cannot confirm" exactly like "not safe".
+func confirmNoOpenPRs(ctx context.Context, repo, branch string) error {
+	prs, err := fetchPRs(ctx, repo, branch)
+	if err != nil {
+		return fmt.Errorf("recheck head PRs: %w", err)
+	}
+	for _, pr := range prs {
+		if pr.State == "OPEN" {
+			return fmt.Errorf("pull request #%d was opened from this branch since classification", pr.Number)
+		}
+	}
+	basePRs, err := fetchOpenBasePRs(ctx, repo, branch)
+	if err != nil {
+		return fmt.Errorf("recheck base PRs: %w", err)
+	}
+	if basePRs > 0 {
+		return fmt.Errorf("%d open pull request(s) now target this branch as their base", basePRs)
+	}
+	return nil
 }
 
 // fetchPRs returns branch's PR history for PRs opened from this repository.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -690,6 +691,107 @@ func installReaperFakeGH(t *testing.T, body string) {
 		t.Fatalf("write fake gh: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// The deletion window: classification walked the whole repo, and someone
+// opened a PR in the meantime. The SHA lease cannot see that -- opening a
+// PR does not move the tip -- so the recheck must catch it.
+func TestConfirmNoOpenPRs(t *testing.T) {
+	t.Run("open head PR blocks the delete", func(t *testing.T) {
+		installReaperFakeGH(t, `
+for arg in "$@"; do if [ "$arg" = "--base" ]; then printf '%s\n' '[]'; exit 0; fi; done
+printf '%s\n' '[{"number":7,"state":"OPEN"}]'
+`)
+		err := confirmNoOpenPRs(context.Background(), "owner/repo", "some/branch")
+		if err == nil || !strings.Contains(err.Error(), "#7") {
+			t.Fatalf("want an error naming PR #7, got %v", err)
+		}
+	})
+
+	t.Run("open base PR blocks the delete", func(t *testing.T) {
+		installReaperFakeGH(t, `
+for arg in "$@"; do if [ "$arg" = "--base" ]; then printf '%s\n' '[{"number":9}]'; exit 0; fi; done
+printf '%s\n' '[]'
+`)
+		err := confirmNoOpenPRs(context.Background(), "owner/repo", "some/branch")
+		if err == nil || !strings.Contains(err.Error(), "base") {
+			t.Fatalf("want a base-PR error, got %v", err)
+		}
+	})
+
+	t.Run("a failed recheck fails closed", func(t *testing.T) {
+		installReaperFakeGH(t, `
+echo "gh: rate limited" >&2
+exit 1
+`)
+		if err := confirmNoOpenPRs(context.Background(), "owner/repo", "some/branch"); err == nil {
+			t.Fatal("a lookup failure must block the delete, not permit it")
+		}
+	})
+
+	t.Run("nothing open permits the delete", func(t *testing.T) {
+		installReaperFakeGH(t, `printf '%s\n' '[]'`)
+		if err := confirmNoOpenPRs(context.Background(), "owner/repo", "some/branch"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// BRR-19: a delete that git rejects because the ref is already gone still
+// achieved the requested end state, so it must not be reported as a failure
+// that leaves the branch on the remote.
+func TestDeleteBranch_AlreadyAbsentCountsAsDeleted(t *testing.T) {
+	work := newReaperGitFixture(t)
+	t.Chdir(work)
+
+	// A branch that exists: a leased delete removes it.
+	sha := runReaperGit(t, work, "rev-parse", "refs/remotes/origin/doomed")
+	if err := deleteBranch(t.Context(), branchInfo{Name: "doomed", TipSHA: sha}); err != nil {
+		t.Fatalf("deleting an existing branch: %v", err)
+	}
+	if out := runReaperGit(t, work, "ls-remote", "--heads", "origin", "refs/heads/doomed"); out != "" {
+		t.Fatalf("branch survived the delete: %q", out)
+	}
+
+	// The same delete replayed: git errors, but the end state already holds.
+	if err := deleteBranch(t.Context(), branchInfo{Name: "doomed", TipSHA: sha}); err != nil {
+		t.Errorf("deleting an already-absent branch reported failure: %v", err)
+	}
+}
+
+// newReaperGitFixture builds a throwaway origin + checkout with one
+// deletable branch, and returns the checkout path.
+func newReaperGitFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	bare := filepath.Join(root, "origin.git")
+	work := filepath.Join(root, "work")
+	runReaperGit(t, root, "init", "--quiet", "--bare", bare)
+	runReaperGit(t, root, "clone", "--quiet", bare, work)
+	runReaperGit(t, work, "config", "user.email", "reaper@test.invalid")
+	runReaperGit(t, work, "config", "user.name", "reaper test")
+	runReaperGit(t, work, "commit", "--quiet", "--allow-empty", "-m", "base")
+	runReaperGit(t, work, "push", "--quiet", "--no-verify", "origin", "HEAD:refs/heads/main")
+	runReaperGit(t, work, "push", "--quiet", "--no-verify", "origin", "HEAD:refs/heads/doomed")
+	runReaperGit(t, work, "fetch", "--quiet", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	return work
+}
+
+func runReaperGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", args...) // #nosec G204 -- test-controlled arguments
+	cmd.Dir = dir
+	// Keep the fixture independent of the developer's global git config.
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestPrintHuman(t *testing.T) {

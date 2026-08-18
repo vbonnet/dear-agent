@@ -74,8 +74,15 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
+          # Actions runs `run` steps under `bash -e`, and `set -uo pipefail`
+          # does NOT clear that. Without this `set +e` the reaper's normal
+          # non-zero statuses (1 review, 2 lookup, 4 delete) would abort the
+          # step right here -- no report, no outputs, no issue. Errexit is
+          # restored the moment the status is captured.
+          set +e
           "${RUNNER_TEMP}/branch-reaper" --json --execute > reaper-report.json
           reaper_rc=$?
+          set -e
           # 0 = clean, 1 = review list non-empty, 2 = a PR-history lookup
           # failed for one or more branches (skipped, see lookup_failed),
           # 4 = a safe delete was rejected. Those four are the documented

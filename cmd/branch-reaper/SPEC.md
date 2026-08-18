@@ -56,6 +56,10 @@ classified from incomplete data, and does not stop the rest of the run.
 
 **BRR-17** When the repository's default branch cannot be determined, the command shall report the failure, shall continue to report under a dry run, and shall refuse `--execute` with status 3 rather than delete against an unconfirmed protected-branch set.
 
+**BRR-18** When `--execute` reaches an individual branch, the command shall re-verify immediately before that deletion that no open pull request has since been opened from it or based on it, and shall skip the deletion and record it as failed when any such pull request exists or when the re-verification itself fails.
+
+**BRR-19** When a deletion is rejected because the branch is already absent from `origin`, the command shall record it as `deleted` rather than `delete_failed`, since the requested end state holds.
+
 **BRR-13** When the run completes, the command shall exit 0 if the four review/failure buckets (`review_no_pr`, `review_closed_unmerged`, `review_new_commits_after_merge`, `lookup_failed`) are all empty and no `--execute` deletion failed; shall exit 1 if any of the three review buckets is non-empty and `lookup_failed` is empty; shall exit 2 if `lookup_failed` is non-empty; shall exit 3 on a usage or environment error; and shall exit 4 when one or more safe deletions failed (which takes precedence over exit 1/2).
 
 **BRR-14** When `--execute` is given and the `origin` remote does not resolve to the repository whose pull-request history was read — matching on host as well as owner and name, so that a same-named repository on another forge or a hostless filesystem remote is rejected — the command shall delete nothing and exit with status 3, because deletions target `origin` while classification targets that repository.
