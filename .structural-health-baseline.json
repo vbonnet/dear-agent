@@ -81,7 +81,7 @@
     "doc-path": [],
     "file-size": [
       "agm/cmd/agm-mcp-server/tools_test.go (1025 lines)",
-      "agm/cmd/agm/archive_test.go (1579 lines)",
+      "agm/cmd/agm/archive_test.go (1484 lines)",
       "agm/cmd/agm/new.go (1097 lines)",
       "agm/cmd/agm/send_msg.go (1191 lines)",
       "agm/cmd/agm/supervisor.go (1056 lines)",
@@ -137,7 +137,6 @@
       "agm/cmd/agm-bus/main.go:329",
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
-      "agm/cmd/agm/archive.go:902",
       "agm/cmd/agm/watch.go:110",
       "agm/cmd/agm/watch.go:111",
       "agm/cmd/agm/watch.go:112",
@@ -730,6 +729,33 @@
       },
       "reason": "main advanced under the branch: spec-contract and completion-pipeline files grew past the stale baseline; admitted at merge-main so the newly always-on PR check starts honest",
       "reference": "PR #1183 / ce-3knl.13.3"
+    },
+    {
+      "previous_baseline_sha256": "393dfe8a88494fc202bf15226ca07e86749873eeaacddaed97f602e5eaf4dfd9",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1484 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1579 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:902"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
     }
   ]
 }
