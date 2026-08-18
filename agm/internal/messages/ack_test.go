@@ -3,6 +3,7 @@ package messages
 import (
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -117,18 +118,15 @@ func TestWaitForAckTimeout(t *testing.T) {
 	err = queue.MarkDelivered(messageID)
 	require.NoError(t, err)
 
-	// Wait for ack with short timeout (no ack sent)
-	start := time.Now()
-	err = ackMgr.WaitForAck(messageID, 200*time.Millisecond)
-	elapsed := time.Since(start)
+	const timeout = 200 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		waitErr := ackMgr.WaitForAck(messageID, timeout)
 
-	// Should timeout
-	assert.Error(t, err, "should timeout")
-	assert.Contains(t, err.Error(), "timeout")
-
-	// Should take approximately the timeout duration
-	assert.True(t, elapsed >= 200*time.Millisecond, "should wait for timeout duration")
-	assert.True(t, elapsed < 500*time.Millisecond, "should not wait too long")
+		require.EqualError(t, waitErr, "acknowledgment timeout after 200ms")
+		assert.Equal(t, timeout, time.Since(start), "should return when the configured timeout expires")
+		assert.Zero(t, ackMgr.GetPendingCount(), "timed-out acknowledgment should not remain pending")
+	})
 
 	// Verify timeout was recorded in database
 	retrieved, err := queue.GetByMessageID(messageID)
