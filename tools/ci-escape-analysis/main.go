@@ -274,8 +274,12 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) ([]cihealth.CheckRun,
 		mergedAt, mergedKnown = parsed, true
 	}
 
+	// filter=all, because the endpoint defaults to `latest` — one run per check
+	// suite. A check rerun after the merge would replace its own pre-merge
+	// attempt in the response, and the merge-time reducer would then report the
+	// check as never having run at all.
 	out, ok = gh(stderr, "api", "--paginate",
-		fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, head),
+		fmt.Sprintf("repos/%s/commits/%s/check-runs?filter=all&per_page=100", repo, head),
 		"--jq", ".check_runs[] | {name: .name, conclusion: .conclusion, appId: .app.id, startedAt: .started_at, completedAt: .completed_at}")
 	if !ok {
 		return nil, false

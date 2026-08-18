@@ -28,6 +28,11 @@ const retroLabel = "main-health-watchdog"
 // never reports it as new again.
 const queuedLabel = "main-health-queued"
 
+// mainRunPageLimit is how many of a workflow's runs on main are fetched while
+// looking for its latest qualifying one. A full page with nothing qualifying in
+// it is reported as an incomplete lookup rather than as an absence.
+const mainRunPageLimit = 60
+
 // redConclusions are the terminal conclusions that mean main is broken.
 // `failure` alone is too narrow: a required workflow that times out or fails to
 // start leaves main just as broken, and treating those as not-red makes the
@@ -136,7 +141,15 @@ func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
 
 	for name, run := range red {
 		fmt.Fprintf(stdout, "\n=== RED: %s @ %s (%s, %s)\n", name, shortSHA(run.HeadSHA), run.Conclusion, run.Event)
-		retro := buildRetro(opts, run, required, requiredKnown, stderr)
+		retro, ok := buildRetro(opts, run, required, requiredKnown, stderr)
+		if !ok {
+			// Could not establish which job failed. Say so and leave this
+			// workflow out of the live set — it was not observed, so nothing
+			// should be reconciled against its absence either.
+			fmt.Fprintf(stderr, "ci-escape-analysis: %s: could not read the failing job; skipping this sweep\n", name)
+			complete = false
+			continue
+		}
 		live[retro.Title()] = true
 		if opts.DryRun {
 			fmt.Fprintf(stdout, "--- would file: %s\n%s\n", retro.Title(), retro.Body())
@@ -277,13 +290,16 @@ func dequeueIncident(repo string, stdout, stderr io.Writer) error {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
 		"--label", retroLabel, "--label", queuedLabel, "--state", "open",
 		"--limit", "50", "--json", "number,title,createdAt",
-		"--jq", `sort_by(.createdAt) | .[0] | "\(.number)\t\(.title)"`)
+		// `.[0]` on an empty array is null, and interpolating null renders the
+		// literal "null" — which the caller would then pass to `gh issue edit`.
+		// Slicing and iterating emits no row at all when nothing is queued.
+		"--jq", `sort_by(.createdAt) | .[0:1][] | "\(.number)\t\(.title)"`)
 	if !ok {
 		return errors.New("listing queued incidents")
 	}
 
 	number, title, found := strings.Cut(strings.TrimSpace(string(out)), "\t")
-	if !found || number == "" {
+	if !found || number == "" || number == "null" {
 		return nil // nothing waiting
 	}
 
@@ -341,7 +357,7 @@ const (
 
 func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, observation) {
 	out, ok := gh(stderr, "run", "list",
-		"--repo", repo, "--branch", "main", "--workflow", workflow, "--limit", "20",
+		"--repo", repo, "--branch", "main", "--workflow", workflow, "--limit", fmt.Sprint(mainRunPageLimit),
 		"--json", "databaseId,workflowName,conclusion,headSha,url,createdAt,event")
 	if !ok {
 		return mainRun{}, lookupFailed
@@ -374,11 +390,24 @@ func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, observat
 		}
 		return run, observedRun
 	}
+	// Nothing qualifying in this page. If the page was full, the answer may
+	// simply be older than the fetch cap — and calling that "no run" lets
+	// reconciliation close a still-open incident as recovered.
+	if len(all) >= mainRunPageLimit {
+		return mainRun{}, lookupFailed
+	}
 	return mainRun{}, observedNoRun
 }
 
-func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredContext, requiredKnown bool, stderr io.Writer) cihealth.Retro {
+func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredContext, requiredKnown bool, stderr io.Writer) (cihealth.Retro, bool) {
 	failing, jobs := failingCheckForRun(opts.Repo, run, stderr)
+	if jobs == jobLookupFailed {
+		// Filing under the workflow name as a stand-in would key the incident
+		// on an identity that changes the moment the lookup succeeds: the next
+		// sweep produces the real job name, opens a second issue, and queues a
+		// second fix agent for one failure.
+		return cihealth.Retro{}, false
+	}
 	// A run that failed before producing any job has no check to name. Using
 	// the workflow's display name instead invents a context no pull request
 	// could have reported, which Classify then reads as `never-ran`. But a
@@ -403,12 +432,8 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 		ScheduledDetection:   run.scheduledDetection(),
 	}
 
-	// A job list that could not be read leaves the classification without its
-	// subject, exactly as an unread check list does — so it starts the
-	// known-state off, and a later successful check lookup cannot turn it back
-	// on.
 	escape.PRKnown = true
-	escape.PRChecksKnown = jobs != jobLookupFailed
+	escape.PRChecksKnown = true
 
 	// A scheduled detection is not attributable to the head commit, so do not
 	// go looking for "the pull request that caused it" — there isn't one.
@@ -458,7 +483,7 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 		Required:      required,
 		RequiredKnown: requiredKnown,
 		WindowDays:    opts.WindowDays,
-	}
+	}, true
 }
 
 // isDiffScoped names the checks whose pre-merge run is deliberately narrower
@@ -582,10 +607,15 @@ func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Write
 // title, scattering exactly the history the stable title exists to keep in one
 // place. Returns the issue number and whether it is currently open.
 func findRetro(repo, title string, stderr io.Writer) (number int, open, known bool) {
+	// Searched by title rather than filtered out of the newest 100. `--limit`
+	// is a fetch cap: once the label has accumulated more than 100 incidents, a
+	// recurring check whose issue falls outside that slice reads as absent and
+	// upsertRetro opens a duplicate.
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
 		"--label", retroLabel, "--state", "all", "--limit", "100",
+		"--search", fmt.Sprintf(`in:title %q`, title),
 		"--json", "number,title,state,createdAt",
-		"--jq", fmt.Sprintf(`[.[] | select(.title == %q)] | sort_by(.createdAt) | .[-1] | "\(.number) \(.state)"`, title))
+		"--jq", fmt.Sprintf(`[.[] | select(.title == %q)] | sort_by(.createdAt) | .[-1:][] | "\(.number) \(.state)"`, title))
 	if !ok {
 		// A failed read is not proof of absence. Treating it as absence has
 		// upsertRetro open a second issue with the same title and queue label,
@@ -593,7 +623,7 @@ func findRetro(repo, title string, stderr io.Writer) (number int, open, known bo
 		return 0, false, false
 	}
 	numberText, state, found := strings.Cut(strings.TrimSpace(string(out)), " ")
-	if !found || strings.HasPrefix(strings.TrimSpace(string(out)), "null") {
+	if !found || numberText == "" || numberText == "null" {
 		return 0, false, true // read cleanly, nothing there
 	}
 	if _, err := fmt.Sscanf(numberText, "%d", &number); err != nil {

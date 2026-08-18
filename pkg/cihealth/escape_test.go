@@ -742,3 +742,51 @@ func TestTitleDistinguishesWorkflowsSharingAJobName(t *testing.T) {
 		t.Errorf("titles lost the workflow: %q / %q", ci, audit)
 	}
 }
+
+// Several Apps can publish the same job name, and the caller supplies them in
+// no particular order. Picking "the first with this name" makes the gating
+// classification a coin flip.
+func TestFindCheckPrefersThePinnedProducer(t *testing.T) {
+	const (
+		githubActions int64 = 15368
+		otherApp      int64 = 99999
+	)
+	required := []RequiredContext{{Name: buildCheck, IntegrationID: githubActions}}
+
+	// Foreign attempt first in the slice, so a name-only search would take it.
+	checks := []CheckRun{
+		{Name: buildCheck, Conclusion: ConclusionSuccess, AppID: otherApp},
+		{Name: buildCheck, Conclusion: ConclusionFailure, AppID: githubActions},
+	}
+
+	got := Classify(Escape{
+		PreMergeCapable:  true,
+		FailingCheck:     buildCheck,
+		MainSHA:          "abc1234def",
+		PRNumber:         8,
+		PRChecks:         checks,
+		PRChecksKnown:    true,
+		PRKnown:          true,
+		RequiredContexts: required,
+		RequiredKnown:    true,
+	})
+	if got.Class != ClassGatingGap {
+		t.Errorf("Class = %q, want %q — the pinned app's failing attempt should drive this", got.Class, ClassGatingGap)
+	}
+
+	// Order must not change the answer.
+	reversed := Escape{
+		PreMergeCapable:  true,
+		FailingCheck:     buildCheck,
+		MainSHA:          "abc1234def",
+		PRNumber:         8,
+		PRChecks:         []CheckRun{checks[1], checks[0]},
+		PRChecksKnown:    true,
+		PRKnown:          true,
+		RequiredContexts: required,
+		RequiredKnown:    true,
+	}
+	if other := Classify(reversed); other.Class != got.Class {
+		t.Errorf("classification depends on slice order: %q vs %q", got.Class, other.Class)
+	}
+}

@@ -259,7 +259,7 @@ func Classify(e Escape) Finding {
 		}
 	}
 
-	run, reported := findCheck(e.PRChecks, e.FailingCheck)
+	run, reported := findCheck(e.PRChecks, e.FailingCheck, e.RequiredContexts)
 
 	switch {
 	case !reported:
@@ -533,13 +533,36 @@ func (r ROI) Explain() string {
 	return b.String()
 }
 
-func findCheck(runs []CheckRun, name string) (CheckRun, bool) {
-	for _, run := range runs {
-		if run.Name == name {
-			return run, true
+// findCheck picks the attempt that the merge gate would have been looking at.
+//
+// Several Apps can publish the same job name, and the caller supplies them in
+// no particular order, so "the first one with this name" is a coin flip that
+// decides the gating classification. When the ruleset pins this context to an
+// App, that App's attempt is the one that mattered; otherwise fall back to the
+// lowest AppID so the choice is at least deterministic between runs.
+func findCheck(runs []CheckRun, name string, required []RequiredContext) (CheckRun, bool) {
+	var pinned int64
+	for _, want := range required {
+		if want.Name == name && want.IntegrationID != 0 {
+			pinned = want.IntegrationID
+			break
 		}
 	}
-	return CheckRun{}, false
+
+	var best CheckRun
+	found := false
+	for _, run := range runs {
+		if run.Name != name {
+			continue
+		}
+		if pinned != 0 && run.AppID == pinned {
+			return run, true
+		}
+		if !found || run.AppID < best.AppID {
+			best, found = run, true
+		}
+	}
+	return best, found
 }
 
 // isRequired reports whether this exact check — name and producing app —

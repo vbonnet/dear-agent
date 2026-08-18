@@ -54,6 +54,7 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape",
 		"TestPlacementIsPricedOnlyWhereItIsTheDecision",
 		"TestRequiredContextMatchesOnProducingApp",
+		"TestFindCheckPrefersThePinnedProducer",
 		"TestFailedCheckLookupIsNotEvidenceOfNeverRan",
 		"TestFailedPRLookupIsNotABypass",
 		"TestWorkflowLevelFailureIsNotAMissingCheck",
