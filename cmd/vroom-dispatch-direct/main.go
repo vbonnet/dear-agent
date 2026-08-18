@@ -44,6 +44,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/vroomgate"
 )
 
 // subprocessTimeout bounds every bd/gh/agm child so a hung subprocess cannot
@@ -59,60 +61,6 @@ const subprocessTimeout = 60 * time.Second
 // session AND reads as a spawn failure that stops the run. 180s is generous
 // for a healthy boot while still bounding a truly hung spawn.
 const sessionSpawnTimeout = 180 * time.Second
-
-// humanGated lists beads that must never be auto-dispatched to a worker: they
-// require a human in the loop (credential rotation, backups, repointing live
-// skills, destructive ops) or are otherwise gated by operator decision. Kept in
-// sync with vroom-prompt-gen and the orchestrator skill's skip list (ce-5z0o).
-var humanGated = map[string]bool{
-	"ce-pqha":    true,
-	"ce-8qi":     true,
-	"ce-kgd":     true,
-	"ce-9uo":     true,
-	"ce-xulg.14": true,
-	"ce-126c":    true,
-	"ce-cd14":    true,
-	"ce-cd14.2":  true,
-	"ce-cd14.1":  true,
-	"ce-rrry":    true,
-	"ce-clm6":    true,
-	"ce-6as.10":  true, // interactive Gmail OAuth re-consent — HUMAN-ACTION, needs a human at the browser
-
-	// Gated for the 2026-07-16 overnight unattended dispatch run (operator
-	// decision): each is either core mesh/spawn/install infra whose breakage
-	// would take dispatch itself down, or touches a security-sensitive surface
-	// (fsguard, credentials, write-guard, OAuth) that needs a human review pass
-	// rather than an unattended merge. Revisit and lift individually once a
-	// human has reviewed the fix, rather than clearing the whole batch at once.
-	"ce-nq2r":    true, // dispatch-owner crash detection — architectural, being handled directly tonight
-	"ce-zp4c":    true, // non-atomic install cp — core install tooling
-	"ce-24f1":    true, // find/guard go/bin wipe — core toolchain safety investigation
-	"ce-bz3w":    true, // go/bin wipe incident — same core toolchain surface as ce-24f1
-	"ce-cknn":    true, // mesh OAuth apiKeyHelper auto-refresh — auth/architectural
-	"ce-fmxv":    true, // agm session new hang / spawn path — core spawn infra
-	"ce-7ep9":    true, // agm.sock deletion under running tmux — core spawn infra
-	"ce-3knl.10": true, // fail-closed AI review merge gate — governance/security
-	"ce-3knl.3":  true, // FSGUARD gaps — security
-	"ce-3knl.2":  true, // credential handling in logs/panes — security
-	"ce-3knl.1":  true, // global git hooks / worktree sweep isolation — host-wide safety surface
-	"ce-3knl":    true, // epic wrapper for the above
-	"ce-5iv2":    true, // nightly go-install clobbers agm-mcp-server — core toolchain
-	"ce-w77v":    true, // non-atomic in-place go install SIGKILLs agm — core toolchain
-	"ce-2n5j":    true, // mesh recovery harness/provider selection — architectural
-	"ce-ychx":    true, // control-plane single-provider dependency — architectural
-	"ce-mazv":    true, // post-merge deploy-verify hook — deploy pipeline safety surface
-	"ce-i5ru":    true, // spawn preflight VerifyAncestry — core spawn infra
-	"ce-uxju":    true, // sandbox-dir GC auto-reap — host stability surface (2.3T leak history)
-	"ce-q172":    true, // write-guard vroom carveout — security
-	"ce-m80x":    true, // FD exhaustion crashing Dolt — host stability surface
-	"ce-93lw.3":  true, // fsguard tokenizer fail-open — security
-	"ce-93lw.1":  true, // raw shell-string interpolation — security
-	"ce-93lw":    true, // epic wrapper for the above
-	"ce-wcmz":    true, // safety-guard false positives — core safety-guard logic
-	"ce-de4v":    true, // OAuth token hot-reload — auth
-	"ce-77ip":    true, // unified OAuth lifecycle epic — architectural
-	"ce-py3x":    true, // human_typing pane-state guard invert — core safety-guard logic
-}
 
 // defaultModel is the model alias workers spawn with. opus-200k → claude-opus-4-8:
 // design-phase work needs Opus, and the 200k variant dodges the 1M credit gate
@@ -410,7 +358,7 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 		if b.Priority > maxPriority {
 			continue
 		}
-		if humanGated[b.ID] {
+		if vroomgate.IsHumanGated(b.ID) {
 			continue
 		}
 		// Live-worker dedup compares normalized ids: liveWorkerIDs normalizes
@@ -432,19 +380,6 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 		return out[i].ID < out[j].ID
 	})
 	return out
-}
-
-// capCandidates truncates the priority-ordered candidate list to at most max
-// entries (0 or negative means unlimited). Candidates are already sorted P0
-// first, so truncating keeps the highest-priority eligible beads and simply
-// leaves the rest for a later run — this is the per-run blast-radius cap for
-// a scheduled/unattended dispatch loop, distinct from selectCandidates'
-// eligibility filtering.
-func capCandidates(candidates []bead, maxN int) []bead {
-	if maxN <= 0 || len(candidates) <= maxN {
-		return candidates
-	}
-	return candidates[:maxN]
 }
 
 // sessionNewArgs builds the `agm session new` argument list for spawning a worker.
@@ -571,6 +506,14 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	flag.Parse()
 
+	// A negative cap is always a misconfiguration (`-max-dispatch=-1` reads as
+	// "unlimited" in plenty of other tools), and quietly treating it as
+	// unlimited is precisely how a safety cap fails open. Only the documented
+	// 0 disables the cap; anything else negative is an error, not a default.
+	if *maxDispatch < 0 {
+		fatal("-max-dispatch must be >= 0 (0 = unlimited), got %d", *maxDispatch)
+	}
+
 	// Cancel in-flight subprocesses if the dispatcher is interrupted (SIGINT/
 	// SIGTERM) so a killed run does not leave orphaned bd/gh/agm children.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -601,19 +544,37 @@ func main() {
 		fatal("query open PRs (failing closed to avoid double-dispatch): %v", err)
 	}
 
-	candidates := capCandidates(selectCandidates(beads, live, prs, *maxPriority), *maxDispatch)
+	// The full eligible list goes into the loop, not a pre-truncated slice: the
+	// cap counts SUCCESSFUL dispatches, so a deterministically-skipped bead does
+	// not consume a slot. Truncating up front would let one poisoned P0 eat the
+	// whole -max-dispatch=1 budget on every scheduled run and starve the queue
+	// permanently — the ce-b1zw failure the skip logic exists to prevent.
+	candidates := selectCandidates(beads, live, prs, *maxPriority)
 
-	dispatched := dispatchCandidates(ctx, candidates, *model, *dryRun, os.Stdout, os.Stderr)
+	dispatched := dispatchCandidates(ctx, candidates, *model, *maxDispatch, *dryRun, os.Stdout, os.Stderr)
 
 	fmt.Fprintf(os.Stderr,
 		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
 		len(beads), len(live), len(candidates), dispatched)
 }
 
-func dispatchCandidates(ctx context.Context, candidates []bead, model string, dryRun bool, out, errOut io.Writer) int {
+// dispatchCandidates works the priority-ordered eligible list and returns how
+// many beads it actually dispatched.
+//
+// maxDispatch (0 or negative = unlimited) bounds SUCCESSFUL dispatches, not list
+// positions: beads skipped for a deterministic per-bead spawn failure do not
+// consume budget, so the run keeps walking down the list until it has genuinely
+// placed maxDispatch beads or run out of candidates.
+func dispatchCandidates(ctx context.Context, candidates []bead, model string, maxDispatch int, dryRun bool, out, errOut io.Writer) int {
 	dispatched := 0
-	for _, b := range candidates {
+	for i, b := range candidates {
 		if ctx.Err() != nil {
+			break
+		}
+		if maxDispatch > 0 && dispatched >= maxDispatch {
+			fmt.Fprintf(errOut,
+				"vroom-dispatch-direct: -max-dispatch=%d reached, deferring %d remaining eligible bead(s) to a later run\n",
+				maxDispatch, len(candidates)-i)
 			break
 		}
 		if dryRun {

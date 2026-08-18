@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/vroomgate"
 	"github.com/vbonnet/dear-agent/internal/vroomprompt"
 )
 
@@ -116,6 +117,25 @@ func TestSelectCandidates(t *testing.T) {
 	}
 	if got[0].path != "/tmp/prompts/ce-aaaa.md" {
 		t.Errorf("unexpected path %s", got[0].path)
+	}
+}
+
+// TestSelectCandidatesHonoursSharedHumanGate is the drift regression: this
+// generator used to keep its own copy of the human-gated list, so a bead gated
+// in vroom-dispatch-direct still got a prompt file materialised here and stayed
+// dispatchable through the orchestrator. Both binaries now read the one list in
+// internal/vroomgate, and this walks all of it rather than a hardcoded sample.
+func TestSelectCandidatesHonoursSharedHumanGate(t *testing.T) {
+	ids := vroomgate.IDs()
+	if len(ids) == 0 {
+		t.Fatal("the shared human gate list is empty; prompt generation would be ungated")
+	}
+	var beads []bead
+	for _, id := range ids {
+		beads = append(beads, bead{ID: id, Title: "gated " + id, Priority: 0})
+	}
+	if got := selectCandidates(beads, nil, nil, "/tmp/prompts"); len(got) != 0 {
+		t.Errorf("human-gated beads must never get a generated prompt, got %+v", got)
 	}
 }
 

@@ -29,6 +29,8 @@ and explicit harness, model, permission-mode, and workspace routes.
 
 **VPG-10** When no new candidates exist, the command shall report a normal steady state and exit successfully.
 
+**VPG-11** While determining whether a Bead is human-gated, the command shall consult the shared `internal/vroomgate` list rather than a command-local copy, so the gate cannot drift between dispatch-path binaries.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_operations_command_guardrails.feature`

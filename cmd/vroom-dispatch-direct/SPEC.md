@@ -34,6 +34,12 @@ can never brick a dispatch run (ce-b1zw).
 
 **VDD-09** When a run dispatches zero beads, the system shall exit with status 0, treating a drained or fully in-flight backlog as a normal steady state.
 
-**VDD-10** When `-max-dispatch` is set to a positive N, the system shall dispatch at most N candidates in that run, keeping the highest-priority-ordered candidates and leaving the remainder for a later run.
+**VDD-10** When `-max-dispatch` is set to a positive N, the system shall dispatch at most N candidates in that run, counting only successful dispatches toward N so a deterministically-skipped bead cannot consume the budget, and shall leave the remaining eligible candidates for a later run.
 
 **VDD-11** When `-max-dispatch` is 0 or unset, the system shall preserve unlimited dispatch (dispatch every eligible candidate, bounded only by spawn backpressure).
+
+**VDD-12** When `-max-dispatch` is negative, the system shall exit with an error rather than treating the misconfigured cap as unlimited.
+
+**VDD-13** When a run summary is reported, the system shall report the total eligible candidate count rather than the capped dispatch count.
+
+**VDD-14** While determining whether a bead is human-gated, the system shall consult the shared `internal/vroomgate` list rather than a command-local copy.
