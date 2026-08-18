@@ -24,19 +24,24 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "seed-session: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	sessionID := flag.String("session-id", "", "Stable AGM session ID to create")
-	name := flag.String("name", "", "Session name")
-	tmuxSession := flag.String("tmux-session", "", "tmux session name (defaults to --name)")
-	harness := flag.String("harness", "claude-code", "Harness identity for the graceful-exit command")
-	project := flag.String("project", "", "Project directory recorded on the session")
-	flag.Parse()
+// run takes its arguments rather than reading os.Args so the validation and
+// the seeded record can both be exercised by a test.
+func run(args []string) error {
+	fs := flag.NewFlagSet("seed-session", flag.ContinueOnError)
+	sessionID := fs.String("session-id", "", "Stable AGM session ID to create")
+	name := fs.String("name", "", "Session name")
+	tmuxSession := fs.String("tmux-session", "", "tmux session name (defaults to --name)")
+	harness := fs.String("harness", "claude-code", "Harness identity for the graceful-exit command")
+	project := fs.String("project", "", "Project directory recorded on the session")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *sessionID == "" || *name == "" {
 		return fmt.Errorf("--session-id and --name are required")

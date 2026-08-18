@@ -18,10 +18,14 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 )
+
+// prompt is U+276F, the character the reaper's prompt detection matches.
+const prompt = "❯ "
 
 func main() {
 	stuck := flag.Bool("stuck", false, "Never show the prompt, to exercise the reaper's prompt-detection timeout")
@@ -34,19 +38,27 @@ func main() {
 		}
 	}
 
-	fmt.Println("Mock Claude Code v1.0 (E2E Test)")
-	fmt.Println("Type /exit to quit")
-	fmt.Println()
-	fmt.Print("❯ ")
+	serve(os.Stdin, os.Stdout)
+}
 
-	scanner := bufio.NewScanner(os.Stdin)
+// serve is the harness contract the reaper depends on: a banner, the U+276F
+// prompt its prompt detection looks for, and a clean exit on the native
+// shutdown command. Split out from main so the contract is testable without a
+// pty.
+func serve(in io.Reader, out io.Writer) {
+	fmt.Fprintln(out, "Mock Claude Code v1.0 (E2E Test)")
+	fmt.Fprintln(out, "Type /exit to quit")
+	fmt.Fprintln(out)
+	fmt.Fprint(out, prompt)
+
+	scanner := bufio.NewScanner(in)
 	for scanner.Scan() {
 		switch strings.TrimSpace(scanner.Text()) {
 		case "/exit", "/quit":
-			fmt.Println("Goodbye")
+			fmt.Fprintln(out, "Goodbye")
 			return
 		default:
-			fmt.Print("❯ ")
+			fmt.Fprint(out, prompt)
 		}
 	}
 }
