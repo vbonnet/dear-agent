@@ -116,3 +116,6 @@ infra/*.tfvars
 
 # Compiled ai-review binary (built into the repo root by `go build ./cmd/ai-review`)
 /ai-review
+
+# Compiled ci-escape-analysis binary (built into the repo root by `go build ./...`)
+/ci-escape-analysis
