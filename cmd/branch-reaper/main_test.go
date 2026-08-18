@@ -132,7 +132,7 @@ func TestClassifyBranch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyBranch(tt.tipSHA, tt.prs); got != tt.want {
+			if got := classifyBranch(tt.tipSHA, tt.prs, 0); got != tt.want {
 				t.Errorf("classifyBranch(%q, %v) = %q, want %q", tt.tipSHA, tt.prs, got, tt.want)
 			}
 		})
@@ -151,7 +151,7 @@ func TestSameRepoPRs(t *testing.T) {
 
 	// A fork PR that merged must not make this repo's same-named branch
 	// look safe to delete.
-	if b := classifyBranch(tipSHA, sameRepoPRs(in[:1])); b != bucketReviewNoPR {
+	if b := classifyBranch(tipSHA, sameRepoPRs(in[:1]), 0); b != bucketReviewNoPR {
 		t.Errorf("fork-only history classified as %q, want %q", b, bucketReviewNoPR)
 	}
 }
@@ -232,6 +232,20 @@ func TestMatchBranchFilter(t *testing.T) {
 		// Regex metacharacters in a branch name are literal, not syntax.
 		{"v1.0", "v1.0", true},
 		{"v1.0", "v1x0", false},
+		// Character classes and `+` are part of GitHub's filter grammar.
+		{"release/[0-9]", "release/2", true},
+		{"release/[0-9]", "release/x", false},
+		{"release/[!0-9]", "release/x", true},
+		{"release/[!0-9]", "release/2", false},
+		{"v1+", "v111", true},
+		{"v1+", "v2", false},
+		// A backslash escapes the next character.
+		{`feat\*`, "feat*", true},
+		{`feat\*`, "featx", false},
+		// Untranslatable patterns fail CLOSED: they protect the branch
+		// rather than leaving it eligible for deletion.
+		{"release/[0-9", "anything", true},
+		{`trailing\`, "anything", true},
 		// Negated filters are exclusions in a trigger; they protect nothing.
 		{"!main", "main", false},
 		{"", "main", false},
@@ -518,34 +532,79 @@ func TestExecuteSafeDeletes_LeasesEachDeleteToItsClassifiedSHA(t *testing.T) {
 	}
 }
 
-func TestParseRemoteRepo(t *testing.T) {
-	tests := map[string]string{
-		"https://github.com/vbonnet/dear-agent.git": "vbonnet/dear-agent",
-		"https://github.com/vbonnet/dear-agent":     "vbonnet/dear-agent",
-		"https://github.com/vbonnet/dear-agent/":    "vbonnet/dear-agent",
-		"git@github.com:vbonnet/dear-agent.git":     "vbonnet/dear-agent",
-		"ssh://git@github.com/vbonnet/dear-agent":   "vbonnet/dear-agent",
-		"/local/path/repo":                          "path/repo",
-		"":                                          "",
-		"nonsense":                                  "",
+func TestParseRemote(t *testing.T) {
+	tests := []struct {
+		url       string
+		host      string
+		ownerRepo string
+	}{
+		{"https://github.com/vbonnet/dear-agent.git", "github.com", "vbonnet/dear-agent"},
+		{"https://github.com/vbonnet/dear-agent", "github.com", "vbonnet/dear-agent"},
+		{"https://github.com/vbonnet/dear-agent/", "github.com", "vbonnet/dear-agent"},
+		{"git@github.com:vbonnet/dear-agent.git", "github.com", "vbonnet/dear-agent"},
+		{"ssh://git@github.com/vbonnet/dear-agent", "github.com", "vbonnet/dear-agent"},
+		{"ssh://git@github.com:22/vbonnet/dear-agent", "github.com", "vbonnet/dear-agent"},
+		// Another forge with the same path is a different repository.
+		{"https://gitlab.com/vbonnet/dear-agent.git", "gitlab.com", "vbonnet/dear-agent"},
+		// A filesystem remote has no host, so it can never be confirmed.
+		{"/local/path/repo", "", "path/repo"},
+		{"", "", ""},
+		{"nonsense", "", ""},
 	}
-	for in, want := range tests {
-		if got := parseRemoteRepo(in); got != want {
-			t.Errorf("parseRemoteRepo(%q) = %q, want %q", in, got, want)
+	for _, tt := range tests {
+		host, ownerRepo := parseRemote(tt.url)
+		if host != tt.host || ownerRepo != tt.ownerRepo {
+			t.Errorf("parseRemote(%q) = (%q, %q), want (%q, %q)", tt.url, host, ownerRepo, tt.host, tt.ownerRepo)
 		}
 	}
 }
 
 func TestSameRepository(t *testing.T) {
-	if !sameRepository("vbonnet/dear-agent", "VBonnet/Dear-Agent") {
+	if !sameRepository("github.com", "vbonnet/dear-agent", "VBonnet/Dear-Agent") {
 		t.Error("GitHub owner/repo comparison must be case-insensitive")
 	}
-	if sameRepository("vbonnet/dear-agent", "someone-else/dear-agent") {
+	if !sameRepository("GitHub.com", "vbonnet/dear-agent", "vbonnet/dear-agent") {
+		t.Error("host comparison must be case-insensitive too")
+	}
+	if sameRepository("github.com", "vbonnet/dear-agent", "someone-else/dear-agent") {
 		t.Error("different owners must not compare equal")
 	}
-	// An unknown side can never prove a match, so --execute stays refused.
-	if sameRepository("", "vbonnet/dear-agent") || sameRepository("vbonnet/dear-agent", "") {
+	// The whole point of carrying the host: an identical owner/repo path on
+	// another forge is a different repository.
+	if sameRepository("gitlab.com", "vbonnet/dear-agent", "vbonnet/dear-agent") {
+		t.Error("a non-GitHub origin must never be accepted as the GitHub repo")
+	}
+	// A hostless (filesystem) remote can never prove a match, so --execute
+	// stays refused.
+	if sameRepository("", "vbonnet/dear-agent", "vbonnet/dear-agent") {
+		t.Error("a hostless remote must never compare equal")
+	}
+	if sameRepository("github.com", "", "vbonnet/dear-agent") || sameRepository("github.com", "vbonnet/dear-agent", "") {
 		t.Error("an empty identifier must never compare equal")
+	}
+}
+
+func TestGHHost(t *testing.T) {
+	t.Setenv("GH_HOST", "")
+	if got := ghHost(); got != "github.com" {
+		t.Errorf("ghHost() = %q, want github.com", got)
+	}
+	t.Setenv("GH_HOST", "github.example.com")
+	if got := ghHost(); got != "github.example.com" {
+		t.Errorf("ghHost() = %q, want the GH_HOST override", got)
+	}
+}
+
+// A merged branch that is still the BASE of an open child PR must never be
+// reaped: `gh pr list --head` cannot see the child, so the base count is a
+// separate veto.
+func TestClassifyBranch_OpenBasePRVetoesDeletion(t *testing.T) {
+	merged := []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", HeadRefOid: tipSHA}}
+	if got := classifyBranch(tipSHA, merged, 0); got != bucketSafeDelete {
+		t.Fatalf("precondition: want %q with no child PRs, got %q", bucketSafeDelete, got)
+	}
+	if got := classifyBranch(tipSHA, merged, 1); got != bucketReviewOpenPR {
+		t.Errorf("classifyBranch with an open child PR = %q, want %q", got, bucketReviewOpenPR)
 	}
 }
 
@@ -557,13 +616,22 @@ func TestSameRepository(t *testing.T) {
 func TestClassifyBranches_LookupFailureIsBucketedNotFatal(t *testing.T) {
 	installReaperFakeGH(t, `
 head=""
+base=""
 prev=""
 for arg in "$@"; do
   if [ "$prev" = "--head" ]; then
     head="$arg"
   fi
+  if [ "$prev" = "--base" ]; then
+    base="$arg"
+  fi
   prev="$arg"
 done
+# The base-PR veto query: no branch here has an open child PR.
+if [ -n "$base" ]; then
+  printf '%s\n' '[]'
+  exit 0
+fi
 case "$head" in
   "bad/branch") echo "gh: rate limited" >&2; exit 1 ;;
   "good/branch") printf '%s\n' '[]' ;;

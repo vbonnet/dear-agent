@@ -30,7 +30,7 @@ classified from incomplete data, and does not stop the rest of the run.
 
 **BRR-01** When remote branches are enumerated, the command shall exclude the remote HEAD symref, the protected branches (the repository's default branch, `main`, `master`, and any branch referenced by a `branches:` trigger in `.github/workflows/*.yml`), and `dependabot/*` branches.
 
-**BRR-02** When a branch has an open pull request, the command shall take no action on it and shall not include it in any reported bucket.
+**BRR-02** When a branch has an open pull request, or when any open pull request targets that branch as its base (including one opened from a fork), the command shall take no action on it and shall not include it in any reported bucket.
 
 **BRR-03** When a branch's most-recently-merged pull request records a head commit equal (case-insensitively) to the branch's tip commit SHA, the command shall classify the branch as `safe_delete`.
 
@@ -52,11 +52,13 @@ classified from incomplete data, and does not stop the rest of the run.
 
 **BRR-12** When determining the protected-branch set, the command shall include the repository's default branch (via `gh repo view`) and every branch referenced by a `push` or `pull_request` `branches:` trigger in any `.github/workflows/*.yml` file, in addition to the fixed `main`/`master` floor, and a failure to determine the default branch or to read the workflows directory shall not be treated as an error.
 
-**BRR-16** When a protected-branch entry is a GitHub Actions branch filter containing wildcards, the command shall protect every branch the filter matches (`*` within one path segment, `**` across segments, `?` for one character), rather than only a branch whose literal name equals the filter, and shall treat a negated (`!`) filter as protecting nothing.
+**BRR-16** When a protected-branch entry is a GitHub Actions branch filter containing pattern syntax, the command shall protect every branch the filter matches under GitHub's filter grammar (`*` within one path segment, `**` across segments, `?` for one character, `+` for one or more of the preceding character, `[...]` character classes, `\` escapes), rather than only a branch whose literal name equals the filter; shall treat a negated (`!`) filter as protecting nothing; and shall treat any filter it cannot translate as protecting the branch rather than leaving it deletable.
+
+**BRR-17** When the repository's default branch cannot be determined, the command shall report the failure, shall continue to report under a dry run, and shall refuse `--execute` with status 3 rather than delete against an unconfirmed protected-branch set.
 
 **BRR-13** When the run completes, the command shall exit 0 if the four review/failure buckets (`review_no_pr`, `review_closed_unmerged`, `review_new_commits_after_merge`, `lookup_failed`) are all empty and no `--execute` deletion failed; shall exit 1 if any of the three review buckets is non-empty and `lookup_failed` is empty; shall exit 2 if `lookup_failed` is non-empty; shall exit 3 on a usage or environment error; and shall exit 4 when one or more safe deletions failed (which takes precedence over exit 1/2).
 
-**BRR-14** When `--execute` is given and the `origin` remote does not resolve to the repository whose pull-request history was read, the command shall delete nothing and exit with status 3, because deletions target `origin` while classification targets that repository.
+**BRR-14** When `--execute` is given and the `origin` remote does not resolve to the repository whose pull-request history was read — matching on host as well as owner and name, so that a same-named repository on another forge or a hostless filesystem remote is rejected — the command shall delete nothing and exit with status 3, because deletions target `origin` while classification targets that repository.
 
 **BRR-15** When any `git` or `gh` subprocess is invoked, the command shall bound it with a deadline, so that a stalled call is surfaced as that one branch's failure rather than starving the rest of the run.
 

@@ -186,7 +186,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitEnvironment
 	}
 
-	protected := protectedBranches(ctx, repo)
+	protected, protErr := protectedBranches(ctx, repo)
+	if protErr != nil {
+		fmt.Fprintf(stderr, "branch-reaper: could not confirm the protected-branch set: %v\n", protErr)
+		if *execute {
+			fmt.Fprintln(stderr, "branch-reaper: refusing --execute without a confirmed protected-branch set")
+			return exitEnvironment
+		}
+	}
 
 	rep, targets := classifyBranches(ctx, repo, protected, branches, stderr)
 
@@ -248,16 +255,18 @@ func resolveRepo(ctx context.Context, stderr io.Writer) (string, bool) {
 // GH_REPO names a different repository than the checkout's origin -- a fork
 // checkout pointed at upstream, say -- a merged upstream PR could classify
 // a same-named fork branch as safe and this tool would delete the wrong
-// repository's ref. Refuse rather than delete across that gap.
+// repository's ref. Refuse rather than delete across that gap. The host is
+// part of that identity, so an origin on another forge with a coincidentally
+// identical owner/repo path is refused too.
 func originIsRepo(ctx context.Context, repo string, stderr io.Writer) bool {
-	originRepo, err := originRemoteRepo(ctx)
+	host, ownerRepo, err := originRemote(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "branch-reaper: --execute needs origin's URL to confirm it is %s: %v\n", repo, err)
 		return false
 	}
-	if !sameRepository(originRepo, repo) {
-		fmt.Fprintf(stderr, "branch-reaper: refusing --execute: PR history is read from %s but origin is %s; "+
-			"deletions would target a different repository\n", repo, originRepo)
+	if !sameRepository(host, ownerRepo, repo) {
+		fmt.Fprintf(stderr, "branch-reaper: refusing --execute: PR history is read from %s on %s but origin is %q on %q; "+
+			"deletions would target a different repository\n", repo, ghHost(), ownerRepo, host)
 		return false
 	}
 	return true
@@ -296,7 +305,18 @@ func classifyBranches(ctx context.Context, repo string, protected []string, bran
 			rep.LookupFailed = append(rep.LookupFailed, b.Name)
 			continue
 		}
-		switch classifyBranch(b.TipSHA, prs) {
+		// A merged stack branch can still be the BASE of an open child PR.
+		// `--head` never sees that child, so without this the base of a
+		// live PR would classify as safe_delete and get reaped out from
+		// under it. Fork children count here: a fork PR based on this
+		// branch is still broken by deleting it.
+		basePRs, err := fetchOpenBasePRs(ctx, repo, b.Name)
+		if err != nil {
+			fmt.Fprintf(stderr, "branch-reaper: base-pr lookup for %q: %v\n", b.Name, err)
+			rep.LookupFailed = append(rep.LookupFailed, b.Name)
+			continue
+		}
+		switch classifyBranch(b.TipSHA, prs, basePRs) {
 		case bucketSafeDelete:
 			rep.SafeDelete = append(rep.SafeDelete, b.Name)
 			targets = append(targets, b)
@@ -446,32 +466,45 @@ func isProtected(branch string, protected []string) bool {
 	return false
 }
 
+// branchFilterMeta is the full set of GitHub Actions filter-pattern
+// metacharacters. A pattern containing none of them is a plain branch name.
+const branchFilterMeta = `*?+[]\`
+
 // matchBranchFilter reports whether name matches a GitHub Actions branch
-// filter. `*` matches any run of characters except `/`, `**` matches across
-// `/`, and `?` matches one non-`/` character; every other character is
-// literal. A filter with no wildcard is therefore an exact-name match.
+// filter, implementing GitHub's filter grammar: `*` matches a run of
+// characters within one path segment, `**` matches across `/`, `?` matches
+// one character within a segment, `+` matches one or more of the preceding
+// character, `[]` is a character class, and `\` escapes the next character.
 //
 // Negated filters (`!foo`) are exclusions in a workflow trigger, so they
 // assert nothing about what CI protects and never protect anything here.
+//
+// A pattern that cannot be translated fails CLOSED -- it protects the
+// branch. Under-protecting means deleting a branch CI treats as long-lived;
+// over-protecting only means one fewer branch is reaped this week.
 func matchBranchFilter(pattern, name string) bool {
 	if pattern == "" || strings.HasPrefix(pattern, "!") {
 		return false
 	}
-	if !strings.ContainsAny(pattern, "*?") {
+	if !strings.ContainsAny(pattern, branchFilterMeta) {
 		return pattern == name
 	}
-	re, err := regexp.Compile(branchFilterRegexp(pattern))
+	expr, ok := branchFilterRegexp(pattern)
+	if !ok {
+		return true
+	}
+	re, err := regexp.Compile(expr)
 	if err != nil {
-		// An untranslatable filter falls back to exact matching rather than
-		// silently protecting nothing at all.
-		return pattern == name
+		return true
 	}
 	return re.MatchString(name)
 }
 
 // branchFilterRegexp translates a GitHub branch filter into an anchored
-// regular expression.
-func branchFilterRegexp(pattern string) string {
+// regular expression. ok is false when the pattern uses a construct this
+// translator cannot represent faithfully, which callers must treat as
+// "assume it matches" rather than "assume it does not".
+func branchFilterRegexp(pattern string) (string, bool) {
 	var b strings.Builder
 	b.WriteString(`\A`)
 	for i := 0; i < len(pattern); i++ {
@@ -485,12 +518,53 @@ func branchFilterRegexp(pattern string) string {
 			b.WriteString(`[^/]*`)
 		case '?':
 			b.WriteString(`[^/]`)
+		case '+':
+			// "one or more of the preceding character" -- only meaningful
+			// after something to repeat.
+			if b.Len() == len(`\A`) {
+				return "", false
+			}
+			b.WriteString(`+`)
+		case '[':
+			class, next, ok := branchFilterClass(pattern, i)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(class)
+			i = next
+		case '\\':
+			if i+1 >= len(pattern) {
+				return "", false
+			}
+			i++
+			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
 		default:
 			b.WriteString(regexp.QuoteMeta(string(c)))
 		}
 	}
 	b.WriteString(`\z`)
-	return b.String()
+	return b.String(), true
+}
+
+// branchFilterClass translates the character class starting at pattern[i]
+// (which must be '[') into a regexp class, returning the index of its
+// closing ']'. An unterminated or empty class is not translatable.
+func branchFilterClass(pattern string, i int) (string, int, bool) {
+	end := strings.IndexByte(pattern[i+1:], ']')
+	if end < 0 {
+		return "", 0, false
+	}
+	body := pattern[i+1 : i+1+end]
+	if body == "" {
+		return "", 0, false
+	}
+	// A leading '!' negates the class, spelled '^' in a regexp.
+	if strings.HasPrefix(body, "!") {
+		body = "^" + body[1:]
+	}
+	// Only '\' needs neutralizing inside a class; every other byte is
+	// already literal there.
+	return "[" + strings.ReplaceAll(body, `\`, `\\`) + "]", i + 1 + end, true
 }
 
 // baseProtectedBranches is the hardcoded floor that always applies,
@@ -511,14 +585,20 @@ func baseProtectedBranches() []string {
 // happened to merge into it, so this derives the protected set from what
 // the repo's own workflows actually do rather than hardcoding an assumed
 // list that silently goes stale the day a new long-lived branch shows up.
-// Detection failures are non-fatal: they just mean fewer branches get the
-// extra protection, never fewer than the hardcoded floor.
-func protectedBranches(ctx context.Context, repo string) []string {
-	protected := baseProtectedBranches()
-	if def, err := defaultBranch(ctx, repo); err == nil && def != "" {
-		protected = append(protected, def)
+// A failed default-branch lookup is returned, not swallowed: a repo whose
+// default branch is neither main nor master would otherwise be left
+// eligible for deletion by a silent error. Callers decide -- reporting can
+// carry on, deleting must not.
+func protectedBranches(ctx context.Context, repo string) ([]string, error) {
+	protected := append(baseProtectedBranches(), workflowTriggerBranches(workflowsDir)...)
+	def, err := defaultBranch(ctx, repo)
+	if err != nil {
+		return protected, fmt.Errorf("default branch of %s: %w", repo, err)
 	}
-	return append(protected, workflowTriggerBranches(workflowsDir)...)
+	if def == "" {
+		return protected, fmt.Errorf("default branch of %s: empty result", repo)
+	}
+	return append(protected, def), nil
 }
 
 // extractTriggerBranches parses a GitHub Actions workflow YAML document and
@@ -594,10 +674,11 @@ func workflowTriggerBranches(dir string) []string {
 	return branches
 }
 
-// classifyBranch buckets one branch given its tip commit SHA and its PR
-// history:
+// classifyBranch buckets one branch given its tip commit SHA, the PR
+// history whose head it is, and the count of open PRs based ON it:
 //
-//  1. any OPEN PR -> review_open_pr (skip, no action, never reported)
+//  1. any OPEN PR from this branch, or any open PR based on it ->
+//     review_open_pr (skip, no action, never reported)
 //  2. else the most-recently-merged PR (by mergedAt), if any:
 //     its headRefOid == tip SHA -> safe_delete (branch content is already
 //     in main via the squash commit)
@@ -605,7 +686,10 @@ func workflowTriggerBranches(dir string) []string {
 //     review_new_commits_after_merge
 //  3. else any CLOSED PR -> review_closed_unmerged
 //  4. else -> review_no_pr
-func classifyBranch(tipSHA string, prs []prRecord) string {
+func classifyBranch(tipSHA string, prs []prRecord, openBasePRs int) string {
+	if openBasePRs > 0 {
+		return bucketReviewOpenPR
+	}
 	for _, pr := range prs {
 		if pr.State == "OPEN" {
 			return bucketReviewOpenPR
@@ -757,6 +841,33 @@ func fetchPRs(ctx context.Context, repo, branch string) ([]prRecord, error) {
 	return sameRepoPRs(prs), nil
 }
 
+// fetchOpenBasePRs counts the open pull requests that target branch as
+// their BASE. Unlike fetchPRs this deliberately does NOT drop fork PRs: a
+// fork's PR based on this branch breaks just as badly when the base
+// disappears.
+func fetchOpenBasePRs(ctx context.Context, repo, branch string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, prFetchTimeout)
+	defer cancel()
+	// #nosec G204,G702 -- fixed "gh" binary; repo/branch are argv elements, not
+	// shell input.
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
+		"--repo", repo, "--base", branch, "--state", "open",
+		"--json", "number", "--limit", fmt.Sprint(prFetchLimit))
+	out, err := runCombined(cmd)
+	if err != nil {
+		return 0, fmt.Errorf("gh pr list --base: %w", err)
+	}
+	raw := strings.TrimSpace(out)
+	if raw == "" {
+		return 0, nil
+	}
+	var prs []prRecord
+	if err := json.Unmarshal([]byte(raw), &prs); err != nil {
+		return 0, fmt.Errorf("parse base pr list: %w", err)
+	}
+	return len(prs), nil
+}
+
 // sameRepoPRs drops fork-originated pull requests.
 func sameRepoPRs(prs []prRecord) []prRecord {
 	kept := make([]prRecord, 0, len(prs))
@@ -789,7 +900,10 @@ func defaultBranch(ctx context.Context, repo string) (string, error) {
 	defer cancel()
 	// #nosec G204,G702 -- fixed "gh" binary; repo is an argv element, not
 	// shell input.
-	cmd := exec.CommandContext(ctx, "gh", "repo", "view", "--repo", repo,
+	// The repository is POSITIONAL here: `gh repo view [<repository>]` has
+	// no --repo flag and rejects one outright, which would have made every
+	// default-branch lookup fail.
+	cmd := exec.CommandContext(ctx, "gh", "repo", "view", repo,
 		"--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
 	out, err := runCombined(cmd)
 	if err != nil {
@@ -798,49 +912,76 @@ func defaultBranch(ctx context.Context, repo string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// originRemoteRepo returns the owner/repo the `origin` remote points at.
-func originRemoteRepo(ctx context.Context) (string, error) {
+// originRemote returns the `origin` remote's host and owner/repo.
+func originRemote(ctx context.Context) (host, ownerRepo string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
 	defer cancel()
 	// #nosec G204,G702 -- fixed "git" binary, no user-controlled arguments.
 	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
 	out, err := runCombined(cmd)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return parseRemoteRepo(strings.TrimSpace(out)), nil
+	host, ownerRepo = parseRemote(strings.TrimSpace(out))
+	return host, ownerRepo, nil
 }
 
-// parseRemoteRepo reduces a git remote URL to "owner/repo", covering the
-// https, ssh and scp-like forms git accepts. It returns "" for anything it
-// cannot reduce, which callers treat as "cannot prove a match".
-func parseRemoteRepo(url string) string {
+// parseRemote splits a git remote URL into its host and its owner/repo,
+// covering the https, ssh and scp-like forms git accepts. Either half comes
+// back empty when it cannot be determined, which callers must treat as
+// "cannot prove a match" -- a filesystem path remote, for instance, has no
+// host and so can never be confirmed to be the GitHub repository whose PR
+// history was read.
+func parseRemote(url string) (host, ownerRepo string) {
 	url = strings.TrimSuffix(strings.TrimSpace(url), "/")
 	url = strings.TrimSuffix(url, ".git")
 	if url == "" {
-		return ""
+		return "", ""
 	}
-	// scp-like "git@host:owner/repo" -> keep only the path after the colon.
-	if !strings.Contains(url, "://") {
-		if _, path, ok := strings.Cut(url, ":"); ok {
-			url = path
-		}
+	switch {
+	case strings.Contains(url, "://"):
+		_, rest, _ := strings.Cut(url, "://")
+		host, url, _ = strings.Cut(rest, "/")
+	case strings.Contains(url, ":"):
+		// scp-like "git@host:owner/repo".
+		host, url, _ = strings.Cut(url, ":")
+	}
+	// Strip any "user@" and ":port" decoration from the host.
+	if _, after, ok := strings.Cut(host, "@"); ok {
+		host = after
+	}
+	if before, _, ok := strings.Cut(host, ":"); ok {
+		host = before
 	}
 	parts := strings.Split(url, "/")
 	if len(parts) < 2 {
-		return ""
+		return host, ""
 	}
 	owner, name := parts[len(parts)-2], parts[len(parts)-1]
 	if owner == "" || name == "" {
-		return ""
+		return host, ""
 	}
-	return owner + "/" + name
+	return host, owner + "/" + name
 }
 
-// sameRepository reports whether two owner/repo identifiers name the same
-// GitHub repository. Both halves are case-insensitive on GitHub.
-func sameRepository(a, b string) bool {
-	return a != "" && b != "" && strings.EqualFold(a, b)
+// ghHost is the GitHub host `gh` is talking to, so the origin check
+// compares the same identity `gh pr list` resolved against.
+func ghHost() string {
+	if h := strings.TrimSpace(os.Getenv("GH_HOST")); h != "" {
+		return h
+	}
+	return "github.com"
+}
+
+// sameRepository reports whether an origin remote names the same repository
+// as ownerRepo on the GitHub host in play. Host is part of the identity:
+// `gitlab.com/acme/project` and `github.com/acme/project` share an
+// owner/repo path and are entirely different repositories.
+func sameRepository(originHost, originOwnerRepo, ownerRepo string) bool {
+	if originHost == "" || originOwnerRepo == "" || ownerRepo == "" {
+		return false
+	}
+	return strings.EqualFold(originHost, ghHost()) && strings.EqualFold(originOwnerRepo, ownerRepo)
 }
 
 // runCombined runs cmd and returns stdout, folding stderr into the error.
