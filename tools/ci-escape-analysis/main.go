@@ -134,9 +134,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	escapes := *escapesFlag
 	escapesTruncated := false
+	escapesMeasured := true
 	escapeScope := fmt.Sprintf("escapes supplied on the command line for %d days", *windowDays)
 	if escapes < 0 {
-		escapes, escapesTruncated = countEscapes(*repo, *workflow, *windowDays, stderr)
+		escapes, escapesTruncated, escapesMeasured = countEscapes(*repo, *workflow, *windowDays, stderr)
 		escapeScope = fmt.Sprintf("distinct failing commits for workflow %q over %d days", *workflow, *windowDays)
 	}
 
@@ -160,6 +161,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			CureAssumed:         !set["cure-minutes"],
 			Escapes:             escapes,
 			EscapesTruncated:    escapesTruncated,
+			EscapesMeasured:     escapesMeasured,
 			EscapesScope:        escapeScope,
 			PreventionMinutes:   prevention,
 			PreventionMeasured:  preventionMeasured,
@@ -267,11 +269,17 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) ([]cihealth.CheckRun,
 
 	out, ok = gh(stderr, "api", "--paginate",
 		fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, head),
-		"--jq", ".check_runs[] | {name: .name, conclusion: .conclusion, appId: .app.id, completedAt: .completed_at}")
+		"--jq", ".check_runs[] | {name: .name, conclusion: .conclusion, appId: .app.id, startedAt: .started_at, completedAt: .completed_at}")
 	if !ok {
 		return nil, false
 	}
 
+	return checksAtMerge(out, mergedAt, mergedKnown), true
+}
+
+// checksAtMerge reduces the check-run stream to one attempt per (name, app),
+// as each stood when the pull request merged.
+func checksAtMerge(out []byte, mergedAt time.Time, mergedKnown bool) []cihealth.CheckRun {
 	type attempt struct {
 		run       cihealth.CheckRun
 		completed time.Time
@@ -291,18 +299,29 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) ([]cihealth.CheckRun,
 			Name        string `json:"name"`
 			Conclusion  string `json:"conclusion"`
 			AppID       int64  `json:"appId"`
+			StartedAt   string `json:"startedAt"`
 			CompletedAt string `json:"completedAt"`
 		}
 		if err := decoder.Decode(&raw); err != nil {
 			break
 		}
-		completed, err := time.Parse(time.RFC3339, raw.CompletedAt)
-		if err != nil {
-			// Never concluded; carries no evidence about the merge gate.
+		started, startErr := time.Parse(time.RFC3339, raw.StartedAt)
+		completed, completeErr := time.Parse(time.RFC3339, raw.CompletedAt)
+
+		switch {
+		case completeErr == nil && (!mergedKnown || !completed.After(mergedAt)):
+			// Concluded at or before the merge: this is what the gate saw.
+		case startErr == nil && mergedKnown && !started.After(mergedAt):
+			// Started before the merge but finished after it, or never
+			// finished. The check existed and was still running when the gate
+			// let the merge through — which is a different fact from the check
+			// never having reported at all, and discarding it produced
+			// `never-ran` with path-filter advice.
+			raw.Conclusion = cihealth.ConclusionPending
+			completed = mergedAt
+		default:
+			// A re-run started after the merge. Not what the gate saw.
 			continue
-		}
-		if mergedKnown && completed.After(mergedAt) {
-			continue // a re-run after the merge; not what the gate saw
 		}
 		k := key{name: raw.Name, appID: raw.AppID}
 		if seen, ok := latest[k]; ok && seen.completed.After(completed) {
@@ -318,7 +337,7 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) ([]cihealth.CheckRun,
 	for _, a := range latest {
 		runs = append(runs, a.run)
 	}
-	return runs, true
+	return runs
 }
 
 // lookupRequiredContexts reads the branch ruleset. The second return value says
@@ -363,9 +382,9 @@ func lookupRequiredContexts(repo string, stderr io.Writer) ([]cihealth.RequiredC
 // as a separate escape lets one unresolved incident inflate the numerator until
 // it crosses a threshold and argues for a pre-merge gate that no additional
 // change ever escaped.
-func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) (count float64, truncated bool) {
+func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) (count float64, truncated, measured bool) {
 	if workflow == "" {
-		return 0, false
+		return 0, false, false
 	}
 	// Every red conclusion, not just `failure`. Detection treats a timed-out or
 	// startup-failed workflow as red; counting only `failure` here would hand
@@ -377,15 +396,17 @@ func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) (coun
 		"--jq", fmt.Sprintf(`"\(length) \([.[] | select(.createdAt > (now - %d*86400 | todate)) | select(%s) | .headSha] | unique | length)"`,
 			windowDays, jqInSet(".conclusion", redConclusions)))
 	if !ok {
-		return 0, false
+		// A failed query is not evidence that nothing failed. Returning zero
+		// here renders as "no escapes recorded — leave the placement alone".
+		return 0, false, false
 	}
 	var fetched int
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %f", &fetched, &count); err != nil {
-		return 0, false
+		return 0, false, false
 	}
 	// `--limit` is a fetch cap, not pagination: hitting it means older failures
 	// inside the window were never seen, so the numerator is a lower bound.
-	return count, fetched >= runPageLimit
+	return count, fetched >= runPageLimit, true
 }
 
 // estimatePrevention is the Prevention Cost term: the wall-clock this workflow

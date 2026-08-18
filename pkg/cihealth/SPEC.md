@@ -89,7 +89,11 @@ detection time nothing has been executed and there is no outcome to audit.
 
 **CIHEALTH-30** When the system renders required contexts, the system shall state that they are the ruleset as read at analysis time, not as it stood at the merge.
 
-**CIHEALTH-31** When the escape count is truncated, the system shall treat the verdict as provisional and report the numerator as a lower bound.
+**CIHEALTH-31** When the escape count is truncated, the system shall treat the verdict as provisional and report the numerator as a lower bound; when it is unmeasured, the system shall return an insufficient-data verdict rather than a no-signal one.
+
+**CIHEALTH-32** When a run failed before producing any job, the system shall classify the failure as `inconclusive` and shall attribute it to the workflow definition rather than to selection.
+
+**CIHEALTH-33** When a check was pending at merge time, the system shall classify the failure as `inconclusive` rather than as never having run.
 
 **CIHEALTH-27** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
 

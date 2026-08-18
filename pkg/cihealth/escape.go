@@ -27,6 +27,11 @@ const (
 	ConclusionStartupFailure = "startup_failure"
 	ConclusionActionRequired = "action_required"
 	ConclusionStale          = "stale"
+	// ConclusionPending is not a GitHub value. The command substitutes it for a
+	// check that had started but not finished when the pull request merged: the
+	// check existed and the gate let the merge through anyway, which is a
+	// different fact from the check never having reported.
+	ConclusionPending = "pending"
 )
 
 // CheckRun is one check context as it reported on a pull request head.
@@ -90,6 +95,11 @@ type Escape struct {
 	// detect drift in the world (registries, advisories, live infrastructure),
 	// so the commit at the head of main is not evidence of what caused them.
 	ScheduledDetection bool
+	// WorkflowLevelFailure marks a run that failed before producing any job —
+	// a startup failure on a malformed workflow. There is no failing check to
+	// name, and substituting the workflow's display name invents a context that
+	// no pull request could ever have reported.
+	WorkflowLevelFailure bool
 	// DiffScoped marks a check whose pre-merge run is deliberately narrower
 	// than its post-merge run (diff-scoped lint, manifest-scoped vuln scan).
 	// Such a check passing pre-merge and failing post-merge is the design
@@ -210,6 +220,21 @@ func Classify(e Escape) Finding {
 			SuggestedActions: []string{
 				"Confirm against bypassed-merge-audit.yml whether this was an authorised bypass.",
 				"If it was not, the gap is in branch protection, not in CI selection.",
+			},
+		}
+	}
+
+	// A run that never produced a job has no failing check to reason about.
+	// Falling through would compare the workflow's display name against the
+	// pull request's job checks, find nothing, and report `never-ran` with
+	// path-filter advice for what is actually an unstartable workflow.
+	if e.WorkflowLevelFailure {
+		return Finding{
+			Class:   ClassInconclusive,
+			Summary: fmt.Sprintf("The %q run failed before producing any job, so there is no failing check to trace back to a pull request. That is a workflow-level failure — a malformed or unstartable workflow definition — not a check that escaped a gate.", e.FailingCheck),
+			SuggestedActions: []string{
+				"Read the run's own log rather than a job log: a startup failure is usually invalid YAML, a bad `uses:` reference, or a missing reusable workflow.",
+				"No path filter or ruleset change is involved. Fix the workflow definition.",
 			},
 		}
 	}
@@ -340,6 +365,10 @@ type ROI struct {
 	CureAssumed bool
 	// Escapes is how many failures were counted in the window.
 	Escapes float64
+	// EscapesMeasured is false when the count could not be gathered. A failed
+	// query returns zero, and zero renders as "no escapes recorded — leave the
+	// placement alone", which is a conclusion drawn from an API error.
+	EscapesMeasured bool
 	// EscapesTruncated is true when the failure history hit the API page limit,
 	// so older failures inside the window were never seen and the numerator is
 	// a lower bound.
@@ -375,7 +404,7 @@ type ROI struct {
 // infinitely worthwhile, which is the right answer: a free check should always
 // run.
 func (r ROI) Ratio() float64 {
-	if !r.PreventionMeasured {
+	if !r.PreventionMeasured || !r.EscapesMeasured {
 		return 0
 	}
 	if r.PreventionMinutes <= 0 {
@@ -394,6 +423,9 @@ func (r ROI) Ratio() float64 {
 // number still crosses thresholds — so the verdict says what it is worth rather
 // than dressing an assumption up as a decision.
 func (r ROI) Verdict() string {
+	if !r.EscapesMeasured {
+		return "INSUFFICIENT DATA — the escape count could not be read; a zero here is an API failure, not an absence of escapes"
+	}
 	if !r.PreventionMeasured {
 		return "INSUFFICIENT DATA — no pre-merge runs to price; do not infer a placement from this"
 	}
@@ -442,7 +474,7 @@ func (r ROI) band() string {
 func (r ROI) Explain() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ROI = (Cure x Frequency) / Prevention\n")
-	if !r.PreventionMeasured {
+	if !r.PreventionMeasured || !r.EscapesMeasured {
 		fmt.Fprintf(&b, "    = (%.0f min x %.0f escapes) / <unmeasured>\n", r.CureMinutes, r.Escapes)
 	} else {
 		fmt.Fprintf(&b, "    = (%.0f min x %.0f escapes) / %.0f min\n", r.CureMinutes, r.Escapes, r.PreventionMinutes)
@@ -464,7 +496,11 @@ func (r ROI) Explain() string {
 	if scope == "" {
 		scope = "unspecified scope"
 	}
-	fmt.Fprintf(&b, "  Frequency  = %.0f — counted over %s\n", r.Escapes, scope)
+	if !r.EscapesMeasured {
+		fmt.Fprintf(&b, "  Frequency  = unmeasured — the failure history could not be read\n")
+	} else {
+		fmt.Fprintf(&b, "  Frequency  = %.0f — counted over %s\n", r.Escapes, scope)
+	}
 	if r.EscapesTruncated {
 		fmt.Fprintf(&b, "               LOWER BOUND; failure history truncated at the API page\n")
 		fmt.Fprintf(&b, "               limit, so older failures in the window were not counted.\n")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/pkg/cihealth"
@@ -147,34 +148,45 @@ func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
 	}
 
 	if !opts.DryRun {
-		switch {
-		case complete:
-			// Close every retro we own that this sweep did not re-file. That
-			// covers both a workflow going green and a workflow whose failing
-			// check changed — the old check's retro is just as stale as a
-			// recovered one, and leaving it open puts a solved failure in the
-			// fix agent's brief.
-			if err := closeStaleRetros(opts.Repo, live, stdout, stderr); err != nil {
-				errs = append(errs, err)
-			}
-		default:
-			// At least one workflow could not be observed this sweep, so its
-			// absence from the live set is ignorance, not recovery. Closing on
-			// that would let one transient API failure delete a live alert.
-			fmt.Fprintf(stdout, "Skipping stale-retro reconciliation: not every workflow was observed this sweep.\n")
-		}
-
-		// Hand exactly one queued incident to the fix agent.
-		if err := dequeueIncident(opts.Repo, stdout, stderr); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, reconcile(opts.Repo, live, complete, stdout, stderr)...)
 	}
 
 	if len(errs) > 0 {
 		fmt.Fprintf(stderr, "ci-escape-analysis: %d retro mutation(s) failed: %v\n", len(errs), errors.Join(errs...))
 		return 1
 	}
+
+	// Dequeue LAST, and only on a clean sweep. The workflow runs this under
+	// `set -euo pipefail`, so a nonzero exit skips the step that writes the
+	// incident to $GITHUB_OUTPUT — dequeuing before the error check would drop
+	// the queue label, strand the incident with nothing dispatched, and no
+	// later sweep would ever restore it.
+	if !opts.DryRun {
+		if err := dequeueIncident(opts.Repo, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "ci-escape-analysis: %v\n", err)
+			return 1
+		}
+	}
 	return 0
+}
+
+// reconcile closes the incidents this sweep did not re-file, provided the sweep
+// actually saw the whole picture.
+func reconcile(repo string, live map[string]bool, complete bool, stdout, stderr io.Writer) []error {
+	if !complete {
+		// At least one workflow could not be observed, so its absence from the
+		// live set is ignorance, not recovery. Closing on that would let one
+		// transient API failure delete a live alert.
+		fmt.Fprintf(stdout, "Skipping stale-retro reconciliation: not every workflow was observed this sweep.\n")
+		return nil
+	}
+	// Covers both a workflow going green and a workflow whose failing check
+	// changed — the old check's incident is just as stale as a recovered one,
+	// and leaving it open puts a solved failure in the fix agent's brief.
+	if err := closeStaleRetros(repo, live, stdout, stderr); err != nil {
+		return []error{err}
+	}
+	return nil
 }
 
 type sweepOptions struct {
@@ -231,15 +243,15 @@ func latestRunPerWorkflowOnMain(opts sweepOptions, stderr io.Writer) (map[string
 	latest := map[string]mainRun{}
 	complete := true
 	for _, workflow := range workflows {
-		run, ok := latestRunOnMain(repo, workflow, stderr)
-		if !ok {
-			// Query failed or would not decode. Record the gap rather than
-			// letting silence pass for health.
+		run, seen := latestRunOnMain(repo, workflow, stderr)
+		switch seen {
+		case lookupFailed:
+			// Record the gap rather than letting silence pass for health.
 			complete = false
 			continue
-		}
-		if run.WorkflowName == "" {
-			continue // nothing has ever run this workflow against main
+		case observedNoRun:
+			continue // looked, nothing qualifying; not a gap in observation
+		case observedRun:
 		}
 		// A workflow that no longer has any trigger reaching main cannot be
 		// red on main today, whatever its history says. Routing Enforcement
@@ -314,18 +326,31 @@ func activeWorkflows(repo string) ([]string, error) {
 }
 
 // latestRunOnMain returns the most recent concluded run of one workflow on main.
-func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, bool) {
+// observation distinguishes "the workflow has no qualifying run on main" — a
+// perfectly good observation, true of every newly added or pull-request-only
+// workflow — from "the query failed". Collapsing them made one PR-only workflow
+// enough to mark every sweep incomplete, which suppressed stale reconciliation
+// permanently and left recovered incidents open forever.
+type observation int
+
+const (
+	observedRun observation = iota
+	observedNoRun
+	lookupFailed
+)
+
+func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, observation) {
 	out, ok := gh(stderr, "run", "list",
 		"--repo", repo, "--branch", "main", "--workflow", workflow, "--limit", "20",
 		"--json", "databaseId,workflowName,conclusion,headSha,url,createdAt,event")
 	if !ok {
-		return mainRun{}, false
+		return mainRun{}, lookupFailed
 	}
 
 	var all []mainRun
 	if err := json.Unmarshal(out, &all); err != nil {
 		fmt.Fprintf(stderr, "ci-escape-analysis: decoding runs for %s: %v\n", workflow, err)
-		return mainRun{}, false
+		return mainRun{}, lookupFailed
 	}
 
 	// gh returns newest first, so the first concluded sighting is the latest.
@@ -340,27 +365,32 @@ func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, bool) {
 		if !mainEvaluatingEvents[run.Event] {
 			continue
 		}
-		return run, true
+		return run, observedRun
 	}
-	return mainRun{}, false
+	return mainRun{}, observedNoRun
 }
 
 func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredContext, requiredKnown bool, stderr io.Writer) cihealth.Retro {
-	failing := failingCheckForRun(opts.Repo, run, stderr)
-	if failing == "" {
+	failing, found := failingCheckForRun(opts.Repo, run, stderr)
+	// A run that failed before producing any job has no check to name. Using
+	// the workflow's display name instead invents a context no pull request
+	// could have reported, which Classify then reads as `never-ran`.
+	workflowLevel := !found
+	if workflowLevel {
 		failing = run.WorkflowName
 	}
 
 	preMerge := opts.PreMergeCapable(run.WorkflowName, failing)
 
 	escape := cihealth.Escape{
-		FailingCheck:       failing,
-		MainSHA:            run.HeadSHA,
-		RequiredContexts:   required,
-		RequiredKnown:      requiredKnown,
-		DiffScoped:         isDiffScoped(failing),
-		PreMergeCapable:    preMerge,
-		ScheduledDetection: run.scheduledDetection(),
+		FailingCheck:         failing,
+		MainSHA:              run.HeadSHA,
+		RequiredContexts:     required,
+		RequiredKnown:        requiredKnown,
+		DiffScoped:           isDiffScoped(failing),
+		WorkflowLevelFailure: workflowLevel,
+		PreMergeCapable:      preMerge,
+		ScheduledDetection:   run.scheduledDetection(),
 	}
 	// A scheduled detection is not attributable to the head commit, so do not
 	// go looking for "the pull request that caused it" — there isn't one.
@@ -373,7 +403,7 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 	}
 
 	prevention, preventionMeasured, truncated := estimatePrevention(opts.Repo, run.WorkflowName, opts.WindowDays, stderr)
-	escapes, escapesTruncated := countEscapes(opts.Repo, run.WorkflowName, opts.WindowDays, stderr)
+	escapes, escapesTruncated, escapesMeasured := countEscapes(opts.Repo, run.WorkflowName, opts.WindowDays, stderr)
 
 	return cihealth.Retro{
 		Repo:         opts.Repo,
@@ -387,6 +417,7 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 			CureAssumed:      !opts.CureMeasured,
 			Escapes:          escapes,
 			EscapesTruncated: escapesTruncated,
+			EscapesMeasured:  escapesMeasured,
 			// Counted for the workflow, not the individual check: a
 			// multi-job workflow reports one run whichever job failed, so
 			// attributing every one of those runs to the check that happens
@@ -437,22 +468,22 @@ func isDiffScoped(check string) bool {
 // same main SHA would otherwise both be handed whichever check-run the commit
 // query returned first, collapsing their separate retros into one issue and
 // pinning the wrong escape classification on both.
-func failingCheckForRun(repo string, run mainRun, stderr io.Writer) string {
+func failingCheckForRun(repo string, run mainRun, stderr io.Writer) (string, bool) {
 	if run.DatabaseID == 0 {
-		return ""
+		return "", false
 	}
 	out, ok := gh(stderr, "run", "view", fmt.Sprint(run.DatabaseID), "--repo", repo,
 		"--json", "jobs",
 		"--jq", fmt.Sprintf(`.jobs[] | select(%s) | .name`, jqInSet(".conclusion", failedJobConclusions())))
 	if !ok {
-		return ""
+		return "", false
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
-			return line
+			return line, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // jqInSet builds a jq membership predicate from the same map the Go side
@@ -475,30 +506,59 @@ func jqInSet(field string, set map[string]bool) string {
 // A new brief is created carrying the queue label; dispatch is decided later by
 // dequeueIncident, not here.
 func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Writer) error {
-	existing := findOpenRetro(repo, retro.Title(), stderr)
-	if existing > 0 {
+	existing, open := findRetro(repo, retro.Title(), stderr)
+
+	switch {
+	case existing > 0 && open:
 		body := fmt.Sprintf("Still red at [`%s`](%s).\n\n%s", shortSHA(run.HeadSHA), run.URL, retro.Body())
 		return runGH("commenting on retro", stderr, "issue", "comment", fmt.Sprint(existing),
 			"--repo", repo, "--body", body)
+
+	case existing > 0:
+		// Recurrence of a check whose incident was closed. Reopen and requeue
+		// rather than opening a duplicate: the point of a stable title is that
+		// one issue carries the whole history of this check going red.
+		if err := runGH("reopening retro", stderr, "issue", "reopen", fmt.Sprint(existing),
+			"--repo", repo); err != nil {
+			return err
+		}
+		if err := runGH("requeuing retro", stderr, "issue", "edit", fmt.Sprint(existing),
+			"--repo", repo, "--add-label", queuedLabel); err != nil {
+			return err
+		}
+		body := fmt.Sprintf("Red again at [`%s`](%s) after this incident was closed.\n\n%s", shortSHA(run.HeadSHA), run.URL, retro.Body())
+		return runGH("commenting on reopened retro", stderr, "issue", "comment", fmt.Sprint(existing),
+			"--repo", repo, "--body", body)
+
+	default:
+		return runGH("creating retro", stderr, "issue", "create", "--repo", repo,
+			"--title", retro.Title(), "--body", retro.Body(),
+			"--label", retroLabel, "--label", queuedLabel)
 	}
-	return runGH("creating retro", stderr, "issue", "create", "--repo", repo,
-		"--title", retro.Title(), "--body", retro.Body(),
-		"--label", retroLabel, "--label", queuedLabel)
 }
 
-func findOpenRetro(repo, title string, stderr io.Writer) int {
+// findRetro locates this command's issue for a check in ANY state.
+//
+// Open-only would miss a check that recovered, had its incident closed, and
+// then failed again — the recurrence would open a second issue with the same
+// title, scattering exactly the history the stable title exists to keep in one
+// place. Returns the issue number and whether it is currently open.
+func findRetro(repo, title string, stderr io.Writer) (number int, open bool) {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
-		"--label", retroLabel, "--state", "open", "--limit", "100",
-		"--json", "number,title",
-		"--jq", fmt.Sprintf(`.[] | select(.title == %q) | .number`, title))
+		"--label", retroLabel, "--state", "all", "--limit", "100",
+		"--json", "number,title,state,createdAt",
+		"--jq", fmt.Sprintf(`[.[] | select(.title == %q)] | sort_by(.createdAt) | .[-1] | "\(.number) \(.state)"`, title))
 	if !ok {
-		return 0
+		return 0, false
 	}
-	var number int
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &number); err != nil {
-		return 0
+	numberText, state, found := strings.Cut(strings.TrimSpace(string(out)), " ")
+	if !found {
+		return 0, false
 	}
-	return number
+	if _, err := fmt.Sscanf(numberText, "%d", &number); err != nil {
+		return 0, false
+	}
+	return number, strings.EqualFold(state, "OPEN")
 }
 
 // closeStaleRetros closes every issue carrying this command's label whose title
@@ -512,24 +572,75 @@ func findOpenRetro(repo, title string, stderr io.Writer) int {
 func closeStaleRetros(repo string, live map[string]bool, stdout, stderr io.Writer) error {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
 		"--label", retroLabel, "--state", "open", "--limit", "100",
-		"--json", "number,title", "--jq", `.[] | "\(.number)\t\(.title)"`)
+		"--json", "number,title,body", "--jq", `.[] | "\(.number)\t\(.title)\t\(.body | @json)"`)
 	if !ok {
 		return errors.New("listing open retros to reconcile")
 	}
 
 	var errs []error
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		number, title, found := strings.Cut(strings.TrimSpace(line), "\t")
-		if !found || live[title] {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 3)
+		if len(fields) < 3 || live[fields[1]] {
 			continue
 		}
-		fmt.Fprintf(stdout, "Closing stale retro #%s (%s is no longer the failing check)\n", number, title)
+		number, title, body := fields[0], fields[1], fields[2]
+
+		// The workflow being green is not enough. A workflow with
+		// event-specific jobs can pass on a push run that never executed the
+		// job this incident is about — CI's schedule-only `AGM Tagged Sweep`
+		// is the standing example — and closing on that would retire an
+		// incident no successful run ever addressed.
+		check := strings.TrimPrefix(title, "main red — ")
+		if !checkRecovered(repo, workflowFromBody(body), check, stderr) {
+			fmt.Fprintf(stdout, "Keeping retro #%s open: no successful run of %q observed yet\n", number, check)
+			continue
+		}
+
+		fmt.Fprintf(stdout, "Closing recovered retro #%s (%s has since passed)\n", number, check)
 		if err := runGH("closing retro", stderr, "issue", "close", number, "--repo", repo,
-			"--comment", "This failure is no longer what `main` is red on; auto-closing. Reopen if the underlying prevention was never landed."); err != nil {
+			"--comment", "This check has since passed on `main`; auto-closing. Reopen if the underlying prevention was never landed."); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// workflowBodyMarker is how the retro body names its producing workflow.
+var workflowBodyMarker = regexp.MustCompile(`Workflow: \*\*(.+?)\*\*`)
+
+func workflowFromBody(body string) string {
+	if m := workflowBodyMarker.FindStringSubmatch(body); len(m) == 2 {
+		return m[1]
+	}
+	return ""
+}
+
+// checkRecovered reports whether the named job has actually succeeded in a
+// recent run of its workflow on main. Requiring the same job to pass — rather
+// than the workflow as a whole — is what keeps an event-specific job's incident
+// open until that job itself is green again.
+func checkRecovered(repo, workflow, check string, stderr io.Writer) bool {
+	if workflow == "" || check == "" {
+		return false
+	}
+	out, ok := gh(stderr, "run", "list", "--repo", repo, "--branch", "main",
+		"--workflow", workflow, "--limit", "10", "--json", "databaseId",
+		"--jq", ".[].databaseId")
+	if !ok {
+		return false
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		id := strings.TrimSpace(line)
+		if id == "" {
+			continue
+		}
+		jobs, ok := gh(stderr, "run", "view", id, "--repo", repo, "--json", "jobs",
+			"--jq", fmt.Sprintf(`.jobs[] | select(.name == %q and .conclusion == "success") | .name`, check))
+		if ok && strings.TrimSpace(string(jobs)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func shortSHA(sha string) string {

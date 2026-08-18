@@ -75,7 +75,19 @@ talk to GitHub, and mutate issues.
 
 **CI-ESCAPE-25** When the system deduplicates check attempts, the system shall key them by producing app as well as name.
 
-**CI-ESCAPE-26** When the escape-count query reaches the API page limit, the system shall report the count as truncated.
+**CI-ESCAPE-26** When the escape-count query reaches the API page limit, the system shall report the count as truncated, and when it fails outright the system shall report the count as unmeasured rather than zero.
+
+**CI-ESCAPE-27** When any retrospective mutation has failed, the system shall not hand off a queued incident, so a handoff is never recorded for a dispatch the caller will skip.
+
+**CI-ESCAPE-28** When a workflow has no qualifying run on main, the system shall treat that as a successful observation and not as a lookup failure.
+
+**CI-ESCAPE-29** When a check was still running at the moment the pull request merged, the system shall report it as pending rather than as absent.
+
+**CI-ESCAPE-30** When a run fails before producing any job, the system shall report the failure as workflow-level rather than naming the workflow as if it were a check context.
+
+**CI-ESCAPE-31** When a check that already has a closed retrospective fails again, the system shall reopen and requeue that retrospective rather than opening a duplicate.
+
+**CI-ESCAPE-32** When deciding that an incident has recovered, the system shall require a successful run of the same failing job, because a workflow can pass on a run that never executed it.
 
 **CI-ESCAPE-17** When any retrospective mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
 

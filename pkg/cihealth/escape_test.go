@@ -168,25 +168,25 @@ func TestROIRatioAndVerdict(t *testing.T) {
 	}{
 		{
 			name:        "cheap check catching frequent expensive escapes",
-			roi:         ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true},
+			roi:         ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true},
 			wantRatio:   12,
 			wantVerdict: "ALWAYS PREVENT",
 		},
 		{
 			name:        "middling ratio lands in the usually-prevent band",
-			roi:         ROI{CureMinutes: 60, Escapes: 2, PreventionMinutes: 30, PreventionMeasured: true},
+			roi:         ROI{CureMinutes: 60, Escapes: 2, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true},
 			wantRatio:   4,
 			wantVerdict: "USUALLY PREVENT",
 		},
 		{
 			name:        "expensive check catching rare cheap escapes stays post-merge",
-			roi:         ROI{CureMinutes: 30, Escapes: 1, PreventionMinutes: 600, PreventionMeasured: true},
+			roi:         ROI{CureMinutes: 30, Escapes: 1, PreventionMinutes: 600, PreventionMeasured: true, EscapesMeasured: true},
 			wantRatio:   0.05,
 			wantVerdict: "CASE-BY-CASE",
 		},
 		{
 			name:        "no escapes in the window is no signal, not a recommendation",
-			roi:         ROI{CureMinutes: 90, Escapes: 0, PreventionMinutes: 30, PreventionMeasured: true},
+			roi:         ROI{CureMinutes: 90, Escapes: 0, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true},
 			wantRatio:   0,
 			wantVerdict: "NO SIGNAL",
 		},
@@ -207,7 +207,7 @@ func TestROIRatioAndVerdict(t *testing.T) {
 // A check that costs nothing should always run — the formula must not divide
 // by zero and must not report the free check as not worth running.
 func TestROIFreePreventionIsAlwaysWorthIt(t *testing.T) {
-	roi := ROI{CureMinutes: 45, Escapes: 1, PreventionMinutes: 0, PreventionMeasured: true}
+	roi := ROI{CureMinutes: 45, Escapes: 1, PreventionMinutes: 0, PreventionMeasured: true, EscapesMeasured: true}
 	if got := roi.Ratio(); !math.IsInf(got, 1) {
 		t.Errorf("Ratio() = %v, want +Inf", got)
 	}
@@ -221,7 +221,7 @@ func TestROIFreePreventionIsAlwaysWorthIt(t *testing.T) {
 
 // A free check that has never caught anything is not evidence of anything.
 func TestROIFreePreventionWithNoEscapesIsNoSignal(t *testing.T) {
-	roi := ROI{CureMinutes: 45, Escapes: 0, PreventionMinutes: 0, PreventionMeasured: true}
+	roi := ROI{CureMinutes: 45, Escapes: 0, PreventionMinutes: 0, PreventionMeasured: true, EscapesMeasured: true}
 	if got := roi.Ratio(); got != 0 {
 		t.Errorf("Ratio() = %v, want 0", got)
 	}
@@ -232,7 +232,7 @@ func TestROIFreePreventionWithNoEscapesIsNoSignal(t *testing.T) {
 
 // The retro has to show its arithmetic; a bare verdict is not auditable.
 func TestROIExplainShowsItsWork(t *testing.T) {
-	got := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true}.Explain()
+	got := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true}.Explain()
 	for _, want := range []string{"ROI = (Cure x Frequency) / Prevention", "90", "4", "30", "12.0:1", "ALWAYS PREVENT"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Explain() missing %q:\n%s", want, got)
@@ -381,7 +381,7 @@ func TestScheduledDetectionIsNotPinnedOnTheHeadCommit(t *testing.T) {
 // or how many people it blocked. A default that can push the ratio across the
 // 3:1 and 10:1 bands must not be rendered as evidence.
 func TestAssumedCureCostYieldsAProvisionalVerdict(t *testing.T) {
-	roi := ROI{CureMinutes: 90, CureAssumed: true, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true}
+	roi := ROI{CureMinutes: 90, CureAssumed: true, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true}
 	verdict := roi.Verdict()
 	if !strings.HasPrefix(verdict, "PROVISIONAL") {
 		t.Errorf("Verdict() = %q, want a PROVISIONAL prefix", verdict)
@@ -397,7 +397,7 @@ func TestAssumedCureCostYieldsAProvisionalVerdict(t *testing.T) {
 // A truncated run history is a lower bound on the denominator, which biases the
 // ratio upward — toward recommending a pre-merge gate.
 func TestTruncatedPreventionIsReportedAsALowerBound(t *testing.T) {
-	roi := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, PreventionTruncated: true}
+	roi := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true, PreventionTruncated: true}
 	if verdict := roi.Verdict(); !strings.HasPrefix(verdict, "PROVISIONAL") {
 		t.Errorf("Verdict() = %q, want a PROVISIONAL prefix", verdict)
 	}
@@ -408,7 +408,7 @@ func TestTruncatedPreventionIsReportedAsALowerBound(t *testing.T) {
 
 // Fully measured terms keep the plain prescriptive band.
 func TestFullyMeasuredROIIsNotProvisional(t *testing.T) {
-	roi := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true}
+	roi := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true}
 	if got := roi.Verdict(); !strings.HasPrefix(got, "ALWAYS PREVENT") {
 		t.Errorf("Verdict() = %q, want ALWAYS PREVENT", got)
 	}
@@ -450,7 +450,7 @@ func TestPostMergeOnlyRetroDoesNotPricePlacement(t *testing.T) {
 		FailingCheck:  "reconcile",
 		Finding:       finding,
 		RequiredKnown: true,
-		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true},
+		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true, EscapesMeasured: true},
 	}.Body()
 
 	if !strings.Contains(body, "not a placement decision") {
@@ -576,7 +576,7 @@ func TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape(t *testing.T) {
 			PRChecksKnown:   true,
 		}),
 		RequiredKnown: true,
-		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true},
+		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true, EscapesMeasured: true},
 	}.Body()
 
 	if !strings.Contains(body, "not a placement decision") {
@@ -620,11 +620,70 @@ func TestFailedCheckLookupIsNotEvidenceOfNeverRan(t *testing.T) {
 // A truncated failure history undercounts escapes, and the numerator moving is
 // what crosses the placement thresholds.
 func TestTruncatedEscapeCountIsReportedAsALowerBound(t *testing.T) {
-	roi := ROI{CureMinutes: 90, Escapes: 100, EscapesTruncated: true, PreventionMinutes: 30, PreventionMeasured: true}
+	roi := ROI{CureMinutes: 90, Escapes: 100, EscapesTruncated: true, PreventionMinutes: 30, PreventionMeasured: true, EscapesMeasured: true}
 	if verdict := roi.Verdict(); !strings.HasPrefix(verdict, "PROVISIONAL") {
 		t.Errorf("Verdict() = %q, want a PROVISIONAL prefix", verdict)
 	}
 	if explain := roi.Explain(); !strings.Contains(explain, "LOWER BOUND") {
 		t.Errorf("Explain() should mark the numerator a lower bound, got %q", explain)
+	}
+}
+
+// A run that failed before producing any job has no failing check. Substituting
+// the workflow's display name invents a context no pull request could have
+// reported, which then reads as `never-ran` with path-filter advice for what is
+// really an unstartable workflow.
+func TestWorkflowLevelFailureIsNotAMissingCheck(t *testing.T) {
+	got := Classify(Escape{
+		PreMergeCapable:      true,
+		FailingCheck:         "SBOM and Security Scan",
+		MainSHA:              "abc1234def",
+		PRNumber:             4,
+		PRChecksKnown:        true,
+		RequiredKnown:        true,
+		WorkflowLevelFailure: true,
+	})
+	if got.Class != ClassInconclusive {
+		t.Errorf("Class = %q, want %q", got.Class, ClassInconclusive)
+	}
+	if got.FilterRefinable {
+		t.Error("FilterRefinable = true for a workflow that never started")
+	}
+}
+
+// A failed frequency query returns zero, and zero reads as "no escapes
+// recorded — leave the placement alone". That is a conclusion drawn from an
+// API error, on an incident whose red run is sitting right there.
+func TestUnmeasuredEscapeCountIsNotNoSignal(t *testing.T) {
+	roi := ROI{CureMinutes: 90, Escapes: 0, EscapesMeasured: false, PreventionMinutes: 30, PreventionMeasured: true}
+	if got := roi.Ratio(); got != 0 {
+		t.Errorf("Ratio() = %v, want 0", got)
+	}
+	verdict := roi.Verdict()
+	if !strings.HasPrefix(verdict, "INSUFFICIENT DATA") {
+		t.Errorf("Verdict() = %q, want INSUFFICIENT DATA", verdict)
+	}
+	if strings.Contains(verdict, "NO SIGNAL") {
+		t.Error("an unread count must not be reported as an absence of escapes")
+	}
+}
+
+// A check still running when the merge went through is a different fact from a
+// check that never reported: the gate let the merge through with it pending.
+func TestPendingAtMergeIsNotNeverRan(t *testing.T) {
+	got := Classify(Escape{
+		PreMergeCapable: true,
+		FailingCheck:    buildCheck,
+		MainSHA:         "abc1234def",
+		PRNumber:        6,
+		PRChecks:        []CheckRun{{Name: buildCheck, Conclusion: ConclusionPending}},
+		PRChecksKnown:   true,
+		RequiredKnown:   true,
+	})
+	if got.Class != ClassInconclusive {
+		t.Errorf("Class = %q, want %q", got.Class, ClassInconclusive)
+	}
+	if got.FilterRefinable {
+		t.Error("FilterRefinable = true; the check did report, it just had not finished")
 	}
 }
