@@ -7,12 +7,13 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 const (
@@ -743,13 +744,17 @@ exit 1
 func TestDeleteBranch_AlreadyAbsentCountsAsDeleted(t *testing.T) {
 	work := newReaperGitFixture(t)
 	t.Chdir(work)
+	// deleteBranch shells out to a plain `git push`, which would find the
+	// developer's own hooks through core.hooksPath. Point the fixture's own
+	// config at the sandbox's empty hooks path so it cannot.
+	gittest.HardenRepo(t, work)
 
 	// A branch that exists: a leased delete removes it.
-	sha := runReaperGit(t, work, "rev-parse", "refs/remotes/origin/doomed")
+	sha := strings.TrimSpace(gittest.Run(t, work, "rev-parse", "refs/remotes/origin/doomed"))
 	if err := deleteBranch(t.Context(), branchInfo{Name: "doomed", TipSHA: sha}); err != nil {
 		t.Fatalf("deleting an existing branch: %v", err)
 	}
-	if out := runReaperGit(t, work, "ls-remote", "--heads", "origin", "refs/heads/doomed"); out != "" {
+	if out := strings.TrimSpace(gittest.Run(t, work, "ls-remote", "--heads", "origin", "refs/heads/doomed")); out != "" {
 		t.Fatalf("branch survived the delete: %q", out)
 	}
 
@@ -766,32 +771,15 @@ func newReaperGitFixture(t *testing.T) string {
 	root := t.TempDir()
 	bare := filepath.Join(root, "origin.git")
 	work := filepath.Join(root, "work")
-	runReaperGit(t, root, "init", "--quiet", "--bare", bare)
-	runReaperGit(t, root, "clone", "--quiet", bare, work)
-	runReaperGit(t, work, "config", "user.email", "reaper@test.invalid")
-	runReaperGit(t, work, "config", "user.name", "reaper test")
-	runReaperGit(t, work, "commit", "--quiet", "--allow-empty", "-m", "base")
-	runReaperGit(t, work, "push", "--quiet", "--no-verify", "origin", "HEAD:refs/heads/main")
-	runReaperGit(t, work, "push", "--quiet", "--no-verify", "origin", "HEAD:refs/heads/doomed")
-	runReaperGit(t, work, "fetch", "--quiet", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	gittest.Run(t, root, "init", "--quiet", "--bare", bare)
+	gittest.Run(t, root, "clone", "--quiet", bare, work)
+	gittest.Run(t, work, "config", "user.email", "reaper@test.invalid")
+	gittest.Run(t, work, "config", "user.name", "reaper test")
+	gittest.Run(t, work, "commit", "--quiet", "--allow-empty", "-m", "base")
+	gittest.Run(t, work, "push", "--quiet", "origin", "HEAD:refs/heads/main")
+	gittest.Run(t, work, "push", "--quiet", "origin", "HEAD:refs/heads/doomed")
+	gittest.Run(t, work, "fetch", "--quiet", "origin", "+refs/heads/*:refs/remotes/origin/*")
 	return work
-}
-
-func runReaperGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", args...) // #nosec G204 -- test-controlled arguments
-	cmd.Dir = dir
-	// Keep the fixture independent of the developer's global git config.
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_TERMINAL_PROMPT=0",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
 }
 
 func TestPrintHuman(t *testing.T) {
