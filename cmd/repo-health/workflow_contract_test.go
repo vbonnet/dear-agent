@@ -17,7 +17,7 @@ const (
 )
 
 type workflowDocument struct {
-	Env  map[string]string      `yaml:"env"`
+	Env  map[string]yaml.Node   `yaml:"env"`
 	Jobs map[string]workflowJob `yaml:"jobs"`
 }
 
@@ -72,7 +72,7 @@ func TestRepoHealthWorkflowUsesOwnedLinterInstaller(t *testing.T) {
 		t.Fatal("CI workflow has no ci job")
 	}
 	ciLint := usingWorkflowStep(t, ciJob, golangciLintAction)
-	healthVersion := health.Env["GOLANGCI_VERSION"]
+	healthVersion := health.Env["GOLANGCI_VERSION"].Value
 	if healthVersion == "" {
 		t.Fatal("health workflow has no GOLANGCI_VERSION")
 	}
