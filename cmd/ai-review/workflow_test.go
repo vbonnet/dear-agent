@@ -23,7 +23,9 @@ func TestWorkflowBuildsSpecPlanBeforeCredentialDecision(t *testing.T) {
 	version := strings.Contains(text, `(.version == "`+specContractVersion+`")`)
 	relevance := strings.Contains(text, `(.review_relevant | type == "boolean")`)
 	dependabotCandidate := strings.Contains(text, `(.dependabot_module_only_candidate | type == "boolean")`)
-	planBody := strings.Contains(text, "PR_BODY: ${{ github.event.pull_request.body }}")
+	planBody := strings.Contains(text, `PR_BODY="$(jq -r '.body // ""' "$AI_REVIEW_CURRENT_PR_JSON")"`)
+	resolvedRevision := strings.Contains(text, "BASE_SHA: ${{ steps.pending.outputs.base_sha }}") &&
+		strings.Contains(text, "HEAD_SHA: ${{ steps.pending.outputs.head_sha }}")
 	key := strings.Index(text, "name: Detect review key")
 	gate := strings.Contains(text, "steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true'")
 	dependabotGate := strings.Contains(text, "steps.dependabot.outputs.exempt != 'true' || steps.override.outputs.active == 'true'")
@@ -35,8 +37,8 @@ func TestWorkflowBuildsSpecPlanBeforeCredentialDecision(t *testing.T) {
 	if !version {
 		t.Fatalf("workflow does not authenticate review plan version %q", specContractVersion)
 	}
-	if !relevance || !dependabotCandidate || !planBody {
-		t.Fatal("workflow plan does not authenticate review relevance from the PR body and deterministic escalation evidence")
+	if !relevance || !dependabotCandidate || !planBody || !resolvedRevision {
+		t.Fatal("workflow plan does not authenticate review relevance from the current API-resolved revision, PR body, and deterministic escalation evidence")
 	}
 	if !gate || !dependabotGate {
 		t.Fatal("relevant SPEC or deterministic escalation plan does not force the existing review gate to run")
@@ -88,14 +90,14 @@ func TestWorkflowDependabotExceptionRequiresTrustedIdentityAndGitEvidence(t *tes
 		"GH_TOKEN":        "${{ secrets.GITHUB_TOKEN }}",
 		"REPO":            "${{ github.repository }}",
 		"PR":              "${{ github.event.pull_request.number }}",
-		"BASE_SHA":        "${{ github.event.pull_request.base.sha }}",
-		"HEAD_SHA":        "${{ github.event.pull_request.head.sha }}",
+		"BASE_SHA":        "${{ steps.pending.outputs.base_sha }}",
+		"HEAD_SHA":        "${{ steps.pending.outputs.head_sha }}",
 		"CANDIDATE":       "${{ steps.plan.outputs.dependabot_module_only_candidate }}",
-		"PR_AUTHOR_LOGIN": "${{ github.event.pull_request.user.login }}",
-		"PR_AUTHOR_ID":    "${{ github.event.pull_request.user.id }}",
-		"PR_AUTHOR_TYPE":  "${{ github.event.pull_request.user.type }}",
-		"HEAD_REPO_ID":    "${{ github.event.pull_request.head.repo.id }}",
-		"BASE_REPO_ID":    "${{ github.event.repository.id }}",
+		"PR_AUTHOR_LOGIN": "${{ steps.pending.outputs.pr_author_login }}",
+		"PR_AUTHOR_ID":    "${{ steps.pending.outputs.pr_author_id }}",
+		"PR_AUTHOR_TYPE":  "${{ steps.pending.outputs.pr_author_type }}",
+		"HEAD_REPO_ID":    "${{ steps.pending.outputs.head_repo_id }}",
+		"BASE_REPO_ID":    "${{ steps.pending.outputs.base_repo_id }}",
 	}
 	if len(auth.Env) != len(wantEnv) {
 		t.Fatalf("Dependabot authentication environment keys = %v, want exactly %v", auth.Env, wantEnv)
@@ -400,7 +402,7 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 		t.Fatalf("workflow review timeout = %d minutes, want %s", workflow.Jobs["review"].TimeoutMinutes, reviewWorkflowTimeout)
 	}
 	steps := workflow.Jobs["review"].Steps
-	if len(steps) == 0 || steps[0].Name != "Mark reviewed head pending" {
+	if len(steps) == 0 || steps[0].Name != "Resolve current PR revision and mark pending" {
 		t.Fatal("trusted review deadline is not established by the first workflow step")
 	}
 	if time.Duration(steps[0].Env.ReviewDeadlineSeconds)*time.Second != reviewWorkflowDeadlineOffset {
@@ -429,12 +431,11 @@ func TestWorkflowPublishesUniqueSpecContractReviewCheck(t *testing.T) {
 		}
 	}
 	boundedCalls := map[string]int{
-		"Fetch PR head for diff":                          3,
+		"Resolve current PR revision and mark pending":    3,
+		"Fetch PR head for diff":                          2,
 		"Build authenticated SPEC governance review plan": 1,
 		"Authenticate Dependabot module-only exception":   3,
-		"Clear override for a new pull request revision":  1,
-		"Attest override to the reviewed revision":        1,
-		"Detect override label":                           3,
+		"Detect override label":                           1,
 		"Run AI review gate":                              2,
 	}
 	for name, minimum := range boundedCalls {

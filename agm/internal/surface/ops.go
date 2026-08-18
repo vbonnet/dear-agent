@@ -11,6 +11,7 @@ var Registry = []codegen.Op{
 	// Read operations
 	ListSessions,
 	GetSession,
+	GetSessionOutput,
 	SearchSessions,
 	GetStatus,
 

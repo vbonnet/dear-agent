@@ -26,8 +26,14 @@ type MockTmux struct {
 	InputContext         context.Context
 	PaneSendContext      context.Context
 
+	// PaneContents maps session name to the pane text CapturePaneTail returns.
+	PaneContents map[string]string
+	// CapturedPaneSessions tracks CapturePaneTail calls.
+	CapturedPaneSessions []string
+
 	// Errors can be set to simulate tmux failures
 	HasSessionError          error
+	CapturePaneError         error
 	ListSessionsError        error
 	CreateSessionError       error
 	KillSessionError         error
@@ -45,6 +51,15 @@ func NewMockTmux() *MockTmux {
 		SentCommands:    []string{},
 		InputReadiness:  InputReadiness{Ready: true, State: "YES", PaneID: "%0"},
 	}
+}
+
+// CapturePaneTail returns the configured pane content for a session.
+func (m *MockTmux) CapturePaneTail(sessionName string, lines int) (string, error) {
+	m.CapturedPaneSessions = append(m.CapturedPaneSessions, sessionName)
+	if m.CapturePaneError != nil {
+		return "", m.CapturePaneError
+	}
+	return m.PaneContents[sessionName], nil
 }
 
 // HasSession checks if a session exists in the mock

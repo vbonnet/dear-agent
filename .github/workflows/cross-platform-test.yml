@@ -69,7 +69,7 @@ jobs:
         run: |
           GIT_COMMIT=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          LDFLAGS="-s -w -X main.Version=2.0.0-dev -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=cross-platform-test"
+          LDFLAGS="-s -w -X github.com/vbonnet/dear-agent/pkg/version.Version=2.0.0-dev -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${GIT_COMMIT} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${BUILD_DATE} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=cross-platform-test"
           mkdir -p build
           go build -ldflags="${LDFLAGS}" -o build/agm ./agm/cmd/agm
           go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper

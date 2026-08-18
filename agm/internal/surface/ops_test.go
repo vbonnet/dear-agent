@@ -13,7 +13,7 @@ func TestRegistry_NotEmpty(t *testing.T) {
 }
 
 func TestRegistry_ExpectedCount(t *testing.T) {
-	const want = 7
+	const want = 8
 	if got := len(Registry); got != want {
 		t.Errorf("Registry length = %d, want %d", got, want)
 	}

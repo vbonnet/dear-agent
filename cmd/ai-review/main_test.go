@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,8 +66,112 @@ func baseConfig() config {
 
 func TestRun_MissingKeyFailsClosed(t *testing.T) {
 	c := noSpecConfig(t)
+	// Still blocking (nonzero), but with the distinct cannot-run code so the
+	// trusted workflow can tell the credential-starved disposition apart from
+	// genuine failures. Any caller treating nonzero as failure still blocks.
+	if got := run(c); got != exitKeylessCannotRun {
+		t.Fatalf("missing key: run() = %d, want %d (blocking cannot-run code)", got, exitKeylessCannotRun)
+	}
+}
+
+func TestRun_KeylessDeterministicHumanVerdictKeepsOrdinaryBlockingExit(t *testing.T) {
+	// A SPEC.owner edge change is a conclusive SPEC-governance human-review
+	// verdict that needs no model, so the absent credential is not its
+	// blocker: it must keep exit 1, never the AIREV-26 cannot-run code that
+	// the workflow would translate to neutral.
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	writeReviewFile(t, dir, "domains/example/SPEC.owner", "domains/example/SPEC.md\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "owner edge")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
 	if got := run(c); got != 1 {
-		t.Fatalf("missing key: run() = %d, want 1 (fail closed)", got)
+		t.Fatalf("keyless deterministic human verdict: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
+
+func TestRun_KeylessEscalationWithoutEvidenceCommentKeepsOrdinaryBlockingExit(t *testing.T) {
+	// AIREV-26 is evidence-first: when the needs-human-review comment cannot
+	// be recorded (PR context set, gh unavailable), a keyless §3 escalation
+	// must keep the plain blocking exit — the workflow's neutral verdict
+	// points readers at evidence that would not exist.
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	writeReviewFile(t, dir, ".github/workflows/x.yml", "name: x\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "workflow edit")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	binDir := t.TempDir()
+	if err := os.Symlink(gitPath, filepath.Join(binDir, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir) // git resolvable, gh absent
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	c.pr, c.repo = "1", "owner/repo"
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless escalation with failed evidence comment: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
+
+func TestRun_KeylessOversizeDiffStaysHardFailure(t *testing.T) {
+	// An oversize diff is a hard failure with or without a credential
+	// (AIREV-26): the keyless cannot-run translation must not run before the
+	// size bound is enforced.
+	dir := t.TempDir()
+	sandbox := gittest.Default(t)
+	git := func(args ...string) string { return sandbox.Run(t, dir, args...) }
+	git("init", "-q")
+	sandbox.HardenRepo(t, dir)
+	writeReviewFile(t, dir, specAuthoringPolicyPath, testSpecAuthoringPolicy)
+	writeReviewFile(t, dir, activeHarnessRegistryPath, testActiveHarnessRegistry)
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	writeReviewFile(t, dir, ".github/workflows/x.yml", "name: x\n"+strings.Repeat("# padding line\n", 64))
+	git("add", "-A")
+	git("commit", "-q", "-m", "oversize workflow edit")
+	head := trim(git("rev-parse", "HEAD"))
+	chdir(t, dir)
+	c := baseConfig()
+	c.baseSHA, c.headSHA = base, head
+	c.maxDiff = 16 // force the oversize path
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless oversize diff: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
+	}
+}
+
+func TestRun_KeylessOrdinaryOversizeDiffStaysHardFailure(t *testing.T) {
+	// Even with no changed SPEC and no escalation, a keyless run must not
+	// reach the preflight cannot-run exit when the diff exceeds the bound.
+	c := noSpecConfig(t)
+	c.maxDiff = 1
+	if got := run(c); got != 1 {
+		t.Fatalf("keyless ordinary oversize diff: run() = %d, want 1 (never %d)", got, exitKeylessCannotRun)
 	}
 }
 
@@ -597,8 +702,8 @@ func TestRun_RelevantSpecWithoutCredentialRequiresHumanReview(t *testing.T) {
 	chdir(t, dir)
 	c := baseConfig()
 	c.baseSHA, c.headSHA = base, head
-	if got := run(c); got != 1 {
-		t.Fatalf("relevant SPEC without credential: run() = %d, want human-review block", got)
+	if got := run(c); got != exitKeylessCannotRun {
+		t.Fatalf("relevant SPEC without credential: run() = %d, want blocking cannot-run code %d", got, exitKeylessCannotRun)
 	}
 }
 
