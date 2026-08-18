@@ -41,8 +41,10 @@ type Config struct {
 	GeminiCmd       []string
 	GeminiTries     int
 	ProviderTimeout time.Duration
-	RetryDelay      time.Duration
-	LockStaleAfter  time.Duration
+	// MaxDiffBytes bounds the diff text placed in a provider prompt.
+	MaxDiffBytes   int
+	RetryDelay     time.Duration
+	LockStaleAfter time.Duration
 	// ProviderRunner executes the review providers. It defaults to the runner
 	// passed to RunOnce, so callers that want provider isolation must set it.
 	ProviderRunner Runner
@@ -123,10 +125,16 @@ func providerEnv(environ []string) []string {
 	return kept
 }
 
+// commandWaitDelay bounds how long a terminated command may keep its pipes.
+const commandWaitDelay = 10 * time.Second
+
 func runCommand(ctx context.Context, name string, args []string, stdin, dir string, env []string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	// A killed provider can leave a descendant holding the output pipes, which
+	// would keep Wait blocked forever without an explicit delay.
+	cmd.WaitDelay = commandWaitDelay
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
@@ -248,7 +256,10 @@ func (cfg *Config) setDefaults() error {
 		return fmt.Errorf("unsupported review event %q", cfg.ReviewEvent)
 	}
 	if len(cfg.CodexCmd) == 0 {
-		cfg.CodexCmd = []string{"codex", "exec", "-"}
+		// The provider runs in a scratch directory, which Codex does not treat
+		// as trusted; codex exec hard-exits there without this flag
+		// (agm/internal/agent/codex_trust.go).
+		cfg.CodexCmd = []string{"codex", "exec", "--skip-git-repo-check", "-"}
 	}
 	if len(cfg.GeminiCmd) == 0 {
 		// The canonical one-shot AGY invocation in agm/cmd/agm/gemini_research.go
@@ -260,6 +271,9 @@ func (cfg *Config) setDefaults() error {
 	}
 	if cfg.ProviderTimeout <= 0 {
 		cfg.ProviderTimeout = 10 * time.Minute
+	}
+	if cfg.MaxDiffBytes <= 0 {
+		cfg.MaxDiffBytes = 256 * 1024
 	}
 	if cfg.RetryDelay < 0 {
 		cfg.RetryDelay = 0
@@ -283,7 +297,9 @@ func (cfg *Config) setDefaults() error {
 func listPRs(ctx context.Context, runner Runner, repo string, limit int) ([]PR, error) {
 	// --limit bounds what GitHub returns, so drafts are excluded in the query;
 	// a page full of drafts would otherwise hide every reviewable pull request.
-	args := []string{"pr", "list", "--repo", repo, "--state", "open", "--draft=false", "--limit", strconv.Itoa(limit), "--json", "number,title,headRefOid,updatedAt,isDraft"}
+	// The bounded page is ordered by most recent update so an older pull request
+	// that just moved is inspected instead of being pinned outside the page.
+	args := []string{"pr", "list", "--repo", repo, "--state", "open", "--draft=false", "--search", "sort:updated-desc", "--limit", strconv.Itoa(limit), "--json", "number,title,headRefOid,updatedAt,isDraft"}
 	out, err := runner.Run(ctx, "gh", args, "")
 	if err != nil {
 		return nil, err
@@ -310,31 +326,32 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 	if err != nil {
 		return res, fmt.Errorf("diff for %s: %w", key, err)
 	}
-	prompt := reviewPrompt(repo, pr, diff)
+	prompt := reviewPrompt(repo, pr, boundDiff(diff, cfg.MaxDiffBytes))
 	codex, err := runProvider(ctx, cfg.ProviderRunner, cfg.CodexCmd, prompt, cfg.ProviderTimeout)
 	if err != nil {
 		return res, fmt.Errorf("codex review for %s: %w", key, err)
 	}
-	gemini, geminiErr := runGemini(ctx, cfg, cfg.ProviderRunner, prompt)
+	gemini, geminiAttempts, geminiErr := runGemini(ctx, cfg, cfg.ProviderRunner, prompt)
 	if geminiErr != nil {
 		// Provider stderr can carry credentials or local paths, so the detail
 		// stays in the operator's log and never reaches the public review body.
 		fmt.Fprintf(stdout, "external-pr-reviewer: secondary review unavailable for %s: %v\n", key, geminiErr)
 	}
-	body := composeReviewBody(repo, pr, cfg.Now(), codex, gemini, cfg.GeminiTries)
-	if cfg.DryRun {
-		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", cfg.ReviewEvent, repo, pr.Number, pr.HeadRefOID)
-		res.Posted = false
-		return res, nil
-	}
-	// gh pr review always targets the PR's current head, so a head that moved
-	// while the providers were running would attach a review of the old diff.
+	body := composeReviewBody(repo, pr, cfg.Now(), codex, gemini, geminiAttempts)
+	// A head that moved while the providers ran describes a revision nobody
+	// reviewed, so the check runs before the dry-run report too: dry-run must
+	// predict exactly what the real path would do.
 	head, err := currentHeadSHA(ctx, runner, repo, pr.Number)
 	if err != nil {
 		return res, fmt.Errorf("confirm head for %s: %w", key, err)
 	}
 	if head != pr.HeadRefOID {
 		res.Skipped, res.Reason = true, "head-changed"
+		return res, nil
+	}
+	if cfg.DryRun {
+		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", cfg.ReviewEvent, repo, pr.Number, pr.HeadRefOID)
+		res.Posted = false
 		return res, nil
 	}
 	if err := postReview(ctx, runner, repo, pr.Number, pr.HeadRefOID, cfg.ReviewEvent, body); err != nil {
@@ -412,8 +429,13 @@ func runProvider(ctx context.Context, runner Runner, cmd []string, prompt string
 	return out, nil
 }
 
-func runGemini(ctx context.Context, cfg Config, runner Runner, prompt string) (string, error) {
-	var last error
+// runGemini returns the secondary review, the number of attempts actually made,
+// and the last failure.
+func runGemini(ctx context.Context, cfg Config, runner Runner, prompt string) (string, int, error) {
+	var (
+		last     error
+		attempts int
+	)
 	for attempt := range cfg.GeminiTries {
 		if attempt > 0 && cfg.RetryDelay > 0 {
 			// An immediate retry re-hits the same rate limit or outage.
@@ -421,21 +443,22 @@ func runGemini(ctx context.Context, cfg Config, runner Runner, prompt string) (s
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return "", errors.Join(last, ctx.Err())
+				return "", attempts, errors.Join(last, ctx.Err())
 			case <-timer.C:
 			}
 		}
 		out, err := runProvider(ctx, runner, cfg.GeminiCmd, prompt, cfg.ProviderTimeout)
+		attempts++
 		if err == nil {
-			return out, nil
+			return out, attempts, nil
 		}
 		last = err
 		if isAccessDenied(err) {
 			// Repeating a denied call cannot recover and can trip lockouts.
-			return "", err
+			return "", attempts, err
 		}
 	}
-	return "", last
+	return "", attempts, last
 }
 
 // accessDenialMarkers identify provider failures that a retry cannot recover.
@@ -480,6 +503,19 @@ func postReview(ctx context.Context, runner Runner, repo string, number int, hea
 	args := []string{"api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number), "--input", "-"}
 	_, err = runner.Run(ctx, "gh", args, string(payload))
 	return err
+}
+
+// boundDiff keeps a prompt within a size a provider argument vector and context
+// window can carry, and says so where it cut.
+func boundDiff(diff string, limit int) string {
+	if limit <= 0 || len(diff) <= limit {
+		return diff
+	}
+	cut := diff[:limit]
+	if idx := strings.LastIndexByte(cut, '\n'); idx > 0 {
+		cut = cut[:idx]
+	}
+	return cut + fmt.Sprintf("\n[diff truncated after %d bytes of %d]\n", len(cut), len(diff))
 }
 
 func reviewPrompt(repo string, pr PR, diff string) string {

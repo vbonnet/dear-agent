@@ -6,9 +6,9 @@
 
 `internal/prreviewer` detects pull requests whose head commit has not yet been
 reviewed, asks a required primary provider and a best-effort secondary provider
-for a review, and posts the combined result through `gh pr review`. Reviewed
-head SHAs are persisted so a repeated pass never re-reviews an unchanged pull
-request. Every external process runs behind the `Runner` boundary so the review
+for a review, and posts the combined result through the GitHub reviews API bound
+to the inspected commit. Reviewed head SHAs are persisted so a repeated pass
+never re-reviews an unchanged pull request. Every external process runs behind the `Runner` boundary so the review
 pass is testable without GitHub or provider access.
 
 ## Contract Ownership
@@ -71,6 +71,14 @@ loop control — and must not restate the requirements below. The split mirrors
 
 **PRV-25** When a state lock is held, the system shall refresh its timestamp for the life of the pass so a long pass is not treated as stale.
 
+**PRV-26** When the secondary provider is unavailable, the system shall report the number of attempts actually made rather than the configured maximum.
+
+**PRV-27** When pull requests are listed, the system shall order the bounded query by most recent update so a moved pull request is not pinned outside the page.
+
+**PRV-28** When a diff exceeds the configured prompt bound, the system shall truncate it and record where the truncation happened.
+
+**PRV-29** When dry-run mode reports the review it would post, the system shall first apply the same head confirmation the posting path applies.
+
 ## Residual Risk
 
 `IsolatedRunner` removes the credential variables listed in the implementation
@@ -80,6 +88,12 @@ credentials. A provider that obeys injected instructions could therefore still
 read operator-readable files. Closing that gap requires an OS-level sandbox for
 provider execution, which is out of scope for this contract and is not claimed
 by any requirement above.
+
+A provider command that declares the prompt placeholder receives the pull
+request title and bounded diff in its argument vector, where a process listing
+on the same host can read them. That is a property of providers whose only
+one-shot interface takes the prompt as an argument; commands that read standard
+input keep the prompt off the command line.
 
 ## BDD Traceability
 

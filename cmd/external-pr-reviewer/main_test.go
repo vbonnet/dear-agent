@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestRunReportsSuccessForHelp(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		if got := run([]string{arg}); got != 0 {
+			t.Fatalf("run(%s) = %d, want 0", arg, got)
+		}
+	}
+}
+
 func TestRunRejectsUnparseableFlags(t *testing.T) {
 	if got := run([]string{"--not-a-flag"}); got != 2 {
 		t.Fatalf("run(--not-a-flag) = %d, want 2", got)

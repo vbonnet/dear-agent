@@ -61,7 +61,7 @@ func decodeReview(t *testing.T, c call) reviewPayload {
 }
 
 func listKey(repo string) string {
-	return "gh pr list --repo " + repo + " --state open --draft=false --limit 50 --json number,title,headRefOid,updatedAt,isDraft"
+	return "gh pr list --repo " + repo + " --state open --draft=false --search sort:updated-desc --limit 50 --json number,title,headRefOid,updatedAt,isDraft"
 }
 
 func listResponse(t *testing.T, prs ...PR) string {
@@ -81,7 +81,10 @@ func viewResponse(sha string) string {
 	return fmt.Sprintf(`{"headRefOid":%q}`, sha)
 }
 
-var testGeminiCmd = []string{"agy", "run", "-"}
+var (
+	testGeminiCmd = []string{"agy", "run", "-"}
+	testCodexCmd  = []string{"codex", "exec", "-"}
+)
 
 func fixedClock() func() time.Time {
 	return func() time.Time { return time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC) }
@@ -102,6 +105,7 @@ func TestRunOnceReviewsOnlyNewHeadAndPostsComment(t *testing.T) {
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
 		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
 		Repos:     []string{"owner/repo"},
 		StatePath: dir + "/state.json",
 		Now:       fixedClock(),
@@ -135,7 +139,7 @@ func TestRunOnceReviewsOnlyNewHeadAndPostsComment(t *testing.T) {
 	}
 
 	r.calls = nil
-	results, err = RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: dir + "/state.json"}, r, &out)
+	results, err = RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: dir + "/state.json"}, r, &out)
 	if err != nil {
 		t.Fatalf("second RunOnce() error = %v", err)
 	}
@@ -162,6 +166,7 @@ func TestRunOnceToleratesGeminiFailureWithoutLeakingProviderError(t *testing.T) 
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
 		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
 		Repos:     []string{"owner/repo"},
 		StatePath: t.TempDir() + "/state.json",
 		Now:       fixedClock(),
@@ -202,6 +207,7 @@ func TestRunOnceDryRunDoesNotPostOrPersist(t *testing.T) {
 		responses: map[string]string{
 			listKey("owner/repo"):            listResponse(t, PR{Number: 3, Title: "Docs", HeadRefOID: "abc"}),
 			"gh pr diff 3 --repo owner/repo": "diff",
+			viewKey("owner/repo", 3):         viewResponse("abc"),
 			"codex exec -":                   "Codex ok",
 			"agy run -":                      "Gemini ok",
 		},
@@ -209,7 +215,7 @@ func TestRunOnceDryRunDoesNotPostOrPersist(t *testing.T) {
 	}
 	state := filepath.Join(t.TempDir(), "state.json")
 	var out strings.Builder
-	_, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, DryRun: true, StatePath: state}, r, &out)
+	_, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, DryRun: true, StatePath: state}, r, &out)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -232,7 +238,7 @@ func TestRunOnceSkipsDraftPullRequests(t *testing.T) {
 		errors: map[string]error{},
 	}
 	var out strings.Builder
-	results, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: t.TempDir() + "/state.json"}, r, &out)
+	results, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: t.TempDir() + "/state.json"}, r, &out)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -257,7 +263,7 @@ func TestRunOnceSkipsWhenHeadMovedDuringReview(t *testing.T) {
 	}
 	state := filepath.Join(t.TempDir(), "state.json")
 	var out strings.Builder
-	results, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out)
+	results, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -299,7 +305,7 @@ func TestRunOnceDoesNotPostWhenPrimaryProviderFails(t *testing.T) {
 		errors: map[string]error{"codex exec -": fmt.Errorf("codex unavailable")},
 	}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
 		t.Fatal("RunOnce() error = nil, want primary provider error")
 	}
 	if len(r.posted()) != 0 {
@@ -325,6 +331,7 @@ func TestRunOncePersistsPostedReviewsWhenALaterRepoFails(t *testing.T) {
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
 		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
 		Repos:     []string{"owner/first", "owner/second"},
 		StatePath: state,
 	}, r, &out)
@@ -360,7 +367,7 @@ func TestRunOncePersistsStateWithOwnerOnlyPermissions(t *testing.T) {
 	}
 	state := filepath.Join(t.TempDir(), "nested", "state.json")
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err != nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	info, err := os.Stat(state)
@@ -409,7 +416,7 @@ func TestListPullRequestsExcludesDraftsInTheQuery(t *testing.T) {
 		errors:    map[string]error{},
 	}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if len(r.calls) != 1 || !containsArg(r.calls[0].args, "--draft=false") {
@@ -428,7 +435,7 @@ func TestRunOnceStopsRetryingDeniedSecondaryProvider(t *testing.T) {
 		errors: map[string]error{"agy run -": fmt.Errorf("agy: exit status 1: 403 Forbidden")},
 	}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, GeminiTries: 5, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, GeminiTries: 5, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	var geminiCalls int
@@ -520,7 +527,7 @@ func TestRunOnceRefusesToRunWhileAnotherRunHoldsState(t *testing.T) {
 	defer release()
 	r := &fakeRunner{responses: map[string]string{}, errors: map[string]error{}}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
 		t.Fatal("RunOnce() error = nil, want a held-lock error")
 	}
 	if len(r.calls) != 0 {
@@ -542,6 +549,7 @@ func TestRunOnceContinuesToLaterTargetsAfterAFailure(t *testing.T) {
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
 		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
 		Repos:     []string{"owner/first", "owner/second"},
 		StatePath: filepath.Join(t.TempDir(), "state.json"),
 	}, r, &out)
@@ -639,6 +647,97 @@ func TestLockHeartbeatKeepsALongPassClaimAlive(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("lock timestamp was never refreshed by the heartbeat")
+}
+
+func TestRunOnceReportsTheAttemptsActuallyMade(t *testing.T) {
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/repo"):             listResponse(t, PR{Number: 51, Title: "Denied", HeadRefOID: "sha51"}),
+			"gh pr diff 51 --repo owner/repo": "diff",
+			viewKey("owner/repo", 51):         viewResponse("sha51"),
+			"codex exec -":                    "Codex ok",
+		},
+		errors: map[string]error{"agy run -": fmt.Errorf("agy: 403 Forbidden")},
+	}
+	var out strings.Builder
+	if _, err := RunOnce(context.Background(), Config{
+		GeminiCmd:   testGeminiCmd,
+		CodexCmd:    testCodexCmd,
+		GeminiTries: 5,
+		Repos:       []string{"owner/repo"},
+		StatePath:   filepath.Join(t.TempDir(), "state.json"),
+	}, r, &out); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	body := decodeReview(t, r.posted()[0]).Body
+	if !strings.Contains(body, "unavailable after 1 attempt(s)") {
+		t.Fatalf("review body must report the attempts actually made: %q", body)
+	}
+}
+
+func TestRunOnceDryRunSkipsAMovedHead(t *testing.T) {
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/repo"):             listResponse(t, PR{Number: 61, Title: "Moving", HeadRefOID: "old"}),
+			"gh pr diff 61 --repo owner/repo": "diff",
+			viewKey("owner/repo", 61):         viewResponse("new"),
+			"codex exec -":                    "Codex ok",
+			"agy run -":                       "Gemini ok",
+		},
+		errors: map[string]error{},
+	}
+	var out strings.Builder
+	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
+		DryRun:    true,
+		Repos:     []string{"owner/repo"},
+		StatePath: filepath.Join(t.TempDir(), "state.json"),
+	}, r, &out)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Skipped || results[0].Reason != "head-changed" {
+		t.Fatalf("dry-run must predict the head-changed skip, got %#v", results)
+	}
+	if strings.Contains(out.String(), "dry-run would post") {
+		t.Fatalf("dry-run must not promise a post it would refuse: %q", out.String())
+	}
+}
+
+func TestDefaultPrimaryProviderSkipsTheGitRepoCheck(t *testing.T) {
+	cfg := Config{Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}
+	if err := cfg.setDefaults(); err != nil {
+		t.Fatalf("setDefaults() error = %v", err)
+	}
+	if !slices.Contains(cfg.CodexCmd, "--skip-git-repo-check") {
+		t.Fatalf("default CodexCmd = %#v, want the scratch-directory trust flag", cfg.CodexCmd)
+	}
+}
+
+func TestListQueryOrdersByMostRecentUpdate(t *testing.T) {
+	r := &fakeRunner{responses: map[string]string{listKey("owner/repo"): listResponse(t)}, errors: map[string]error{}}
+	var out strings.Builder
+	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if !containsArg(r.calls[0].args, "sort:updated-desc") {
+		t.Fatalf("expected the bounded query to order by update time, got %#v", r.calls[0].args)
+	}
+}
+
+func TestBoundDiffTruncatesOversizedInput(t *testing.T) {
+	diff := strings.Repeat("line of diff\n", 100)
+	got := boundDiff(diff, 120)
+	if len(got) >= len(diff) {
+		t.Fatalf("boundDiff() did not truncate: %d bytes", len(got))
+	}
+	if !strings.Contains(got, "[diff truncated after") {
+		t.Fatalf("boundDiff() did not record the truncation: %q", got)
+	}
+	if unchanged := boundDiff(diff, len(diff)); unchanged != diff {
+		t.Fatal("boundDiff() altered a diff within the limit")
+	}
 }
 
 func TestLoadStateTreatsMissingFileAsEmpty(t *testing.T) {

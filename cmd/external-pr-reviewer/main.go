@@ -50,6 +50,10 @@ flags:
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
+		// Help is a successful request for the command's own documentation.
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if fs.NArg() != 0 {
