@@ -95,9 +95,11 @@ func runInstallQuotaSchedule(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("✓ Installed: %s\n", dest)
 
-	// Load the job. Unload first in case an older version is running.
+	// Load the job. Unload first in case an older version is running. Unload
+	// failure is expected on first install (no older job loaded), so it is
+	// reported but never fatal.
 	if err := exec.Command("launchctl", "unload", dest).Run(); err != nil { //#nosec G204 -- controlled path
-		// Ignored: the job may simply not be loaded yet (first install).
+		fmt.Printf("  (no previous job unloaded: %v)\n", err)
 	}
 	if out, err := exec.Command("launchctl", "load", dest).CombinedOutput(); err != nil { //#nosec G204
 		fmt.Printf("⚠ launchctl load failed (%v): %s\n", err, out)
