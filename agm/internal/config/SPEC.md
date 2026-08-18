@@ -51,14 +51,17 @@ decisions.
 
 ## BDD Traceability
 
-- `agm/test/bdd/features/config_directory_parity.feature`
-- `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/config_directory_parity.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
+- Test consequence: CONFIG-10 through CONFIG-18 are verified by deterministic schema and unit tests rather than new scenarios — strict decode and source authentication in `config_strict_test.go`, runtime-authority capture, projection and isolated-HOME rebinding in `runtime_authority_test.go` and `runtime_authority_isolation_test.go`, centralized bootstrap and integrity in `storage_test.go`, and documented-snippet schema conformance in `documented_schema_test.go`. The two features above continue to own cross-package configuration-directory and harness parity.
 
 ## Package Test Traceability
 
 - `agm/internal/config/config_test.go`
 - `agm/internal/config/config_strict_test.go`
+- `agm/internal/config/documented_schema_test.go`
 - `agm/internal/config/runtime_authority_test.go`
+- `agm/internal/config/runtime_authority_isolation_test.go`
 - `agm/internal/config/storage_test.go`
 - `agm/internal/config/parser_golden_test.go`
 - `agm/internal/config/fuzz_test.go`
