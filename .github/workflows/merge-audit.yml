@@ -6,6 +6,14 @@ name: Merge Audit
 #   - unresolved review threads at merge
 #   - required checks red or pending at merge
 #
+# "Required" means the contexts branch protection actually gates on, resolved
+# from the effective-rules endpoint. Advisory checks (AI review, SPEC contract
+# review, and the other non-gating bots) are deliberately NOT part of the
+# predicate: branch protection permits merging over them, so treating every
+# check run as required manufactures a violation for a merge that broke no
+# rule. `bypassed-merge-audit.yml` scopes the same way; the two detectors
+# answer the same question and must not disagree.
+#
 # Detect + ALERT only: on a violation it opens (or updates) a GitHub Issue
 # labelled "merge-audit". It NEVER reverts or rewrites history — remediation is
 # a human decision. The weekly cross-repo sweep lives in cmd/merge-audit; this
@@ -56,13 +64,24 @@ jobs:
           # Resolve PR association from the pushed commit itself. A bounded PR
           # list becomes incomplete during merge bursts and can turn a valid
           # PR merge into a false direct-push alert.
-          pr_num=$(timeout 30 gh api \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${REPO}/commits/${SHA}/pulls?per_page=100" \
-            --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0].number // empty') || {
-              echo "::error::Could not resolve pull-request association for ${SHA}; refusing to classify it as a direct push."
-              exit 1
-            }
+          #
+          # This endpoint is eventually consistent: this workflow starts within
+          # seconds of the merge, and the association (or `merged_at`) is not
+          # always visible yet. An empty first answer therefore means "not
+          # indexed yet" at least as often as it means "direct push", so retry
+          # before concluding the latter.
+          pr_num=""
+          for attempt in 1 2 3 4 5; do
+            pr_num=$(timeout 30 gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/commits/${SHA}/pulls?per_page=100" \
+              --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0].number // empty') || {
+                echo "::error::Could not resolve pull-request association for ${SHA}; refusing to classify it as a direct push."
+                exit 1
+              }
+            [ -n "$pr_num" ] && break
+            [ "$attempt" -lt 5 ] && sleep $(( attempt * 5 ))
+          done
 
           findings=""
 
@@ -87,19 +106,51 @@ jobs:
           - 💬 **Unresolved threads**: PR #${pr_num} merged with ${unresolved} unresolved review thread(s)."
             fi
 
-            # Required checks red or pending at merge time.
-            head_sha=$(timeout 30 gh pr view "$pr_num" --repo "$REPO" \
-              --json headRefOid --jq '.headRefOid')
-            not_green=$(timeout 30 gh api "repos/${REPO}/commits/${head_sha}/check-runs" \
-              --jq '[.check_runs[] | select(
-                       .status=="completed" and
+            # Required checks red or pending at merge time. Resolve what is
+            # actually required from the effective-rules endpoint (the legacy
+            # branch-protection endpoint omits repository rulesets) rather than
+            # treating every check run as required — see the file header.
+            required=$(timeout 30 gh api "repos/${REPO}/rules/branches/main" \
+              --jq '[.[] | select(.type == "required_status_checks")
+                     | .parameters.required_status_checks[]?.context] | unique') || {
+                echo "::error::Could not resolve the required checks for main; refusing to classify this merge."
+                exit 1
+              }
+            echo "Required checks: ${required}"
+
+            pr_meta=$(timeout 30 gh pr view "$pr_num" --repo "$REPO" \
+              --json headRefOid,mergedAt)
+            head_sha=$(jq -r '.headRefOid' <<<"$pr_meta")
+            merged_at=$(jq -r '.mergedAt' <<<"$pr_meta")
+
+            runs=$(timeout 30 gh api "repos/${REPO}/commits/${head_sha}/check-runs" \
+              --jq '.check_runs // []' 2>/dev/null || echo '[]')
+
+            # Failed before the merge.
+            red=$(jq -r --argjson required "$required" --arg merged "$merged_at" \
+              '[.[] | select(.name as $n | ($required | index($n)) != null) | select(
+                       .status == "completed" and
+                       (.conclusion // "") != "" and
                        (.conclusion // "") != "success" and
                        (.conclusion // "") != "skipped" and
-                       (.conclusion // "") != "neutral"
-                     ) | "\(.name) [\(.conclusion)]"] | join(", ")' 2>/dev/null || echo "")
-            if [ -n "$not_green" ]; then
+                       (.conclusion // "") != "neutral" and
+                       (.completed_at // "z") <= $merged
+                     ) | "\(.name) [\(.conclusion)]"] | join(", ")' <<<"$runs")
+
+            # Still in flight when the merge landed.
+            pending=$(jq -r --argjson required "$required" --arg merged "$merged_at" \
+              '[.[] | select(.name as $n | ($required | index($n)) != null) | select(
+                       (.started_at // "z") <= $merged and
+                       (.status != "completed" or (.completed_at // "z") > $merged)
+                     ) | .name] | join(", ")' <<<"$runs")
+
+            if [ -n "$red" ]; then
               findings="${findings}
-          - ❌ **Checks not green**: PR #${pr_num} merged with failing checks: ${not_green}."
+          - ❌ **Required checks not green**: PR #${pr_num} merged with failing required checks: ${red}."
+            fi
+            if [ -n "$pending" ]; then
+              findings="${findings}
+          - ⏳ **Required checks pending**: PR #${pr_num} merged while required checks were still running: ${pending}."
             fi
           fi
 
