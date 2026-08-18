@@ -195,7 +195,7 @@ func collectUnmergedCommits(dir string, result *CompletionVerification) {
 		result.UnmergedCommits = append(result.UnmergedCommits,
 			fmt.Sprintf("%d commit(s) ahead of %s (unable to list details: %v)", n, base, logErr))
 	} else {
-		for _, c := range strings.Split(strings.TrimSpace(string(logOut)), "\n") {
+		for c := range strings.SplitSeq(strings.TrimSpace(string(logOut)), "\n") {
 			if cc := strings.TrimSpace(c); cc != "" {
 				result.UnmergedCommits = append(result.UnmergedCommits, cc)
 			}
