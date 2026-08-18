@@ -122,14 +122,28 @@ func ForceFlag(args []string) (string, bool) {
 // have to be walked individually.
 func forcesPush(opt string) bool {
 	if strings.HasPrefix(opt, "--") {
-		switch {
-		case opt == "--force" || opt == "--force-with-lease" || opt == "--mirror":
-			return true
-		case strings.HasPrefix(opt, "--force-with-lease=") ||
-			strings.HasPrefix(opt, "--force-if-includes"):
-			return true
+		// Strip a glued value: --force-with-lease=<ref> is still a force.
+		name, _, _ := strings.Cut(opt, "=")
+		if name == "--" {
+			return false
 		}
-		// Any other long option, including the negating --no-force forms.
+		// Git's parse-options resolves any unambiguous ABBREVIATION of a long
+		// option, so `--m` reaches --mirror and `--force-w` reaches
+		// --force-with-lease (verified against git 2.55.0: both parse, while
+		// --zzzz reports "unknown option"). Matching the spelled-out names
+		// exactly therefore leaves the same hole the short-cluster fix closes.
+		//
+		// A guard must not try to reproduce git's ambiguity rules: treating
+		// every prefix of a forbidden option as forbidden can only over-block,
+		// and the tokens it over-blocks (--f, --fo) are ones git itself
+		// rejects as ambiguous. Under-blocking would overwrite remote history.
+		for _, forbidden := range forcingLongOpts {
+			if strings.HasPrefix(forbidden, name) {
+				return true
+			}
+		}
+		// Any other long option, including the negating --no-force forms,
+		// which are not prefixes of anything forbidden.
 		return false
 	}
 	for _, c := range opt[1:] {
@@ -137,19 +151,25 @@ func forcesPush(opt string) bool {
 			// -f is `git push`'s only short option spelled with an 'f'.
 			return true
 		}
-		if shortPushOptsWithValue[c] {
-			// The option's value is glued to the rest of the word (`-ofoo`),
-			// so the remaining letters are that value, not further options.
+		if c == 'o' {
+			// -o/--push-option is git push's only value-taking short option,
+			// and its value may be glued on (`-ofoo`), so the remaining
+			// letters are that value rather than further options.
 			break
 		}
 	}
 	return false
 }
 
-// shortPushOptsWithValue are the `git push` short options that consume a value.
-// Their value may be glued to the letter (`-ofoo`), which would otherwise let
-// an arbitrary string be scanned for option letters.
-var shortPushOptsWithValue = map[rune]bool{'o': true}
+// forcingLongOpts are the long options that can overwrite remote history. Any
+// unambiguous prefix of one of these reaches it through git's parse-options,
+// so they are matched by prefix rather than by equality.
+var forcingLongOpts = []string{
+	"--force",
+	"--force-with-lease",
+	"--force-if-includes",
+	"--mirror",
+}
 
 // PushArgs assembles the full git argv for a safe push: an optional `-C
 // repoDir`, the credential reset, `push`, and the caller's push arguments.

@@ -70,6 +70,8 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-27** When a push request contains a bare `--` separator, the system shall classify no later token as a flag, since git treats every token after the end-of-options separator as a repository or refspec; a leading-`+` force refspec after `--` shall still be rejected.
 
+**SAFEGIT-28** When a push request contains any prefix of a history-overwriting long option (`--m`, `--forc`, `--force-w`), the system shall classify it as a force flag, since git's parse-options resolves unambiguous abbreviations; the system shall match by prefix rather than reproduce git's ambiguity rules, because over-blocking an abbreviation git itself rejects is safe while under-blocking overwrites remote history.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
