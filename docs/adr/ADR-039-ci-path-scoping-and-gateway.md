@@ -24,14 +24,55 @@ green with the gate silently disabled.
 
 ## Decision
 
-Path selection is expressed as job-level `if:` conditions fed by one reusable
-workflow, `.github/workflows/changed-paths.yml`, which owns the path taxonomy
-for the repo. Workflow-level `paths:` is prohibited for any job that produces a
-required status context.
+Path selection is expressed as `if:` conditions fed by one reusable workflow,
+`.github/workflows/changed-paths.yml`, which wraps `cmd/changed-paths`. The
+taxonomy lives in Go so it can be unit tested; the bug class here is a
+classifier that silently under-selects, which is invisible in a workflow log.
+Workflow-level `paths:` is prohibited for any job that produces a required
+status context.
 
-`changed-paths.yml` fails safe: every output defaults to `true`. A missing base
-ref, a git failure, a non-`pull_request` event, or a change to a global input
-(`go.mod`, `go.sum`, `Makefile`, `.github/**`, lint config) forces every
+Four rules follow, and every one of them exists because breaking it makes a
+required check **absent** rather than red. GitHub accepts a `skipped` — or
+never-reported — required context as satisfying branch protection, so each of
+these failures merges green with the gate switched off.
+
+1. **A job that produces a required *matrix* context is scoped at the step
+   level, never the job level.** GitHub does not expand `strategy.matrix` for a
+   job whose job-level `if:` is false; the skipped check run carries the
+   literal, unexpanded name. This repo's own history shows it: PR runs report
+   the skipped job as `AGM E2E Install (${{ matrix.distro }})`, while push runs
+   report `AGM E2E Install (ubuntu)` and `(debian)`. A job-level `if:` on
+   `Build & Test` would therefore never emit `Build & Test (ubuntu-latest)`,
+   and the PR would sit at "Expected — Waiting for status to be reported"
+   forever. Such jobs always run and gate their own steps, paying ~30s of
+   runner startup to keep the context reportable.
+
+2. **A failed detector means everything is relevant.** An `if:` with no status
+   function inherits an implicit `success()` over `needs`, so a detector that
+   dies on checkout or runner startup would silently skip its consumers. Every
+   scoped condition carries `!cancelled()` and an explicit
+   `needs.changes.result != 'success' ||` clause; the gateway's audit reads a
+   non-success detector the same way.
+
+3. **`CI Gateway` is itself a required status check.** Without the ruleset
+   entry the audit below is advisory: the jobs it watches report `skipped`,
+   branch protection accepts that, and a red gateway blocks nothing.
+
+4. **Go-relevance is a denylist, not an allowlist.** A file is a build input
+   unless it is provably documentation. An allowlist of Go-ish extensions
+   under-selects the moment someone adds a new kind of embedded asset —
+   `//go:embed`-ed `.sql` schemas, `.yaml` contracts, and Markdown skills all
+   change the compiled program without touching a `.go` file. Embed ownership
+   is discovered from the tree at detection time rather than hand-listed, and
+   `agm/agm-plugin/commands` (content-hashed) plus `skills` (skill-lint) are
+   treated as product because Build & Test verifies them. Change detection also
+   uses `git diff --name-status`, counting **both** sides of a rename: under
+   `--name-only`, renaming a `.go` file to a `.md` one reports only the
+   Markdown path and would skip build and analysis.
+
+`changed-paths.yml` also fails safe: every output defaults to `true`. A missing
+base ref, a git failure, a non-`pull_request` event, or a change to a global
+input (`go.mod`, `go.sum`, `Makefile`, `.github/**`, lint config) forces every
 consumer on. This mirrors the forced-full fallback `cmd/test-affected` already
 uses (ADR-028). Under-running is a hole in the gate; over-running costs runner
 minutes.
@@ -44,10 +85,15 @@ gate. `if: always()` is mandatory: under the default `success()` a single
 skipped upstream would skip the gateway, and a gateway that skips is a gateway
 that passes.
 
+All four rules are asserted by `cmd/changed-paths/workflow_contract_test.go`,
+which reads `.github/rulesets/main.json` and the workflow files directly. That
+test is the enforcement mechanism; the prose above is only its rationale.
+
 Enforcement is scoped to what a change can actually break, not to the whole
 tree. `Vulnerability Scan` blocks a PR only when it touches a dependency
-manifest or lockfile; the whole-tree blocking scan moves to push-to-main,
-release, and the weekly schedule.
+manifest or lockfile; the whole-tree blocking scan moves to push-to-main
+(itself filtered to manifest changes), release, and the weekly schedule. The
+weekly schedule is therefore the unconditional backstop, not push-to-main.
 
 ## Alternatives
 
@@ -69,8 +115,14 @@ as grey in the PR checks list — that is the intended shape, not a missing run.
 
 Manifest-scoping the vulnerability gate is narrower than true baseline
 diffing: a PR that bumps one dependency is still blocked by an unrelated
-pre-existing CRITICAL, because Trivy has no `--baseline-commit`. The
-post-merge scans and the main-health watchdog carry that residual risk.
+pre-existing CRITICAL, because Trivy has no `--baseline-commit`. The weekly
+scan, the release scan, and the main-health watchdog carry that residual risk.
+
+Applying the ruleset is a separate, manual admin step (see
+`docs/branch-protection.md`). Until `CI Gateway` is applied to the live
+ruleset, the skip audit is advisory. Merging this ADR's implementation without
+applying the ruleset leaves the gate weaker than before, so the two go
+together.
 
 Moving whole-tree enforcement off the PR path means some debt is found after
 merge instead of before. That is the deliberate trade, and it is only safe

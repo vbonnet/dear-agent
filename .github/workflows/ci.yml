@@ -20,12 +20,19 @@ permissions:
   contents: read
 
 jobs:
-  # Shared change detection. Job-level `if:` conditions below consume these
-  # outputs. Never move this selection into workflow-level `on.pull_request.paths`
-  # — a workflow skipped by a path filter reports no check run at all, and the
+  # Shared change detection. The conditions below consume these outputs.
+  #
+  # Never move this selection into workflow-level `on.pull_request.paths` — a
+  # workflow skipped by a path filter reports no check run at all, and the
   # required "Build & Test (…)" contexts would sit at "Expected — Waiting for
   # status to be reported" forever. A job skipped by `if:` reports `skipped`,
-  # which GitHub accepts for a required check. See ADR-038.
+  # which GitHub accepts for a required check.
+  #
+  # Jobs that PRODUCE a required context are scoped at the STEP level, because
+  # a skipped matrix job never emits its expanded contexts. Jobs that do not
+  # are scoped at the job level, and every such condition carries `!cancelled()`
+  # plus `needs.changes.result != 'success'` so a failed detector cannot
+  # silently skip a gate. See ADR-038.
   changes:
     name: Change Detection
     uses: ./.github/workflows/changed-paths.yml
@@ -33,12 +40,31 @@ jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     needs: changes
-    # Skips only when the PR touches no Go source, no build metadata, and
-    # nothing under .github/ — i.e. a pure docs/asset PR, which cannot change
-    # what `go build`, `go vet`, or `go test` produce. Every other PR runs the
-    # full matrix exactly as before. changed-paths.yml fails safe to `true`, so
-    # an unknowable diff still runs the full gate.
-    if: needs.changes.outputs.go == 'true'
+    # This job is scoped at the STEP level, not the job level, and that is
+    # load-bearing rather than stylistic.
+    #
+    # GitHub does not expand `strategy.matrix` for a job whose job-level `if:`
+    # is false. The skipped job reports ONE check run under the literal,
+    # unexpanded name — verified in this repo's own history: `AGM E2E Install
+    # (${{ matrix.distro }})` appears as the skipped check name on PR runs,
+    # while a push run reports `AGM E2E Install (ubuntu)` / `(debian)`. A
+    # job-level `if:` here would therefore never emit `Build & Test
+    # (ubuntu-latest)` or `Build & Test (macos-latest)`, and branch protection
+    # would sit at "Expected — Waiting for status to be reported" forever.
+    #
+    # So the job always runs, emits both required contexts, and skips its own
+    # steps on a docs-only PR. The residual cost is runner startup (~30s),
+    # against ~30 minutes saved.
+    #
+    # `!cancelled()` rather than a bare omission: with no `if:` at all, a
+    # FAILED `changes` job would skip this one, and a skipped required check
+    # satisfies branch protection just as well as a passing one.
+    if: ${{ !cancelled() }}
+    env:
+      # The one place selection is decided for this job. A detector that did
+      # not succeed publishes no outputs, and that means "run everything", not
+      # "run nothing".
+      RUN_BUILD: ${{ needs.changes.result != 'success' || needs.changes.outputs.go == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -61,6 +87,7 @@ jobs:
 
     steps:
       - name: Checkout
+        if: env.RUN_BUILD == 'true'
         uses: actions/checkout@v7
         with:
           # Full history required for two reasons:
@@ -70,6 +97,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
+        if: env.RUN_BUILD == 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
@@ -77,17 +105,19 @@ jobs:
           cache-dependency-path: "go.sum"
 
       - name: Install tmux (macOS)
-        if: matrix.os == 'macos-latest'
+        if: env.RUN_BUILD == 'true' && matrix.os == 'macos-latest'
         run: brew install tmux
 
       - name: Install bubblewrap (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: env.RUN_BUILD == 'true' && matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y bubblewrap
 
       - name: Download dependencies
+        if: env.RUN_BUILD == 'true'
         run: go mod download
 
       - name: Build
+        if: env.RUN_BUILD == 'true'
         # The first three binaries collide with same-named directories
         # under the repo root (./agm, ./agm-reaper exists as a dir, etc.),
         # so go build refuses to write the executable next to the source
@@ -108,21 +138,26 @@ jobs:
           go install ./agm/cmd/agm
 
       - name: Vet
+        if: env.RUN_BUILD == 'true'
         run: go vet ./...
 
       - name: Validate tracked AI skills
+        if: env.RUN_BUILD == 'true'
         run: go run ./tools/skill-lint -repo .
 
       - name: Verify AGM plugin hashes
+        if: env.RUN_BUILD == 'true'
         run: make plugin-verify-hashes
 
       - name: Test
+        if: env.RUN_BUILD == 'true'
         run: go test ${{ matrix.race }} -count=1 -timeout=20m ./...
         env:
           # Skip tmux-dependent tests on macOS CI
           CI_SKIP_TMUX: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
 
       - name: Lint
+        if: env.RUN_BUILD == 'true'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
         with:
           # Pin to a specific version so linter upgrades are deliberate, not
@@ -141,6 +176,14 @@ jobs:
           # shared 10 GB Actions cache that main's hot path depends on.
           skip-save-cache: ${{ github.event_name != 'push' }}
 
+      - name: Explain skipped build
+        if: env.RUN_BUILD != 'true'
+        run: |
+          echo "::notice ::Build & Test skipped its steps: this PR changes no Go"
+          echo "::notice ::source, no build metadata, and no embedded or verified"
+          echo "::notice ::build input. The context is still reported so branch"
+          echo "::notice ::protection stays satisfiable. See ADR-038."
+
   # Smart integration-test selection. The selector (cmd/test-affected)
   # walks the dependency graph from this branch vs. origin/main and runs
   # `go test -tags=integration` on only the packages whose deps actually
@@ -148,9 +191,11 @@ jobs:
   # Makefile, .github/workflows/, the selector source) deliberately fall
   # back to a full integration run — see cmd/test-affected/main.go.
   #
-  # This is *additive*. The "Build & Test" job above still runs every
-  # unit test on every PR; this job just narrows the integration suite
-  # down to what the PR actually touches. Empty output = clean pass.
+  # This is *additive*. The "Build & Test" job above still runs the full
+  # unit-test surface on every PR that touches a build input — Go source,
+  # build metadata, or an embedded/hash-verified asset (ADR-038); this job
+  # just narrows the integration suite down to what the PR actually
+  # touches. Empty output = clean pass.
   #
   # Linux-only on purpose: integration tests rely on real tmux and
   # process behaviour that's flaky on the macOS runner. Mirror the
@@ -172,7 +217,14 @@ jobs:
     # already returns an empty selection for a docs-only PR. Skipping the job
     # outright avoids paying for checkout + tmux install + `go mod download`
     # just to be told there is nothing to run.
-    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
+    #
+    # `!cancelled()` and the `result != 'success'` clause are the fail-closed
+    # half: an `if:` with no status function inherits an implicit `success()`,
+    # so a FAILED detector would silently skip this job.
+    if: >-
+      ${{ !cancelled()
+      && github.event_name == 'pull_request'
+      && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
     # Suite has been green across multiple consecutive PRs (verified
     # 2026-06-12). Ratchet step: removed continue-on-error so failures
     # now block CI. Next admin step: add to branch-protection
@@ -219,8 +271,11 @@ jobs:
     # These are Go contract tests over agm/**. A PR that changes neither Go
     # source nor anything under agm/ cannot move them. `go` is ANDed in so a
     # docs-only edit inside agm/ (agm/README.md) does not drag a 15-minute
-    # contract suite along with it.
-    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.agm == 'true'
+    # contract suite along with it. A failed detector runs it anyway.
+    if: >-
+      ${{ !cancelled()
+      && (needs.changes.result != 'success'
+      || (needs.changes.outputs.go == 'true' && needs.changes.outputs.agm == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -303,7 +358,11 @@ jobs:
     # Race tests, fuzz seeds, and a gosec scan, all scoped to
     # engram/internal/providers/simple and engram/internal/reflection. A PR
     # that touches no Go source under engram/ cannot change their outcome.
-    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.engram == 'true'
+    # A failed detector runs it anyway.
+    if: >-
+      ${{ !cancelled()
+      && (needs.changes.result != 'success'
+      || (needs.changes.outputs.go == 'true' && needs.changes.outputs.engram == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -348,6 +407,14 @@ jobs:
   #      the same `changes` outputs the jobs consumed, which jobs SHOULD have
   #      run, and fail if any of them reports `skipped`. A filter that wrongly
   #      excludes a relevant PR turns red here instead of merging green.
+  #      A detector that did not succeed publishes no outputs, and the audit
+  #      reads that as "everything was relevant", never "nothing was".
+  #
+  # THIS JOB MUST BE A REQUIRED STATUS CHECK. It is listed as `CI Gateway` in
+  # .github/rulesets/main.json. Without that entry the audit is advisory: the
+  # scoped jobs it watches report `skipped`, branch protection accepts a
+  # `skipped` required context, and a red gateway blocks nothing.
+  # cmd/changed-paths/workflow_contract_test.go asserts the ruleset entry.
   #
   # Honours DECL-WORKFLOW-02: a failing required job cannot be reported as
   # success through this aggregate. See ADR-038.
@@ -369,82 +436,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fail on any upstream failure or cancellation
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          set -euo pipefail
-          echo "Upstream job results:"
-          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+      - name: Checkout
+        uses: actions/checkout@v7
 
-          bad=$(echo "$NEEDS_JSON" \
-            | jq -r 'to_entries[]
-                     | select(.value.result == "failure" or .value.result == "cancelled")
-                     | "\(.key) -> \(.value.result)"')
-          if [ -n "$bad" ]; then
-            echo "::error ::CI Gateway: upstream job(s) did not pass:"
-            echo "$bad" | sed 's/^/  /'
-            exit 1
-          fi
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: false
 
-      - name: Verify every skipped job was legitimately skipped
+      # The audit logic lives in cmd/changed-paths (see audit.go) so the
+      # expectation table is unit tested rather than asserted by inline shell.
+      - name: Aggregate and audit skipped jobs
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           EVENT_NAME: ${{ github.event_name }}
-          SEL_GO: ${{ needs.changes.outputs.go }}
-          SEL_AGM: ${{ needs.changes.outputs.agm }}
-          SEL_ENGRAM: ${{ needs.changes.outputs.engram }}
-        run: |
-          set -euo pipefail
-
-          # Expected-to-run, recomputed from the same inputs the jobs used.
-          # Kept deliberately as a duplicate expression rather than a shared
-          # variable: if someone edits a job's `if:` without editing this, the
-          # two disagree and the gateway fails loudly. That divergence is the
-          # signal, not a bug.
-          expect_ci="$SEL_GO"
-          expect_integration=false
-          if [ "$EVENT_NAME" = "pull_request" ] && [ "$SEL_GO" = "true" ]; then
-            expect_integration=true
-          fi
-          expect_agm=false
-          if [ "$SEL_GO" = "true" ] && [ "$SEL_AGM" = "true" ]; then
-            expect_agm=true
-          fi
-          expect_engram=false
-          if [ "$SEL_GO" = "true" ] && [ "$SEL_ENGRAM" = "true" ]; then
-            expect_engram=true
-          fi
-
-          result_of() {
-            echo "$NEEDS_JSON" | jq -r --arg k "$1" '.[$k].result // "missing"'
-          }
-
-          violations=""
-          assert() {
-            job="$1"; expected="$2"
-            actual=$(result_of "$job")
-            echo "  ${job}: result=${actual} expected_to_run=${expected}"
-            if [ "$expected" = "true" ] && [ "$actual" = "skipped" ]; then
-              violations="${violations}\n  - ${job} was SKIPPED but the change set says it was relevant"
-            fi
-          }
-
-          echo "Selection: go=${SEL_GO} agm=${SEL_AGM} engram=${SEL_ENGRAM} event=${EVENT_NAME}"
-          echo "Skip audit:"
-          assert ci "$expect_ci"
-          assert integration-tests "$expect_integration"
-          assert agm-codex-contracts "$expect_agm"
-          assert engram-storage-hardening "$expect_engram"
-
-          if [ -n "$violations" ]; then
-            echo "::error ::CI Gateway: a relevant job was skipped — path scoping is wrong, not the PR."
-            printf '%b\n' "$violations"
-            echo "Fix the filters in .github/workflows/changed-paths.yml or the job \`if:\` conditions."
-            exit 1
-          fi
-
-          echo "All jobs either ran or were legitimately out of scope for this change set."
+        run: go run ./cmd/changed-paths -audit
 
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln

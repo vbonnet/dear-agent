@@ -96,6 +96,13 @@ jobs:
   vulnerability-scan:
     name: Vulnerability Scan
     needs: changes
+    # `!cancelled()` is load-bearing. This job produces a REQUIRED context, and
+    # an `if:` with no status function — or no `if:` at all next to a `needs:` —
+    # inherits an implicit `success()`. A detector that fails on checkout or
+    # runner startup would then skip this job, and a skipped required check
+    # satisfies branch protection exactly as well as a passing one, so the
+    # security gate would vanish rather than turn red. See ADR-038.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -118,10 +125,14 @@ jobs:
           sarif_file: 'trivy-results.sarif'
 
       # Blocking pass. Runs unconditionally off pull_request (push to main,
-      # release, weekly schedule) and on any PR that touches a dependency
-      # manifest or lockfile.
+      # release, weekly schedule), on any PR that touches a dependency manifest
+      # or lockfile, and on any PR where the detector did not succeed — an
+      # unknowable change set means "scan", never "skip".
       - name: Run Trivy with exit code
-        if: github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true'
+        if: >-
+          ${{ github.event_name != 'pull_request'
+          || needs.changes.result != 'success'
+          || needs.changes.outputs.deps == 'true' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'fs'
@@ -131,7 +142,10 @@ jobs:
           ignore-unfixed: true
 
       - name: Explain non-blocking pass
-        if: github.event_name == 'pull_request' && needs.changes.outputs.deps != 'true'
+        if: >-
+          ${{ github.event_name == 'pull_request'
+          && needs.changes.result == 'success'
+          && needs.changes.outputs.deps != 'true' }}
         run: |
           echo "::notice ::Vulnerability Scan is advisory for this PR: no dependency"
           echo "::notice ::manifest or lockfile changed, so it cannot introduce a new"

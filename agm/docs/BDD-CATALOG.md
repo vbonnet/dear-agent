@@ -1692,8 +1692,10 @@ make test-bdd          # godog feature tests (TestFeatures)
 go test ./test/bdd/... # features + SPEC invariants + contract drift
 ```
 
-CI runs this package on every PR via the root `ci.yml` "Build & Test" job
-(`go test -race ./...`).
+CI runs this package via the root `ci.yml` "Build & Test" job
+(`go test -race ./...`), on every PR that touches a build input — Go source,
+build metadata, or an embedded/hash-verified asset. A pure documentation PR
+skips the job's steps (ADR-038); it also cannot change this package.
 
 ---
 
