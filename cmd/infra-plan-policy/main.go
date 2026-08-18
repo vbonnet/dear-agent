@@ -198,7 +198,7 @@ func runAuthorize(args []string, stdout io.Writer, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	_, err = stdout.Write(append(claims, '\n'))
+	_, err = stdout.Write(claims)
 	return err
 }
 
@@ -275,7 +275,7 @@ func runReceipt(args []string, stdout io.Writer, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	_, err = stdout.Write(append(receipt, '\n'))
+	_, err = stdout.Write(receipt)
 	return err
 }
 
@@ -401,6 +401,9 @@ func openFiles(paths []string) ([]*os.File, error) {
 	return files, nil
 }
 
+// closeFiles releases read-only inputs. Close cannot report a lost write for a
+// read-only descriptor, and the caller is already returning a rejection, so the
+// discard below is deliberate rather than a swallowed failure.
 func closeFiles(files []*os.File) {
 	for _, file := range files {
 		_ = file.Close()
@@ -412,7 +415,15 @@ func loadJSON(path string, target any) error {
 	if err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
+	// INFRA-ATTEST-06 requires duplicated private JSON to be withheld, but
+	// encoding/json silently keeps the last occurrence of a repeated key and
+	// DisallowUnknownFields does not catch it. Canonicalise through the same
+	// bounded unique-key parser used for private evidence before decoding.
+	canonical, err := infraattest.CanonicalPrivateJSON(raw, maxContextBytes)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(canonical))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return errors.New("invalid input")
@@ -441,6 +452,7 @@ func loadKey(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clear(raw)
 	key, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(string(raw)))
 	if err != nil || len(key) < infraattest.CommitmentKeyMinBytes {
 		return nil, errors.New("invalid input")

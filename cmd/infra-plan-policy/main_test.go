@@ -138,62 +138,9 @@ func TestAuthorizationRejectsPersistedPlaintextPlanJSON(t *testing.T) {
 }
 
 func TestReceiptCommandCanonicalizesSubsecondClockAndSucceeds(t *testing.T) {
+	context, authorizationPath, keyPath := cliValidReceiptFixture(t)
 	directory := t.TempDir()
-	key := bytes.Repeat([]byte{0x41}, infraattest.CommitmentKeyMinBytes)
-	authorizationNonce := bytes.Repeat([]byte{0x11}, infraattest.CommitmentNonceBytes)
-	receiptNonce := bytes.Repeat([]byte{0x22}, infraattest.CommitmentNonceBytes)
-	lineage := "private-lineage-" + cliPrivateSentinel
-
-	authorizationPath := writeJSONTestFile(
-		t,
-		directory,
-		"authorization",
-		cliTestAuthorization(key, authorizationNonce, lineage),
-	)
-	keyPath := writeTestFile(
-		t,
-		directory,
-		"key",
-		base64.RawURLEncoding.EncodeToString(key)+"\n",
-	)
-	evidence := evidencePaths{
-		Inventory: writeTestFile(
-			t,
-			directory,
-			"inventory",
-			`{"complete":true,"repositories":["`+cliPrivateSentinel+`"]}`,
-		),
-		Backend: writeTestFile(t, directory, "backend", `bucket = "`+cliPrivateSentinel+`"`+"\n"),
-		StateSnapshot: writeTestFile(
-			t,
-			directory,
-			"state",
-			`{"lineage":"`+lineage+`","serial":42,"private":"`+cliPrivateSentinel+`"}`,
-		),
-		MigrationManifest: writeTestFile(
-			t,
-			directory,
-			"migration",
-			`{"schema":"dear-agent.opentofu-migration-surface/v1","backend":{"type":"s3","configuration":{"bucket":"`+
-				cliPrivateSentinel+`"}},"state_encryption":"disabled","plan_encryption":"enforced","moved_blocks":[],`+
-				`"removed_blocks":[],"import_blocks":[],"providers":[{"address":"registry.opentofu.org/integrations/github",`+
-				`"version":"6.13.0"}],"workspace":"default"}`,
-		),
-		ProviderSnapshot: writeTestFile(
-			t,
-			directory,
-			"provider",
-			`{"private":"`+cliPrivateSentinel+`"}`,
-		),
-	}
-	contextPath := writeJSONTestFile(t, directory, "context", receiptContext{
-		State: stateContext{Lineage: lineage, Serial: 42},
-		Verification: infraattest.VerificationClaims{
-			ProviderVisible: true, NoDrift: true, SourceParity: true, BehavioralCanary: true,
-		},
-		Nonce:    base64.RawURLEncoding.EncodeToString(receiptNonce),
-		Evidence: evidence,
-	})
+	contextPath := writeJSONTestFile(t, directory, "context", context)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -207,7 +154,7 @@ func TestReceiptCommandCanonicalizesSubsecondClockAndSucceeds(t *testing.T) {
 	if exitCode != 0 || stderr.Len() != 0 {
 		t.Fatalf("receipt command failed: exit=%d stderr=%q", exitCode, stderr.String())
 	}
-	if strings.Contains(stdout.String(), cliPrivateSentinel) || strings.Contains(stdout.String(), lineage) {
+	if strings.Contains(stdout.String(), cliPrivateSentinel) || strings.Contains(stdout.String(), context.State.Lineage) {
 		t.Fatal("successful receipt exposed private evidence")
 	}
 	var receipt infraattest.ReceiptClaims
@@ -216,6 +163,55 @@ func TestReceiptCommandCanonicalizesSubsecondClockAndSucceeds(t *testing.T) {
 	}
 	if receipt.ObservedAt != "2026-08-11T00:03:00Z" {
 		t.Fatalf("canonical observed_at = %q", receipt.ObservedAt)
+	}
+	canonical, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stdout.Bytes(), canonical) {
+		t.Fatalf("receipt stdout is not canonical claim bytes: got %q", stdout.String())
+	}
+}
+
+// TestContextJSONWithDuplicateKeyIsRejected pins INFRA-ATTEST-06: encoding/json
+// silently keeps the last occurrence of a duplicated key, so a repeated private
+// context field must be withheld instead of resolving to one arbitrary value.
+// The fixture is otherwise valid, so only the duplication can cause rejection.
+func TestContextJSONWithDuplicateKeyIsRejected(t *testing.T) {
+	context, authorizationPath, keyPath := cliValidReceiptFixture(t)
+	canonical, err := json.Marshal(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := `"nonce":"` + context.Nonce + `",`
+	if !strings.Contains(string(canonical), nonce) {
+		t.Fatalf("fixture does not contain %s", nonce)
+	}
+	directory := t.TempDir()
+	now := time.Date(2026, 8, 11, 0, 3, 0, 0, time.UTC)
+	issue := func(name, body string) (int, string) {
+		var stdout, stderr bytes.Buffer
+		path := writeTestFile(t, directory, name, body)
+		code := run(
+			[]string{"receipt", "--context", path, "--authorization", authorizationPath, "--hmac-key", keyPath},
+			&stdout,
+			&stderr,
+			now,
+		)
+		return code, stdout.String()
+	}
+
+	// Positive control: the identical fixture without duplication must succeed,
+	// so only the repeated key can explain the rejection below.
+	if code, _ := issue("context-valid", string(canonical)); code != 0 {
+		t.Fatalf("valid control fixture was rejected: exit=%d", code)
+	}
+	code, stdout := issue("context-duplicated", "{"+nonce+strings.TrimPrefix(string(canonical), "{"))
+	if code == 0 {
+		t.Fatal("duplicated private context key was accepted")
+	}
+	if stdout != "" {
+		t.Fatalf("rejection wrote to stdout: %q", stdout)
 	}
 }
 
@@ -292,4 +288,67 @@ func writeJSONTestFile(t *testing.T, directory, name string, value any) string {
 		t.Fatal(err)
 	}
 	return writeTestFile(t, directory, name, string(raw))
+}
+
+// cliValidReceiptFixture builds a fully valid receipt invocation so tests can
+// vary one input at a time without tripping unrelated rejections.
+func cliValidReceiptFixture(t *testing.T) (receiptContext, string, string) {
+	t.Helper()
+	directory := t.TempDir()
+	key := bytes.Repeat([]byte{0x41}, infraattest.CommitmentKeyMinBytes)
+	authorizationNonce := bytes.Repeat([]byte{0x11}, infraattest.CommitmentNonceBytes)
+	receiptNonce := bytes.Repeat([]byte{0x22}, infraattest.CommitmentNonceBytes)
+	lineage := "private-lineage-" + cliPrivateSentinel
+
+	authorizationPath := writeJSONTestFile(
+		t,
+		directory,
+		"authorization",
+		cliTestAuthorization(key, authorizationNonce, lineage),
+	)
+	keyPath := writeTestFile(
+		t,
+		directory,
+		"key",
+		base64.RawURLEncoding.EncodeToString(key)+"\n",
+	)
+	evidence := evidencePaths{
+		Inventory: writeTestFile(
+			t,
+			directory,
+			"inventory",
+			`{"complete":true,"repositories":["`+cliPrivateSentinel+`"]}`,
+		),
+		Backend: writeTestFile(t, directory, "backend", `bucket = "`+cliPrivateSentinel+`"`+"\n"),
+		StateSnapshot: writeTestFile(
+			t,
+			directory,
+			"state",
+			`{"lineage":"`+lineage+`","serial":42,"private":"`+cliPrivateSentinel+`"}`,
+		),
+		MigrationManifest: writeTestFile(
+			t,
+			directory,
+			"migration",
+			`{"schema":"dear-agent.opentofu-migration-surface/v1","backend":{"type":"s3","configuration":{"bucket":"`+
+				cliPrivateSentinel+`"}},"state_encryption":"disabled","plan_encryption":"enforced","moved_blocks":[],`+
+				`"removed_blocks":[],"import_blocks":[],"providers":[{"address":"registry.opentofu.org/integrations/github",`+
+				`"version":"6.13.0"}],"workspace":"default"}`,
+		),
+		ProviderSnapshot: writeTestFile(
+			t,
+			directory,
+			"provider",
+			`{"private":"`+cliPrivateSentinel+`"}`,
+		),
+	}
+	context := receiptContext{
+		State: stateContext{Lineage: lineage, Serial: 42},
+		Verification: infraattest.VerificationClaims{
+			ProviderVisible: true, NoDrift: true, SourceParity: true, BehavioralCanary: true,
+		},
+		Nonce:    base64.RawURLEncoding.EncodeToString(receiptNonce),
+		Evidence: evidence,
+	}
+	return context, authorizationPath, keyPath
 }
