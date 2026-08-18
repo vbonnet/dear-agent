@@ -36,8 +36,9 @@ to close them.
 | [031](ADR-031-agent-escalation-path.md) | Audited exceptions and escalation | Accepted |
 | [032](ADR-032-escalate-to-supervisor.md) | Supervisor escalation chain | Accepted |
 | [033](ADR-033-commit-anchored-progress-ledger.md) | Commit-Anchored Progress Ledger for Long-Running Workers | Accepted |
-| [034](ADR-034-squash-only-merge-contract.md) | Squash-only merge contract + auto-merge arming | Accepted |
+| [034](ADR-034-squash-only-merge-contract.md) | Squash-only merge contract; routine auto-arming retired | Accepted |
 | [035](ADR-035-dear-terminology-disambiguation.md) | DEAR Terminology Disambiguation | Accepted |
 | [036](ADR-036-wayfinder-enforcement.md) | Wayfinder trace at the delivery boundary | Accepted |
+| [037](ADR-037-cedar-policy-language.md) | Cedar as the persona/policy-enforcement language | Proposed |
 
 Subsystem ADR directories have independent scoped numbering and indexes.

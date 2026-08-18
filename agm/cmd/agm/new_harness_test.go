@@ -3,20 +3,329 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
+
+func TestGeminiWrapperStartFailureDoesNotCommitAdmissionEffects(t *testing.T) {
+	startFailure := errors.New("private executor did not start")
+	reservation := &override.Reservation{}
+	recorded := false
+	canceled := false
+	done, err := startGeminiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		SessionName: "gemini-start-failure",
+		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+			return []*override.Reservation{reservation}, nil
+		},
+		AfterAuthorization: func() {
+			recorded = true
+		},
+	}, geminiWrapperRuntime{
+		lookPath: func(string) (string, error) {
+			return "/opt/agm/bin/agm-agent-wrapper", nil
+		},
+		prepare: func(sessionName, wrapperPath string) (geminiWrapperLaunch, error) {
+			if sessionName != "gemini-start-failure" ||
+				wrapperPath != "/opt/agm/bin/agm-agent-wrapper" {
+				t.Fatalf("prepare wrapper = (%q, %q)", sessionName, wrapperPath)
+			}
+			return geminiWrapperLaunch{
+				executable: "/opt/agm/bin/agm",
+				arguments:  []string{"__exec-harness", "--handoff", "/tmp/fixture"},
+				bind: func(recordSpawn bool, got ...*override.Reservation) error {
+					if !recordSpawn || !slices.Equal(got, []*override.Reservation{reservation}) {
+						t.Fatalf("bind effects = (%t, %v)", recordSpawn, got)
+					}
+					return nil
+				},
+				cancel: func() error {
+					canceled = true
+					return nil
+				},
+			}, nil
+		},
+		run: func(context.Context, string, []string) error {
+			return startFailure
+		},
+	})
+	if !errors.Is(err, startFailure) || done {
+		t.Fatalf("startGeminiHarnessWithRuntime() = done:%t error:%v, want definite start failure", done, err)
+	}
+	if recorded {
+		t.Fatal("definite wrapper start failure recorded post-authorization effects")
+	}
+	if !canceled {
+		t.Fatal("definite wrapper start failure preserved an undelivered handoff")
+	}
+	if _, commitErr := reservation.Commit(); errors.Is(commitErr, override.ErrReservationCommitted) {
+		t.Fatal("definite wrapper start failure consumed the override reservation")
+	}
+}
+
+func TestGeminiWrapperDelegatesEffectsToExecutorBeforeSuccessfulStart(t *testing.T) {
+	var events []string
+	recorded := false
+	done, err := startGeminiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		SessionName: "gemini-start-success",
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			recorded = true
+		},
+	}, geminiWrapperRuntime{
+		lookPath: func(string) (string, error) {
+			return "/opt/agm/bin/agm-agent-wrapper", nil
+		},
+		prepare: func(string, string) (geminiWrapperLaunch, error) {
+			events = append(events, "prepare")
+			return geminiWrapperLaunch{
+				executable: "/opt/agm/bin/agm",
+				arguments:  []string{"__exec-harness", "--handoff", "/tmp/fixture"},
+				bind: func(recordSpawn bool, _ ...*override.Reservation) error {
+					if !recordSpawn {
+						t.Fatal("foreground wrapper did not delegate spawn recording")
+					}
+					events = append(events, "bind")
+					return nil
+				},
+				cancel: func() error {
+					events = append(events, "cancel")
+					return nil
+				},
+			}, nil
+		},
+		run: func(_ context.Context, executable string, arguments []string) error {
+			if executable != "/opt/agm/bin/agm" ||
+				!slices.Equal(arguments, []string{"__exec-harness", "--handoff", "/tmp/fixture"}) {
+				t.Fatalf("executor invocation = %q %q", executable, arguments)
+			}
+			events = append(events, "run")
+			return nil
+		},
+	})
+	if err != nil || !done || recorded {
+		t.Fatalf("startGeminiHarnessWithRuntime() = done:%t recorded:%t error:%v", done, recorded, err)
+	}
+	if got, want := strings.Join(events, ","), "prepare,authorize,bind,run,cancel"; got != want {
+		t.Fatalf("foreground launch events = %q, want %q", got, want)
+	}
+}
 
 func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 	spec.DisableOAuth = true
 	return ops.BuildHarnessLaunchCommand(spec).Command
 }
 
+func TestSubmitHarnessLaunchAuthorizesAtSubmissionBoundary(t *testing.T) {
+	var events []string
+	hookReservation := &override.Reservation{}
+	spec := ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			if len(got) != 1 || got[0] != hookReservation {
+				t.Fatalf("launch reservations = %v, want exact Codex hook reservation", got)
+			}
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}
+	launch := ops.HarnessLaunchCommand{
+		Command:      "fixture",
+		Reservations: []*override.Reservation{hookReservation},
+		BindOverrideReservations: func(recordSpawn bool, got ...*override.Reservation) error {
+			if !recordSpawn {
+				t.Fatal("new Codex launch did not defer spawn recording to its executor")
+			}
+			if len(got) != 1 || got[0] != hookReservation {
+				t.Fatalf("bound reservations = %v, want exact final reservation", got)
+			}
+			events = append(events, "bind")
+			return nil
+		},
+		Cancel: func() error {
+			events = append(events, "cancel")
+			return nil
+		},
+	}
+	err := submitHarnessLaunch("fixture", spec, launch, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "authorize,bind,submit"; got != want {
+		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchRecordsNonDeferredSpawnAfterAuthorization(t *testing.T) {
+	var events []string
+	spec := ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}
+	err := submitHarnessLaunch("fixture", spec, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(recordSpawn bool, _ ...*override.Reservation) error {
+			if !recordSpawn {
+				t.Fatal("executor did not receive the spawn-recording obligation")
+			}
+			events = append(events, "bind")
+			return nil
+		},
+	}, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "authorize,bind,submit"; got != want {
+		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchConfirmedFailureDoesNotFinalizeNonDeferredEffects(t *testing.T) {
+	refusal := errors.New("tmux rejected submission")
+	reservation := &override.Reservation{}
+	recorded := false
+	canceled := false
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+			return []*override.Reservation{reservation}, nil
+		},
+		AfterAuthorization: func() {
+			recorded = true
+		},
+	}, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(bool, ...*override.Reservation) error {
+			return nil
+		},
+		Cancel: func() error {
+			canceled = true
+			return nil
+		},
+	}, func() error {
+		return refusal
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitHarnessLaunch() error = %v, want %v", err, refusal)
+	}
+	if recorded {
+		t.Fatal("confirmed submission failure recorded a spawn")
+	}
+	if !canceled {
+		t.Fatal("confirmed submission failure preserved an undelivered handoff")
+	}
+	if _, commitErr := reservation.Commit(); errors.Is(commitErr, override.ErrReservationCommitted) {
+		t.Fatal("confirmed submission failure consumed the launch override reservation")
+	}
+}
+
+func TestSubmitHarnessLaunchUncertainDeliveryFinalizesNonDeferredEffects(t *testing.T) {
+	var events []string
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		BeforeSpawn: func(got ...*override.Reservation) ([]*override.Reservation, error) {
+			events = append(events, "authorize")
+			return got, nil
+		},
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}, ops.HarnessLaunchCommand{
+		BindOverrideReservations: func(recordSpawn bool, _ ...*override.Reservation) error {
+			if !recordSpawn {
+				t.Fatal("uncertain executor launch omitted spawn recording")
+			}
+			events = append(events, "bind")
+			return nil
+		},
+	}, func() error {
+		events = append(events, "submit-uncertain")
+		return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+	})
+	if err != nil {
+		t.Fatalf("submitHarnessLaunch() error = %v", err)
+	}
+	if got, want := strings.Join(events, ","), "authorize,bind,submit-uncertain"; got != want {
+		t.Fatalf("uncertain launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchAdmissionFailureCancelsWithoutSubmission(t *testing.T) {
+	refusal := errors.New("admission refused")
+	var events []string
+	spec := ops.HarnessLaunchSpec{BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+		events = append(events, "authorize")
+		return nil, refusal
+	}}
+	launch := ops.HarnessLaunchCommand{
+		Command: "fixture",
+		Cancel: func() error {
+			events = append(events, "cancel")
+			return nil
+		},
+	}
+	err := submitHarnessLaunch("fixture", spec, launch, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitHarnessLaunch() error = %v, want %v", err, refusal)
+	}
+	if got, want := strings.Join(events, ","), "authorize,cancel"; got != want {
+		t.Fatalf("refused launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitHarnessLaunchBindingFailureCancelsWithoutSubmission(t *testing.T) {
+	refusal := errors.New("private handoff binding failed")
+	var events []string
+	launch := ops.HarnessLaunchCommand{
+		Command: "fixture",
+		BindOverrideReservations: func(bool, ...*override.Reservation) error {
+			events = append(events, "bind")
+			return refusal
+		},
+		Cancel: func() error {
+			events = append(events, "cancel")
+			return nil
+		},
+	}
+	err := submitHarnessLaunch("fixture", ops.HarnessLaunchSpec{
+		AfterAuthorization: func() {
+			events = append(events, "record-spawn")
+		},
+	}, launch, func() error {
+		events = append(events, "submit")
+		return nil
+	})
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitHarnessLaunch() error = %v, want %v", err, refusal)
+	}
+	if got, want := strings.Join(events, ","), "bind,cancel"; got != want {
+		t.Fatalf("failed binding events = %q, want %q", got, want)
+	}
+}
+
 func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	callerCtx := t.Context()
 	var sentCommand string
 	var waitedSession string
@@ -56,8 +365,11 @@ func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
 		t.Fatal("auto permission mode was not reported as applied")
 	}
 	for _, want := range []string{
-		"cd '/tmp/agy work' && agy --model 'Gemini 3.5 Flash (Low)'",
-		"--dangerously-skip-permissions",
+		"__exec-agy",
+		"--session 'agy-production-seam'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/agy work'",
+		"--permission 'auto'",
 		"--add-dir '/tmp/extra dir'",
 		"&& exit",
 	} {
@@ -86,6 +398,32 @@ func TestStartAgyHarnessPropagatesReadinessFailure(t *testing.T) {
 	}, runtime)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("readiness error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestStartAgyHarnessDoesNotAuthorizeBeforeExecutableResolution(t *testing.T) {
+	wantErr := errors.New("agy is unavailable")
+	authorized := false
+	submitted := false
+	runtime := agyHarnessRuntime{
+		lookPath:    func(string) (string, error) { return "", wantErr },
+		sendCommand: func(string, string) error { submitted = true; return nil },
+	}
+	_, err := startAgyHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "agy", SessionName: "agy-missing", WorkDir: "/tmp",
+		BeforeSpawn: func(...*override.Reservation) ([]*override.Reservation, error) {
+			authorized = true
+			return nil, nil
+		},
+	}, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want executable lookup error %v", err, wantErr)
+	}
+	if authorized {
+		t.Fatal("launch admission was consumed before executable resolution")
+	}
+	if submitted {
+		t.Fatal("launch was submitted after executable resolution failed")
 	}
 }
 
@@ -259,7 +597,11 @@ func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"cd '/tmp/agy work' && agy --model 'Gemini 3.5 Flash (Low)' --dangerously-skip-permissions",
+		"agm __exec-agy",
+		"--session 'agy'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/agy work'",
+		"--permission 'auto'",
 		"--add-dir '/tmp/extra dir'",
 		"&& exit",
 	} {
@@ -278,7 +620,19 @@ func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
 	if strings.Contains(cmd, "--dangerously-skip-permissions") {
 		t.Errorf("default AGY command should not skip permissions: %q", cmd)
 	}
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --model 'Gemini 3.5 Flash (Medium)' && exit") {
+	for _, want := range []string{
+		"agm __exec-agy",
+		"--session 'agy'",
+		"--model 'Gemini 3.5 Flash (Medium)'",
+		"--workdir '/tmp/agy-work'",
+		"--permission 'default'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("default AGY launch command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "cd '/tmp/agy-work' && agy") {
 		t.Errorf("unexpected default AGY launch command: %q", cmd)
 	}
 	if strings.Contains(cmd, "--prompt-interactive") {
@@ -315,7 +669,7 @@ func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
 		want string
 	}{
 		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "--approval 'never'"},
-		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions"},
+		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agm __exec-agy"},
 		{name: "OpenCode", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "opencode-cli", Model: "glm-5.2", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true}), want: "opencode attach"},
 		{name: "Pi", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "pi-cli", Model: "sonnet", SessionName: "worker", SessionID: "native", WorkDir: "/tmp/work", Persistent: true, Pi: &manifest.Pi{SessionID: "native", SessionDir: "/tmp/pi"}}), want: "pi --session-id 'native'"},
 	}

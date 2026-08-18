@@ -14,7 +14,7 @@ active, overlay, waiting, looping, stuck, and unknown states.
 
 **AGM-STATE-02** When the Claude Code background tasks overlay is visible, the system shall report `background_tasks_view` and classify it as an overlay.
 
-**AGM-STATE-03** When a Claude prompt, a complete Codex composer (the initial header with its model-change hint and empty `›` input cursor, or an empty post-turn `›` input cursor paired with the structured model footer), an Antigravity bare prompt, or the latest managed Pi ready status is visible, the system shall report `ready` with high confidence; standalone Codex model text, a working-status footer, a typed draft, an unsubmitted paste chip, and Pi working or permission status shall not report ready.
+**AGM-STATE-03** When a Claude prompt, a complete Codex composer (the initial header with its model-change hint and empty `›` or `»` input cursor, or an empty post-turn `›` or `»` input cursor paired with the structured model footer), an Antigravity bare prompt, or the latest managed Pi ready status is visible, the system shall report `ready` with high confidence; standalone Codex model text, a working-status footer, a typed draft, an unsubmitted paste chip, and Pi working or permission status shall not report ready.
 
 **AGM-STATE-04** When a spinner appears with agent markers, the system shall report `waiting_agent`.
 

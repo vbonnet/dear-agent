@@ -1,20 +1,21 @@
 name: Structural Health
 
 # Purpose: surface and ratchet down structural drift in the codebase.
-# The structural-health tool runs five scans (dead packages, oversized
-# files, untested packages, broken ARCHITECTURE.md path references, and
-# unguarded goroutines) and compares them against a checked-in baseline.
+# The structural-health tool runs six scans (dead packages, oversized files,
+# untested packages, broken ARCHITECTURE.md path references, unguarded
+# goroutines, and raw macOS free-memory gates) and compares them against a
+# checked-in baseline.
 #
 # This job FAILS ONLY ON REGRESSIONS — a finding that is new relative to
-# .structural-health-baseline.json. The large pile of pre-existing findings
-# is baselined, so the job is green today and only goes red when a change
-# makes things structurally worse. To tighten the ratchet after fixing
-# findings, regenerate the baseline:
+# .structural-health-baseline.json. Accepted findings remain visible in the
+# baseline, and any new key makes the job red. To tighten the ratchet after
+# fixing findings, run:
 #
 #   go run ./cmd/structural-health --update-baseline
 #
-# and commit the smaller baseline. See cmd/structural-health/main.go and
-# docs/retros/ (DEAR retro, Tier 0 recommendation) for the rationale.
+# This command is shrink-only. Deliberately accepting new keys requires
+# --accept-new plus a reason and durable reference; the exact transition is
+# retained in the baseline. See cmd/structural-health/SPEC.md for the contract.
 
 on:
   push:
@@ -34,11 +35,8 @@ permissions:
 jobs:
   structural-health:
     name: Structural Health (baselined)
-    # Non-required: gate the per-push hot path behind the `full-ci` label.
-    # push (main), merge_group, and workflow_dispatch still run.
-    if: >-
-      github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'full-ci')
+    # Run on every declared main PR and main push. This check is not yet
+    # provider-required, but the workflow must expose setup and scan failures.
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

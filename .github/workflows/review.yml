@@ -5,51 +5,40 @@ name: AI Code Review (5-dimension)
 # is the enforcement signal.
 #
 # Fail-closed contract (see cmd/ai-review), in force whenever the gate runs:
-#   - only an "approved" outcome (or the audited 'ai-review:override' label)
-#     exits 0; needs-work / rejected / needs-human-review block the merge.
+#   - only an "approved" outcome (or an authenticated exact-head maintainer
+#     'ai-review:override' labeled event) exits 0; needs-work / rejected /
+#     needs-human-review fail this workflow.
 #   - fork PRs, per-dimension API failure, synthesis failure, unparseable
 #     outcome, and oversize diffs all fail closed. (A missing secret also fails
-#     closed inside cmd/ai-review, but see PAUSED below — the gate is no longer
-#     invoked at all in that case.)
+#     closed inside cmd/ai-review. While no reviewer credential is configured,
+#     this workflow translates that internal failure into an honest
+#     neutral-with-warning check for same-repository PRs — the review that can
+#     never run must not permanently block every merge — while a sticky PR
+#     comment records that human review is recommended. Configuring
+#     ANTHROPIC_API_KEY restores full blocking behavior with no further
+#     change. An authenticated plan with neither SPEC-governance work nor a
+#     deterministic REVIEW.md §3 escalation takes the quieter neutral path
+#     before command invocation. The other neutral path is an authenticated,
+#     same-repository Dependabot dependency-version-led Go module update; the
+#     trusted plan proves the diff shape and current trusted API snapshots prove
+#     the bot and repository IDs.)
 #
 # Runs on every PR revision (opened/synchronize/reopened/ready_for_review), not
 # just the draft->ready edge, so the check that gates the current head SHA
 # actually reflects the current head SHA.
 #
-# PAUSED 2026-07-27 — "5-Dimension AI Review" is NOT currently a required
-# status check. ANTHROPIC_API_KEY is intentionally unset (no API quota outside
-# the Max plan subscription, which this workflow cannot use — it would bill
-# pay-per-token, not the subscription). SPEC R4 in cmd/ai-review says a missing
-# secret fails closed with no silent skip, because a secret vanishing is
-# normally a sign of tampering. But an owner who has never funded this gate and
-# isn't about to isn't "tampering" — so the "Run AI review gate" step below is
-# skipped outright (steps.gate.outcome=skipped) when the key is absent and no
-# 'ai-review:override' label is active. The published check gets an honest
-# `neutral` conclusion (never a fabricated `success`) explaining why, and the
-# job does not fail. That neutral is narrowly scoped: it requires the key
-# preflight to have RUN and affirmatively reported no key. A skip caused by an
-# earlier step failing still publishes `failure`, because GitHub counts
-# `neutral` as satisfying a required check — so a broad "skip => neutral" would
-# let an infra failure pass the gate unreviewed once it is required again.
-# cmd/ai-review's Go fail-closed logic is untouched — it
-# still fails closed if actually invoked with no key, which still happens on
-# the override path (AIREV-03's audited pass-through still applies there).
-# "5-Dimension AI Review" was also dropped from the required-checks list in
-# .github/rulesets/main.json so a future ruleset sync can't start blocking
-# merges on a check nobody is funding (live GitHub does not require it either
-# — see docs/branch-protection.md).
-#
-# Re-enable: set the ANTHROPIC_API_KEY repo secret. That alone flips the
-# "Detect review key" preflight below and re-arms the gate — no other change
-# needed. To make it a required merge gate again too, re-add "5-Dimension AI
-# Review" to .github/rulesets/main.json and re-apply per
-# docs/branch-protection.md.
+# SPEC CONTRACT ROLLOUT — this workflow emits a uniquely named trusted check on
+# pull-request heads. It does not make that context provider-required and does
+# not claim that an LLM ran when ANTHROPIC_API_KEY is absent. A later reviewed
+# Terraform/ruleset rollout must establish any provider enforcement and prove
+# it with an exact-head canary. A relevant plan remains fail-closed here until a
+# revision-bound maintainer override is recorded.
 
 on:
   # pull_request_target is deliberate: this workflow checks out and executes
   # only the protected base revision, while treating the PR head as diff data.
-  # That trusted context can both attest an override to the exact head SHA and
-  # remove a stale override label from fork PRs.
+  # That trusted context can authenticate a maintainer's exact-head label event
+  # and publish revision-bound verdicts and review comments.
   pull_request_target:
     # `labeled`/`unlabeled` matter: applying the documented `ai-review:override`
     # label must produce a NEW check run on the same head SHA, otherwise the
@@ -70,23 +59,94 @@ concurrency:
 
 jobs:
   review:
-    name: 5-Dimension AI Review
+    name: AI review orchestration
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 70
 
     steps:
-      # This is intentionally first. Native pull_request_target checks attach
-      # to the protected base, so a previous head success must be superseded
-      # before any fallible checkout, fetch, or override preparation runs.
-      - name: Mark reviewed head pending
+      # GitHub can deliver a pull_request_target payload whose embedded head is
+      # already stale after a force-push. Resolve one current, API-authenticated
+      # PR snapshot before choosing the revision that every later Git, policy,
+      # identity, and publication step binds. This is intentionally first so a
+      # previous verdict on that current head is normally superseded before any
+      # fallible checkout, fetch, or override preparation runs. An API outage
+      # cannot safely identify the current head; the distinct native job fails
+      # instead of reusing the event's stale evidence.
+      - name: Resolve current PR revision and mark pending
         id: pending
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          REVIEW_DEADLINE_SECONDS: 4020
         run: |
           set -euo pipefail
-          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='5-Dimension AI Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='5-Dimension AI Review' -f output[summary]='Trusted review gate is running.' --jq .id)"
+          review_started_at="$(date -u +%s)"
+          review_deadline="$((review_started_at + REVIEW_DEADLINE_SECONDS))"
+          echo "AI_REVIEW_DEADLINE_UNIX=$review_deadline" >> "$GITHUB_ENV"
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "::error::pull request number is malformed"; exit 1; }
+          current_pr="$RUNNER_TEMP/ai-review-current-pr.json"
+          timeout --signal=TERM --kill-after=5s 30s gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/pulls/$PR" > "$current_pr"
+          [ "$(wc -c < "$current_pr")" -le 1048576 ] || { echo "::error::current pull-request response is oversized"; exit 1; }
+          if ! jq -e --arg repo "$REPO" --argjson pr "$PR" '
+            (.number == $pr) and
+            (.state == "open") and
+            (.base.ref == "main") and
+            (.base.repo.full_name == $repo) and
+            ((.base.repo.id | type) == "number") and
+            ((.head.repo.id | type) == "number") and
+            ((.head.repo.full_name | type) == "string") and
+            ((.base.sha | type) == "string") and (.base.sha | test("^[0-9a-f]{40}$")) and
+            ((.head.sha | type) == "string") and (.head.sha | test("^[0-9a-f]{40}$")) and
+            ((.user.login | type) == "string") and (.user.login | test("^[A-Za-z0-9-]+(\\[bot\\])?$")) and
+            ((.user.id | type) == "number") and
+            ((.user.type | type) == "string") and (.user.type | test("^[A-Za-z]+$")) and
+            ((.body == null) or (((.body | type) == "string") and ((.body | utf8bytelength) <= 65536) and ((.body | index("\u0000")) == null))) and
+            ((.labels | type) == "array") and all(.labels[]; ((.name | type) == "string") and ((.name | length) <= 128))
+          ' "$current_pr" >/dev/null; then
+            echo "::error::current pull-request response is malformed or not an open PR against this repository's main branch"
+            exit 1
+          fi
+          protected_ref="$RUNNER_TEMP/ai-review-protected-main.json"
+          timeout --signal=TERM --kill-after=5s 30s gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/git/ref/heads/main" > "$protected_ref"
+          [ "$(wc -c < "$protected_ref")" -le 65536 ] || { echo "::error::protected-main response is oversized"; exit 1; }
+          if ! jq -e '
+            (.ref == "refs/heads/main") and
+            (.object.type == "commit") and
+            ((.object.sha | type) == "string") and
+            (.object.sha | test("^[0-9a-f]{40}$"))
+          ' "$protected_ref" >/dev/null; then
+            echo "::error::protected-main response is malformed"
+            exit 1
+          fi
+          head_sha="$(jq -r .head.sha "$current_pr")"
+          base_sha="$(jq -r .object.sha "$protected_ref")"
+          head_repo_id="$(jq -r .head.repo.id "$current_pr")"
+          base_repo_id="$(jq -r .base.repo.id "$current_pr")"
+          pr_author_login="$(jq -r .user.login "$current_pr")"
+          pr_author_id="$(jq -r .user.id "$current_pr")"
+          pr_author_type="$(jq -r .user.type "$current_pr")"
+          labels="$(jq -c '[.labels[].name]' "$current_pr")"
+          is_fork=false
+          [ "$head_repo_id" = "$base_repo_id" ] || is_fork=true
+          {
+            echo "head_sha=$head_sha"
+            echo "base_sha=$base_sha"
+            echo "head_repo_id=$head_repo_id"
+            echo "base_repo_id=$base_repo_id"
+            echo "pr_author_login=$pr_author_login"
+            echo "pr_author_id=$pr_author_id"
+            echo "pr_author_type=$pr_author_type"
+            echo "labels=$labels"
+            echo "is_fork=$is_fork"
+          } >> "$GITHUB_OUTPUT"
+          echo "AI_REVIEW_CURRENT_PR_JSON=$current_pr" >> "$GITHUB_ENV"
+          check_id="$(timeout --signal=TERM --kill-after=5s 30s gh api --method POST "repos/$REPO/check-runs" -f name='SPEC Contract Review' -f head_sha="$head_sha" -f status=in_progress -f output[title]='SPEC Contract Review' -f output[summary]='Trusted SPEC contract review is running.' --jq .id)"
+          [[ "$check_id" =~ ^[0-9]+$ ]] || { echo "::error::pending check response is malformed"; exit 1; }
           echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
 
       # SECURITY: check out the *base* (protected) revision, not the PR merge
@@ -97,117 +157,302 @@ jobs:
       # fetched below as *data* only (the diff), never executed.
       - name: Checkout trusted base revision
         uses: actions/checkout@v7
+        timeout-minutes: 10
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          ref: ${{ steps.pending.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v7
+        timeout-minutes: 10
         with:
           go-version-file: 'go.mod'
           cache: true
 
-      # Fetch the untrusted head as data. refs/pull/<n>/head works for both
-      # fork and same-repo PRs; merge-group heads live on origin already.
+      # Fetch the exact resolved untrusted object as data. A mutable
+      # refs/pull/<n>/head can move after the trusted API snapshot and must not
+      # be paired with a different SHA from either the event or the snapshot.
       - name: Fetch PR head for diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          BASE_SHA: ${{ steps.pending.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          origin="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
-          if [ -n "${PR:-}" ]; then
-            git fetch --no-tags "$origin" "+refs/pull/${PR}/head:refs/ai-review/head"
-          else
-            git fetch --no-tags "$origin" "+${HEAD_SHA}:refs/ai-review/head"
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
           fi
-          git cat-file -e "${HEAD_SHA}^{commit}"
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          origin="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" git fetch --no-tags "$origin" "+${HEAD_SHA}:refs/ai-review/head"
+          now="$(date -u +%s)"
+          if [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline expired while fetching the PR head"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" git cat-file -e "${HEAD_SHA}^{commit}"
 
-      # A human override approves one reviewed revision, not a mutable branch.
-      # Remove it as soon as a contributor pushes a new head; the resulting
-      # unlabeled event reruns this gate without an override, and a maintainer
-      # must deliberately reapply the label after reviewing that new revision.
-      # The trusted pull_request_target token has the write permission declared
-      # above, and the subsequent SHA attestation is a second fail-closed guard.
-      - name: Clear override for a new pull request revision
-        if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review:override')
+      # This deterministic plan is built from authenticated Git objects before
+      # reading ANTHROPIC_API_KEY or making any model call. The protected-base
+      # authoring policy and exact activeHarnesses registry, never PR-controlled
+      # replacements, own its policy and applicability inventory. The same plan
+      # also authenticates every deterministic REVIEW.md §3 escalation input,
+      # including PR-body and commit markers, so neutral cannot hide one.
+      - name: Build authenticated SPEC governance review plan
+        id: plan
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ steps.pending.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+        run: |
+          set -uo pipefail
+          set +e
+          if ! PR_BODY="$(jq -r '.body // ""' "$AI_REVIEW_CURRENT_PR_JSON")"; then
+            echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            echo 'dependabot_module_only_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          export PR_BODY
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            echo 'dependabot_module_only_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          timeout --signal=TERM --kill-after=5s "${remaining}s" go run ./cmd/ai-review --review-plan > "$RUNNER_TEMP/ai-review-plan.json"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] || ! jq -e '(.version == "spec-contract/v3") and (.review_relevant | type == "boolean") and (.dependabot_module_only_candidate | type == "boolean")' "$RUNNER_TEMP/ai-review-plan.json" >/dev/null 2>&1; then
+            echo 'review_relevant=true' >> "$GITHUB_OUTPUT"
+            echo 'dependabot_module_only_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "review_relevant=$(jq -r '.review_relevant' "$RUNNER_TEMP/ai-review-plan.json")" >> "$GITHUB_OUTPUT"
+          echo "dependabot_module_only_candidate=$(jq -r '.dependabot_module_only_candidate' "$RUNNER_TEMP/ai-review-plan.json")" >> "$GITHUB_OUTPUT"
+
+      # The plan authenticates exact Git objects but deliberately knows nothing
+      # about GitHub identities. Complete the decision from GitHub's trusted APIs.
+      # Besides the immutable PR creator and numeric same-repository identity,
+      # authenticate the current head as one GitHub-created Dependabot commit
+      # directly on the protected base. A replaced head must also have an exact
+      # head_ref_force_pushed timeline event by Dependabot or by a principal that
+      # GitHub currently grants maintainer authority. This is deliberately
+      # fail-closed: API, schema, identity, ancestry, or timeline uncertainty
+      # leaves exempt=false and sends the PR through the ordinary review path.
+      - name: Authenticate Dependabot module-only exception
+        id: dependabot
+        if: steps.plan.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ steps.pending.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+          CANDIDATE: ${{ steps.plan.outputs.dependabot_module_only_candidate }}
+          PR_AUTHOR_LOGIN: ${{ steps.pending.outputs.pr_author_login }}
+          PR_AUTHOR_ID: ${{ steps.pending.outputs.pr_author_id }}
+          PR_AUTHOR_TYPE: ${{ steps.pending.outputs.pr_author_type }}
+          HEAD_REPO_ID: ${{ steps.pending.outputs.head_repo_id }}
+          BASE_REPO_ID: ${{ steps.pending.outputs.base_repo_id }}
         run: |
           set -euo pipefail
-          gh pr edit "$PR" --repo "$REPO" --remove-label 'ai-review:override'
+          # Write the safe default first. Every rejection below exits zero so
+          # publication still runs, but the candidate cannot take the neutral
+          # exception and therefore follows the ordinary fail-closed gate.
+          echo 'exempt=false' >> "$GITHUB_OUTPUT"
+          reject() {
+            echo "::warning::Dependabot head provenance was not authenticated: $1"
+            exit 0
+          }
+          remaining_seconds() {
+            local now
+            now="$(date -u +%s)"
+            if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+              return 1
+            fi
+            printf '%s\n' "$((AI_REVIEW_DEADLINE_UNIX - now))"
+          }
 
-      # A label records who authorized an exception, but not which mutable PR
-      # revision they reviewed. Record that revision in a bot-authored comment
-      # from the trusted workflow. The detection step below accepts an override
-      # only when this attestation matches the current PR head.
-      - name: Attest override to the reviewed revision
-        if: github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'ai-review:override'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh api --method POST "repos/$REPO/issues/$PR/comments" \
-            -f body="<!-- ai-review-override-sha:$HEAD_SHA -->
-          Human override attested by the trusted review workflow for `$HEAD_SHA`."
+          if [ "$CANDIDATE" != true ] || \
+             [ "$PR_AUTHOR_LOGIN" != 'dependabot[bot]' ] || \
+             [ "$PR_AUTHOR_ID" != 49699333 ] || \
+             [ "$PR_AUTHOR_TYPE" != Bot ] || \
+             [ -z "$HEAD_REPO_ID" ] || \
+             [ "$HEAD_REPO_ID" != "$BASE_REPO_ID" ]; then
+            exit 0
+          fi
+          [[ "$PR" =~ ^[0-9]+$ ]] || reject 'pull request number is malformed'
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || reject 'base SHA is malformed'
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || reject 'head SHA is malformed'
 
-      # The override must survive the merge queue: a merge_group run cannot see
-      # the originating PR's labels, so without this a human-overridden PR would
-      # pass its PR check and then fail again on the synthetic merge-group SHA,
-      # making the documented fallback unable to merge through the queue.
+          commit_json="$RUNNER_TEMP/dependabot-current-head.json"
+          remaining="$(remaining_seconds)" || reject 'trusted review deadline is unavailable'
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/commits/$HEAD_SHA" > "$commit_json"; then
+            reject 'current-head commit API lookup failed'
+          fi
+          [ "$(wc -c < "$commit_json")" -le 1048576 ] || reject 'current-head commit response is oversized'
+          if ! jq -e --arg head "$HEAD_SHA" --arg base "$BASE_SHA" '
+            (.sha == $head) and
+            (.author.login == "dependabot[bot]") and
+            (.author.id == 49699333) and
+            (.author.type == "Bot") and
+            (.commit.author.name == "dependabot[bot]") and
+            (.commit.author.email == "49699333+dependabot[bot]@users.noreply.github.com") and
+            (.committer.login == "web-flow") and
+            (.committer.id == 19864447) and
+            (.committer.type == "User") and
+            (.commit.committer.name == "GitHub") and
+            (.commit.committer.email == "noreply@github.com") and
+            ((.parents | type) == "array") and
+            (.parents | length == 1) and
+            (.parents[0].sha == $base)
+          ' "$commit_json" >/dev/null 2>&1; then
+            reject 'current head is not the expected single Dependabot commit on the protected base'
+          fi
+
+          events_json="$RUNNER_TEMP/dependabot-head-events.json"
+          remaining="$(remaining_seconds)" || reject 'trusted review deadline expired before timeline lookup'
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/issues/$PR/events?per_page=100" > "$events_json"; then
+            reject 'pull-request timeline API lookup failed'
+          fi
+          [ "$(wc -c < "$events_json")" -le 2097152 ] || reject 'pull-request timeline response is oversized'
+          if ! jq -e '((type == "array") and (all(.[]; (type == "array") and all(.[]; type == "object"))))' "$events_json" >/dev/null 2>&1; then
+            reject 'pull-request timeline response is malformed'
+          fi
+
+          if ! mutation_count="$(jq -r '[((add // [])[]) | select(.event == "head_ref_force_pushed" or .event == "head_ref_deleted" or .event == "head_ref_restored")] | length' "$events_json")"; then
+            reject 'pull-request timeline mutation evidence is malformed'
+          fi
+          if ! matching_actor="$(jq -r --arg head "$HEAD_SHA" '
+              [((add // [])[]) |
+                select(.event == "head_ref_force_pushed" and .commit_id == $head)] |
+              last // empty |
+              [.actor.login, (.actor.id | tostring), .actor.type] |
+              @tsv
+            ' "$events_json")"; then
+            reject 'pull-request timeline actor evidence is malformed'
+          fi
+
+          # No head-ref mutation means this is still the original single
+          # Dependabot commit authenticated above. Once the branch has changed,
+          # the timeline must bind the exact current SHA to an authenticated
+          # actor; an event for any other revision is not transferable.
+          if [ "$mutation_count" = 0 ]; then
+            echo 'exempt=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ -n "$matching_actor" ] || reject 'no exact current-head force-push event exists'
+          IFS=$'\t' read -r head_actor_login head_actor_id head_actor_type <<< "$matching_actor"
+          if [ "$head_actor_login" = 'dependabot[bot]' ] && \
+             [ "$head_actor_id" = 49699333 ] && \
+             [ "$head_actor_type" = Bot ]; then
+            echo 'exempt=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A maintainer-triggered Dependabot rebase records the maintainer as
+          # the force-push actor even though GitHub creates the authenticated
+          # bot/web-flow commit. Accept only authority GitHub says already has
+          # the repository's maintain/admin override power; ordinary writers
+          # cannot turn spoofed commit metadata into a neutral verdict.
+          [[ "$head_actor_login" =~ ^[A-Za-z0-9-]+$ ]] || reject 'head actor login is malformed'
+          permission_file="$RUNNER_TEMP/dependabot-head-actor-permission.json"
+          remaining="$(remaining_seconds)" || reject 'trusted review deadline expired before actor lookup'
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/collaborators/$head_actor_login/permission" > "$permission_file"; then
+            reject 'head actor permission lookup failed'
+          fi
+          if jq -e \
+            --arg login "$head_actor_login" \
+            --argjson id "$head_actor_id" \
+            --arg type "$head_actor_type" '
+              (.user.login == $login) and
+              (.user.id == $id) and
+              (.user.type == $type) and
+              (.role_name == "maintain" or .role_name == "admin" or .permission == "admin")
+            ' "$permission_file" >/dev/null 2>&1; then
+            echo 'exempt=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      # Override authority belongs to this trusted event, not to persistent PR
+      # state. A historical maintainer-applied label plus a bot-authored comment
+      # is insufficient because a PR-controlled pull_request workflow can post
+      # as github-actions[bot]. Activate only for the exact-current-head labeled
+      # event whose actor GitHub currently verifies as maintain/admin. A push
+      # leaves the stale cosmetic label untouched so a delayed synchronize run
+      # cannot remove a newer label application, but synchronize and every other
+      # event remain inactive. Remove and reapply the label to review a new head.
       - name: Detect override label
         id: override
         env:
-          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          LABELS: ${{ steps.pending.outputs.labels }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
-          ACTION: ${{ github.event.action }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_ACTOR_LOGIN: ${{ github.event.sender.login }}
+          EVENT_ACTOR_ID: ${{ github.event.sender.id }}
+          EVENT_ACTOR_TYPE: ${{ github.event.sender.type }}
         run: |
           set -euo pipefail
-          labels="${LABELS:-}"
-          # A new head must never inherit an override, even if a prior runner
-          # was interrupted before it could remove the label.
-          if [ "$EVENT" = "pull_request_target" ] && [ "$ACTION" = "synchronize" ]; then
+          remaining_seconds() {
+            local now
+            now="$(date -u +%s)"
+            if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+              return 1
+            fi
+            printf '%s\n' "$((AI_REVIEW_DEADLINE_UNIX - now))"
+          }
+          reject_override() {
             echo "active=false" >> "$GITHUB_OUTPUT"
             exit 0
-          fi
+          }
+          labels="${LABELS:-}"
           reviewed_head="$HEAD_SHA"
-          if [ "$EVENT" = "merge_group" ]; then
-            # gh-readonly-queue/<base>/pr-<number>-<sha>
-            pr="$(printf '%s' "$HEAD_REF" | sed -n 's|.*/pr-\([0-9]\{1,\}\)-[0-9a-f]\{1,\}$|\1|p')"
-            if [ -n "$pr" ]; then
-              PR="$pr"
-              labels="$(gh api "repos/$REPO/pulls/$pr" --jq '[.labels[].name]' 2>/dev/null || echo '[]')"
-              reviewed_head="$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha' 2>/dev/null || true)"
-            fi
+          if [ "${EVENT_NAME:-}" != pull_request_target ] || \
+             [ "${EVENT_ACTION:-}" != labeled ] || \
+             [ "${EVENT_LABEL:-}" != 'ai-review:override' ] || \
+             [ "${EVENT_HEAD_SHA:-}" != "$reviewed_head" ] || \
+             ! printf '%s\n' "$labels" | grep -q '"ai-review:override"'; then
+            reject_override
           fi
-          attested_head="$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null | \
-            sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
-            grep -Fx "$reviewed_head" | tail -n 1 || true)"
-          # PR-controlled pull_request workflows can post as
-          # github-actions[bot], so a bot-authored marker alone is not an
-          # authorization decision. Bind the active label to its latest actor
-          # and require GitHub to verify that actor has maintainer authority.
-          label_actor="$(gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
-            --jq '.[] | select(.event == "labeled" and .label.name == "ai-review:override") | .actor.login' 2>/dev/null | tail -n 1 || true)"
-          label_permission=""
-          if [ -n "$label_actor" ]; then
-            label_permission="$(gh api "repos/$REPO/collaborators/$label_actor/permission" --jq .permission 2>/dev/null || true)"
+          label_actor_login="${EVENT_ACTOR_LOGIN:-}"
+          label_actor_id="${EVENT_ACTOR_ID:-}"
+          label_actor_type="${EVENT_ACTOR_TYPE:-}"
+          [[ "$label_actor_login" =~ ^[A-Za-z0-9-]+$ ]] || reject_override
+          [[ "$label_actor_id" =~ ^[0-9]+$ ]] || reject_override
+          [ "$label_actor_type" = User ] || reject_override
+          remaining="$(remaining_seconds)" || reject_override
+          permission_file="$RUNNER_TEMP/ai-review-override-actor-permission.json"
+          if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/collaborators/$label_actor_login/permission" > "$permission_file"; then
+            reject_override
           fi
-          if printf '%s\n' "$labels" | grep -q '"ai-review:override"' && [ "$attested_head" = "$reviewed_head" ] && { [ "$label_permission" = maintain ] || [ "$label_permission" = admin ]; }; then
+          [ "$(wc -c < "$permission_file")" -le 65536 ] || reject_override
+          if jq -e \
+            --arg login "$label_actor_login" \
+            --argjson id "$label_actor_id" \
+            --arg type "$label_actor_type" '
+              (.user.login == $login) and
+              (.user.id == $id) and
+              (.user.type == $type) and
+              ((.role_name == "maintain" or .role_name == "admin") or .permission == "admin")
+            ' "$permission_file" >/dev/null 2>&1; then
             echo "active=true" >> "$GITHUB_OUTPUT"
           else
             echo "active=false" >> "$GITHUB_OUTPUT"
@@ -232,24 +477,34 @@ jobs:
       - name: Run AI review gate
         id: gate
         continue-on-error: true
-        # Skip entirely (not fail-closed) when the key is unset and no human
-        # has overridden — see the PAUSED note at the top of this file. The
-        # override path still runs so its audited pass-through keeps working
-        # even with no key.
-        if: steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true'
+        # Relevant SPEC governance changes and every deterministic escalation
+        # run even without a credential, so an absent credential is human review
+        # instead of a neutral result. Only the authenticated dependency-version-led
+        # Dependabot exception skips model execution, even when a key exists;
+        # an active human override still runs so its audit receipt is preserved.
+        if: >-
+          (steps.dependabot.outputs.exempt != 'true' || steps.override.outputs.active == 'true') &&
+          (steps.plan.outcome != 'success' || steps.plan.outputs.review_relevant == 'true' || steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true')
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          IS_FORK: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository }}
+          BASE_SHA: ${{ steps.pending.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+          IS_FORK: ${{ steps.pending.outputs.is_fork }}
           OVERRIDE: ${{ steps.override.outputs.active }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
+          PR_BODY="$(jq -r '.body // ""' "$AI_REVIEW_CURRENT_PR_JSON")"
+          export PR_BODY
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
           # Bootstrap: the reviewer is deliberately run from the protected base
           # revision, so on the rollout PR that first introduces cmd/ai-review
           # the base has no such package. Fail closed with a clear message
@@ -266,88 +521,205 @@ jobs:
                   "> The \`ai-review:override\` label is present and the trusted base revision does not yet contain \`cmd/ai-review\`, so no automated review could run." "" \
                   "This is the rollout PR that introduces the gate. The override is recorded on this PR as a label." "" \
                   "<sub>Review gate per REVIEW.md §2/§5.</sub>" > /tmp/ai-review-bootstrap.md
-                gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md || true
+                if ! timeout --signal=TERM --kill-after=5s "${remaining}s" gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md; then
+                  echo "::error::could not record the bootstrap override audit comment"
+                  exit 1
+                fi
               fi
               exit 0
             fi
             echo "::error::cmd/ai-review is absent from the trusted base revision. This is expected only on the rollout PR that introduces it: apply the 'ai-review:override' label after a human review to land it. Thereafter the gate runs from protected base code."
             exit 1
           fi
-          go run ./cmd/ai-review
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline is missing, malformed, or expired"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          # Exit 78 is cmd/ai-review's explicit "same-repository review cannot
+          # run because no reviewer credential is configured" disposition.
+          # Record exactly that discrimination as a step output so publication
+          # can translate only the credential-starved failure to neutral;
+          # every other nonzero code (plan build failure, expired deadline,
+          # timeout's 124, fork, override audit failure) keeps failing closed.
+          # Build then execute directly: `go run` reports the child's status
+          # only in its stderr text and itself exits 1 ("The exit status of
+          # Run is not the exit status of the compiled binary"), which would
+          # erase the exit-78 discrimination.
+          timeout --signal=TERM --kill-after=5s "${remaining}s" go build -o "$RUNNER_TEMP/ai-review-gate" ./cmd/ai-review
+          now="$(date -u +%s)"
+          if ! [[ "${AI_REVIEW_DEADLINE_UNIX:-}" =~ ^[0-9]+$ ]] || [ "$AI_REVIEW_DEADLINE_UNIX" -le "$now" ]; then
+            echo "::error::trusted review deadline expired while building the reviewer"
+            exit 1
+          fi
+          remaining="$((AI_REVIEW_DEADLINE_UNIX - now))"
+          set +e
+          timeout --signal=TERM --kill-after=5s "${remaining}s" "$RUNNER_TEMP/ai-review-gate"
+          gate_status=$?
+          set -e
+          if [ "$gate_status" -eq 78 ]; then
+            echo "keyless_cannot_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "keyless_cannot_run=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$gate_status"
 
       # pull_request_target is pinned to trusted base code, but GitHub attaches
       # its job check suite to that base revision. Publish the authoritative
-      # result explicitly on the reviewed PR (or merge-group) head so the
-      # context is both trusted and satisfiable — a prerequisite for it being
-      # usable as a required check again once the gate is un-paused.
+      # result explicitly on the reviewed PR head. The unique custom context is
+      # the semantic-review verdict; the native job remains orchestration only.
       - name: Publish check on reviewed head
         id: publish
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          BASE_SHA: ${{ steps.pending.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
           REPO: ${{ github.repository }}
           OUTCOME: ${{ steps.gate.outcome }}
           KEY_OUTCOME: ${{ steps.key.outcome }}
           KEY_PRESENT: ${{ steps.key.outputs.present }}
           OVERRIDE: ${{ steps.override.outputs.active }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          REVIEW_RELEVANT: ${{ steps.plan.outputs.review_relevant }}
+          DEPENDABOT_OUTCOME: ${{ steps.dependabot.outcome }}
+          DEPENDABOT_EXEMPT: ${{ steps.dependabot.outputs.exempt }}
+          IS_FORK: ${{ steps.pending.outputs.is_fork }}
+          KEYLESS_CANNOT_RUN: ${{ steps.gate.outputs.keyless_cannot_run }}
         run: |
           set -euo pipefail
           conclusion=failure
           summary="Trusted review gate completed with outcome: $OUTCOME."
-          if [ "$OUTCOME" = success ]; then
+          current_base="$(timeout --signal=TERM --kill-after=5s 30s gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPO/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || true)"
+          base_current=false
+          if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$current_base" = "$BASE_SHA" ]; then
+            base_current=true
+          else
+            summary='Trusted review evidence is stale or protected-main freshness could not be verified.'
+          fi
+          if [ "$base_current" = true ] && [ "$OUTCOME" = success ]; then
             conclusion=success
-          elif [ "$OUTCOME" = skipped ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "$OVERRIDE" != true ]; then
+          elif [ "$base_current" = true ] && [ "$OUTCOME" = skipped ] && [ "$PLAN_OUTCOME" = success ] && [ "$DEPENDABOT_OUTCOME" = success ] && [ "$DEPENDABOT_EXEMPT" = true ] && [ "$KEY_OUTCOME" = success ] && [ "$OVERRIDE" != true ]; then
+            # The authenticated plan proves an exact dependency-version-led Go module
+            # delta, while trusted API snapshots prove the immutable Dependabot
+            # bot ID and same-repository numeric identity. This is non-blocking but
+            # remains honest: no model approval is claimed.
+            conclusion=neutral
+            summary='Neutral: authenticated same-repository Dependabot dependency-version-led Go module update. No model approval or human override is claimed.'
+          elif [ "$base_current" = true ] && [ "$OUTCOME" = skipped ] && [ "$PLAN_OUTCOME" = success ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "$OVERRIDE" != true ] && [ "$REVIEW_RELEVANT" = false ]; then
             # The ONLY non-failure skip: key detection ran, succeeded, and
             # affirmatively reported no key, with no override in play. Any
             # other skip means an earlier step (checkout / setup-go / fetch /
             # override or key detection) failed and GitHub's implicit
             # success() guard skipped the gate — that must stay `failure`.
-            # GitHub counts `neutral` as satisfying a required check, so
-            # treating every skip as neutral would let an infrastructure
-            # failure pass the gate unreviewed once it is required again.
             # Honest `neutral`, never a fabricated `success` (SPEC R4).
             conclusion=neutral
-            summary='Paused: ANTHROPIC_API_KEY is not configured (cost/quota decision, 2026-07-27). Re-enable by setting the secret, or run a single PR under human authority with the ai-review:override label.'
+            summary='Neutral: ANTHROPIC_API_KEY is not configured and the authenticated plan has no changed SPEC.md, protected SPEC-review owner, or deterministic REVIEW.md escalation. No model approval is claimed.'
+          elif [ "$base_current" = true ] && [ "$OUTCOME" = failure ] && [ "${KEYLESS_CANNOT_RUN:-}" = true ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "${OVERRIDE:-false}" != true ] && [ "${IS_FORK:-}" != true ]; then
+            # Skip-with-warning: cmd/ai-review exited with its explicit
+            # cannot-run-without-credential code (78), which it emits only for
+            # a same-repository, non-override run whose sole blocker is the
+            # absent ANTHROPIC_API_KEY. That failure is a review that can
+            # never run, not a review that found a problem, so publish an
+            # honest neutral-with-warning: no approval is claimed, the gate's
+            # own needs-human-review evidence stays on the PR, and the sticky
+            # comment below records that human review is recommended. Every
+            # other nonzero gate exit — plan build failure, expired deadline,
+            # fork, override audit failure — reports keyless_cannot_run=false
+            # and stays a hard failure, and KEY_OUTCOME=success proves key
+            # detection (and every step before it) actually ran. The moment
+            # ANTHROPIC_API_KEY is configured, exit 78 is unreachable and
+            # every gate failure blocks again.
+            conclusion=neutral
+            # Deliberately does not assert review-relevance: exit 78 also
+            # covers the credential preflight on an ordinary diff (for
+            # example after a transient plan-step failure defaulted
+            # review_relevant=true), where the binary's own authenticated
+            # plan found no SPEC or escalation evidence.
+            summary='Neutral with warning: ANTHROPIC_API_KEY is not configured, so the automated 5-dimension review could NOT run. Any escalation or SPEC evidence the authenticated plan recorded is in the PR comments. Human review is recommended before merge. No model approval is claimed.'
           fi
           echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
-          gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
+          timeout --signal=TERM --kill-after=5s 90s gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
             -f conclusion="$conclusion" \
-            -f output[title]='5-Dimension AI Review' \
+            -f output[title]='SPEC Contract Review' \
             -f output[summary]="$summary"
+
+      # The custom check is the semantic verdict. The distinct native job is a
+      # source-level transport failure signal, not a satisfiable PR-head
+      # required check. Do not let a failed check-runs API call leave it green.
+      - name: Fail if SPEC Contract Review publication failed
+        if: always() && steps.publish.outcome == 'failure'
+        run: exit 1
 
       # An earlier revision may have left a sticky review comment — including a
       # "passed by human override" one, since applying the label makes the gate
-      # run even with no key. Pushing a new revision clears that label and (with
-      # no key) skips the gate entirely, so cmd/ai-review never runs to upsert
-      # the record. Without this step the PR would show a neutral check next to
+      # run even with no key. Pushing a new revision invalidates its exact-head
+      # attestation even if the cosmetic label remains and (with no key) skips
+      # the gate entirely, so cmd/ai-review never runs to upsert the record.
+      # Without this step the PR would show a neutral check next to
       # a stale comment still claiming a human override passed it. Retire the
       # marked comment here so the PR-facing audit trail matches the check.
       # Best-effort by design: the check conclusion already carries the verdict,
-      # so a comment outage must not turn a paused revision into a red job.
-      - name: Replace stale sticky comment when paused
+      # so a comment outage must not change the check conclusion.
+      - name: Explain neutral review result
         if: always() && steps.publish.outputs.conclusion == 'neutral' && github.event.pull_request.number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ steps.pending.outputs.head_sha }}
+          DEPENDABOT_EXEMPT: ${{ steps.dependabot.outputs.exempt }}
+          KEYLESS_CANNOT_RUN: ${{ steps.gate.outputs.keyless_cannot_run }}
         run: |
           set -euo pipefail
+          if [ "$DEPENDABOT_EXEMPT" = true ]; then
+            reason="The authenticated plan for \`$HEAD_SHA\` proves a dependency-version-led Go module update, and trusted API snapshots identify the same-repository Dependabot app bot. This workflow check is neutral; no model approval or human override is claimed."
+          elif [ "${KEYLESS_CANNOT_RUN:-}" = true ]; then
+            reason="\`ANTHROPIC_API_KEY\` is not configured, so the automated 5-dimension review could **not** run on \`$HEAD_SHA\`. **Human review is recommended before merge.** The gate's needs-human-review comment above records the authenticated plan's evidence for this revision. No model approval is claimed."
+          else
+            reason="\`ANTHROPIC_API_KEY\` is not configured. The authenticated plan for \`$HEAD_SHA\` has no changed \`SPEC.md\`, protected SPEC-review owner, or deterministic REVIEW.md escalation, so this workflow check is neutral; no model approval is claimed."
+          fi
+          if [ "${KEYLESS_CANNOT_RUN:-}" = true ]; then
+            # The gate has just posted current-head evidence above; do not
+            # blanket-invalidate "earlier" comments, only stale overrides.
+            carryover='The needs-human-review evidence above applies to **this** revision. Any `ai-review:override` from an earlier revision does **not** carry to this one.'
+          else
+            carryover='Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.'
+          fi
           printf '%s\n' '<!-- ai-review-5d -->' \
-            '## ⏸️ AI Code Review — paused (no automated review ran)' '' \
-            "> \`ANTHROPIC_API_KEY\` is not configured, so no automated review ran for \`$HEAD_SHA\`." '' \
-            'Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.' '' \
-            '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-paused.md
-          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-paused.md \
-            || echo "::warning::could not post the paused review comment; the neutral check still carries the verdict."
-          # Prune older marked comments, keeping the one just posted. Cosmetic.
-          ( gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-              --jq '.[] | select(.body | startswith("<!-- ai-review-5d -->")) | .id' \
-            | head -n -1 \
-            | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null || true; done ) || true
+            '## AI Code Review — neutral (no automated review ran)' '' \
+            "> $reason" '' \
+            "$carryover" '' \
+            '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-neutral.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-neutral.md \
+            || echo "::warning::could not post the neutral review comment; the check still carries the verdict."
+          # Prune older marked comments, keeping the one just posted. Cosmetic —
+          # but NOT in the keyless-cannot-run case: cmd/ai-review has just
+          # posted the current head's needs-human-review evidence under the
+          # same marker, and this comment explicitly points readers at it.
+          if [ "${KEYLESS_CANNOT_RUN:-}" != true ]; then
+            ( gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+                --jq '.[] | select(.body | startswith("<!-- ai-review-5d -->")) | .id' \
+              | head -n -1 \
+              | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null || true; done ) || true
+          fi
 
+      # A keyless same-repo gate failure (cmd/ai-review's explicit exit 78,
+      # surfaced as keyless_cannot_run=true) is published as
+      # neutral-with-warning above, so the orchestration job must not stay red
+      # for it either: while no reviewer credential exists that failure means
+      # "review could not run", not "review found a problem". Every other gate
+      # failure — key present, plan/transport errors, override in play (its
+      # audit trail must be intact), fork PR, or key detection itself not
+      # having succeeded — still fails the job closed.
       - name: Fail if review gate failed
-        if: steps.gate.outcome == 'failure'
+        if: >-
+          always() && steps.gate.outcome == 'failure' &&
+          (steps.gate.outputs.keyless_cannot_run != 'true' ||
+           steps.key.outcome != 'success' || steps.key.outputs.present != 'false' ||
+           steps.override.outputs.active == 'true' || steps.pending.outputs.is_fork == 'true')
         run: exit 1

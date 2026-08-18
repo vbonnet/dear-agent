@@ -2,13 +2,6 @@ package manifest
 
 import "time"
 
-// SessionOutcome describes how a session ended, stamped on the record at
-// archive time. It makes the archive pile triage-legible instead of showing
-// rows of identical, indistinguishable archived sessions. Values are defined
-// as constants (OutcomeCompleted, OutcomeCrashed, OutcomeKilled, OutcomeGCStale)
-// in constants.go.
-type SessionOutcome string
-
 // Manifest represents an AGM session manifest (v2 schema)
 type Manifest struct {
 	SchemaVersion           string            `yaml:"schema_version"`
@@ -53,6 +46,8 @@ type Manifest struct {
 	WorkflowPhaseUpdatedAt  *time.Time        `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
 	CostTracking            *CostTracking     `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
 	Resources               *ResourceManifest `yaml:"resources,omitempty"`                  // Git worktrees and branches created by this session
+	FinalOutput             string            `yaml:"final_output,omitempty"`               // Tail of the session's terminal output, captured at completion so results survive pane teardown
+	FinalOutputAt           time.Time         `yaml:"final_output_at,omitempty"`            // When FinalOutput was captured
 }
 
 // PermissionPolicy records the resolved role/profile permission policy used
@@ -202,13 +197,22 @@ type OpenCode struct {
 
 // SandboxConfig represents sandbox isolation metadata for a session
 type SandboxConfig struct {
-	Enabled      bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
-	ID           string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
-	Provider     string    `yaml:"provider,omitempty" json:"provider,omitempty"`
-	MergedPath   string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
-	WorkingDir   string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
-	CreatedAt    time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
-	ExtraAddDirs []string  `yaml:"extra_add_dirs,omitempty" json:"extra_add_dirs,omitempty"`
+	Enabled               bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
+	ID                    string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
+	Provider              string    `yaml:"provider,omitempty" json:"provider,omitempty"`
+	MergedPath            string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
+	WorkingDir            string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
+	CreatedAt             time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
+	ExtraAddDirs          []string  `yaml:"extra_add_dirs,omitempty" json:"extra_add_dirs,omitempty"`
+	BypassCodexHookTrust  bool      `yaml:"bypass_codex_hook_trust,omitempty" json:"bypass_codex_hook_trust,omitempty"`
+	CodexHookSourceRepo   string    `yaml:"codex_hook_source_repo,omitempty" json:"codex_hook_source_repo,omitempty"`
+	CodexHookSourceCommit string    `yaml:"codex_hook_source_commit,omitempty" json:"codex_hook_source_commit,omitempty"`
+	CodexHookDigest       string    `yaml:"codex_hook_digest,omitempty" json:"codex_hook_digest,omitempty"`
+	CodexHookRoot         string    `yaml:"codex_hook_root,omitempty" json:"codex_hook_root,omitempty"`
+	// BypassCodexHookTrustReason is the justification bound into each private
+	// launch handoff. It is persisted so resume can authorize again at its
+	// executable boundary rather than inherit the original decision.
+	BypassCodexHookTrustReason string `yaml:"bypass_codex_hook_trust_reason,omitempty" json:"bypass_codex_hook_trust_reason,omitempty"`
 }
 
 // ResourceManifest records git worktrees and branches created during a session.

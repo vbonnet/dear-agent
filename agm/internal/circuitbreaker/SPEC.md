@@ -35,3 +35,5 @@ machine state without false positives that would block healthy agent sessions.
 **CBRK-10** When the known-worker lookup is invoked, the system shall bound it with a timeout so a locked or overloaded session database cannot hang session admission.
 
 **CBRK-11** When a worker's record name differs from its tmux session name, the system shall recognise the session under either name, so a resumed or imported worker still counts against the cap.
+
+**CBRK-12** When the circuit breaker reads an engaged admission brake, the system shall report an overrideable refusal without accepting any reason or authorization option that can make the gate pass; only the launch boundary may apply a committed shared override after repeating every live gate.

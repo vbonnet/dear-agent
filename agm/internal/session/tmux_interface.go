@@ -155,6 +155,12 @@ type InputReadinessChecker interface {
 	CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error)
 }
 
+// PaneOutputCapturer is the optional read capability used by result-surfacing
+// operations to return the tail of a session's terminal output.
+type PaneOutputCapturer interface {
+	CapturePaneTail(sessionName string, lines int) (string, error)
+}
+
 // AtomicInputSender checks harness input ownership and delivers to the
 // resulting exact pane while holding one tmux mutation boundary. If Ready is
 // false, no input was sent; if Ready is true, delivery completed successfully.

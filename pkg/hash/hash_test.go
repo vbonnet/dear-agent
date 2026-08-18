@@ -154,6 +154,12 @@ func TestExpandPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "tilde with platform separator",
+			path:    "~" + string(filepath.Separator) + filepath.Join("Documents", "platform.txt"),
+			want:    filepath.Join(home, "Documents", "platform.txt"),
+			wantErr: false,
+		},
+		{
 			name:    "unsupported user tilde",
 			path:    "~otheruser/file",
 			want:    "",

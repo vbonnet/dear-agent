@@ -8,8 +8,7 @@ case "$max_age" in *[!0-9]*|''|???????????*) echo "gobin-guard-audit: invalid GO
 now=$(date +%s); last=$(cat "$heartbeat" 2>/dev/null || true); reason=
 case "$last" in ''|*[!0-9]*|0[0-9]*|???????????*) reason="heartbeat is missing or invalid: $heartbeat";; *) [ "$last" -gt "$now" ] || [ $((now-last)) -gt "$max_age" ] && reason="heartbeat is stale: $heartbeat";; esac
 if [ -z "$reason" ]; then rm -f "$alarm" 2>/dev/null || true; exit 0; fi
-delivered=1
-trail_dir=$(dirname "$trail")
+delivered=1; trail_dir=$(dirname "$trail")
 if mkdir -p "$trail_dir" 2>/dev/null; then
   (umask 0177 && touch "$trail" && chmod 600 "$trail") 2>/dev/null || true
   event_id="gobin-guard-audit-$(date -u +%Y%m%d%H%M%S)-$$"

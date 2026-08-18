@@ -197,8 +197,18 @@ func ValidateFinalLiveness(verdict tmux.PaneLiveness, err error) error {
 
 // AgyPermissionModeFlag maps shared automatic mode to AGY's startup flag.
 func AgyPermissionModeFlag(mode string) string {
-	if mode == "auto" || mode == "dangerously-skip-permissions" {
-		return "--dangerously-skip-permissions"
+	return strings.Join(AgyPermissionModeArgs(mode), " ")
+}
+
+// AgyPermissionModeArgs is the canonical native AGY permission mapping used
+// both to construct argv and to report whether startup applied the mode.
+func AgyPermissionModeArgs(mode string) []string {
+	switch mode {
+	case "auto", "dangerously-skip-permissions":
+		return []string{"--dangerously-skip-permissions"}
+	case "plan":
+		return []string{"--mode", "plan"}
+	default:
+		return nil
 	}
-	return ""
 }

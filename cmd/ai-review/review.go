@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -77,20 +79,56 @@ func dimensions() []dimension {
 	}
 }
 
-// dimensionReport holds one lens's rendered findings.
+// dimensionReport holds one review report's rendered findings.
 type dimensionReport struct {
 	key  string
 	text string
 }
 
+const (
+	defaultReviewMaxTokens int64 = 2048
+	// Adaptive thinking consumes the same output budget as the visible JSON.
+	// SPEC reviews therefore reserve enough room for both reasoning and the
+	// complete bounded applicability/deletion verdict.
+	specReviewMaxTokens int64 = 64 * 1024
+	// reviewWorkflowTimeout must match the trusted review job timeout. The
+	// first trusted workflow step publishes an absolute review cutoff before
+	// this process starts; reviewWorkflowDeadlineOffset leaves a dedicated
+	// publication window even when setup consumes the command-local slack.
+	reviewWorkflowTimeout            = 70 * time.Minute
+	reviewWorkflowDeadlineOffset     = 67 * time.Minute
+	reviewWorkflowPublicationReserve = reviewWorkflowTimeout - reviewWorkflowDeadlineOffset
+	reviewPipelineTimeout            = 55 * time.Minute
+	// Eight owner shards run at no more than four concurrently, so their two
+	// sequential waves fit in 21 minutes. The final SPEC call, parallel
+	// dimensions, and synthesis each have one 11-minute stage, giving valid
+	// 10-minute calls scheduling slack. Their 54-minute worst-case sequence
+	// leaves one minute in-process. The absolute workflow cutoff independently
+	// preserves the publication reserve above.
+	semanticOwnerSearchStageTimeout = 21 * time.Minute
+	finalSpecReviewStageTimeout     = 11 * time.Minute
+	dimensionReviewStageTimeout     = 11 * time.Minute
+	synthesisStageTimeout           = 11 * time.Minute
+	// The SDK requires streaming for large output budgets unless the caller
+	// supplies an explicit request timeout. Every request must fit within its
+	// stage deadline; a shorter parent deadline still wins through context.
+	reviewRequestTimeout = 10 * time.Minute
+)
+
 // callClaude issues a single Messages API request with adaptive thinking and
 // the configured effort. Any error is returned to the caller so the run can
 // fail closed (SPEC R5/R6); it never substitutes a placeholder success.
-func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, system, user string) (string, error) {
+func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, maxTokens int64, system, user string) (string, error) {
+	if maxTokens <= 0 {
+		return "", fmt.Errorf("model output budget must be positive")
+	}
+	// A stage budget represents one bounded model attempt. SDK retries would
+	// otherwise outlive the advertised per-request allowance and eat the
+	// publication reserve established by the workflow deadline.
 	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     model,
-		MaxTokens: 2048,
+		MaxTokens: maxTokens,
 		System:    []anthropic.TextBlockParam{{Text: system}},
 		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
 		OutputConfig: anthropic.OutputConfigParam{
@@ -99,9 +137,12 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
 		},
-	})
+	}, option.WithRequestTimeout(reviewRequestTimeout), option.WithMaxRetries(0))
 	if err != nil {
 		return "", err
+	}
+	if resp.StopReason != anthropic.StopReasonEndTurn {
+		return "", fmt.Errorf("model response stopped before end_turn: %s", resp.StopReason)
 	}
 	var b strings.Builder
 	for _, block := range resp.Content {
@@ -120,13 +161,15 @@ func callClaude(ctx context.Context, client anthropic.Client, model anthropic.Mo
 // whole batch errors (errgroup first-error semantics) so the caller fails
 // closed — a partial review is never treated as complete (SPEC R5, R12).
 func runDimensions(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, diff string) ([]dimensionReport, error) {
+	ctx, cancel := context.WithTimeout(ctx, dimensionReviewStageTimeout)
+	defer cancel()
 	dims := dimensions()
 	reports := make([]dimensionReport, len(dims))
 	g, ctx := errgroup.WithContext(ctx)
 	user := "Review this PR diff and report your findings per your persona instructions:\n\n```diff\n" + diff + "\n```"
 	for i, d := range dims {
 		g.Go(func() error {
-			text, err := callClaude(ctx, client, model, effort, d.system, user)
+			text, err := callClaude(ctx, client, model, effort, defaultReviewMaxTokens, d.system, user)
 			if err != nil {
 				return fmt.Errorf("dimension %s: %w", d.key, err)
 			}
@@ -140,20 +183,23 @@ func runDimensions(ctx context.Context, client anthropic.Client, model anthropic
 	return reports, nil
 }
 
-// synthesize collects the dimension reports and asks the model for a single
+// synthesize collects the review reports and asks the model for a single
 // outcome word. A synthesis error is returned (fail closed, SPEC R6); an
 // unparseable word is handled by ParseOutcome (fail closed, SPEC R7). Returns
 // the raw synthesis text (for the PR comment) alongside the parsed outcome.
 func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Model, effort anthropic.OutputConfigEffort, reports []dimensionReport) (Outcome, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, synthesisStageTimeout)
+	defer cancel()
 	var sb strings.Builder
-	sb.WriteString("You are a senior engineer synthesizing five independent code review dimensions.\n")
-	sb.WriteString("Based on the dimension reports below, determine the overall outcome per this taxonomy:\n")
+	sb.WriteString("You are a senior engineer synthesizing independent review reports. The reports include five code review dimensions and may include an authoritative SPEC-CONTRACT report.\n")
+	sb.WriteString("Based on the review reports below, determine the overall outcome per this taxonomy:\n")
 	sb.WriteString("- approved: no blocking findings\n")
 	sb.WriteString("- needs-work: fixable blocking findings exist\n")
 	sb.WriteString("- rejected: fundamental design problem\n")
 	sb.WriteString("- needs-human-review: security auto-fail trigger, escalation trigger, or novel irreversible decision\n\n")
 	sb.WriteString("Rules: any security blocking finding -> needs-human-review. Any other blocking finding -> needs-work. ")
 	sb.WriteString("Data-loss finding -> rejected. Ambiguous findings resolve down (needs-work beats approved; needs-human-review beats needs-work).\n")
+	sb.WriteString("When a SPEC-CONTRACT report is present, its declared authoritative outcome is binding: preserve needs-work, rejected, or needs-human-review and never upgrade it to approved.\n")
 	sb.WriteString("Escalate to needs-human-review regardless of severity when the diff touches any of: agent permissions; pre/post-tool hooks or hook registration; ")
 	sb.WriteString("security boundaries (write guards, deny rules, CODEOWNERS, PII manifests); infrastructure that is expensive to reverse (IaC, schema changes, CI/CD pipeline edits); ")
 	sb.WriteString("or an explicit HUMAN REVIEW REQUIRED marker.\n")
@@ -170,7 +216,7 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 		"outcome word (approved/needs-work/rejected/needs-human-review) and nothing else; " +
 		"start the brief summary on the second line."
 
-	text, err := callClaude(ctx, client, model, effort, synthSystem, sb.String())
+	text, err := callClaude(ctx, client, model, effort, defaultReviewMaxTokens, synthSystem, sb.String())
 	if err != nil {
 		return NeedsHumanReview, "", err
 	}

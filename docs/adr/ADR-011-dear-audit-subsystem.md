@@ -1,11 +1,12 @@
 # ADR-011: Scheduled repository audit subsystem
 
-Status: Accepted (2026-06-16; verified 2026-07-17)
+Status: Accepted (2026-06-16; verified 2026-07-17; amended 2026-08-02)
 
 ## Context
 
 CI answers whether one revision passes its gates. It does not own recurring
-repository checks, finding deduplication, remediation history, or trend queries.
+repository checks, finding deduplication, remediation suggestions, or trend
+queries.
 Embedding schedules inside each check would also couple policy to one runtime.
 
 ## Decision
@@ -13,8 +14,18 @@ Embedding schedules inside each check would also couple policy to one runtime.
 `pkg/audit` owns addressable checks, structured findings, and SQLite-backed run
 history. Checks declare stable IDs and recommended cadence but own no clock.
 Operators schedule `workflow-audit run` through cron, CI, or workflow wrappers.
-Finding and remediation remain separate stages, and finding fingerprints prevent
-the same unresolved problem from inflating counts across runs.
+Finding and remediation-suggestion generation remain separate stages, and finding
+fingerprints prevent the same unresolved problem from inflating counts across
+runs. Remediation fields are suggestion-only data: the audit runner does not
+execute commands, open pull requests or issues, or alter finding state on their
+behalf. `StrategyAuto` means eligible for an external automation system, not
+inline execution authority.
+
+A side-effecting dispatcher would need its own charter and a proven live producer
+and consumer. It must define durable intent and outcome records, idempotency,
+leases or equivalent ownership, retries, crash recovery, reconciliation, and
+operator-visible evidence before it can consume audit suggestions. Those
+responsibilities do not belong to `pkg/audit`.
 
 The v1 storage schema is additive and owns exactly `audit_findings`,
 `audit_runs`, and `audit_proposals`. It does not modify workflow tables,
@@ -36,4 +47,8 @@ support deduplication or reopening.
 
 Operators must supply scheduling. Shared records make audit results queryable
 and allow normal workflow steps to consume them. `pkg/audit` and its command
-tests own verification.
+tests own verification. The unreleased inline remediator interface and the
+corresponding `workflow-audit run --dry-run` flag were removed because production
+only installed a no-op. Source callers that experimented with that interface must
+move side effects into an independently durable workflow and treat stored
+remediation fields as input suggestions.

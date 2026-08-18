@@ -84,7 +84,7 @@ var priorityInstructions = map[string]string{
 }
 
 // priorityToQueuePriority maps --priority flag values to queue priority constants
-var priorityToQueuePriority = map[string]string{
+var priorityToQueuePriority = map[string]messages.Priority{
 	"critical":   messages.PriorityCritical,
 	"urgent":     messages.PriorityHigh,
 	"normal":     messages.PriorityMedium,

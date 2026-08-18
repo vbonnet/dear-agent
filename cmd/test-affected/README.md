@@ -11,9 +11,10 @@ output into `go test`, and you only run what the PR actually touches.
 make test-affected        # run affected integration tests
 make test-affected-print  # show what *would* run (no test execution)
 
-# Direct invocation:
-go run ./cmd/test-affected --base=origin/main --tags=integration         # print
-go run ./cmd/test-affected --base=origin/main --tags=integration --run   # exec `go test`
+# Direct invocation (build first so --run preserves exit code 124):
+go build -o /tmp/test-affected ./cmd/test-affected
+/tmp/test-affected --base=origin/main --tags=integration         # print
+/tmp/test-affected --base=origin/main --tags=integration --run   # exec `go test`
 ```
 
 ## How it works
@@ -44,8 +45,13 @@ Falls back to running everything if `go list` errors. Smart selection is
 | `--tags`    | (empty)        | Comma-separated build tags forwarded to `go list`                |
 | `--root`    | repo root      | Override repo root (default: `git rev-parse --show-toplevel`)    |
 | `--all`     | `false`        | Emit *every* affected package, not just test-bearing ones        |
-| `--run`     | `false`        | Exec `go test -race -count=1` on the selection instead of printing |
+| `--run`     | `false`        | Exec `go test -race -count=1 -timeout=20m` on the selection instead of printing |
 | `--verbose` | `false`        | Log per-package decisions to stderr                              |
+
+`--run` gives each package the same 20-minute deadline as required CI and
+local preflight, while bounding package discovery at 20 minutes and the
+aggregate `go test` command at 55 minutes. The affected-integration workflow
+backstops the complete job at 100 minutes.
 
 ## Trust boundary
 

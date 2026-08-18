@@ -99,6 +99,14 @@ tracked **symlink** to it, the Claude plugin manifest exports the directory, and
 both marketplace catalogs register the plugin. Copy this pattern. Do not ship
 two divergent copies of a skill.
 
+`spec-governance/skills/{write-spec,audit-specs}/SKILL.md` are the only authored
+SPEC-governance workflow bodies. This repository does not copy them into
+harness directories. If a harness later requires a discovery projection, it
+must be mechanically derived from the canonical source, checked for exact
+drift, and reported only as source projection evidence. A projection still
+does not prove that a harness discovers, installs, or invokes the skill; keep
+those states separate and verify each claimed runtime independently.
+
 ### Version skew is real
 
 Source checkout, installed Go binaries, and the installed plugin snapshot are

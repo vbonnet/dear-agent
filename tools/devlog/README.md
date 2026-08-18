@@ -6,7 +6,7 @@ A CLI tool for managing development workspaces using bare git repositories with 
 
 ### C4 Component Diagram
 
-![Devlog Component Diagram](diagrams/rendered/c4-component-devlog.png)
+![Devlog Component Diagram](diagrams/rendered/c4-component-devlog.svg)
 
 **Component Architecture** showing the developer workspace management system:
 

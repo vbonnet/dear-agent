@@ -1,8 +1,8 @@
 services:
   reaper-e2e-test:
     build:
-      context: ../../../
-      dockerfile: test/e2e/docker/Dockerfile
+      context: ../../../../
+      dockerfile: agm/test/e2e/docker/Dockerfile
     image: agm-reaper-e2e:latest
     container_name: agm-reaper-e2e
     environment:
@@ -13,8 +13,8 @@ services:
       # Mount test scripts
       - ./scripts:/home/testuser/tests:ro
       # Mount built binaries (will be built before docker-compose up)
-      - ../../../bin/agm:/home/testuser/bin/agm:ro
-      - ../../../bin/agm-reaper:/home/testuser/bin/agm-reaper:ro
+      - ../../../../bin/agm:/home/testuser/bin/agm:ro
+      - ../../../../bin/agm-reaper:/home/testuser/bin/agm-reaper:ro
       # Mount test results output
       - ./test-results:/home/testuser/test-results:rw
     working_dir: /home/testuser

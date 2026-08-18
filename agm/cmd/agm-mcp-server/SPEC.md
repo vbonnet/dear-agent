@@ -1,10 +1,15 @@
 # AGM MCP Server - Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-08 -->
 
 ## Overview
 
 The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations without accessing conversation content.
+
+One private production registration seam owns the exact compiled tool set.
+The logical-registry-to-compiled-wire relationship and its finite compatibility
+matrix are defined in `agm/internal/surface/SPEC.md` and exercised through the
+actual SDK registration path.
 
 ## Objectives
 
@@ -37,10 +42,27 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-11** When `agm_send_message` resolves a pure API manifest while the MCP operation context also carries tmux, the MCP adapter shall delegate to shared operations, which shall perform the stable-ID lifecycle, adapter-readiness, and context-aware provider transaction before any tmux probe or delivery.
 
+**MCS-12** When `agm_create_session` receives a title that matches a non-archived session record, including when another creator commits that title concurrently, the shared creation lifecycle shall reject the request, roll back any owned launch state, and return the same duplicate-name guidance as the CLI.
+
+**MCS-13** When provider-visible tools are registered, the system shall route production and contract tests through the same private function containing the exact compiled tool set; SDK discovery order shall not be treated as a wire contract.
+
+**MCS-14** When list, search, get, archive, or kill input reaches a shared operation, the system shall use production-called private adapters that preserve every request value, list field mask, and mutation dry-run state.
+
+**MCS-15** When the compiled tool surface is audited, the system shall enumerate the production SDK registration through an in-memory MCP client, preserve exact wire schema values before generic client decoding, reconcile every client-visible pagination cursor with that wire response, reject repeated non-terminal cursors before issuing another request, and reject every registry, complete property-constraint or nested array-item schema, mapping, or discovery difference not consumed by one exact compatibility record, including absent versus explicitly empty enum keywords and lossless enum member boundaries.
+
+**MCS-16** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
+
+**MCS-17** When an MCP client completes initialization, the system shall advertise the version identity of the running AGM artifact in `serverInfo.version`.
+
+**MCS-18** When the server reports startup identity, the system shall use the same version identity that it advertises to an initialized MCP client.
+
+**MCS-19** When a build lacks release-version metadata, the system shall expose a nonempty development fallback identity without claiming a numbered release.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Test consequence: Deterministic integration test `TestMCPInitializeReportsSharedBuildVersion` observes `serverInfo.version` and the independently negotiated protocol through a real in-memory SDK initialization handshake; no new BDD feature is required because the external session BDD harness does not expose MCP initialization metadata.
 
 ## Use Cases
 
@@ -178,7 +200,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 **Input Schema**:
 ```json
 {
-  "session_id": "uuid (required)"
+  "identifier": "session ID, name, or UUID prefix (required)"
 }
 ```
 
@@ -198,9 +220,46 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 ```
 
 **Constraints**:
-- `session_id` is required
+- `identifier` is required
 - Returns error if session not found
 - No caching (relies on list cache)
+
+### Tool 3b: agm_get_session_output
+
+**Purpose**: Read the tail of a session's terminal output so orchestrators can collect worker results without attaching to panes
+
+**Input Schema**:
+```json
+{
+  "identifier": "session ID, name, or UUID prefix (required)",
+  "lines": "optional trailing pane lines to capture (default 100, max 2000)"
+}
+```
+
+**Output Schema**:
+```json
+{
+  "session_id": "uuid",
+  "name": "string",
+  "status": "active|zombie|stopped|archived|unknown",
+  "state": "string",
+  "source": "live-pane|final-capture",
+  "output": "string",
+  "captured_at": "RFC3339"
+}
+```
+
+**Constraints**:
+- `identifier` is required
+- Reads the live tmux pane for `active`/`zombie` sessions; falls back to the
+  durable `final_output` persisted on the session record when the pane is gone
+- Fallback is not guaranteed whenever `final_output` is populated. The durable
+  capture describes an *earlier* completion, so it is served only when the pane
+  is provably absent. If liveness cannot be confirmed — a tmux socket outage,
+  permission failure, or a failed capture on a still-running pane — the
+  operation returns a retryable error rather than answering with output from a
+  previous task
+- Returns an error when neither source has any output
 
 ### Tool 4: agm_create_session
 
@@ -221,6 +280,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 - `cwd` must be an existing absolute directory
 - `prompt` is required
 - `title`, when present, must be safe for tmux
+- the resolved session name must not match any non-archived session record
 - harness and model validation use the shared agent registry
 - lifecycle ownership, rollback, and Codex setup remain in `internal/ops`
 
@@ -268,13 +328,14 @@ mcp_server:
     - agm_list_sessions
     - agm_search_sessions
     - agm_get_session_metadata
+    - agm_get_session_output
     - agm_archive_session
     - agm_kill_session
     - agm_create_session
     - agm_send_message
     - agm_list_ops
-    - agm_list_wayfinder_sessions
-    - agm_get_wayfinder_session
+    - engram_list_wayfinder_sessions
+    - engram_get_wayfinder_session
   auto_register: true
   claude_config_path: ~/.config/claude/mcp_servers.json
   sessions_dir: ~/.config/agm/sessions
@@ -352,7 +413,7 @@ mcp_server:
 
 ### MCP Stdio Transport
 
-- **Protocol**: Model Context Protocol v1.2.0
+- **Protocol**: Model Context Protocol version negotiated by the pinned SDK
 - **Transport**: stdio (stdin/stdout)
 - **Logging**: stderr only (critical requirement)
 - **Format**: JSON-RPC 2.0
@@ -398,28 +459,16 @@ mcp_server:
 - No stack traces to clients (log to stderr)
 - Graceful degradation (return empty results on non-fatal errors)
 
-## Versioning
+## Implementation Identity and Protocol
 
-### Version Information
+The server's implementation identity is the running AGM artifact version. The
+build system supplies release provenance through the repository's shared
+version package; an unstamped developer build uses that package's nonempty
+development fallback. The first process header, structured startup log, and
+MCP `serverInfo.version` all expose this same identity.
 
-```go
-var (
-    Version   = "1.0.0-dev"
-    GitCommit = "unknown"
-    BuildDate = "unknown"
-    BuiltBy   = "unknown"
-)
-```
-
-- Set via ldflags at build time
-- Printed to stderr on startup
-- Exposed in MCP server implementation
-
-### API Versioning
-
-- MCP Protocol: v1.2.0 (go-sdk)
-- AGM MCP Server: v1.0.0
-- No breaking changes planned for v1.x
+Implementation identity is not the MCP wire protocol version. The pinned MCP
+SDK independently negotiates protocol support with each client.
 
 ## Future Enhancements (V2+)
 
@@ -448,6 +497,8 @@ var (
 - Supported MCP client integration
 - End-to-end tool invocation
 - Error handling
+- Compiled registration, semantic schema, request mapping, and discovery
+  compatibility against the logical operation registry
 
 ### Performance Tests
 
@@ -460,7 +511,7 @@ var (
 
 ### MCP Specification Compliance
 
-- Implements MCP v1.2.0 protocol
+- Negotiates supported MCP protocol versions through the pinned SDK
 - Uses official `github.com/modelcontextprotocol/go-sdk`
 - Follows stdio transport requirements
 - Adheres to JSON-RPC 2.0 format

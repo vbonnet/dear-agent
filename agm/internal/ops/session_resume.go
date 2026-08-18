@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/claude"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitmanifest "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
@@ -22,6 +23,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	uuidpkg "github.com/vbonnet/dear-agent/agm/internal/uuid"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 const resumeReadinessTimeout = 60 * time.Second
@@ -65,10 +67,12 @@ type ResumeSessionHealth struct {
 // already validated surface input; prompt-file IO remains outside the
 // operation.
 type ResumeSessionRequest struct {
-	SessionID    string                   `json:"session_id"`
-	ManifestPath string                   `json:"manifest_path,omitempty"`
-	Prompt       string                   `json:"prompt,omitempty"`
-	OnEvent      func(ResumeSessionEvent) `json:"-"`
+	SessionID       string                   `json:"session_id"`
+	ManifestPath    string                   `json:"manifest_path,omitempty"`
+	Prompt          string                   `json:"prompt,omitempty"`
+	CurrentAddDirs  []string                 `json:"-"`
+	ExcludedAddDirs []string                 `json:"-"`
+	OnEvent         func(ResumeSessionEvent) `json:"-"`
 }
 
 // ResumeSessionResult is both the lifecycle result and the post-lock
@@ -211,7 +215,8 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 
 	piLaunchID := ""
 	if sendCommand {
-		launch, launchID, warnings, prepareErr := prepareResumeLaunch(store, m, harnessName, health)
+		launchManifest := resumeLaunchManifest(m, harnessName, req.CurrentAddDirs, req.ExcludedAddDirs)
+		launch, launchID, warnings, prepareErr := prepareResumeLaunch(store, launchManifest, harnessName, health)
 		for _, warning := range warnings {
 			addResumeWarning(result, req, warning)
 		}
@@ -227,6 +232,13 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 				return result, rollbackResumeTmux(ctx, tmuxAdapter, store, m, created, resumeTmuxNameChange{}, err)
 			}
 			return result, err
+		}
+		if err := persistResumeSandboxPolicy(store, m, launchManifest); err != nil {
+			persistErr := ErrStorageError("session/resume.persist-sandbox-policy", err)
+			if created.owned() {
+				return result, rollbackResumeTmux(ctx, tmuxAdapter, store, m, created, resumeTmuxNameChange{}, persistErr)
+			}
+			return result, persistErr
 		}
 	}
 
@@ -304,6 +316,64 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 	}
 	result.PromptMayHaveStarted = promptMayHaveStarted
 	return result, nil
+}
+
+// resumeLaunchManifest returns a launch copy whose Codex grants are the stable
+// union of the session's persisted policy and the current trusted host handoff.
+// The caller persists that union only after the harness is confirmed ready, so
+// failed resumes cannot partially rewrite policy while repaired sessions remain
+// durable across later cold resumes.
+func resumeLaunchManifest(m *manifest.Manifest, harnessName string, currentAddDirs, excludedAddDirs []string) *manifest.Manifest {
+	if m == nil || harnessName != "codex-cli" || m.Sandbox == nil || !m.Sandbox.Enabled || (len(currentAddDirs) == 0 && len(excludedAddDirs) == 0) {
+		return m
+	}
+	launchManifest := *m
+	sandbox := *m.Sandbox
+	sandbox.ExtraAddDirs = nil
+	for _, dir := range m.Sandbox.ExtraAddDirs {
+		if !pathWithinAny(dir, excludedAddDirs) {
+			sandbox.ExtraAddDirs = append(sandbox.ExtraAddDirs, dir)
+		}
+	}
+	seen := make(map[string]struct{}, len(sandbox.ExtraAddDirs)+len(currentAddDirs))
+	for _, dir := range sandbox.ExtraAddDirs {
+		seen[dir] = struct{}{}
+	}
+	for _, dir := range currentAddDirs {
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		sandbox.ExtraAddDirs = append(sandbox.ExtraAddDirs, dir)
+		seen[dir] = struct{}{}
+	}
+	launchManifest.Sandbox = &sandbox
+	return &launchManifest
+}
+
+func pathWithinAny(path string, roots []string) bool {
+	clean := filepath.Clean(path)
+	for _, root := range roots {
+		rel, err := filepath.Rel(filepath.Clean(root), clean)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func persistResumeSandboxPolicy(store dolt.Storage, persisted, launch *manifest.Manifest) error {
+	if store == nil || persisted == nil || launch == nil || launch == persisted || launch.Sandbox == nil {
+		return nil
+	}
+	original := persisted.Sandbox
+	sandbox := *launch.Sandbox
+	sandbox.ExtraAddDirs = append([]string{}, launch.Sandbox.ExtraAddDirs...)
+	persisted.Sandbox = &sandbox
+	if err := store.UpdateSession(persisted); err != nil {
+		persisted.Sandbox = original
+		return err
+	}
+	return nil
 }
 
 func classifyResumeHealth(ctx context.Context, tmuxAdapter session.TmuxInterface, m *manifest.Manifest, manifestPath string) ResumeSessionHealth {
@@ -417,6 +487,12 @@ func submitAndAwaitResume(
 				return errors.Join(err, fmt.Errorf("cancel undelivered %s resume launch: %w", harnessName, cancelErr))
 			}
 			return err
+		}
+		if err := launch.FinalizeOverrideReservations(launch.Reservations...); err != nil {
+			return errors.Join(
+				fmt.Errorf("finalize %s resume override transaction: %w", harnessName, err),
+				launch.CancelUndelivered(),
+			)
 		}
 		uncertain, err := ResolveHarnessLaunchSubmission(launch, tmuxAdapter.SendKeys(health.TmuxSessionName, launch.Command))
 		if uncertain {
@@ -705,6 +781,8 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		WorkDir:        health.WorktreePath,
 		PermissionMode: m.PermissionMode,
 		Codex:          m.Codex,
+		CodexRemoteResume: harnessName == "codex-cli" && m.Codex != nil &&
+			m.Codex.SessionID != "",
 	}
 	switch harnessName {
 	case "claude-code":
@@ -718,6 +796,33 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		warnings := []string{}
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
+			// Attestation re-runs here and fails closed. Command preparation
+			// reserves authorization bound to the exact source identity and
+			// seals the prepared claim into the private handoff. The executor
+			// revalidates and commits it only after every other fallible launch
+			// check. A persisted launch policy therefore cannot become
+			// "approve once, resume forever".
+			if m.Sandbox.BypassCodexHookTrust {
+				reason, reasonErr := override.ValidateReason(m.Sandbox.BypassCodexHookTrustReason)
+				if reasonErr != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook-trust reason before resume: %w", reasonErr)
+				}
+				if err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
+					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
+					SourceCommit: m.Sandbox.CodexHookSourceCommit,
+					Digest:       m.Sandbox.CodexHookDigest,
+					HookRoot:     m.Sandbox.CodexHookRoot,
+				}, health.WorktreePath); err != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
+				}
+				spec.BypassCodexHookTrust = true
+				spec.CodexHookRoot = m.Sandbox.CodexHookRoot
+				spec.CodexHookTrustReason = reason
+				spec.CodexHookTrustActor = OverrideActor()
+				spec.CodexHookSourceRepo = m.Sandbox.CodexHookSourceRepo
+				spec.CodexHookSourceCommit = m.Sandbox.CodexHookSourceCommit
+				spec.CodexHookDigest = m.Sandbox.CodexHookDigest
+			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))

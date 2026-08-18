@@ -6,6 +6,7 @@
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
 # RELATED-SPEC: agm/internal/agent/openai/SPEC.md
 # RELATED-SPEC: agm/internal/harnessexec/SPEC.md
+# RELATED-SPEC: agm/internal/codexhooks/SPEC.md
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
@@ -534,7 +535,7 @@ Feature: Harness parity
     Given an imported AGY session with permission mode "auto"
     When AGM resumes the AGY session
     Then AGM should launch a tmux pane that resumes the AGY conversation
-    And the AGY resume command should include "--dangerously-skip-permissions"
+    And the AGY resume command should include "--permission 'auto'"
 
   Scenario: AGY model compatibility survives catalog migrations
     Given AGY is available

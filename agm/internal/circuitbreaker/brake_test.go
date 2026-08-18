@@ -85,6 +85,9 @@ func TestBrakeGate_EngagedBrakeRefuses(t *testing.T) {
 	if g.Passed {
 		t.Fatal("admission_brake gate passed with a live brake")
 	}
+	if !g.RequiresOverride {
+		t.Fatal("an engaged brake should identify the scoped override path")
+	}
 	if !strings.Contains(g.Message, "disk-watchdog") {
 		t.Errorf("message must name the brake source, got %q", g.Message)
 	}
@@ -99,8 +102,8 @@ func TestBrakeGate_UnreadableBrakeFailsClosed(t *testing.T) {
 	if r.Allowed {
 		t.Fatal("an unreadable brake must refuse the spawn — it is not evidence of health")
 	}
-	if g := findGate(r, "admission_brake"); g.Passed {
-		t.Errorf("admission_brake gate passed with an unreadable brake: %q", g.Message)
+	if g := findGate(r, "admission_brake"); g.Passed || g.RequiresOverride {
+		t.Errorf("unreadable brake gate = %+v, want a non-overrideable refusal", g)
 	}
 }
 

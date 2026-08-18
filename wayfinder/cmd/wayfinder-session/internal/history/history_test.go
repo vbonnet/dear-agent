@@ -26,7 +26,7 @@ func TestAppendEvent(t *testing.T) {
 	h := New(tmpDir)
 
 	// Append event
-	data := map[string]interface{}{
+	data := map[string]any{
 		"key": "value",
 		"num": 42,
 	}
@@ -63,6 +63,189 @@ func TestAppendEvent(t *testing.T) {
 	// JSON numbers are unmarshaled as float64
 	if event.Data["num"] != float64(42) {
 		t.Errorf("event.Data[num] = %v, want %v", event.Data["num"], float64(42))
+	}
+}
+
+func TestAppendEventSanitizesNewDataWithoutMutationOrHistoryRewrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	homeDir := t.TempDir()
+	h := New(tmpDir)
+	h.userHomeDir = func() (string, error) { return homeDir, nil }
+
+	legacyBytes := []byte("{\"data\":{\"path\":\"/legacy/absolute/path\"}}\n")
+	if err := os.WriteFile(h.path, legacyBytes, 0o600); err != nil {
+		t.Fatalf("write existing history: %v", err)
+	}
+
+	data := map[string]any{
+		"project":       tmpDir,
+		"project_child": filepath.Join(tmpDir, "nested", "file.txt"),
+		"nested": []any{
+			map[string]any{
+				"project_message": "failed at " + tmpDir + ", retrying",
+				"home_message":    "home=" + homeDir + ": unavailable",
+			},
+		},
+		"prefix_collision": tmpDir + "-old",
+		"large_number":     int64(9007199254740993),
+		"number":           42,
+	}
+	if filepath.Separator == '/' {
+		data["backslash_collision"] = tmpDir + `\unrelated`
+	}
+	before, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("json.Marshal(data) error = %v", err)
+	}
+
+	if err := h.AppendEvent(EventTypePhaseStarted, "BUILD", data); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	after, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("json.Marshal(data after append) error = %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("AppendEvent() mutated caller data:\n got %s\nwant %s", after, before)
+	}
+
+	persisted, err := os.ReadFile(h.path)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if !bytes.HasPrefix(persisted, legacyBytes) {
+		t.Fatalf("existing history bytes changed:\n got %q\nwant prefix %q", persisted, legacyBytes)
+	}
+	if !bytes.Contains(persisted[len(legacyBytes):], []byte(`"large_number":9007199254740993`)) {
+		t.Fatalf("appended event did not preserve the exact large integer: %s", persisted[len(legacyBytes):])
+	}
+
+	var event Event
+	if err := json.Unmarshal(bytes.TrimSpace(persisted[len(legacyBytes):]), &event); err != nil {
+		t.Fatalf("decode appended event: %v", err)
+	}
+	if got, want := event.Data["project"], "$PROJECT_DIR"; got != want {
+		t.Errorf("project = %q, want %q", got, want)
+	}
+	if got, want := event.Data["project_child"], filepath.Join("$PROJECT_DIR", "nested", "file.txt"); got != want {
+		t.Errorf("project_child = %q, want %q", got, want)
+	}
+	nested, ok := event.Data["nested"].([]any)
+	if !ok || len(nested) != 1 {
+		t.Fatalf("nested = %#v, want one-element slice", event.Data["nested"])
+	}
+	messages, ok := nested[0].(map[string]any)
+	if !ok {
+		t.Fatalf("nested[0] = %#v, want map", nested[0])
+	}
+	if got, want := messages["project_message"], "failed at $PROJECT_DIR, retrying"; got != want {
+		t.Errorf("project_message = %q, want %q", got, want)
+	}
+	if got, want := messages["home_message"], "home=$HOME: unavailable"; got != want {
+		t.Errorf("home_message = %q, want %q", got, want)
+	}
+	if got, want := event.Data["prefix_collision"], tmpDir+"-old"; got != want {
+		t.Errorf("prefix_collision = %q, want %q", got, want)
+	}
+	if filepath.Separator == '/' {
+		if got, want := event.Data["backslash_collision"], tmpDir+`\unrelated`; got != want {
+			t.Errorf("backslash_collision = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestAppendEventSucceedsWhenHomeDirectoryCannotBeResolved(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := New(tmpDir)
+	h.userHomeDir = func() (string, error) {
+		return "", errors.New("home unavailable")
+	}
+
+	err := h.AppendEvent(EventTypePhaseStarted, "BUILD", map[string]any{"path": "/host/private/path"})
+	if err != nil {
+		t.Fatalf("AppendEvent() unexpected error = %v", err)
+	}
+	events, err := h.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("Read() returned %d events, want 1", len(events))
+	}
+}
+
+func TestReplacePathRootBoundaries(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "project")
+	descendant := root + string(filepath.Separator) + "child"
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "exact root", value: root, want: "$PROJECT_DIR"},
+		{name: "descendant", value: descendant, want: "$PROJECT_DIR" + string(filepath.Separator) + "child"},
+		{name: "comma terminator", value: "failed at " + root + ", retrying", want: "failed at $PROJECT_DIR, retrying"},
+		{name: "colon terminator", value: "path=" + root + ": unavailable", want: "path=$PROJECT_DIR: unavailable"},
+		{name: "sentence terminator", value: "failed at " + root + ".", want: "failed at $PROJECT_DIR."},
+		{name: "hyphen continuation", value: root + "-old", want: root + "-old"},
+		{name: "dot continuation", value: root + ".old", want: root + ".old"},
+		{name: "underscore continuation", value: root + "_old", want: root + "_old"},
+		{name: "embedded prefix", value: "x" + root, want: "x" + root},
+		{name: "repeated roots", value: root + " then " + descendant, want: "$PROJECT_DIR then $PROJECT_DIR" + string(filepath.Separator) + "child"},
+	}
+	if filepath.Separator == '/' {
+		tests = append(tests, struct {
+			name  string
+			value string
+			want  string
+		}{name: "backslash is not a POSIX descendant", value: root + `\unrelated`, want: root + `\unrelated`})
+	}
+	if filepath.Separator == '\\' {
+		tests = append(tests, struct {
+			name  string
+			value string
+			want  string
+		}{name: "forward slashes throughout Windows root", value: filepath.ToSlash(root) + "/child", want: "$PROJECT_DIR/child"})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := replacePathRoot(tt.value, root, "$PROJECT_DIR"); got != tt.want {
+				t.Errorf("replacePathRoot(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchWindowsPathRootTreatsCaseAndSeparatorsAsEquivalent(t *testing.T) {
+	value := `c:/users/agent/project/private.txt`
+	root := `C:\Users\Agent\Project`
+	matchedLength, ok := matchWindowsPathRoot(value, root)
+	if !ok {
+		t.Fatal("matchWindowsPathRoot() did not match a case-folded forward-slash root")
+	}
+	if want := len(`c:/users/agent/project`); matchedLength != want {
+		t.Errorf("matchWindowsPathRoot() length = %d, want %d", matchedLength, want)
+	}
+}
+
+func TestSanitizeValuePrefersProjectPlaceholderWithinHome(t *testing.T) {
+	homeDir := filepath.Join(string(filepath.Separator), "users", "agent")
+	projectDir := filepath.Join(homeDir, "project")
+	input := map[string]any{
+		"project": filepath.Join(projectDir, "artifact.md"),
+		"home":    filepath.Join(homeDir, "other.md"),
+	}
+
+	got, ok := sanitizeValue(input, projectDir, homeDir).(map[string]any)
+	if !ok {
+		t.Fatalf("sanitizeValue() = %#v, want map", got)
+	}
+	if want := filepath.Join("$PROJECT_DIR", "artifact.md"); got["project"] != want {
+		t.Errorf("project = %q, want %q", got["project"], want)
+	}
+	if want := filepath.Join("$HOME", "other.md"); got["home"] != want {
+		t.Errorf("home = %q, want %q", got["home"], want)
 	}
 }
 

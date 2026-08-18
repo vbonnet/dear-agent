@@ -112,10 +112,6 @@ Feature: Local development guardrails
     When AGM runs the protected cleanup regressions
     Then Wayfinder and AGM cleanup should preserve Git-locked checkouts
 
-  Scenario: Repository cleanup preserves branches for protected worktrees
-    When AGM runs the protected repository cleanup regression
-    Then repository cleanup should preserve the worktree and its branches
-
   Scenario: Safe PR child lifetime survives abrupt parent termination
     When AGM runs the safe-pr abrupt-parent regression
     Then the child should retain transaction ownership until it exits
@@ -124,10 +120,27 @@ Feature: Local development guardrails
     When AGM runs the safe-pr final transaction audit regression
     Then each safe-pr transaction should have one accurate audit record
 
+  Scenario: Safe PR creation never invokes a merge subprocess
+    When AGM runs the safe-pr no-merge subprocess regression
+    Then safe-pr creation should not invoke a merge subprocess
+
+  Scenario: Bounded affected runner commands own their complete process trees
+    When AGM runs the affected runner process-tree regressions
+    Then bounded affected runner commands should terminate their descendants
+
+  Scenario: Affected runner fixtures distinguish every setup outcome
+    When AGM runs the affected runner fixture regressions
+    Then partial readiness, early completion, and setup timeout should be distinguished
+
+  Scenario: Safe merge distinguishes required checks from advisory history
+    When AGM runs the effective required-check regressions
+    Then safe-merge should enforce complete provider-required CI without advisory drift
+
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured
     When AGM validates Go test timeout parity
     Then all repository Go test timeouts should match
+    And affected integration deadline layers should preserve their nested budgets
 
   Scenario: Local and required CI vulnerability policy stay aligned
     Given local and required CI govulncheck allowlists are configured

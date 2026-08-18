@@ -198,12 +198,18 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 	}
 
 	// Reset the agent-attempt budget when the failure signature has changed
-	// since we last spawned. Without this, a PR that exhausts maxAttempts is
-	// classified StateAbandoned forever: doSpawn (and thus RecordAgentSpawn,
-	// which holds the only other reset) is never reached again, so a human's
-	// fresh push or a completely different failure can never be retried. We
-	// reset before Classify so the new attempt budget feeds the decision.
-	d.Tracker.ResetAttemptsIfSigChanged(pr.Number, failureSignature(pr))
+	// since we last spawned, or clear the failure episode when CI has passed.
+	// Projection errors do not establish a current failure signature. Preserve
+	// the existing attempt budget through provider outages and ordinary pending
+	// reruns; reset it when CI passes or when an actual failing check set proves
+	// that a different failure is now actionable.
+	if pr.CheckProjectionError == "" {
+		if pr.requiredVerdict() == CheckPass {
+			d.Tracker.ResetAttemptsIfPassing(pr.Number)
+		} else if pr.requiredVerdict() == CheckFail {
+			d.Tracker.ResetAttemptsIfSigChanged(pr.Number, failureSignature(pr))
+		}
+	}
 
 	cls := d.Policy.Classify(pr, rec.AgentAttempts, agentActive)
 

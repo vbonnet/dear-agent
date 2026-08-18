@@ -310,9 +310,16 @@ func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
 		t.Fatalf("tmux commands = %v, want launch then detached prompt", tmuxMock.SentCommands)
 	}
 	launch := tmuxMock.SentCommands[0]
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
 	for _, want := range []string{
-		"agy --model 'Gemini 3.5 Flash (Low)'",
-		"--dangerously-skip-permissions",
+		"__exec-agy",
+		"--session 'agy-detached'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '" + resolvedDir + "'",
+		"--permission 'auto'",
 		"--add-dir '/tmp/extra dir'",
 	} {
 		if !strings.Contains(launch, want) {
@@ -575,12 +582,15 @@ func TestCreateSessionPiRejectsInvalidCodingAgentDirectoryBeforeTmux(t *testing.
 
 func TestBuildAgyResumeCommandPreservesModelConversationAndMode(t *testing.T) {
 	command := BuildAgyResumeCommand(HarnessLaunchSpec{
-		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy resume",
+		Harness: "agy", Model: "claude-sonnet-4.6-thinking", SessionName: "agy-resume", WorkDir: "/tmp/agy resume",
 		PermissionMode: "auto", ExtraAddDirs: []string{"/tmp/agy resume"},
 	}, "117ff898-a964-4a9f-b460-1be4a8a49b17").Command
 	for _, want := range []string{
-		"cd '/tmp/agy resume' && agy --model 'Claude Sonnet 4.6 (Thinking)'",
-		"--dangerously-skip-permissions",
+		"agm __exec-agy",
+		"--session 'agy-resume'",
+		"--model 'Claude Sonnet 4.6 (Thinking)'",
+		"--workdir '/tmp/agy resume'",
+		"--permission 'auto'",
 		"--conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
 		"--add-dir '/tmp/agy resume'",
 		"&& exit",
@@ -969,7 +979,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
+	want := []string{"storage", "launch", "ready", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
@@ -1442,7 +1452,7 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	manifestPath, registrationAllowed, created, err := prepareCreateManifestDir(&CreateSessionRequest{
+	manifestPath, created, err := prepareCreateManifestDir(&CreateSessionRequest{
 		ManifestDir:         filepath.Join(blocker, "session"),
 		ManifestDirOptional: true,
 	})
@@ -1452,8 +1462,8 @@ func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
 	if manifestPath != "" {
 		t.Fatalf("manifest path = %q, want empty path after optional mkdir failure", manifestPath)
 	}
-	if registrationAllowed || created {
-		t.Fatalf("registrationAllowed = %v, created = %v; want both false", registrationAllowed, created)
+	if created {
+		t.Fatalf("created = %v; want false", created)
 	}
 }
 
@@ -1679,7 +1689,13 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
-	cmd := testHarnessCommandWithCodex("codex-cli", "5.4", "codex-session", "/tmp/work", false, &manifest.Codex{SessionID: "thr_123"})
+	req := &CreateSessionRequest{Cwd: "/tmp/work"}
+	params := &createSessionParams{name: "codex-session", harness: "codex-cli", model: "5.4"}
+	spec := buildHarnessLaunchSpec(req, params, "session-id", &manifest.Codex{SessionID: "thr_123"})
+	if spec.CodexRemoteResume {
+		t.Fatal("fresh remote Codex create was marked as a cold resume")
+	}
+	cmd := BuildHarnessLaunchCommand(spec).Command
 	for _, want := range []string{
 		"agm __exec-codex",
 		"--session 'codex-session'",
@@ -1693,6 +1709,30 @@ func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("remote Codex command %q missing %q", cmd, want)
 		}
+	}
+	for _, forbidden := range []string{"--remote-resume", `model_reasoning_effort="xhigh"`} {
+		if strings.Contains(cmd, forbidden) {
+			t.Fatalf("fresh remote Codex command unexpectedly contains %q: %q", forbidden, cmd)
+		}
+	}
+}
+
+func TestBuildHarnessCommand_Agy(t *testing.T) {
+	cmd := testHarnessCommand("agy", "3.5-flash-low", "agy-session", "/tmp/work", false)
+	for _, want := range []string{
+		"agm __exec-agy",
+		"--session 'agy-session'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/work'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("AGY command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "OPENAI_API_KEY") || strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") ||
+		strings.Contains(cmd, "GOOGLE_APPLICATION_CREDENTIALS") || strings.Contains(cmd, "GEMINI_API_KEY") {
+		t.Errorf("AGY command leaked credential env: %s", cmd)
 	}
 }
 
@@ -1809,13 +1849,18 @@ func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
 
 func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
 	sandbox := &manifest.SandboxConfig{
-		Enabled: true,
-		ID:      "sandbox-session",
+		Enabled:               true,
+		ID:                    "sandbox-session",
+		CodexHookSourceRepo:   "/src/reviewed",
+		CodexHookSourceCommit: strings.Repeat("a", 40),
+		CodexHookDigest:       strings.Repeat("b", 64),
+		CodexHookRoot:         "/trusted/hooks/" + strings.Repeat("b", 64),
 	}
 	req := &CreateSessionRequest{
-		Cwd:          "/tmp/sandbox",
-		ExtraAddDirs: []string{"/tmp/worktree", "/tmp/beads"},
-		Metadata:     CreateSessionMetadata{Sandbox: sandbox},
+		Cwd:                  "/tmp/sandbox",
+		ExtraAddDirs:         []string{"/tmp/worktree", "/tmp/beads"},
+		BypassCodexHookTrust: true,
+		Metadata:             CreateSessionMetadata{Sandbox: sandbox},
 	}
 	params := &createSessionParams{name: "sandbox", harness: "codex-cli", model: "gpt-5.5"}
 
@@ -1824,11 +1869,94 @@ func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t 
 	if got.Sandbox == sandbox {
 		t.Fatal("Sandbox aliases request metadata")
 	}
+	if !got.Sandbox.BypassCodexHookTrust {
+		t.Fatal("BypassCodexHookTrust = false, want true")
+	}
+	if got.Sandbox.CodexHookSourceRepo != sandbox.CodexHookSourceRepo ||
+		got.Sandbox.CodexHookSourceCommit != sandbox.CodexHookSourceCommit ||
+		got.Sandbox.CodexHookDigest != sandbox.CodexHookDigest ||
+		got.Sandbox.CodexHookRoot != sandbox.CodexHookRoot {
+		t.Fatalf("persisted Codex hook evidence = %#v, want %#v", got.Sandbox, sandbox)
+	}
 	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
 		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
 	}
 	req.ExtraAddDirs[0] = "/tmp/mutated"
 	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
 		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
+	}
+}
+
+func TestVerifyCreateCodexHookTrustRechecksSandboxAssets(t *testing.T) {
+	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	req := &CreateSessionRequest{
+		Cwd:                  worktreePath,
+		BypassCodexHookTrust: true,
+		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{
+			Enabled:               true,
+			CodexHookSourceRepo:   hookTrust.SourceRepo,
+			CodexHookSourceCommit: hookTrust.SourceCommit,
+			CodexHookDigest:       hookTrust.Digest,
+			CodexHookRoot:         hookTrust.HookRoot,
+		}},
+	}
+	params := &createSessionParams{harness: "codex-cli"}
+	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err != nil {
+		t.Fatalf("verifyCreateCodexHookTrust() error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, ".codex", "hooks.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err == nil {
+		t.Fatal("verifyCreateCodexHookTrust() error = nil after manifest mutation")
+	}
+}
+
+func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing.T) {
+	t.Setenv("AGM_ACTOR", "vroom-dispatch")
+	params := &createSessionParams{name: "codex", harness: "codex-cli", model: "gpt-5.5"}
+	for _, tt := range []struct {
+		name    string
+		sandbox *manifest.SandboxConfig
+		want    bool
+	}{
+		{name: "no sandbox"},
+		{name: "disabled sandbox", sandbox: &manifest.SandboxConfig{}},
+		{
+			name: "enabled sandbox",
+			sandbox: &manifest.SandboxConfig{
+				Enabled:                    true,
+				BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+				CodexHookSourceRepo:        "/reviewed/dear-agent",
+				CodexHookSourceCommit:      strings.Repeat("a", 40),
+				CodexHookDigest:            strings.Repeat("b", 64),
+			},
+			want: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &CreateSessionRequest{
+				Cwd:                  "/tmp/work",
+				BypassCodexHookTrust: true,
+				Metadata:             CreateSessionMetadata{Sandbox: tt.sandbox},
+			}
+			got := buildHarnessLaunchSpec(req, params, "session-id", nil)
+			if got.BypassCodexHookTrust != tt.want {
+				t.Fatalf("BypassCodexHookTrust = %v, want %v", got.BypassCodexHookTrust, tt.want)
+			}
+			if tt.want && got.CodexHookTrustReason != tt.sandbox.BypassCodexHookTrustReason {
+				t.Fatalf("CodexHookTrustReason = %q, want %q", got.CodexHookTrustReason, tt.sandbox.BypassCodexHookTrustReason)
+			}
+			if tt.want && got.CodexHookTrustActor != "vroom-dispatch" {
+				t.Fatalf("CodexHookTrustActor = %q, want caller identity", got.CodexHookTrustActor)
+			}
+			if tt.want &&
+				(got.CodexHookSourceRepo != tt.sandbox.CodexHookSourceRepo ||
+					got.CodexHookSourceCommit != tt.sandbox.CodexHookSourceCommit ||
+					got.CodexHookDigest != tt.sandbox.CodexHookDigest) {
+				t.Fatalf("Codex hook source identity = (%q, %q, %q), want sandbox evidence",
+					got.CodexHookSourceRepo, got.CodexHookSourceCommit, got.CodexHookDigest)
+			}
+		})
 	}
 }

@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +64,45 @@ func TestScanDocPaths(t *testing.T) {
 	}
 }
 
+func TestBootstrapCommandCarriesAdmissionAndPaths(t *testing.T) {
+	got := bootstrapCommand("repo root/$USER's", "custom/baseline.json", true)
+	for _, want := range []string{
+		`--root 'repo root/$USER'"'"'s'`,
+		`--baseline 'custom/baseline.json'`,
+		"--update-baseline",
+		"--accept-new",
+		"--accept-scanner-change",
+		`--reason '<why>'`,
+		`--reference '<bead-or-pr>'`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("bootstrap command %q does not contain %q", got, want)
+		}
+	}
+}
+
+func TestBootstrapCommandOmitsAdmissionForEmptyScan(t *testing.T) {
+	got := bootstrapCommand("repo", "empty.json", false)
+	for _, unwanted := range []string{"--accept-new", "--accept-scanner-change", "--reason", "--reference", "\n+"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("empty-scan bootstrap command %q unexpectedly contains %q", got, unwanted)
+		}
+	}
+}
+
+func TestQuoteShellWordRoundTripsPathBytes(t *testing.T) {
+	want := "repo $HOME $(exit 42) `exit 43` ' \" back\\slash\nnext"
+	// #nosec G204 -- exercising generated shell syntax is the purpose of this test.
+	cmd := exec.Command("sh", "-c", "printf %s "+quoteShellWord(want))
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("shell round trip: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("shell round trip = %q, want %q", got, want)
+	}
+}
+
 func TestScanFileSize(t *testing.T) {
 	root := t.TempDir()
 	small := make([]byte, 0)
@@ -82,8 +123,42 @@ func TestScanFileSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Key != "big.go" {
-		t.Fatalf("scanFileSize = %+v, want single finding big.go", got)
+	if len(got) != 1 || got[0].Key != "big.go (1005 lines)" {
+		t.Fatalf("scanFileSize = %+v, want single size-sensitive finding", got)
+	}
+}
+
+func TestParseFileSizeKey(t *testing.T) {
+	path, lines, ok := parseFileSizeKey("pkg/big.go (1205 lines)")
+	if !ok || path != "pkg/big.go" || lines != 1205 {
+		t.Fatalf("parseFileSizeKey = %q, %d, %v", path, lines, ok)
+	}
+	if _, _, ok := parseFileSizeKey("pkg/big.go"); ok {
+		t.Fatal("path-only key unexpectedly parsed as size finding")
+	}
+}
+
+func TestDiffFileSizeUsesMonotonicBudget(t *testing.T) {
+	base := baseline{Findings: map[string][]string{
+		"file-size": {"pkg/big.go (1300 lines)"},
+	}}
+	for _, tc := range []struct {
+		name    string
+		current string
+		wantReg bool
+	}{
+		{name: "reduction", current: "pkg/big.go (1200 lines)"},
+		{name: "same", current: "pkg/big.go (1300 lines)"},
+		{name: "growth", current: "pkg/big.go (1400 lines)", wantReg: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := diff(map[string][]finding{
+				"file-size": {{Key: tc.current}},
+			}, base)
+			if got := rep.regressionCount() > 0; got != tc.wantReg {
+				t.Fatalf("regression = %v, want %v", got, tc.wantReg)
+			}
+		})
 	}
 }
 
@@ -240,9 +315,7 @@ func TestDiffNoRegressionWhenWithinBaseline(t *testing.T) {
 	}
 }
 
-func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, defaultBaselinePath)
+func TestFindingKeysSortsAndFillsScans(t *testing.T) {
 	current := map[string][]finding{
 		"dead-package":      {{Key: "pkg/z"}, {Key: "pkg/a"}},
 		"file-size":         {{Key: "big.go"}},
@@ -250,20 +323,17 @@ func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
 		"doc-path":          {},
 		"goroutine-recover": {},
 	}
-	if err := writeBaseline(path, current); err != nil {
-		t.Fatal(err)
-	}
-	bl, err := readBaseline(path)
+	got, err := findingKeys(current)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Keys must be sorted on disk.
-	got := bl.Findings["dead-package"]
-	if len(got) != 2 || got[0] != "pkg/a" || got[1] != "pkg/z" {
-		t.Errorf("dead-package baseline = %v, want sorted [pkg/a pkg/z]", got)
+	dead := got["dead-package"]
+	if len(dead) != 2 || dead[0] != "pkg/a" || dead[1] != "pkg/z" {
+		t.Errorf("dead-package keys = %v, want sorted [pkg/a pkg/z]", dead)
 	}
 	// Empty scans must serialize as [] (not absent) so the schema is stable.
-	if bl.Findings["zero-test"] == nil {
+	if got["zero-test"] == nil || got["raw-mem-gate"] == nil {
 		t.Errorf("zero-test should round-trip as empty slice, got nil")
 	}
 }

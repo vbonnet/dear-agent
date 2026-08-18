@@ -1,6 +1,6 @@
 # AGM Statusline Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-08-01 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -39,6 +39,10 @@ provider is missing, slow, or broken.
 **STATUSLINE-11** When configuration is absent or incomplete, the system shall fall back to the default separator and timeout settings.
 
 **STATUSLINE-12** When composed output is empty for a session, the system shall cache the empty output to avoid repeated provider execution during the cache TTL.
+
+**STATUSLINE-13** When a provider deadline expires, the system shall prioritize that deadline over ready completion signals and return after bounded cancellation cleanup even if a descendant retains inherited I/O.
+
+**STATUSLINE-14** When a provider exits successfully before its deadline, the system shall accept its output until inherited stdout reaches EOF or the configured deadline expires.
 
 ## BDD Traceability
 

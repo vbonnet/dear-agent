@@ -238,7 +238,7 @@ func TestGetDLQ(t *testing.T) {
 
 	// Verify all are failed status
 	for _, entry := range dlq {
-		assert.Equal(t, StatusFailed, entry.Status)
+		assert.Equal(t, QueueStateFailed, entry.Status)
 	}
 }
 
@@ -416,7 +416,7 @@ func TestGetUnacknowledged(t *testing.T) {
 	for _, entry := range unacked {
 		assert.True(t, entry.AckRequired)
 		assert.False(t, entry.AckReceived)
-		assert.Equal(t, StatusDelivered, entry.Status)
+		assert.Equal(t, QueueStateDelivered, entry.Status)
 	}
 }
 

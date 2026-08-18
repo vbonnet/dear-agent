@@ -47,6 +47,8 @@ harness when a supervisor is stale.
 
 **VD-17** When a supervisor evaluates completion, the system shall require evidence that the change is merged, deployed when applicable, and verified before closing its bead.
 
+**VD-18** When a supervisor session is still registered but its pane shows a provider authentication failure for its configured harness, the system shall archive that broken active session before recreating it through the normal bounded restart path.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

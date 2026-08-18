@@ -55,6 +55,51 @@ func TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing(t *testing.T) 
 	}
 }
 
+func TestHandleClaudeStartupReprovesTrustBeforeAdvancing(t *testing.T) {
+	t.Parallel()
+
+	readiness := HarnessInputReadiness{
+		State:   HarnessInputOnboarding,
+		Content: "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit",
+	}
+	t.Run("selector moved to No before atomic probe", func(t *testing.T) {
+		t.Parallel()
+		observed := false
+		advanced := make(map[string]bool)
+		calls := 0
+		ready, err := handleHarnessStartupStateWithProbe(t.Context(), "session", "claude-code", readiness, &observed, advanced,
+			func(_ context.Context, session string, autoAnswer bool) (ClaudeInputProbe, error) {
+				calls++
+				if session != "session" || !autoAnswer {
+					t.Fatalf("probe arguments = %q, %t", session, autoAnswer)
+				}
+				return ClaudeInputProbe{DialogOwnsInput: true}, nil
+			})
+		if err != nil || ready {
+			t.Fatalf("result = ready:%t err:%v", ready, err)
+		}
+		if calls != 1 || !observed || len(advanced) != 0 {
+			t.Fatalf("calls=%d observed=%t advanced=%v", calls, observed, advanced)
+		}
+	})
+
+	t.Run("atomic probe alone records a completed trust transition", func(t *testing.T) {
+		t.Parallel()
+		observed := false
+		advanced := make(map[string]bool)
+		_, err := handleHarnessStartupStateWithProbe(t.Context(), "session", "claude-code", readiness, &observed, advanced,
+			func(context.Context, string, bool) (ClaudeInputProbe, error) {
+				return ClaudeInputProbe{DialogOwnsInput: true, TrustAnswered: true}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !advanced[HarnessInputOnboarding+":trust"] {
+			t.Fatalf("advanced transitions = %v", advanced)
+		}
+	})
+}
+
 func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -82,6 +127,25 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			harness: "codex-cli",
 			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m Run /review on my current changes\n\ngpt-5.5 high · ~/src/project",
 			state:   HarnessInputBusy,
+		},
+		{
+			name:    "current Codex post-turn composer",
+			harness: "codex-cli",
+			content: "»\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "current Codex post-turn human draft",
+			harness: "codex-cli",
+			content: "» preserve this human draft\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex update selector owns input",
+			harness: "codex-cli",
+			content: "✨ Update available! 0.145.0 -> 0.146.0\n› 1. Update now (runs `brew upgrade --cask codex`)\n  2. Skip\n  3. Skip until next version\nPress enter to continue",
+			state:   HarnessInputOnboarding,
 		},
 		{
 			name:    "Codex model footer without input owner",
@@ -144,6 +208,83 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			harness: "claude-code",
 			content: "Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit",
 			state:   HarnessInputOnboarding,
+		},
+		{
+			// ce-wn4qe: current Claude Code (2.x) trust wording. The classifier
+			// must report Onboarding (not a false ready and not a hang) so the
+			// shared readiness path auto-answers it with Enter.
+			name:    "Claude current-wording trust owns input",
+			harness: "claude-code",
+			content: " Quick safety check: Is this a project you created or one you trust?\n\n ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n Read, Bash(git status)\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			// A paired composer draft is not trust authority without the question;
+			// generic confirmation chrome still keeps it fail-closed as permission.
+			name:    "Claude unanchored paired trust-looking rows are not onboarding",
+			harness: "claude-code",
+			content: " ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			state:   HarnessInputPermission,
+		},
+		{
+			name:    "Claude selected negative still owns onboarding input",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n❯ 2. No, exit\n\nEnter to confirm",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude ANSI selected negative still owns onboarding input",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n\x1b[1m❯\x1b[0m 2. \x1b[38;5;105mNo, exit\x1b[0m\n\nEnter to confirm",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude partially rendered trust question and bare cursor own onboarding input",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n❯ ",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude long known partial trust body cannot push question outside classifier",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n" +
+				"This folder pre-approves project permissions:\n" + strings.Repeat("Read\n", 14) + "❯ ",
+			state: HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude historical question and arbitrary response expose current composer",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n" +
+				strings.Repeat("model response complete\n", 14) + "❯ ",
+			ready: true,
+			state: HarnessInputReady,
+		},
+		{
+			// ce-wn4qe: current Claude Code idle composer with the multi-line
+			// status footer (cwd@host, mode, auth, effort) below the ❯ box.
+			// The prior chrome whitelist rejected the cwd/login/effort lines and
+			// timed out every spawn; the composer must classify as ready.
+			name:    "Claude current idle composer with status footer",
+			harness: "claude-code",
+			content: "────────────────────────────────────────\n❯ \n────────────────────────────────────────\n  vbonnet@mac:/private/tmp/wd\n  ⏸ plan mode on (shift+tab to cycle) · ← for agents\n                    Not logged in · Run /login\n                    ● high · /effort",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			// A ❯ with an active-work signal below it is a running turn, not a
+			// ready composer.
+			name:    "Claude composer running a turn is not ready",
+			harness: "claude-code",
+			content: "❯ \n  ✻ Working… (12s · esc to interrupt)\n  vbonnet@mac:/private/tmp/wd",
+			state:   HarnessInputBusy,
+		},
+		{
+			// Active output beneath an empty ❯ that merely contains a slash token
+			// like "/model" must not be mistaken for idle footer chrome.
+			name:    "Claude output mentioning a slash token is not ready",
+			harness: "claude-code",
+			content: "❯ \nRunning /model migration\nApplying changes…",
+			state:   HarnessInputBusy,
 		},
 		{
 			name:    "Claude permission wins over prompt glyph",
@@ -547,6 +688,7 @@ func TestHarnessStartupAdvanceKeys(t *testing.T) {
 	}{
 		{name: "Gemini trust selection", harness: "gemini-cli", content: "Do you trust the files in this folder?", want: []string{"1", "Enter"}},
 		{name: "Codex model upgrade", harness: "codex-cli", content: "Choose how you'd like Codex to proceed", want: []string{"Down", "Enter"}},
+		{name: "Codex update selector", harness: "codex-cli", content: "Update available!\nUpdate now\nSkip until next version", want: []string{"Down", "Enter"}},
 		{name: "AGY survey", harness: "agy", content: "How's the CLI experience so far?\n[0] Skip", want: []string{"0"}},
 		{name: "default trust selection", harness: "claude-code", content: "Do you trust the files in this folder?", want: []string{"Enter"}},
 	}
@@ -554,6 +696,47 @@ func TestHarnessStartupAdvanceKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := harnessStartupAdvanceKeys(tt.harness, tt.content); !slices.Equal(got, tt.want) {
 				t.Fatalf("harnessStartupAdvanceKeys(%q) = %#v, want %#v", tt.harness, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCanAdvanceHarnessStartup(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		state   string
+		harness string
+		content string
+		want    bool
+	}{
+		{
+			name:    "Claude selected affirmative may advance",
+			state:   HarnessInputOnboarding,
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit\nEnter to confirm",
+			want:    true,
+		},
+		{
+			name:    "Claude selected negative may not advance",
+			state:   HarnessInputOnboarding,
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n❯ 2. No, exit\nEnter to confirm",
+			want:    false,
+		},
+		{
+			name:    "other onboarding keeps existing advancement",
+			state:   HarnessInputOnboarding,
+			harness: "codex-cli",
+			content: "Do you trust the contents of this directory?",
+			want:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canAdvanceHarnessStartup(tt.state, tt.harness, tt.content); got != tt.want {
+				t.Fatalf("canAdvanceHarnessStartup(%q, %q) = %t, want %t", tt.state, tt.harness, got, tt.want)
 			}
 		})
 	}

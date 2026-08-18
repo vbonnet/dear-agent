@@ -147,7 +147,7 @@ bash_cmd() { # $1 = command string -> hook payload
     [[ "$output" == *"bd --db"* ]]
 }
 
-@test "error message mentions bd -C" {
+@test "error message does not suggest non-canonical bd -C" {
     bash_cmd 'BEADS_DIR=/x bd list'
-    [[ "$output" == *"bd -C"* ]]
+    [[ "$output" != *"bd -C"* ]]
 }

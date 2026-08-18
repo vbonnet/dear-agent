@@ -243,11 +243,37 @@ func TestDetectSessionUninitialized(t *testing.T) {
 			wantEvidence:  "no claude process",
 		},
 		{
-			name:          "trust prompt visible",
+			name:          "trust question without selected row remains uninitialized",
 			paneContent:   "Do you trust the files in this folder?\n1. Yes\n2. No\n",
 			claudeRunning: true,
 			wantViolation: true,
+			wantEvidence:  "no prompt character",
+		},
+		{
+			name:          "live selected trust prompt is uninitialized",
+			paneContent:   "Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit\nEnter to confirm",
+			claudeRunning: true,
+			wantViolation: true,
 			wantEvidence:  "trust prompt visible",
+		},
+		{
+			name:          "live trust prompt with negative selected is uninitialized",
+			paneContent:   "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n❯ 2. No, exit\nEnter to confirm",
+			claudeRunning: true,
+			wantViolation: true,
+			wantEvidence:  "trust prompt visible",
+		},
+		{
+			name:          "historical trust selector above current composer is initialized",
+			paneContent:   "❯ 1. Yes, I trust this folder\n  2. No, exit\n\nresponse complete\n❯ \n────────",
+			claudeRunning: true,
+			wantViolation: false,
+		},
+		{
+			name:          "historical trust question and selector above current composer are initialized",
+			paneContent:   "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit\nEnter to confirm\n\nresponse complete\n❯ \n────────",
+			claudeRunning: true,
+			wantViolation: false,
 		},
 		{
 			name:          "welcome screen without prompt",

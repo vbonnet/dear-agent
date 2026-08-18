@@ -156,8 +156,8 @@ func ResolveBaseRef(repoPath string) string {
 // Note: a squash-merged branch reports a positive count even though its
 // content is already on base. This is intentional for a cleanup gate — it
 // keeps such worktrees rather than risking removal of work that only looks
-// merged. Reclaiming squash-merged trees is the job of `agm audit resources`
-// / scripts/cleanup-worktrees.sh, not this conservative path.
+// merged. Reclaiming squash-merged trees requires the explicit PR merge proof
+// in `agm worktree sweep`, not this conservative path.
 func CommitsAhead(repoPath, ref, base string) (int, error) {
 	gitRoot, err := findGitRoot(repoPath)
 	if err != nil {

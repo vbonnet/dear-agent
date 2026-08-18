@@ -65,6 +65,11 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite session store: %w", err)
 	}
+	// The SQLite adapter is a test-environment stand-in for Dolt. Keep its
+	// writes on one connection so concurrent callers queue in database/sql
+	// instead of racing separate SQLite writers into SQLITE_BUSY. The durable
+	// name reservation still arbitrates interleaved create lifecycles.
+	conn.SetMaxOpenConns(1)
 	if err := conn.Ping(); err != nil { //nolint:noctx // connection validation
 		_ = conn.Close()
 		return nil, fmt.Errorf("ping SQLite session store: %w", err)
@@ -171,6 +176,17 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_agm_sessions_workspace_updated
   ON agm_sessions(workspace, updated_at DESC);
+CREATE TABLE IF NOT EXISTS agm_session_name_reservations (
+  workspace TEXT NOT NULL,
+  name TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (workspace, name),
+  UNIQUE (workspace, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agm_session_name_reservation_expiry
+  ON agm_session_name_reservations(expires_at);
 CREATE TABLE IF NOT EXISTS agm_harness_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
@@ -339,6 +355,39 @@ func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error)
 	return configuredWorkspaceConfigsFromRegistry(enabled, data)
 }
 
+// ConfiguredWorkspaceConfigsIncludingDisabledAt returns every workspace named
+// in the registry, including disabled entries. Destructive inventory must not
+// omit a disabled store that can still contain an unarchived session.
+func ConfiguredWorkspaceConfigsIncludingDisabledAt(workspaceConfigPath string) ([]*Config, error) {
+	path := expandTilde(workspaceConfigPath)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read AGM workspace config: %w", err)
+	}
+	all, hasRegistryEntries, err := parseAllWorkspaceNames(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) == 0 {
+		if hasRegistryEntries {
+			return nil, fmt.Errorf("AGM workspace config has no named workspaces")
+		}
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	return configuredWorkspaceConfigsFromRegistry(all, data)
+}
+
 func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*Config, error) {
 	base, err := configForWorkspace(enabled[0])
 	if err != nil {
@@ -454,6 +503,26 @@ func parseEnabledWorkspaceNames(data []byte) ([]string, bool, error) {
 	return enabled, len(cfg.Workspaces) > 0, nil
 }
 
+func parseAllWorkspaceNames(data []byte) ([]string, bool, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name string `yaml:"name"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+	names := make([]string, 0, len(cfg.Workspaces))
+	for index, workspace := range cfg.Workspaces {
+		name := strings.TrimSpace(workspace.Name)
+		if name == "" {
+			return nil, true, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		}
+		names = append(names, name)
+	}
+	return names, len(cfg.Workspaces) > 0, nil
+}
+
 func validateConfiguredWorkspaceConfigs(configs []*Config, base *Config, explicitDatabase string, databaseIsExplicit bool) ([]*Config, error) {
 	if len(configs) == 0 {
 		return []*Config{base}, nil
@@ -565,6 +634,18 @@ func New(config *Config) (*Adapter, error) {
 	}
 
 	return adapter, nil
+}
+
+// NewWithoutAutoStart opens a Dolt adapter without invoking a configured
+// startup script or retrying after the initial connection failure. It is used
+// by read-only inventory probes where a missing database is expected.
+func NewWithoutAutoStart(config *Config) (*Adapter, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	withoutStart := *config
+	withoutStart.StartScript = ""
+	return New(&withoutStart)
 }
 
 // expandTilde expands ~ prefix to user home directory

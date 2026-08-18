@@ -10,31 +10,53 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
 // HarnessLaunchSpec is the harness-neutral launch contract used by every
 // creation surface. Surface adapters may still own interactive readiness and
 // presentation, but they must not assemble a second launch command.
 type HarnessLaunchSpec struct {
-	Harness          string
-	Model            string
-	SessionName      string
-	SessionID        string
-	ResumeID         string
-	WorkDir          string
-	Persistent       bool
-	PermissionMode   string
-	DisableAutoMode  bool
-	DisableOAuth     bool
-	MaxBudgetUSD     float64
-	ExtraAddDirs     []string
-	ForwardTelemetry bool
-	Codex            *manifest.Codex
-	Pi               *manifest.Pi
-	PiLaunchID       string
-	PiExtension      string
-	PiPolicyJSON     string
-	PiPolicyFile     string
+	Harness         string
+	Model           string
+	SessionName     string
+	SessionID       string
+	ResumeID        string
+	WorkDir         string
+	Persistent      bool
+	PermissionMode  string
+	DisableAutoMode bool
+	DisableOAuth    bool
+	MaxBudgetUSD    float64
+	ExtraAddDirs    []string
+	// BypassCodexHookTrust authorizes Codex to trust the exact attested hook
+	// materialization without an interactive per-path review. Only codex-cli
+	// consumes it; other harnesses ignore it.
+	BypassCodexHookTrust  bool
+	CodexHookRoot         string
+	CodexHookTrustReason  string
+	CodexHookTrustActor   string
+	CodexHookSourceRepo   string
+	CodexHookSourceCommit string
+	CodexHookDigest       string
+	ForwardTelemetry      bool
+	Codex                 *manifest.Codex
+	// CodexRemoteResume marks an existing Codex thread reattachment. A fresh
+	// remote-controlled session has Codex metadata but must leave this false.
+	CodexRemoteResume bool
+	Pi                *manifest.Pi
+	PiLaunchID        string
+	PiExtension       string
+	PiPolicyJSON      string
+	PiPolicyFile      string
+	// BeforeSpawn is an optional surface-owned admission callback. Launch
+	// adapters invoke it after command preparation and executable resolution,
+	// immediately before the irreversible process or tmux submission boundary.
+	BeforeSpawn func(...*override.Reservation) ([]*override.Reservation, error)
+	// AfterAuthorization runs only after every launch-bound override has been
+	// committed or sealed successfully and command delivery is successful or
+	// uncertain.
+	AfterAuthorization func()
 	// DeferredUntilCallerExit is set only by current-pane launchers whose
 	// queued command cannot run until the producing AGM process releases tmux.
 	DeferredUntilCallerExit bool
@@ -43,9 +65,27 @@ type HarnessLaunchSpec struct {
 // HarnessLaunchCommand is the command plus the startup-policy outcome needed
 // by post-create handling.
 type HarnessLaunchCommand struct {
-	Command              string
-	ModeAppliedAtStartup bool
-	Cancel               func() error
+	Command                  string
+	ModeAppliedAtStartup     bool
+	Cancel                   func() error
+	Reservations             []*override.Reservation
+	BindOverrideReservations func(bool, ...*override.Reservation) error
+}
+
+var reserveCodexHookTrust = func(
+	reason, actor, session, subject string,
+) (*override.Reservation, override.AuthorizationProof, error) {
+	reservation, err := override.Reserve(override.Request{
+		Kind:    override.KindCodexHookTrust,
+		Reason:  reason,
+		Actor:   actor,
+		Session: session,
+		Subject: subject,
+	})
+	if err != nil {
+		return nil, override.AuthorizationProof{}, err
+	}
+	return reservation, reservation.Proof(), nil
 }
 
 // CancelUndelivered removes a private handoff when its pane command is
@@ -56,6 +96,28 @@ func (c HarnessLaunchCommand) CancelUndelivered() error {
 		return nil
 	}
 	return c.Cancel()
+}
+
+// FinalizeLaunch seals reservations and the spawn-recording obligation into a
+// private handoff for executor-bound commitment. Legacy effect-free launch
+// commands fall back to direct reservation commitment.
+func (c HarnessLaunchCommand) FinalizeLaunch(
+	recordSpawn bool,
+	reservations ...*override.Reservation,
+) error {
+	if c.BindOverrideReservations != nil {
+		return c.BindOverrideReservations(recordSpawn, reservations...)
+	}
+	_, err := override.CommitAll(reservations...)
+	return err
+}
+
+// FinalizeOverrideReservations commits resume-only overrides without recording
+// a new-spawn stagger timestamp.
+func (c HarnessLaunchCommand) FinalizeOverrideReservations(
+	reservations ...*override.Reservation,
+) error {
+	return c.FinalizeLaunch(false, reservations...)
 }
 
 // ResolveHarnessLaunchSubmission converts tmux's irreversible submission
@@ -89,10 +151,11 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	}
 }
 
-// PrepareHarnessLaunchCommand stages caller-only credentials and telemetry for
-// private Codex and Claude execution. The returned command contains only the
-// absolute current AGM path, validated non-secret metadata, and an opaque
-// owner-only handoff path. Call Cancel only when the command was not delivered.
+// PrepareHarnessLaunchCommand stages caller-only credentials, telemetry, and
+// launch-admission effects for private harness execution. Private commands
+// contain only the absolute current AGM path, validated non-secret metadata,
+// and an opaque owner-only handoff path. Call Cancel only when the command was
+// not delivered.
 func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, error) {
 	if err := validateHarnessLaunchSpec(spec); err != nil {
 		return HarnessLaunchCommand{}, err
@@ -106,19 +169,80 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 		}
 		return HarnessLaunchCommand{
 			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
 	case "codex-cli":
 		launch, modeApplied := codexLaunch(spec)
+		launch, reservations, err := reserveCodexLaunch(launch)
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
 		prepared, err := harnessexec.PrepareCodexCommand(launch, os.Environ())
 		if err != nil {
 			return HarnessLaunchCommand{}, err
 		}
 		return HarnessLaunchCommand{
 			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+			Reservations:             reservations,
+			BindOverrideReservations: prepared.BindOverrideReservations,
+		}, nil
+	case "agy":
+		launch, modeApplied := agyLaunch(spec, "")
+		prepared, err := harnessexec.PrepareAgyCommand(launch, os.Environ())
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		return HarnessLaunchCommand{
+			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
 	default:
-		return BuildHarnessLaunchCommand(spec), nil
+		launch := BuildHarnessLaunchCommand(spec)
+		if spec.SessionName == "" ||
+			(spec.BeforeSpawn == nil && spec.AfterAuthorization == nil) {
+			return launch, nil
+		}
+		command := launch.Command
+		if !spec.Persistent {
+			command = strings.TrimSuffix(command, launchparity.ExitSuffix(false))
+		}
+		prepared, err := harnessexec.PrepareHarnessCommand(
+			spec.SessionName,
+			command,
+			spec.Persistent,
+			spec.DeferredUntilCallerExit,
+		)
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		launch.Command = prepared.Command
+		launch.Cancel = prepared.Cancel
+		launch.BindOverrideReservations = prepared.BindOverrideReservations
+		return launch, nil
 	}
+}
+
+func reserveCodexLaunch(
+	launch harnessexec.CodexLaunch,
+) (harnessexec.CodexLaunch, []*override.Reservation, error) {
+	if !launch.BypassHookTrust {
+		return launch, nil, nil
+	}
+	reservation, proof, err := reserveCodexHookTrust(
+		launch.HookTrustReason,
+		launch.HookTrustActor,
+		launch.SessionName,
+		launch.HookTrustSubject,
+	)
+	if err != nil {
+		return harnessexec.CodexLaunch{}, nil, fmt.Errorf("codex hook-trust override refused: %w", err)
+	}
+	launch.HookTrustProof = proof
+	var reservations []*override.Reservation
+	if reservation != nil {
+		reservations = []*override.Reservation{reservation}
+	}
+	return launch, reservations, nil
 }
 
 func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
@@ -142,6 +266,7 @@ func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
 			{"session name", spec.SessionName},
 			{"workdir", spec.WorkDir},
 			{"permission mode", spec.PermissionMode},
+			{"Codex hook root", spec.CodexHookRoot},
 		}
 		if spec.Codex != nil {
 			fields = append(fields, field{"codex session id", spec.Codex.SessionID})
@@ -187,6 +312,19 @@ func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
 	if validateAddDirs {
 		if err := harnessexec.ValidatePastedTextList("add-dir", spec.ExtraAddDirs); err != nil {
 			return fmt.Errorf("validate harness launch: %w", err)
+		}
+	}
+	if agent.NormalizeHarnessName(spec.Harness) == "codex-cli" {
+		if spec.BypassCodexHookTrust {
+			if _, err := override.CodexHookTrustSubject(
+				spec.CodexHookSourceRepo, spec.CodexHookSourceCommit, spec.CodexHookDigest,
+			); err != nil {
+				return fmt.Errorf("validate harness launch: %w", err)
+			}
+		} else if spec.CodexHookSourceRepo != "" ||
+			spec.CodexHookSourceCommit != "" ||
+			spec.CodexHookDigest != "" {
+			return fmt.Errorf("validate harness launch: Codex hook source requires hook-trust bypass")
 		}
 	}
 	return nil
@@ -264,6 +402,12 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		resumeID = spec.Codex.SessionID
 	}
 	modeApplied := false
+	hookTrustSubject := ""
+	if spec.BypassCodexHookTrust {
+		hookTrustSubject, _ = override.CodexHookTrustSubject(
+			spec.CodexHookSourceRepo, spec.CodexHookSourceCommit, spec.CodexHookDigest,
+		)
+	}
 	approval := ""
 	if flag := launchparity.CodexPermissionModeFlag(spec.PermissionMode); flag != "" {
 		approval = strings.TrimPrefix(flag, "-a ")
@@ -278,6 +422,15 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		AddDirs:                spec.ExtraAddDirs,
 		ResumeID:               resumeID,
 		Remote:                 resumeID != "",
+		RemoteResume:           spec.CodexRemoteResume && resumeID != "",
+		BypassHookTrust:        spec.BypassCodexHookTrust,
+		HookRoot:               spec.CodexHookRoot,
+		HookTrustReason:        spec.CodexHookTrustReason,
+		HookTrustActor:         spec.CodexHookTrustActor,
+		HookTrustSubject:       hookTrustSubject,
+		HookTrustSourceRepo:    spec.CodexHookSourceRepo,
+		HookTrustSourceCommit:  spec.CodexHookSourceCommit,
+		HookTrustDigest:        spec.CodexHookDigest,
 		Persistent:             spec.Persistent,
 		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}
@@ -303,7 +456,14 @@ func PrepareAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) (Har
 	if err := harnessexec.ValidatePastedText("agy conversation id", conversationID); err != nil {
 		return HarnessLaunchCommand{}, fmt.Errorf("validate harness launch: %w", err)
 	}
-	return buildAgyCommand(spec, conversationID), nil
+	launch, modeApplied := agyLaunch(spec, conversationID)
+	prepared, err := harnessexec.PrepareAgyCommand(launch, os.Environ())
+	if err != nil {
+		return HarnessLaunchCommand{}, err
+	}
+	return HarnessLaunchCommand{
+		Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+	}, nil
 }
 
 // PrepareFallbackResumeCommand validates the working directory used by the
@@ -318,14 +478,22 @@ func PrepareFallbackResumeCommand(workdir string) (HarnessLaunchCommand, error) 
 }
 
 func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
+	launch, modeApplied := agyLaunch(spec, conversationID)
+	return HarnessLaunchCommand{Command: harnessexec.BuildAgyCommand(launch), ModeAppliedAtStartup: modeApplied}
+}
+
+func agyLaunch(spec HarnessLaunchSpec, conversationID string) (harnessexec.AgyLaunch, bool) {
 	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
-	command := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
-		WorkDir:        spec.WorkDir,
-		ResolvedModel:  resolvedModel,
-		PermissionMode: spec.PermissionMode,
-		ConversationID: conversationID,
-		ExtraAddDirs:   spec.ExtraAddDirs,
-		Persistent:     spec.Persistent,
-	})
-	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
+	modeApplied := launchparity.AgyPermissionModeFlag(spec.PermissionMode) != ""
+	launch := harnessexec.AgyLaunch{
+		SessionName:            spec.SessionName,
+		Model:                  resolvedModel,
+		WorkDir:                spec.WorkDir,
+		Permission:             spec.PermissionMode,
+		AddDirs:                spec.ExtraAddDirs,
+		ConversationID:         conversationID,
+		Persistent:             spec.Persistent,
+		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
+	}
+	return launch, modeApplied
 }

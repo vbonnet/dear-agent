@@ -22,6 +22,12 @@
 
 **WAYFINDER-HISTORY-07** When a project contains only the legacy `WAYFINDER-HISTORY.md` JSON Lines log, the system shall atomically rename it to `WAYFINDER-HISTORY.jsonl` before reading, appending, or archiving so the audit trail remains contiguous.
 
+**WAYFINDER-HISTORY-08** When an event is appended, the system shall recursively replace project-directory and home-directory path roots in newly persisted data values with `$PROJECT_DIR` and `$HOME` without mutating caller-owned data or rewriting existing history bytes.
+
+Path-root recognition is privacy-first for diagnostic text: whitespace and common diagnostic punctuation immediately after an exact root are delimiters, even where POSIX could interpret that punctuation as part of a rare sibling filename. Platform-equivalent path separators are recognized throughout the root and as descendant delimiters; Windows roots are matched case-insensitively, while POSIX roots remain byte-sensitive. Ordinary filename continuations are not rewritten.
+
+**WAYFINDER-HISTORY-09** If the home-directory root cannot be resolved while event data is being sanitized, the system shall reject the append before opening the history file rather than persist data under a weakened privacy guarantee.
+
 ## Test Traceability
 
 - Package tests: `wayfinder/cmd/wayfinder-session/internal/history/history_test.go`

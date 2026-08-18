@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,11 +20,14 @@ import (
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
 func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
+	var admission *circuitBreakerAdmission
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
 		}
-		if err := enforceCircuitBreakers(); err != nil {
+		var err error
+		admission, err = enforceCircuitBreakers(sessionName)
+		if err != nil {
 			return err
 		}
 	}
@@ -49,6 +51,10 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 			if pwd := os.Getenv("PWD"); pwd != "" {
 				spec.WorkDir = pwd
 			}
+			if admission != nil {
+				spec.BeforeSpawn = admission.beforeSpawn
+				spec.AfterAuthorization = admission.afterAuthorization
+			}
 			if err := startCurrentTmuxHarness(ctx, spec); err != nil {
 				return ops.CreateSessionLaunchResult{}, err
 			}
@@ -69,8 +75,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		OpenSessionStorage: func(context.Context) (dolt.Storage, func(), error) {
 			adapter, err := getStorage()
 			if err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to connect to session storage: %v", err))
-				return nil, nil, nil
+				return nil, nil, err
 			}
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
@@ -90,7 +95,8 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 		AllowEmptyPrompt:       true,
 		AllowUnsafeTitle:       true,
 		ReuseExistingTmux:      true,
-		RegistrationOptional:   true,
+		RequireStorage:         true,
+		RegisterBeforeLaunch:   true,
 		ManifestDir:            manifestDir,
 		ManifestDirOptional:    true,
 		SkipCodexRemoteControl: true,
@@ -174,7 +180,9 @@ func queueCurrentTmuxPiWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTm
 	if err != nil {
 		return false, fmt.Errorf("prepare Pi launch: %w", err)
 	}
-	if err := resolveHarnessLaunchSubmission("Pi", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch("Pi", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Pi in current tmux pane",
 			"  • Verify Pi is installed: which pi\n"+
@@ -213,7 +221,9 @@ func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime curren
 	if err != nil {
 		return false, fmt.Errorf("prepare Codex launch: %w", err)
 	}
-	if err := resolveHarnessLaunchSubmission("Codex", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch("Codex", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Codex in current tmux pane",
 			"  • Verify Codex is installed: which codex\n"+
@@ -305,7 +315,9 @@ func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchS
 	if err != nil {
 		return fmt.Errorf("prepare %s launch: %w", spec.Harness, err)
 	}
-	if err := resolveHarnessLaunchSubmission(spec.Harness, launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
+	if err := submitHarnessLaunch(spec.Harness, spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -360,76 +372,60 @@ func startCurrentTmuxGemini(ctx context.Context, spec ops.HarnessLaunchSpec) err
 	return nil
 }
 
-// monitorAndAnswerTrustPrompt monitors tmux output via control mode and answers trust prompt if detected
-// Returns nil if no prompt appears (success), error if prompt appears but we can't answer it
+// monitorAndAnswerTrustPrompt polls the current exact pane and answers a live
+// affirmative trust prompt. Control-mode fragments are not authority evidence.
 func monitorAndAnswerTrustPrompt(ctx context.Context, sessionName string, timeout time.Duration) error {
-	// Start control mode
-	ctrl, err := tmux.StartControlMode(sessionName)
-	if err != nil {
-		return fmt.Errorf("failed to start control mode: %w", err)
+	return monitorAndAnswerTrustPromptWithProbe(ctx, sessionName, timeout, 100*time.Millisecond, tmux.ProbeClaudeInputContext)
+}
+
+func monitorAndAnswerTrustPromptWithProbe(
+	parent context.Context,
+	sessionName string,
+	timeout, pollInterval time.Duration,
+	probeInput func(context.Context, string, bool) (tmux.ClaudeInputProbe, error),
+) error {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	if pollInterval <= 0 {
+		pollInterval = 100 * time.Millisecond
 	}
-	defer func() { _ = ctrl.Close() }()
-
-	// Create output watcher
-	watcher := tmux.NewOutputWatcher(ctrl.Stdout)
-
-	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 	trustPromptDetected := false
 
-	for time.Now().Before(deadline) {
+	for {
 		if err := ctx.Err(); err != nil {
-			return err
-		}
-		// Read next line with short timeout
-		line, err := watcher.GetRawLine(1 * time.Second)
-		if err != nil {
-			// Timeout reading - no more output
-			// If we haven't seen trust prompt, assume it won't appear
-			if !trustPromptDetected {
-				debug.Log("No trust prompt detected (good - additionalDirectories likely worked)")
+			if err == context.DeadlineExceeded {
+				if trustPromptDetected {
+					return fmt.Errorf("trust prompt detected but couldn't find its affirmative option")
+				}
 				return nil
 			}
-			continue
+			return err
 		}
-
-		// Parse %output events
-		if !strings.HasPrefix(line, "%output") {
-			continue
+		probe, probeErr := probeInput(ctx, sessionName, true)
+		if probeErr != nil {
+			return fmt.Errorf("probe current trust dialog: %w", probeErr)
 		}
-
-		content := tmux.ExtractOutputContent(line)
-
-		// Check for trust prompt
-		if strings.Contains(content, "Do you trust the files in this folder?") {
+		if probe.DialogOwnsInput && !trustPromptDetected {
 			trustPromptDetected = true
-			debug.Log("Trust prompt detected!")
+			debug.Log("Trust prompt detected from current exact pane")
 			fmt.Println("📋 Trust prompt appeared - answering automatically...")
 		}
-
-		// If we detected the prompt, look for the selection UI
-		if trustPromptDetected && strings.Contains(content, "Yes, proceed") {
-			debug.Log("Sending Enter to select 'Yes, proceed'")
-
-			// Close control mode before sending keys (mixing control + send-keys doesn't work well)
-			_ = ctrl.Close()
-
-			// Send Enter key via regular tmux
-			if err := tmux.SendCommand(sessionName, "C-m"); err != nil {
-				return fmt.Errorf("failed to answer trust prompt: %w", err)
-			}
-
+		if probe.TrustAnswered {
 			debug.Log("Trust prompt answered successfully")
 			ui.PrintSuccess("Trust prompt answered")
 			return nil
 		}
+		if probe.ComposerOwnsInput {
+			debug.Log("No live trust prompt remains; Claude composer owns input")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
 	}
-
-	if trustPromptDetected {
-		return fmt.Errorf("trust prompt detected but couldn't find 'Yes, proceed' option")
-	}
-
-	// No trust prompt seen - this is success
-	return nil
 }
 
 // addToAdditionalDirectories was removed — it wrote sandbox paths to the global

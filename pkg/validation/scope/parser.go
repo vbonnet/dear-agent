@@ -6,6 +6,18 @@ import (
 	"strings"
 )
 
+var (
+	headingPattern          = regexp.MustCompile(`^(#{1,6})\s+(.+?)(?:\s+#+)?$`)
+	inlineCodePattern       = regexp.MustCompile("`[^`]+`")
+	boldAsteriskPattern     = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	boldUnderscorePattern   = regexp.MustCompile(`__([^_]+)__`)
+	italicAsteriskPattern   = regexp.MustCompile(`\*([^*]+)\*`)
+	italicUnderscorePattern = regexp.MustCompile(`_([^_]+)_`)
+	linkPattern             = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	imagePattern            = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
+	whitespacePattern       = regexp.MustCompile(`\s+`)
+)
+
 // Parser handles markdown section extraction and fuzzy matching
 type Parser struct{}
 
@@ -19,11 +31,8 @@ func (p *Parser) Parse(markdown string) []Section {
 	sections := []Section{}
 	lines := strings.Split(markdown, "\n")
 
-	// Regex for ATX-style headings: ^#{1,6}\s+(.+?)(?:\s+#+)?$
-	headingRegex := regexp.MustCompile(`^(#{1,6})\s+(.+?)(?:\s+#+)?$`)
-
 	for i, line := range lines {
-		if matches := headingRegex.FindStringSubmatch(line); matches != nil {
+		if matches := headingPattern.FindStringSubmatch(line); matches != nil {
 			level := len(matches[1])
 			heading := p.stripFormatting(matches[2])
 
@@ -42,24 +51,24 @@ func (p *Parser) Parse(markdown string) []Section {
 // stripFormatting removes markdown formatting from heading text
 func (p *Parser) stripFormatting(text string) string {
 	// Remove inline code: `code`
-	text = regexp.MustCompile("`[^`]+`").ReplaceAllString(text, "")
+	text = inlineCodePattern.ReplaceAllString(text, "")
 
 	// Remove bold: **text** or __text__
-	text = regexp.MustCompile(`\*\*([^*]+)\*\*`).ReplaceAllString(text, "$1")
-	text = regexp.MustCompile(`__([^_]+)__`).ReplaceAllString(text, "$1")
+	text = boldAsteriskPattern.ReplaceAllString(text, "$1")
+	text = boldUnderscorePattern.ReplaceAllString(text, "$1")
 
 	// Remove italic: *text* or _text_
-	text = regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllString(text, "$1")
-	text = regexp.MustCompile(`_([^_]+)_`).ReplaceAllString(text, "$1")
+	text = italicAsteriskPattern.ReplaceAllString(text, "$1")
+	text = italicUnderscorePattern.ReplaceAllString(text, "$1")
 
 	// Remove links: [text](url) -> text
-	text = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`).ReplaceAllString(text, "$1")
+	text = linkPattern.ReplaceAllString(text, "$1")
 
 	// Remove images: ![alt](url) -> ""
-	text = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`).ReplaceAllString(text, "")
+	text = imagePattern.ReplaceAllString(text, "")
 
 	// Collapse multiple spaces to single space
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	text = whitespacePattern.ReplaceAllString(text, " ")
 
 	return strings.TrimSpace(text)
 }
@@ -162,4 +171,3 @@ func levenshteinDistance(s1, s2 string) int {
 
 	return prevRow[len2]
 }
-

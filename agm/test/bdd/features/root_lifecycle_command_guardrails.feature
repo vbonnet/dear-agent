@@ -4,6 +4,7 @@
 # RELATED-SPEC: cmd/bead-close-guard/SPEC.md
 # RELATED-SPEC: cmd/bead-pr-guard/SPEC.md
 # RELATED-SPEC: cmd/bead-pr-sync/SPEC.md
+# RELATED-SPEC: cmd/branch-reaper/SPEC.md
 # RELATED-SPEC: cmd/merge-audit/SPEC.md
 # RELATED-SPEC: cmd/ai-review/SPEC.md
 Feature: Root lifecycle command guardrails
@@ -23,6 +24,7 @@ Feature: Root lifecycle command guardrails
       | cmd/bead-close-guard   |
       | cmd/bead-pr-guard      |
       | cmd/bead-pr-sync       |
+      | cmd/branch-reaper      |
       | cmd/merge-audit        |
       | cmd/mergeloop          |
       | internal/mergeloop     |
