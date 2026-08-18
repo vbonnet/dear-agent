@@ -187,7 +187,8 @@ func TestLastMerged(t *testing.T) {
 }
 
 func TestIsProtected(t *testing.T) {
-	protected := map[string]bool{"main": true, "master": true, "develop": true, "HEAD": true}
+	// As a workflow would express it: plain names plus a wildcard family.
+	protected := []string{"main", "master", "develop", "HEAD", "release/**", "v*"}
 	tests := []struct {
 		branch string
 		want   bool
@@ -200,6 +201,13 @@ func TestIsProtected(t *testing.T) {
 		{"mainline", false},
 		{"develop-x", false},
 		{"dependabot/go_modules/foo", false},
+		// A `release/**` trigger protects the whole family, not a branch
+		// literally named "release/**".
+		{"release/v2", true},
+		{"release/2026/q3", true},
+		{"release", false},
+		{"v1", true},
+		{"v1/2", false}, // single * stops at "/"
 	}
 	for _, tt := range tests {
 		if got := isProtected(tt.branch, protected); got != tt.want {
@@ -208,14 +216,41 @@ func TestIsProtected(t *testing.T) {
 	}
 }
 
+func TestMatchBranchFilter(t *testing.T) {
+	tests := []struct {
+		pattern string
+		name    string
+		want    bool
+	}{
+		{"main", "main", true},
+		{"main", "mainline", false},
+		{"release/**", "release/v2/hotfix", true},
+		{"release/*", "release/v2/hotfix", false},
+		{"release/*", "release/v2", true},
+		{"feat?", "feat1", true},
+		{"feat?", "feat12", false},
+		// Regex metacharacters in a branch name are literal, not syntax.
+		{"v1.0", "v1.0", true},
+		{"v1.0", "v1x0", false},
+		// Negated filters are exclusions in a trigger; they protect nothing.
+		{"!main", "main", false},
+		{"", "main", false},
+	}
+	for _, tt := range tests {
+		if got := matchBranchFilter(tt.pattern, tt.name); got != tt.want {
+			t.Errorf("matchBranchFilter(%q, %q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestBaseProtectedBranches(t *testing.T) {
 	base := baseProtectedBranches()
 	for _, b := range []string{"main", "master", "HEAD"} {
-		if !base[b] {
+		if !isProtected(b, base) {
 			t.Errorf("baseProtectedBranches() missing %q", b)
 		}
 	}
-	if base["develop"] {
+	if isProtected("develop", base) {
 		t.Error("baseProtectedBranches() must not hardcode develop -- that's the bug being fixed, it must come from dynamic detection")
 	}
 }
@@ -540,7 +575,7 @@ esac
 		{Name: "good/branch", TipSHA: tipSHA},
 	}
 	var stderr bytes.Buffer
-	rep, targets := classifyBranches(context.Background(), "owner/repo", map[string]bool{}, branches, &stderr)
+	rep, targets := classifyBranches(context.Background(), "owner/repo", nil, branches, &stderr)
 
 	if len(targets) != 0 {
 		t.Errorf("targets = %v, want none (neither branch is safe_delete)", targets)

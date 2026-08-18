@@ -42,11 +42,13 @@
 // to that same repository.
 //
 // The protected-branch set is not a hardcoded guess: it is the repo's
-// actual default branch (via `gh repo view`) plus every branch referenced
-// by a push/pull_request `branches:` trigger across .github/workflows/*.yml
-// -- a branch CI treats as a long-lived integration target must never be
-// auto-deleted, whatever it happens to be called -- with `main`/`master`
-// kept as a hardcoded floor in case dynamic detection fails entirely.
+// actual default branch (via `gh repo view`) plus every branch filter
+// referenced by a push/pull_request `branches:` trigger across
+// .github/workflows/*.yml -- a branch CI treats as a long-lived
+// integration target must never be auto-deleted, whatever it happens to be
+// called -- with `main`/`master` kept as a hardcoded floor in case dynamic
+// detection fails entirely. Those entries are matched as filters, not
+// literals, so a `release/**` trigger protects the whole family.
 //
 // A branch whose PR history cannot be retrieved (auth, rate limit,
 // transient API error, a per-branch PR count so large the query is
@@ -87,6 +89,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -274,7 +277,7 @@ func originIsRepo(ctx context.Context, repo string, stderr io.Writer) bool {
 // Report.LookupFailed and left unclassified; it is never a candidate for
 // deletion. This does not abort the run for the remaining branches -- a
 // single flaky lookup should not deny a report on everything else.
-func classifyBranches(ctx context.Context, repo string, protected map[string]bool, branches []branchInfo, stderr io.Writer) (Report, []branchInfo) {
+func classifyBranches(ctx context.Context, repo string, protected []string, branches []branchInfo, stderr io.Writer) (Report, []branchInfo) {
 	rep := Report{
 		SafeDelete:                 []string{},
 		ReviewNoPR:                 []string{},
@@ -431,9 +434,63 @@ type prRecord struct {
 }
 
 // isProtected reports whether branch must never be classified or deleted,
-// regardless of PR state.
-func isProtected(branch string, protected map[string]bool) bool {
-	return protected[branch]
+// regardless of PR state. Entries are GitHub Actions branch filters, so an
+// entry like `release/**` protects the whole family, not just a branch
+// literally named "release/**".
+func isProtected(branch string, protected []string) bool {
+	for _, pattern := range protected {
+		if matchBranchFilter(pattern, branch) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchBranchFilter reports whether name matches a GitHub Actions branch
+// filter. `*` matches any run of characters except `/`, `**` matches across
+// `/`, and `?` matches one non-`/` character; every other character is
+// literal. A filter with no wildcard is therefore an exact-name match.
+//
+// Negated filters (`!foo`) are exclusions in a workflow trigger, so they
+// assert nothing about what CI protects and never protect anything here.
+func matchBranchFilter(pattern, name string) bool {
+	if pattern == "" || strings.HasPrefix(pattern, "!") {
+		return false
+	}
+	if !strings.ContainsAny(pattern, "*?") {
+		return pattern == name
+	}
+	re, err := regexp.Compile(branchFilterRegexp(pattern))
+	if err != nil {
+		// An untranslatable filter falls back to exact matching rather than
+		// silently protecting nothing at all.
+		return pattern == name
+	}
+	return re.MatchString(name)
+}
+
+// branchFilterRegexp translates a GitHub branch filter into an anchored
+// regular expression.
+func branchFilterRegexp(pattern string) string {
+	var b strings.Builder
+	b.WriteString(`\A`)
+	for i := 0; i < len(pattern); i++ {
+		switch c := pattern[i]; c {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				b.WriteString(`.*`)
+				i++
+				continue
+			}
+			b.WriteString(`[^/]*`)
+		case '?':
+			b.WriteString(`[^/]`)
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	b.WriteString(`\z`)
+	return b.String()
 }
 
 // baseProtectedBranches is the hardcoded floor that always applies,
@@ -441,8 +498,8 @@ func isProtected(branch string, protected map[string]bool) bool {
 // succeeds: these names (plus the remote HEAD symref, which listBranches
 // already filters out before this is ever consulted) are never eligible
 // for deletion.
-func baseProtectedBranches() map[string]bool {
-	return map[string]bool{"main": true, "master": true, "HEAD": true}
+func baseProtectedBranches() []string {
+	return []string{"main", "master", "HEAD"}
 }
 
 // protectedBranches returns baseProtectedBranches() plus the repository's
@@ -456,15 +513,12 @@ func baseProtectedBranches() map[string]bool {
 // list that silently goes stale the day a new long-lived branch shows up.
 // Detection failures are non-fatal: they just mean fewer branches get the
 // extra protection, never fewer than the hardcoded floor.
-func protectedBranches(ctx context.Context, repo string) map[string]bool {
+func protectedBranches(ctx context.Context, repo string) []string {
 	protected := baseProtectedBranches()
 	if def, err := defaultBranch(ctx, repo); err == nil && def != "" {
-		protected[def] = true
+		protected = append(protected, def)
 	}
-	for _, b := range workflowTriggerBranches(workflowsDir) {
-		protected[b] = true
-	}
-	return protected
+	return append(protected, workflowTriggerBranches(workflowsDir)...)
 }
 
 // extractTriggerBranches parses a GitHub Actions workflow YAML document and
@@ -607,6 +661,8 @@ const branchFieldSep = "\x00"
 // listBranches enumerates refs/remotes/origin/* branches (excluding the
 // remote HEAD symref) with their tip commit SHA.
 func listBranches(ctx context.Context) ([]branchInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
+	defer cancel()
 	// #nosec G204,G702 -- fixed "git" binary, no user-controlled arguments.
 	cmd := exec.CommandContext(ctx, "git", "for-each-ref",
 		"--format=%(refname)%00%(objectname)", "refs/remotes/origin")

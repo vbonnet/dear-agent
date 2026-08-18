@@ -29,6 +29,10 @@ on:
 permissions:
   contents: write
   issues: write
+  # Every classification is a `gh pr list` call. Without this the installation
+  # token cannot read pull requests at all, so every branch lands in
+  # lookup_failed and nothing is ever reaped.
+  pull-requests: read
 
 env:
   GIT_TERMINAL_PROMPT: "0"
@@ -74,12 +78,24 @@ jobs:
           reaper_rc=$?
           # 0 = clean, 1 = review list non-empty, 2 = a PR-history lookup
           # failed for one or more branches (skipped, see lookup_failed),
-          # 4 = a safe delete was rejected. Only 3 (usage/environment error)
-          # means no report was produced at all -- everything else still has
-          # a valid JSON report on stdout worth surfacing to a human.
-          if [ "$reaper_rc" -eq 3 ]; then
-            echo "::error::branch-reaper exited $reaper_rc (usage/environment error, no report produced)" >&2
-            exit "$reaper_rc"
+          # 4 = a safe delete was rejected. Those four are the documented
+          # contract and each still leaves a valid JSON report on stdout.
+          # ANY other status -- 3 (usage/environment error), a Go panic, a
+          # 137 OOM kill -- is an allowlist miss: fail loudly rather than
+          # feed a truncated or absent report to jq with errexit disabled.
+          case "$reaper_rc" in
+            0|1|2|4) ;;
+            *)
+              echo "::error::branch-reaper exited $reaper_rc, outside its documented 0/1/2/4 contract; no trustworthy report" >&2
+              exit "$reaper_rc"
+              ;;
+          esac
+          # The exit code alone does not prove the report survived: a crash
+          # after the first write leaves partial JSON. Parse it before any
+          # of it is believed.
+          if ! jq -e 'type == "object" and has("safe_delete") and has("lookup_failed")' reaper-report.json > /dev/null; then
+            echo "::error::branch-reaper produced no parseable report despite exiting $reaper_rc" >&2
+            exit 1
           fi
           if [ "$reaper_rc" -eq 2 ]; then
             echo "::warning::branch-reaper could not retrieve PR history for one or more branches -- see lookup_failed in the report" >&2

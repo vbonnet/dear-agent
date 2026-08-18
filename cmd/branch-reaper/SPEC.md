@@ -52,6 +52,8 @@ classified from incomplete data, and does not stop the rest of the run.
 
 **BRR-12** When determining the protected-branch set, the command shall include the repository's default branch (via `gh repo view`) and every branch referenced by a `push` or `pull_request` `branches:` trigger in any `.github/workflows/*.yml` file, in addition to the fixed `main`/`master` floor, and a failure to determine the default branch or to read the workflows directory shall not be treated as an error.
 
+**BRR-16** When a protected-branch entry is a GitHub Actions branch filter containing wildcards, the command shall protect every branch the filter matches (`*` within one path segment, `**` across segments, `?` for one character), rather than only a branch whose literal name equals the filter, and shall treat a negated (`!`) filter as protecting nothing.
+
 **BRR-13** When the run completes, the command shall exit 0 if the four review/failure buckets (`review_no_pr`, `review_closed_unmerged`, `review_new_commits_after_merge`, `lookup_failed`) are all empty and no `--execute` deletion failed; shall exit 1 if any of the three review buckets is non-empty and `lookup_failed` is empty; shall exit 2 if `lookup_failed` is non-empty; shall exit 3 on a usage or environment error; and shall exit 4 when one or more safe deletions failed (which takes precedence over exit 1/2).
 
 **BRR-14** When `--execute` is given and the `origin` remote does not resolve to the repository whose pull-request history was read, the command shall delete nothing and exit with status 3, because deletions target `origin` while classification targets that repository.
