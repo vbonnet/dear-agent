@@ -35,6 +35,10 @@ handling, loop control, and process exit codes.
 
 **XPR-11** When the review pass is configured, the command shall dispatch providers through the isolated runner so contributor content never reaches a provider holding the operator's GitHub credentials.
 
+**XPR-12** When a provider command flag is empty, the command shall leave the supported provider default in place rather than overriding it.
+
+**XPR-13** When help is printed, the command shall describe the review transport and the bounds the implementation actually applies.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

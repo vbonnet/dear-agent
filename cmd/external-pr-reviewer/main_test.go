@@ -14,6 +14,16 @@ func TestRunReportsSuccessForHelp(t *testing.T) {
 	}
 }
 
+func TestEmptyProviderFlagsLeaveTheSupportedDefaults(t *testing.T) {
+	argv, err := splitCommand("")
+	if err != nil {
+		t.Fatalf("splitCommand(\"\") error = %v", err)
+	}
+	if len(argv) != 0 {
+		t.Fatalf("splitCommand(\"\") = %#v, want nothing so the package default applies", argv)
+	}
+}
+
 func TestRunRejectsUnparseableFlags(t *testing.T) {
 	if got := run([]string{"--not-a-flag"}); got != 2 {
 		t.Fatalf("run(--not-a-flag) = %d, want 2", got)

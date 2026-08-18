@@ -74,7 +74,7 @@ func listResponse(t *testing.T, prs ...PR) string {
 }
 
 func viewKey(repo string, number int) string {
-	return fmt.Sprintf("gh pr view %d --repo %s --json headRefOid,baseRefOid", number, repo)
+	return fmt.Sprintf("gh pr view %d --repo %s --json headRefOid,baseRefOid,isDraft", number, repo)
 }
 
 func viewResponse(sha string) string {
@@ -804,6 +804,61 @@ func TestRunOnceSkipsWhenTheBaseMovedDuringReview(t *testing.T) {
 	}
 	if len(r.posted()) != 0 {
 		t.Fatalf("must not approve a patch the providers did not read: %#v", r.calls)
+	}
+}
+
+func TestRunOnceSkipsAPullRequestReturnedToDraft(t *testing.T) {
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/repo"):              listResponse(t, PR{Number: 111, Title: "Back to draft", HeadRefOID: "sha111"}),
+			"gh pr diff 111 --repo owner/repo": "diff",
+			viewKey("owner/repo", 111):         `{"headRefOid":"sha111","isDraft":true}`,
+			"codex exec -":                     "Codex ok",
+			"agy run -":                        "Gemini ok",
+		},
+		errors: map[string]error{},
+	}
+	var out strings.Builder
+	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
+		Repos:     []string{"owner/repo"},
+		StatePath: filepath.Join(t.TempDir(), "state.json"),
+	}, r, &out)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Skipped || results[0].Reason != "draft" {
+		t.Fatalf("a pull request returned to draft must be skipped, got %#v", results)
+	}
+	if len(r.posted()) != 0 {
+		t.Fatalf("must not review a draft: %#v", r.calls)
+	}
+}
+
+func TestReclaimStaleLockYieldsToAFreshLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "state.json.lock")
+	if err := os.WriteFile(lockPath, []byte("live"), 0o600); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	info, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("stat lock: %v", err)
+	}
+	// The caller believes the lock is older than it is, which is exactly the
+	// race where two reclaimers would otherwise both proceed.
+	if err := reclaimStaleLock(lockPath, info.ModTime().Add(-time.Hour)); err == nil {
+		t.Fatal("reclaimStaleLock() error = nil, want it to yield to the live lock")
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("the live lock must be restored: %v", err)
+	}
+	if err := reclaimStaleLock(lockPath, info.ModTime()); err != nil {
+		t.Fatalf("reclaimStaleLock() of the matching lock error = %v", err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("the stale lock should be gone: %v", err)
 	}
 }
 

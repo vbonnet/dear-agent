@@ -31,19 +31,21 @@ func run(args []string) int {
 		statePath       = fs.String("state", "", "path to JSON state file")
 		dryRun          = fs.Bool("dry-run", false, "run providers and print actions without posting or updating state")
 		reviewEvent     = fs.String("event", string(prreviewer.ReviewComment), "review event: COMMENT, REQUEST_CHANGES, or APPROVE")
-		codexCmd        = fs.String("codex-cmd", "codex exec -", "Codex command; prompt is sent on stdin")
-		geminiCmd       = fs.String("gemini-cmd", "agy run -", "Gemini/AGY command; prompt is sent on stdin")
+		codexCmd        = fs.String("codex-cmd", "", "Codex command; empty uses the supported default. Use {prompt} for an argv prompt, otherwise the prompt is sent on stdin")
+		geminiCmd       = fs.String("gemini-cmd", "", "Gemini/AGY command; empty uses the supported default. Use {prompt} for an argv prompt, otherwise the prompt is sent on stdin")
 		geminiTries     = fs.Int("gemini-tries", 2, "Gemini attempts before skipping the secondary review")
 		providerTimeout = fs.Duration("provider-timeout", 10*time.Minute, "maximum run time for a single provider invocation")
 		retryDelay      = fs.Duration("retry-delay", 5*time.Second, "delay between secondary provider attempts")
+		githubTimeout   = fs.Duration("github-timeout", 2*time.Minute, "maximum run time for a single gh invocation")
 	)
 	fs.Var(&repos, "repo", "target GitHub repo in owner/name form; repeat for multiple repos")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `usage: external-pr-reviewer --repo owner/name [flags]
 
-Polls open pull requests, detects unseen head SHAs, asks Codex for the primary
-review and Gemini/AGY for a best-effort secondary review, then posts via gh pr
-review as the current operator. Default event is COMMENT.
+Polls open pull requests, detects unseen head and base revisions, asks Codex for
+the primary review and Gemini/AGY for a best-effort secondary review, then posts
+through the GitHub reviews API (gh api) bound to the inspected commit, as the
+current operator. Default event is COMMENT.
 
 flags:
 `)
@@ -84,6 +86,7 @@ flags:
 		GeminiCmd:       geminiArgv,
 		GeminiTries:     *geminiTries,
 		ProviderTimeout: *providerTimeout,
+		GitHubTimeout:   *githubTimeout,
 		RetryDelay:      *retryDelay,
 		ProviderRunner:  prreviewer.IsolatedRunner{},
 	}

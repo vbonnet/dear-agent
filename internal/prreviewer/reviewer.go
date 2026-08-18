@@ -42,7 +42,9 @@ type Config struct {
 	GeminiTries     int
 	ProviderTimeout time.Duration
 	// MaxDiffBytes bounds the diff text placed in a provider prompt.
-	MaxDiffBytes   int
+	MaxDiffBytes int
+	// GitHubTimeout bounds one gh invocation.
+	GitHubTimeout  time.Duration
 	RetryDelay     time.Duration
 	LockStaleAfter time.Duration
 	// ProviderRunner executes the review providers. It defaults to the runner
@@ -254,7 +256,7 @@ func RunOnce(ctx context.Context, cfg Config, runner Runner, stdout io.Writer) (
 }
 
 func reviewRepo(ctx context.Context, cfg Config, runner Runner, st state, repo string, stdout io.Writer) ([]Result, []error) {
-	prs, err := listPRs(ctx, runner, repo, cfg.Limit)
+	prs, err := listPRs(ctx, cfg, runner, repo, cfg.Limit)
 	if err != nil {
 		return nil, []error{fmt.Errorf("list PRs for %s: %w", repo, err)}
 	}
@@ -290,6 +292,23 @@ func (cfg *Config) setDefaults() error {
 	default:
 		return fmt.Errorf("unsupported review event %q", cfg.ReviewEvent)
 	}
+	cfg.applyProviderDefaults()
+	if cfg.StatePath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve home for state path: %w", err)
+		}
+		cfg.StatePath = filepath.Join(home, ".local", "state", "dear-agent", "external-pr-reviewer.json")
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	return nil
+}
+
+// applyProviderDefaults fills in the provider commands and the bounds that
+// govern how long and how large a provider interaction may be.
+func (cfg *Config) applyProviderDefaults() {
 	if len(cfg.CodexCmd) == 0 {
 		// The provider runs in a scratch directory, which Codex does not treat
 		// as trusted; codex exec hard-exits there without this flag
@@ -310,32 +329,35 @@ func (cfg *Config) setDefaults() error {
 	if cfg.MaxDiffBytes <= 0 {
 		cfg.MaxDiffBytes = 256 * 1024
 	}
+	if cfg.GitHubTimeout <= 0 {
+		cfg.GitHubTimeout = 2 * time.Minute
+	}
 	if cfg.RetryDelay < 0 {
 		cfg.RetryDelay = 0
 	}
 	if cfg.LockStaleAfter <= 0 {
 		cfg.LockStaleAfter = 4 * time.Hour
 	}
-	if cfg.StatePath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("resolve home for state path: %w", err)
-		}
-		cfg.StatePath = filepath.Join(home, ".local", "state", "dear-agent", "external-pr-reviewer.json")
-	}
-	if cfg.Now == nil {
-		cfg.Now = time.Now
-	}
-	return nil
 }
 
-func listPRs(ctx context.Context, runner Runner, repo string, limit int) ([]PR, error) {
+// runGH invokes gh with a deadline so a stalled network call cannot hang the
+// pass until the operator interrupts it.
+func runGH(ctx context.Context, cfg Config, runner Runner, args []string, stdin string) (string, error) {
+	if cfg.GitHubTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.GitHubTimeout)
+		defer cancel()
+	}
+	return runner.Run(ctx, "gh", args, stdin)
+}
+
+func listPRs(ctx context.Context, cfg Config, runner Runner, repo string, limit int) ([]PR, error) {
 	// --limit bounds what GitHub returns, so drafts are excluded in the query;
 	// a page full of drafts would otherwise hide every reviewable pull request.
 	// The bounded page is ordered by most recent update so an older pull request
 	// that just moved is inspected instead of being pinned outside the page.
 	args := []string{"pr", "list", "--repo", repo, "--state", "open", "--draft=false", "--search", "sort:updated-desc", "--limit", strconv.Itoa(limit), "--json", "number,title,headRefOid,baseRefOid,updatedAt,isDraft"}
-	out, err := runner.Run(ctx, "gh", args, "")
+	out, err := runGH(ctx, cfg, runner, args, "")
 	if err != nil {
 		return nil, err
 	}
@@ -373,9 +395,46 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 		res.Skipped, res.Reason = true, "already-reviewed"
 		return res, nil
 	}
-	diff, err := prDiff(ctx, runner, repo, pr.Number)
+	body, event, err := buildReview(ctx, cfg, runner, repo, pr, key, stdout)
 	if err != nil {
-		return res, fmt.Errorf("diff for %s: %w", key, err)
+		return res, err
+	}
+	// A head or base that moved, or a return to draft, describes a pull request
+	// nobody reviewed. The check runs before the dry-run report too, so dry-run
+	// predicts exactly what the real path would do.
+	skip, err := shouldSkipAfterReview(ctx, cfg, runner, repo, pr, key)
+	if err != nil {
+		return res, err
+	}
+	if skip != "" {
+		res.Skipped, res.Reason = true, skip
+		return res, nil
+	}
+	if cfg.DryRun {
+		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", event, repo, pr.Number, pr.HeadRefOID)
+		return res, nil
+	}
+	if err := postReview(ctx, cfg, runner, repo, pr.Number, pr.HeadRefOID, event, body); err != nil {
+		return res, fmt.Errorf("post review for %s: %w", key, err)
+	}
+	st[key] = reviewedIdentity(pr)
+	// The review is already public, so the result reports it as posted even if
+	// persistence fails; the pass then retries the save at the end.
+	res.Posted = true
+	// A crash between the POST and the end of the pass would otherwise lose the
+	// record and post the same review again on the next run.
+	if err := saveState(cfg.StatePath, st); err != nil {
+		return res, fmt.Errorf("persist review for %s: %w", key, err)
+	}
+	return res, nil
+}
+
+// buildReview collects the provider reviews and returns the body to post and
+// the event to post it under.
+func buildReview(ctx context.Context, cfg Config, runner Runner, repo string, pr PR, key string, stdout io.Writer) (string, ReviewEvent, error) {
+	diff, err := prDiff(ctx, cfg, runner, repo, pr.Number)
+	if err != nil {
+		return "", "", fmt.Errorf("diff for %s: %w", key, err)
 	}
 	bounded, truncated := boundDiff(diff, cfg.MaxDiffBytes)
 	prompt := reviewPrompt(repo, pr, bounded)
@@ -386,7 +445,7 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 	}
 	codex, err := runProvider(ctx, cfg.ProviderRunner, cfg.CodexCmd, prompt, cfg.ProviderTimeout)
 	if err != nil {
-		return res, fmt.Errorf("codex review for %s: %w", key, err)
+		return "", "", fmt.Errorf("codex review for %s: %w", key, err)
 	}
 	gemini, geminiAttempts, geminiErr := runGemini(ctx, cfg, cfg.ProviderRunner, prompt)
 	if geminiErr != nil {
@@ -398,43 +457,33 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 	if truncated && cfg.ReviewEvent == ReviewApprove {
 		body += "\nApproval withheld: the diff was truncated before review, so part of this pull request was not inspected.\n"
 	}
-	// A head or base that moved while the providers ran describes a patch nobody
-	// reviewed, so the check runs before the dry-run report too: dry-run must
-	// predict exactly what the real path would do.
-	current, err := currentRevisions(ctx, runner, repo, pr.Number)
-	if err != nil {
-		return res, fmt.Errorf("confirm revisions for %s: %w", key, err)
-	}
-	current.Number = pr.Number
-	if reviewedIdentity(current) != reviewedIdentity(pr) {
-		res.Skipped, res.Reason = true, "head-changed"
-		return res, nil
-	}
-	if cfg.DryRun {
-		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", event, repo, pr.Number, pr.HeadRefOID)
-		res.Posted = false
-		return res, nil
-	}
-	if err := postReview(ctx, runner, repo, pr.Number, pr.HeadRefOID, event, body); err != nil {
-		return res, fmt.Errorf("post review for %s: %w", key, err)
-	}
-	st[key] = reviewedIdentity(pr)
-	// A crash between the POST and the end of the pass would otherwise lose the
-	// record and post the same review again on the next run.
-	if err := saveState(cfg.StatePath, st); err != nil {
-		return res, fmt.Errorf("persist review for %s: %w", key, err)
-	}
-	res.Posted = true
-	return res, nil
+	return body, event, nil
 }
 
-func prDiff(ctx context.Context, runner Runner, repo string, number int) (string, error) {
-	return runner.Run(ctx, "gh", []string{"pr", "diff", strconv.Itoa(number), "--repo", repo}, "")
+// shouldSkipAfterReview returns the skip reason if the pull request changed
+// while the providers were running, or an empty string when posting is safe.
+func shouldSkipAfterReview(ctx context.Context, cfg Config, runner Runner, repo string, pr PR, key string) (string, error) {
+	current, err := currentRevisions(ctx, cfg, runner, repo, pr.Number)
+	if err != nil {
+		return "", fmt.Errorf("confirm revisions for %s: %w", key, err)
+	}
+	current.Number = pr.Number
+	if current.IsDraft {
+		return "draft", nil
+	}
+	if reviewedIdentity(current) != reviewedIdentity(pr) {
+		return "head-changed", nil
+	}
+	return "", nil
+}
+
+func prDiff(ctx context.Context, cfg Config, runner Runner, repo string, number int) (string, error) {
+	return runGH(ctx, cfg, runner, []string{"pr", "diff", strconv.Itoa(number), "--repo", repo}, "")
 }
 
 // currentRevisions returns the pull request's current head and base revisions.
-func currentRevisions(ctx context.Context, runner Runner, repo string, number int) (PR, error) {
-	out, err := runner.Run(ctx, "gh", []string{"pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefOid,baseRefOid"}, "")
+func currentRevisions(ctx context.Context, cfg Config, runner Runner, repo string, number int) (PR, error) {
+	out, err := runGH(ctx, cfg, runner, []string{"pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefOid,baseRefOid,isDraft"}, "")
 	if err != nil {
 		return PR{}, err
 	}
@@ -556,7 +605,7 @@ func isAccessDenied(err error) bool {
 // postReview submits the review through the reviews API so it is bound to the
 // commit both providers actually read. The body travels on stdin: a review body
 // in argv is readable by every process listing on a shared host.
-func postReview(ctx context.Context, runner Runner, repo string, number int, headSHA string, event ReviewEvent, body string) error {
+func postReview(ctx context.Context, cfg Config, runner Runner, repo string, number int, headSHA string, event ReviewEvent, body string) error {
 	payload, err := json.Marshal(struct {
 		CommitID string `json:"commit_id"`
 		Event    string `json:"event"`
@@ -566,7 +615,7 @@ func postReview(ctx context.Context, runner Runner, repo string, number int, hea
 		return fmt.Errorf("marshal review payload: %w", err)
 	}
 	args := []string{"api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number), "--input", "-"}
-	_, err = runner.Run(ctx, "gh", args, string(payload))
+	_, err = runGH(ctx, cfg, runner, args, string(payload))
 	return err
 }
 
@@ -658,11 +707,40 @@ func lockState(path string, staleAfter time.Duration, now func() time.Time) (fun
 		if now().Sub(info.ModTime()) < staleAfter {
 			return nil, fmt.Errorf("another external-pr-reviewer run holds %s", lockPath)
 		}
-		if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("clear stale state lock: %w", err)
+		if err := reclaimStaleLock(lockPath, info.ModTime()); err != nil {
+			return nil, err
 		}
 	}
 	return nil, fmt.Errorf("could not claim state lock %s", lockPath)
+}
+
+// reclaimStaleLock removes a lock only if the file it renames away is still the
+// stale one. Renaming first means a racing reclaimer cannot delete the fresh
+// lock another process just created.
+func reclaimStaleLock(lockPath string, staleModTime time.Time) error {
+	claimed := fmt.Sprintf("%s.stale.%d", lockPath, os.Getpid())
+	if err := os.Rename(lockPath, claimed); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("claim stale state lock: %w", err)
+	}
+	info, err := os.Stat(claimed)
+	if err != nil {
+		return fmt.Errorf("inspect claimed state lock: %w", err)
+	}
+	if !info.ModTime().Equal(staleModTime) {
+		// Another process replaced the lock between the stat and the rename, so
+		// what was moved is its live lock: put it back and yield.
+		if err := os.Rename(claimed, lockPath); err != nil {
+			return fmt.Errorf("restore live state lock: %w", err)
+		}
+		return fmt.Errorf("another external-pr-reviewer run holds %s", lockPath)
+	}
+	if err := os.Remove(claimed); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear stale state lock: %w", err)
+	}
+	return nil
 }
 
 // heartbeatLock refreshes the lock timestamp until the pass releases it.

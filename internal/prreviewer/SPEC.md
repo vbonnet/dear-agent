@@ -87,6 +87,14 @@ loop control — and must not restate the requirements below. The split mirrors
 
 **PRV-33** When an external command produces output, the system shall bound what it buffers and shall record that the output was truncated.
 
+**PRV-34** When a pull request has become a draft since it was listed, the system shall skip posting.
+
+**PRV-35** When a GitHub command is invoked, the system shall bound it with the configured GitHub timeout.
+
+**PRV-36** When a stale state lock is reclaimed, the system shall verify that the reclaimed file is still the stale one and shall yield to a lock another pass created meanwhile.
+
+**PRV-37** When persistence fails after a review was posted, the system shall still report the result as posted so the pass retries the save.
+
 ## Residual Risk
 
 `IsolatedRunner` removes the credential variables listed in the implementation
