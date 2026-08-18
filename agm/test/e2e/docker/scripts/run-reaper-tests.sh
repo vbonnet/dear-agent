@@ -39,8 +39,12 @@ run_test() {
 run_test "Reaper Happy Path" "/home/testuser/tests/test_reaper_happy_path.sh"
 run_test "Reaper Binary Missing" "/home/testuser/tests/test_reaper_binary_missing.sh"
 
-# Long-running tests (disabled by default for faster CI):
-# run_test "Reaper Prompt Timeout" "/home/testuser/tests/test_reaper_prompt_timeout.sh"  # Takes ~150s
+# ~4.5 min: 90s prompt detection + 60s fallback + the pane-close escalation.
+# It was commented out "for faster CI" and rotted unnoticed behind that comment
+# — by the time anyone looked it had three separate breakages. The job's budget
+# is 30 minutes and the whole suite is under 6, so the saving never justified
+# leaving the reaper's timeout path uncovered.
+run_test "Reaper Prompt Timeout" "/home/testuser/tests/test_reaper_prompt_timeout.sh"
 
 # Future tests (uncomment when implemented):
 # run_test "AGM Exit Workflow" "/home/testuser/tests/test_agm_exit_workflow.sh"
