@@ -388,3 +388,130 @@ func TestCompletionWatcher_SkipsPureAPISessions(t *testing.T) {
 		t.Fatalf("pure API session got durable writes: %+v", storage.updated)
 	}
 }
+
+// flakyStorage fails the first failWrites durable writes, then records the
+// ones that land — the storage outage a completion has to survive.
+type flakyStorage struct {
+	mockStorage
+	failWrites int
+	updated    []*manifest.Manifest
+}
+
+func (f *flakyStorage) UpdateSession(m *manifest.Manifest) error {
+	if f.failWrites > 0 {
+		f.failWrites--
+		return errors.New("storage unavailable")
+	}
+	copied := *m
+	f.updated = append(f.updated, &copied)
+	return nil
+}
+
+// flakyWatcherFixture mirrors watcherFixture with a caller-supplied storage so
+// the durable-write retry path can be exercised.
+func flakyWatcherFixture(t *testing.T, storage *flakyStorage) (*CompletionWatcher, *session.MockTmux) {
+	t.Helper()
+	tmux := session.NewMockTmux()
+	tmux.Sessions["worker-1"] = true
+	tmux.PaneContents = map[string]string{"worker-1": "booting…\n"}
+	tmux.InputReadiness = session.InputReadiness{Ready: true, State: "YES"}
+	watcher := NewCompletionWatcher(&OpContext{Storage: storage, Tmux: tmux})
+	watcher.IdleConfirmTicks = 2
+	watcher.ReadinessBlindConfirmMultiplier = 1
+	return watcher, tmux
+}
+
+// driveToIdleCompletion runs the tick choreography that produces one idle
+// completion: baseline, two ticks of pane activity, then stable input-ready
+// ticks until the debounce fires.
+func driveToIdleCompletion(t *testing.T, watcher *CompletionWatcher, tmux *session.MockTmux) CompletionEvent {
+	t.Helper()
+	scanOnce(t, watcher) // baseline
+	tmux.PaneContents["worker-1"] = "working…\n"
+	scanOnce(t, watcher)
+	tmux.PaneContents["worker-1"] = "working…\nRESULT: 42\n"
+	scanOnce(t, watcher)
+	scanOnce(t, watcher) // first stable tick debounces
+	events := scanOnce(t, watcher)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 completion, got %d", len(events))
+	}
+	return events[0]
+}
+
+// TestCompletionWatcher_RetryPreservesTheOriginalCompletionTime pins the
+// timestamps a retried write carries. When storage is down for several scans,
+// the retry replays a capture taken at detection time; restamping it with the
+// retry's clock tells every consumer that an old tail was captured at recovery
+// time, so freshness and ordering decisions rank stale evidence first.
+func TestCompletionWatcher_RetryPreservesTheOriginalCompletionTime(t *testing.T) {
+	m := testManifest("worker-1", "", time.Time{})
+	m.Harness = "codex-cli"
+	storage := &flakyStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}, failWrites: 1}
+	watcher, tmux := flakyWatcherFixture(t, storage)
+
+	event := driveToIdleCompletion(t, watcher, tmux)
+	if len(storage.updated) != 0 {
+		t.Fatalf("the failing write was recorded as landed: %+v", storage.updated)
+	}
+
+	// A later stable scan retries quietly — no second event for the operator.
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("retry re-emitted the completion: %v", events)
+	}
+	if len(storage.updated) != 1 {
+		t.Fatalf("retry did not land the durable write: %+v", storage.updated)
+	}
+
+	landed := storage.updated[0]
+	if !landed.FinalOutputAt.Equal(event.DetectedAt) {
+		t.Errorf("retry stamped FinalOutputAt %v, want the original capture time %v", landed.FinalOutputAt, event.DetectedAt)
+	}
+	if !landed.StateUpdatedAt.Equal(event.DetectedAt) {
+		t.Errorf("retry stamped StateUpdatedAt %v, want the original detection time %v", landed.StateUpdatedAt, event.DetectedAt)
+	}
+	if landed.State != manifest.StateDone || landed.FinalOutput == "" {
+		t.Errorf("retried write lost the completion: %+v", landed)
+	}
+}
+
+// TestCompletionWatcher_RetryDoesNotOverwriteNewerState pins the other half of
+// the retry contract. Between a failed write and its retry the session can
+// accept new work and a state hook can persist WORKING; the pane tail has not
+// changed yet, so the retry still looks due. Replaying DONE there makes an
+// actively running task read as finished to every durable-state consumer.
+func TestCompletionWatcher_RetryDoesNotOverwriteNewerState(t *testing.T) {
+	m := testManifest("worker-1", "", time.Time{})
+	m.Harness = "codex-cli"
+	storage := &flakyStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{m}}, failWrites: 1}
+	watcher, tmux := flakyWatcherFixture(t, storage)
+
+	driveToIdleCompletion(t, watcher, tmux)
+	if len(storage.updated) != 0 {
+		t.Fatalf("the failing write was recorded as landed: %+v", storage.updated)
+	}
+
+	// A state hook records new work before the next scan.
+	m.State = manifest.StateWorking
+	m.StateUpdatedAt = time.Now()
+	m.StateSource = "state-hook"
+
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("retry re-emitted the completion: %v", events)
+	}
+	if len(storage.updated) != 0 {
+		t.Fatalf("retry overwrote a newer state transition: %+v", storage.updated)
+	}
+	if m.State != manifest.StateWorking || m.StateSource != "state-hook" {
+		t.Fatalf("record was clobbered by the superseded completion: state=%q source=%q", m.State, m.StateSource)
+	}
+
+	// The superseded completion is settled, not pending: it must not retry on
+	// every later tick either.
+	if events := scanOnce(t, watcher); len(events) != 0 {
+		t.Fatalf("second retry emitted events: %v", events)
+	}
+	if len(storage.updated) != 0 {
+		t.Fatalf("superseded completion kept retrying: %+v", storage.updated)
+	}
+}
