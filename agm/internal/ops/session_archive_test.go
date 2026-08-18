@@ -220,8 +220,12 @@ func TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox(t *testing.T) {
 		},
 		Remove: os.RemoveAll,
 	}
-	if !cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker) {
-		t.Fatal("cleanupSandboxDirWithChecker() = false, want owned sandbox removed")
+	removed, existed := cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker)
+	if !removed {
+		t.Fatal("cleanupSandboxDirWithChecker() removed=false, want owned sandbox removed")
+	}
+	if !existed {
+		t.Fatal("cleanupSandboxDirWithChecker() existed=false, want true for an owned sandbox that was present")
 	}
 	if _, err := os.Stat(sandboxDir); !os.IsNotExist(err) {
 		t.Fatalf("sandbox still exists after cleanup: %v", err)
@@ -258,8 +262,15 @@ func TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath(t *testing.T) {
 			return os.RemoveAll(path)
 		},
 	}
-	if cleanupSandboxDirWithChecker(sessionID, unownedPath, base, checker) {
-		t.Fatal("cleanupSandboxDirWithChecker() = true for unattributed merged path")
+	gotRemoved, gotExisted := cleanupSandboxDirWithChecker(sessionID, unownedPath, base, checker)
+	if gotRemoved {
+		t.Fatal("cleanupSandboxDirWithChecker() removed=true for unattributed merged path")
+	}
+	// The refusal is a real problem (mismatched attribution), not "nothing to
+	// remove" — it must surface as a failure, not be conflated with the
+	// benign "no sandbox directory" case.
+	if !gotExisted {
+		t.Fatal("cleanupSandboxDirWithChecker() existed=false, want true — refusing an unattributed path is a failure worth surfacing, not a no-op")
 	}
 	if len(unmounted) != 0 || len(removed) != 0 {
 		t.Fatalf("destructive calls for unattributed path: unmounted=%v removed=%v", unmounted, removed)
@@ -269,6 +280,33 @@ func TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath(t *testing.T) {
 	}
 	if _, err := os.Stat(unownedPath); err != nil {
 		t.Fatalf("unowned path was not preserved: %v", err)
+	}
+}
+
+// TestCleanupSandboxDirWithChecker_AbsentSandboxIsNotAFailure proves the one
+// legitimate reason cleanupSandboxDirWithChecker reports existed=false: there
+// was never a sandbox directory to remove. This must stay distinct from a
+// removal failure (fix for ce-93lw.27 gap #3) so callers don't surface a
+// "sandbox cleanup failed" warning when there was simply nothing to clean up.
+func TestCleanupSandboxDirWithChecker_AbsentSandboxIsNotAFailure(t *testing.T) {
+	home := t.TempDir()
+	base := filepath.Join(home, ".agm", "sandboxes")
+	sessionID := "sandbox-cleanup-absent-session"
+	mergedPath := filepath.Join(base, sessionID, "merged")
+
+	checker := &sandboxgc.Checker{
+		Base:          base,
+		ListMounts:    func() ([]string, error) { return nil, nil },
+		ListProcPaths: func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+		Unmount:       func(string) error { return nil },
+		Remove:        os.RemoveAll,
+	}
+	removed, existed := cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker)
+	if removed {
+		t.Fatal("cleanupSandboxDirWithChecker() removed=true for a sandbox that was never created")
+	}
+	if existed {
+		t.Fatal("cleanupSandboxDirWithChecker() existed=true for a sandbox that was never created — want false (not a failure)")
 	}
 }
 
@@ -365,7 +403,7 @@ func TestArchiveSession_ReloadedSandboxOwnershipControlsCleanup(t *testing.T) {
 				ExternalSessionArchiver: testExternalArchiver(func(context.Context, *manifest.Manifest) []ExternalArchiveOutcome {
 					return []ExternalArchiveOutcome{{Provider: "test", Status: ExternalArchiveSkipped}}
 				}),
-				archiveSandboxCleaner: func(id, merged string) bool {
+				archiveSandboxCleaner: func(id, merged string) (bool, bool) {
 					cleanupCalls++
 					return cleanupSandboxDirWithChecker(id, merged, base, checker)
 				},

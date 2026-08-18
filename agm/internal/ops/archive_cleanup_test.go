@@ -202,7 +202,7 @@ func TestCleanupAfterArchive_SandboxBranchDeletedWithoutInferringSessionBranch(t
 	result := CleanupAfterArchive(
 		sessionID, "my-session",
 		"", repoDir, "", "my-session",
-		false,
+		false, false,
 	)
 
 	if result.BranchDeleted {
@@ -279,7 +279,8 @@ func TestCleanupAfterArchive_KeepSandbox(t *testing.T) {
 	result := CleanupAfterArchive(
 		"sess-1", "test-session",
 		"", "", "", "", // no worktree/repo/branch
-		true, // keepSandbox
+		true,  // keepSandbox
+		false, // hasOpenPR
 	)
 
 	// No worktree or sandbox paths — should be no-ops
@@ -296,7 +297,7 @@ func TestCleanupAfterArchive_KeepSandbox(t *testing.T) {
 
 func TestCleanupAfterArchive_EmptyInputs(t *testing.T) {
 	// All empty strings — should be a no-op, not panic
-	result := CleanupAfterArchive("", "", "", "", "", "", false)
+	result := CleanupAfterArchive("", "", "", "", "", "", false, false)
 	if result.WorktreesRemoved != 0 {
 		t.Errorf("WorktreesRemoved = %d, want 0", result.WorktreesRemoved)
 	}
@@ -332,7 +333,7 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	result := CleanupAfterArchive(
 		"sess-test", "test-session",
 		nestedWorkDir, repoDir, "", "test-branch",
-		false,
+		false, false,
 	)
 
 	if result.WorktreesRemoved != 1 {
@@ -348,6 +349,57 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	// Verify worktree is actually gone
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
 		t.Errorf("Worktree dir should be removed, stat err: %v", err)
+	}
+}
+
+// TestCleanupAfterArchive_KeepsBranchWithOpenPR covers the fix for
+// ce-93lw.27 gap #4: a branch that would otherwise be eligible for
+// force-deletion (owned worktree, not primary) must be preserved when the
+// caller reports a confirmed open PR — the worktree is still reclaimed
+// (removing the local checkout is harmless; the remote branch/PR survives),
+// but the local branch ref itself is not stripped out from under in-flight
+// work.
+func TestCleanupAfterArchive_KeepsBranchWithOpenPR(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+
+	wtDir := filepath.Join(t.TempDir(), "open-pr-wt")
+	runGit(t, repoDir, "worktree", "add", wtDir, "-b", "open-pr-branch")
+	runGit(t, wtDir, "commit", "--allow-empty", "-m", "in-flight commit")
+	nestedWorkDir := filepath.Join(wtDir, "agm", "cmd", "agm")
+	if err := os.MkdirAll(nestedWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := CleanupAfterArchive(
+		"sess-open-pr", "open-pr-session",
+		nestedWorkDir, repoDir, "", "open-pr-branch",
+		false, true, // keepSandbox=false, hasOpenPR=true
+	)
+
+	if result.WorktreesRemoved != 1 {
+		t.Errorf("WorktreesRemoved = %d, want 1 — the worktree itself is still reclaimed", result.WorktreesRemoved)
+	}
+	if result.BranchDeleted {
+		t.Error("BranchDeleted should be false when the branch has a confirmed open PR")
+	}
+	if !result.BranchKeptOpenPR {
+		t.Error("BranchKeptOpenPR should be true when deletion was skipped for an open PR")
+	}
+
+	// The local branch ref must still exist.
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "open-pr-branch")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("branch with an open PR was deleted despite hasOpenPR=true")
 	}
 }
 
@@ -367,7 +419,7 @@ func TestCleanupAfterArchive_UsesSurvivingRepoAfterRemovingLinkedRepoPath(t *tes
 	result := CleanupAfterArchive(
 		"sess-linked-repo", "linked-repo-session",
 		wtDir, wtDir, "", "linked-repo-session",
-		false,
+		false, false,
 	)
 
 	if result.WorktreesRemoved != 1 {
@@ -401,7 +453,7 @@ func TestCleanupAfterArchive_PreservesPrimaryCheckout(t *testing.T) {
 	result := CleanupAfterArchive(
 		"primary-session-id", "primary-session",
 		nestedWorkDir, repoDir, "", "primary-session",
-		false,
+		false, false,
 	)
 
 	if !result.PrimaryWorktreeKept {
@@ -436,7 +488,7 @@ func TestCleanupAfterArchive_UsesContextProjectWhenWorkingDirectoryMissing(t *te
 	result := CleanupAfterArchive(
 		"context-session-id", "context-session",
 		"", repoDir, "", "context-session",
-		false,
+		false, false,
 	)
 	if !result.PrimaryWorktreeKept || result.WorktreesRemoved != 0 || result.BranchDeleted {
 		t.Fatalf("unsafe context-project cleanup result = %+v", result)
@@ -466,7 +518,7 @@ func TestCleanupAfterArchive_PreservesBranchNotOwnedByRemovedWorktree(t *testing
 	result := CleanupAfterArchive(
 		"mismatch-id", "session-name",
 		worktreeDir, repoDir, "", "session-name",
-		false,
+		false, false,
 	)
 	if result.WorktreesRemoved != 1 || result.BranchDeleted {
 		t.Fatalf("mismatched ownership cleanup result = %+v", result)
@@ -494,7 +546,7 @@ func TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified(t *te
 	result := CleanupAfterArchive(
 		"unclassified-id", "unclassified-session",
 		t.TempDir(), repoDir, "", "unclassified-session",
-		false,
+		false, false,
 	)
 	if result.WorktreesRemoved != 0 || result.BranchDeleted {
 		t.Fatalf("unsafe cleanup result = %+v, want worktree and branch preserved", result)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
@@ -205,7 +206,19 @@ func TestVerifyCompletion_UncommittedChangesBlock(t *testing.T) {
 	}
 }
 
+// stubOpenPR overrides the package-level openPRForBranch seam for the
+// duration of the test so PR-aware checks never shell out to a real `gh`
+// (no network/auth dependency, deterministic, fast).
+func stubOpenPR(t *testing.T, fn func(repoPath, branch string) (int, bool)) {
+	t.Helper()
+	original := openPRForBranch
+	openPRForBranch = fn
+	t.Cleanup(func() { openPRForBranch = original })
+}
+
 func TestVerifyCompletion_UnmergedBranchBlocks(t *testing.T) {
+	stubOpenPR(t, func(string, string) (int, bool) { return 0, false })
+
 	dir := setupTestRepo(t)
 	commitFile(t, dir, "main.go", "package main\n", "Initial commit")
 
@@ -230,8 +243,11 @@ func TestVerifyCompletion_UnmergedBranchBlocks(t *testing.T) {
 	if len(result.UnmergedCommits) == 0 {
 		t.Fatal("expected UnmergedCommits to be non-empty")
 	}
+	if result.HasOpenPR {
+		t.Error("expected HasOpenPR=false when no PR is known for the branch")
+	}
 	if !result.Critical() {
-		t.Error("expected Critical()=true with unmerged commits")
+		t.Error("expected Critical()=true with unmerged commits and no open PR")
 	}
 	errs := result.CriticalErrors()
 	found := false
@@ -242,6 +258,120 @@ func TestVerifyCompletion_UnmergedBranchBlocks(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected unmerged commits error, got %v", errs)
+	}
+}
+
+// TestVerifyCompletion_UnmergedWithOpenPRNotCritical covers gap #2 from the
+// worktree-sprawl retro (ce-93lw.27): unmerged commits on a branch that has
+// a confirmed open PR are tracked, in-flight work — not abandoned — so they
+// must not hard-block archive.
+func TestVerifyCompletion_UnmergedWithOpenPRNotCritical(t *testing.T) {
+	stubOpenPR(t, func(_, branch string) (int, bool) {
+		if branch == "feature" {
+			return 7, true
+		}
+		return 0, false
+	})
+
+	dir := setupTestRepo(t)
+	commitFile(t, dir, "main.go", "package main\n", "Initial commit")
+
+	run := func(args ...string) {
+		t.Helper()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("branch", "-M", "main")
+	run("checkout", "-b", "feature")
+	commitFile(t, dir, "feature.go", "package main\n", "Feature work")
+	commitFile(t, dir, "feature_test.go", "package main\n", "Feature tests")
+
+	result := VerifyCompletion(dir)
+
+	if len(result.UnmergedCommits) == 0 {
+		t.Fatal("expected UnmergedCommits to be non-empty")
+	}
+	if !result.HasOpenPR {
+		t.Fatal("expected HasOpenPR=true when the branch has a confirmed open PR")
+	}
+	if result.OpenPRNumber != 7 {
+		t.Errorf("expected OpenPRNumber=7, got %d", result.OpenPRNumber)
+	}
+	if result.Critical() {
+		t.Errorf("expected Critical()=false when unmerged commits are covered by an open PR, got errors: %v", result.CriticalErrors())
+	}
+	if len(result.CriticalErrors()) != 0 {
+		t.Errorf("expected no critical errors, got %v", result.CriticalErrors())
+	}
+	foundWarning := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "open PR #7") {
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Errorf("expected a non-blocking warning mentioning the open PR, got %v", result.Warnings)
+	}
+}
+
+// TestVerifyCompletion_FailClosedOnUnresolvableBase covers gap #1 from the
+// retro: the old implementation hard-coded `git log main..HEAD` and silently
+// returned a clean result on any git error (fail OPEN). A branch whose base
+// cannot be resolved at all (no origin, no local "main") must fail CLOSED —
+// treated as unmerged — rather than silently reporting no unmerged commits.
+func TestVerifyCompletion_FailClosedOnUnresolvableBase(t *testing.T) {
+	stubOpenPR(t, func(string, string) (int, bool) { return 0, false })
+
+	dir := setupTestRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	// Switch off the default branch before the first commit, so no "main"
+	// branch is ever created and there is no origin remote to fall back to
+	// — ResolveBaseRef has nothing to resolve.
+	run("checkout", "-b", "solo-work")
+	commitFile(t, dir, "server.go", "package main\n", "Add server")
+	commitFile(t, dir, "server_test.go", "package main\n", "Add server tests")
+
+	result := VerifyCompletion(dir)
+
+	if len(result.UnmergedCommits) == 0 {
+		t.Fatal("expected a fail-closed synthetic UnmergedCommits entry when the base ref can't be resolved")
+	}
+	if !result.Critical() {
+		t.Error("expected Critical()=true when the unmerged check fails closed")
+	}
+	errs := result.CriticalErrors()
+	found := false
+	for _, e := range errs {
+		if e == "branch has 1 unmerged commit(s)" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the fail-closed synthetic entry to surface as a critical error, got %v", errs)
+	}
+}
+
+// TestVerifyCompletion_EmptyRepoNotFailClosed proves the "no commits yet"
+// case is not conflated with a real resolution failure: a freshly
+// initialized repo/worktree with zero commits has nothing that could be
+// unmerged, so it must not fail closed.
+func TestVerifyCompletion_EmptyRepoNotFailClosed(t *testing.T) {
+	dir := setupTestRepo(t)
+	result := VerifyCompletion(dir)
+
+	if len(result.UnmergedCommits) != 0 {
+		t.Errorf("expected no UnmergedCommits for a repo with zero commits, got %v", result.UnmergedCommits)
+	}
+	if result.Critical() {
+		t.Errorf("expected Critical()=false for an empty repo, got errors: %v", result.CriticalErrors())
 	}
 }
 

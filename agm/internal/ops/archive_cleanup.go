@@ -31,31 +31,46 @@ type CleanupAction struct {
 
 // CleanupResult summarises all post-archive cleanup work.
 type CleanupResult struct {
-	WorktreesRemoved     int  `json:"worktrees_removed"`
-	PrimaryWorktreeKept  bool `json:"primary_worktree_kept"`
-	WorktreesPruned      bool `json:"worktrees_pruned"`
-	SandboxRemoved       bool `json:"sandbox_removed"`
+	WorktreesRemoved    int  `json:"worktrees_removed"`
+	PrimaryWorktreeKept bool `json:"primary_worktree_kept"`
+	WorktreesPruned     bool `json:"worktrees_pruned"`
+	SandboxRemoved      bool `json:"sandbox_removed"`
+	// SandboxRemovalFailed is true when a sandbox directory was expected to
+	// exist and be removable but removal did not succeed (as opposed to
+	// there being no sandbox to remove at all, which is not a failure).
+	// Archive callers must surface this visibly rather than only reporting
+	// it via the (often unread) SandboxRemoved count — a silently-failed
+	// sandbox reap otherwise under-reports and leaks disk.
+	SandboxRemovalFailed bool `json:"sandbox_removal_failed,omitempty"`
 	BranchDeleted        bool `json:"branch_deleted"`
+	// BranchKeptOpenPR is true when the session branch was NOT force-deleted
+	// because it has a confirmed open PR — the branch is in-flight work, not
+	// abandoned, so deleting the local ref (while the remote/PR head
+	// survives) would be needlessly destructive.
+	BranchKeptOpenPR     bool `json:"branch_kept_open_pr,omitempty"`
 	SandboxBranchDeleted bool `json:"sandbox_branch_deleted"`
 }
 
-type sandboxCleanupFunc func(sessionID, mergedPath string) bool
+type sandboxCleanupFunc func(sessionID, mergedPath string) (removed bool, existed bool)
 
 // CleanupAfterArchive performs best-effort resource cleanup after a session
 // has been archived. It removes the git worktree, prunes orphaned worktrees,
-// deletes the session branch (if fully merged), and removes the sandbox
-// directory. Every action is logged to ~/.agm/logs/cleanup.jsonl.
+// deletes the session branch (if fully merged and it has no open PR), and
+// removes the sandbox directory. Every action is logged to
+// ~/.agm/logs/cleanup.jsonl.
 //
 // If keepSandbox is true the sandbox directory is preserved for debugging.
-func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName string, keepSandbox bool) *CleanupResult {
+// If hasOpenPR is true the local session branch is preserved even when it
+// would otherwise be eligible for force-deletion (see BranchKeptOpenPR).
+func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName string, keepSandbox, hasOpenPR bool) *CleanupResult {
 	return cleanupAfterArchive(
 		sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName,
-		keepSandbox, cleanupSandboxDir,
+		keepSandbox, hasOpenPR, cleanupSandboxDir,
 	)
 }
 
 //nolint:gocyclo // linear cleanup transaction keeps attribution, worktree, branch, and sandbox decisions in execution order
-func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName string, keepSandbox bool, cleanSandbox sandboxCleanupFunc) *CleanupResult {
+func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName string, keepSandbox, hasOpenPR bool, cleanSandbox sandboxCleanupFunc) *CleanupResult {
 	result := &CleanupResult{}
 	logger := newCleanupLogger()
 	primaryWorktree := false
@@ -166,7 +181,15 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	// 3. Force-delete the session branch. We use -D (force) because archived
 	// session branches are almost never fast-forward merged (squash-merge via
 	// PR is the norm), so the safe -d would silently fail in most cases.
-	if branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe {
+	//
+	// A confirmed open PR overrides deletion even when the worktree ownership
+	// check (branchDeletionSafe) says it would otherwise be safe: an open PR
+	// means the branch is in-flight, not abandoned, and stripping the local
+	// ref is needlessly destructive (the retro's "resolved := merged |
+	// has-open-PR | explicitly-abandoned" rule applied to cleanup, not just
+	// the archive gate).
+	switch {
+	case branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe && !hasOpenPR:
 		err := forceDeleteBranch(cleanupRepoPath, branchName)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
@@ -182,7 +205,18 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			slog.Debug("Branch not deleted (may not exist)",
 				"branch", branchName, "error", err)
 		}
-	} else if branchName != "" && cleanupRepoPath != "" {
+	case branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe && hasOpenPR:
+		result.BranchKeptOpenPR = true
+		logAction(logger, CleanupAction{
+			SessionID:   sessionID,
+			SessionName: sessionName,
+			Action:      "keep_branch_open_pr",
+			Target:      branchName,
+			Success:     true,
+		})
+		slog.Info("Preserving local branch with an open PR during archive cleanup",
+			"branch", branchName)
+	case branchName != "" && cleanupRepoPath != "":
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
@@ -214,16 +248,21 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 
 	// 4. Remove the sandbox directory (unless --keep-sandbox).
 	if sandboxPath != "" && !keepSandbox {
-		removed := cleanSandbox != nil && cleanSandbox(sessionID, sandboxPath)
+		var removed, existed bool
+		if cleanSandbox != nil {
+			removed, existed = cleanSandbox(sessionID, sandboxPath)
+		}
+		failed := existed && !removed
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
 			Action:      "remove_sandbox",
 			Target:      sandboxPath,
 			Success:     removed,
-			Error:       boolErrStr(!removed, "sandbox removal failed or not found"),
+			Error:       boolErrStr(failed, "sandbox existed but removal failed — periodic sandbox gc will retry"),
 		})
 		result.SandboxRemoved = removed
+		result.SandboxRemovalFailed = failed
 	} else if keepSandbox && sandboxPath != "" {
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,

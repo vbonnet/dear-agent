@@ -1,9 +1,9 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-08-08 -->
+<!-- Last audited at: 2026-08-17 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-08-08
+**Last Updated**: 2026-08-17
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -80,6 +80,10 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-55** When an async reaper validates an active session before stopping its pane, the system shall permit that expected active pane only for preflight while preserving supervisor, completion-verification, and pending-delegation guards; the final archive shall enforce pane death again.
 
 **OPS-81** When archive cleanup receives an explicit working directory or falls back to the context project, the system shall resolve and preserve the repository primary checkout and any merely name-matching branch, record the intentional preservation, and continue safe non-worktree cleanup; for linked worktrees, the system shall resolve a surviving primary checkout before removing the linked checkout, use that surviving path for subsequent prune and branch cleanup, and delete a branch only after resolving and successfully removing a worktree whose inventory branch exactly matches that deletion target.
+
+**OPS-107** When archive cleanup would otherwise force-delete a local session branch (an owned, non-primary worktree whose inventory branch matches the requested deletion target — see OPS-81), the system shall skip that deletion and record `BranchKeptOpenPR` when the caller reports a confirmed open PR for the branch (from `CompletionVerification.HasOpenPR`, computed once by `runArchiveVerification` and threaded through every archive path — CLI, bulk, GC, and the async reaper); the worktree itself is still reclaimed, since removing the local checkout does not affect the remote branch or PR.
+
+**OPS-108** When post-archive sandbox removal is attempted and a sandbox directory was confirmed to exist, the system shall report `SandboxRemovalFailed` on `CleanupResult` if removal did not succeed, distinct from the case where no sandbox directory existed at all (never a failure); a CLI archive command shall surface `SandboxRemovalFailed` as a visible, impossible-to-miss error (not only a silently-omitted count) so a failed reap is never mistaken for a completed one.
 
 **OPS-56** When `ArchiveSession` uses an isolated SQLite store or archives a manifest marked as a test session, the system shall preserve lifecycle, explicit legacy-directory moves, and injected external-archive behavior without mutating host trust, monitor, process, pending-message, worktree, branch, temporary-file, sandbox, or configuration state.
 
@@ -278,6 +282,15 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 - **UI archival is a separate namespace.** `ArchiveUISessions` reconciles
   Claude desktop/UI records and is not part of AGM internal session archival
   (ADR-026).
+- **PR-awareness is computed once, threaded everywhere.** `HasOpenPR` comes
+  from a single `runArchiveVerification` call inside `archiveResolvedSession`
+  and is passed into cleanup (OPS-107) rather than re-queried — every archive
+  path (CLI, bulk, GC, async reaper) shares one PR check per archive, not one
+  per subsystem that cares about it.
+- **Cleanup failures are not silent.** A sandbox that existed but could not be
+  removed is a distinct, surfaced failure (OPS-108) — never conflated with
+  "there was nothing to remove," and never only visible as an under-counted
+  total.
 
 ## BDD Traceability
 

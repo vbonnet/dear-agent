@@ -423,11 +423,24 @@ func reportPostCleanup(pc *ops.CleanupResult) {
 	if pc.BranchDeleted {
 		fmt.Printf("Deleted session branch\n")
 	}
+	if pc.BranchKeptOpenPR {
+		fmt.Printf("Kept session branch (has an open PR)\n")
+	}
 	if pc.SandboxBranchDeleted {
 		fmt.Printf("Deleted sandbox branch\n")
 	}
 	if pc.SandboxRemoved {
 		fmt.Printf("Removed sandbox directory\n")
+	}
+	// A sandbox that existed but could not be removed must never be a silent
+	// count omission — surface it as a visible, impossible-to-miss warning
+	// (fix for ce-93lw.27 gap #3: this used to only under-report a count).
+	if pc.SandboxRemovalFailed {
+		ui.PrintError(fmt.Errorf("sandbox directory existed but could not be removed"),
+			"Sandbox cleanup failed during archive",
+			"  • Check ~/.agm/logs/cleanup.jsonl for the failure detail\n"+
+				"  • The periodic sandbox GC sweep will retry automatically\n"+
+				"  • Or retry manually: agm sandbox gc --reap")
 	}
 }
 
