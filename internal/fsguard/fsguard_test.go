@@ -137,6 +137,17 @@ func TestInspectCommand(t *testing.T) {
 		{"git force-with-lease blocked", "git -C ~/src/dear-agent push --force-with-lease", home, false,
 			"force-push"},
 		{"git -f blocked", "git -C ~/src/dear-agent push -f origin main", home, false, "force-push"},
+		{"git -uf cluster blocked", "git -C ~/src/dear-agent push -uf origin main", home, false,
+			"force-push"},
+		{"git -fu cluster blocked", "git -C ~/src/dear-agent push -fu origin main", home, false,
+			"force-push"},
+		{"git -vfq cluster blocked", "git -C ~/src/dear-agent push -vfq origin main", home, false,
+			"force-push"},
+		{"git -u push still allowed", "git -C ~/src/dear-agent push -u origin main", home, true, ""},
+		{"git mirror push blocked", "git -C ~/src/dear-agent push --mirror origin", home, false,
+			"force-push"},
+		{"git force refspec blocked", "git -C ~/src/dear-agent push origin +main", home, false,
+			"force-push"},
 		{"git commit in worktree allowed", "git -C ~/worktrees/x commit -m y", home, true, ""},
 
 		// cd tracking for git.
