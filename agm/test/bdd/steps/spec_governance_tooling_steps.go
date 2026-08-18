@@ -116,8 +116,7 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(specGovernanceNonVerdictLeadStep, exerciseNonVerdictSPECAuditLeads)
 	ctx.Step(specGovernanceReciprocalDiagnosticStep, exerciseReciprocalSPECBDDDiagnostics)
 	ctx.Step(specGovernanceFindingValidationStep, exercisePinnedSPECFindingValidation)
-	ctx.Step(specGovernanceOfflineRenderingStep, exerciseBoundedOfflineSPECAuditRendering)
-	ctx.Step(specGovernanceReadOnlyBoundaryStep, exerciseReadOnlySPECAuditBoundary)
+	registerSpecGovernanceRenderingSteps(ctx)
 	ctx.Step(specGovernanceResultStep, specGovernanceBehaviorShouldPass)
 }
 
@@ -141,18 +140,6 @@ func exercisePinnedSPECFindingValidation(ctx context.Context) error {
 		"TestPinnedValidationRejectsIncompleteSharedFeatureAndPreservationTargets",
 		"TestPinnedValidationRequiresEveryPinnedReciprocalFeatureInRetirementPlan",
 	)
-}
-
-func exerciseBoundedOfflineSPECAuditRendering(ctx context.Context) error {
-	return runSpecAuditGoTests(ctx,
-		"TestRenderIsOfflineAndEscapesEvidence",
-		"TestReportInputsAndArtifactsAreBounded",
-		"TestEscapedHTMLStopsAtArtifactLimit",
-	)
-}
-
-func exerciseReadOnlySPECAuditBoundary(ctx context.Context) error {
-	return runSpecAuditGoTests(ctx, "TestInventoryValidateRenderPreserveTargetRepositoryState")
 }
 
 func runSpecAuditGoTests(ctx context.Context, names ...string) error {

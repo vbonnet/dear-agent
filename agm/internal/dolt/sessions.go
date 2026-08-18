@@ -82,6 +82,25 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 	if session.Outcome != manifest.OutcomeUnknown {
 		metadata["outcome"] = string(session.Outcome)
 	}
+	// Readiness state lives here for the same no-migration reason as outcome:
+	// without it, every `agm session state set` (hook- or daemon-issued) is
+	// dropped on the write and reads back as "", which silently disables the
+	// stall detector and GC recency guards (ce-0zng9).
+	if session.State != "" {
+		metadata["state"] = session.State
+		if !session.StateUpdatedAt.IsZero() {
+			metadata["state_updated_at"] = session.StateUpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if session.StateSource != "" {
+			metadata["state_source"] = session.StateSource
+		}
+	}
+	if session.FinalOutput != "" {
+		metadata["final_output"] = session.FinalOutput
+		if !session.FinalOutputAt.IsZero() {
+			metadata["final_output_at"] = session.FinalOutputAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	return metadata
 }
 
@@ -1437,6 +1456,15 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory
 	}
+	applyStateMetadata(session, metadata)
+	if finalOutput, ok := metadata["final_output"].(string); ok {
+		session.FinalOutput = finalOutput
+		if raw, ok := metadata["final_output_at"].(string); ok {
+			if at, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				session.FinalOutputAt = at
+			}
+		}
+	}
 	if err := unmarshalSandboxMetadata(session, metadata); err != nil {
 		return err
 	}
@@ -1448,6 +1476,22 @@ func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) e
 	applyPiMetadata(session, metadata)
 	applyEngramMetadata(session, metadata)
 	return nil
+}
+
+func applyStateMetadata(session *manifest.Manifest, metadata map[string]any) {
+	state, _ := metadata["state"].(string)
+	if state == "" {
+		return
+	}
+	session.State = state
+	if raw, ok := metadata["state_updated_at"].(string); ok {
+		if at, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			session.StateUpdatedAt = at
+		}
+	}
+	if source, ok := metadata["state_source"].(string); ok {
+		session.StateSource = source
+	}
 }
 
 func parseSessionMetadataOutcome(metadata map[string]any) (manifest.SessionOutcome, bool, error) {

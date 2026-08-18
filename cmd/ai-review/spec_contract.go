@@ -257,26 +257,27 @@ func appendApplicabilityEvidence(plan *reviewPlan, path string, requirements []p
 // which require a human decision instead of reviewing themselves. The plan is
 // built from Git before credentials or model calls.
 type reviewPlan struct {
-	Version                string                         `json:"version"`
-	BaseSHA                string                         `json:"base_sha"`
-	MergeBaseSHA           string                         `json:"merge_base_sha"`
-	HeadSHA                string                         `json:"head_sha"`
-	Policy                 specPolicyEvidence             `json:"policy"`
-	ActiveHarnessInventory activeHarnessInventoryEvidence `json:"active_harness_inventory"`
-	Changes                []specChange                   `json:"changes"`
-	Contracts              []changedSpecContract          `json:"contracts"`
-	ContractForms          []specContractFormEvidence     `json:"contract_form_evidence"`
-	Applicability          []specApplicabilityEvidence    `json:"applicability_evidence"`
-	OwnerIndex             []semanticOwnerCandidate       `json:"-"`
-	OwnerShards            []semanticOwnerShard           `json:"-"`
-	OwnerIndexDigest       string                         `json:"owner_index_digest"`
-	OwnerIndexComplete     bool                           `json:"owner_index_complete"`
-	OwnerSearch            *semanticOwnerSearchEvidence   `json:"semantic_owner_search,omitempty"`
-	Diff                   string                         `json:"diff"`
-	ReviewNeeded           bool                           `json:"review_needed"`
-	ReviewRelevant         bool                           `json:"review_relevant"`
-	EscalationTriggers     []string                       `json:"escalation_triggers"`
-	HumanReasons           []string                       `json:"human_reasons"`
+	Version                       string                         `json:"version"`
+	BaseSHA                       string                         `json:"base_sha"`
+	MergeBaseSHA                  string                         `json:"merge_base_sha"`
+	HeadSHA                       string                         `json:"head_sha"`
+	Policy                        specPolicyEvidence             `json:"policy"`
+	ActiveHarnessInventory        activeHarnessInventoryEvidence `json:"active_harness_inventory"`
+	Changes                       []specChange                   `json:"changes"`
+	Contracts                     []changedSpecContract          `json:"contracts"`
+	ContractForms                 []specContractFormEvidence     `json:"contract_form_evidence"`
+	Applicability                 []specApplicabilityEvidence    `json:"applicability_evidence"`
+	OwnerIndex                    []semanticOwnerCandidate       `json:"-"`
+	OwnerShards                   []semanticOwnerShard           `json:"-"`
+	OwnerIndexDigest              string                         `json:"owner_index_digest"`
+	OwnerIndexComplete            bool                           `json:"owner_index_complete"`
+	OwnerSearch                   *semanticOwnerSearchEvidence   `json:"semantic_owner_search,omitempty"`
+	Diff                          string                         `json:"diff"`
+	ReviewNeeded                  bool                           `json:"review_needed"`
+	ReviewRelevant                bool                           `json:"review_relevant"`
+	DependabotModuleOnlyCandidate bool                           `json:"dependabot_module_only_candidate"`
+	EscalationTriggers            []string                       `json:"escalation_triggers"`
+	HumanReasons                  []string                       `json:"human_reasons"`
 }
 
 func (p reviewPlan) needsHuman() bool { return len(p.HumanReasons) > 0 }
@@ -350,6 +351,9 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		if specReviewOwnerPath(path) {
 			plan.HumanReasons = append(plan.HumanReasons, "SPEC review enforcement owner change requires maintainer review ("+path+")")
 		}
+		if specReviewDependencyPath(path) {
+			plan.HumanReasons = append(plan.HumanReasons, "SPEC reviewer dependency graph change requires maintainer review ("+path+")")
+		}
 		// Exact basename comparisons deliberately avoid suffix matching (for
 		// example, NOT-A-SPEC.md and NOT-SPEC.owner are ordinary files).
 		if filepath.Base(path) == "SPEC.owner" {
@@ -400,6 +404,14 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 		}
 		return plan, nil
 	}
+	dependabotCandidate, err := dependabotModuleOnlyCandidate(ctx, mergeBase, head)
+	if err != nil {
+		return reviewPlan{}, fmt.Errorf("evaluate Dependabot module-only candidate: %w", err)
+	}
+	plan.DependabotModuleOnlyCandidate = dependabotCandidate &&
+		len(plan.Changes) == 0 &&
+		len(plan.EscalationTriggers) == 0 &&
+		onlyReviewerDependencyReasons(plan.HumanReasons)
 	if plan.needsHuman() && len(plan.Changes) == 0 {
 		if err := normalizeHumanReasons(&plan); err != nil {
 			return reviewPlan{}, err
@@ -733,6 +745,18 @@ func buildReviewPlanWithPRBody(ctx context.Context, base, head, prBody string) (
 	return plan, nil
 }
 
+func onlyReviewerDependencyReasons(reasons []string) bool {
+	if len(reasons) == 0 {
+		return false
+	}
+	for _, reason := range reasons {
+		if !strings.HasPrefix(reason, "SPEC reviewer dependency graph change requires maintainer review (") {
+			return false
+		}
+	}
+	return true
+}
+
 func changedContractAction(status string) (string, error) {
 	switch status {
 	case "A":
@@ -755,13 +779,20 @@ func specReviewOwnerPath(path string) bool {
 		path == activeHarnessRegistryPath ||
 		path == ".github/workflows/review.yml" ||
 		path == ".github/rulesets/main.json" ||
-		path == "go.mod" ||
+		strings.HasPrefix(path, "cmd/ai-review/") ||
+		strings.HasPrefix(path, "internal/earslint/") ||
+		strings.HasPrefix(path, "internal/markdownvisible/")
+}
+
+// specReviewDependencyPath identifies build inputs that can change the trusted
+// reviewer without changing any SPEC contract. They remain a fail-closed
+// supply-chain boundary for ordinary contributors; the workflow may separately
+// recognize a narrowly authenticated Dependabot dependency-version-led update.
+func specReviewDependencyPath(path string) bool {
+	return path == "go.mod" ||
 		path == "go.sum" ||
 		path == "go.work" ||
 		path == "go.work.sum" ||
-		strings.HasPrefix(path, "cmd/ai-review/") ||
-		strings.HasPrefix(path, "internal/earslint/") ||
-		strings.HasPrefix(path, "internal/markdownvisible/") ||
 		strings.HasPrefix(path, "vendor/")
 }
 

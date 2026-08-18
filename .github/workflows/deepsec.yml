@@ -1,10 +1,8 @@
 name: Deepsec (incremental)
 
-# Runs deepsec on PR-changed files only (vs origin/main). Posts findings
-# as a PR comment via `--comment-out`. Non-blocking by default — the
-# `success_if_findings` job-level check below makes the workflow report
-# success even when findings exist, so merges aren't gated on this yet.
-# Promote to required once signal-to-noise stabilises.
+# Runs deepsec on PR-changed files only (vs the declared base branch) and posts
+# candidate findings as a PR comment via `--comment-out`. Findings are advisory;
+# promote the workflow to required once signal-to-noise stabilises.
 #
 # Cost: each `deepsec process` invocation calls the configured LLM. The
 # job runs only when ANTHROPIC_API_KEY is set as a repo secret, so forks
@@ -14,6 +12,7 @@ name: Deepsec (incremental)
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -30,12 +29,13 @@ jobs:
   # scan gates on it. When the key is absent the scan job shows as "Skipped"
   # (grey ⊘) rather than false-green ✅ (nothing scanned).
   check-key:
-    # Skip forks (no secrets). Non-required: gate the per-push hot path behind
-    # the `full-ci` label; still runs for merge_group / workflow_dispatch.
+    # Skip forks and keep the paid path behind `full-ci`. A labeled event only
+    # admits the label that activates this workflow, not unrelated later labels.
     if: >-
       (github.event.pull_request.head.repo.full_name == github.repository) &&
-      (github.event_name != 'pull_request' ||
-       contains(github.event.pull_request.labels.*.name, 'full-ci'))
+      contains(github.event.pull_request.labels.*.name, 'full-ci') &&
+      (github.event.action != 'labeled' ||
+       github.event.label.name == 'full-ci')
     runs-on: ubuntu-latest
     outputs:
       has_key: ${{ steps.probe.outputs.has_key }}
@@ -59,6 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           # Need history so `--diff origin/main` can resolve the base.
           fetch-depth: 0
 

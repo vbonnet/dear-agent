@@ -40,18 +40,17 @@ const tracerName = "safe-merge"
 // MinSoak is the minimum age the head commit must be before merging.
 const MinSoak = 5 * time.Minute
 
-const (
-	// cleanupCommandTimeout bounds each best-effort local Git cleanup operation.
-	// Cleanup runs after provider merge success, so it must never hold the caller
-	// indefinitely even when a local worktree or Git process is unhealthy.
-	cleanupCommandTimeout = 30 * time.Second
-	// cleanupCommandWaitDelay bounds pipe draining when a Git descendant keeps
-	// stdout or stderr open after the direct Git process exits.
-	cleanupCommandWaitDelay = time.Second
-)
-
 // DefaultWatchTimeout is the default time limit for watch mode.
 const DefaultWatchTimeout = 45 * time.Minute
+
+// mergeConfirmationCommandTimeout bounds each exact-head provider query. A
+// provider merge can be accepted immediately before caller cancellation kills
+// the local gh process, so one bounded query must remain possible afterward.
+const mergeConfirmationCommandTimeout = 30 * time.Second
+
+// mergeConfirmationCommandWaitDelay bounds pipe draining if a provider-query
+// descendant outlives the direct gh process while retaining stdout or stderr.
+const mergeConfirmationCommandWaitDelay = time.Second
 
 // MergeConfig holds options for a safe merge.
 type MergeConfig struct {
@@ -133,6 +132,14 @@ func SafeMergeContext(ctx context.Context, cfg MergeConfig) error {
 
 // watchMerge polls the merge gates until they pass or the timeout elapses.
 func watchMerge(ctx context.Context, cfg MergeConfig) error {
+	return watchMergeWithAttempt(ctx, cfg, attemptMerge)
+}
+
+func watchMergeWithAttempt(
+	ctx context.Context,
+	cfg MergeConfig,
+	attemptFn func(context.Context, MergeConfig) error,
+) error {
 	timeout := cfg.WatchTimeout
 	if timeout == 0 {
 		timeout = DefaultWatchTimeout
@@ -150,16 +157,46 @@ func watchMerge(ctx context.Context, cfg MergeConfig) error {
 	defer span.End()
 
 	deadline := time.Now().Add(timeout)
-	attempt := 0
+	watchCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	contextResult := func(lastErr error) error {
+		// A caller-owned deadline/cancellation is not this watch operation's
+		// configured timeout and must retain its original context identity.
+		if parentErr := ctx.Err(); parentErr != nil {
+			return fmt.Errorf("watch canceled: %w", parentErr)
+		}
+		ctxErr := watchCtx.Err()
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			if lastErr == nil {
+				lastErr = ctxErr
+			}
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "timeout", lastErr.Error())
+			return fmt.Errorf("watch timeout after %s: last error: %w", timeout, lastErr)
+		}
+		return fmt.Errorf("watch canceled: %w", ctxErr)
+	}
+	attemptNumber := 0
 	for {
-		attempt++
+		if watchCtx.Err() != nil {
+			return contextResult(nil)
+		}
+		attemptNumber++
 		fmt.Fprintf(os.Stderr, "safe-merge: watch attempt %d (timeout in %s)…\n",
-			attempt, time.Until(deadline).Round(time.Second))
+			attemptNumber, time.Until(deadline).Round(time.Second))
 
-		err := attemptMerge(ctx, cfg)
+		err := attemptFn(watchCtx, cfg)
 		if err == nil {
-			span.SetAttributes(attribute.Int("watch.attempts", attempt))
+			span.SetAttributes(attribute.Int("watch.attempts", attemptNumber))
 			return nil
+		}
+		// Once the provider reports a different head, retrying the whole merge
+		// transaction would cross the exact-head safety boundary and discard the
+		// retained cleanup root. Surface the terminal mismatch immediately.
+		if errors.Is(err, errMergeHeadChanged) {
+			return err
+		}
+		if watchCtx.Err() != nil {
+			return contextResult(err)
 		}
 
 		// If all gates passed but it was a dry-run, return immediately.
@@ -167,13 +204,12 @@ func watchMerge(ctx context.Context, cfg MergeConfig) error {
 			return err
 		}
 
-		if time.Now().After(deadline) {
-			appendAuditEntry(cfg.Repo, cfg.PRNumber, "timeout", err.Error())
-			return fmt.Errorf("watch timeout after %s: last error: %w", timeout, err)
-		}
-
 		fmt.Fprintf(os.Stderr, "safe-merge: gates not ready (%v); retrying in %s\n", err, interval)
-		time.Sleep(interval)
+		select {
+		case <-watchCtx.Done():
+			return contextResult(err)
+		case <-time.After(interval):
+		}
 	}
 }
 
@@ -212,6 +248,39 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
+	// Gate 0: deterministic PR state. Closed/merged, draft, and conflicts are
+	// visible from one `gh pr view` and each has one exact fix, so fail fast
+	// with that fix instead of arming auto-merge and letting the completion
+	// wait time out 45 minutes later with no cause named. BEHIND is
+	// deliberately NOT a fail here: safe-merge advances behind branches itself
+	// (base-freshness gate, ce-gdy60), so failing early on it would defeat
+	// that remediation; pr-blockers still reports BEHIND for diagnosis.
+	if err := runGate(ctx, "state", func() error {
+		st, err := FetchPRState(ctx, cfg.PRNumber, cfg.Repo)
+		if err != nil {
+			return err
+		}
+		if s := strings.ToUpper(st.State); s != "OPEN" {
+			return fmt.Errorf("PR #%d is %s; nothing to merge", cfg.PRNumber, s)
+		}
+		var lines []string
+		for _, b := range StateBlockers(st, cfg.Repo) {
+			if b.Code == BlockBehind {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("  • %s: %s\n    fix: %s", b.Code, b.Detail, b.Fix))
+		}
+		if len(lines) == 0 {
+			return nil
+		}
+		return fmt.Errorf("PR state blocks merging:\n%s", strings.Join(lines, "\n"))
+	}); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "state: "+err.Error())
+		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `pr-blockers %d --repo %s` for the full diagnosis\n", cfg.PRNumber, cfg.Repo)
+		return fmt.Errorf("state gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ PR state mergeable (open, not draft, no conflicts)")
+
 	// Gate 1: every provider-effective required CI check must pass.
 	if err := runGate(ctx, "ci", func() error { return checkAllCIContext(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 		// P4 flake valve: when flaky_checks are configured, give a failing
@@ -239,7 +308,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: SKIPPED via --skip-review-check")
 		fmt.Fprintln(os.Stderr, "safe-merge: ⚠ review-thread gate skipped (--skip-review-check)")
 	} else {
-		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(cfg.PRNumber, cfg.Repo) }); err != nil {
+		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
 			parts := strings.SplitN(cfg.Repo, "/", 2)
 			owner, repoName := parts[0], parts[1]
@@ -294,38 +363,40 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
 	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
-	mergeCmd := exec.Command(mergeArgs[0], mergeArgs[1:]...)
-	mergeCmd.Stdout = os.Stdout
-	mergeCmd.Stderr = os.Stderr
-	if err := mergeCmd.Run(); err != nil {
-		mergeSpan.RecordError(err)
-		mergeSpan.SetStatus(codes.Error, err.Error())
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
-		return fmt.Errorf("gh pr merge failed: %w", err)
+	confirm := func() error {
+		return confirmMergedWithin(ctx, mergeConfirmationCommandTimeout,
+			cfg.PRNumber, cfg.Repo, headInfo.SHA)
 	}
-	confirm := func() error { return confirmMerged(cfg.PRNumber, cfg.Repo, headInfo.SHA) }
-	var confirmationErr error
-	if cfg.Watch {
-		// watchMerge owns retry timing and the overall deadline.
-		confirmationErr = confirm()
-	} else {
-		// A one-shot invocation must still wait for an accepted auto-merge to
-		// finish; success from `gh pr merge --auto` only means it was queued.
-		confirmationErr = waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
+	confirmCompletion := func() error {
+		// Keep provider acceptance, exact-head polling, and cleanup in one
+		// transaction so a pending merge cannot discard the retained local root.
+		// Success from `gh pr merge --auto` only means it was queued.
+		return waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
 	}
-	if confirmationErr != nil {
-		mergeSpan.RecordError(confirmationErr)
-		mergeSpan.SetStatus(codes.Error, confirmationErr.Error())
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", confirmationErr.Error())
-		return confirmationErr
-	}
-	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
-		fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
-
-	// Post-merge cleanup (best-effort, non-fatal).
-	if headInfo.Branch != "" {
-		cleanupWorktree(ctx, headInfo.Branch)
+	failure := runProviderMergeTransaction(
+		ctx,
+		headInfo.Branch,
+		mergeArgs,
+		confirmCompletion,
+		func() {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
+				fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
+			fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
+		},
+	)
+	if failure != nil {
+		mergeSpan.RecordError(failure.err)
+		mergeSpan.SetStatus(codes.Error, failure.err.Error())
+		switch failure.stage {
+		case providerMergeCommandStage:
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+failure.err.Error())
+			return fmt.Errorf("gh pr merge failed: %w", failure.err)
+		case providerMergeConfirmationStage:
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", failure.err.Error())
+			return failure.err
+		default:
+			return fmt.Errorf("provider merge transaction: %w", failure.err)
+		}
 	}
 	return nil
 }
@@ -335,17 +406,33 @@ type mergeResult struct {
 	HeadRefOid string `json:"headRefOid"`
 }
 
-var errMergePending = errors.New("merge is pending")
+var (
+	errMergePending     = errors.New("merge is pending")
+	errMergeHeadChanged = errors.New("merge completion head changed")
+)
 
-// confirmMerged prevents a successful `gh pr merge --auto` invocation from
+// confirmMergedWithin prevents a successful `gh pr merge --auto` invocation from
 // being mistaken for a completed merge. GitHub exits zero when auto-merge is
 // merely enabled, so cleanup is safe only after the PR reports MERGED at the
 // exact head SHA that passed the gates.
-func confirmMerged(prNum int, repo, expectedHeadSHA string) error {
-	out, err := runCommand(exec.Command("gh", "pr", "view",
+func confirmMergedWithin(
+	parent context.Context,
+	timeout time.Duration,
+	prNum int,
+	repo, expectedHeadSHA string,
+) error {
+	confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(confirmCtx, "gh", "pr", "view",
 		fmt.Sprintf("%d", prNum), "--repo", repo,
-		"--json", "state,headRefOid"))
+		"--json", "state,headRefOid")
+	cmd.WaitDelay = mergeConfirmationCommandWaitDelay
+	out, err := runCommand(cmd)
 	if err != nil {
+		if ctxErr := confirmCtx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
 		return fmt.Errorf("confirming merge completion: %w", err)
 	}
 
@@ -358,7 +445,7 @@ func confirmMerged(prNum int, repo, expectedHeadSHA string) error {
 
 func validateMergeResult(result mergeResult, expectedHeadSHA string) error {
 	if result.HeadRefOid != expectedHeadSHA {
-		return fmt.Errorf("merge completion head changed: expected %s, got %s",
+		return fmt.Errorf("%w: expected %s, got %s", errMergeHeadChanged,
 			expectedHeadSHA, result.HeadRefOid)
 	}
 	if result.State != "MERGED" {
@@ -382,7 +469,13 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, errMergePending) {
+		if errors.Is(err, errMergeHeadChanged) {
+			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("waiting for merge completion: %w", ctxErr)
+		}
+		if errors.Is(err, context.Canceled) {
 			return err
 		}
 		remaining := time.Until(deadline)
@@ -392,7 +485,10 @@ func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration
 		wait := min(interval, remaining)
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for merge completion: %w", ctx.Err())
+			// Provider acceptance can race with caller cancellation between
+			// polls. Perform one final bounded exact-head check before the
+			// parent cancellation becomes terminal on the next iteration.
+			continue
 		case <-time.After(wait):
 		}
 	}
@@ -953,137 +1049,6 @@ func parseCheckRuns(data []byte) error {
 	return validateCheckRuns(checks)
 }
 
-const reviewThreadsQuery = `
-query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
-        nodes {
-          isResolved
-          isOutdated
-          comments(first: 1) {
-            nodes {
-              author { login }
-              body
-            }
-          }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-}`
-
-type gqlReviewThread struct {
-	IsResolved bool `json:"isResolved"`
-	IsOutdated bool `json:"isOutdated"`
-	Comments   struct {
-		Nodes []struct {
-			Author struct {
-				Login string `json:"login"`
-			} `json:"author"`
-			Body string `json:"body"`
-		} `json:"nodes"`
-	} `json:"comments"`
-}
-
-type gqlReviewResult struct {
-	Data struct {
-		Repository struct {
-			PullRequest struct {
-				ReviewThreads struct {
-					Nodes    []gqlReviewThread `json:"nodes"`
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-				} `json:"reviewThreads"`
-			} `json:"pullRequest"`
-		} `json:"repository"`
-	} `json:"data"`
-}
-
-func checkReviewThreads(prNum int, repo string) error {
-	parts := strings.SplitN(repo, "/", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid repo %q", repo)
-	}
-	owner, name := parts[0], parts[1]
-
-	var threads []gqlReviewThread
-	cursor := ""
-	for {
-		args := []string{
-			"api", "graphql",
-			"--field", fmt.Sprintf("owner=%s", owner),
-			"--field", fmt.Sprintf("name=%s", name),
-			"--field", fmt.Sprintf("number=%d", prNum),
-			"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
-		}
-		if cursor != "" {
-			args = append(args, "--field", fmt.Sprintf("cursor=%s", cursor))
-		}
-		out, err := runCommand(exec.Command("gh", args...))
-		if err != nil {
-			return fmt.Errorf("GraphQL query failed: %w", err)
-		}
-		var result gqlReviewResult
-		if err := json.Unmarshal(out, &result); err != nil {
-			return fmt.Errorf("parsing GraphQL response: %w", err)
-		}
-		page := result.Data.Repository.PullRequest.ReviewThreads
-		threads = append(threads, page.Nodes...)
-		if !page.PageInfo.HasNextPage {
-			break
-		}
-		if page.PageInfo.EndCursor == "" || page.PageInfo.EndCursor == cursor {
-			return fmt.Errorf("GraphQL review-thread pagination did not advance")
-		}
-		cursor = page.PageInfo.EndCursor
-	}
-	return reviewThreadError(threads)
-}
-
-// parseReviewThreads returns an error if any unresolved, non-outdated review
-// threads exist in the GraphQL response. Exported for testing.
-func parseReviewThreads(data []byte) error {
-	var result gqlReviewResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		return fmt.Errorf("parsing GraphQL response: %w", err)
-	}
-
-	return reviewThreadError(result.Data.Repository.PullRequest.ReviewThreads.Nodes)
-}
-
-func reviewThreadError(threads []gqlReviewThread) error {
-	var unresolved []string
-	for i, t := range threads {
-		if t.IsResolved || t.IsOutdated {
-			continue
-		}
-		label := fmt.Sprintf("thread #%d", i+1)
-		if len(t.Comments.Nodes) > 0 {
-			c := t.Comments.Nodes[0]
-			author := c.Author.Login
-			if author == "" {
-				author = "unknown"
-			}
-			body := c.Body
-			if len([]rune(body)) > 80 {
-				body = string([]rune(body)[:80]) + "…"
-			}
-			label = fmt.Sprintf("  • @%s: %q", author, body)
-		}
-		unresolved = append(unresolved, label)
-	}
-
-	if len(unresolved) > 0 {
-		return fmt.Errorf("%d unresolved review thread(s):\n%s",
-			len(unresolved), strings.Join(unresolved, "\n"))
-	}
-	return nil
-}
-
 type prViewResult struct {
 	HeadRefOid string `json:"headRefOid"`
 	Commits    []struct {
@@ -1156,73 +1121,4 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 		return prHeadResult{}, fmt.Errorf("PR #%d has no headRefOid — cannot anchor merge", prNum)
 	}
 	return prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName}, nil
-}
-
-// cleanupWorktree removes any local worktrees tracking the given branch and
-// then deletes the local branch. This mirrors the post-merge cleanup in
-// AGENTS.md §5. Failures are printed as warnings, not returned as errors.
-func cleanupWorktree(ctx context.Context, branch string) {
-	// NUL-delimited porcelain preserves every valid worktree path byte verbatim.
-	out, err := runCleanupGit(ctx, "", "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: git worktree list: %v\n", err)
-		return
-	}
-
-	// Parse NUL-delimited porcelain fields. Each block has "worktree <path>",
-	// optionally "branch refs/heads/<branch>", followed by an empty field.
-	// The very first worktree block is always the main worktree — never remove it.
-	var toRemove []string
-	var mainWorktree, currentPath string
-	for field := range bytes.SplitSeq(out, []byte{0}) {
-		if after, ok := bytes.CutPrefix(field, []byte("worktree ")); ok {
-			currentPath = string(after)
-			if mainWorktree == "" {
-				mainWorktree = currentPath
-			}
-		} else if bytes.Equal(field, []byte("branch refs/heads/"+branch)) && currentPath != "" {
-			if currentPath != mainWorktree {
-				toRemove = append(toRemove, currentPath)
-			}
-			currentPath = ""
-		}
-	}
-	if mainWorktree == "" {
-		fmt.Fprintln(os.Stderr, "safe-merge: cleanup: git worktree list returned no primary worktree")
-		return
-	}
-
-	for _, path := range toRemove {
-		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removing worktree %s\n", path)
-		if out, err := runCleanupGit(ctx, mainWorktree, "worktree", "remove", "--", path); err != nil {
-			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: worktree remove %s: %v: %s\n", path, err, out)
-		}
-	}
-
-	// Delete the local branch if it exists.
-	if out, err := runCleanupGit(ctx, mainWorktree, "branch", "-d", "--", branch); err != nil {
-		// -d refuses to delete if unmerged; that's fine — we already merged.
-		// Suppress the error if it's just "branch not found".
-		if !strings.Contains(string(out), "not found") {
-			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: branch -d %s: %s\n", branch, strings.TrimSpace(string(out)))
-		}
-	} else {
-		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removed local branch %s\n", branch)
-	}
-}
-
-func runCleanupGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	commandCtx, cancel := context.WithTimeout(ctx, cleanupCommandTimeout)
-	defer cancel()
-
-	// #nosec G204,G702 -- executable name is fixed; internal Git argv uses
-	// explicit option terminators before provider- or repository-derived values.
-	cmd := exec.CommandContext(commandCtx, "git", args...)
-	cmd.Dir = dir
-	cmd.WaitDelay = cleanupCommandWaitDelay
-	out, err := cmd.CombinedOutput()
-	if err != nil && commandCtx.Err() != nil {
-		return out, fmt.Errorf("git cleanup command: %w", commandCtx.Err())
-	}
-	return out, err
 }

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -36,6 +37,13 @@ type SessionDetail struct {
 	ContextUsage     *ContextUsage            `json:"context_usage,omitempty"`
 	PermissionMode   string                   `json:"permission_mode,omitempty"`
 	HarnessHistory   []manifest.HarnessSwitch `json:"harness_history,omitempty"`
+	// FinalOutputAt is deliberately the ONLY completion-capture field here:
+	// captured terminal contents can hold prompts, responses, credentials,
+	// and paths, so the output itself stays confined to the explicitly
+	// requested get_session_output operation (metadata surfaces such as
+	// agm_get_session_metadata must never return it). The timestamp tells a
+	// caller that a durable capture exists without exposing its contents.
+	FinalOutputAt string `json:"final_output_at,omitempty"`
 }
 
 // ContextUsage mirrors manifest.ContextUsage for JSON output.
@@ -150,6 +158,9 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 		UpdatedAt:        m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		PermissionMode:   m.PermissionMode,
 	}
+	if !m.FinalOutputAt.IsZero() {
+		d.FinalOutputAt = m.FinalOutputAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
 
 	if m.ParentSessionID != nil {
 		d.ParentSessionID = *m.ParentSessionID
@@ -166,33 +177,62 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 	return d
 }
 
-func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
+// existenceForStatus resolves tmux existence for status reporting, preferring
+// the strict checker. The plain HasSession collapses every tmux ExitError into
+// "absent" with a nil error, so an inaccessible socket or permission failure
+// would report a live worker as "stopped" — the same false-dead verdict the
+// list path now avoids by answering "unknown" (ce-0zng9). The strict checker
+// separates "no such session" from backend failure, so a failure surfaces as
+// an error here and the caller answers "unknown".
+func existenceForStatus(tmux any, plain interface {
+	HasSession(name string) (bool, error)
+}, tmuxName string) (bool, error) {
+	if strict, ok := tmux.(session.StrictSessionExistenceChecker); ok {
+		return strict.HasSessionStrict(context.Background(), tmuxName)
+	}
+	return plain.HasSession(tmuxName)
+}
+
+func computeSessionStatus(m *manifest.Manifest, tmux any) string {
+	status, observeErr := computeSessionStatusObserved(m, tmux)
+	if observeErr != nil {
+		// Callers of this form have no way to act on the cause, and an
+		// unobservable backend established neither "active" nor "stopped".
+		return "unknown"
+	}
+	return status
+}
+
+// computeSessionStatusObserved is computeSessionStatus plus the observation
+// error it otherwise swallows. "unknown" has two very different causes — no
+// tmux capability to ask at all, and a backend that was asked and failed to
+// answer — and a caller that must not invent a verdict from silence needs to
+// tell them apart. A non-nil error means the backend was unobservable, so
+// neither "active" nor "stopped" was ever established.
+func computeSessionStatusObserved(m *manifest.Manifest, tmux any) (string, error) {
 	if m.Lifecycle == "archived" {
-		return "archived"
+		return "archived", nil
 	}
 
 	if tmux == nil {
-		return "unknown"
+		return "unknown", nil
 	}
 
 	ti, ok := tmux.(interface {
 		HasSession(name string) (bool, error)
 	})
 	if !ok {
-		return "unknown"
+		return "unknown", nil
 	}
 
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
-	}
+	tmuxName := session.TmuxSessionName(m)
 
-	has, err := ti.HasSession(tmuxName)
+	has, err := existenceForStatus(tmux, ti, tmuxName)
 	if err != nil {
-		return "unknown"
+		return "unknown", err
 	}
 	if !has {
-		return "stopped"
+		return "stopped", nil
 	}
 	// The tmux session exists — but existence alone is a false-green liveness
 	// signal (ce-axsr): the session survives the harness exiting and the pane
@@ -200,8 +240,8 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 	// liveness, a dead-harness session reports "zombie" instead of "active".
 	if checker, ok := tmux.(session.HarnessLivenessChecker); ok {
 		if info, lerr := checker.HarnessLiveness(tmuxName); lerr == nil && info.SessionExists && !info.HarnessAlive {
-			return "zombie"
+			return "zombie", nil
 		}
 	}
-	return "active"
+	return "active", nil
 }

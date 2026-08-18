@@ -187,7 +187,7 @@ func renderPromptForRoute(b bead, route vroomprompt.Route) string {
 
 Bead %s (%s). %s
 
-**Stop after work complete + bead note written, OR PR created + auto-merge armed. Do NOT close bead. Do NOT create new beads.**
+**Stop after work complete + bead note written, OR provider-visible PR created through safe-pr. Never arm auto-merge. Do NOT close bead. Do NOT create new beads.**
 
 ## Goal
 
