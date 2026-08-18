@@ -85,14 +85,17 @@ jobs:
             echo "::warning::branch-reaper could not retrieve PR history for one or more branches -- see lookup_failed in the report" >&2
           fi
           if [ "$reaper_rc" -eq 4 ]; then
-            echo "::warning::branch-reaper failed to delete one or more safe_delete branches -- see the job logs above" >&2
+            echo "::error::branch-reaper failed to delete one or more safe_delete branches -- see delete_failed in the report" >&2
           fi
 
           {
             echo "## Branch audit — $(date -u '+%Y-%m-%d')"
             echo
             echo "### Auto-deleted this run (merged, tip still the merged head)"
-            jq -r '.safe_delete[]? | "- `\(.)`"' reaper-report.json
+            jq -r '.deleted[]? | "- `\(.)`"' reaper-report.json
+            echo
+            echo "### Deletion FAILED — still on the remote, needs a look"
+            jq -r '.delete_failed[]? | "- `\(.)`"' reaper-report.json
             echo
             echo "### Never had a PR — review for abandoned work"
             jq -r '.review_no_pr[]? | "- `\(.)`"' reaper-report.json
@@ -111,6 +114,13 @@ jobs:
             echo "has_review=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_review=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Reported here, failed at the end of the job: the report and the
+          # tracking issue still have to land before the run goes red.
+          if [ "$reaper_rc" -eq 4 ]; then
+            echo "delete_failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "delete_failed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build summary
@@ -169,3 +179,12 @@ jobs:
             timeout 30 gh issue close "$n" --repo "$REPO" \
               --comment "Branch audit: nothing left needing review; auto-closing."
           done
+
+      - name: Fail the run when a deletion was rejected
+        # Last, so the report, artifact and tracking issue all land first.
+        # A rejected leased delete means the remote moved under us: the run
+        # must go red rather than pass with a branch it claimed to reap.
+        if: steps.reaper.outputs.delete_failed == 'true'
+        run: |
+          echo "::error::branch-reaper left one or more safe_delete branches on the remote" >&2
+          exit 1

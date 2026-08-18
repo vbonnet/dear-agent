@@ -35,6 +35,11 @@
 // --force-with-lease=<branch>:<sha> pinned to the exact SHA that was
 // classified, so a push that lands between classification and deletion
 // makes the delete fail loudly instead of silently destroying the new tip.
+// The report then names what actually happened -- `deleted` versus
+// `delete_failed` -- so a branch still sitting on the remote is never
+// listed as reaped. Because PR history is read from GH_REPO while deletes
+// push to `origin`, --execute first refuses outright unless origin resolves
+// to that same repository.
 //
 // The protected-branch set is not a hardcoded guess: it is the repo's
 // actual default branch (via `gh repo view`) plus every branch referenced
@@ -44,12 +49,14 @@
 // kept as a hardcoded floor in case dynamic detection fails entirely.
 //
 // A branch whose PR history cannot be retrieved (auth, rate limit,
-// transient API error, or a per-branch PR count so large the query is
-// truncated) is never classified from incomplete data -- it is reported in
-// its own `lookup_failed` bucket instead, and the run's exit code reflects
-// that a real error occurred. It does not abort the rest of the run: this
-// tool walks every branch in the repo, so one flaky lookup should not deny
-// a report on everything else.
+// transient API error, a per-branch PR count so large the query is
+// truncated, or a `gh` call that blows its deadline) is never classified
+// from incomplete data -- it is reported in its own `lookup_failed` bucket
+// instead, and the run's exit code reflects that a real error occurred. It
+// does not abort the rest of the run: this tool walks every branch in the
+// repo, so one flaky lookup should not deny a report on everything else.
+// Every git/gh subprocess carries its own deadline for the same reason --
+// a hung call must cost one branch, not the whole report.
 //
 // # Usage
 //
@@ -108,6 +115,15 @@ const dependabotPrefix = "dependabot/"
 // page is treated as an error rather than a partial answer.
 const prFetchLimit = 100
 
+// Per-subprocess deadlines. Every git/gh call this tool makes is bounded so
+// that a single hung invocation degrades one branch instead of starving the
+// whole run until the CI job timeout kills it without a report.
+const (
+	prFetchTimeout   = 30 * time.Second
+	deleteTimeout    = 60 * time.Second
+	repoQueryTimeout = 30 * time.Second
+)
+
 // Exit codes. See the package doc comment; stale-branch-audit.yml treats
 // exitEnvironment as a hard failure and everything else (0/1/2/4) as "emit
 // the report, then decide whether to open a review issue".
@@ -153,14 +169,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	ctx := context.Background()
 
-	repo := os.Getenv("GH_REPO")
-	if repo == "" {
-		detected, err := detectRepo(ctx)
-		if err != nil || detected == "" {
-			fmt.Fprintln(stderr, "branch-reaper: could not determine repo (set GH_REPO or run inside a repo checkout)")
-			return exitEnvironment
-		}
-		repo = detected
+	repo, ok := resolveRepo(ctx, stderr)
+	if !ok {
+		return exitEnvironment
+	}
+	if *execute && !originIsRepo(ctx, repo, stderr) {
+		return exitEnvironment
 	}
 
 	branches, err := listBranches(ctx)
@@ -173,21 +187,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	rep, targets := classifyBranches(ctx, repo, protected, branches, stderr)
 
+	deleteFailed := 0
+	if *execute {
+		del := func(b branchInfo) error { return deleteBranch(ctx, b) }
+		// Deletion runs before the report is emitted so the report can say
+		// what actually happened: `deleted` versus `delete_failed`, never a
+		// blanket "auto-deleted" list that includes refs still on the
+		// remote.
+		deleteFailed = executeSafeDeletes(targets, del, stderr, &rep)
+		if deleteFailed > 0 {
+			fmt.Fprintf(stderr, "branch-reaper: %d of %d safe deletes failed\n", deleteFailed, len(targets))
+		}
+	}
+
 	if *jsonOut {
 		printJSON(stdout, rep)
 	} else {
 		printHuman(stdout, rep, time.Now().UTC())
 	}
 
-	deleteFailed := 0
-	if *execute {
-		del := func(b branchInfo) error { return deleteBranch(ctx, b) }
-		deleteFailed = executeSafeDeletes(targets, del, stderr)
-		if deleteFailed > 0 {
-			fmt.Fprintf(stderr, "branch-reaper: %d of %d safe deletes failed\n", deleteFailed, len(targets))
-		}
-	}
+	return exitCode(rep, deleteFailed)
+}
 
+// exitCode maps a finished run to its status. A failed deletion outranks
+// everything else: it is the only outcome where the tool tried to change
+// the remote and did not.
+func exitCode(rep Report, deleteFailed int) int {
 	switch {
 	case deleteFailed > 0:
 		return exitDeleteError
@@ -198,6 +223,41 @@ func run(args []string, stdout, stderr io.Writer) int {
 	default:
 		return exitClean
 	}
+}
+
+// resolveRepo returns the owner/repo to read PR history from: GH_REPO when
+// set, else whatever `gh repo view` infers from the checkout.
+func resolveRepo(ctx context.Context, stderr io.Writer) (string, bool) {
+	if repo := os.Getenv("GH_REPO"); repo != "" {
+		return repo, true
+	}
+	detected, err := detectRepo(ctx)
+	if err != nil || detected == "" {
+		fmt.Fprintln(stderr, "branch-reaper: could not determine repo (set GH_REPO or run inside a repo checkout)")
+		return "", false
+	}
+	return detected, true
+}
+
+// originIsRepo reports whether the `origin` remote resolves to repo.
+//
+// PR history is read from repo, but deletion always pushes to origin. If
+// GH_REPO names a different repository than the checkout's origin -- a fork
+// checkout pointed at upstream, say -- a merged upstream PR could classify
+// a same-named fork branch as safe and this tool would delete the wrong
+// repository's ref. Refuse rather than delete across that gap.
+func originIsRepo(ctx context.Context, repo string, stderr io.Writer) bool {
+	originRepo, err := originRemoteRepo(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "branch-reaper: --execute needs origin's URL to confirm it is %s: %v\n", repo, err)
+		return false
+	}
+	if !sameRepository(originRepo, repo) {
+		fmt.Fprintf(stderr, "branch-reaper: refusing --execute: PR history is read from %s but origin is %s; "+
+			"deletions would target a different repository\n", repo, originRepo)
+		return false
+	}
+	return true
 }
 
 // classifyBranches fetches PR history for each candidate branch and buckets
@@ -250,18 +310,23 @@ func classifyBranches(ctx context.Context, repo string, protected map[string]boo
 	return rep, targets
 }
 
-// executeSafeDeletes deletes every classified branch from origin and returns
-// how many deletions failed. Individual failures are logged and do not abort
-// the remaining deletes, but the count is what the caller turns into a
-// non-zero exit so a rejected delete can never be reported as done.
-func executeSafeDeletes(targets []branchInfo, del func(branchInfo) error, stderr io.Writer) int {
+// executeSafeDeletes deletes every classified branch from origin, records
+// the per-branch outcome in rep.Deleted / rep.DeleteFailed, and returns how
+// many deletions failed. Individual failures are logged and do not abort the
+// remaining deletes, but they are both counted (the caller turns a non-zero
+// count into a non-zero exit) and named in the report, so a branch that is
+// still on the remote is never listed as deleted.
+func executeSafeDeletes(targets []branchInfo, del func(branchInfo) error, stderr io.Writer, rep *Report) int {
 	failed := 0
 	for _, b := range targets {
 		fmt.Fprintf(stderr, "deleting: %s (%s)\n", b.Name, b.TipSHA)
 		if err := del(b); err != nil {
 			fmt.Fprintf(stderr, "branch-reaper: delete %s: %v\n", b.Name, err)
+			rep.DeleteFailed = append(rep.DeleteFailed, b.Name)
 			failed++
+			continue
 		}
+		rep.Deleted = append(rep.Deleted, b.Name)
 	}
 	return failed
 }
@@ -281,6 +346,11 @@ type Report struct {
 	// per-branch fetch limit) -- never classified, never deleted, distinct
 	// from review_no_pr.
 	LookupFailed []string `json:"lookup_failed"`
+	// Deleted and DeleteFailed split safe_delete by what --execute actually
+	// achieved. Without --execute both are empty: safe_delete alone means
+	// "would delete", never "did delete".
+	Deleted      []string `json:"deleted"`
+	DeleteFailed []string `json:"delete_failed"`
 }
 
 func reviewTotal(r Report) int {
@@ -290,6 +360,12 @@ func reviewTotal(r Report) int {
 func printJSON(w io.Writer, r Report) {
 	if r.LookupFailed == nil {
 		r.LookupFailed = []string{}
+	}
+	if r.Deleted == nil {
+		r.Deleted = []string{}
+	}
+	if r.DeleteFailed == nil {
+		r.DeleteFailed = []string{}
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -320,6 +396,19 @@ func printHuman(w io.Writer, r Report, now time.Time) {
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Lookup failed (gh error, not classified): %d\n", len(r.LookupFailed))
 	for _, b := range r.LookupFailed {
+		fmt.Fprintf(w, "  - %s\n", b)
+	}
+	if len(r.Deleted) == 0 && len(r.DeleteFailed) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Deleted this run: %d\n", len(r.Deleted))
+	for _, b := range r.Deleted {
+		fmt.Fprintf(w, "  - %s\n", b)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Deletion FAILED (still on the remote): %d\n", len(r.DeleteFailed))
+	for _, b := range r.DeleteFailed {
 		fmt.Fprintf(w, "  - %s\n", b)
 	}
 }
@@ -558,6 +647,8 @@ func parseBranchList(out string) []branchInfo {
 // classified. If anything landed on the branch since, git rejects the push
 // with "stale info" rather than destroying the unseen commits.
 func deleteBranch(ctx context.Context, b branchInfo) error {
+	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
+	defer cancel()
 	// #nosec G204,G702 -- fixed "git" binary; branch comes from a prior
 	// `git for-each-ref` listing of this repo's own remote refs, not
 	// external input.
@@ -572,6 +663,14 @@ func deleteBranch(ctx context.Context, b branchInfo) error {
 // only, so a fork's same-named branch would otherwise be read as this
 // branch's history.
 func fetchPRs(ctx context.Context, repo, branch string) ([]prRecord, error) {
+	// One stalled `gh` call must not hold up every remaining branch: without
+	// a per-call deadline a hung subprocess runs until the job timeout kills
+	// the whole run with no report at all, which is exactly the "one bad
+	// lookup denies results for everything else" failure the lookup_failed
+	// bucket exists to prevent. Deadline expiry surfaces as an ordinary
+	// lookup error, so the branch lands in lookup_failed like any other.
+	ctx, cancel := context.WithTimeout(ctx, prFetchTimeout)
+	defer cancel()
 	// #nosec G204,G702 -- fixed "gh" binary; repo/branch are argv elements, not
 	// shell input.
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
@@ -616,6 +715,8 @@ func sameRepoPRs(prs []prRecord) []prRecord {
 
 // detectRepo infers owner/repo via `gh repo view`.
 func detectRepo(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
+	defer cancel()
 	// #nosec G204,G702 -- fixed "gh" binary, no user-controlled arguments.
 	cmd := exec.CommandContext(ctx, "gh", "repo", "view",
 		"--json", "nameWithOwner", "--jq", ".nameWithOwner")
@@ -628,6 +729,8 @@ func detectRepo(ctx context.Context) (string, error) {
 
 // defaultBranch returns repo's default branch name via `gh repo view`.
 func defaultBranch(ctx context.Context, repo string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
+	defer cancel()
 	// #nosec G204,G702 -- fixed "gh" binary; repo is an argv element, not
 	// shell input.
 	cmd := exec.CommandContext(ctx, "gh", "repo", "view", "--repo", repo,
@@ -637,6 +740,51 @@ func defaultBranch(ctx context.Context, repo string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// originRemoteRepo returns the owner/repo the `origin` remote points at.
+func originRemoteRepo(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
+	defer cancel()
+	// #nosec G204,G702 -- fixed "git" binary, no user-controlled arguments.
+	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	out, err := runCombined(cmd)
+	if err != nil {
+		return "", err
+	}
+	return parseRemoteRepo(strings.TrimSpace(out)), nil
+}
+
+// parseRemoteRepo reduces a git remote URL to "owner/repo", covering the
+// https, ssh and scp-like forms git accepts. It returns "" for anything it
+// cannot reduce, which callers treat as "cannot prove a match".
+func parseRemoteRepo(url string) string {
+	url = strings.TrimSuffix(strings.TrimSpace(url), "/")
+	url = strings.TrimSuffix(url, ".git")
+	if url == "" {
+		return ""
+	}
+	// scp-like "git@host:owner/repo" -> keep only the path after the colon.
+	if !strings.Contains(url, "://") {
+		if _, path, ok := strings.Cut(url, ":"); ok {
+			url = path
+		}
+	}
+	parts := strings.Split(url, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	owner, name := parts[len(parts)-2], parts[len(parts)-1]
+	if owner == "" || name == "" {
+		return ""
+	}
+	return owner + "/" + name
+}
+
+// sameRepository reports whether two owner/repo identifiers name the same
+// GitHub repository. Both halves are case-insensitive on GitHub.
+func sameRepository(a, b string) bool {
+	return a != "" && b != "" && strings.EqualFold(a, b)
 }
 
 // runCombined runs cmd and returns stdout, folding stderr into the error.

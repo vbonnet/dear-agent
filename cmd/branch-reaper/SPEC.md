@@ -40,9 +40,9 @@ classified from incomplete data, and does not stop the rest of the run.
 
 **BRR-06** When a branch has no pull request at all, the command shall classify the branch as `review_no_pr`.
 
-**BRR-07** When `--json` is given, the command shall emit a single JSON object with the `safe_delete`, `review_no_pr`, `review_closed_unmerged`, `review_new_commits_after_merge`, and `lookup_failed` keys, each an array (never `null`) of branch names.
+**BRR-07** When `--json` is given, the command shall emit a single JSON object with the `safe_delete`, `review_no_pr`, `review_closed_unmerged`, `review_new_commits_after_merge`, `lookup_failed`, `deleted`, and `delete_failed` keys, each an array (never `null`) of branch names.
 
-**BRR-08** When `--execute` is given, the command shall delete every branch in the `safe_delete` bucket from the `origin` remote after emitting the report, leasing each deletion to the tip SHA the branch was classified against so that a ref updated since classification is rejected rather than deleted.
+**BRR-08** When `--execute` is given, the command shall delete every branch in the `safe_delete` bucket from the `origin` remote before emitting the report, leasing each deletion to the tip SHA the branch was classified against so that a ref updated since classification is rejected rather than deleted, and shall record each branch in `deleted` or `delete_failed` according to the outcome so that no branch still present on the remote is reported as deleted.
 
 **BRR-09** When the target repository is not given via `GH_REPO`, the command shall infer it via `gh repo view`, and shall exit with status 3 and a descriptive message when neither source yields a repository.
 
@@ -53,6 +53,10 @@ classified from incomplete data, and does not stop the rest of the run.
 **BRR-12** When determining the protected-branch set, the command shall include the repository's default branch (via `gh repo view`) and every branch referenced by a `push` or `pull_request` `branches:` trigger in any `.github/workflows/*.yml` file, in addition to the fixed `main`/`master` floor, and a failure to determine the default branch or to read the workflows directory shall not be treated as an error.
 
 **BRR-13** When the run completes, the command shall exit 0 if the four review/failure buckets (`review_no_pr`, `review_closed_unmerged`, `review_new_commits_after_merge`, `lookup_failed`) are all empty and no `--execute` deletion failed; shall exit 1 if any of the three review buckets is non-empty and `lookup_failed` is empty; shall exit 2 if `lookup_failed` is non-empty; shall exit 3 on a usage or environment error; and shall exit 4 when one or more safe deletions failed (which takes precedence over exit 1/2).
+
+**BRR-14** When `--execute` is given and the `origin` remote does not resolve to the repository whose pull-request history was read, the command shall delete nothing and exit with status 3, because deletions target `origin` while classification targets that repository.
+
+**BRR-15** When any `git` or `gh` subprocess is invoked, the command shall bound it with a deadline, so that a stalled call is surfaced as that one branch's failure rather than starving the rest of the run.
 
 ## BDD Traceability
 

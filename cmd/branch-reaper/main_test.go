@@ -390,7 +390,7 @@ func TestReportJSON_EmptyBucketsAreArraysNotNull(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	for _, key := range []string{"safe_delete", "review_no_pr", "review_closed_unmerged", "review_new_commits_after_merge", "lookup_failed"} {
+	for _, key := range []string{"safe_delete", "review_no_pr", "review_closed_unmerged", "review_new_commits_after_merge", "lookup_failed", "deleted", "delete_failed"} {
 		raw, ok := decoded[key]
 		if !ok {
 			t.Errorf("missing key %q", key)
@@ -453,7 +453,8 @@ func TestExecuteSafeDeletes_CountsFailuresAndKeepsGoing(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	failed := executeSafeDeletes(targets, del, &stderr)
+	var rep Report
+	failed := executeSafeDeletes(targets, del, &stderr, &rep)
 	if failed != 1 {
 		t.Errorf("failed = %d, want 1", failed)
 	}
@@ -463,14 +464,53 @@ func TestExecuteSafeDeletes_CountsFailuresAndKeepsGoing(t *testing.T) {
 	if !strings.Contains(stderr.String(), "delete bad/two") {
 		t.Errorf("failure not reported; stderr:\n%s", stderr.String())
 	}
+	// The branch that is still on the remote must never appear as deleted.
+	if strings.Join(rep.Deleted, ",") != "ok/one,ok/three" {
+		t.Errorf("deleted = %v, want [ok/one ok/three]", rep.Deleted)
+	}
+	if strings.Join(rep.DeleteFailed, ",") != "bad/two" {
+		t.Errorf("delete_failed = %v, want [bad/two]", rep.DeleteFailed)
+	}
 }
 
 func TestExecuteSafeDeletes_LeasesEachDeleteToItsClassifiedSHA(t *testing.T) {
 	targets := []branchInfo{{Name: "ok/one", TipSHA: tipSHA}}
 	var seen branchInfo
-	executeSafeDeletes(targets, func(b branchInfo) error { seen = b; return nil }, io.Discard)
+	var rep Report
+	executeSafeDeletes(targets, func(b branchInfo) error { seen = b; return nil }, io.Discard, &rep)
 	if seen.TipSHA != tipSHA {
 		t.Errorf("delete got SHA %q, want the classified %q", seen.TipSHA, tipSHA)
+	}
+}
+
+func TestParseRemoteRepo(t *testing.T) {
+	tests := map[string]string{
+		"https://github.com/vbonnet/dear-agent.git": "vbonnet/dear-agent",
+		"https://github.com/vbonnet/dear-agent":     "vbonnet/dear-agent",
+		"https://github.com/vbonnet/dear-agent/":    "vbonnet/dear-agent",
+		"git@github.com:vbonnet/dear-agent.git":     "vbonnet/dear-agent",
+		"ssh://git@github.com/vbonnet/dear-agent":   "vbonnet/dear-agent",
+		"/local/path/repo":                          "path/repo",
+		"":                                          "",
+		"nonsense":                                  "",
+	}
+	for in, want := range tests {
+		if got := parseRemoteRepo(in); got != want {
+			t.Errorf("parseRemoteRepo(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSameRepository(t *testing.T) {
+	if !sameRepository("vbonnet/dear-agent", "VBonnet/Dear-Agent") {
+		t.Error("GitHub owner/repo comparison must be case-insensitive")
+	}
+	if sameRepository("vbonnet/dear-agent", "someone-else/dear-agent") {
+		t.Error("different owners must not compare equal")
+	}
+	// An unknown side can never prove a match, so --execute stays refused.
+	if sameRepository("", "vbonnet/dear-agent") || sameRepository("vbonnet/dear-agent", "") {
+		t.Error("an empty identifier must never compare equal")
 	}
 }
 
