@@ -14,6 +14,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Deny-all floor. Every job below declares its own least-privilege
+# `permissions:` block, which replaces this one entirely — this exists so a
+# job added later starts with zero scopes instead of inheriting the
+# repository default.
+permissions: {}
+
 jobs:
   analyze:
     name: Analyze Go Code
