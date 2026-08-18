@@ -1,7 +1,7 @@
 // Package safegit builds and runs git pushes that cannot hang on the macOS
 // keychain credential helper, and cannot force-push.
 //
-// The hang it prevents
+// # The hang it prevents
 //
 // On this host the git credential helper chain is, for any host not explicitly
 // remapped, the *generic* chain from the system gitconfig:
@@ -26,7 +26,7 @@
 // only *appends* the CLI helper; it never resets osxkeychain off the front of
 // the chain, so it inherits the same hang for every non-github.com context.
 //
-// The fix
+// # The fix
 //
 // CredentialResetArgs emits an empty `-c credential.helper=` (which clears the
 // entire accumulated helper list, osxkeychain included) followed by a single
@@ -81,23 +81,75 @@ func CredentialResetArgs(ghPath string) []string {
 //
 // Detected forms:
 //   - -f / --force / --force-with-lease / --force-if-includes (flags)
+//   - -uf, -fu, -vfq, ... (short-option clusters containing -f)
 //   - --mirror (rewrites remote refs wholesale, equivalent to force-push)
 //   - +<refspec>  (a leading '+' in a refspec means "force this ref")
+//
+// Options are only recognized before a bare `--`. Git treats every token after
+// the end-of-options separator as a repository or refspec, so `git push origin
+// -- -f` pushes a branch named "-f" and is not a force push — while a `+ref`
+// after `--` still forces that ref and is still rejected.
 func ForceFlag(args []string) (string, bool) {
+	endOfOptions := false
 	for _, a := range args {
-		switch {
-		case a == "-f" || a == "--force" || a == "--force-with-lease" || a == "--mirror":
-			return a, true
-		case strings.HasPrefix(a, "--force-with-lease=") ||
-			strings.HasPrefix(a, "--force-if-includes"):
-			return a, true
-		case strings.HasPrefix(a, "+") && !strings.HasPrefix(a, "--"):
-			// A '+' prefix on a refspec forces that ref; block it.
+		if !endOfOptions {
+			if a == "--" {
+				endOfOptions = true
+				continue
+			}
+			if strings.HasPrefix(a, "-") && a != "-" {
+				if forcesPush(a) {
+					return a, true
+				}
+				continue
+			}
+		}
+		// A repository or refspec. A '+' prefix on a refspec forces that ref.
+		if strings.HasPrefix(a, "+") {
 			return a, true
 		}
 	}
 	return "", false
 }
+
+// forcesPush reports whether one option token (leading '-', not the bare "-"
+// or "--") forces the push.
+//
+// Short options are the subtle half. Git's parse-options — like POSIX getopt —
+// lets callers bundle short options into a single argv token, so `-uf` is
+// `-u -f` and forces the push just as surely as a standalone `-f`. Comparing
+// the whole token against "-f" therefore misses every cluster; the letters
+// have to be walked individually.
+func forcesPush(opt string) bool {
+	if strings.HasPrefix(opt, "--") {
+		switch {
+		case opt == "--force" || opt == "--force-with-lease" || opt == "--mirror":
+			return true
+		case strings.HasPrefix(opt, "--force-with-lease=") ||
+			strings.HasPrefix(opt, "--force-if-includes"):
+			return true
+		}
+		// Any other long option, including the negating --no-force forms.
+		return false
+	}
+	for _, c := range opt[1:] {
+		if c == 'f' {
+			// -f is `git push`'s only short option spelled with an 'f'.
+			return true
+		}
+		if shortPushOptsWithValue[c] {
+			// The option's value is glued to the rest of the word (`-ofoo`),
+			// so the remaining letters are that value, not further options.
+			break
+		}
+	}
+	return false
+}
+
+// shortPushOptsWithValue are the `git push` short options that consume a value.
+// Their value may be glued to the letter (`-ofoo`), which would otherwise let
+// an arbitrary string be scanned for option letters.
+var shortPushOptsWithValue = map[rune]bool{'o': true}
 
 // PushArgs assembles the full git argv for a safe push: an optional `-C
 // repoDir`, the credential reset, `push`, and the caller's push arguments.
