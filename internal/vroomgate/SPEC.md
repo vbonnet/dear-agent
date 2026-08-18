@@ -22,5 +22,4 @@ another.
 
 ## BDD Traceability
 
-- Package tests: `internal/vroomgate/*_test.go`
-- Consumer tests: `cmd/vroom-dispatch-direct/main_test.go`, `cmd/vroom-prompt-gen/main_test.go`
+- Test consequence: Deterministic unit tests own this contract end to end. `internal/vroomgate/gate_test.go` proves VHG-01 through VHG-03 against the list itself, and the consumer tests `TestHumanGatedBeadsAreNeverCandidates` (`cmd/vroom-dispatch-direct/main_test.go`) and `TestSelectCandidatesHonoursSharedHumanGate` (`cmd/vroom-prompt-gen/main_test.go`) prove VHG-04 by enumerating `vroomgate.IDs()` and asserting no gated bead survives either binary's candidate selection. No new BDD feature is required: this is a private in-process seam with no observable session behaviour for the BDD harness to drive, and both consuming commands already carry their own BDD linkage.

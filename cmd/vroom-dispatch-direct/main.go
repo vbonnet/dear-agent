@@ -17,11 +17,9 @@
 //  2. open PRs (the bead is already in flight — its id appears in a PR branch/title)
 //  3. the human-gated skip list (beads a human must drive, never an autonomous worker)
 //
-// Capacity is controlled by real spawn backpressure. By default this
-// dispatcher does not impose a hard worker-count cap; it dispatches eligible
-// beads until the candidate list is exhausted or `agm session new` refuses a
-// spawn. -max-dispatch opts into a per-run cap for a scheduled/unattended
-// loop that wants to bound its own blast radius independent of backpressure.
+// Capacity is controlled by real spawn backpressure: it dispatches eligible
+// beads until the list is exhausted or a spawn is refused. -max-dispatch opts
+// into a per-run cap on top of that (see cap.go).
 //
 // Exit status is 0 on success even when zero beads are dispatched — "nothing new
 // to dispatch" (backlog drained, at capacity, or all in flight) is a normal
@@ -91,10 +89,9 @@ const subprocessTimeout = 60 * time.Second
 const sessionSpawnTimeout = 180 * time.Second
 
 // Worker spawn defaults. opus-200k → claude-opus-4-8: design-phase work needs
-// Opus, and the 200k variant dodges the 1M credit gate that the bare
-// opus/sonnet aliases trip on this Max-plan auth (ce-84l2). The human-gated
-// skip list lives in internal/vroomgate so every dispatch-path binary reads the
-// same list instead of a local copy that can drift.
+// Opus, and the 200k variant dodges the 1M credit gate the bare opus/sonnet
+// aliases trip on this Max-plan auth (ce-84l2). The human-gated skip list now
+// lives in internal/vroomgate so it cannot drift between dispatch binaries.
 const (
 	defaultHarness   = "claude-code"
 	defaultModel     = "opus-200k"
@@ -967,12 +964,8 @@ func main() {
 	ledgerPath := flag.String("ledger", "~/.agm/vroom/dispatch-ledger.json", "path to the dispatch ledger used to reconcile bead closure across runs")
 	flag.Parse()
 
-	// A negative cap is always a misconfiguration (`-max-dispatch=-1` reads as
-	// "unlimited" in plenty of other tools), and quietly treating it as
-	// unlimited is precisely how a safety cap fails open. Only the documented
-	// 0 disables the cap; anything else negative is an error, not a default.
-	if *maxDispatch < 0 {
-		fatal("-max-dispatch must be >= 0 (0 = unlimited), got %d", *maxDispatch)
+	if err := validateMaxDispatch(*maxDispatch); err != nil {
+		fatal("%v", err)
 	}
 
 	// Cancel in-flight subprocesses if the dispatcher is interrupted (SIGINT/
@@ -1083,11 +1076,7 @@ func main() {
 	}
 	beads = excludeReconciled(beads, reconciled)
 
-	// The full eligible list goes into the loop, not a pre-truncated slice: the
-	// cap counts SUCCESSFUL dispatches, so a deterministically-skipped bead does
-	// not consume a slot. Truncating up front would let one poisoned P0 eat the
-	// whole -max-dispatch=1 budget on every scheduled run and starve the queue
-	// permanently — the ce-b1zw failure the skip logic exists to prevent.
+	// The full eligible list goes into the loop, never a pre-truncated slice.
 	candidates := selectCandidates(beads, occupied, prs, *maxPriority)
 
 	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *maxDispatch, *dryRun, os.Stdout, os.Stderr, ledger)
@@ -1113,20 +1102,15 @@ func main() {
 // deterministic bead-closure reconciliation possible across the tool's
 // one-shot-per-tick invocations.
 //
-// maxDispatch (0 or negative = unlimited) bounds SUCCESSFUL dispatches, not list
-// positions: beads skipped for a deterministic per-bead spawn failure do not
-// consume budget, so the run keeps walking down the list until it has genuinely
-// placed maxDispatch beads or run out of candidates.
+// maxDispatch (0 or negative = unlimited) bounds successful dispatches, not list
+// positions — cap.go explains why that distinction matters.
 func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, maxDispatch int, dryRun bool, out, errOut io.Writer, ledger *dispatchLedger) int {
 	dispatched := 0
 	for i, b := range candidates {
 		if ctx.Err() != nil {
 			break
 		}
-		if maxDispatch > 0 && dispatched >= maxDispatch {
-			fmt.Fprintf(errOut,
-				"vroom-dispatch-direct: -max-dispatch=%d reached, deferring %d remaining eligible bead(s) to a later run\n",
-				maxDispatch, len(candidates)-i)
+		if dispatchCapReached(maxDispatch, dispatched, len(candidates)-i, errOut) {
 			break
 		}
 		if dryRun {
