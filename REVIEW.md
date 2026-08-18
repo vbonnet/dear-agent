@@ -64,12 +64,39 @@ diff touches any of the following:
 Escalation is not a failure state — it is a correct outcome that preserves
 human authority over irreversible decisions.
 
-These triggers are enforced **deterministically in code** (`cmd/ai-review`
+The triggers above are enforced **deterministically in code** (`cmd/ai-review`
 inspects the changed paths, the PR body, and the commit messages), not left to
-the synthesis agent's judgement — §3 says escalation is mandatory "regardless of
-finding severity", so it must not depend on a nondeterministic model call. A
-diff that trips any trigger is forced to `needs-human-review` even if all five
-dimensions report clean.
+the synthesis agent's judgement — §3 says escalation is mandatory "regardless
+of finding severity", so those must not depend on a nondeterministic model
+call. A diff that trips any of them is forced to `needs-human-review` even if
+all five dimensions report clean.
+
+**Size and scope are flagged separately, and are advisory, not a §3 trigger:**
+a deterministic GitHub Action (`.github/workflows/pr-size-scope.yml`) computes
+changed lines, changed files, and top-level areas on every push and posts a
+split-suggestion comment once a PR crosses 1,000 changed lines, 50 changed
+files, or 4 top-level areas. It comments only — it does not call into
+`cmd/ai-review` and does not force `needs-human-review`. Reviewers should
+still treat a flagged PR as needing a split before line-by-line review, but an
+oversized diff does not by itself force escalation the way the triggers above
+do.
+
+**Stacked PRs and this protocol:** the five-dimension review workflow only
+triggers for `branches: [main]`, and additionally validates that
+`.base.ref == "main"`. A stacked PR (base ≠ `main`) does not get this review
+at all.
+
+Landing the stack's root does **not** fix this on its own: merging the root
+changes no descendant's base, so every descendant stays outside the protocol
+until it is explicitly rebased onto `main` and retargeted there (see
+[CONTRIBUTING.md](CONTRIBUTING.md) — a squash landing means retargeting alone
+would leave the descendant re-carrying its predecessor's diff). Treat each
+stack member as unreviewed by this protocol until it has itself run with
+`main` as its base.
+
+Even then, a `main` base is necessary but not sufficient — `review.yml` takes
+a neutral path when its plan reports `review_relevant=false`, which publishes
+a green-looking check that is not a review.
 
 ---
 
