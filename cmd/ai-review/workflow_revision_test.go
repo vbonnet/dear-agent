@@ -650,10 +650,11 @@ func TestWorkflowPublicationRevalidatesProtectedMain(t *testing.T) {
 		{name: "freshness API failure", currentBase: base, failAPI: true, outcome: "success", want: "failure"},
 		// Only the gate's explicit cannot-run-without-credential exit (78,
 		// surfaced as keyless_cannot_run=true) publishes neutral-with-warning,
-		// and only same-repository with the key affirmatively absent. A
-		// keyless failure WITHOUT that discrimination (plan build error,
-		// expired deadline, timeout) stays a failure, as do fork PRs,
-		// stale-base publication, and any failure while a key is present.
+		// and only same-repository with the key affirmatively absent. That
+		// exit is the AIREV-26 predicate: the review could never run. A
+		// keyless failure WITHOUT that discrimination stays a failure, as do
+		// fork PRs, stale-base publication, and any failure while a key is
+		// present.
 		{name: "keyless same-repo cannot-run failure is neutral with warning", currentBase: base, outcome: "failure", keyless: true, want: "neutral"},
 		{name: "keyless failure without cannot-run discrimination stays failure", currentBase: base, outcome: "failure", want: "failure"},
 		{name: "keyless fork cannot-run failure stays failure", currentBase: base, outcome: "failure", keyless: true, isFork: true, want: "failure"},
@@ -847,4 +848,68 @@ func runCurrentPRRevisionResolver(t *testing.T, run, response, failAPI string) (
 		}
 	}
 	return outputs, string(envRaw), nil
+}
+
+// TestWorkflowKeylessNeutralIsExitSeventyEightOnly pins the AIREV-26 boundary
+// that separates "the review could never run" from "the review concluded and
+// found a problem". Only cmd/ai-review's explicit cannot-run exit 78 —
+// surfaced by the gate step as keyless_cannot_run=true — may be published as
+// neutral-with-warning. Every disposition AIREV-26 enumerates as fail-closed
+// reaches the workflow with keyless_cannot_run=false (or never writes the
+// output at all, when the failure precedes the binary), and each must keep
+// blocking even though no reviewer credential is configured.
+//
+// Widening the publish branch to "any keyless gate failure" turns each of
+// these genuine findings into a false pass, so they are asserted by name.
+func TestWorkflowKeylessNeutralIsExitSeventyEightOnly(t *testing.T) {
+	steps := reviewWorkflowRevisionSteps(t)
+	var publish, failGate workflowRevisionStep
+	for _, step := range steps {
+		switch step.Name {
+		case "Publish check on reviewed head":
+			publish = step
+		case "Fail if review gate failed":
+			failGate = step
+		}
+	}
+	if publish.Run == "" {
+		t.Fatal("Publish check on reviewed head step is missing")
+	}
+	if failGate.If == "" {
+		t.Fatal("Fail if review gate failed step is missing")
+	}
+	// The native orchestration job must go green for exit 78 and ONLY for
+	// exit 78; without this clause every keyless gate failure stops blocking.
+	if !strings.Contains(failGate.If, "steps.gate.outputs.keyless_cannot_run != 'true'") {
+		t.Errorf("orchestration failure condition = %q, want it gated on keyless_cannot_run", failGate.If)
+	}
+	// The published semantic verdict must apply the same discrimination.
+	if !strings.Contains(publish.Run, `[ "${KEYLESS_CANNOT_RUN:-}" = true ]`) {
+		t.Error("publish step no longer discriminates the cannot-run exit; every keyless gate failure would publish neutral")
+	}
+
+	const base = "1111111111111111111111111111111111111111"
+	// Each case is a keyless, same-repository, current-base run whose gate
+	// failed. keyless=false is how the workflow observes every AIREV-26
+	// fail-closed disposition, because cmd/ai-review reserves exit 78 for the
+	// cannot-run predicate alone.
+	failClosed := []string{
+		"conclusive SPEC-governance verdict needing no model (ownership edge)",
+		"conclusive SPEC-governance verdict needing no model (reviewer dependency)",
+		"conclusive SPEC-governance verdict needing no model (BDD traceability)",
+		"conclusive SPEC-governance verdict needing no model (stale-base evidence)",
+		"oversize or uncomputable diff",
+		"needs-human-review evidence comment could not be posted",
+		"authenticated plan construction error",
+		"expired trusted review deadline",
+		"reviewer build failure before the gate binary ran",
+	}
+	for _, name := range failClosed {
+		t.Run(name, func(t *testing.T) {
+			got := runReviewPublication(t, publish.Run, base, base, "failure", false, false, false, false, false)
+			if got != "failure" {
+				t.Fatalf("conclusion = %q, want %q: a keyless review that CAN conclude must not be excused", got, "failure")
+			}
+		})
+	}
 }

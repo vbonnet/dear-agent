@@ -4,14 +4,12 @@
 //
 // # Why this matters
 //
-// safe-pr arms squash auto-merge on every non-draft PR it creates, on the
-// assumption that CI will run, report the required checks, and let the PR
-// merge itself once green. Drafts are human handoffs and remain unarmed. A
-// push-then-PR-open race can drop the CI trigger: the head SHA ends up
-// with no check-runs at all, so the required checks never report. Auto-merge
-// then waits forever and the safe-merge babysit loop skips the PR as "pending"
-// on every pass — there is no red, no green, and no signal. The PR ages
-// indefinitely with nothing flagging it.
+// safe-pr can create a non-draft PR whose head SHA has no check-runs when a
+// push-then-PR-open race drops the CI trigger. The required checks then never
+// report, and the safe-merge babysit loop skips the PR as "pending" on every
+// pass — there is no red, no green, and no signal. The PR ages indefinitely
+// with nothing flagging it. Drafts are human handoffs and remain outside this
+// automated recovery path.
 //
 // This package holds the pure detection logic so it is exhaustively unit
 // testable with no GitHub access; sources.go wires it to the gh CLI and the
