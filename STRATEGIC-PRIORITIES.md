@@ -232,10 +232,8 @@ silently re-solved by later sessions, so the system duplicates rather than loses
     the agent's primary way to learn; each recurring review finding becomes a
     just-in-time instruction at the right placement level, never top-level AGENTS.md
     unless universal. North-star metric: automated-review catches trending toward
-    zero. Evidence: operator reframe 2026-08-18 (this revision); the input corpus is
-    already banked (#1096, #1243 thread volumes), making this the cheapest
-    dreaming-pattern loop to start; same pattern as the trace-mining talk applied to
-    review data.
+    zero. Evidence: operator reframe 2026-08-18 (this revision); the input corpus
+    is already banked (#1096, #1243), the cheapest dreaming-pattern loop to start.
 
 ## Pending inputs to reconcile
 
@@ -244,8 +242,7 @@ silently re-solved by later sessions, so the system duplicates rather than loses
   next review if it lands, or correct the reference.
 - engram-research PR #322 (strategic state) is still open: merge it as the audit
   trail behind this file.
-- Local golden clones diverged from origin (7 repos, including engram-research and
-  this repo's own unpushed retros): N4 covers the alarm; reconcile is manual.
+- Local golden clones diverged from origin (7 repos): N4 covers the alarm.
 
 ## Reconciliation exceptions
 
