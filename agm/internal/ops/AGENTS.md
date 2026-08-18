@@ -27,7 +27,7 @@ Concretely: distinguish `os.ErrNotExist` from every other read error; give
 classifiers a `lookup-failed` bucket rather than reusing `none`; and if the
 function's signature has nowhere to report the failure, change the signature.
 
-## One owner per behaviour
+## One owner per behavior
 
 The second-most-repeated defect here: adding a second path beside the canonical
 one instead of using it — a parallel status computation, a second tmux-name
