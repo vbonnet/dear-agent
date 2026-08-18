@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -153,5 +154,28 @@ func TestDirSize_NonExistent(t *testing.T) {
 	size := DirSize("/nonexistent/path/abc123")
 	if size != 0 {
 		t.Errorf("DirSize of nonexistent = %d, want 0", size)
+	}
+}
+
+// Source is the field a reader uses to tell one GC runner from another; a
+// reader that cannot tell them apart grades a scheduled job on records some
+// other component produced. The name is part of the on-disk contract with
+// cmd/disk-watchdog, which cannot import this internal package.
+func TestEntrySourcePublishedOnTheWire(t *testing.T) {
+	out, err := json.Marshal(Entry{Operation: "sandbox_gc_completed", Source: "disk-watchdog"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"source":"disk-watchdog"`) {
+		t.Errorf("source missing from %s", out)
+	}
+	// An undeclared runner leaves the field out entirely rather than claiming
+	// to be anyone: empty must not be readable as a named producer.
+	out, err = json.Marshal(Entry{Operation: "sandbox_gc_completed"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(out), "source") {
+		t.Errorf("an undeclared runner published a source: %s", out)
 	}
 }
