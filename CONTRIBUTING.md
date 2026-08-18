@@ -124,6 +124,79 @@ before pushing, or drop a one-line `exec make preflight` pre-push hook into
 3. Describe what your PR does and why
 4. Link any related issues
 
+### Small, stacked PRs
+
+Agents should prefer small, targeted pull requests that are easy to review and
+test independently. When a change is large, split it into a GitHub stacked PR
+series: land mechanical refactors, renames, generated updates, or pure test
+scaffolding first, then put the risky behavior change in a focused follow-up PR.
+
+Each PR in the stack must stand on its own: it should have a clear purpose,
+pass the relevant tests, and be independently understandable from its diff and
+description. Do not bundle unrelated concerns into one monster PR just because
+they were discovered in the same session.
+
+**Caveat — the five-dimension review protocol (see [REVIEW.md](REVIEW.md))
+only triggers for PRs based on `main`.** A PR whose base is another open PR's
+branch does not get that review at all.
+
+Targeting `main` is necessary but **not** sufficient. In the current keyless
+configuration `.github/workflows/review.yml` skips the gate when its plan
+reports `review_relevant=false` and publishes a neutral result that says so
+explicitly — so an ordinary stack member with no changed SPEC and no REVIEW.md
+§3 escalation trigger gets a green-looking neutral check, not a review. Read
+the check's text rather than its colour before concluding a PR was reviewed.
+
+Two ways to stay honest about this:
+- Open each stack member only after its predecessor has landed on `main`, so
+  every PR in the sequence is itself based on `main`, or
+- If you do stack branch-on-branch, **restack** each descendant onto `main`
+  once its predecessor lands, then retarget its base. A `safe-merge` landing
+  is a squash (`internal/safegit/merge.go` passes `--squash`), so the
+  predecessor's new `main` commit is not an ancestor of a descendant created
+  from the pre-merge branch — retargeting alone leaves the descendant's diff
+  carrying its predecessor's changes again.
+
+  Use `--onto`, not a plain rebase. A plain `git rebase main` still selects
+  every one of the predecessor's commits for replay, because none of them is
+  an ancestor of `main` by SHA after the squash — so a multi-commit
+  predecessor conflicts against its own already-landed changes. Restack with
+  the old parent tip as the cut point:
+
+  ```sh
+  git rebase --onto main <old-parent-tip> <descendant-branch>
+  ```
+
+  **This second option is not currently supported end to end — prefer the
+  first.** Two gaps, both real:
+
+  - `safe-rebase` has no `--onto` mode. It runs a plain `git rebase <base>`
+    (`internal/safegit/rebase.go`, `attemptRebase`), so a squash-merged parent
+    is exactly the case it handles badly. Restacking by hand therefore skips
+    its latest-`origin/main` fetch, protected-branch check, automatic conflict
+    abort, and audit trail.
+  - A restack rewrites the branch, so landing it needs a force-push — and
+    `safe-push` never force-pushes, by design. There is no sanctioned command
+    that completes this workflow.
+
+  Tracked as `ce-x2ekc`. Until it lands, stack only when you are prepared to
+  land each predecessor first, or get a maintainer to complete the restack.
+  Either way, wait for that PR's own exact-head review before merging, and
+  don't rely on `safe-merge`'s fallback "validate all reported checks" path as
+  a substitute for it.
+
+**Bead tracking:** `safe-pr create` defaults every PR in a session to the
+same first bead and stamps `Closes <bead>` — unless the PR body you pass
+already mentions that bead ID anywhere, in which case `safe-pr` skips the
+auto-stamp (see `internal/safepr.StampedArgs`/`referencesBead`). In a stack,
+the default behavior closes the bead the moment the *first* PR merges, while
+later stack members are still open — `agm pr scan-orphaned` will then flag
+them as tracking a closed bead. Give each PR in a stack its own bead, or, to
+share one bead across the stack without early-closing it, reference the bead
+yourself in each non-final PR's body using non-closing language (e.g. "Part
+of `<bead>`", not "Closes `<bead>`") so `safe-pr`'s auto-stamp is suppressed;
+only the stack's final PR should carry an actual `Closes <bead>`.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
