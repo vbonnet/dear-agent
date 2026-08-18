@@ -234,11 +234,20 @@ func pathyArgs(args []string) []string {
 // `=`-joined (`--mode=755`) forms are single option tokens already dropped by
 // isOption. Reference paths (-r/--reference) are read-only sources, so skipping
 // them here is also correct.
+// GNU coreutils accept value-taking options after the operands too
+// (`cp SRC DEST --suffix bak`), so an unconsumed value would otherwise become
+// the "last" operand and displace the real destination.
 var optsWithValue = map[string]map[string]bool{
 	"mkdir":    {"-m": true, "--mode": true},
-	"install":  {"-m": true, "--mode": true, "-o": true, "--owner": true, "-g": true, "--group": true},
+	"install":  {"-m": true, "--mode": true, "-o": true, "--owner": true, "-g": true, "--group": true, "-S": true, "--suffix": true},
 	"shred":    {"-n": true, "--iterations": true, "-s": true, "--size": true},
 	"truncate": {"-s": true, "--size": true, "-r": true, "--reference": true},
+	"cp":       {"-S": true, "--suffix": true},
+	"mv":       {"-S": true, "--suffix": true},
+	"ln":       {"-S": true, "--suffix": true},
+	"chmod":    {"--reference": true},
+	"chown":    {"--reference": true},
+	"chgrp":    {"--reference": true},
 }
 
 // leadingSpecOperand lists commands whose first non-option positional is a
@@ -246,6 +255,50 @@ var optsWithValue = map[string]map[string]bool{
 // target, e.g. the 755 in `chmod 755 file` or the user in `chown user file`.
 var leadingSpecOperand = map[string]bool{
 	"chmod": true, "chown": true, "chgrp": true,
+}
+
+// targetDirCmds lists the commands whose GNU `-t`/`--target-directory` option
+// names the destination directory. Its value is a mutation target rather than
+// an inert scalar, so it must be consumed as an option value *and* classified
+// (see optionTargets); merely skipping it would drop the destination and let
+// `cp -t ~/src/dear-agent f` through with only its read-only source inspected.
+var targetDirCmds = map[string]bool{
+	"cp": true, "mv": true, "ln": true, "install": true,
+}
+
+// targetDirOption reports whether tok is cmd's -t/--target-directory option.
+// inline holds a destination glued to the option (`--target-directory=DIR`,
+// `-tDIR`, `-rtDIR`); an empty inline means the destination is the next token.
+func targetDirOption(cmd, tok string) (inline string, ok bool) {
+	if !targetDirCmds[cmd] {
+		return "", false
+	}
+	switch {
+	case tok == "-t" || tok == "--target-directory":
+		return "", true
+	case strings.HasPrefix(tok, "--target-directory="):
+		return strings.TrimPrefix(tok, "--target-directory="), true
+	case strings.HasPrefix(tok, "--") || !strings.HasPrefix(tok, "-"):
+		return "", false
+	case strings.HasPrefix(tok, "-t"):
+		return tok[2:], true // -tDIR
+	case strings.HasSuffix(tok, "t"):
+		return "", true // short cluster ending in t, e.g. -rt DIR
+	}
+	return "", false
+}
+
+// hasReferenceOption reports whether a chmod/chown/chgrp invocation takes its
+// mode/owner/group from `--reference=RFILE` instead of a leading spec operand.
+// In that form (`chmod --reference=R FILE...`) the first positional is already
+// a mutation target, so dropping it would silently lose the real target.
+func hasReferenceOption(rest []string) bool {
+	for _, a := range rest {
+		if a == "--reference" || strings.HasPrefix(a, "--reference=") {
+			return true
+		}
+	}
+	return false
 }
 
 // targetOperands returns the operands of a write command that name filesystem
@@ -257,20 +310,84 @@ var leadingSpecOperand = map[string]bool{
 func targetOperands(cmd string, rest []string) []string {
 	valueOpts := optsWithValue[cmd]
 	out := make([]string, 0, len(rest))
-	leadingSkipped := !leadingSpecOperand[cmd]
+	leadingSkipped := !leadingSpecOperand[cmd] || hasReferenceOption(rest)
+	operandsOnly := false
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
-		if isOption(a) {
-			if valueOpts[a] {
-				i++ // consume the option's value so it is not seen as a target
+		if !operandsOnly {
+			// `--` ends option parsing: every later token is an operand even
+			// when it starts with '-' (`rm -- -logfile`), and `--` itself names
+			// nothing, so it must not be classified as a relative path.
+			if a == "--" {
+				operandsOnly = true
+				continue
 			}
-			continue
+			if inline, isTargetDir := targetDirOption(cmd, a); isTargetDir {
+				if inline == "" {
+					i++ // destination is the next token; optionTargets classifies it
+				}
+				continue
+			}
+			if isOption(a) {
+				if valueOpts[a] {
+					i++ // consume the option's value so it is not seen as a target
+				}
+				continue
+			}
 		}
 		if !leadingSkipped {
 			leadingSkipped = true
 			continue // drop the leading mode/owner/group spec
 		}
 		out = append(out, a)
+	}
+	return out
+}
+
+// optionTargets returns the mutation targets a command names through an option
+// value rather than a positional operand — currently only GNU's
+// `-t`/`--target-directory` destination.
+func optionTargets(cmd string, rest []string) []string {
+	var out []string
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		if a == "--" {
+			break // options end here; the rest are operands
+		}
+		inline, ok := targetDirOption(cmd, a)
+		if !ok {
+			continue
+		}
+		if inline != "" {
+			out = append(out, inline)
+			continue
+		}
+		if i+1 < len(rest) {
+			out = append(out, rest[i+1])
+			i++
+		}
+	}
+	return out
+}
+
+// stripRedirections removes redirection syntax from a simple-command segment:
+// the operator, the token it redirects to, and any bare file-descriptor digit
+// in front of it (the `2` of `2>&1`, which tokenizes as its own word). Redirect
+// targets are classified separately by checkRedirections; left in the segment
+// they would masquerade as command operands, so `cp a ~/src/dear-agent/f 2>&1`
+// would pick `1` as cp's destination and miss the protected write entirely.
+func stripRedirections(segment []string) []string {
+	out := make([]string, 0, len(segment))
+	for i := 0; i < len(segment); i++ {
+		tok := segment[i]
+		if !redirOps[tok] {
+			out = append(out, tok)
+			continue
+		}
+		if n := len(out); n > 0 && isAllDigits(out[n-1]) {
+			out = out[:n-1] // drop the leading fd of `2>&1`
+		}
+		i++ // drop the redirect target as well
 	}
 	return out
 }
@@ -375,9 +492,14 @@ func isEnvAssignment(tok string) bool {
 func writeTargets(cmd string, rest []string) []string {
 	switch {
 	case destAll[cmd] || cmd == "tee" || permsCmds[cmd]:
-		return targetOperands(cmd, rest)
+		return append(optionTargets(cmd, rest), targetOperands(cmd, rest)...)
 	case destLast[cmd]:
-		// cp/rsync/install/ln SRC... DEST -> the destination is last.
+		// cp/rsync/install/ln SRC... DEST -> the destination is last, unless
+		// -t/--target-directory names it, in which case every positional is a
+		// read-only source and the option value is the sole write target.
+		if dirs := optionTargets(cmd, rest); len(dirs) > 0 {
+			return dirs
+		}
 		ops := targetOperands(cmd, rest)
 		if len(ops) == 0 {
 			return nil
@@ -575,7 +697,7 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed bool, message string) {
 	currentDir := g.expand(cwd, cwd)
 	for _, segment := range splitSegments(tokens) {
-		args := stripRunners(realArgs(segment))
+		args := stripRunners(realArgs(stripRedirections(segment)))
 		if len(args) == 0 {
 			continue
 		}

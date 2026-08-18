@@ -49,6 +49,16 @@ func TestForceFlag(t *testing.T) {
 		{"force refspec +HEAD:main", []string{"origin", "+HEAD:main"}, "+HEAD:main", true},
 		{"force refspec wildcard", []string{"origin", "+refs/heads/*:refs/heads/*"}, "+refs/heads/*:refs/heads/*", true},
 		{"plain refspec HEAD:main not force", []string{"origin", "HEAD:main"}, "", false},
+
+		// `git push [options] [repository [refspec...]]`: a leading '+' forces
+		// only in a refspec position. A remote may legally be named +prod.
+		{"plus-prefixed remote is not force", []string{"+prod", "main"}, "", false},
+		{"plus refspec after plus remote still force", []string{"+prod", "+main"}, "+main", true},
+		{"plus remote with -u is not force", []string{"-u", "+prod", "main"}, "", false},
+		{"push-option value does not shift repository", []string{"-o", "ci.skip", "origin", "+main"}, "+main", true},
+		{"equals-form repo option keeps refspec force", []string{"--repo=origin", "origin", "+main"}, "+main", true},
+		{"force refspec after end-of-options", []string{"--", "origin", "+main"}, "+main", true},
+		{"force flag still caught before repository", []string{"--force", "+prod", "main"}, "--force", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

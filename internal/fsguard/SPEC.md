@@ -73,7 +73,15 @@ state why.
 
 **FSG-43** When a write command's positional argument is a bare relative name (e.g. the `AGENTS.md` in `rm AGENTS.md`) rather than a path-shaped one (absolute, `~`, `$HOME`, `.`/`..`), the system shall resolve it against the current working directory and classify it as a write target.
 
-**FSG-44** The system shall not treat the value of a value-taking option (e.g. the `755` in `mkdir -m 755 d`) or a leading non-path spec operand (the mode/owner/group in `chmod 755 f`, `chown user f`, `chgrp grp f`) as a write target.
+**FSG-44** The system shall not treat the value of a value-taking option (e.g. the `755` in `mkdir -m 755 d`) or a leading non-path spec operand (the mode/owner/group in `chmod 755 f`, `chown user f`, `chgrp grp f`) as a write target. Because GNU coreutils also accept value-taking options after the operands (e.g. `cp SRC DEST --suffix bak`), the value shall be consumed wherever the option appears, so it never displaces the trailing destination of FSG-18.
+
+**FSG-45** When a write command contains the end-of-options separator `--`, the system shall treat every later token as a positional operand even when it begins with `-`, and shall not classify the `--` token itself as a write target.
+
+**FSG-46** When a simple command contains redirection syntax (the operator, its target, and any leading file-descriptor digit such as the `2` of `2>&1`), the system shall exclude those tokens from the command's operands before selecting write targets, so a redirection cannot displace the destination of FSG-18. The redirect target itself remains classified under FSG-23 through FSG-26.
+
+**FSG-47** When `chmod`, `chown`, or `chgrp` takes its mode/owner/group from `--reference` (e.g. `chmod --reference=RFILE FILE...`), the system shall not drop the leading positional as a spec operand, because in that form the first positional is already a mutation target.
+
+**FSG-48** When `cp`, `mv`, `ln`, or `install` names its destination with `-t`/`--target-directory` (including the `--target-directory=DIR`, `-tDIR`, and clustered `-rt DIR` forms), the system shall classify that option's value as the write target and treat every positional operand as a read-only source.
 
 **FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all positional target arguments (see FSG-43, FSG-44) as write targets.
 
@@ -110,6 +118,8 @@ state why.
 **FSG-29** When `git push` is invoked within `~/src/` without any force flag or force refspec, the system shall allow it (a plain `git -C ~/src/<repo> push origin main`).
 
 **FSG-30** When `git push` is invoked within `~/src/` with any destructive form — `--force`/`-f`, `--force-with-lease[=…]`, `--force-if-includes`, `--mirror`, or a leading-plus force refspec (e.g. `+main`) — the system shall block it. Detection reuses the `safegit.ForceFlag` parser so the guard and `safe-push` share one definition of "destructive push" rather than maintaining a weaker copy.
+
+**FSG-49** When a leading-plus token occupies the repository operand position of a `git push` (a remote legitimately named `+prod`, as in `git -C ~/src/<repo> push +prod main`), the system shall allow it rather than reading it as a force refspec, because `git push` is `git push [options] [repository [refspec...]]` and only refspec operands carry force semantics.
 
 **FSG-31** When `git merge`, `git pull`, `git fetch`, `git clone`, or `git worktree` is invoked within `~/src/`, the system shall allow it.
 

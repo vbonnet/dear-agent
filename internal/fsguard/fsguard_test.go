@@ -76,6 +76,7 @@ func TestInspectCommand(t *testing.T) {
 	t.Parallel()
 	g := testGuard()
 	home := "/home/tester"
+	wt := home + "/worktrees/dear-agent/feat"
 
 	tests := []struct {
 		name        string
@@ -170,6 +171,46 @@ func TestInspectCommand(t *testing.T) {
 		{"bare redirect in worktree cwd allowed", "echo x > out.txt", home + "/worktrees/dear-agent/feat", true, ""},
 		{"bare chmod mode not target in worktree", "chmod 755 build.sh", home + "/worktrees/dear-agent/feat", true, ""},
 		{"bare chmod in src cwd blocked", "chmod 644 AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+
+		// `--` ends option parsing: it is not itself a target, and a target
+		// after it is classified even when it starts with '-' (ce-3knl.3).
+		{"dashdash is not a target", "rm -- file.txt", wt, true, ""},
+		{"dashdash hyphen target in src blocked", "rm -- -logfile", home + "/src/dear-agent", false, "~/src"},
+		{"dashdash src target blocked", "rm -- ~/src/dear-agent/AGENTS.md", home, false, "~/src"},
+		{"dashdash worktree target allowed", "rm -- main.go", wt, true, ""},
+
+		// Redirection syntax must not be mistaken for command operands, or the
+		// `1` of `2>&1` displaces the real destination (ce-3knl.3).
+		{"cp with 2>&1 still sees dest", "cp /tmp/a ~/src/dear-agent/f 2>&1", home, false, "~/src"},
+		{"cp with stdout redirect still sees dest", "cp /tmp/a ~/src/dear-agent/f >out.txt", wt, false, "~/src"},
+		{"cp benign with 2>&1 allowed", "cp /tmp/a /tmp/b 2>&1", wt, true, ""},
+
+		// chmod/chown/chgrp --reference replaces the leading spec operand, so
+		// the first positional is already a target (ce-3knl.3).
+		{"chmod --reference= keeps target", "chmod --reference=/tmp/ref ~/src/dear-agent/AGENTS.md", home, false, "~/src"},
+		{"chmod --reference spaced keeps target", "chmod --reference /tmp/ref ~/src/dear-agent/AGENTS.md",
+			home, false, "~/src"},
+		{"chown --reference keeps target", "chown --reference=/tmp/ref ~/src/dear-agent/AGENTS.md", home, false, "~/src"},
+
+		// Value-taking options may trail the operands, so their value must be
+		// consumed or it becomes the "last" operand (ce-3knl.3).
+		{"cp --suffix after operands", "cp /tmp/a ~/src/dear-agent/f --suffix bak", home, false, "~/src"},
+		{"cp -S after operands", "cp /tmp/a ~/src/dear-agent/f -S bak", home, false, "~/src"},
+
+		// -t/--target-directory names the destination; every positional is a
+		// read-only source (ce-3knl.3).
+		{"cp -t dest blocked", "cp -t ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp --target-directory= blocked", "cp --target-directory=~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp --target-directory spaced blocked", "cp --target-directory ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -tDIR glued blocked", "cp -t~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -rt cluster blocked", "cp -rt ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"install -t dest blocked", "install -t ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"mv -t dest blocked", "mv -t ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -t benign allowed", "cp -t /tmp/dir /tmp/a", wt, true, ""},
+
+		// A remote may legally be named +prod; only refspecs carry force
+		// semantics in a leading '+' (ce-3knl.3).
+		{"git push +remote is not a force push", "git -C ~/src/dear-agent push +prod main", home, true, ""},
 
 		// cd tracking for git.
 		{"cd then git commit blocked", "cd ~/src/dear-agent && git commit -m x", home, false,

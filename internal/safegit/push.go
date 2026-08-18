@@ -83,20 +83,54 @@ func CredentialResetArgs(ghPath string) []string {
 //   - -f / --force / --force-with-lease / --force-if-includes (flags)
 //   - --mirror (rewrites remote refs wholesale, equivalent to force-push)
 //   - +<refspec>  (a leading '+' in a refspec means "force this ref")
+//
+// The leading-plus test is applied only to refspecs. `git push` is
+// `git push [options] [repository [refspec...]]`, so the first positional names
+// the remote, and a remote may legally be called `+prod`; testing it as a
+// refspec would reject the entirely non-destructive `git push +prod main`.
 func ForceFlag(args []string) (string, bool) {
-	for _, a := range args {
-		switch {
-		case a == "-f" || a == "--force" || a == "--force-with-lease" || a == "--mirror":
-			return a, true
-		case strings.HasPrefix(a, "--force-with-lease=") ||
-			strings.HasPrefix(a, "--force-if-includes"):
-			return a, true
-		case strings.HasPrefix(a, "+") && !strings.HasPrefix(a, "--"):
+	sawRepository := false
+	endOfOptions := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !endOfOptions {
+			switch {
+			case a == "-f" || a == "--force" || a == "--force-with-lease" || a == "--mirror":
+				return a, true
+			case strings.HasPrefix(a, "--force-with-lease=") ||
+				strings.HasPrefix(a, "--force-if-includes"):
+				return a, true
+			case a == "--":
+				endOfOptions = true
+				continue
+			case pushOptsWithValue[a]:
+				i++ // the value is not a positional, so it is not the repository
+				continue
+			case strings.HasPrefix(a, "-") && a != "-":
+				continue // any other option
+			}
+		}
+		if !sawRepository {
+			sawRepository = true // the repository operand, not a refspec
+			continue
+		}
+		if strings.HasPrefix(a, "+") {
 			// A '+' prefix on a refspec forces that ref; block it.
 			return a, true
 		}
 	}
 	return "", false
+}
+
+// pushOptsWithValue lists the `git push` options whose value is routinely
+// passed as a separate token (`git push -o ci.skip origin main`), so the value
+// is not miscounted as the repository operand. Options normally written in the
+// `--opt=value` form (`--repo`, `--exec`, `--receive-pack`) are deliberately
+// absent: if one is ever spelled with a separate token, its value takes the
+// repository slot and every later `+ref` is still tested, which over-blocks
+// rather than under-blocks.
+var pushOptsWithValue = map[string]bool{
+	"-o": true, "--push-option": true,
 }
 
 // PushArgs assembles the full git argv for a safe push: an optional `-C
