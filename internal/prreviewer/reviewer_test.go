@@ -3,9 +3,11 @@ package prreviewer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -36,11 +38,26 @@ func (f *fakeRunner) Run(ctx context.Context, name string, args []string, stdin 
 func (f *fakeRunner) posted() []call {
 	var out []call
 	for _, c := range f.calls {
-		if c.name == "gh" && len(c.args) >= 2 && c.args[0] == "pr" && c.args[1] == "review" {
+		if c.name == "gh" && len(c.args) >= 1 && c.args[0] == "api" {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+type reviewPayload struct {
+	CommitID string `json:"commit_id"`
+	Event    string `json:"event"`
+	Body     string `json:"body"`
+}
+
+func decodeReview(t *testing.T, c call) reviewPayload {
+	t.Helper()
+	var payload reviewPayload
+	if err := json.Unmarshal([]byte(c.stdin), &payload); err != nil {
+		t.Fatalf("parse review payload %q: %v", c.stdin, err)
+	}
+	return payload
 }
 
 func listKey(repo string) string {
@@ -93,13 +110,24 @@ func TestRunOnceReviewsOnlyNewHeadAndPostsComment(t *testing.T) {
 		t.Fatalf("expected one posted result, got %#v", results)
 	}
 	review := r.posted()
-	if len(review) != 1 || !containsArg(review[0].args, "--comment") {
-		t.Fatalf("expected one gh pr review --comment, got %#v", r.calls)
+	if len(review) != 1 {
+		t.Fatalf("expected one posted review, got %#v", r.calls)
 	}
-	body := review[0].args[slices.Index(review[0].args, "-b")+1]
+	payload := decodeReview(t, review[0])
+	if payload.Event != string(ReviewComment) {
+		t.Fatalf("review event = %q, want COMMENT", payload.Event)
+	}
+	if payload.CommitID != "abc123" {
+		t.Fatalf("review commit_id = %q, want the inspected head", payload.CommitID)
+	}
 	for _, want := range []string{"owner/repo", "PR #7", "2026-08-09T00:00:00Z", "## Codex", "Codex finding", "## Gemini", "Gemini finding"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("review body %q missing %q", body, want)
+		if !strings.Contains(payload.Body, want) {
+			t.Fatalf("review body %q missing %q", payload.Body, want)
+		}
+	}
+	for _, arg := range review[0].args {
+		if strings.Contains(arg, "Codex finding") {
+			t.Fatalf("review body must not travel in argv: %#v", review[0].args)
 		}
 	}
 
@@ -153,7 +181,7 @@ func TestRunOnceToleratesGeminiFailureWithoutLeakingProviderError(t *testing.T) 
 	if len(review) != 1 {
 		t.Fatalf("expected one posted review, got %#v", r.calls)
 	}
-	body := review[0].args[slices.Index(review[0].args, "-b")+1]
+	body := decodeReview(t, review[0]).Body
 	if strings.Contains(body, "ghp_secret") || strings.Contains(body, "agy failed") {
 		t.Fatalf("review body leaked provider error text: %q", body)
 	}
@@ -492,6 +520,55 @@ func TestRunOnceRefusesToRunWhileAnotherRunHoldsState(t *testing.T) {
 	}
 	if len(r.calls) != 0 {
 		t.Fatalf("a blocked run must not contact GitHub: %#v", r.calls)
+	}
+}
+
+func TestRunOnceContinuesToLaterTargetsAfterAFailure(t *testing.T) {
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/second"):             listResponse(t, PR{Number: 41, Title: "Later", HeadRefOID: "sha41"}),
+			"gh pr diff 41 --repo owner/second": "diff",
+			viewKey("owner/second", 41):         viewResponse("sha41"),
+			"codex exec -":                      "Codex ok",
+			"agy run -":                         "Gemini ok",
+		},
+		errors: map[string]error{listKey("owner/first"): fmt.Errorf("gh rate limited")},
+	}
+	var out strings.Builder
+	results, err := RunOnce(context.Background(), Config{
+		Repos:     []string{"owner/first", "owner/second"},
+		StatePath: filepath.Join(t.TempDir(), "state.json"),
+	}, r, &out)
+	if err == nil {
+		t.Fatal("RunOnce() error = nil, want the first repository failure reported")
+	}
+	if !strings.Contains(err.Error(), "owner/first") {
+		t.Fatalf("error %v does not name the failing repository", err)
+	}
+	if len(results) != 1 || !results[0].Posted || results[0].Repo != "owner/second" {
+		t.Fatalf("a failing target must not starve later targets, got %#v", results)
+	}
+	posted := r.posted()
+	if len(posted) != 1 || decodeReview(t, posted[0]).CommitID != "sha41" {
+		t.Fatalf("expected the later repository to be reviewed, got %#v", r.calls)
+	}
+}
+
+func TestRunCommandReportsOperatorCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sleep is not available on windows")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	_, err := runCommand(ctx, "sleep", []string{"30"}, "", "", nil)
+	if err == nil {
+		t.Fatal("runCommand() error = nil, want a cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runCommand() error = %v, want it to report context.Canceled", err)
 	}
 }
 

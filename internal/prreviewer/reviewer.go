@@ -130,10 +130,16 @@ func runCommand(ctx context.Context, name string, args []string, stdin, dir stri
 		if msg == "" {
 			msg = strings.TrimSpace(out.String())
 		}
+		failure := fmt.Errorf("%s: %w", name, err)
 		if msg != "" {
-			return out.String(), fmt.Errorf("%s: %w: %s", name, err, msg)
+			failure = fmt.Errorf("%s: %w: %s", name, err, msg)
 		}
-		return out.String(), fmt.Errorf("%s: %w", name, err)
+		// A killed child reports "signal: killed", which hides the operator's
+		// cancellation from callers that decide between shutdown and failure.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			failure = errors.Join(failure, ctxErr)
+		}
+		return out.String(), failure
 	}
 	return out.String(), nil
 }
@@ -171,31 +177,52 @@ func RunOnce(ctx context.Context, cfg Config, runner Runner, stdout io.Writer) (
 	if err != nil {
 		return nil, err
 	}
+	// One failing repository or pull request must not starve the independent
+	// targets behind it, so failures are collected and reported at the end.
+	var (
+		results  []Result
+		failures []error
+		posted   bool
+	)
+	for _, repo := range cfg.Repos {
+		repoResults, repoFailures := reviewRepo(ctx, cfg, runner, st, repo, stdout)
+		results = append(results, repoResults...)
+		failures = append(failures, repoFailures...)
+		for _, res := range repoResults {
+			posted = posted || res.Posted
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
 	// Every review that was actually posted must survive a later failure,
 	// otherwise the next pass re-reviews it and posts a duplicate.
-	var posted bool
-	persist := func() error {
-		if cfg.DryRun || !posted {
-			return nil
-		}
-		return saveState(cfg.StatePath, st)
+	if posted && !cfg.DryRun {
+		failures = append(failures, saveState(cfg.StatePath, st))
 	}
-	var results []Result
-	for _, repo := range cfg.Repos {
-		prs, err := listPRs(ctx, runner, repo, cfg.Limit)
+	return results, errors.Join(failures...)
+}
+
+func reviewRepo(ctx context.Context, cfg Config, runner Runner, st state, repo string, stdout io.Writer) ([]Result, []error) {
+	prs, err := listPRs(ctx, runner, repo, cfg.Limit)
+	if err != nil {
+		return nil, []error{fmt.Errorf("list PRs for %s: %w", repo, err)}
+	}
+	var (
+		results  []Result
+		failures []error
+	)
+	for _, pr := range prs {
+		res, err := handlePR(ctx, cfg, runner, st, repo, pr, stdout)
+		results = append(results, res)
 		if err != nil {
-			return results, errors.Join(fmt.Errorf("list PRs for %s: %w", repo, err), persist())
-		}
-		for _, pr := range prs {
-			res, err := handlePR(ctx, cfg, runner, st, repo, pr, stdout)
-			results = append(results, res)
-			posted = posted || res.Posted
-			if err != nil {
-				return results, errors.Join(err, persist())
+			failures = append(failures, err)
+			if ctx.Err() != nil {
+				break
 			}
 		}
 	}
-	return results, persist()
+	return results, failures
 }
 
 func (cfg *Config) setDefaults() error {
@@ -301,7 +328,7 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 		res.Skipped, res.Reason = true, "head-changed"
 		return res, nil
 	}
-	if err := postReview(ctx, runner, repo, pr.Number, cfg.ReviewEvent, body); err != nil {
+	if err := postReview(ctx, runner, repo, pr.Number, pr.HeadRefOID, cfg.ReviewEvent, body); err != nil {
 		return res, fmt.Errorf("post review for %s: %w", key, err)
 	}
 	st[key] = pr.HeadRefOID
@@ -403,17 +430,20 @@ func isAccessDenied(err error) bool {
 	return false
 }
 
-func postReview(ctx context.Context, runner Runner, repo string, number int, event ReviewEvent, body string) error {
-	args := []string{"pr", "review", strconv.Itoa(number), "--repo", repo, "-b", body}
-	switch event {
-	case ReviewComment:
-		args = append(args, "--comment")
-	case ReviewRequestChanges:
-		args = append(args, "--request-changes")
-	case ReviewApprove:
-		args = append(args, "--approve")
+// postReview submits the review through the reviews API so it is bound to the
+// commit both providers actually read. The body travels on stdin: a review body
+// in argv is readable by every process listing on a shared host.
+func postReview(ctx context.Context, runner Runner, repo string, number int, headSHA string, event ReviewEvent, body string) error {
+	payload, err := json.Marshal(struct {
+		CommitID string `json:"commit_id"`
+		Event    string `json:"event"`
+		Body     string `json:"body"`
+	}{CommitID: headSHA, Event: string(event), Body: body})
+	if err != nil {
+		return fmt.Errorf("marshal review payload: %w", err)
 	}
-	_, err := runner.Run(ctx, "gh", args, "")
+	args := []string{"api", "--method", "POST", fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number), "--input", "-"}
+	_, err = runner.Run(ctx, "gh", args, string(payload))
 	return err
 }
 

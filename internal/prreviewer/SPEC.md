@@ -11,6 +11,14 @@ head SHAs are persisted so a repeated pass never re-reviews an unchanged pull
 request. Every external process runs behind the `Runner` boundary so the review
 pass is testable without GitHub or provider access.
 
+## Contract Ownership
+
+This SPEC is the single owner of the observable review-pass contract: detection,
+provider dispatch, posting, and persistence. `cmd/external-pr-reviewer/SPEC.md`
+owns only the operator-facing command surface — flag parsing, exit codes, and
+loop control — and must not restate the requirements below. The split mirrors
+`cmd/mergeloop` and `internal/mergeloop`.
+
 ## EARS Requirements
 
 **PRV-01** When a review pass is configured without a repository, the system shall reject the configuration rather than inspecting any pull request.
@@ -52,6 +60,12 @@ pass is testable without GitHub or provider access.
 **PRV-19** When a review prompt is built, the system shall declare the pull request title and diff to be untrusted data that the provider must not act on.
 
 **PRV-20** When a non-dry-run pass starts, the system shall claim an exclusive state lock, shall refuse to run while another pass holds it, and shall reclaim a lock older than the configured staleness window.
+
+**PRV-21** When a review is submitted, the system shall bind it to the inspected commit SHA and shall send the review body outside the process argument vector.
+
+**PRV-22** When one repository or pull request fails, the system shall continue with the remaining independent targets and shall report the collected failures once the pass ends.
+
+**PRV-23** When an external command is terminated by pass cancellation, the system shall report the cancellation alongside the command failure.
 
 ## BDD Traceability
 
