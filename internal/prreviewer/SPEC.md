@@ -79,6 +79,14 @@ loop control — and must not restate the requirements below. The split mirrors
 
 **PRV-29** When dry-run mode reports the review it would post, the system shall first apply the same head confirmation the posting path applies.
 
+**PRV-30** When the reviewed diff was truncated and the configured event is an approval, the system shall downgrade the event to a comment and shall record why the approval was withheld.
+
+**PRV-31** When a reviewed identity is recorded, the system shall include the base revision so a retargeted pull request is reviewed again, and shall key state by a case-insensitive repository name.
+
+**PRV-32** When a review is posted, the system shall persist the reviewed identity before inspecting another target.
+
+**PRV-33** When an external command produces output, the system shall bound what it buffers and shall record that the output was truncated.
+
 ## Residual Risk
 
 `IsolatedRunner` removes the credential variables listed in the implementation

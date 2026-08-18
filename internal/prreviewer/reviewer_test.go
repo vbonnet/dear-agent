@@ -61,7 +61,7 @@ func decodeReview(t *testing.T, c call) reviewPayload {
 }
 
 func listKey(repo string) string {
-	return "gh pr list --repo " + repo + " --state open --draft=false --search sort:updated-desc --limit 50 --json number,title,headRefOid,updatedAt,isDraft"
+	return "gh pr list --repo " + repo + " --state open --draft=false --search sort:updated-desc --limit 50 --json number,title,headRefOid,baseRefOid,updatedAt,isDraft"
 }
 
 func listResponse(t *testing.T, prs ...PR) string {
@@ -728,15 +728,128 @@ func TestListQueryOrdersByMostRecentUpdate(t *testing.T) {
 
 func TestBoundDiffTruncatesOversizedInput(t *testing.T) {
 	diff := strings.Repeat("line of diff\n", 100)
-	got := boundDiff(diff, 120)
-	if len(got) >= len(diff) {
-		t.Fatalf("boundDiff() did not truncate: %d bytes", len(got))
+	got, truncated := boundDiff(diff, 120)
+	if !truncated || len(got) >= len(diff) {
+		t.Fatalf("boundDiff() did not truncate: %d bytes, truncated=%v", len(got), truncated)
 	}
 	if !strings.Contains(got, "[diff truncated after") {
 		t.Fatalf("boundDiff() did not record the truncation: %q", got)
 	}
-	if unchanged := boundDiff(diff, len(diff)); unchanged != diff {
+	unchanged, truncated := boundDiff(diff, len(diff))
+	if truncated || unchanged != diff {
 		t.Fatal("boundDiff() altered a diff within the limit")
+	}
+}
+
+func TestRunOnceReReviewsARetargetedPullRequest(t *testing.T) {
+	pr := PR{Number: 71, Title: "Retargeted", HeadRefOID: "sha71", BaseRefOID: "base1"}
+	state := filepath.Join(t.TempDir(), "state.json")
+	responses := map[string]string{
+		listKey("owner/repo"):             listResponse(t, pr),
+		"gh pr diff 71 --repo owner/repo": "diff",
+		viewKey("owner/repo", 71):         viewResponse("sha71"),
+		"codex exec -":                    "Codex ok",
+		"agy run -":                       "Gemini ok",
+	}
+	cfg := Config{GeminiCmd: testGeminiCmd, CodexCmd: testCodexCmd, Repos: []string{"owner/repo"}, StatePath: state}
+	var out strings.Builder
+	r := &fakeRunner{responses: responses, errors: map[string]error{}}
+	if _, err := RunOnce(context.Background(), cfg, r, &out); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+
+	// Same head, new base: the effective patch changed, so it is reviewed again.
+	retargeted := pr
+	retargeted.BaseRefOID = "base2"
+	r = &fakeRunner{responses: responses, errors: map[string]error{}}
+	r.responses[listKey("owner/repo")] = listResponse(t, retargeted)
+	results, err := RunOnce(context.Background(), cfg, r, &out)
+	if err != nil {
+		t.Fatalf("second RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Posted {
+		t.Fatalf("a retargeted pull request must be reviewed again, got %#v", results)
+	}
+}
+
+func TestStateKeyIgnoresRepositoryCasing(t *testing.T) {
+	pr := PR{Number: 5, HeadRefOID: "sha5"}
+	if stateKey("Acme/App", pr) != stateKey("acme/app", pr) {
+		t.Fatalf("state keys differ by casing: %q vs %q", stateKey("Acme/App", pr), stateKey("acme/app", pr))
+	}
+}
+
+func TestRunOncePersistsEachReviewBeforeContinuing(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state.json")
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/first"):             listResponse(t, PR{Number: 81, Title: "First", HeadRefOID: "sha81"}),
+			"gh pr diff 81 --repo owner/first": "diff",
+			viewKey("owner/first", 81):         viewResponse("sha81"),
+			"codex exec -":                     "Codex ok",
+			"agy run -":                        "Gemini ok",
+		},
+		errors: map[string]error{listKey("owner/second"): fmt.Errorf("gh exploded")},
+	}
+	var out strings.Builder
+	if _, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
+		CodexCmd:  testCodexCmd,
+		Repos:     []string{"owner/first", "owner/second"},
+		StatePath: state,
+	}, r, &out); err == nil {
+		t.Fatal("RunOnce() error = nil, want the second repository failure")
+	}
+	st, err := loadState(state)
+	if err != nil {
+		t.Fatalf("loadState() error = %v", err)
+	}
+	if st["owner/first#81"] == "" {
+		t.Fatalf("the posted review was not persisted immediately: %#v", st)
+	}
+}
+
+func TestRunOnceWithholdsApprovalForATruncatedDiff(t *testing.T) {
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/repo"):             listResponse(t, PR{Number: 91, Title: "Huge", HeadRefOID: "sha91"}),
+			"gh pr diff 91 --repo owner/repo": strings.Repeat("line of diff\n", 500),
+			viewKey("owner/repo", 91):         viewResponse("sha91"),
+			"codex exec -":                    "Codex ok",
+			"agy run -":                       "Gemini ok",
+		},
+		errors: map[string]error{},
+	}
+	var out strings.Builder
+	if _, err := RunOnce(context.Background(), Config{
+		GeminiCmd:    testGeminiCmd,
+		CodexCmd:     testCodexCmd,
+		ReviewEvent:  ReviewApprove,
+		MaxDiffBytes: 200,
+		Repos:        []string{"owner/repo"},
+		StatePath:    filepath.Join(t.TempDir(), "state.json"),
+	}, r, &out); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	payload := decodeReview(t, r.posted()[0])
+	if payload.Event != string(ReviewComment) {
+		t.Fatalf("review event = %q, want COMMENT for a truncated diff", payload.Event)
+	}
+	if !strings.Contains(payload.Body, "Approval withheld") {
+		t.Fatalf("review body does not explain the withheld approval: %q", payload.Body)
+	}
+}
+
+func TestCappedBufferStopsAtItsLimit(t *testing.T) {
+	buf := &cappedBuffer{limit: 10}
+	if _, err := buf.Write([]byte(strings.Repeat("x", 25))); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if got := buf.String(); !strings.HasPrefix(got, strings.Repeat("x", 10)) || !strings.Contains(got, "[output truncated at 10 bytes]") {
+		t.Fatalf("cappedBuffer = %q, want a bounded, marked buffer", got)
+	}
+	if buf.buf.Len() != 10 {
+		t.Fatalf("cappedBuffer retained %d bytes, want 10", buf.buf.Len())
 	}
 }
 

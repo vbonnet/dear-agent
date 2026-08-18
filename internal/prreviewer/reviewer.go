@@ -56,6 +56,7 @@ type PR struct {
 	Number     int       `json:"number"`
 	Title      string    `json:"title"`
 	HeadRefOID string    `json:"headRefOid"`
+	BaseRefOID string    `json:"baseRefOid"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 	IsDraft    bool      `json:"isDraft"`
 }
@@ -128,6 +129,39 @@ func providerEnv(environ []string) []string {
 // commandWaitDelay bounds how long a terminated command may keep its pipes.
 const commandWaitDelay = 10 * time.Second
 
+// maxCommandOutputBytes bounds what one command may buffer in memory, so a
+// runaway provider or a huge diff cannot exhaust the poller.
+const maxCommandOutputBytes = 8 << 20
+
+// cappedBuffer accumulates output up to a limit and then discards the rest,
+// reporting that it did so.
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if remaining := c.limit - c.buf.Len(); remaining > 0 {
+		if len(p) > remaining {
+			c.buf.Write(p[:remaining])
+			c.truncated = true
+		} else {
+			c.buf.Write(p)
+		}
+	} else if len(p) > 0 {
+		c.truncated = true
+	}
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string {
+	if c.truncated {
+		return c.buf.String() + fmt.Sprintf("\n[output truncated at %d bytes]\n", c.limit)
+	}
+	return c.buf.String()
+}
+
 func runCommand(ctx context.Context, name string, args []string, stdin, dir string, env []string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -136,9 +170,10 @@ func runCommand(ctx context.Context, name string, args []string, stdin, dir stri
 	// would keep Wait blocked forever without an explicit delay.
 	cmd.WaitDelay = commandWaitDelay
 	cmd.Stdin = strings.NewReader(stdin)
-	var out, errb bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errb
+	out := &cappedBuffer{limit: maxCommandOutputBytes}
+	errb := &cappedBuffer{limit: maxCommandOutputBytes}
+	cmd.Stdout = out
+	cmd.Stderr = errb
 	err := cmd.Run()
 	if err != nil {
 		msg := strings.TrimSpace(errb.String())
@@ -299,7 +334,7 @@ func listPRs(ctx context.Context, runner Runner, repo string, limit int) ([]PR, 
 	// a page full of drafts would otherwise hide every reviewable pull request.
 	// The bounded page is ordered by most recent update so an older pull request
 	// that just moved is inspected instead of being pinned outside the page.
-	args := []string{"pr", "list", "--repo", repo, "--state", "open", "--draft=false", "--search", "sort:updated-desc", "--limit", strconv.Itoa(limit), "--json", "number,title,headRefOid,updatedAt,isDraft"}
+	args := []string{"pr", "list", "--repo", repo, "--state", "open", "--draft=false", "--search", "sort:updated-desc", "--limit", strconv.Itoa(limit), "--json", "number,title,headRefOid,baseRefOid,updatedAt,isDraft"}
 	out, err := runner.Run(ctx, "gh", args, "")
 	if err != nil {
 		return nil, err
@@ -311,14 +346,30 @@ func listPRs(ctx context.Context, runner Runner, repo string, limit int) ([]PR, 
 	return prs, nil
 }
 
+// stateKey identifies a pull request. GitHub treats repository names
+// case-insensitively, so the key is lowered to keep one entry per repository.
+func stateKey(repo string, pr PR) string {
+	return fmt.Sprintf("%s#%d", strings.ToLower(repo), pr.Number)
+}
+
+// reviewedIdentity is what was actually reviewed. The base revision is part of
+// it because retargeting a pull request changes the effective patch without
+// moving its head.
+func reviewedIdentity(pr PR) string {
+	if pr.BaseRefOID == "" {
+		return pr.HeadRefOID
+	}
+	return pr.HeadRefOID + "+" + pr.BaseRefOID
+}
+
 func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo string, pr PR, stdout io.Writer) (Result, error) {
-	key := fmt.Sprintf("%s#%d", repo, pr.Number)
+	key := stateKey(repo, pr)
 	res := Result{Repo: repo, PRNumber: pr.Number, HeadSHA: pr.HeadRefOID}
 	if pr.IsDraft {
 		res.Skipped, res.Reason = true, "draft"
 		return res, nil
 	}
-	if st[key] == pr.HeadRefOID {
+	if st[key] == reviewedIdentity(pr) {
 		res.Skipped, res.Reason = true, "already-reviewed"
 		return res, nil
 	}
@@ -326,7 +377,13 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 	if err != nil {
 		return res, fmt.Errorf("diff for %s: %w", key, err)
 	}
-	prompt := reviewPrompt(repo, pr, boundDiff(diff, cfg.MaxDiffBytes))
+	bounded, truncated := boundDiff(diff, cfg.MaxDiffBytes)
+	prompt := reviewPrompt(repo, pr, bounded)
+	event := cfg.ReviewEvent
+	if truncated && event == ReviewApprove {
+		// Approving code no provider read is the one outcome this must not do.
+		event = ReviewComment
+	}
 	codex, err := runProvider(ctx, cfg.ProviderRunner, cfg.CodexCmd, prompt, cfg.ProviderTimeout)
 	if err != nil {
 		return res, fmt.Errorf("codex review for %s: %w", key, err)
@@ -338,6 +395,9 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 		fmt.Fprintf(stdout, "external-pr-reviewer: secondary review unavailable for %s: %v\n", key, geminiErr)
 	}
 	body := composeReviewBody(repo, pr, cfg.Now(), codex, gemini, geminiAttempts)
+	if truncated && cfg.ReviewEvent == ReviewApprove {
+		body += "\nApproval withheld: the diff was truncated before review, so part of this pull request was not inspected.\n"
+	}
 	// A head that moved while the providers ran describes a revision nobody
 	// reviewed, so the check runs before the dry-run report too: dry-run must
 	// predict exactly what the real path would do.
@@ -350,14 +410,19 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 		return res, nil
 	}
 	if cfg.DryRun {
-		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", cfg.ReviewEvent, repo, pr.Number, pr.HeadRefOID)
+		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", event, repo, pr.Number, pr.HeadRefOID)
 		res.Posted = false
 		return res, nil
 	}
-	if err := postReview(ctx, runner, repo, pr.Number, pr.HeadRefOID, cfg.ReviewEvent, body); err != nil {
+	if err := postReview(ctx, runner, repo, pr.Number, pr.HeadRefOID, event, body); err != nil {
 		return res, fmt.Errorf("post review for %s: %w", key, err)
 	}
-	st[key] = pr.HeadRefOID
+	st[key] = reviewedIdentity(pr)
+	// A crash between the POST and the end of the pass would otherwise lose the
+	// record and post the same review again on the next run.
+	if err := saveState(cfg.StatePath, st); err != nil {
+		return res, fmt.Errorf("persist review for %s: %w", key, err)
+	}
 	res.Posted = true
 	return res, nil
 }
@@ -507,15 +572,15 @@ func postReview(ctx context.Context, runner Runner, repo string, number int, hea
 
 // boundDiff keeps a prompt within a size a provider argument vector and context
 // window can carry, and says so where it cut.
-func boundDiff(diff string, limit int) string {
+func boundDiff(diff string, limit int) (string, bool) {
 	if limit <= 0 || len(diff) <= limit {
-		return diff
+		return diff, false
 	}
 	cut := diff[:limit]
 	if idx := strings.LastIndexByte(cut, '\n'); idx > 0 {
 		cut = cut[:idx]
 	}
-	return cut + fmt.Sprintf("\n[diff truncated after %d bytes of %d]\n", len(cut), len(diff))
+	return cut + fmt.Sprintf("\n[diff truncated after %d bytes of %d]\n", len(cut), len(diff)), true
 }
 
 func reviewPrompt(repo string, pr PR, diff string) string {
