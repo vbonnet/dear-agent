@@ -111,8 +111,9 @@ resource "github_repository_ruleset" "branch_protection" {
     dynamic "required_status_checks" {
       for_each = length(var.required_checks) > 0 ? [1] : []
       content {
-        # strict = false: branch does not need to be up-to-date before merge.
-        strict_required_status_checks_policy = false
+        # Require the branch to be up to date with the base before merge, so a
+        # green check is evidence about the tip the PR will actually land on.
+        strict_required_status_checks_policy = var.strict_required_status_checks
 
         dynamic "required_check" {
           for_each = var.required_checks
