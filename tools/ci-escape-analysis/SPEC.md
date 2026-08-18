@@ -61,7 +61,11 @@ talk to GitHub, and mutate issues.
 
 **CI-ESCAPE-15** When sweeping, the system shall close every retrospective carrying its label that the current sweep did not re-file, which covers both a recovered workflow and a workflow whose failing check has changed.
 
-**CI-ESCAPE-16** When sweeping, the system shall report which retrospectives it opened for the first time, so the caller can distinguish a new incident from a recurrence.
+**CI-ESCAPE-16** When sweeping, the system shall label each newly filed retrospective as queued, shall hand off at most one queued retrospective per sweep, and shall remove the queue label from the one it hands off, so simultaneous incidents are worked one at a time rather than all but the first being dropped.
+
+**CI-ESCAPE-20** When any workflow's run lookup fails, the system shall skip stale reconciliation entirely, so a transient API failure cannot be read as recovery and close a live incident.
+
+**CI-ESCAPE-21** When the system counts escapes, the system shall count every conclusion it treats as red, so detection and the ROI numerator cannot disagree.
 
 **CI-ESCAPE-17** When any retrospective mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
 

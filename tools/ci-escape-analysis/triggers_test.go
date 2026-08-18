@@ -218,3 +218,28 @@ func TestIfPermitsPullRequest(t *testing.T) {
 		}
 	}
 }
+
+// A substring test reads `!= 'pull_request'` as permission, exactly inverting
+// the condition. sbom-scan.yml guards two jobs that way.
+func TestIfPermitsPullRequestParsesTheOperator(t *testing.T) {
+	tests := []struct {
+		condition string
+		want      bool
+	}{
+		{"github.event_name != 'pull_request'", false},
+		{"github.event_name != \"pull_request\"", false},
+		{"github.event_name != 'pull_request' && github.event_name != 'schedule'", false},
+		{"github.event_name == 'pull_request'", true},
+		{"github.event_name == 'schedule' || github.event_name == 'pull_request'", true},
+		{"github.event_name == 'schedule'", false},
+		{"github.event_name != 'schedule'", true},
+		{"github.event_name == 'pull_request_target'", true},
+		{"github.event_name != 'pull_request_target'", false},
+		{"contains(github.event.head_commit.message, 'pull_request')", true},
+	}
+	for _, test := range tests {
+		if got := ifPermitsPullRequest(test.condition); got != test.want {
+			t.Errorf("ifPermitsPullRequest(%q) = %v, want %v", test.condition, got, test.want)
+		}
+	}
+}

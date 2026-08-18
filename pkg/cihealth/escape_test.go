@@ -444,8 +444,11 @@ func TestPostMergeOnlyRetroDoesNotPricePlacement(t *testing.T) {
 		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true},
 	}.Body()
 
-	if !strings.Contains(body, "Not applicable") {
+	if !strings.Contains(body, "not a placement decision") {
 		t.Errorf("body should decline to price placement, got:\n%s", body)
+	}
+	if !strings.Contains(body, "not an escape") {
+		t.Errorf("body should say why placement does not apply to this class, got:\n%s", body)
 	}
 	for _, banned := range []string{"ALWAYS PREVENT", "USUALLY PREVENT", "CASE-BY-CASE"} {
 		if strings.Contains(body, banned) {
@@ -459,11 +462,19 @@ func TestPostMergeOnlyRetroDoesNotPricePlacement(t *testing.T) {
 	}
 }
 
-// An actual escape still gets priced.
-func TestEscapeClassesStillPricePlacement(t *testing.T) {
-	for _, class := range []Class{ClassNeverRan, ClassSelectionGap, ClassScopeGap, ClassMergeSkew, ClassGatingGap} {
+// Placement is priced only where widening pre-merge selection or scope is
+// actually the remedy. Pricing it elsewhere produced verdicts that contradicted
+// the finding directly above them — a `merge-skew` brief that had just
+// established the check passed pre-merge, closing with "block this pre-merge".
+func TestPlacementIsPricedOnlyWhereItIsTheDecision(t *testing.T) {
+	for _, class := range []Class{ClassNeverRan, ClassSelectionGap, ClassScopeGap} {
 		if !(Finding{Class: class}).PricesPlacement() {
-			t.Errorf("PricesPlacement() = false for %q", class)
+			t.Errorf("PricesPlacement() = false for %q, want true", class)
+		}
+	}
+	for _, class := range []Class{ClassMergeSkew, ClassInconclusive, ClassBypassed, ClassGatingGap, ClassPostMergeOnly} {
+		if (Finding{Class: class}).PricesPlacement() {
+			t.Errorf("PricesPlacement() = true for %q, want false", class)
 		}
 	}
 }
@@ -536,6 +547,36 @@ func TestBriefDoesNotClaimToBeACompletedRetro(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// A merge-skew brief established two paragraphs earlier that the check DID run
+// and pass pre-merge. Closing it with a placement verdict contradicts that, and
+// a generic "this is not an escape" disclaimer is false for this class.
+func TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape(t *testing.T) {
+	body := Retro{
+		FailingCheck: buildCheck,
+		Finding: Classify(Escape{
+			PreMergeCapable: true,
+			FailingCheck:    buildCheck,
+			PRNumber:        3,
+			PRChecks:        []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}},
+			RequiredKnown:   true,
+		}),
+		RequiredKnown: true,
+		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true},
+	}.Body()
+
+	if !strings.Contains(body, "not a placement decision") {
+		t.Errorf("merge-skew should decline to price placement:\n%s", body)
+	}
+	if strings.Contains(body, "not an escape") {
+		t.Error("merge-skew IS an escape; the disclaimer must not claim otherwise")
+	}
+	for _, banned := range []string{"ALWAYS PREVENT", "USUALLY PREVENT", "CASE-BY-CASE"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("merge-skew brief renders a placement verdict %q", banned)
 		}
 	}
 }

@@ -135,17 +135,30 @@ type Finding struct {
 	SuggestedActions []string
 }
 
-// PricesPlacement reports whether "should this check move pre-merge?" is even a
-// question for this class.
+// PricesPlacement reports whether "should this check move pre-merge, or run at
+// a wider scope there?" is the decision this class actually turns on.
 //
-// It is not, for a post-merge-only finding: the check either cannot run on a
-// pull request, or the failure was a scheduled detection that no pull request
-// caused. Rendering the ratio anyway produced the contradiction this exists to
-// stop — a retro headed `post-merge-only` closing with "ALWAYS PREVENT — block
-// this pre-merge", because the workflow happened to have measurable pre-merge
-// runs from its other trigger.
+// Only three classes qualify. `never-ran` and `selection-gap` are selection
+// bugs, where the remedy is to make the check run pre-merge on changes like
+// this one; `scope-gap` is the deliberate narrow-then-wide trade, where the
+// remedy is to widen the pre-merge scope or not.
+//
+// Every other class has a different remedy, and pricing a placement move
+// against it produces a verdict that contradicts the finding above it:
+// `merge-skew` has already established the check DID run and pass pre-merge at
+// the same scope, so "block this pre-merge" is advice it already follows;
+// `inconclusive` needs the pre-merge run to conclude, not to be moved;
+// `bypassed` and `gating-gap` are enforcement questions the ruleset owns; and
+// `post-merge-only` is not an escape at all.
 func (f Finding) PricesPlacement() bool {
-	return f.Class != ClassPostMergeOnly
+	switch f.Class {
+	case ClassNeverRan, ClassSelectionGap, ClassScopeGap:
+		return true
+	case ClassBypassed, ClassGatingGap, ClassPostMergeOnly, ClassMergeSkew, ClassInconclusive:
+		return false
+	default:
+		return false
+	}
 }
 
 // Classify decides how the failure got through pre-merge.
@@ -311,6 +324,12 @@ type ROI struct {
 	// PreventionMinutes is what running the check pre-merge costs over the same
 	// window: check duration x pull requests it would run on x wait cost.
 	PreventionMinutes float64
+	// PreventionScope names what the denominator actually measured. The sweep
+	// times the whole producing workflow, not the individual failing job, so in
+	// a multi-job workflow an unrelated matrix or integration job can dominate
+	// the figure and make a cheap check look expensive. Saying so keeps the
+	// denominator from being read as check-specific when it is workflow-wide.
+	PreventionScope string
 	// PreventionMeasured distinguishes "this check is genuinely free" from "we
 	// have no pre-merge runs to measure". Without the distinction, a workflow
 	// that has never run on a pull request divides by zero and comes out as
@@ -415,6 +434,10 @@ func (r ROI) Explain() string {
 		scope = "unspecified scope"
 	}
 	fmt.Fprintf(&b, "  Frequency  = %.0f — counted over %s\n", r.Escapes, scope)
+	scope = r.PreventionScope
+	if scope == "" {
+		scope = "unspecified scope"
+	}
 	switch {
 	case !r.PreventionMeasured:
 		fmt.Fprintf(&b, "  Prevention = unmeasured — no qualifying pre-merge runs observed\n")
@@ -424,6 +447,9 @@ func (r ROI) Explain() string {
 		fmt.Fprintf(&b, "               true ratio smaller than shown.\n")
 	default:
 		fmt.Fprintf(&b, "  Prevention = %.0f min, measured over the full window\n", r.PreventionMinutes)
+	}
+	if r.PreventionMeasured {
+		fmt.Fprintf(&b, "               Scope: %s.\n", scope)
 	}
 
 	fmt.Fprintf(&b, "\nVerdict: %s\n", r.Verdict())

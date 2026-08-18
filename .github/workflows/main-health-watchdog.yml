@@ -37,6 +37,11 @@ on:
       - Instruction Policy Integrity
       - Routing Enforcement
     types: [completed]
+    # Only completions on main say anything about main's health. Without this
+    # every one of those workflows finishing on a pull-request branch launches
+    # a full repository-wide sweep and appends another "Still red" comment to
+    # any open incident, turning ordinary PR activity into issue noise.
+    branches: [main]
   # Safety net: catches anything the event path missed (dropped webhook, a
   # workflow added to main without being added to the list above, a red run
   # that predates this workflow).
@@ -64,12 +69,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      # `incident` is the title of a retro this sweep opened for the first
-      # time — empty when nothing is red, and empty when everything red already
-      # had an open retro. The fix agent is gated on it rather than on "is
-      # anything red", because a red workflow stays red for as long as it takes
-      # to fix, and dispatching per sweep would launch a paid agent every four
-      # hours against an incident already being worked.
+      # `incident` is the one queued incident this sweep handed off, or empty.
+      # The sweep files a brief per red workflow and labels each as queued;
+      # dequeuing takes the oldest, drops the label, and names it here. So a
+      # red workflow that is already being worked does not re-dispatch an agent
+      # every four hours, and simultaneous incidents are picked up one per
+      # sweep instead of all but the first being dropped.
       incident: ${{ steps.sweep.outputs.incident }}
     steps:
       - name: Checkout
@@ -95,10 +100,8 @@ jobs:
         run: |
           set -euo pipefail
           go run ./tools/ci-escape-analysis --repo "${{ github.repository }}" --sweep | tee sweep.log
-          # First newly-opened retro only. One incident per dispatch: an agent
-          # told to fix several unrelated workflows must either combine them
-          # into one PR or drop some, and the remaining incidents are picked up
-          # by the next sweep once this one is closed.
+          # The sweep prints at most one NEW INCIDENT line: the incident it
+          # dequeued. Everything else stays queued for a later sweep.
           incident=$(grep -m1 '^NEW INCIDENT: ' sweep.log | cut -d' ' -f3- || true)
           echo "incident=${incident}" >> "$GITHUB_OUTPUT"
 

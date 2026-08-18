@@ -81,7 +81,9 @@ detection time nothing has been executed and there is no outcome to audit.
 
 **CIHEALTH-25** When the system renders the incident brief, the system shall state that it is not a completed retrospective and shall emit empty `Execute` and `Audit` sections for the fixer to complete, because DEAR requires an executed fix and an audited outcome.
 
-**CIHEALTH-26** When a finding is not an escape, the system shall omit the prevention-versus-cure verdict, because there is no placement decision to price.
+**CIHEALTH-26** When the class's remedy is not to move or widen the check pre-merge, the system shall omit the prevention-versus-cure verdict, because a placement verdict would contradict the finding it accompanies.
+
+**CIHEALTH-28** When the system reports a prevention cost, the system shall state the scope that cost was measured over, because a figure timed across a whole workflow does not license a claim about one job.
 
 **CIHEALTH-27** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
 

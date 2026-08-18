@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -213,24 +214,55 @@ func namesPullRequestTrigger(rest string) bool {
 	return false
 }
 
+// eventNameComparison matches a `github.event_name == 'x'` or `!= 'x'` test,
+// in either quote style.
+var eventNameComparison = regexp.MustCompile(`github\.event_name\s*(==|!=)\s*['"]([^'"]*)['"]`)
+
 // ifPermitsPullRequest reports whether a job-level `if:` could ever be true for
 // a pull-request event. Only conditions that pin `github.event_name` to a fixed
 // set are decidable by inspection; anything else is treated as permitting, which
 // keeps the default on the conservative side.
+//
+// The operator has to be parsed, not just the event name. A substring test
+// reads `github.event_name != 'pull_request'` as permission because the string
+// contains "pull_request" — exactly inverting the condition. `Generate SBOM`
+// and `Go Vulnerability Check` both use that guard, so the substring version
+// classified their push failures as `never-ran` with path-filter advice.
 func ifPermitsPullRequest(condition string) bool {
-	if !strings.Contains(condition, "github.event_name") {
+	matches := eventNameComparison.FindAllStringSubmatch(condition, -1)
+	if len(matches) == 0 {
+		// Either no event gate at all, or one written in a form this does not
+		// decide (a `contains()` call, a matrix expression). Permit.
 		return true
 	}
-	// A condition that names event_name at all but never names a pull-request
-	// event can only be satisfied by some other event.
-	for _, trigger := range pullRequestTriggers {
-		if strings.Contains(condition, trigger) {
-			return true
+
+	var equalsPR, notEqualsPR, equalsOther, notEqualsOther bool
+	for _, m := range matches {
+		isPR := slices.Contains(pullRequestTriggers, m[2])
+		switch {
+		case m[1] == "==" && isPR:
+			equalsPR = true
+		case m[1] == "!=" && isPR:
+			notEqualsPR = true
+		case m[1] == "==":
+			equalsOther = true
+		default:
+			notEqualsOther = true
 		}
 	}
-	// `github.event_name != 'schedule'` is a negative test and still admits
-	// pull requests.
-	return strings.Contains(condition, "!=")
+
+	switch {
+	case equalsPR:
+		return true // some branch of the condition admits a pull request
+	case notEqualsPR:
+		return false // explicitly prohibited on pull requests
+	case equalsOther:
+		return false // pinned to events a pull request never fires
+	case notEqualsOther:
+		return true // excludes some other event; pull requests still pass
+	default:
+		return true
+	}
 }
 
 // jobIndent finds the indent width used for job ids, so nested keys can be told

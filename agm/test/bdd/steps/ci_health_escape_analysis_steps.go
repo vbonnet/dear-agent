@@ -51,7 +51,8 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestScheduledDetectionIsNotPinnedOnTheHeadCommit",
 		"TestRetroNamesOnlyMechanismsThatExist",
 		"TestPostMergeOnlyRetroDoesNotPricePlacement",
-		"TestEscapeClassesStillPricePlacement",
+		"TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape",
+		"TestPlacementIsPricedOnlyWhereItIsTheDecision",
 		"TestRequiredContextMatchesOnProducingApp",
 		"TestBriefDoesNotClaimToBeACompletedRetro",
 	)

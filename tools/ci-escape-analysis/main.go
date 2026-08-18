@@ -161,6 +161,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			PreventionMinutes:   prevention,
 			PreventionMeasured:  preventionMeasured,
 			PreventionTruncated: truncated,
+			PreventionScope:     fmt.Sprintf("wall-clock of the whole %q workflow on pull requests, not of this job alone", *workflow),
 		},
 		Required:      escape.RequiredContexts,
 		RequiredKnown: escape.RequiredKnown,
@@ -345,10 +346,15 @@ func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) float
 	if workflow == "" {
 		return 0
 	}
+	// Every red conclusion, not just `failure`. Detection treats a timed-out or
+	// startup-failed workflow as red; counting only `failure` here would hand
+	// such an incident a frequency of zero and a NO SIGNAL verdict, so the
+	// numerator would disagree with the thing that raised the alarm.
 	out, ok := gh(stderr, "run", "list", "--repo", repo, "--workflow", workflow,
-		"--branch", "main", "--status", "failure", "--limit", fmt.Sprint(runPageLimit),
-		"--json", "createdAt,headSha",
-		"--jq", fmt.Sprintf("[.[] | select(.createdAt > (now - %d*86400 | todate)) | .headSha] | unique | length", windowDays))
+		"--branch", "main", "--limit", fmt.Sprint(runPageLimit),
+		"--json", "createdAt,headSha,conclusion",
+		"--jq", fmt.Sprintf("[.[] | select(.createdAt > (now - %d*86400 | todate)) | select(%s) | .headSha] | unique | length",
+			windowDays, jqInSet(".conclusion", redConclusions)))
 	if !ok {
 		return 0
 	}

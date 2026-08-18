@@ -80,8 +80,7 @@ func (r Retro) Body() string {
 
 	if !r.Finding.PricesPlacement() {
 		fmt.Fprintf(&b, "### Should this move pre-merge? (prevention-vs-cure)\n\n")
-		fmt.Fprintf(&b, "**Not applicable.** This failure is not an escape, so there is no placement to price. ")
-		fmt.Fprintf(&b, "Running the ratio here would answer a question nobody asked, and its verdict would read as an instruction to move a check that either cannot run pre-merge or already does.\n\n")
+		fmt.Fprintf(&b, "**Not applicable — `%s` is not a placement decision.** %s\n\n", r.Finding.Class, placementNotApplicable(r.Finding.Class))
 		return r.footer(&b)
 	}
 
@@ -115,4 +114,26 @@ func (r Retro) footer(b *strings.Builder) string {
 	fmt.Fprintf(b, "Analysis: `tools/ci-escape-analysis`. Contract: `pkg/cihealth/SPEC.md`. Policy: `docs/policies/dear-retro.ai.md`.\n")
 
 	return b.String()
+}
+
+// placementNotApplicable says why the prevention-vs-cure ratio is the wrong
+// question for a class, rather than printing one generic disclaimer that is
+// false for half of them.
+func placementNotApplicable(class Class) string {
+	switch class {
+	case ClassMergeSkew:
+		return "The check already ran pre-merge and passed, at the same scope it runs at on main. Moving it pre-merge is advice it is already following; the open question is flake versus semantic merge skew."
+	case ClassInconclusive:
+		return "The pre-merge run never concluded. What this needs is for that run to finish, not for the check to be placed somewhere else."
+	case ClassBypassed:
+		return "No pull request ran the check, so no placement would have changed the outcome. This is a branch-protection question."
+	case ClassGatingGap:
+		return "The check ran pre-merge and reported. Enforcement let the merge through anyway, which is a ruleset decision, not a placement one."
+	case ClassPostMergeOnly:
+		return "This is not an escape. The check either cannot run on a pull request, or the failure was a scheduled detection no pull request caused."
+	case ClassNeverRan, ClassSelectionGap, ClassScopeGap:
+		return "" // priced; never reached
+	default:
+		return "The remedy for this class is not to move the check pre-merge."
+	}
 }

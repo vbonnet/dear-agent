@@ -19,6 +19,15 @@ import (
 // reads no brief at all.
 const retroLabel = "main-health-watchdog"
 
+// queuedLabel marks an incident that has been filed but not yet handed to the
+// fix agent. It is what makes "one incident per dispatch" a queue rather than a
+// drop: when a sweep opens several incidents at once, all of them are queued,
+// one is dequeued and dispatched, and the rest wait for later sweeps. Gating on
+// "newly created" alone silently abandoned every incident after the first,
+// because a later sweep only comments on an issue that already exists and so
+// never reports it as new again.
+const queuedLabel = "main-health-queued"
+
 // redConclusions are the terminal conclusions that mean main is broken.
 // `failure` alone is too narrow: a required workflow that times out or fails to
 // start leaves main just as broken, and treating those as not-red makes the
@@ -96,7 +105,7 @@ func (r mainRun) scheduledDetection() bool {
 // deliver its alert must not report success: the workflow would go on to
 // dispatch a fix agent whose entire brief is an issue that does not exist.
 func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
-	runs, err := latestRunPerWorkflowOnMain(opts.Repo, opts.WindowDays, stderr)
+	runs, complete, err := latestRunPerWorkflowOnMain(opts.Repo, opts.WindowDays, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "ci-escape-analysis: %v\n", err)
 		return 1
@@ -133,23 +142,31 @@ func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "--- would file: %s\n%s\n", retro.Title(), retro.Body())
 			continue
 		}
-		created, err := upsertRetro(opts.Repo, retro, run, stderr)
-		if err != nil {
+		if err := upsertRetro(opts.Repo, retro, run, stderr); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-			continue
-		}
-		if created {
-			fmt.Fprintf(stdout, "NEW INCIDENT: %s\n", retro.Title())
 		}
 	}
 
 	if !opts.DryRun {
-		// Close every retro we own that this sweep did not re-file. That
-		// covers both a workflow going green and a workflow whose failing
-		// check changed — the old check's retro is just as stale as a
-		// recovered one, and leaving it open puts a solved failure in the fix
-		// agent's brief.
-		if err := closeStaleRetros(opts.Repo, live, stdout, stderr); err != nil {
+		switch {
+		case complete:
+			// Close every retro we own that this sweep did not re-file. That
+			// covers both a workflow going green and a workflow whose failing
+			// check changed — the old check's retro is just as stale as a
+			// recovered one, and leaving it open puts a solved failure in the
+			// fix agent's brief.
+			if err := closeStaleRetros(opts.Repo, live, stdout, stderr); err != nil {
+				errs = append(errs, err)
+			}
+		default:
+			// At least one workflow could not be observed this sweep, so its
+			// absence from the live set is ignorance, not recovery. Closing on
+			// that would let one transient API failure delete a live alert.
+			fmt.Fprintf(stdout, "Skipping stale-retro reconciliation: not every workflow was observed this sweep.\n")
+		}
+
+		// Hand exactly one queued incident to the fix agent.
+		if err := dequeueIncident(opts.Repo, stdout, stderr); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -178,12 +195,17 @@ type sweepOptions struct {
 // nothing — which is exactly how ci-health-monitor.yml has been failing
 // silently, since it also hardcodes a label it never creates.
 func ensureLabel(repo string, stderr io.Writer) {
-	if err := runGH("creating retro label", io.Discard, "label", "create", retroLabel,
-		"--repo", repo,
-		"--color", "B60205",
-		"--description", "main is red; DEAR retro filed by main-health-watchdog",
-		"--force"); err != nil {
-		fmt.Fprintf(stderr, "ci-escape-analysis: could not ensure label %q: %v\n", retroLabel, err)
+	for _, label := range []struct{ name, colour, description string }{
+		{retroLabel, "B60205", "main is red; incident brief filed by main-health-watchdog"},
+		{queuedLabel, "FBCA04", "incident brief awaiting a fix agent"},
+	} {
+		if err := runGH("creating label", io.Discard, "label", "create", label.name,
+			"--repo", repo,
+			"--color", label.colour,
+			"--description", label.description,
+			"--force"); err != nil {
+			fmt.Fprintf(stderr, "ci-escape-analysis: could not ensure label %q: %v\n", label.name, err)
+		}
 	}
 }
 
@@ -197,10 +219,13 @@ func ensureLabel(repo string, stderr io.Writer) {
 // run sits behind a few hundred newer runs from busier workflows would simply
 // not appear, and a workflow that is not observed is silently treated as
 // healthy.
-func latestRunPerWorkflowOnMain(repo string, windowDays int, stderr io.Writer) (map[string]mainRun, error) {
+// The second return value reports whether every active workflow was actually
+// observed. A workflow whose run lookup failed is unknown, not healthy, and the
+// caller must not read its absence as recovery.
+func latestRunPerWorkflowOnMain(repo string, windowDays int, stderr io.Writer) (map[string]mainRun, bool, error) {
 	workflows, err := activeWorkflows(repo)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// A run older than the lookback window is not evidence about main today.
@@ -212,18 +237,52 @@ func latestRunPerWorkflowOnMain(repo string, windowDays int, stderr io.Writer) (
 	cutoff := time.Now().AddDate(0, 0, -windowDays)
 
 	latest := map[string]mainRun{}
+	complete := true
 	for _, workflow := range workflows {
 		run, ok := latestRunOnMain(repo, workflow, stderr)
 		if !ok {
+			// Query failed or would not decode. Record the gap rather than
+			// letting silence pass for health.
+			complete = false
 			continue
 		}
 		created, err := time.Parse(time.RFC3339, run.CreatedAt)
 		if err != nil || created.Before(cutoff) {
+			// Nothing recent enough to speak for main today. Not a gap in
+			// observation: we looked, and there was no current evidence.
 			continue
 		}
 		latest[run.WorkflowName] = run
 	}
-	return latest, nil
+	return latest, complete, nil
+}
+
+// dequeueIncident hands the oldest queued incident to the fix agent by printing
+// it, and drops the queue label so the next sweep moves on to the one behind
+// it. At most one per sweep: an agent told to fix several unrelated workflows
+// must either combine them into one pull request or abandon some.
+func dequeueIncident(repo string, stdout, stderr io.Writer) error {
+	out, ok := gh(stderr, "issue", "list", "--repo", repo,
+		"--label", retroLabel, "--label", queuedLabel, "--state", "open",
+		"--limit", "50", "--json", "number,title,createdAt",
+		"--jq", `sort_by(.createdAt) | .[0] | "\(.number)\t\(.title)"`)
+	if !ok {
+		return errors.New("listing queued incidents")
+	}
+
+	number, title, found := strings.Cut(strings.TrimSpace(string(out)), "\t")
+	if !found || number == "" {
+		return nil // nothing waiting
+	}
+
+	if err := runGH("dequeuing incident", stderr, "issue", "edit", number,
+		"--repo", repo, "--remove-label", queuedLabel); err != nil {
+		// Do not announce an incident that is still queued: the next sweep
+		// would announce it again and dispatch a second agent onto it.
+		return err
+	}
+	fmt.Fprintf(stdout, "NEW INCIDENT: %s\n", title)
+	return nil
 }
 
 // activeWorkflows lists the workflow file names GitHub currently considers
@@ -330,6 +389,11 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 			PreventionMinutes:   prevention,
 			PreventionMeasured:  preventionMeasured,
 			PreventionTruncated: truncated,
+			// Timed for the whole workflow, not the failing job. In a
+			// multi-job workflow an unrelated matrix or integration job can
+			// dominate the wall clock and make a cheap check look expensive,
+			// so the denominator is labelled for what it is.
+			PreventionScope: fmt.Sprintf("wall-clock of the whole %q workflow on pull requests, not of this job alone", run.WorkflowName),
 		},
 		Required:      required,
 		RequiredKnown: requiredKnown,
@@ -396,19 +460,20 @@ func jqInSet(field string, set map[string]bool) string {
 	return fmt.Sprintf("%s as $c | [%s] | index($c)", field, strings.Join(quoted, ","))
 }
 
-// upsertRetro files a new retro or comments on the existing one. The title is
-// stable per failing check, which is what makes recurrence countable. Reports
-// whether it opened a new issue, so the caller can tell a new incident from a
-// recurrence of one already being worked.
-func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Writer) (bool, error) {
+// upsertRetro files a new incident brief or comments on the existing one. The
+// title is stable per failing check, which is what makes recurrence countable.
+// A new brief is created carrying the queue label; dispatch is decided later by
+// dequeueIncident, not here.
+func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Writer) error {
 	existing := findOpenRetro(repo, retro.Title(), stderr)
 	if existing > 0 {
 		body := fmt.Sprintf("Still red at [`%s`](%s).\n\n%s", shortSHA(run.HeadSHA), run.URL, retro.Body())
-		return false, runGH("commenting on retro", stderr, "issue", "comment", fmt.Sprint(existing),
+		return runGH("commenting on retro", stderr, "issue", "comment", fmt.Sprint(existing),
 			"--repo", repo, "--body", body)
 	}
-	return true, runGH("creating retro", stderr, "issue", "create", "--repo", repo,
-		"--title", retro.Title(), "--body", retro.Body(), "--label", retroLabel)
+	return runGH("creating retro", stderr, "issue", "create", "--repo", repo,
+		"--title", retro.Title(), "--body", retro.Body(),
+		"--label", retroLabel, "--label", queuedLabel)
 }
 
 func findOpenRetro(repo, title string, stderr io.Writer) int {
