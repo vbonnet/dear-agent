@@ -14,6 +14,11 @@
 
 **DECL-WORKFLOW-05** When the AGM Codex contract job runs, the system shall enforce the versioned per-package coverage floors for critical lifecycle operations.
 
+**DECL-WORKFLOW-06** When GitHub emits a `labeled` event that adds `full-ci` to a same-repository pull request targeting `main`, the system shall admit the Deepsec credential probe for the exact current pull-request head while rejecting fork pull requests and unrelated label events.
+
+**DECL-WORKFLOW-07** When an eligible same-repository pull request targeting `main` and carrying `full-ci` is opened, synchronized, or reopened, the system shall admit the Deepsec credential probe for the exact current pull-request head.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`
+- Package test: `agm/test/bdd/steps/deepsec_workflow_contract_test.go`
