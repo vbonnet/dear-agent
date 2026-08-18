@@ -245,13 +245,16 @@ jobs:
             and stop rather than guessing.
 
       # Acknowledging the dispatch, and the ONLY place the queue label comes
-      # off. The earlier design dropped it in the sweep and put it back here on
-      # failure, which relies on this step being reached — and it is not reached
-      # when the agent step consumes the job's `timeout-minutes`, because that
-      # terminates the job. Recovery cannot live inside the thing it recovers
-      # from. Clearing the label only after the agent has run inverts the
-      # default: a timeout, a cancellation, a failed step, or a dead runner all
-      # leave the incident queued, and the next sweep dispatches it again.
+      # off. The earlier design dropped the label in the sweep and put it back
+      # here on failure, which made recovery depend on this step being reached
+      # after the job had already gone wrong — including after the job hit its
+      # own `timeout-minutes`. Whether a terminated job still schedules its
+      # `cancelled()` steps is a runner detail, and an alert that survives a
+      # timeout should not be resting on one. Clearing the label only after the
+      # agent has run removes the question: a timeout, a cancellation, a failed
+      # step, or a dead runner all leave the incident queued, whatever the
+      # runner does with the rest of the job, and the next sweep dispatches it
+      # again.
       #
       # Safe against double dispatch: the workflow-level concurrency group
       # covers this job too, so no sweep runs while this one is still going.

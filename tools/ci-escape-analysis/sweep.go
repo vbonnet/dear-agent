@@ -290,19 +290,20 @@ func latestRunPerWorkflowOnMain(opts sweepOptions, stderr io.Writer) (map[string
 	return latest, complete, nil
 }
 
-// announceQueuedIncident hands the oldest queued incident to the triage agent by
-// printing it and its number. At most one per sweep: an agent told to triage
+// announceQueuedIncident hands the oldest queued incident to the triage agent
+// by printing it and its number. At most one per sweep: an agent told to triage
 // several unrelated workflows must either conflate them or abandon some.
 //
 // It deliberately does NOT drop the queue label. The label is the record that
 // this incident still needs an agent, and the only event that can honestly
 // clear it is a dispatch that actually completed — which this process cannot
-// observe, because it exits before the triage job starts. Dropping it here made
+// observe, because it exits before the triage job starts. Dropping it here left
 // every way that job can end without running (its own `timeout-minutes`, a
-// cancelled run, a dead runner) strand the incident open and unqueued forever,
-// since later sweeps only comment on an incident they have already filed. The
-// triage job removes the label itself once the agent has run; nothing else
-// can, so any other ending leaves the incident queued for the next sweep.
+// cancelled run, a dead runner) able to strand the incident open and unqueued
+// forever: later sweeps only comment on an incident they have already filed,
+// and the step that restored the label lived inside the job it was recovering
+// from. The triage job removes the label itself once the agent has run; nothing
+// else can, so any other ending leaves the incident queued for the next sweep.
 //
 // Safe against double dispatch because the workflow's concurrency group covers
 // the whole run: no later sweep starts while the triage job is still going.
