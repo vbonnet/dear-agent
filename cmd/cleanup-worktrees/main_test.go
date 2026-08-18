@@ -2,11 +2,12 @@ package main
 
 import (
 	"errors"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestParse(t *testing.T) {
@@ -110,35 +111,35 @@ func TestSamePath(t *testing.T) {
 	}
 }
 
-// gitT runs git in dir and fails the test on error.
-func gitT(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(cmd.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // newRepo builds a repo with an origin/main ref and one commit.
+//
+// Every Git invocation goes through internal/gittest so no host hook can fire
+// (internal/gittest guard, bead ce-3knl.1). The repository is additionally
+// hardened, because the code under test shells out to plain `git` with the
+// inherited environment; HardenRepo writes the empty hooks path into the
+// repository's own config so those production calls are hermetic too.
 func newRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin")
-	gitT(t, root, "init", "--bare", "--initial-branch=main", origin)
+	gittest.Run(t, root, "init", "--bare", "--initial-branch=main", origin)
+	gittest.HardenRepo(t, origin)
 
 	repo := filepath.Join(root, "repo")
-	gitT(t, root, "init", "--initial-branch=main", repo)
-	gitT(t, repo, "commit", "--allow-empty", "-m", "base")
-	gitT(t, repo, "remote", "add", "origin", origin)
-	gitT(t, repo, "push", "-u", "origin", "main")
+	gittest.Run(t, root, "init", "--initial-branch=main", repo)
+	gittest.HardenRepo(t, repo)
+	gittest.Run(t, repo, "commit", "--allow-empty", "-m", "base")
+	gittest.Run(t, repo, "remote", "add", "origin", origin)
+	gittest.Run(t, repo, "push", "-u", "origin", "main")
 	return repo
+}
+
+// addWorktree creates a branch worktree and hardens it, so the production
+// removal path cannot execute a host hook from the new checkout either.
+func addWorktree(t *testing.T, repo, branch, path string) {
+	t.Helper()
+	gittest.Run(t, repo, "worktree", "add", "-b", branch, path)
+	gittest.HardenRepo(t, path)
 }
 
 func TestTargetRefPrefersOriginMain(t *testing.T) {
@@ -155,8 +156,8 @@ func TestTargetRefPrefersOriginMain(t *testing.T) {
 func TestTargetRefFailsWithoutTarget(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "solo")
-	gitT(t, root, "init", "--initial-branch=main", repo)
-	gitT(t, repo, "commit", "--allow-empty", "-m", "base")
+	gittest.Run(t, root, "init", "--initial-branch=main", repo)
+	gittest.Run(t, repo, "commit", "--allow-empty", "-m", "base")
 	if _, err := targetRef(repo); err == nil {
 		t.Fatal("targetRef() = nil error, want failure when no origin ref exists")
 	}
@@ -165,7 +166,7 @@ func TestTargetRefFailsWithoutTarget(t *testing.T) {
 func TestListWorktreesParsesPorcelain(t *testing.T) {
 	repo := newRepo(t)
 	wtPath := filepath.Join(t.TempDir(), "feature")
-	gitT(t, repo, "worktree", "add", "-b", "feature", wtPath)
+	addWorktree(t, repo, "feature", wtPath)
 
 	got, err := listWorktrees(repo)
 	if err != nil {
@@ -197,10 +198,10 @@ func TestInspectClassification(t *testing.T) {
 	now := time.Now()
 
 	mergedPath := filepath.Join(t.TempDir(), "merged")
-	gitT(t, repo, "worktree", "add", "-b", "merged", mergedPath)
+	addWorktree(t, repo, "merged", mergedPath)
 	aheadPath := filepath.Join(t.TempDir(), "ahead")
-	gitT(t, repo, "worktree", "add", "-b", "ahead", aheadPath)
-	gitT(t, aheadPath, "commit", "--allow-empty", "-m", "work")
+	addWorktree(t, repo, "ahead", aheadPath)
+	gittest.Run(t, aheadPath, "commit", "--allow-empty", "-m", "work")
 
 	all, err := listWorktrees(repo)
 	if err != nil {
@@ -269,7 +270,7 @@ func TestInspectClassification(t *testing.T) {
 func TestInspectFixRemovesStaleWorktreeAndBranch(t *testing.T) {
 	repo := newRepo(t)
 	stalePath := filepath.Join(t.TempDir(), "gone")
-	gitT(t, repo, "worktree", "add", "-b", "gone", stalePath)
+	addWorktree(t, repo, "gone", stalePath)
 
 	all, err := listWorktrees(repo)
 	if err != nil {
