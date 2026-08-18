@@ -19,54 +19,27 @@ AGM_SOCKET="/tmp/agm.sock"
 
 # Cleanup from previous runs
 tmux -S "$AGM_SOCKET" kill-session -t "$TEST_SESSION" 2>/dev/null || true
-rm -rf "$SESSIONS_DIR/$TEST_SESSION" 2>/dev/null || true
+rm -rf "$SESSIONS_DIR"/* 2>/dev/null || true
 rm -f "$REAPER_LOG" 2>/dev/null || true
 
 echo "Step 1: Create tmux session with stuck Claude (never shows prompt)..."
-# Create a Python script that simulates stuck Claude - outputs text but never shows prompt
-cat > /tmp/mock_claude_stuck.py <<'PYTHON'
-#!/usr/bin/env python3
-"""
-Mock Claude that never shows prompt (simulates stuck/busy state).
-Used to test reaper's timeout and fallback behavior.
-"""
-
-import sys
-import time
-
-def main():
-    print("Mock Claude Code v1.0 (Stuck Simulation)")
-    print("Processing request... (will never finish)")
-    print()
-
-    # Never show prompt, just keep outputting dots to simulate activity
-    try:
-        while True:
-            sys.stdout.write(".")
-            sys.stdout.flush()
-            time.sleep(5)
-    except KeyboardInterrupt:
-        print()
-        print("Interrupted")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-PYTHON
-
-chmod +x /tmp/mock_claude_stuck.py
-
-# Run stuck Python script directly in tmux session
-tmux -S "$AGM_SOCKET" new-session -d -s "$TEST_SESSION" python3 /tmp/mock_claude_stuck.py
+# `claude --stuck` never reaches the prompt, exercising the reaper's
+# prompt-detection timeout and its timer fallback. Same binary as the other
+# tests: the pane process must be named `claude` for AGM to see a live
+# harness rather than a zombie.
+tmux -S "$AGM_SOCKET" new-session -d -s "$TEST_SESSION" claude --stuck
 sleep 2  # Wait for mock Claude to start
 echo "✓ Tmux session created with stuck Claude (socket: $AGM_SOCKET)"
 
 echo ""
 echo "Step 2: Create AGM session manifest..."
-SESSION_DIR="$SESSIONS_DIR/$TEST_SESSION"
-mkdir -p "$SESSION_DIR"
-
 SESSION_UUID=$(uuidgen 2>/dev/null || echo "test-uuid-$(date +%s)")
+# Keyed by session ID, not session name: ops.ArchiveSession looks for the
+# legacy directory at <sessions-dir>/<session-id>/manifest.yaml and moves it to
+# <sessions-dir>/.archive-old-format/<session-id>/. A name-keyed directory is
+# invisible to that migration, so the archive assertions below never fired.
+SESSION_DIR="$SESSIONS_DIR/$SESSION_UUID"
+mkdir -p "$SESSION_DIR"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 cat > "$SESSION_DIR/manifest.yaml" <<EOF
@@ -85,6 +58,17 @@ tmux:
 EOF
 
 echo "✓ AGM manifest created: $SESSION_DIR/manifest.yaml"
+
+# The reaper resolves its target through the AGM lifecycle store, not through
+# this manifest: ops.ArchiveSession looks the session up by identifier, and the
+# reaper's archive preflight runs before it touches the pane. A fixture with
+# only a manifest.yaml dies at preflight with AGM-001 and never reaps anything.
+/home/testuser/bin/seed-session \
+    --session-id "$SESSION_UUID" \
+    --name "$TEST_SESSION" \
+    --harness claude-code \
+    --project "$SESSION_DIR"
+echo "✓ AGM lifecycle record seeded: $SESSION_UUID"
 
 echo ""
 echo "Step 3: Verify stuck Claude is running (no prompt expected)..."
@@ -106,6 +90,7 @@ echo "Total expected time: ~150s (90s timeout + 60s fallback)"
 
 /home/testuser/bin/agm-reaper \
     --session "$TEST_SESSION" \
+    --session-id "$SESSION_UUID" \
     --log-file "$REAPER_LOG" \
     --sessions-dir "$SESSIONS_DIR" &
 
@@ -175,7 +160,7 @@ echo "✓ Timing is reasonable (${ELAPSED_FINAL}s, expected ~150s)"
 
 echo ""
 echo "Step 7: Verify session archived despite timeout..."
-ARCHIVE_DIR="$SESSIONS_DIR/.archive-old-format/$TEST_SESSION"
+ARCHIVE_DIR="$SESSIONS_DIR/.archive-old-format/$SESSION_UUID"
 
 # Find the archived directory (may have timestamp suffix)
 ACTUAL_ARCHIVE=$(find "$SESSIONS_DIR/.archive-old-format" -name "${TEST_SESSION}*" -type d 2>/dev/null | head -1)

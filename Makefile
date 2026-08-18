@@ -1510,6 +1510,15 @@ build-agm:
 	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
 
+# Binaries the reaper E2E compose stack mounts. The seeder is a test fixture,
+# not a shipped tool, so it is deliberately not part of build-agm/install-agm.
+build-reaper-e2e: build-agm
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/seed-session ./agm/test/e2e/docker/cmd/seed-session/
+	# Must be named `claude`: AGM matches the pane process COMM against the
+	# harness, and Linux takes COMM from the executable file name.
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/claude ./agm/test/e2e/docker/cmd/mock-claude/
+	@echo "Built: bin/seed-session bin/claude"
+
 install-agm: build-agm
 	$(call install-go-bin,bin/agm)
 	$(call install-go-bin,bin/agm-reaper)
