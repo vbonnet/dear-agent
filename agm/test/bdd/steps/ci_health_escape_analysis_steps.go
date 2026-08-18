@@ -55,6 +55,7 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestPlacementIsPricedOnlyWhereItIsTheDecision",
 		"TestRequiredContextMatchesOnProducingApp",
 		"TestFailedCheckLookupIsNotEvidenceOfNeverRan",
+		"TestFailedPRLookupIsNotABypass",
 		"TestWorkflowLevelFailureIsNotAMissingCheck",
 		"TestPendingAtMergeIsNotNeverRan",
 		"TestBriefDoesNotClaimToBeACompletedRetro",

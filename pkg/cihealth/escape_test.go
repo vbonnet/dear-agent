@@ -29,6 +29,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 			},
 			wantClass:      ClassBypassed,
 			wantSummaryHas: "0123456",
@@ -43,6 +44,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 			},
 			wantClass:      ClassNeverRan,
 			wantRefinable:  true,
@@ -58,6 +60,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 			},
 			wantClass:      ClassSelectionGap,
 			wantRefinable:  true,
@@ -73,6 +76,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 			},
 			wantClass:      ClassGatingGap,
 			wantSummaryHas: "not a required status check",
@@ -87,6 +91,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 			},
 			wantClass:      ClassGatingGap,
 			wantSummaryHas: "administrative bypass",
@@ -101,6 +106,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 				DiffScoped:       true,
 			},
 			wantClass:      ClassScopeGap,
@@ -116,6 +122,7 @@ func TestClassify(t *testing.T) {
 				RequiredContexts: required,
 				RequiredKnown:    true,
 				PRChecksKnown:    true,
+				PRKnown:          true,
 			},
 			wantClass:      ClassMergeSkew,
 			wantSummaryHas: "non-deterministic",
@@ -147,10 +154,10 @@ func TestClassify(t *testing.T) {
 func TestFilterRefinableOnlyForSelectionClasses(t *testing.T) {
 	required := []RequiredContext{{Name: buildCheck}}
 	cases := map[Class]Escape{
-		ClassBypassed:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 0, PRChecksKnown: true},
-		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required, RequiredKnown: true, PRChecksKnown: true},
-		ClassScopeGap:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, DiffScoped: true, PRChecksKnown: true},
-		ClassMergeSkew: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, PRChecksKnown: true},
+		ClassBypassed:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 0, PRChecksKnown: true, PRKnown: true},
+		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required, RequiredKnown: true, PRChecksKnown: true, PRKnown: true},
+		ClassScopeGap:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, DiffScoped: true, PRChecksKnown: true, PRKnown: true},
+		ClassMergeSkew: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, PRChecksKnown: true, PRKnown: true},
 	}
 	for class, escape := range cases {
 		if got := Classify(escape); got.FilterRefinable {
@@ -315,6 +322,7 @@ func TestNonSuccessConclusionIsNotTreatedAsAPass(t *testing.T) {
 				PRChecks:        []CheckRun{{Name: "Integration Tests (affected)", Conclusion: conclusion}},
 				RequiredKnown:   true,
 				PRChecksKnown:   true,
+				PRKnown:         true,
 			}
 
 			if got := Classify(base); got.Class != ClassInconclusive {
@@ -344,6 +352,7 @@ func TestUnknownRequiredContextsDoNotAssertAdvisory(t *testing.T) {
 		PRNumber:        9,
 		PRChecks:        []CheckRun{{Name: "Build & Test (ubuntu-latest)", Conclusion: ConclusionFailure}},
 		PRChecksKnown:   true,
+		PRKnown:         true,
 		RequiredKnown:   false,
 	})
 	if got.Class != ClassGatingGap {
@@ -418,8 +427,9 @@ func TestFullyMeasuredROIIsNotProvisional(t *testing.T) {
 // exist in this repository sends it to edit a file it cannot find.
 func TestRetroNamesOnlyMechanismsThatExist(t *testing.T) {
 	for _, escape := range []Escape{
-		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true},
-		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true, PRChecks: []CheckRun{{Name: "c", Conclusion: ConclusionSkipped}}},
+		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true, PRKnown: true},
+		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true,
+			PRKnown: true, PRChecks: []CheckRun{{Name: "c", Conclusion: ConclusionSkipped}}},
 	} {
 		body := Retro{FailingCheck: "c", Finding: Classify(escape), RequiredKnown: true}.Body()
 		for _, ghost := range []string{"changed-paths.yml", "global-inputs", "ADR-038"} {
@@ -507,6 +517,7 @@ func TestRequiredContextMatchesOnProducingApp(t *testing.T) {
 		RequiredContexts: required,
 		RequiredKnown:    true,
 		PRChecksKnown:    true,
+		PRKnown:          true,
 	}
 
 	// A foreign App's same-named failing check is not the required context, so
@@ -539,7 +550,7 @@ func TestRequiredContextMatchesOnProducingApp(t *testing.T) {
 func TestBriefDoesNotClaimToBeACompletedRetro(t *testing.T) {
 	r := Retro{
 		FailingCheck:  "Build & Test (ubuntu-latest)",
-		Finding:       Classify(Escape{PreMergeCapable: true, FailingCheck: "Build & Test (ubuntu-latest)", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true}),
+		Finding:       Classify(Escape{PreMergeCapable: true, FailingCheck: "Build & Test (ubuntu-latest)", PRNumber: 1, RequiredKnown: true, PRChecksKnown: true, PRKnown: true}),
 		RequiredKnown: true,
 	}
 
@@ -574,6 +585,7 @@ func TestMergeSkewDeclinesPlacementWithoutCallingItANonEscape(t *testing.T) {
 			PRChecks:        []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}},
 			RequiredKnown:   true,
 			PRChecksKnown:   true,
+			PRKnown:         true,
 		}),
 		RequiredKnown: true,
 		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true, EscapesMeasured: true},
@@ -678,6 +690,7 @@ func TestPendingAtMergeIsNotNeverRan(t *testing.T) {
 		PRNumber:        6,
 		PRChecks:        []CheckRun{{Name: buildCheck, Conclusion: ConclusionPending}},
 		PRChecksKnown:   true,
+		PRKnown:         true,
 		RequiredKnown:   true,
 	})
 	if got.Class != ClassInconclusive {
@@ -685,5 +698,26 @@ func TestPendingAtMergeIsNotNeverRan(t *testing.T) {
 	}
 	if got.FilterRefinable {
 		t.Error("FilterRefinable = true; the check did report, it just had not finished")
+	}
+}
+
+// A denied or timed-out commit-to-pull-request lookup collapses to PR zero,
+// which reads as a direct push. Reporting an administrative bypass is a serious
+// accusation and must not be manufactured from an API error.
+func TestFailedPRLookupIsNotABypass(t *testing.T) {
+	got := Classify(Escape{
+		PreMergeCapable: true,
+		FailingCheck:    buildCheck,
+		MainSHA:         "abc1234def",
+		PRNumber:        0,
+		PRKnown:         false,
+		PRChecksKnown:   true,
+		RequiredKnown:   true,
+	})
+	if got.Class != ClassUnknown {
+		t.Errorf("Class = %q, want %q", got.Class, ClassUnknown)
+	}
+	if strings.Contains(got.Summary, "bypass") {
+		t.Errorf("Summary alleges a bypass it never established: %q", got.Summary)
 	}
 }

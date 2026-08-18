@@ -33,28 +33,28 @@ const queuedLabel = "main-health-queued"
 // start leaves main just as broken, and treating those as not-red makes the
 // watchdog silently skip the incident it exists to catch.
 //
-// `cancelled` is deliberately absent, and it is the one that needs justifying.
-// GitHub reports concurrency cancellation, manual cancellation, and a job
-// hitting its timeout with the same conclusion. Most workflows here set
-// `cancel-in-progress: true`, so on a busy main the newest run is routinely a
-// superseded one — counting that as red would file a retro for every rapid
-// second push. Cancelled runs are therefore treated as no evidence at all and
-// the search falls through to the last run that did conclude.
+// `cancelled` is included, but only when nothing superseded the run — see
+// latestRunOnMain. GitHub reports concurrency cancellation, manual
+// cancellation, and a job hitting its `timeout-minutes` with the same
+// conclusion. Most workflows here set `cancel-in-progress: true`, so a
+// cancelled run with a newer run behind it is routine supersession; a
+// cancelled run that is the newest run of all was stopped on its own account
+// and left that commit without a successful build.
 var redConclusions = map[string]bool{
 	"failure":         true,
 	"timed_out":       true,
 	"startup_failure": true,
 	"action_required": true,
 	"stale":           true,
+	"cancelled":       true,
 }
 
 // inconclusiveRunConclusions carry no information about health, so the run
 // search skips past them exactly as it skips a run still in flight.
 var inconclusiveRunConclusions = map[string]bool{
-	"":          true, // still running
-	"cancelled": true,
-	"skipped":   true,
-	"neutral":   true,
+	"":        true, // still running
+	"skipped": true,
+	"neutral": true,
 }
 
 // failedJobConclusions is the wider set used to name the job inside an
@@ -354,8 +354,15 @@ func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, observat
 	}
 
 	// gh returns newest first, so the first concluded sighting is the latest.
-	for _, run := range all {
+	for index, run := range all {
 		if inconclusiveRunConclusions[run.Conclusion] || run.WorkflowName == "" {
+			continue
+		}
+		// A cancelled run with anything newer behind it — in flight or not —
+		// is concurrency supersession, which says nothing about health. A
+		// cancelled run that is the newest of all was stopped by a human or by
+		// its own timeout, and that commit has no successful build.
+		if run.Conclusion == "cancelled" && index > 0 {
 			continue
 		}
 		// Only events that actually evaluate main count. `Claude Code` runs on
@@ -371,12 +378,15 @@ func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, observat
 }
 
 func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredContext, requiredKnown bool, stderr io.Writer) cihealth.Retro {
-	failing, found := failingCheckForRun(opts.Repo, run, stderr)
+	failing, jobs := failingCheckForRun(opts.Repo, run, stderr)
 	// A run that failed before producing any job has no check to name. Using
 	// the workflow's display name instead invents a context no pull request
-	// could have reported, which Classify then reads as `never-ran`.
-	workflowLevel := !found
-	if workflowLevel {
+	// could have reported, which Classify then reads as `never-ran`. But a
+	// failed lookup is not the same as a job-less run: calling that a
+	// workflow-level failure would send the fixer after workflow syntax when
+	// the failing job is merely unknown.
+	workflowLevel := jobs == noJobs
+	if failing == "" {
 		failing = run.WorkflowName
 	}
 
@@ -392,13 +402,22 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 		PreMergeCapable:      preMerge,
 		ScheduledDetection:   run.scheduledDetection(),
 	}
+
+	// A job list that could not be read leaves the classification without its
+	// subject, exactly as an unread check list does — so it starts the
+	// known-state off, and a later successful check lookup cannot turn it back
+	// on.
+	escape.PRKnown = true
+	escape.PRChecksKnown = jobs != jobLookupFailed
+
 	// A scheduled detection is not attributable to the head commit, so do not
 	// go looking for "the pull request that caused it" — there isn't one.
-	escape.PRChecksKnown = true // no lookup attempted means nothing was lost
 	if !escape.ScheduledDetection {
-		escape.PRNumber = lookupPR(opts.Repo, run.HeadSHA, stderr)
+		escape.PRNumber, escape.PRKnown = lookupPR(opts.Repo, run.HeadSHA, stderr)
 		if escape.PRNumber > 0 {
-			escape.PRChecks, escape.PRChecksKnown = lookupPRChecks(opts.Repo, escape.PRNumber, stderr)
+			checks, known := lookupPRChecks(opts.Repo, escape.PRNumber, stderr)
+			escape.PRChecks = checks
+			escape.PRChecksKnown = escape.PRChecksKnown && known
 		}
 	}
 
@@ -468,22 +487,32 @@ func isDiffScoped(check string) bool {
 // same main SHA would otherwise both be handed whichever check-run the commit
 // query returned first, collapsing their separate retros into one issue and
 // pinning the wrong escape classification on both.
-func failingCheckForRun(repo string, run mainRun, stderr io.Writer) (string, bool) {
+// jobLookup distinguishes a run that genuinely produced no job from one whose
+// job list could not be read.
+type jobLookup int
+
+const (
+	foundJob jobLookup = iota
+	noJobs
+	jobLookupFailed
+)
+
+func failingCheckForRun(repo string, run mainRun, stderr io.Writer) (string, jobLookup) {
 	if run.DatabaseID == 0 {
-		return "", false
+		return "", jobLookupFailed
 	}
 	out, ok := gh(stderr, "run", "view", fmt.Sprint(run.DatabaseID), "--repo", repo,
 		"--json", "jobs",
 		"--jq", fmt.Sprintf(`.jobs[] | select(%s) | .name`, jqInSet(".conclusion", failedJobConclusions())))
 	if !ok {
-		return "", false
+		return "", jobLookupFailed
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
-			return line, true
+			return line, foundJob
 		}
 	}
-	return "", false
+	return "", noJobs
 }
 
 // jqInSet builds a jq membership predicate from the same map the Go side
@@ -506,7 +535,10 @@ func jqInSet(field string, set map[string]bool) string {
 // A new brief is created carrying the queue label; dispatch is decided later by
 // dequeueIncident, not here.
 func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Writer) error {
-	existing, open := findRetro(repo, retro.Title(), stderr)
+	existing, open, known := findRetro(repo, retro.Title(), stderr)
+	if !known {
+		return errors.New("could not read existing incidents; refusing to risk a duplicate")
+	}
 
 	switch {
 	case existing > 0 && open:
@@ -543,22 +575,25 @@ func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Write
 // then failed again — the recurrence would open a second issue with the same
 // title, scattering exactly the history the stable title exists to keep in one
 // place. Returns the issue number and whether it is currently open.
-func findRetro(repo, title string, stderr io.Writer) (number int, open bool) {
+func findRetro(repo, title string, stderr io.Writer) (number int, open, known bool) {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
 		"--label", retroLabel, "--state", "all", "--limit", "100",
 		"--json", "number,title,state,createdAt",
 		"--jq", fmt.Sprintf(`[.[] | select(.title == %q)] | sort_by(.createdAt) | .[-1] | "\(.number) \(.state)"`, title))
 	if !ok {
-		return 0, false
+		// A failed read is not proof of absence. Treating it as absence has
+		// upsertRetro open a second issue with the same title and queue label,
+		// so one transient error dispatches a duplicate fix agent.
+		return 0, false, false
 	}
 	numberText, state, found := strings.Cut(strings.TrimSpace(string(out)), " ")
-	if !found {
-		return 0, false
+	if !found || strings.HasPrefix(strings.TrimSpace(string(out)), "null") {
+		return 0, false, true // read cleanly, nothing there
 	}
 	if _, err := fmt.Sscanf(numberText, "%d", &number); err != nil {
-		return 0, false
+		return 0, false, false
 	}
-	return number, strings.EqualFold(state, "OPEN")
+	return number, strings.EqualFold(state, "OPEN"), true
 }
 
 // closeStaleRetros closes every issue carrying this command's label whose title
@@ -591,7 +626,8 @@ func closeStaleRetros(repo string, live map[string]bool, stdout, stderr io.Write
 		// is the standing example — and closing on that would retire an
 		// incident no successful run ever addressed.
 		check := strings.TrimPrefix(title, "main red — ")
-		if !checkRecovered(repo, workflowFromBody(body), check, stderr) {
+		workflow := workflowFromBody(body)
+		if !checkRecovered(repo, workflow, check, stderr) {
 			fmt.Fprintf(stdout, "Keeping retro #%s open: no successful run of %q observed yet\n", number, check)
 			continue
 		}
@@ -623,22 +659,47 @@ func checkRecovered(repo, workflow, check string, stderr io.Writer) bool {
 	if workflow == "" || check == "" {
 		return false
 	}
+
+	// A workflow-level incident (a startup failure, which produced no job)
+	// carries the workflow's own name as its check. No workflow has a job named
+	// after itself, so looking for one would keep such an incident open
+	// forever; a later successful run of the workflow is what closes it.
+	if check == workflow {
+		out, ok := gh(stderr, "run", "list", "--repo", repo, "--branch", "main",
+			"--workflow", workflow, "--limit", "1", "--status", "success",
+			"--json", "databaseId", "--jq", ".[].databaseId")
+		return ok && strings.TrimSpace(string(out)) != ""
+	}
+
+	// Only a success AFTER the failure counts. Scanning recent runs without a
+	// boundary finds the success that preceded the failure and closes the
+	// incident on the strength of the very run the failure came after.
 	out, ok := gh(stderr, "run", "list", "--repo", repo, "--branch", "main",
-		"--workflow", workflow, "--limit", "10", "--json", "databaseId",
-		"--jq", ".[].databaseId")
+		"--workflow", workflow, "--limit", "20",
+		"--json", "databaseId,conclusion",
+		"--jq", `.[] | "\(.databaseId) \(.conclusion)"`)
 	if !ok {
 		return false
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		id := strings.TrimSpace(line)
-		if id == "" {
+		id, conclusion, found := strings.Cut(strings.TrimSpace(line), " ")
+		if !found || id == "" {
 			continue
 		}
+		// gh returns newest first. Walking from the newest, the first run that
+		// ran this job decides: a success closes the incident, a failure means
+		// the newest evidence is still red and the scan stops.
 		jobs, ok := gh(stderr, "run", "view", id, "--repo", repo, "--json", "jobs",
-			"--jq", fmt.Sprintf(`.jobs[] | select(.name == %q and .conclusion == "success") | .name`, check))
-		if ok && strings.TrimSpace(string(jobs)) != "" {
-			return true
+			"--jq", fmt.Sprintf(`.jobs[] | select(.name == %q) | .conclusion`, check))
+		if !ok {
+			return false
 		}
+		state := strings.TrimSpace(string(jobs))
+		if state == "" {
+			continue // this run did not execute the job; keep looking back
+		}
+		_ = conclusion
+		return state == "success"
 	}
 	return false
 }

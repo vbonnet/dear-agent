@@ -123,8 +123,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	escape.PRNumber = *prNumberFlag
+	escape.PRKnown = true
 	if escape.PRNumber < 0 {
-		escape.PRNumber = lookupPR(*repo, *sha, stderr)
+		escape.PRNumber, escape.PRKnown = lookupPR(*repo, *sha, stderr)
 	}
 	escape.PRChecksKnown = true
 	if escape.PRNumber > 0 {
@@ -229,17 +230,21 @@ func runGH(what string, stderr io.Writer, args ...string) error {
 // direct push could be dressed up as a merge. Only a pull request that merged
 // into main with this exact merge commit qualifies; anything else is no pull
 // request at all, which is the honest answer for a direct push.
-func lookupPR(repo, sha string, stderr io.Writer) int {
+// The second return value reports whether the association was actually read.
+// A denied or timed-out request otherwise collapses to PR zero, which Classify
+// reads as a direct push and reports as an administrative bypass — a serious
+// accusation manufactured from an API error.
+func lookupPR(repo, sha string, stderr io.Writer) (int, bool) {
 	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/commits/%s/pulls", repo, sha),
 		"--jq", fmt.Sprintf(`[.[] | select(.merged_at != null and .base.ref == "main" and .merge_commit_sha == %q)] | .[0].number // 0`, sha))
 	if !ok {
-		return 0
+		return 0, false
 	}
 	var number int
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &number); err != nil {
-		return 0
+		return 0, false
 	}
-	return number
+	return number, true
 }
 
 // lookupPRChecks returns the checks as they stood when the pull request merged.

@@ -68,6 +68,10 @@ type Escape struct {
 	// PRNumber is the pull request that introduced MainSHA. Zero means no pull
 	// request was found — a direct push or an admin bypass.
 	PRNumber int
+	// PRKnown records whether the commit-to-pull-request lookup succeeded.
+	// Without it a denied request collapses to PRNumber zero, which reads as a
+	// direct push and gets reported as an administrative bypass.
+	PRKnown bool
 	// PRChecks is every check that reported on the pull request head.
 	PRChecks []CheckRun
 	// PRChecksKnown records whether the check lookup succeeded. A denied or
@@ -242,10 +246,10 @@ func Classify(e Escape) Finding {
 	// Guard before any statement about what did or did not report. Without it,
 	// a denied check-runs query produces an empty slice, `never-ran`, and a
 	// recommendation to widen a path filter that was never involved.
-	if !e.PRChecksKnown {
+	if !e.PRKnown || !e.PRChecksKnown {
 		return Finding{
 			Class:   ClassUnknown,
-			Summary: fmt.Sprintf("The checks that reported on PR #%d could not be read, so how %q got past pre-merge is unresolved. This is a gap in the evidence, not a finding about the pull request.", e.PRNumber, e.FailingCheck),
+			Summary: fmt.Sprintf("The pull request that introduced %s, or the checks that reported on it, could not be read — so how %q got past pre-merge is unresolved. This is a gap in the evidence, not a finding about the pull request.", shortSHA(e.MainSHA), e.FailingCheck),
 			SuggestedActions: []string{
 				"Fix the failure on main first; the classification can be redone once the lookup succeeds.",
 				fmt.Sprintf("Re-run the analysis by hand to establish the class: `ci-escape-analysis -repo <repo> -check %q -sha %s -pr %d`.", e.FailingCheck, shortSHA(e.MainSHA), e.PRNumber),

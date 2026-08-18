@@ -135,7 +135,12 @@ jobs:
           fetch-depth: 1
 
       - name: Dispatch fix agent
-        uses: anthropics/claude-code-action@v1
+        # Pinned by commit SHA, not by the mutable `v1` tag. This job grants
+        # the action contents/pull-requests/issues write and an OIDC token, so
+        # a moved tag would hand a substituted action the ability to push
+        # arbitrary changes. The repository's own workflow-hygiene check wants
+        # third-party actions pinned; a write-capable one is where it matters.
+        uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Job-level `permissions:` govern the workflow token; the action
@@ -192,3 +197,19 @@ jobs:
             Open one focused PR for this one incident. Do not modify the repository
             ruleset. Do not self-merge. If the fix is not obvious within your budget,
             comment your findings on the brief and stop rather than guessing.
+
+      # The sweep drops the queue label when it hands an incident off, so if
+      # this job fails, times out, or is cancelled the incident would sit open
+      # and unqueued forever — later sweeps only comment on it and never
+      # restore the label. Put it back so the next sweep can dispatch again.
+      - name: Requeue the incident if the fix agent did not run
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INCIDENT: ${{ needs.sweep.outputs.incident }}
+        run: |
+          set -euo pipefail
+          number=$(gh issue list --repo "${{ github.repository }}"             --label main-health-watchdog --state open --limit 50             --json number,title --jq ".[] | select(.title == \"$INCIDENT\") | .number")
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --repo "${{ github.repository }}" --add-label main-health-queued
+          fi
