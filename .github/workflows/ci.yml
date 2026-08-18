@@ -108,7 +108,7 @@ jobs:
           CI_SKIP_TMUX: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
         with:
           # Pin to a specific version so linter upgrades are deliberate, not
           # silent. `latest` lets golangci-lint bump on its own schedule,
@@ -303,8 +303,92 @@ jobs:
   # invocation from security-scan.yml. To make this gate enforced, add
   # "CI / govulncheck" to the branch-protection required-status-checks
   # list (admin step — tracked by BL-061).
-  govulncheck:
-    name: govulncheck
+  #
+  # Scoping (ce-1234-ci-health): "govulncheck" is a required status check,
+  # so it must post on every PR/push or branch protection blocks the PR
+  # forever. detect-go-changes always runs and decides whether the
+  # dependency graph could have changed; the real scan only runs then
+  # (Go compiles + govulncheck's DB download aren't free, and a PR that
+  # touches neither Go code nor go.mod/go.sum can't have altered the
+  # vulnerable-package set). govulncheck-gate always runs and carries the
+  # required-check name, succeeding whenever the scan was skipped or
+  # actually passed. schedule/workflow_dispatch runs always scan for
+  # real — that's the daily drift-catcher for newly published CVEs
+  # against unchanged dependencies.
+  detect-go-changes:
+    name: Detect Go dependency changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed Go files
+        id: changed
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            range="${before}...${{ github.event.after }}"
+          fi
+
+          # ACMRT, not ACMR: a symlink replaced by a regular .go file is
+          # status T, which ACMR drops — the file would enter the package
+          # graph while this detector reported nothing and the required
+          # gate skip-passed.
+          #
+          # Write to a file rather than piping into `grep -q`: under
+          # `set -o pipefail`, grep -q exits at its first match, git diff
+          # takes SIGPIPE and returns 141, and the whole pipeline fails —
+          # which this `if` would misread as "nothing to scan" on exactly
+          # the largest diffs.
+          # -z so pathnames arrive verbatim. Under Git's default output a
+          # path with non-ASCII bytes, a tab, or a newline is quoted and
+          # backslash-escaped — `pkg/é.go` becomes "pkg/\303\251.go", the
+          # `.go` suffix test fails, and govulncheck skip-passes on a PR
+          # that did change Go source.
+          git diff -z --name-only --diff-filter=ACMRT "$range" > /tmp/go_changed.z
+
+          # The scanner's own policy counts as a scan input. A PR that
+          # edits the govulncheck invocation or its vulnerability
+          # allowlist but no Go file would otherwise satisfy the required
+          # gate without ever executing the policy it just changed — a
+          # broken scanner could merge and stay hidden until the next
+          # scheduled run. security-audit.yml carries the mirrored
+          # invocation; ci.yml carries the required one.
+          has_changes=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              *.go|go.mod|go.sum|*/go.mod|*/go.sum \
+              |.github/workflows/ci.yml|.github/workflows/security-audit.yml)
+                has_changes=true
+                break
+                ;;
+            esac
+          done < /tmp/go_changed.z
+
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+
+  govulncheck-scan:
+    name: govulncheck (scan)
+    needs: detect-go-changes
+    if: needs.detect-go-changes.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -353,3 +437,31 @@ jobs:
           echo "No unallowed vulnerabilities."
         env:
           GOWORK: "off"
+
+  govulncheck:
+    # This job's name is the required-status-check context. It always
+    # runs (never itself path-skipped), so branch protection always gets
+    # a result. It mirrors govulncheck-scan's outcome when that job ran,
+    # and succeeds when govulncheck-scan was legitimately skipped (no Go
+    # dependency changes to scan).
+    name: govulncheck
+    needs: [detect-go-changes, govulncheck-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate
+        run: |
+          if [[ "${{ needs.detect-go-changes.result }}" != "success" ]]; then
+            echo "detect-go-changes did not complete successfully: ${{ needs.detect-go-changes.result }}"
+            exit 1
+          fi
+          if [[ "${{ needs.detect-go-changes.outputs.has_changes }}" != "true" ]]; then
+            echo "No Go/go.mod/go.sum changes in this push/PR — nothing to scan."
+            exit 0
+          fi
+          if [[ "${{ needs.govulncheck-scan.result }}" != "success" ]]; then
+            echo "govulncheck-scan reported: ${{ needs.govulncheck-scan.result }}"
+            exit 1
+          fi
+          echo "govulncheck-scan passed."

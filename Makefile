@@ -65,6 +65,7 @@ override BUILD_STAMP_FLAGS = $(if $(_INVALID_EXTRA_GO_LDFLAGS),$(error EXTRA_GO_
 # this registry with the recipes so a new governed build cannot bypass it.
 override _GOVERNED_BUILD_TARGETS := \
 	health-check \
+	build-reaper-e2e \
 	build-routing-guard \
 	build-stamp-test-probe \
 	build-configure-settings \
@@ -83,8 +84,10 @@ override _GOVERNED_BUILD_TARGETS := \
 	build-bead-close-guard \
 	build-drift-check \
 	build-babysit-prs \
+	build-external-pr-reviewer \
 	build-mergeloop \
 	build-resolve-review-threads \
+	build-pr-blockers \
 	build-merge-audit \
 	build-dear-deploy \
 	build-write-guards \
@@ -207,7 +210,7 @@ override _GOVERNED_BUILD_TARGETS := \
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-external-pr-reviewer install-external-pr-reviewer build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-pr-blockers install-pr-blockers build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
@@ -486,8 +489,9 @@ install-token-refresher: build-token-refresher
 	$(call install-go-bin,bin/token-refresher)
 
 # Wire token-refresher into the supervisor mesh (ce-cs3v): deploy the launchd
-# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes, and
-# print the single host-side, ask-gated activation step for you to run yourself.
+# idle-backstop that checks ~/.claude/.credentials.json every 30 minutes and
+# refreshes only near access-token expiry, then print the single host-side,
+# ask-gated activation step for you to run yourself.
 #
 # The scheduled job is the ONLY sanctioned wiring. Do NOT also point Claude
 # Code's apiKeyHelper at this binary: since claude-code 2.1.205 a configured
@@ -504,8 +508,11 @@ install-token-refresher-launchagent: install-token-refresher
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 	@echo "Activate it yourself (ask-gated host action):"
-	@echo "  Schedule the idle backstop:"
-	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
+	@echo "  Reload the idle backstop (bootout first -- a bare 'launchctl load' is a"
+	@echo "  no-op against an already-loaded label and keeps running the STALE"
+	@echo "  in-memory ProgramArguments, not what's on disk):"
+	@echo "     launchctl bootout gui/\$$(id -u)/com.dear-agent.token-refresher 2>/dev/null || true"
+	@echo "     launchctl bootstrap gui/\$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 	@if grep -q '"apiKeyHelper"' $(HOME)/.claude/settings.json 2>/dev/null; then \
 		echo ""; \
 		echo "  WARNING: this host still has a retired apiKeyHelper in ~/.claude/settings.json."; \
@@ -774,6 +781,16 @@ build-babysit-prs:
 install-babysit-prs: build-babysit-prs
 	$(call install-go-bin,bin/babysit-prs)
 
+# Build external-pr-reviewer: configurable WRITE-permission PR review poller.
+build-external-pr-reviewer:
+	@echo "Building external-pr-reviewer..."
+	@mkdir -p bin
+	go build $(BUILD_STAMP_FLAGS) -o bin/external-pr-reviewer ./cmd/external-pr-reviewer/
+	@echo "Built: bin/external-pr-reviewer"
+
+install-external-pr-reviewer: build-external-pr-reviewer
+	$(call install-go-bin,bin/external-pr-reviewer)
+
 # Build mergeloop: the Ralph Wiggum persistent PR-merge loop (ADR-029). Drives
 # every open PR toward MERGED with zero human mechanics — rebases behind
 # branches, spawns agents to fix CI/conflicts (--enable-agents), and delegates
@@ -819,6 +836,19 @@ build-resolve-review-threads:
 
 install-resolve-review-threads: build-resolve-review-threads
 	$(call install-go-bin,bin/resolve-review-threads)
+
+# Build pr-blockers: the deterministic PR merge-blocker classifier. Given a PR
+# number it names the exact blocker set (draft, conflicts, failing/pending
+# required checks, unresolved threads INCLUDING outdated, review decision,
+# behind-base) and the exact fix for each, from GitHub's own merge state.
+# Run it before investigating any stuck PR; never guess at a merge blocker.
+build-pr-blockers:
+	@echo "Building pr-blockers..."
+	go build $(BUILD_STAMP_FLAGS) -o bin/pr-blockers ./cmd/pr-blockers/
+	@echo "Built: bin/pr-blockers"
+
+install-pr-blockers: build-pr-blockers
+	$(call install-go-bin,bin/pr-blockers)
 
 # Build merge-audit: safe-merge P6 detection tier. Weekly cross-repo sweep for
 # unresolved-threads-at-merge, checks-incomplete-at-merge, direct pushes,
@@ -1042,7 +1072,7 @@ build-disk-watchdog:
 	go build $(BUILD_STAMP_FLAGS) -o bin/disk-watchdog ./cmd/disk-watchdog/
 	@echo "Built: bin/disk-watchdog"
 
-install-disk-watchdog: build-disk-watchdog
+install-disk-watchdog: build-disk-watchdog install-agm
 	$(call install-go-bin,bin/disk-watchdog)
 
 install-disk-watchdog-launchagent: install-disk-watchdog
@@ -1494,6 +1524,15 @@ build-agm:
 	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm ./agm/cmd/agm/
 	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
+
+# Binaries the reaper E2E compose stack mounts. The seeder is a test fixture,
+# not a shipped tool, so it is deliberately not part of build-agm/install-agm.
+build-reaper-e2e: build-agm
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/seed-session ./agm/test/e2e/docker/cmd/seed-session/
+	# Must be named `claude`: AGM matches the pane process COMM against the
+	# harness, and Linux takes COMM from the executable file name.
+	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/claude ./agm/test/e2e/docker/cmd/mock-claude/
+	@echo "Built: bin/seed-session bin/claude"
 
 install-agm: build-agm
 	$(call install-go-bin,bin/agm)
