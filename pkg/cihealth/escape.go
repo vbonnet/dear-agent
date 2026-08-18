@@ -14,13 +14,20 @@ import (
 	"strings"
 )
 
-// Conclusion values GitHub reports for a check run.
+// Conclusion values GitHub reports for a check run. The unsuccessful set is
+// wider than "failure": a check that timed out, was cancelled, or never started
+// did not pass, and treating those as passes is how a red main gets classified
+// as merge skew.
 const (
-	ConclusionSuccess   = "success"
-	ConclusionFailure   = "failure"
-	ConclusionSkipped   = "skipped"
-	ConclusionCancelled = "cancelled"
-	ConclusionNeutral   = "neutral"
+	ConclusionSuccess        = "success"
+	ConclusionFailure        = "failure"
+	ConclusionSkipped        = "skipped"
+	ConclusionCancelled      = "cancelled"
+	ConclusionNeutral        = "neutral"
+	ConclusionTimedOut       = "timed_out"
+	ConclusionStartupFailure = "startup_failure"
+	ConclusionActionRequired = "action_required"
+	ConclusionStale          = "stale"
 )
 
 // CheckRun is one check context as it reported on a pull request head.
@@ -44,11 +51,23 @@ type Escape struct {
 	PRChecks []CheckRun
 	// RequiredContexts is the repository ruleset's required status checks.
 	RequiredContexts []string
-	// PreMergeCapable is false when the producing workflow has no
-	// pull_request trigger at all. Such a workflow never had a pre-merge
-	// opportunity to miss, so "how did this get past pre-merge" has a trivial
-	// answer and filter refinement is not the lever.
+	// RequiredKnown records whether the ruleset lookup actually succeeded.
+	// Reading the branch rules needs Administration (read), which the
+	// workflow's GITHUB_TOKEN does not have; without this flag an empty list
+	// from a denied request is indistinguishable from a repository that
+	// requires nothing, and every gating-gap verdict would be fabricated.
+	RequiredKnown bool
+	// PreMergeCapable is false when the failing check could not have run on a
+	// pull request — either its workflow has no pull_request trigger, or the
+	// job producing it is guarded to non-pull-request events. Such a check
+	// never had a pre-merge opportunity to miss, so "how did this get past
+	// pre-merge" has a trivial answer and filter refinement is not the lever.
 	PreMergeCapable bool
+	// ScheduledDetection marks a failure observed on a scheduled or manually
+	// dispatched run rather than on the run for the merge commit itself. Those
+	// detect drift in the world (registries, advisories, live infrastructure),
+	// so the commit at the head of main is not evidence of what caused them.
+	ScheduledDetection bool
 	// DiffScoped marks a check whose pre-merge run is deliberately narrower
 	// than its post-merge run (diff-scoped lint, manifest-scoped vuln scan).
 	// Such a check passing pre-merge and failing post-merge is the design
@@ -84,6 +103,12 @@ const (
 	// and fails on main. Either non-determinism, or two pull requests that
 	// each passed alone and conflict once merged.
 	ClassMergeSkew Class = "merge-skew"
+	// ClassInconclusive — the check reported on the pull request but never
+	// reached a successful conclusion: cancelled, timed out, startup failure,
+	// action required, neutral. It neither passed nor failed, so neither the
+	// scope-gap nor the merge-skew story applies, and asserting either would
+	// send the reader after a scoping or determinism problem that is not there.
+	ClassInconclusive Class = "inconclusive"
 )
 
 // Finding is the classification plus the prose the retro needs.
@@ -92,6 +117,19 @@ type Finding struct {
 	Summary          string
 	FilterRefinable  bool
 	SuggestedActions []string
+}
+
+// PricesPlacement reports whether "should this check move pre-merge?" is even a
+// question for this class.
+//
+// It is not, for a post-merge-only finding: the check either cannot run on a
+// pull request, or the failure was a scheduled detection that no pull request
+// caused. Rendering the ratio anyway produced the contradiction this exists to
+// stop — a retro headed `post-merge-only` closing with "ALWAYS PREVENT — block
+// this pre-merge", because the workflow happened to have measurable pre-merge
+// runs from its other trigger.
+func (f Finding) PricesPlacement() bool {
+	return f.Class != ClassPostMergeOnly
 }
 
 // Classify decides how the failure got through pre-merge.
@@ -107,6 +145,21 @@ func Classify(e Escape) Finding {
 			SuggestedActions: []string{
 				"Fix the finding itself. There is no selection or gating bug to chase here.",
 				"Only ask whether this belongs pre-merge if the finding is one a pull request could have introduced; drift, dependency, and infrastructure detectors usually cannot be.",
+			},
+		}
+	}
+
+	// A scheduled or dispatched run compares the repository against a world
+	// that moves on its own. Attributing it to whatever commit happens to be at
+	// the head of main manufactures a culprit, and every downstream class would
+	// be reasoning about a pull request that had nothing to do with the finding.
+	if e.ScheduledDetection {
+		return Finding{
+			Class:   ClassPostMergeOnly,
+			Summary: fmt.Sprintf("%q failed on a scheduled or manually dispatched run, not on the run for %s. Scheduled runs detect drift in the outside world — new advisories, registry state, live infrastructure — so the commit at the head of `main` is not evidence of what caused this.", e.FailingCheck, shortSHA(e.MainSHA)),
+			SuggestedActions: []string{
+				"Fix the finding itself. Do not attribute it to the pull request that happens to be at the head of main.",
+				"If the finding is one a pull request could have introduced, re-run the workflow on the merge commit to get an attributable result before treating it as an escape.",
 			},
 		}
 	}
@@ -131,8 +184,8 @@ func Classify(e Escape) Finding {
 			Summary:         fmt.Sprintf("%q never reported on PR #%d. A workflow dropped by a workflow-level path filter creates no check run at all, so nothing was there to be red.", e.FailingCheck, e.PRNumber),
 			FilterRefinable: true,
 			SuggestedActions: []string{
-				"Move the filter from workflow-level `on.<event>.paths` to a job-level `if:` fed by .github/workflows/changed-paths.yml (ADR-038).",
-				"A job skipped by `if:` reports `skipped`, which is visible and auditable; a skipped workflow reports nothing.",
+				"Widen the workflow-level `on.pull_request.paths` filter in the workflow that produces this check, so the relevant change matches.",
+				"Better: move the filter off `on.<event>.paths` and onto a job-level `if:`. A job skipped by `if:` reports `skipped`, which is visible and auditable; a workflow skipped by `paths` reports nothing at all, which is why this failure was invisible pre-merge.",
 			},
 		}
 
@@ -142,13 +195,22 @@ func Classify(e Escape) Finding {
 			Summary:         fmt.Sprintf("%q was SKIPPED on PR #%d but fails on main. The change was relevant and the path filter said it was not — this is a selection bug, and it is the one class that filter refinement actually fixes.", e.FailingCheck, e.PRNumber),
 			FilterRefinable: true,
 			SuggestedActions: []string{
-				"Find which changed path should have matched and widen the pattern in .github/workflows/changed-paths.yml.",
-				"If the input is one that invalidates selection itself, add it to the global-inputs list so it forces every consumer on.",
-				"Confirm the CI Gateway skip audit did not catch this; if it did not, the gateway's expectation table is out of step with the job conditions.",
+				"Find which changed path should have matched and widen the condition that skipped the job.",
+				"If the skip came from the affected-test selector (`cmd/test-affected`, ADR-028), the dependency graph it walks missed an edge — fix the selector, not the job.",
 			},
 		}
 
 	case run.Conclusion == ConclusionFailure:
+		if !e.RequiredKnown {
+			return Finding{
+				Class:   ClassGatingGap,
+				Summary: fmt.Sprintf("%q FAILED on PR #%d and the commit is on main. Whether it is a required context could not be determined — reading the branch ruleset needs Administration (read), which this token does not have — so the reason enforcement let it through is unresolved.", e.FailingCheck, e.PRNumber),
+				SuggestedActions: []string{
+					"Read the ruleset by hand (`gh api repos/<repo>/rules/branches/main`) to establish whether this context is required.",
+					"If it is required, cross-check bypassed-merge-audit.yml and the ruleset history for this window. If it is not, this is an advisory check and its red main runs are not escapes.",
+				},
+			}
+		}
 		if !isRequired(e.RequiredContexts, e.FailingCheck) {
 			return Finding{
 				Class:   ClassGatingGap,
@@ -164,6 +226,21 @@ func Classify(e Escape) Finding {
 			Summary: fmt.Sprintf("%q FAILED on PR #%d and is a required context, yet the commit is on main. That points at an administrative bypass or a ruleset change.", e.FailingCheck, e.PRNumber),
 			SuggestedActions: []string{
 				"Cross-check bypassed-merge-audit.yml and the ruleset history for this window.",
+			},
+		}
+
+	// Everything below asserts that the check PASSED pre-merge. Only a success
+	// conclusion supports that. Cancelled, timed out, startup failure, neutral
+	// and action-required runs reach neither verdict, and letting them fall
+	// through would tell the reader that a check which never passed is either
+	// deliberately narrower pre-merge or non-deterministic.
+	case run.Conclusion != ConclusionSuccess:
+		return Finding{
+			Class:   ClassInconclusive,
+			Summary: fmt.Sprintf("%q reported %q on PR #%d — it neither passed nor failed — and fails on main. There is no pre-merge pass to compare against, so neither a scoping nor a determinism story applies.", e.FailingCheck, run.Conclusion, e.PRNumber),
+			SuggestedActions: []string{
+				"Establish why the pre-merge run did not conclude: a cancelled run usually means a superseding push, a timeout means the job outgrew its budget, a startup failure means the workflow itself is malformed.",
+				"An inconclusive required check should not have satisfied the merge gate. If it did, that is an enforcement question — check the ruleset and bypassed-merge-audit.yml.",
 			},
 		}
 
@@ -202,8 +279,19 @@ type ROI struct {
 	// CureMinutes is what one escape costs: time main sits red, multiplied by
 	// how many people that blocks, plus triage and revert.
 	CureMinutes float64
-	// Escapes is how many times this check let a failure through in the window.
+	// CureAssumed is true when CureMinutes is a standing default rather than a
+	// measurement of this incident. Nothing here observes how long main was red
+	// or how many people it blocked, so the default is an assumption — and an
+	// assumption that can push the ratio across the 3:1 and 10:1 bands must not
+	// be rendered as though it were evidence.
+	CureAssumed bool
+	// Escapes is how many failures were counted in the window.
 	Escapes float64
+	// EscapesScope names what Escapes actually counted. The sweep counts
+	// distinct failing commits for the whole producing workflow, not for the
+	// individual check, because a multi-job workflow reports one run per job
+	// set; saying so keeps the numerator honest.
+	EscapesScope string
 	// PreventionMinutes is what running the check pre-merge costs over the same
 	// window: check duration x pull requests it would run on x wait cost.
 	PreventionMinutes float64
@@ -213,6 +301,11 @@ type ROI struct {
 	// infinitely worth blocking pre-merge — the exact opposite of the truth for
 	// a schedule-only detector.
 	PreventionMeasured bool
+	// PreventionTruncated is true when the run history hit the API page limit,
+	// so the window was only partially observed. A truncated denominator is
+	// systematically too small, which inflates the ratio in exactly the
+	// direction that argues for adding a pre-merge gate.
+	PreventionTruncated bool
 }
 
 // Ratio is (cure x frequency) / prevention. Zero prevention cost is treated as
@@ -232,10 +325,40 @@ func (r ROI) Ratio() float64 {
 }
 
 // Verdict maps a ratio onto the repo's three bands.
+//
+// The bands are only prescriptive when both terms are evidence. An assumed cure
+// cost or a truncated prevention measurement still produces a number, and that
+// number still crosses thresholds — so the verdict says what it is worth rather
+// than dressing an assumption up as a decision.
 func (r ROI) Verdict() string {
 	if !r.PreventionMeasured {
 		return "INSUFFICIENT DATA — no pre-merge runs to price; do not infer a placement from this"
 	}
+	band := r.band()
+	// With no escapes in the window the ratio is zero whatever the cure cost
+	// is, so the soft terms cannot be what produced the answer and flagging
+	// them would just be noise on every quiet sweep.
+	caveats := r.caveats()
+	if len(caveats) == 0 || r.Ratio() == 0 {
+		return band
+	}
+	return fmt.Sprintf("PROVISIONAL — %s. Rests on terms that are not evidence: %s. Establish them before moving this check.",
+		band, strings.Join(caveats, "; "))
+}
+
+// caveats names every term that is not evidence, so the verdict can say which.
+func (r ROI) caveats() []string {
+	var out []string
+	if r.CureAssumed {
+		out = append(out, "cure cost is a standing default, not measured for this incident")
+	}
+	if r.PreventionTruncated {
+		out = append(out, "prevention cost is a lower bound: the run history was truncated at the API page limit")
+	}
+	return out
+}
+
+func (r ROI) band() string {
 	switch ratio := r.Ratio(); {
 	case ratio > 10:
 		return "ALWAYS PREVENT — block this pre-merge (ROI > 10:1)"
@@ -252,19 +375,41 @@ func (r ROI) Verdict() string {
 // asserting a verdict.
 func (r ROI) Explain() string {
 	var b strings.Builder
-	if !r.PreventionMeasured {
-		fmt.Fprintf(&b, "ROI = (Cure x Frequency) / Prevention\n")
-		fmt.Fprintf(&b, "    = (%.0f min x %.0f escapes) / <unmeasured>\n", r.CureMinutes, r.Escapes)
-		fmt.Fprintf(&b, "\nVerdict: %s\n", r.Verdict())
-		return b.String()
-	}
 	fmt.Fprintf(&b, "ROI = (Cure x Frequency) / Prevention\n")
-	fmt.Fprintf(&b, "    = (%.0f min x %.0f escapes) / %.0f min\n", r.CureMinutes, r.Escapes, r.PreventionMinutes)
-	if ratio := r.Ratio(); math.IsInf(ratio, 1) {
-		fmt.Fprintf(&b, "    = unbounded (prevention is free)\n")
+	if !r.PreventionMeasured {
+		fmt.Fprintf(&b, "    = (%.0f min x %.0f escapes) / <unmeasured>\n", r.CureMinutes, r.Escapes)
 	} else {
-		fmt.Fprintf(&b, "    = %.1f:1\n", ratio)
+		fmt.Fprintf(&b, "    = (%.0f min x %.0f escapes) / %.0f min\n", r.CureMinutes, r.Escapes, r.PreventionMinutes)
+		if ratio := r.Ratio(); math.IsInf(ratio, 1) {
+			fmt.Fprintf(&b, "    = unbounded (prevention is free)\n")
+		} else {
+			fmt.Fprintf(&b, "    = %.1f:1\n", ratio)
+		}
 	}
+
+	fmt.Fprintf(&b, "\nwhere:\n")
+	if r.CureAssumed {
+		fmt.Fprintf(&b, "  Cure       = %.0f min/escape — ASSUMED. Nothing here measures how long\n", r.CureMinutes)
+		fmt.Fprintf(&b, "               main sat red or how many people it blocked.\n")
+	} else {
+		fmt.Fprintf(&b, "  Cure       = %.0f min/escape, measured for this incident\n", r.CureMinutes)
+	}
+	scope := r.EscapesScope
+	if scope == "" {
+		scope = "unspecified scope"
+	}
+	fmt.Fprintf(&b, "  Frequency  = %.0f — counted over %s\n", r.Escapes, scope)
+	switch {
+	case !r.PreventionMeasured:
+		fmt.Fprintf(&b, "  Prevention = unmeasured — no qualifying pre-merge runs observed\n")
+	case r.PreventionTruncated:
+		fmt.Fprintf(&b, "  Prevention = %.0f min — LOWER BOUND; run history truncated at the API\n", r.PreventionMinutes)
+		fmt.Fprintf(&b, "               page limit, so the true denominator is larger and the\n")
+		fmt.Fprintf(&b, "               true ratio smaller than shown.\n")
+	default:
+		fmt.Fprintf(&b, "  Prevention = %.0f min, measured over the full window\n", r.PreventionMinutes)
+	}
+
 	fmt.Fprintf(&b, "\nVerdict: %s\n", r.Verdict())
 	return b.String()
 }

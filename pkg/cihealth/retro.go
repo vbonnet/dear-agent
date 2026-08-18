@@ -17,6 +17,9 @@ type Retro struct {
 	Finding      Finding
 	ROI          ROI
 	Required     []string
+	// RequiredKnown is false when the ruleset could not be read, so an empty
+	// Required list means "not established" rather than "nothing is required".
+	RequiredKnown bool
 	// WindowDays is the lookback the escape count was measured over.
 	WindowDays int
 }
@@ -46,7 +49,7 @@ func (r Retro) Body() string {
 
 	fmt.Fprintf(&b, "### Can filter selection be refined?\n\n")
 	if r.Finding.FilterRefinable {
-		fmt.Fprintf(&b, "**Yes.** This failure reached main because the pre-merge selection did not run a check that was relevant to the change. That is a filter bug and it is fixable in `.github/workflows/changed-paths.yml`.\n\n")
+		fmt.Fprintf(&b, "**Yes.** This failure reached main because the pre-merge selection did not run a check that was relevant to the change. That is a filter bug, and it is fixable in the producing workflow's own `on.pull_request.paths` block or job-level `if:` condition.\n\n")
 	} else {
 		fmt.Fprintf(&b, "**No.** Refining path filters will not prevent this class. Selection did what it was told; the gap is elsewhere. Editing filters in response to this would add cost without removing risk.\n\n")
 	}
@@ -57,26 +60,41 @@ func (r Retro) Body() string {
 	}
 	fmt.Fprintf(&b, "\n")
 
+	if !r.Finding.PricesPlacement() {
+		fmt.Fprintf(&b, "### Should this move pre-merge? (prevention-vs-cure)\n\n")
+		fmt.Fprintf(&b, "**Not applicable.** This failure is not an escape, so there is no placement to price. ")
+		fmt.Fprintf(&b, "Running the ratio here would answer a question nobody asked, and its verdict would read as an instruction to move a check that either cannot run pre-merge or already does.\n\n")
+		return r.footer(&b)
+	}
+
 	fmt.Fprintf(&b, "### Should this move pre-merge? (prevention-vs-cure)\n\n")
 	fmt.Fprintf(&b, "Formula: `ROI = (Cure Cost x Frequency) / Prevention Cost`. ")
 	fmt.Fprintf(&b, "Bands: >10:1 always prevent, >3:1 usually prevent, <3:1 case-by-case.\n\n")
 	fmt.Fprintf(&b, "```\n%s```\n\n", r.ROI.Explain())
-	fmt.Fprintf(&b, "Measured over the last %d days. ", r.WindowDays)
-	fmt.Fprintf(&b, "Cure cost is time `main` sat red multiplied by the people it blocked, plus triage. ")
-	fmt.Fprintf(&b, "Prevention cost is what running this check pre-merge on every affected PR would have cost over the same window.\n\n")
+	fmt.Fprintf(&b, "Lookback window: %d days. ", r.WindowDays)
+	fmt.Fprintf(&b, "Every term's provenance is stated in the block above; a term marked ASSUMED or LOWER BOUND is not evidence, and a verdict resting on one is marked `PROVISIONAL`.\n\n")
 	fmt.Fprintf(&b, "Read the verdict as an input, not an instruction — a check that is slow **and** flaky belongs post-merge whatever the ratio says, because the flake tax is paid by everyone and does not appear in the numerator.\n\n")
 
-	if len(r.Required) > 0 {
-		fmt.Fprintf(&b, "<details><summary>Required status checks at time of failure</summary>\n\n")
+	return r.footer(&b)
+}
+
+// footer closes the retro with the evidence caveat and the provenance line.
+// Shared so a retro that skips the pricing section still carries both.
+func (r Retro) footer(b *strings.Builder) string {
+	switch {
+	case !r.RequiredKnown:
+		fmt.Fprintf(b, "> **Required status checks: not established.** Reading the branch ruleset needs Administration (read), which the watchdog's token does not have. Any statement above about whether this check gates merges is unresolved, not a finding.\n\n")
+	case len(r.Required) > 0:
+		fmt.Fprintf(b, "<details><summary>Required status checks at time of failure</summary>\n\n")
 		for _, context := range SortedContexts(r.Required) {
-			fmt.Fprintf(&b, "- `%s`\n", context)
+			fmt.Fprintf(b, "- `%s`\n", context)
 		}
-		fmt.Fprintf(&b, "\n</details>\n\n")
+		fmt.Fprintf(b, "\n</details>\n\n")
 	}
 
-	fmt.Fprintf(&b, "---\n")
-	fmt.Fprintf(&b, "Filed automatically by `.github/workflows/main-health-watchdog.yml`. ")
-	fmt.Fprintf(&b, "Analysis: `tools/ci-escape-analysis`. Policy: `docs/policies/dear-retro.ai.md`. Design: ADR-038.\n")
+	fmt.Fprintf(b, "---\n")
+	fmt.Fprintf(b, "Filed automatically by `.github/workflows/main-health-watchdog.yml`. ")
+	fmt.Fprintf(b, "Analysis: `tools/ci-escape-analysis`. Contract: `pkg/cihealth/SPEC.md`. Policy: `docs/policies/dear-retro.ai.md`.\n")
 
 	return b.String()
 }

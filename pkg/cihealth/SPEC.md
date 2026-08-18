@@ -1,10 +1,15 @@
 # cihealth Package Specification
 
-<!-- Last audited at: 2026-08-17 -->
+<!-- Last audited at: 2026-08-18 -->
 
-**Version:** 1.0
+**Version:** 2.0
 **Status:** Baseline
 **Scope:** `pkg/cihealth`.
+
+This file is the single owner of the escape classification contract and the
+prevention-vs-cure arithmetic. `tools/ci-escape-analysis/SPEC.md` specifies only
+that command's fact gathering, invocation modes, and issue mutation, and defers
+here for behaviour.
 
 ## Overview
 
@@ -21,7 +26,7 @@ files when an escape is detected.
 
 ### Classification
 
-**CIHEALTH-01** When the producing workflow has no `pull_request` trigger, the system shall classify the failure as `post-merge-only` before evaluating any other condition, so a scheduled detector is never reported as a path-filter gap.
+**CIHEALTH-01** When the failing check could not have run on a pull request, the system shall classify the failure as `post-merge-only` before evaluating any other condition, so a scheduled detector is never reported as a path-filter gap.
 
 **CIHEALTH-02** When no pull request introduced the commit, the system shall classify the failure as `bypassed` and direct the reader at branch protection rather than at CI selection.
 
@@ -39,7 +44,13 @@ files when an escape is detected.
 
 **CIHEALTH-09** When the system classifies a failure, the system shall mark `FilterRefinable` true only for `never-ran` and `selection-gap`, because those are the only classes path-filter refinement can fix.
 
-**CIHEALTH-10** When the system classifies a failure, the system shall emit a summary and at least one suggested action naming the mechanism that addresses that class.
+**CIHEALTH-10** When the system classifies a failure, the system shall emit a summary and at least one suggested action naming the mechanism that addresses that class, and every mechanism named shall exist in this repository.
+
+**CIHEALTH-19** When the failing check reported a conclusion on the pull request that is neither `success`, `failure`, nor `skipped`, the system shall classify the failure as `inconclusive` and shall not assert that the check passed pre-merge, because `scope-gap` and `merge-skew` both rest on a pre-merge pass.
+
+**CIHEALTH-20** When the failure was observed on a scheduled or dispatched run, the system shall classify it as `post-merge-only` before consulting any pull request, because the commit at the head of `main` is not evidence of what caused a detection the clock triggered.
+
+**CIHEALTH-21** When the required-context list could not be established, the system shall report the enforcement question as unresolved and shall not assert that the failing check is advisory.
 
 ### ROI pricing
 
@@ -54,6 +65,12 @@ files when an escape is detected.
 **CIHEALTH-15** When the ratio exceeds ten to one, the system shall return an always-prevent verdict; above three to one, a usually-prevent verdict; above zero, a case-by-case verdict; and at zero, a no-signal verdict.
 
 **CIHEALTH-16** When the system explains a ratio, the system shall render the arithmetic including both operands, so a retro shows its work rather than asserting a verdict.
+
+**CIHEALTH-22** When the cure cost is a standing default rather than a measurement of the incident, or the prevention measurement was truncated at the API page limit, the system shall mark the verdict `PROVISIONAL` and shall name every term that is not evidence.
+
+**CIHEALTH-23** When the system explains a ratio, the system shall state the provenance of each term — measured, assumed, unmeasured, or a lower bound — so a threshold crossing can be attributed to evidence or to an assumption.
+
+**CIHEALTH-24** When the system reports an escape count, the system shall state the scope that count was taken over, because a count taken per workflow does not license a claim about an individual check.
 
 ### Retro rendering
 

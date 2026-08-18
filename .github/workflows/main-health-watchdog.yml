@@ -49,6 +49,11 @@ permissions:
   contents: read
   issues: write
   actions: read
+  # Reading which pull request introduced a commit
+  # (repos/:repo/commits/:sha/pulls) needs this. Without it the lookup is
+  # denied, the helper degrades to PR 0, and every ordinary merge is classified
+  # as a bypass.
+  pull-requests: read
 
 jobs:
   sweep:
@@ -56,7 +61,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      red: ${{ steps.sweep.outputs.red }}
+      # `incident` is the title of a retro this sweep opened for the first
+      # time — empty when nothing is red, and empty when everything red already
+      # had an open retro. The fix agent is gated on it rather than on "is
+      # anything red", because a red workflow stays red for as long as it takes
+      # to fix, and dispatching per sweep would launch a paid agent every four
+      # hours against an incident already being worked.
+      incident: ${{ steps.sweep.outputs.incident }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -81,11 +92,12 @@ jobs:
         run: |
           set -euo pipefail
           go run ./tools/ci-escape-analysis --repo "${{ github.repository }}" --sweep | tee sweep.log
-          if grep -qE '^=== RED:' sweep.log; then
-            echo "red=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "red=false" >> "$GITHUB_OUTPUT"
-          fi
+          # First newly-opened retro only. One incident per dispatch: an agent
+          # told to fix several unrelated workflows must either combine them
+          # into one PR or drop some, and the remaining incidents are picked up
+          # by the next sweep once this one is closed.
+          incident=$(grep -m1 '^NEW INCIDENT: ' sweep.log | cut -d' ' -f3- || true)
+          echo "incident=${incident}" >> "$GITHUB_OUTPUT"
 
   # Triggering the fix. This deliberately does NOT post "@claude" on the issue
   # and hope: an issue opened by GITHUB_TOKEN does not fire the `issues` event
@@ -95,13 +107,20 @@ jobs:
   fix:
     name: Trigger a fix
     needs: sweep
-    if: needs.sweep.outputs.red == 'true'
+    if: needs.sweep.outputs.incident != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      # The agent's whole job is to push a branch and open a pull request, so
+      # `contents: read` would end every successful repair at an authorization
+      # denial. `issues: write` covers the documented fallback of commenting
+      # its findings on the retro. `actions: read` lets it read the failing
+      # run's logs — the retro carries a check name and a URL, not the
+      # diagnostic output.
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
       id-token: write
     steps:
       - name: Checkout
@@ -113,28 +132,48 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Job-level `permissions:` govern the workflow token; the action
+          # needs Actions read granted through its own surface as well before
+          # it will read run logs. Both are required — see claude.yml.
+          additional_permissions: |
+            actions: read
           prompt: |
             `main` is red on ${{ github.repository }}. The Main Health Watchdog has
-            filed a DEAR retro issue labelled `ci-red` for each failing workflow;
-            read the open ones with `gh issue list --label ci-red --state open`.
+            filed exactly one new DEAR retro, and it is the only incident you are to
+            work on:
 
-            Each retro already contains an escape classification and a
+                ${{ needs.sweep.outputs.incident }}
+
+            Find it with `gh issue list --label main-health-watchdog --state open`.
+            Other retros carrying that label are separate incidents already being
+            worked; leave them alone.
+
+            The retro already contains an escape classification and a
             prevention-vs-cure ROI calculation. Do not redo that analysis — act on it.
+            Terms it marks ASSUMED or LOWER BOUND are not evidence, and a verdict
+            marked PROVISIONAL is not an instruction.
 
             Your job, in order:
             1. Fix the actual failure so main goes green. That is the priority.
             2. Then act on the retro's classification, and ONLY on it:
-               - `selection-gap` or `never-ran`: a path filter was wrong. Widen the
-                 pattern in .github/workflows/changed-paths.yml, or add the input to
-                 the global-inputs list if it invalidates selection itself.
+               - `never-ran`: the producing workflow's own `on.pull_request.paths`
+                 filter excluded the change. Widen it there, or move the filter to a
+                 job-level `if:` so a skip is visible instead of silent.
+               - `selection-gap`: a job-level condition skipped the check. Widen that
+                 condition; if the skip came from the affected-test selector
+                 (`cmd/test-affected`, ADR-028), fix the selector's dependency walk.
                - `merge-skew`: do NOT touch path filters. Re-run the job to separate
                  flake from semantic merge skew, and say which it was.
+               - `inconclusive`: the pre-merge run never concluded. Establish why
+                 (superseded push, timeout, malformed workflow) before anything else.
                - `scope-gap`: the diff-scoping is working as designed. Only widen the
-                 pre-merge scope if the retro's ROI ratio cleared 10:1.
+                 pre-merge scope if the retro's ROI ratio cleared 10:1 AND was not
+                 marked PROVISIONAL.
+               - `post-merge-only`: not an escape. Fix the finding, change no filters.
                - `gating-gap` or `bypassed`: this is a ruleset/branch-protection
                  question, not a CI-filtering one. Write up what should change and
                  stop — ruleset edits are a control surface and need a human.
 
-            Open one focused PR. Do not modify the repository ruleset. Do not
-            self-merge. If the fix is not obvious within your budget, comment your
-            findings on the retro issue and stop rather than guessing.
+            Open one focused PR for this one incident. Do not modify the repository
+            ruleset. Do not self-merge. If the fix is not obvious within your budget,
+            comment your findings on the retro issue and stop rather than guessing.

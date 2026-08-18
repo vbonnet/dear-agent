@@ -27,6 +27,7 @@ func TestClassify(t *testing.T) {
 				MainSHA:          "0123456789abcdef",
 				PRNumber:         0,
 				RequiredContexts: required,
+				RequiredKnown:    true,
 			},
 			wantClass:      ClassBypassed,
 			wantSummaryHas: "0123456",
@@ -39,6 +40,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         42,
 				PRChecks:         []CheckRun{{Name: "govulncheck", Conclusion: ConclusionSuccess}},
 				RequiredContexts: required,
+				RequiredKnown:    true,
 			},
 			wantClass:      ClassNeverRan,
 			wantRefinable:  true,
@@ -52,6 +54,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         42,
 				PRChecks:         []CheckRun{{Name: buildCheck, Conclusion: ConclusionSkipped}},
 				RequiredContexts: required,
+				RequiredKnown:    true,
 			},
 			wantClass:      ClassSelectionGap,
 			wantRefinable:  true,
@@ -65,6 +68,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         42,
 				PRChecks:         []CheckRun{{Name: "Structural Health (baselined)", Conclusion: ConclusionFailure}},
 				RequiredContexts: required,
+				RequiredKnown:    true,
 			},
 			wantClass:      ClassGatingGap,
 			wantSummaryHas: "not a required status check",
@@ -77,6 +81,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         42,
 				PRChecks:         []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}},
 				RequiredContexts: required,
+				RequiredKnown:    true,
 			},
 			wantClass:      ClassGatingGap,
 			wantSummaryHas: "administrative bypass",
@@ -89,6 +94,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         42,
 				PRChecks:         []CheckRun{{Name: "Vulnerability Scan", Conclusion: ConclusionSuccess}},
 				RequiredContexts: required,
+				RequiredKnown:    true,
 				DiffScoped:       true,
 			},
 			wantClass:      ClassScopeGap,
@@ -102,6 +108,7 @@ func TestClassify(t *testing.T) {
 				PRNumber:         42,
 				PRChecks:         []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}},
 				RequiredContexts: required,
+				RequiredKnown:    true,
 			},
 			wantClass:      ClassMergeSkew,
 			wantSummaryHas: "non-deterministic",
@@ -134,7 +141,7 @@ func TestFilterRefinableOnlyForSelectionClasses(t *testing.T) {
 	required := []string{buildCheck}
 	cases := map[Class]Escape{
 		ClassBypassed:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 0},
-		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required},
+		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required, RequiredKnown: true},
 		ClassScopeGap:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}, DiffScoped: true},
 		ClassMergeSkew: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionSuccess}}},
 	}
@@ -277,5 +284,186 @@ func TestUnmeasuredPreventionIsNotFreePrevention(t *testing.T) {
 	}
 	if strings.Contains(explain, "unbounded") {
 		t.Errorf("Explain() must not claim prevention is free, got %q", explain)
+	}
+}
+
+// A check that was cancelled, timed out, or never started did not pass. The
+// classifier used to fall past the skipped and failure cases straight into the
+// scope-gap and merge-skew branches, both of which assert a pre-merge pass —
+// so a superseded PR run was reported as a non-deterministic check.
+func TestNonSuccessConclusionIsNotTreatedAsAPass(t *testing.T) {
+	for _, conclusion := range []string{
+		ConclusionCancelled,
+		ConclusionTimedOut,
+		ConclusionStartupFailure,
+		ConclusionActionRequired,
+		ConclusionNeutral,
+	} {
+		t.Run(conclusion, func(t *testing.T) {
+			base := Escape{
+				PreMergeCapable: true,
+				FailingCheck:    "Integration Tests (affected)",
+				MainSHA:         "abc1234def",
+				PRNumber:        7,
+				PRChecks:        []CheckRun{{Name: "Integration Tests (affected)", Conclusion: conclusion}},
+				RequiredKnown:   true,
+			}
+
+			if got := Classify(base); got.Class != ClassInconclusive {
+				t.Errorf("Class = %q, want %q", got.Class, ClassInconclusive)
+			}
+
+			// Diff-scoping must not rescue it either: scope-gap says the check
+			// passed at a narrower scope, and it did not pass at all.
+			scoped := base
+			scoped.DiffScoped = true
+			if got := Classify(scoped); got.Class != ClassInconclusive {
+				t.Errorf("diff-scoped Class = %q, want %q", got.Class, ClassInconclusive)
+			}
+		})
+	}
+}
+
+// Reading the branch ruleset needs Administration (read), which the watchdog's
+// token does not have. A denied request returns an empty list, which is
+// indistinguishable from "this repository requires nothing" — and that reading
+// turns every required-check failure into an advisory one.
+func TestUnknownRequiredContextsDoNotAssertAdvisory(t *testing.T) {
+	got := Classify(Escape{
+		PreMergeCapable: true,
+		FailingCheck:    "Build & Test (ubuntu-latest)",
+		MainSHA:         "abc1234def",
+		PRNumber:        9,
+		PRChecks:        []CheckRun{{Name: "Build & Test (ubuntu-latest)", Conclusion: ConclusionFailure}},
+		RequiredKnown:   false,
+	})
+	if got.Class != ClassGatingGap {
+		t.Fatalf("Class = %q, want %q", got.Class, ClassGatingGap)
+	}
+	if strings.Contains(got.Summary, "not a required status check") {
+		t.Errorf("Summary asserts an advisory context it could not establish: %q", got.Summary)
+	}
+	if !strings.Contains(got.Summary, "could not be determined") {
+		t.Errorf("Summary should report the lookup as unresolved, got %q", got.Summary)
+	}
+}
+
+// A scheduled run compares the repo against a world that moves on its own, so
+// the commit at the head of main is not evidence of what caused the failure.
+func TestScheduledDetectionIsNotPinnedOnTheHeadCommit(t *testing.T) {
+	got := Classify(Escape{
+		PreMergeCapable:    true,
+		ScheduledDetection: true,
+		FailingCheck:       "reconcile",
+		MainSHA:            "abc1234def",
+		PRNumber:           11,
+		PRChecks:           nil,
+		RequiredKnown:      true,
+	})
+	if got.Class != ClassPostMergeOnly {
+		t.Errorf("Class = %q, want %q", got.Class, ClassPostMergeOnly)
+	}
+	if got.FilterRefinable {
+		t.Error("FilterRefinable = true; a scheduled detection has no pre-merge filter to refine")
+	}
+}
+
+// The cure term is a standing default: nothing measures how long main sat red
+// or how many people it blocked. A default that can push the ratio across the
+// 3:1 and 10:1 bands must not be rendered as evidence.
+func TestAssumedCureCostYieldsAProvisionalVerdict(t *testing.T) {
+	roi := ROI{CureMinutes: 90, CureAssumed: true, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true}
+	verdict := roi.Verdict()
+	if !strings.HasPrefix(verdict, "PROVISIONAL") {
+		t.Errorf("Verdict() = %q, want a PROVISIONAL prefix", verdict)
+	}
+	if !strings.Contains(verdict, "ALWAYS PREVENT") {
+		t.Errorf("Verdict() should still report the band it computed, got %q", verdict)
+	}
+	if explain := roi.Explain(); !strings.Contains(explain, "ASSUMED") {
+		t.Errorf("Explain() should label the assumed term, got %q", explain)
+	}
+}
+
+// A truncated run history is a lower bound on the denominator, which biases the
+// ratio upward — toward recommending a pre-merge gate.
+func TestTruncatedPreventionIsReportedAsALowerBound(t *testing.T) {
+	roi := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true, PreventionTruncated: true}
+	if verdict := roi.Verdict(); !strings.HasPrefix(verdict, "PROVISIONAL") {
+		t.Errorf("Verdict() = %q, want a PROVISIONAL prefix", verdict)
+	}
+	if explain := roi.Explain(); !strings.Contains(explain, "LOWER BOUND") {
+		t.Errorf("Explain() should mark the denominator a lower bound, got %q", explain)
+	}
+}
+
+// Fully measured terms keep the plain prescriptive band.
+func TestFullyMeasuredROIIsNotProvisional(t *testing.T) {
+	roi := ROI{CureMinutes: 90, Escapes: 4, PreventionMinutes: 30, PreventionMeasured: true}
+	if got := roi.Verdict(); !strings.HasPrefix(got, "ALWAYS PREVENT") {
+		t.Errorf("Verdict() = %q, want ALWAYS PREVENT", got)
+	}
+}
+
+// The retro is the fix agent's brief. Pointing it at a selector that does not
+// exist in this repository sends it to edit a file it cannot find.
+func TestRetroNamesOnlyMechanismsThatExist(t *testing.T) {
+	for _, escape := range []Escape{
+		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true},
+		{PreMergeCapable: true, FailingCheck: "c", PRNumber: 1, RequiredKnown: true, PRChecks: []CheckRun{{Name: "c", Conclusion: ConclusionSkipped}}},
+	} {
+		body := Retro{FailingCheck: "c", Finding: Classify(escape), RequiredKnown: true}.Body()
+		for _, ghost := range []string{"changed-paths.yml", "global-inputs", "ADR-038"} {
+			if strings.Contains(body, ghost) {
+				t.Errorf("retro body names %q, which does not exist in this repository", ghost)
+			}
+		}
+	}
+}
+
+// A post-merge-only finding is not an escape, so "should this move pre-merge?"
+// has no answer to price. Rendering the ratio anyway produced a retro headed
+// post-merge-only that closed with "ALWAYS PREVENT — block this pre-merge",
+// because the workflow had measurable pre-merge runs from its other trigger.
+func TestPostMergeOnlyRetroDoesNotPricePlacement(t *testing.T) {
+	finding := Classify(Escape{
+		PreMergeCapable:    true,
+		ScheduledDetection: true,
+		FailingCheck:       "reconcile",
+		MainSHA:            "abc1234def",
+		RequiredKnown:      true,
+	})
+	if finding.PricesPlacement() {
+		t.Fatal("PricesPlacement() = true for post-merge-only")
+	}
+
+	body := Retro{
+		FailingCheck:  "reconcile",
+		Finding:       finding,
+		RequiredKnown: true,
+		ROI:           ROI{CureMinutes: 90, Escapes: 40, PreventionMinutes: 5, PreventionMeasured: true},
+	}.Body()
+
+	if !strings.Contains(body, "Not applicable") {
+		t.Errorf("body should decline to price placement, got:\n%s", body)
+	}
+	for _, banned := range []string{"ALWAYS PREVENT", "USUALLY PREVENT", "CASE-BY-CASE"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("post-merge-only retro renders a placement verdict %q", banned)
+		}
+	}
+	// The footer still has to be there; skipping the section must not skip the
+	// provenance line.
+	if !strings.Contains(body, "main-health-watchdog.yml") {
+		t.Error("body lost its provenance footer")
+	}
+}
+
+// An actual escape still gets priced.
+func TestEscapeClassesStillPricePlacement(t *testing.T) {
+	for _, class := range []Class{ClassNeverRan, ClassSelectionGap, ClassScopeGap, ClassMergeSkew, ClassGatingGap} {
+		if !(Finding{Class: class}).PricesPlacement() {
+			t.Errorf("PricesPlacement() = false for %q", class)
+		}
 	}
 }

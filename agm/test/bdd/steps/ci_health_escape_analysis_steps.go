@@ -46,6 +46,12 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestClassify",
 		"TestFilterRefinableOnlyForSelectionClasses",
 		"TestScheduleOnlyWorkflowIsNotAnEscape",
+		"TestNonSuccessConclusionIsNotTreatedAsAPass",
+		"TestUnknownRequiredContextsDoNotAssertAdvisory",
+		"TestScheduledDetectionIsNotPinnedOnTheHeadCommit",
+		"TestRetroNamesOnlyMechanismsThatExist",
+		"TestPostMergeOnlyRetroDoesNotPricePlacement",
+		"TestEscapeClassesStillPricePlacement",
 	)
 	return nil
 }
@@ -73,6 +79,9 @@ func agmRunsCIEscapeROIRegressions(ctx context.Context) error {
 		"TestROIFreePreventionWithNoEscapesIsNoSignal",
 		"TestROIExplainShowsItsWork",
 		"TestUnmeasuredPreventionIsNotFreePrevention",
+		"TestAssumedCureCostYieldsAProvisionalVerdict",
+		"TestTruncatedPreventionIsReportedAsALowerBound",
+		"TestFullyMeasuredROIIsNotProvisional",
 	)
 	return nil
 }

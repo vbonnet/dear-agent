@@ -19,10 +19,14 @@
 //
 // Facts are read via the `gh` CLI, which the runner already authenticates.
 // Every fetch failure degrades to "unknown" rather than aborting: a retro with
-// a partial picture is worth more than no retro.
+// a partial picture is worth more than no retro. Where "unknown" and a real
+// answer would lead to different advice — required contexts, prevention cost —
+// the unknown is carried into the retro as unknown rather than silently
+// becoming an empty list or a zero.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -30,10 +34,22 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/cihealth"
 )
+
+// ghTimeout bounds every subprocess call. The GitHub CLI can block on network
+// stalls and, if it ever loses its token, on an interactive prompt; an unbounded
+// wait would hang the whole workflow behind a single query.
+const ghTimeout = 60 * time.Second
+
+// runPageLimit is the cap `gh run list` is asked for. It is a fetch cap, not
+// pagination — hitting it means the window was only partially observed, which
+// the callers must report rather than quietly treat as the whole picture.
+const runPageLimit = 100
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -50,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		workflow     = flags.String("workflow", "", "human name of the failing workflow")
 		runURL       = flags.String("run-url", "", "URL of the failing run")
 		diffScoped   = flags.Bool("diff-scoped", false, "the check's pre-merge run is deliberately narrower than its post-merge run")
+		preMerge     = flags.Bool("pre-merge-capable", true, "the failing check could have run on a pull request; set false for a schedule-only workflow or a job guarded to non-pull-request events")
+		scheduled    = flags.Bool("scheduled-detection", false, "the failure was observed on a scheduled or dispatched run, so the head of main is not evidence of its cause")
 		windowDays   = flags.Int("window-days", 30, "lookback window for the escape count")
 		cureMinutes  = flags.Float64("cure-minutes", 90, "engineer-minutes one escape costs: main red x people blocked, plus triage")
 		preventMins  = flags.Float64("prevention-minutes", 0, "engineer-minutes running this check pre-merge would cost over the window; 0 means measure it from run history")
@@ -70,12 +88,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Whether a flag was supplied at all is the only way to tell a measured
+	// value from the default. A cure cost nobody stated is an assumption, and
+	// the retro has to say so.
+	set := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+
 	if *sweepMode {
 		return sweep(sweepOptions{
-			Repo:        *repo,
-			WindowDays:  *windowDays,
-			CureMinutes: *cureMinutes,
-			DryRun:      *dryRun,
+			Repo:         *repo,
+			WindowDays:   *windowDays,
+			CureMinutes:  *cureMinutes,
+			CureMeasured: set["cure-minutes"],
+			DryRun:       *dryRun,
 		}, stdout, stderr)
 	}
 
@@ -88,6 +113,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		FailingCheck: *check,
 		MainSHA:      *sha,
 		DiffScoped:   *diffScoped,
+		// Standalone mode has no workflow file to consult, so capability is an
+		// input. Defaulting it to true rather than to Go's zero value matters:
+		// a false here short-circuits Classify into post-merge-only before it
+		// looks at the pull request at all, which would make every hand-run
+		// analysis return the same answer.
+		PreMergeCapable:    *preMerge,
+		ScheduledDetection: *scheduled,
 	}
 
 	escape.PRNumber = *prNumberFlag
@@ -97,16 +129,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if escape.PRNumber > 0 {
 		escape.PRChecks = lookupPRChecks(*repo, escape.PRNumber, stderr)
 	}
-	escape.RequiredContexts = lookupRequiredContexts(*repo, stderr)
+	escape.RequiredContexts, escape.RequiredKnown = lookupRequiredContexts(*repo, stderr)
 
 	escapes := *escapesFlag
+	escapeScope := fmt.Sprintf("escapes supplied on the command line for %d days", *windowDays)
 	if escapes < 0 {
 		escapes = countEscapes(*repo, *workflow, *windowDays, stderr)
+		escapeScope = fmt.Sprintf("distinct failing commits for workflow %q over %d days", *workflow, *windowDays)
 	}
 
-	prevention := *preventMins
-	if prevention <= 0 {
-		prevention = estimatePrevention(*repo, *workflow, *windowDays, stderr)
+	// An explicitly supplied prevention cost is a measurement by definition;
+	// otherwise fall back to run history, which reports for itself whether it
+	// observed anything.
+	prevention, preventionMeasured, truncated := *preventMins, set["prevention-minutes"], false
+	if !preventionMeasured {
+		prevention, preventionMeasured, truncated = estimatePrevention(*repo, *workflow, *windowDays, stderr)
 	}
 
 	retro := cihealth.Retro{
@@ -117,27 +154,64 @@ func run(args []string, stdout, stderr io.Writer) int {
 		RunURL:       *runURL,
 		Finding:      cihealth.Classify(escape),
 		ROI: cihealth.ROI{
-			CureMinutes:       *cureMinutes,
-			Escapes:           escapes,
-			PreventionMinutes: prevention,
+			CureMinutes:         *cureMinutes,
+			CureAssumed:         !set["cure-minutes"],
+			Escapes:             escapes,
+			EscapesScope:        escapeScope,
+			PreventionMinutes:   prevention,
+			PreventionMeasured:  preventionMeasured,
+			PreventionTruncated: truncated,
 		},
-		Required:   escape.RequiredContexts,
-		WindowDays: *windowDays,
+		Required:      escape.RequiredContexts,
+		RequiredKnown: escape.RequiredKnown,
+		WindowDays:    *windowDays,
 	}
 
 	fmt.Fprint(stdout, retro.Body())
 	return 0
 }
 
-// gh runs the GitHub CLI and returns stdout. Errors are reported and swallowed:
-// see the package comment on degrading rather than aborting.
-func gh(stderr io.Writer, args ...string) ([]byte, bool) {
-	out, err := exec.Command("gh", args...).Output()
+// ghOutput runs the GitHub CLI and returns stdout, bounded by a timeout so a
+// stalled network call or an interactive prompt cannot hang the workflow.
+func ghOutput(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", args...).Output()
 	if err != nil {
-		fmt.Fprintf(stderr, "ci-escape-analysis: gh %s: %v\n", strings.Join(args, " "), err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), ctxErr)
+		}
+		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+// gh is ghOutput for the fact-gathering calls, where a failure is reported and
+// degraded to "unknown": see the package comment.
+func gh(stderr io.Writer, args ...string) ([]byte, bool) {
+	out, err := ghOutput(args...)
+	if err != nil {
+		fmt.Fprintf(stderr, "ci-escape-analysis: %v\n", err)
 		return nil, false
 	}
 	return out, true
+}
+
+// runGH is the mutating counterpart: it returns the error so the caller can
+// decide, because a retro that failed to file is not a degraded fact, it is a
+// missing alert.
+func runGH(what string, stderr io.Writer, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("%s: %w", what, ctxErr)
+		}
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	return nil
 }
 
 func lookupPR(repo, sha string, stderr io.Writer) int {
@@ -184,11 +258,17 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
 	return runs
 }
 
-func lookupRequiredContexts(repo string, stderr io.Writer) []string {
+// lookupRequiredContexts reads the branch ruleset. The second return value says
+// whether the read actually succeeded: this endpoint needs Administration
+// (read), which the workflow token does not have, and a denied request returns
+// nothing — indistinguishable from a repository that requires no checks. Every
+// gating verdict turns on that distinction, so it is carried rather than
+// flattened.
+func lookupRequiredContexts(repo string, stderr io.Writer) ([]string, bool) {
 	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/rules/branches/main", repo),
 		"--jq", ".[] | select(.type == \"required_status_checks\") | .parameters.required_status_checks[].context")
 	if !ok {
-		return nil
+		return nil, false
 	}
 	var contexts []string
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
@@ -196,18 +276,25 @@ func lookupRequiredContexts(repo string, stderr io.Writer) []string {
 			contexts = append(contexts, line)
 		}
 	}
-	return contexts
+	return contexts, true
 }
 
-// countEscapes is the Frequency term: how many times this workflow went red on
-// main inside the window.
+// countEscapes is the Frequency term: how many distinct commits this workflow
+// went red on inside the window.
+//
+// Distinct commits, not failed runs. A scheduled workflow or a manual re-run
+// fails repeatedly against the same unchanged SHA, and charging each of those
+// as a separate escape lets one unresolved incident inflate the numerator until
+// it crosses a threshold and argues for a pre-merge gate that no additional
+// change ever escaped.
 func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) float64 {
 	if workflow == "" {
 		return 0
 	}
 	out, ok := gh(stderr, "run", "list", "--repo", repo, "--workflow", workflow,
-		"--branch", "main", "--status", "failure", "--limit", "100",
-		"--json", "createdAt", "--jq", fmt.Sprintf("[.[] | select(.createdAt > (now - %d*86400 | todate))] | length", windowDays))
+		"--branch", "main", "--status", "failure", "--limit", fmt.Sprint(runPageLimit),
+		"--json", "createdAt,headSha",
+		"--jq", fmt.Sprintf("[.[] | select(.createdAt > (now - %d*86400 | todate)) | .headSha] | unique | length", windowDays))
 	if !ok {
 		return 0
 	}
@@ -218,27 +305,45 @@ func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) float
 	return count
 }
 
-// estimatePrevention is the Prevention Cost term: median wall-clock of this
-// workflow on pull requests, multiplied by how many pull requests ran it in the
-// window. Wall-clock rather than billable minutes on purpose — the cost that
-// matters is the engineer waiting, not the runner.
-func estimatePrevention(repo, workflow string, windowDays int, stderr io.Writer) float64 {
+// estimatePrevention is the Prevention Cost term: the wall-clock this workflow
+// spent on pull requests inside the window. Wall-clock rather than billable
+// minutes on purpose — the cost that matters is the engineer waiting, not the
+// runner.
+//
+// Returns whether anything was actually observed, and whether the query hit the
+// page limit. Both matter: an unmeasured denominator must not read as "free",
+// and a truncated one is a lower bound that biases the ratio toward adding a
+// gate.
+func estimatePrevention(repo, workflow string, windowDays int, stderr io.Writer) (minutes float64, measured, truncated bool) {
 	if workflow == "" {
-		return 0
+		return 0, false, false
 	}
 	out, ok := gh(stderr, "run", "list", "--repo", repo, "--workflow", workflow,
-		"--event", "pull_request", "--limit", "100",
+		"--event", "pull_request", "--limit", fmt.Sprint(runPageLimit),
 		"--json", "createdAt,updatedAt",
 		"--jq", fmt.Sprintf(
 			`[.[] | select(.createdAt > (now - %d*86400 | todate))
 			   | ((.updatedAt | fromdate) - (.createdAt | fromdate)) / 60]
-			 | if length == 0 then 0 else add end`, windowDays))
+			 | "\(length) \(add // 0)"`, windowDays))
 	if !ok {
-		return 0
+		return 0, false, false
 	}
-	var minutes float64
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%f", &minutes); err != nil {
-		return 0
+
+	var (
+		observed int
+		total    float64
+	)
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %f", &observed, &total); err != nil {
+		return 0, false, false
 	}
-	return minutes
+	if observed == 0 {
+		// The workflow declares a pull_request trigger but nothing ran on a
+		// pull request in the window — an over-narrow path filter does exactly
+		// this. There is no prevention cost to price, and claiming one of zero
+		// would make the ratio unbounded.
+		return 0, false, false
+	}
+	return total, true, observed >= runPageLimit
 }
+
+func sortStrings(s []string) { sort.Strings(s) }
