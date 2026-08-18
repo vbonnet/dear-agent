@@ -38,6 +38,10 @@ required-check projection shared with safe-merge.
 
 **PR-BLOCKERS-10** When `--json` is provided, the system shall emit the full diagnosis as JSON on stdout.
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/workflow_tooling_guardrails.feature`
+
 ## Test Traceability
 
 - `cmd/pr-blockers/main_test.go`: usage errors, READY output, BLOCKED output contract.
