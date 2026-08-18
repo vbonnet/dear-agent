@@ -3,6 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
 // TestBuildClaudeCommand_BracketedModelQuoted is the regression test for ce-rpet:
@@ -11,32 +14,29 @@ import (
 // character-class glob. Prior to the fix, `claude --model claude-sonnet-4-6[1m]`
 // would fail with "zsh: no matches found: claude-sonnet-4-6[1m]".
 func TestBuildClaudeCommand_BracketedModelQuoted(t *testing.T) {
-	saved := modelName
-	defer func() { modelName = saved }()
-	modelName = "sonnet" // resolves to claude-sonnet-4-6[1m]
-
-	cmd, _ := buildClaudeCommand("test-session", "/tmp/work", nil)
+	resolvedModel := agent.ResolveModelFullName("claude-code", "sonnet")
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "claude-code", Model: "sonnet", SessionName: "test-session", WorkDir: "/tmp/work",
+	})
 
 	// The [1m] suffix must be inside single quotes so the shell never sees bare [1m].
-	if !strings.Contains(cmd, "--model 'claude-sonnet-4-6[1m]'") {
+	if !strings.Contains(cmd, "--model '"+resolvedModel+"'") {
 		t.Errorf("bracketed model not shell-quoted in command; zsh would glob [1m]: %s", cmd)
 	}
 
 	// Negative: the unquoted form must not appear.
-	if strings.Contains(cmd, "--model claude-sonnet-4-6[1m]") {
+	if strings.Contains(cmd, "--model "+resolvedModel) {
 		t.Errorf("unquoted bracketed model in command would cause zsh glob failure: %s", cmd)
 	}
 }
 
 // TestBuildClaudeCommand_SessionNameQuoted verifies that a session name containing
-// shell-special characters is quoted in the AGM_SESSION_NAME assignment.
+// shell-special characters is quoted in the private protocol argument.
 func TestBuildClaudeCommand_SessionNameQuoted(t *testing.T) {
-	saved := modelName
-	defer func() { modelName = saved }()
-	modelName = "sonnet"
-
-	cmd, _ := buildClaudeCommand("my-session", "/tmp/work", nil)
-	if !strings.Contains(cmd, "AGM_SESSION_NAME='my-session'") {
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "claude-code", Model: "sonnet", SessionName: "my-session", WorkDir: "/tmp/work",
+	})
+	if !strings.Contains(cmd, "--session 'my-session'") {
 		t.Errorf("session name not quoted in command: %s", cmd)
 	}
 }
@@ -45,21 +45,14 @@ func TestBuildClaudeCommand_SessionNameQuoted(t *testing.T) {
 // "&& exit" from the harness command so supervisor sessions survive their
 // Claude turn/loop ending without dropping to a bare shell (ce-pzca).
 func TestBuildClaudeCommand_PersistentOmitsExit(t *testing.T) {
-	savedModel := modelName
-	savedPersistent := persistent
-	defer func() {
-		modelName = savedModel
-		persistent = savedPersistent
-	}()
-	modelName = "sonnet"
-	persistent = true
-
-	cmd, _ := buildClaudeCommand("sup-session", "/tmp/work", nil)
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "claude-code", Model: "sonnet", SessionName: "sup-session", WorkDir: "/tmp/work", Persistent: true,
+	})
 	if strings.Contains(cmd, "&& exit") {
 		t.Errorf("persistent=true: command still has '&& exit': %s", cmd)
 	}
 	// Must still contain all other required parts.
-	for _, want := range []string{"claude", "AGM_SESSION_NAME='sup-session'", "--add-dir '/tmp/work'"} {
+	for _, want := range []string{"agm __exec-claude", "--session 'sup-session'", "--add-dir '/tmp/work'"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("persistent=true: command missing %q: %s", want, cmd)
 		}
@@ -69,16 +62,9 @@ func TestBuildClaudeCommand_PersistentOmitsExit(t *testing.T) {
 // TestBuildClaudeCommand_NonPersistentHasExit verifies that non-persistent
 // (default) sessions keep the "&& exit" suffix for clean teardown.
 func TestBuildClaudeCommand_NonPersistentHasExit(t *testing.T) {
-	savedModel := modelName
-	savedPersistent := persistent
-	defer func() {
-		modelName = savedModel
-		persistent = savedPersistent
-	}()
-	modelName = "sonnet"
-	persistent = false
-
-	cmd, _ := buildClaudeCommand("worker-session", "/tmp/work", nil)
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "claude-code", Model: "sonnet", SessionName: "worker-session", WorkDir: "/tmp/work",
+	})
 	if !strings.Contains(cmd, "&& exit") {
 		t.Errorf("persistent=false: command missing '&& exit': %s", cmd)
 	}

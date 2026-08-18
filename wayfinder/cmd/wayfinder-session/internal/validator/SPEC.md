@@ -1,36 +1,43 @@
-# Wayfinder Validator Requirements Specification (EARS)
+# Wayfinder validator requirements specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-17 -->
 
-**Version**: 2.0
-**Status**: Active
-**Scope**: Deterministic transition gates for the canonical nine-phase Wayfinder workflow.
+**Status:** Active
+**Scope:** Deterministic start and completion gates.
 
-## EARS Requirements
+## EARS requirements
 
-**WAYFINDER-VALIDATOR-01** When a phase start is requested, the system shall accept only a canonical phase and require the preceding non-skipped phase to be complete.
+**WFVALID-01** When a phase start is requested, the system shall accept only a named phase and require the nearest preceding non-skipped phase to be complete.
 
-**WAYFINDER-VALIDATOR-02** When DESIGN is started, the system shall require a bounded `RESEARCH-existing-solutions.md` with overlap analysis, search methodology when reuse is incomplete, and at least 200 words.
+**WFVALID-02** When DESIGN is started, the system shall require bounded `RESEARCH-existing-solutions.md` content with overlap analysis, search methodology when reuse is incomplete, and at least 200 words.
 
-**WAYFINDER-VALIDATOR-03** When a phase completion is requested, the system shall require the phase to be in progress and its canonical deliverable to contain meaningful content.
+**WFVALID-03** When phase completion is requested, the system shall require that phase to be in progress and a substantive canonical deliverable to exist.
 
-**WAYFINDER-VALIDATOR-04** When SPEC is completed, the system shall run the deterministic strict EARS gate without requiring a model provider.
+**WFVALID-04** When SPEC is completed, the system shall validate strict EARS requirements without a model provider.
 
-**WAYFINDER-VALIDATOR-05** When DESIGN or PLAN documentation is completed, the system shall apply the configured document-quality gate to the canonical artifact.
+**WFVALID-05** When required design or plan review is configured, the system shall apply it to the canonical artifact and preserve deterministic gates.
 
-**WAYFINDER-VALIDATOR-06** When PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, or SETUP contains modified source code, the system shall reject completion as a phase-boundary violation.
+**WFVALID-06** When a pre-BUILD phase contains modified source code, the system shall reject completion as a phase-boundary violation.
 
-**WAYFINDER-VALIDATOR-07** When BUILD is completed, the system shall require implementation evidence and reject design-only placeholder language.
+**WFVALID-07** When BUILD is completed, the system shall require implementation evidence and reject placeholder-only claims.
 
-**WAYFINDER-VALIDATOR-08** When code verification runs, the system shall use fixed command arguments, bounded execution time, contained paths, file-size limits, and successful build and test results.
+**WFVALID-08** When code verification runs, the system shall contain paths, bound file sizes and execution time, and require successful applicable commands.
 
-**WAYFINDER-VALIDATOR-09** When unresolved clarification markers, unchecked canonical assumption lists, or pending questions exist, the system shall reject phase completion with remediation guidance.
+**WFVALID-09** When unresolved clarification markers, required unchecked assumptions, or pending questions exist, the system shall reject completion.
 
-**WAYFINDER-VALIDATOR-10** When a rewind is requested, the system shall require a completed canonical target that precedes the current phase.
+**WFVALID-10** When a skipped phase precedes the requested phase, the system shall gate on the nearest preceding non-skipped phase.
 
-**WAYFINDER-VALIDATOR-11** When normal validation receives a retired phase identifier, the system shall reject it rather than route through a compatibility gate.
+**WFVALID-11** When a provider review is unavailable, the system shall report that boundary without manufacturing a passing result.
 
-## Test Traceability
+**WFVALID-12** When a project without a completed lifecycle state is evaluated for parent completion, the system shall require every canonical non-skipped waypoint to be present and completed.
 
-- Package tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
-- BDD: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`
+**WFVALID-13** When BUILD or RETRO completion validates Git state, the system shall allow the current phase artifact to reach the scoped completion commit while rejecting untracked artifacts from earlier phases and untracked BUILD source code.
+
+**WFVALID-14** When `phase_engram_path` is relative, the system shall resolve it against the Wayfinder project directory before hashing while continuing to accept absolute and home-relative paths.
+
+Only exact `~` and `~` followed by a platform path separator are home-relative. Other leading-tilde path components are project-relative.
+
+## Traceability
+
+- Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
+- Cross-surface BDD: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`

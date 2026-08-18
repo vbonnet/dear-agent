@@ -500,7 +500,7 @@ func (t *Table) RenderPlainText() string {
 
 ## References
 
-- ADR-002: Table Formatting Enhancement with Lipgloss
+- Implementation: package source and tests in this directory
 - Lipgloss: https://github.com/charmbracelet/lipgloss
 - Charm ecosystem: https://charm.sh/
 - Go table libraries comparison: https://github.com/topics/table-go

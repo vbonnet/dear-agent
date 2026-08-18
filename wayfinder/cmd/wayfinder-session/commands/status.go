@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -12,7 +11,7 @@ import (
 var StatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Wayfinder session status",
-	Long: `Show the canonical Wayfinder V2 session status.
+	Long: `Show the canonical Wayfinder session status.
 
 Example:
 	wayfinder session status`,
@@ -21,16 +20,9 @@ Example:
 
 func runStatus(cmd *cobra.Command, args []string) error {
 	projectDir := GetProjectDirectory()
-	version, err := status.DetectSchemaVersion(filepath.Join(projectDir, status.StatusFilename))
-	if err != nil {
-		return fmt.Errorf("failed to read STATUS file: %w", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before status")
-	}
 	currentStatus, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical V2 status: %w", err)
+		return fmt.Errorf("failed to read canonical status: %w", err)
 	}
 
 	// Display status
@@ -39,7 +31,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Source: %s\n", status.StatusFilename)
 	fmt.Printf("Project: %s\n", currentStatus.ProjectName)
-	fmt.Printf("Version: %s (canonical 9 phases)\n", status.WayfinderV2)
+	fmt.Printf("Schema: %s (canonical 9 phases)\n", status.SchemaVersion)
 	if !currentStatus.CreatedAt.IsZero() {
 		fmt.Printf("Started: %s\n", currentStatus.CreatedAt.Format("2006-01-02 15:04 MST"))
 	}
@@ -77,7 +69,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	hasRemaining := false
 	for _, phaseName := range status.AllPhasesV2() {
 		if !existingPhases[phaseName] {
-			fmt.Printf("  %s (pending)\n", phaseName)
+			fmt.Printf("  %s %s\n", phaseName, remainingPhaseStatus(currentStatus, phaseName))
 			hasRemaining = true
 		}
 	}
@@ -87,6 +79,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func remainingPhaseStatus(currentStatus *status.StatusV2, phaseName string) string {
+	if currentStatus.IsPhaseSkipped(phaseName) {
+		return "(skipped)"
+	}
+	return "(pending)"
 }
 
 // getPhaseSymbol returns the display symbol for a phase

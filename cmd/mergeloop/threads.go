@@ -24,9 +24,19 @@ import (
 // thread would hide unaddressed feedback, which is exactly what
 // required_conversation_resolution exists to prevent.
 //
-// Empty after the Gemini sunset (2026-07-17): gemini-code-assist was removed
-// when its consumer tier was discontinued. Add future bot logins here as needed.
-var knownBotLogins = map[string]bool{}
+// gemini-code-assist was removed 2026-06-24 (#724) in anticipation of its
+// consumer tier sunsetting 2026-07-17, and chatgpt-codex-connector was never
+// added. Both are still actively commenting as of 2026-07-20 (confirmed via
+// live PR review threads, e.g. #960), so the map sat empty for nearly a
+// month: mergeloop's auto-resolve step became a silent no-op, and every PR
+// that received a bot comment stayed BLOCKED on required_conversation_
+// resolution with fully green CI (#945, #947, #949, #950, #960, #961, #976).
+// Restore both; re-remove a login only once its bot has actually stopped
+// commenting.
+var knownBotLogins = map[string]bool{
+	"gemini-code-assist":      true,
+	"chatgpt-codex-connector": true,
+}
 
 // normalizeBotLogin strips the "[bot]" suffix that some GitHub surfaces append
 // to GitHub-App accounts. The reviews/threads GraphQL API returns the bare
@@ -43,6 +53,23 @@ func isKnownBotAuthor(login string) bool {
 	return knownBotLogins[normalizeBotLogin(login)]
 }
 
+// allCommentsFromKnownBots reports whether every comment in a thread —
+// including any human reply after the bot's opening comment — is authored by
+// a known bot. A single non-bot author anywhere in the thread means the
+// thread must never be auto-resolved (MLC-05). An empty slice is not a bot
+// thread.
+func allCommentsFromKnownBots(logins []string) bool {
+	if len(logins) == 0 {
+		return false
+	}
+	for _, login := range logins {
+		if !isKnownBotAuthor(login) {
+			return false
+		}
+	}
+	return true
+}
+
 // ghThreadResolver implements mergeloop.ThreadResolver by resolving unresolved
 // review threads authored by known bots via the GitHub GraphQL
 // resolveReviewThread mutation. Thread resolution is GraphQL-only — there is no
@@ -57,7 +84,7 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
         nodes{
           id
           isResolved
-          comments(first:1){ nodes{ author{ login } } }
+          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } } }
         }
       }
     }
@@ -104,7 +131,13 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 }
 
 // listBotThreads pages through the PR's review threads and returns the
-// unresolved ones whose first comment is authored by a known bot.
+// unresolved ones where every comment — not just the first — is authored by
+// a known bot. A bot opening a thread that a human later replies to must
+// never be auto-resolved (MLC-05); checking only the first comment would miss
+// that reply entirely and silently discard human feedback the moment this
+// PR's own review-thread finding illustrates it does (ce-hz14 follow-up). A
+// thread with more comments than a single page fetches is left unresolved
+// rather than risk missing a human reply past the page boundary.
 func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name string, pr int) ([]botThread, error) {
 	var out []botThread
 	cursor := ""
@@ -135,6 +168,9 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 								ID         string `json:"id"`
 								IsResolved bool   `json:"isResolved"`
 								Comments   struct {
+									PageInfo struct {
+										HasNextPage bool `json:"hasNextPage"`
+									} `json:"pageInfo"`
 									Nodes []struct {
 										Author struct {
 											Login string `json:"login"`
@@ -152,14 +188,17 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 		}
 		rt := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {
-			if n.IsResolved || len(n.Comments.Nodes) == 0 {
+			if n.IsResolved || len(n.Comments.Nodes) == 0 || n.Comments.PageInfo.HasNextPage {
 				continue
 			}
-			author := n.Comments.Nodes[0].Author.Login
-			if !isKnownBotAuthor(author) {
+			logins := make([]string, len(n.Comments.Nodes))
+			for i, c := range n.Comments.Nodes {
+				logins[i] = c.Author.Login
+			}
+			if !allCommentsFromKnownBots(logins) {
 				continue
 			}
-			out = append(out, botThread{id: n.ID, author: author})
+			out = append(out, botThread{id: n.ID, author: logins[0]})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break

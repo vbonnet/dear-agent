@@ -1,45 +1,32 @@
-# ADR-016: Shared Operations Layer for Unified API Surfaces
+# ADR-016: Shared operations layer
 
-**Status:** Accepted
-**Date:** 2026-03-23
-**Context:** AGM API unification (agm-api swarm)
+Status: Accepted (2026-03-23; amended 2026-07-17)
 
-## Problem
+## Context
 
-AGM exposes three API surfaces — CLI (Cobra), MCP (JSON-RPC), and Skills (markdown) — but they had independent implementations with different behavior:
-- CLI commands contained business logic inline in Cobra RunE handlers
-- MCP server read from deprecated YAML manifest files instead of Dolt
-- Skills called CLI commands but had no structured error handling
-- Error messages were human-oriented, not useful for AI agents
+CLI, MCP, skills, background jobs, and reapers once reimplemented lifecycle
+mutations with different validation, storage, and cleanup behavior.
 
 ## Decision
 
-Introduce `internal/ops/` as a shared operations layer that all three surfaces call:
+`agm/internal/ops` owns typed state-changing operations and stable structured
+errors. CLI and MCP are adapters; skills invoke a structured CLI surface.
+Session creation and archival each have one ordered operation with dependency
+ports on `OpContext`, caller provenance, rollback, and harness-specific edge
+adapters. Bulk selection and asynchronous reaping may prepare or aggregate work
+but do not duplicate the durable transition.
 
-```
-CLI (Cobra)    →  internal/ops  →  Dolt Storage
-MCP (JSON-RPC) →  internal/ops  →  Dolt Storage
-Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
-```
+Claude UI archival is a separate namespace under ADR-026 because it reconciles
+provider records rather than AGM session lifecycle.
 
-### Key design choices:
+## Alternatives
 
-1. **OpContext for dependency injection**: Storage, tmux, config, and output preferences passed via `OpContext` struct
-2. **RFC 7807 errors**: All errors return `OpError` with stable codes (AGM-001+), actionable `suggestions`, and echoed `parameters`
-3. **Field masks**: `ApplyFieldMask()` filters JSON output to requested fields, reducing token consumption
-4. **Typed request/result structs**: Every operation has `*Request` input and `*Result` output, both JSON-serializable
-5. **Skills use CLI with `--output json`**: Rather than importing Go directly, skills shell out to `agm --output json` and parse structured output
-
-## Alternatives Considered
-
-1. **gRPC service layer**: Rejected — over-engineered for a single-user CLI tool
-2. **Refactor CLI commands only**: Rejected — doesn't help MCP or Skills
-3. **MCP-first with CLI as thin client**: Rejected — CLI needs to work without MCP server running
+CLI-only business logic leaves MCP divergent. A mandatory service layer would
+make the local CLI depend on a daemon. Shared untyped helpers do not define
+transition ownership.
 
 ## Consequences
 
-- All three surfaces guarantee identical behavior for the same operation
-- New operations only need one implementation (in ops), then thin adapters in each surface
-- Error codes are stable contracts that agents can match on programmatically
-- MCP server no longer needs separate YAML manifest reading code
-- Slight overhead: each MCP tool call creates a new Dolt connection (acceptable for low-frequency tool use)
+All surfaces share guards and outcomes, while adapters retain presentation and
+interaction differences. Operations, CLI, MCP, reaper, and archive tests verify
+the transition order.

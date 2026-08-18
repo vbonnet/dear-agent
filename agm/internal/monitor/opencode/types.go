@@ -12,7 +12,7 @@ import (
 
 // AGMEvent represents a parsed OpenCode event ready for publishing to EventBus
 type AGMEvent struct {
-	State     string                 // AGM state (IDLE, THINKING, AWAITING_PERMISSION, etc.)
+	State     string                 // AGM state (IDLE, WORKING, AWAITING_PERMISSION, etc.)
 	Timestamp int64                  // Unix timestamp from OpenCode event
 	Metadata  map[string]interface{} // Event-specific metadata
 }
@@ -23,7 +23,6 @@ type Config struct {
 	ServerURL      string          // OpenCode server URL (e.g., "http://localhost:4096")
 	SessionID      string          // AGM session ID
 	Reconnect      ReconnectConfig // Auto-reconnect configuration
-	FallbackTmux   bool            // Fall back to tmux monitoring if SSE fails
 	HealthProbeURL string          // Health probe endpoint (default: "/health")
 	HealthTimeout  time.Duration   // Health probe timeout (default: 5s)
 	MaxRetries     int             // Max reconnect attempts (0 = unlimited)
@@ -52,7 +51,6 @@ func DefaultConfig() Config {
 		Enabled:        false,
 		ServerURL:      "http://localhost:4096",
 		Reconnect:      DefaultReconnectConfig(),
-		FallbackTmux:   true,
 		HealthProbeURL: "/health",
 		HealthTimeout:  5 * time.Second,
 		MaxRetries:     0, // Unlimited

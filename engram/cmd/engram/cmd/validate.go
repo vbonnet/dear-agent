@@ -27,10 +27,8 @@ type ValidatorType string
 const (
 	ValidatorEngram           ValidatorType = "engram"
 	ValidatorContent          ValidatorType = "content"
-	ValidatorWayfinder        ValidatorType = "wayfinder"
 	ValidatorLinkChecker      ValidatorType = "linkchecker"
 	ValidatorYAMLTokenCounter ValidatorType = "yamltokencounter"
-	ValidatorRetrospective    ValidatorType = "retrospective"
 )
 
 // ValidationResult holds results from any validator
@@ -77,17 +75,13 @@ var validateCmd = &cobra.Command{
 VALIDATORS:
   engram          - Validate .ai.md engram files (frontmatter, anti-patterns)
   content         - Validate .ai.md content files (tokens, structure, budgets)
-  wayfinder       - Validate wayfinder-artifact.yaml files (phase schemas)
   linkchecker     - Check internal .ai.md links
   yamltokencounter - Count tokens in YAML frontmatter
-  retrospective   - Validate S11 retrospective files
 
 AUTO-DETECTION:
   The validator auto-detects file type from filename and content:
     - *.ai.md                  → engram validator
     - core/**/*.ai.md          → content validator
-    - *-retrospective.md       → retrospective validator
-    - wayfinder-artifact.yaml  → wayfinder validator
     - *.yaml, *.yml            → yamltokencounter
 
 USAGE:
@@ -135,11 +129,8 @@ EXAMPLES:
   # Check all links in .ai.md files
   engram validate --type=linkchecker --all
 
-  # Validate wayfinder artifact
-  engram validate --type=wayfinder wayfinder-artifact.yaml
-
-  # Validate retrospective with JSON output
-  engram validate --json project-retrospective.md
+  # Report validation as JSON
+  engram validate --json prompts/example.ai.md
 `,
 	RunE: runValidate,
 }
@@ -148,7 +139,7 @@ func init() {
 	rootCmd.AddCommand(validateCmd)
 
 	validateCmd.Flags().BoolVar(&validateAll, "all", false, "Validate all files in current directory")
-	validateCmd.Flags().StringVar(&validateType, "type", "", "Validator type (engram|content|wayfinder|linkchecker|yamltokencounter|retrospective)")
+	validateCmd.Flags().StringVar(&validateType, "type", "", "Validator type (engram|content|linkchecker|yamltokencounter)")
 	validateCmd.Flags().BoolVar(&validateJSON, "json", false, "Output in JSON format")
 	validateCmd.Flags().BoolVar(&validateVerbose, "verbose", false, "Show detailed output")
 	validateCmd.Flags().BoolVar(&validateFix, "fix", false, "Auto-fix issues (content validator token counts)")
@@ -159,6 +150,9 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	// Handle deprecated --recursive flag
 	if validateRecursive {
 		validateAll = true
+	}
+	if validateType != "" && !isKnownValidatorType(ValidatorType(validateType)) {
+		return fmt.Errorf("unknown validator type: %s", validateType)
 	}
 
 	// Determine files to validate
@@ -214,6 +208,15 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	return outputValidationText(summary)
 }
 
+func isKnownValidatorType(validatorType ValidatorType) bool {
+	switch validatorType {
+	case ValidatorEngram, ValidatorContent, ValidatorLinkChecker, ValidatorYAMLTokenCounter:
+		return true
+	default:
+		return false
+	}
+}
+
 // validateFiles validates all files and returns summary
 func validateFiles(files []string) *ValidationSummary {
 	summary := &ValidationSummary{
@@ -257,16 +260,6 @@ func detectValidatorType(filePath string) ValidatorType {
 	filename := filepath.Base(filePath)
 	ext := filepath.Ext(filePath)
 
-	// Retrospective files
-	if strings.HasSuffix(filename, "-retrospective.md") {
-		return ValidatorRetrospective
-	}
-
-	// Wayfinder artifacts
-	if strings.Contains(filename, "wayfinder-artifact") && (ext == ".yaml" || ext == ".yml") {
-		return ValidatorWayfinder
-	}
-
 	// YAML files (token counter)
 	if ext == ".yaml" || ext == ".yml" {
 		return ValidatorYAMLTokenCounter
@@ -300,14 +293,10 @@ func runValidatorForFile(filePath string, validatorType ValidatorType) (Validati
 		return runEngramValidator(filePath)
 	case ValidatorContent:
 		return runContentValidator(filePath)
-	case ValidatorWayfinder:
-		return runWayfinderValidator(filePath)
 	case ValidatorLinkChecker:
 		return runLinkChecker(filePath)
 	case ValidatorYAMLTokenCounter:
 		return runYAMLTokenCounter(filePath)
-	case ValidatorRetrospective:
-		return runRetrospectiveValidator(filePath)
 	default:
 		return result, fmt.Errorf("unknown validator type: %s", validatorType)
 	}
@@ -397,41 +386,6 @@ func runContentValidator(filePath string) (ValidationResult, error) {
 	return result, nil
 }
 
-// runWayfinderValidator runs the wayfinder validator
-func runWayfinderValidator(filePath string) (ValidationResult, error) {
-	result := ValidationResult{
-		ValidatorType: ValidatorWayfinder,
-		FilePath:      filePath,
-		Errors:        make([]ValidationError, 0),
-		Warnings:      make([]ValidationWarning, 0),
-	}
-
-	// Read file
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return result, fmt.Errorf("failed to read file: %w", err)
-	}
-
-	// Extract frontmatter
-	frontmatter, err := validator.ExtractFrontmatter(string(content))
-	if err != nil {
-		return result, fmt.Errorf("failed to extract frontmatter: %w", err)
-	}
-
-	// Validate
-	errs := validator.ValidateArtifact(frontmatter)
-	for _, e := range errs {
-		result.Errors = append(result.Errors, ValidationError{
-			FilePath: filePath,
-			Line:     0,
-			Type:     e.Field,
-			Message:  e.Message,
-		})
-	}
-
-	return result, nil
-}
-
 // runLinkChecker runs the link checker
 func runLinkChecker(filePath string) (ValidationResult, error) {
 	result := ValidationResult{
@@ -489,44 +443,6 @@ func runYAMLTokenCounter(filePath string) (ValidationResult, error) {
 	if validateVerbose {
 		fmt.Printf("%s: %d tokens (method: %s)\n",
 			filePath, countResult.FrontmatterTokens, countResult.Method)
-	}
-
-	return result, nil
-}
-
-// runRetrospectiveValidator runs the retrospective validator
-func runRetrospectiveValidator(filePath string) (ValidationResult, error) {
-	result := ValidationResult{
-		ValidatorType: ValidatorRetrospective,
-		FilePath:      filePath,
-		Errors:        make([]ValidationError, 0),
-		Warnings:      make([]ValidationWarning, 0),
-	}
-
-	v := validator.NewRetrospectiveValidator(filePath)
-	errs, warnings, err := v.Validate()
-	if err != nil {
-		return result, fmt.Errorf("validation failed: %w", err)
-	}
-
-	// Convert errors
-	for _, e := range errs {
-		result.Errors = append(result.Errors, ValidationError{
-			FilePath: filePath,
-			Line:     0,
-			Type:     e.Field,
-			Message:  e.Message,
-		})
-	}
-
-	// Convert warnings
-	for _, w := range warnings {
-		result.Warnings = append(result.Warnings, ValidationWarning{
-			FilePath: filePath,
-			Line:     0,
-			Type:     w.Field,
-			Message:  w.Message,
-		})
 	}
 
 	return result, nil

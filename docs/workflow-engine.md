@@ -3,8 +3,8 @@
 **Status:** Active (Phase 3 shipped 2026-05-03)
 **Audience:** developers running, authoring, or migrating workflows
 **Source of truth for:** how to use the engine end-to-end. Architecture
-lives in [ADR-010](adrs/ADR-010-workflow-engine-architecture.md); the
-release plan lives in [ROADMAP.md](../ROADMAP.md).
+lives in [ADR-010](adr/ADR-010-workflow-engine-architecture.md); current work
+is tracked in Beads.
 
 This guide is the operator manual. If you've never used `dear-agent`
 before, the **10-minute walkthrough** below takes you from a fresh
@@ -300,4 +300,5 @@ want the knowledge corpus in a separate file.
 | 4 | Migration + `workflow dev` | done — `workflow-migrate`, `workflow-codemod`, `workflow-dev` |
 | 5 | Adapters + visual inspector + `kind: spawn` | done — Obsidian/llm-wiki/registry adapters, `workflow-inspector`, `kind: spawn`; OpenViking ships as a stub |
 
-For per-ticket detail see [BACKLOG.md](workflow-engine/BACKLOG.md).
+Release history is preserved in Git and current follow-up work is tracked in
+Beads rather than a second Markdown backlog.

@@ -17,10 +17,10 @@
 //	free   : < 20 GiB WARN, < 5 GiB CRITICAL
 //	inodes : > 90% WARN, > 95% CRITICAL
 //
-// Remediation reuses the sanctioned safe hook `agm worktree sweep --execute`,
-// which removes only provably-MERGED, clean worktrees (squash-safe ancestor/PR
-// oracle; dirty, active, and unpushed work is never touched — see
-// agm/internal/ops.Sweep). No new destructive cleanup is invented here.
+// Remediation reuses sanctioned safe hooks: first `agm sandbox gc --reap`,
+// then `agm worktree sweep --execute`. The sandbox GC re-verifies live-session,
+// process, mount, path, and age gates; the worktree sweep removes only
+// provably-MERGED, clean worktrees. No new destructive cleanup is invented here.
 //
 // Usage:
 //
@@ -32,9 +32,19 @@
 //	disk-watchdog --free-critical-gb 10  # override the free-space CRITICAL floor
 //	disk-watchdog --inode-warn 0.85      # override the inode WARN ceiling
 //	disk-watchdog --inode-critical 0.92  # override the inode CRITICAL ceiling
+//	disk-watchdog --brake /path/brake.json  # admission-brake location
+//	disk-watchdog --brake-ttl 45m        # how long an engaged brake blocks spawns
+//
+// Beyond alarming and remediating, the watchdog drives the cross-process
+// admission brake (pkg/vroom/admission): when its own remediation fails, or
+// when it cannot take a snapshot at all, it latches the brake and every spawn
+// path refuses new work until a healthy tick releases it or the TTL expires.
+// That is the ce-93lw.18 fix — on 2026-07-18 this watchdog was in ALARM with
+// `agm worktree sweep --execute: signal: killed` in every remediation slot, and
+// nothing consumed that fact, so the mesh kept spawning into a wedged host.
 //
 // Exit codes: 0 = within limits; 1 = at least one threshold breached (an alarm
-// fired); 2 = usage/runtime error.
+// fired); 2 = usage/runtime error. Brake I/O never changes the exit code.
 package main
 
 import (
@@ -48,6 +58,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
@@ -77,6 +88,8 @@ type config struct {
 	path       string
 	agmBin     string
 	trailPath  string
+	brakePath  string
+	brakeTTL   time.Duration
 	thresholds supervisor.DiskAlertThresholds
 
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
@@ -94,6 +107,10 @@ func run(args []string, out io.Writer) (int, error) {
 	fs.StringVar(&cfg.path, "path", "/", "filesystem path to measure")
 	fs.StringVar(&cfg.agmBin, "agm", "agm", "path to the agm binary used for worktree-sweep remediation")
 	fs.StringVar(&cfg.trailPath, "trail", defaultTrailPath(), "decision-trail JSONL path for alarm records")
+	fs.StringVar(&cfg.brakePath, "brake", admission.DefaultPath(),
+		"admission-brake path; engaged when remediation fails, released on a healthy tick")
+	fs.DurationVar(&cfg.brakeTTL, "brake-ttl", admission.DefaultTTL,
+		"how long an engaged admission brake blocks spawns before expiring on its own")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -110,6 +127,11 @@ func run(args []string, out io.Writer) (int, error) {
 
 	snap, err := takeSnapshot(cfg.path)
 	if err != nil {
+		// A watchdog that cannot measure the thing it guards is itself a
+		// saturation signal (ce-93lw.18 (c)). Latch the brake before returning,
+		// so spawns stop while we are blind rather than continuing on the last
+		// reading nobody has.
+		applyBrake(cfg, true, fmt.Sprintf("cannot read a disk snapshot for %s: %v", cfg.path, err))
 		return 2, fmt.Errorf("snapshot: %w", err)
 	}
 
@@ -125,6 +147,8 @@ func run(args []string, out io.Writer) (int, error) {
 		}
 		remediation = r
 	}
+
+	updateAdmissionBrake(cfg, breached, remediation)
 
 	// Logging the alarm to the trail is best-effort: a trail write failure is a
 	// warning, never a reason to suppress the breach exit code — and on a truly
@@ -174,9 +198,18 @@ func defaultTrailPath() string {
 // sweepResult is the parsed JSON contract of `agm worktree sweep -o json`
 // (a subset; field names mirror agm/internal/ops.SweepResult).
 type sweepResult struct {
-	Removed []string          `json:"removed"`
-	Failed  map[string]string `json:"failed,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	SandboxGC *sandboxGCSummary `json:"sandbox_gc,omitempty"`
+	Removed   []string          `json:"removed"`
+	Failed    map[string]string `json:"failed,omitempty"`
+	Error     string            `json:"error,omitempty"`
+}
+
+type sandboxGCSummary struct {
+	Scanned int    `json:"scanned"`
+	Reaped  int    `json:"reaped"`
+	Kept    int    `json:"kept"`
+	Errors  int    `json:"errors"`
+	Error   string `json:"error,omitempty"`
 }
 
 // sweepMergedWorktrees delegates remediation to the canonical worktree sweep,
@@ -201,15 +234,105 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 		}
 	}
 
+	result := &sweepResult{}
+	gcOut, gcErr := run(ctx, cfg.agmBin, "sandbox", "gc", "--reap", "--json")
+	if gcErr != nil {
+		result.SandboxGC = &sandboxGCSummary{Error: gcErr.Error()}
+	} else if err := json.Unmarshal(gcOut, &result.SandboxGC); err != nil {
+		result.SandboxGC = &sandboxGCSummary{Error: fmt.Sprintf("parse sandbox gc output: %v", err)}
+	}
+
 	out, err := run(ctx, cfg.agmBin, "worktree", "sweep", "--execute", "-o", "json")
 	if err != nil {
-		return nil, fmt.Errorf("%s worktree sweep --execute: %w", cfg.agmBin, err)
+		result.Error = fmt.Sprintf("%s worktree sweep --execute: %v", cfg.agmBin, err)
+		return result, fmt.Errorf("%s worktree sweep --execute: %w", cfg.agmBin, err)
 	}
-	var r sweepResult
-	if err := json.Unmarshal(out, &r); err != nil {
-		return nil, fmt.Errorf("parse worktree sweep output: %w", err)
+	if err := json.Unmarshal(out, result); err != nil {
+		result.Error = fmt.Sprintf("parse worktree sweep output: %v", err)
+		return result, fmt.Errorf("parse worktree sweep output: %w", err)
 	}
-	return &r, nil
+	if result.SandboxGC != nil && result.SandboxGC.Error != "" {
+		sboxErr := fmt.Sprintf("%s sandbox gc --reap: %s", cfg.agmBin, result.SandboxGC.Error)
+		if result.Error != "" {
+			result.Error = fmt.Sprintf("%s; %s", sboxErr, result.Error)
+		} else {
+			result.Error = sboxErr
+		}
+	}
+	return result, nil
+}
+
+// brakeSource identifies this watchdog in the admission-brake record.
+const brakeSource = "disk-watchdog"
+
+// brakeDecision is what a tick concluded about the admission brake. Pure, so
+// the policy can be tested without touching the filesystem.
+type brakeDecision struct {
+	// Engage latches the brake; Release clears it. Both false means leave any
+	// existing brake alone and let its TTL run.
+	Engage  bool
+	Release bool
+	Reason  string
+}
+
+// decideBrake maps a tick outcome onto a brake transition.
+//
+// The case that matters is row one. On 2026-07-18 this watchdog ticked every
+// five minutes with root at 96.2% used and
+// `agm worktree sweep --execute: signal: killed` in every remediation slot —
+// the remediation path was being killed by the exhaustion it existed to
+// relieve — and the mesh kept spawning because that fact had no consumer.
+//
+// A breached tick whose remediation *succeeded* deliberately leaves an existing
+// brake alone rather than clearing it: one successful sweep under an active
+// alarm is not evidence the host is healthy. Only an unbreached tick releases.
+func decideBrake(breached bool, rem *sweepResult) brakeDecision {
+	switch {
+	case !breached:
+		return brakeDecision{Release: true}
+	case rem != nil && rem.Error != "":
+		return brakeDecision{
+			Engage: true,
+			Reason: fmt.Sprintf("worktree-sweep remediation failed: %s", rem.Error),
+		}
+	default:
+		return brakeDecision{}
+	}
+}
+
+// updateAdmissionBrake applies the tick's brake decision.
+func updateAdmissionBrake(cfg config, breached bool, rem *sweepResult) {
+	d := decideBrake(breached, rem)
+	switch {
+	case d.Engage:
+		applyBrake(cfg, true, d.Reason)
+	case d.Release:
+		applyBrake(cfg, false, "")
+	}
+}
+
+// applyBrake engages or releases the brake, honouring --dry-run.
+//
+// Brake I/O is best-effort in exactly the same way the trail append is: a write
+// failure is a warning on stderr and never changes the exit code, because the
+// alarm itself must still be reported. On a truly full disk the brake write is
+// one of the operations most likely to fail, and swallowing the alarm to report
+// that would be the wrong trade.
+func applyBrake(cfg config, engage bool, reason string) {
+	if cfg.dryRun || cfg.brakePath == "" {
+		return
+	}
+	if engage {
+		if err := admission.Engage(cfg.brakePath, brakeSource, reason, cfg.brakeTTL); err != nil {
+			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: could not engage admission brake: %v\n", err)
+		}
+		return
+	}
+	// Scoped to this source so a healthy disk tick cannot clear a brake
+	// vroom-governor engaged because its own probes had gone unreadable.
+	if err := admission.ReleaseBySource(cfg.brakePath, brakeSource); err != nil {
+		fmt.Fprintf(os.Stderr, "disk-watchdog: warning: could not release admission brake: %v\n", err)
+	}
 }
 
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.
@@ -241,6 +364,9 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 		remediation := map[string]any{
 			"worktrees_removed": len(rem.Removed),
 			"removed":           rem.Removed,
+		}
+		if rem.SandboxGC != nil {
+			remediation["sandbox_gc"] = rem.SandboxGC
 		}
 		if len(rem.Failed) > 0 {
 			remediation["failed"] = rem.Failed
@@ -315,7 +441,12 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	case rem.Error != "":
 		fmt.Fprintf(out, "Remediation: FAILED (%s)\n", rem.Error)
 	default:
-		fmt.Fprintf(out, "Remediation: reaped %d provably-merged worktree(s)", len(rem.Removed))
+		if rem.SandboxGC != nil {
+			fmt.Fprintf(out, "Remediation: reaped %d sandbox(es); reaped %d provably-merged worktree(s)",
+				rem.SandboxGC.Reaped, len(rem.Removed))
+		} else {
+			fmt.Fprintf(out, "Remediation: reaped %d provably-merged worktree(s)", len(rem.Removed))
+		}
 		if len(rem.Failed) > 0 {
 			fmt.Fprintf(out, " (%d failed)", len(rem.Failed))
 		}

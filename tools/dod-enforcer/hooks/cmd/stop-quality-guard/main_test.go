@@ -2,10 +2,10 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/pkg/stophook"
 )
 
@@ -14,9 +14,9 @@ func newResult() *stophook.Result { return &stophook.Result{HookName: "test"} }
 func makeGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	mustCmd(t, dir, "git", "init")
-	mustCmd(t, dir, "git", "config", "user.email", "test@test.com")
-	mustCmd(t, dir, "git", "config", "user.name", "Test")
+	gittest.Run(t, dir, "init")
+	gittest.Run(t, dir, "config", "user.email", "test@test.com")
+	gittest.Run(t, dir, "config", "user.name", "Test")
 	return dir
 }
 
@@ -27,19 +27,10 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func mustCmd(t *testing.T, dir, name string, args ...string) {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
-	}
-}
-
 func commitAll(t *testing.T, dir string) {
 	t.Helper()
-	mustCmd(t, dir, "git", "add", ".")
-	mustCmd(t, dir, "git", "commit", "-m", "init")
+	gittest.Run(t, dir, "add", ".")
+	gittest.Run(t, dir, "commit", "-m", "init")
 }
 
 // --- checkCodeMarkers ---

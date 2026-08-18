@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/pkg/backlog"
@@ -32,10 +31,13 @@ func writeBacklog(t *testing.T) string {
 }
 
 func TestParseFiles(t *testing.T) {
-	if got := parseFiles(""); len(got) != 2 {
-		t.Errorf("default files = %v, want 2 entries", got)
+	if _, err := parseFiles(""); err == nil {
+		t.Fatal("empty --files accepted")
 	}
-	got := parseFiles(" a.md , , b.md ")
+	got, err := parseFiles(" a.md , , b.md ")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || got[0] != "a.md" || got[1] != "b.md" {
 		t.Errorf("parseFiles = %v, want [a.md b.md]", got)
 	}
@@ -66,6 +68,22 @@ func TestRunUsage(t *testing.T) {
 	}
 }
 
+func TestCommandsRequireExplicitFiles(t *testing.T) {
+	if got := cmdList(nil); got != 2 {
+		t.Errorf("cmdList without --files = %d, want 2", got)
+	}
+	if got := cmdSuggest(nil); got != 2 {
+		t.Errorf("cmdSuggest without --files = %d, want 2", got)
+	}
+	missing := filepath.Join(t.TempDir(), "missing.md")
+	if got := cmdList([]string{"--files", missing}); got != 1 {
+		t.Errorf("cmdList with missing explicit file = %d, want 1", got)
+	}
+	if got := cmdSuggest([]string{"--files", missing}); got != 1 {
+		t.Errorf("cmdSuggest with missing explicit file = %d, want 1", got)
+	}
+}
+
 func TestCmdList(t *testing.T) {
 	p := writeBacklog(t)
 	if got := cmdList([]string{"--files", p}); got != 0 {
@@ -83,52 +101,5 @@ func TestCmdSuggest(t *testing.T) {
 	}
 	if got := cmdSuggest([]string{"--files", p, "--json"}); got != 0 {
 		t.Errorf("cmdSuggest --json exit = %d, want 0", got)
-	}
-}
-
-func TestCmdSuggestEmitsVROOM(t *testing.T) {
-	p := writeBacklog(t)
-	out := filepath.Join(t.TempDir(), "nested", "vroom.jsonl")
-	code := cmdSuggest([]string{
-		"--files", p, "--emit-vroom", "--vroom-out", out, "--worker", "claude-code",
-	})
-	if code != 0 {
-		t.Fatalf("cmdSuggest exit = %d, want 0", code)
-	}
-	b, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("read vroom out: %v", err)
-	}
-	line := strings.TrimSpace(string(b))
-	if !strings.Contains(line, `"topic":"vroom.decision.dispatched"`) {
-		t.Errorf("jsonl missing dispatched topic: %s", line)
-	}
-	if !strings.Contains(line, `"task_id":"1.1"`) {
-		t.Errorf("jsonl should dispatch top pick 1.1: %s", line)
-	}
-	if !strings.Contains(line, `"worker":"claude-code"`) {
-		t.Errorf("jsonl missing worker: %s", line)
-	}
-}
-
-func TestJSONLPublisherAppends(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "p.jsonl")
-	pub, err := newJSONLPublisher(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := pub.Publish("t.one", map[string]interface{}{"a": 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := pub.Publish("t.two", map[string]interface{}{"b": 2}); err != nil {
-		t.Fatal(err)
-	}
-	if err := pub.Close(); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(out)
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("want 2 jsonl lines, got %d: %q", len(lines), string(b))
 	}
 }

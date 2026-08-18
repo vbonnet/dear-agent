@@ -19,12 +19,6 @@ var GetStatus = codegen.Op{
 		ToolName:    "agm_get_status",
 		Description: "Get live status of all AGM sessions with summary counts. Use for dashboard views.",
 	},
-	Skill: &codegen.SkillSurface{
-		SlashCommand: "agm-status",
-		AllowedTools: "Bash(agm session status:*)",
-		ActionVerb:   "get the current session status",
-		OutputTable:  []string{"Name", "Status", "State", "Harness"},
-	},
 }
 
 // GetStatusRequest mirrors ops.GetStatusRequest with ef tags for generation.

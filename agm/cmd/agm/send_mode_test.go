@@ -1,9 +1,36 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestDispatchModeSwitchContextStopsBeforeSlashCommandDelivery(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := dispatchModeSwitchContext(ctx, "claude-code", "missing-session", "plan", "default")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatchModeSwitchContext() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDispatchPiModeUsesManagedCommandWithCallerContext(t *testing.T) {
+	original := sendPiModeCommand
+	t.Cleanup(func() { sendPiModeCommand = original })
+	callerCtx := t.Context()
+	sendPiModeCommand = func(ctx context.Context, session, command string) error {
+		if ctx != callerCtx || session != "pi-worker" || command != "/agm-mode plan" {
+			t.Fatalf("Pi mode delivery = ctx %v session %q command %q", ctx == callerCtx, session, command)
+		}
+		return nil
+	}
+	if err := dispatchModeSwitchContext(callerCtx, "pi-cli", "pi-worker", "plan", "default"); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCalculateShiftTabPresses(t *testing.T) {
 	tests := []struct {

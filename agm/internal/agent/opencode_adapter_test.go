@@ -3,12 +3,13 @@ package agent
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-// TestOpenCodeAdapterImplementsAgentInterface verifies OpenCodeAdapter implements Agent interface.
-func TestOpenCodeAdapterImplementsAgentInterface(t *testing.T) {
+func TestOpenCodeAdapterImplementsHarnessContract(t *testing.T) {
 	// Create mock HTTP server for health check
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
@@ -34,8 +35,36 @@ func TestOpenCodeAdapterImplementsAgentInterface(t *testing.T) {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
-	// Verify adapter implements Agent interface
-	var _ = adapter
+	var _ Harness = adapter
+}
+
+func TestOpenCodeResumeRejectsTerminalControlsBeforeTmux(t *testing.T) {
+	store, err := NewJSONSessionStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := SessionID("opencode-invalid-resume")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName:   "must-not-be-created",
+		WorkingDir: "/tmp/safe\x1b[201~\nunsafe",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &OpenCodeAdapter{sessionStore: store}
+	err = adapter.ResumeSession(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "contains control characters") {
+		t.Fatalf("ResumeSession() error = %v, want pre-tmux terminal-control rejection", err)
+	}
+}
+
+func TestOpenCodeResumeValidationAppliesOnlyToColdRelaunch(t *testing.T) {
+	invalid := "/tmp/safe\x1b[201~\nunsafe"
+	if err := validateOpenCodeResume(false, invalid); err == nil {
+		t.Fatal("cold relaunch accepted terminal controls")
+	}
+	if err := validateOpenCodeResume(true, invalid); err != nil {
+		t.Fatalf("existing session rejected despite requiring no shell paste: %v", err)
+	}
 }
 
 // TestOpenCodeAdapterName tests Name() method.
@@ -149,10 +178,7 @@ func TestNewOpenCodeAdapterWithNilConfig(t *testing.T) {
 	}
 
 	// Verify default values
-	opencodeAdapter, ok := adapter.(*OpenCodeAdapter)
-	if !ok {
-		t.Fatal("Adapter is not *OpenCodeAdapter")
-	}
+	opencodeAdapter := adapter
 
 	if opencodeAdapter.serverURL != "http://localhost:4096" {
 		t.Errorf("serverURL = %q, want %q", opencodeAdapter.serverURL, "http://localhost:4096")
@@ -180,10 +206,7 @@ func TestNewOpenCodeAdapterWithCustomServerURL(t *testing.T) {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
-	opencodeAdapter, ok := adapter.(*OpenCodeAdapter)
-	if !ok {
-		t.Fatal("Adapter is not *OpenCodeAdapter")
-	}
+	opencodeAdapter := adapter
 
 	if opencodeAdapter.serverURL != customURL {
 		t.Errorf("serverURL = %q, want %q", opencodeAdapter.serverURL, customURL)
@@ -216,10 +239,7 @@ func TestCheckServerHealthSuccess(t *testing.T) {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
-	opencodeAdapter, ok := adapter.(*OpenCodeAdapter)
-	if !ok {
-		t.Fatal("Adapter is not *OpenCodeAdapter")
-	}
+	opencodeAdapter := adapter
 
 	// Test health check
 	if err := opencodeAdapter.checkServerHealth(); err != nil {
@@ -244,10 +264,7 @@ func TestCheckServerHealthFailureServerDown(t *testing.T) {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
-	opencodeAdapter, ok := adapter.(*OpenCodeAdapter)
-	if !ok {
-		t.Fatal("Adapter is not *OpenCodeAdapter")
-	}
+	opencodeAdapter := adapter
 
 	// Test health check (should fail)
 	if err := opencodeAdapter.checkServerHealth(); err == nil {
@@ -281,10 +298,7 @@ func TestCheckServerHealthFailureNon200Status(t *testing.T) {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
-	opencodeAdapter, ok := adapter.(*OpenCodeAdapter)
-	if !ok {
-		t.Fatal("Adapter is not *OpenCodeAdapter")
-	}
+	opencodeAdapter := adapter
 
 	// Test health check (should fail with non-200 status)
 	if err := opencodeAdapter.checkServerHealth(); err == nil {

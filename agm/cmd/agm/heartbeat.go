@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -275,7 +273,7 @@ func runHeartbeatStatus(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runHeartbeatWatchdog(_ *cobra.Command, args []string) error {
+func runHeartbeatWatchdog(cmd *cobra.Command, args []string) error {
 	session := args[0]
 
 	pollInterval := heartbeatMaxAge / 4
@@ -289,8 +287,7 @@ func runHeartbeatWatchdog(_ *cobra.Command, args []string) error {
 	fmt.Printf("Watchdog started for %s (max-age=%s, poll=%s)\n", session, heartbeatMaxAge, pollInterval)
 	fmt.Printf("Restart command: %s\n", heartbeatRestartCmd)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
+	ctx := cmd.Context()
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -306,7 +303,7 @@ func runHeartbeatWatchdog(_ *cobra.Command, args []string) error {
 				if os.IsNotExist(err) {
 					fmt.Printf("[%s] No heartbeat found for %s, executing restart\n",
 						time.Now().Format(time.RFC3339), session)
-					if err := executeRestart(heartbeatRestartCmd); err != nil {
+					if err := executeRestartContext(ctx, heartbeatRestartCmd); err != nil {
 						fmt.Fprintf(os.Stderr, "Restart failed: %v\n", err)
 					}
 					continue
@@ -320,7 +317,7 @@ func runHeartbeatWatchdog(_ *cobra.Command, args []string) error {
 				age := time.Since(hb.Timestamp)
 				fmt.Printf("[%s] Heartbeat stale for %s (age=%s > max-age=%s), executing restart\n",
 					time.Now().Format(time.RFC3339), session, age.Round(time.Second), heartbeatMaxAge)
-				if err := executeRestart(heartbeatRestartCmd); err != nil {
+				if err := executeRestartContext(ctx, heartbeatRestartCmd); err != nil {
 					fmt.Fprintf(os.Stderr, "Restart failed: %v\n", err)
 				}
 			}
@@ -329,7 +326,11 @@ func runHeartbeatWatchdog(_ *cobra.Command, args []string) error {
 }
 
 func executeRestart(cmd string) error {
-	c := exec.Command("sh", "-c", cmd)
+	return executeRestartContext(context.Background(), cmd)
+}
+
+func executeRestartContext(ctx context.Context, cmd string) error {
+	c := exec.CommandContext(ctx, "sh", "-c", cmd)
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c.Run()

@@ -9,14 +9,7 @@ import (
 func GetTestAdapter(t *testing.T) *Adapter {
 	t.Helper()
 
-	config := &Config{
-		Workspace: "test",
-		Port:      "3307",
-		Host:      "127.0.0.1",
-		Database:  "agm_test", // Use test database
-		User:      "root",
-		Password:  "",
-	}
+	config := sharedDoltTestConfig(t)
 
 	adapter, err := New(config)
 	if err != nil {
@@ -37,6 +30,20 @@ func GetTestAdapter(t *testing.T) *Adapter {
 	}
 
 	return adapter
+}
+
+func sharedDoltTestConfig(t *testing.T) *Config {
+	t.Helper()
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+	return &Config{
+		Workspace: "test",
+		Port:      "3307",
+		Host:      "127.0.0.1",
+		Database:  "agm_test", // Use test database
+		User:      "root",
+		Password:  "",
+	}
 }
 
 // CleanTestDatabase removes all sessions from test database

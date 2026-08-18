@@ -1,13 +1,19 @@
 package bubblewrap
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
@@ -127,6 +133,146 @@ func TestProvider_checkBubblewrapInstalled(t *testing.T) {
 	} else {
 		assert.NoError(t, err)
 	}
+}
+
+func TestBubblewrapRejectsMatchedNonGitLowerDir(t *testing.T) {
+	base := t.TempDir()
+	gitRepo := filepath.Join(base, "git-repo")
+	requestedRepo := filepath.Join(base, "requested-non-git")
+	mergedDir := filepath.Join(base, "merged")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", gitRepo)
+	require.NoError(t, os.MkdirAll(requestedRepo, 0o755))
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(gitRepo, "project.txt"), []byte("wrong repo\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(requestedRepo, "project.txt"), []byte("requested repo\n"), 0o600))
+
+	p := NewProvider()
+	orderedLowerDirs := sandbox.PrioritizeLowerDir([]string{gitRepo, requestedRepo}, requestedRepo)
+	_, err := p.createPrivateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
+	require.Error(t, err)
+	assert.Equal(t, sandbox.ErrCodeMountFailed, errCode(t, err))
+	assert.Contains(t, err.Error(), "refusing host-symlink fallback")
+	_, statErr := os.Lstat(filepath.Join(mergedDir, "project.txt"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "failed isolation must not expose either host repository")
+}
+
+func TestBubblewrapRejectsConfigRepoOutsideLowerDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	externalRepo := filepath.Join(home, "workspace", "repos", "configured")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", externalRepo)
+	runBubblewrapGit(t, externalRepo, "config", "user.name", "Bubblewrap Test")
+	runBubblewrapGit(t, externalRepo, "config", "user.email", "bubblewrap@example.invalid")
+	require.NoError(t, os.WriteFile(filepath.Join(externalRepo, "outside.txt"), []byte("outside request\n"), 0o600))
+	runBubblewrapGit(t, externalRepo, "add", "outside.txt")
+	runBubblewrapGit(t, externalRepo, "commit", "-q", "-m", "initial")
+
+	configPath := filepath.Join(home, ".agm", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("workspaces:\n  - name: configured\n    root: ~/workspace\n"), 0o600))
+
+	lowerDir := filepath.Join(t.TempDir(), "requested-non-git")
+	mergedDir := filepath.Join(t.TempDir(), "merged")
+	require.NoError(t, os.MkdirAll(lowerDir, 0o755))
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+
+	_, err := NewProvider().createPrivateWorktree([]string{lowerDir}, "outside-lower", mergedDir, "")
+	require.Error(t, err)
+	assert.Equal(t, sandbox.ErrCodeMountFailed, errCode(t, err))
+	assert.Contains(t, err.Error(), "refusing host-symlink fallback")
+	assert.NotContains(t, runBubblewrapGit(t, externalRepo, "branch", "--list"), "agm/outside-lower")
+	_, statErr := os.Lstat(filepath.Join(mergedDir, "outside.txt"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "configured repository outside LowerDirs must not be materialized")
+}
+
+func TestBubblewrapPreservesGitWorktreeCreationFailure(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	activeWorktree := filepath.Join(base, "active")
+	mergedDir := filepath.Join(base, "merged")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", repo)
+	runBubblewrapGit(t, repo, "config", "user.name", "Bubblewrap Test")
+	runBubblewrapGit(t, repo, "config", "user.email", "bubblewrap@example.invalid")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600))
+	runBubblewrapGit(t, repo, "add", "README.md")
+	runBubblewrapGit(t, repo, "commit", "-q", "-m", "initial")
+	runBubblewrapGit(t, repo, "worktree", "add", "-q", "-b", "agm/worktree-add-failure", activeWorktree)
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+
+	_, err := NewProvider().createPrivateWorktree([]string{repo}, "worktree-add-failure", mergedDir, repo)
+	require.Error(t, err)
+	assert.Equal(t, sandbox.ErrCodeMountFailed, errCode(t, err))
+	assert.Contains(t, err.Error(), "git worktree add failed")
+	assert.Contains(t, err.Error(), "delete failed")
+}
+
+func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {
+	repo, mergedDir, upperDir, workDir := newLockedBubblewrapWorktree(t)
+	p := NewProvider()
+	const id = "locked-destroy"
+	cleanupState := sandbox.NewWorktreeCleanup(true)
+	p.sandboxes[id] = &sandbox.Sandbox{
+		ID:         id,
+		MergedPath: mergedDir,
+		UpperPath:  upperDir,
+		WorkPath:   workDir,
+		CleanupFunc: func() error {
+			return cleanupState.Run(
+				func() error { return p.removeWorktree(repo, mergedDir) },
+				func() error { return p.cleanup(upperDir, workDir, mergedDir) },
+			)
+		},
+	}
+
+	err := p.Destroy(context.Background(), id)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "git worktree remove failed")
+	for _, path := range []string{mergedDir, upperDir, workDir} {
+		require.DirExists(t, path, "failed destroy removed retryable provider path")
+	}
+	require.NoError(t, p.Validate(context.Background(), id), "failed destroy removed provider registry state")
+	out := runBubblewrapGit(t, repo, "worktree", "list", "--porcelain")
+	assert.Contains(t, out, "locked provider-active-owner", "failed destroy changed the exact Git lock reason")
+
+	runBubblewrapGit(t, repo, "worktree", "unlock", mergedDir)
+	require.NoError(t, p.Destroy(context.Background(), id), "destroy retry after unlock")
+	for _, path := range []string{mergedDir, upperDir, workDir} {
+		_, statErr := os.Stat(path)
+		assert.True(t, os.IsNotExist(statErr), "successful destroy retained %s: %v", path, statErr)
+	}
+	require.Error(t, p.Validate(context.Background(), id), "successful destroy retained provider registry state")
+}
+
+func newLockedBubblewrapWorktree(t *testing.T) (repo, mergedDir, upperDir, workDir string) {
+	t.Helper()
+	base := t.TempDir()
+	repo = filepath.Join(base, "repo")
+	workspace := filepath.Join(base, "sandbox")
+	mergedDir = filepath.Join(workspace, "merged")
+	upperDir = filepath.Join(workspace, "upper")
+	workDir = filepath.Join(workspace, "work")
+	runBubblewrapGit(t, base, "init", "-q", "-b", "main", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("locked provider cleanup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runBubblewrapGit(t, repo, "add", "README.md")
+	runBubblewrapGit(t, repo, "commit", "-q", "-m", "initial")
+	runBubblewrapGit(t, repo, "worktree", "add", "-q", "-b", "locked-destroy", mergedDir)
+	require.NoError(t, os.MkdirAll(upperDir, 0o755))
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	runBubblewrapGit(t, repo, "worktree", "lock", "--reason", "provider-active-owner", mergedDir)
+	return repo, mergedDir, upperDir, workDir
+}
+
+func runBubblewrapGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	commandArgs := slices.Clone(args)
+	out, err := gittest.Output(t, dir, commandArgs...)
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(out))
+	}
+	return out
 }
 
 // ---- buildBwrapArgs unit tests (cross-platform, no exec) ----

@@ -1,31 +1,177 @@
 package ops
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // createMockStorage implements dolt.Storage for CreateSession tests.
 type createMockStorage struct {
-	created []*manifest.Manifest
+	created     []*manifest.Manifest
+	deleted     []string
+	createErr   error
+	deleteErr   error
+	createOrder *[]string
+	onCreate    func()
+}
+
+type createOnlyTmux struct {
+	session.TmuxInterface
+}
+
+type createFailingKillTmux struct {
+	session.TmuxInterface
+	err error
+}
+
+func (t *createFailingKillTmux) KillSession(string) error {
+	return t.err
+}
+
+type createNoReadinessTmux struct {
+	session.TmuxInterface
+	kill func(string) error
+}
+
+func (t *createNoReadinessTmux) KillSession(name string) error {
+	return t.kill(name)
+}
+
+type createReadinessTmux struct {
+	*session.MockTmux
+	order   *[]string
+	waitErr error
+	waitCtx context.Context
+	atomic  func()
+}
+
+func (t *createReadinessTmux) SendKeys(sessionName, keys string) error {
+	phase := "prompt"
+	if len(t.SentCommands) == 0 {
+		phase = "launch"
+	}
+	*t.order = append(*t.order, phase)
+	return t.MockTmux.SendKeys(sessionName, keys)
+}
+
+func (t *createReadinessTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	t.waitCtx = ctx
+	*t.order = append(*t.order, "ready")
+	t.WaitedHarnesses = append(t.WaitedHarnesses, sessionName+":"+harness)
+	if timeout != sharedHarnessReadyTimeout {
+		return fmt.Errorf("readiness timeout = %v, want %v", timeout, sharedHarnessReadyTimeout)
+	}
+	return t.waitErr
+}
+
+func (t *createReadinessTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	if t.atomic != nil {
+		t.atomic()
+	}
+	sentBefore := len(t.SentCommands)
+	readiness, err := t.MockTmux.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
+	if len(t.SentCommands) > sentBefore {
+		*t.order = append(*t.order, "prompt")
+	}
+	return readiness, err
+}
+
+func TestWaitForCreatedHarnessReadyPropagatesRequestContext(t *testing.T) {
+	type contextKey struct{}
+	wantCtx := context.WithValue(context.Background(), contextKey{}, "request")
+	var order []string
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+
+	if err := waitForCreatedHarnessReady(wantCtx, &OpContext{Tmux: tmuxMock}, "worker", "codex-cli"); err != nil {
+		t.Fatalf("waitForCreatedHarnessReady() error = %v", err)
+	}
+	if tmuxMock.waitCtx != wantCtx {
+		t.Fatal("startup readiness did not receive the request context")
+	}
+}
+
+type createTestRuntime struct {
+	launch   func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
+	complete func(context.Context, CreateSessionCompletion) error
+}
+
+type createTestAgyBootstrapRuntime struct {
+	*createTestRuntime
+	bootstrap func(context.Context, AgyCreateIdentityBootstrap) error
+}
+
+func (r *createTestAgyBootstrapRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input AgyCreateIdentityBootstrap) error {
+	return r.bootstrap(ctx, input)
+}
+
+type createTestAgyIdentityTracker struct {
+	snapshot func(context.Context, string) (string, error)
+	discover func(context.Context, string, string) (*agysession.Metadata, error)
+}
+
+func (tracker *createTestAgyIdentityTracker) Snapshot(ctx context.Context, workDir string) (string, error) {
+	return tracker.snapshot(ctx, workDir)
+}
+
+func (tracker *createTestAgyIdentityTracker) Discover(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+	return tracker.discover(ctx, workDir, previousConversationID)
+}
+
+func successfulCreateTestAgyIdentityTracker() *createTestAgyIdentityTracker {
+	return &createTestAgyIdentityTracker{
+		snapshot: func(context.Context, string) (string, error) { return "previous-native-id", nil },
+		discover: func(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	}
+}
+
+func (r *createTestRuntime) Launch(ctx context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+	if r.launch == nil {
+		return CreateSessionLaunchResult{}, nil
+	}
+	return r.launch(ctx, spec)
+}
+
+func (r *createTestRuntime) Complete(ctx context.Context, completion CreateSessionCompletion) error {
+	if r.complete == nil {
+		return nil
+	}
+	return r.complete(ctx, completion)
 }
 
 func (s *createMockStorage) CreateSession(m *manifest.Manifest) error {
+	if s.createOrder != nil {
+		*s.createOrder = append(*s.createOrder, "register")
+	}
 	s.created = append(s.created, m)
-	return nil
+	if s.onCreate != nil {
+		s.onCreate()
+	}
+	return s.createErr
 }
 func (s *createMockStorage) GetSession(string) (*manifest.Manifest, error) { return nil, nil }
 func (s *createMockStorage) UpdateSession(*manifest.Manifest) error        { return nil }
-func (s *createMockStorage) DeleteSession(string) error                    { return nil }
+func (s *createMockStorage) DeleteSession(id string) error {
+	s.deleted = append(s.deleted, id)
+	return s.deleteErr
+}
 
 func (s *createMockStorage) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) {
 	return nil, nil
@@ -50,6 +196,20 @@ func (s *createMockStorage) Delete(string) error                                
 func (s *createMockStorage) List(*manifest.Filter) ([]*manifest.Manifest, error) { return nil, nil }
 func (s *createMockStorage) Close() error                                        { return nil }
 func (s *createMockStorage) ApplyMigrations() error                              { return nil }
+
+func testHarnessCommand(harness, model, sessionName, workDir string, persistent bool) string {
+	return BuildHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness: harness, Model: model, SessionName: sessionName,
+		WorkDir: workDir, Persistent: persistent, DisableOAuth: true,
+	}).Command
+}
+
+func testHarnessCommandWithCodex(harness, model, sessionName, workDir string, persistent bool, codex *manifest.Codex) string {
+	return BuildHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness: harness, Model: model, SessionName: sessionName,
+		WorkDir: workDir, Persistent: persistent, Codex: codex, DisableOAuth: true,
+	}).Command
+}
 
 func TestCreateSession_HappyPath(t *testing.T) {
 	dir := t.TempDir()
@@ -121,6 +281,326 @@ func TestCreateSession_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+		if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "detached AGY prompt" {
+			t.Fatalf("commands before identity discovery = %v, want launch then startup prompt", tmuxMock.SentCommands)
+		}
+		return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+	}
+
+	result, err := CreateSession(&OpContext{
+		Tmux: tmuxMock, Storage: store, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "detached AGY prompt", Title: "agy-detached",
+		Harness: "agy", Model: "3.5-flash-low", PermissionMode: "auto",
+		ExtraAddDirs: []string{"/tmp/extra dir"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if result.Harness != "agy" || result.Model != "3.5-flash-low" {
+		t.Fatalf("result harness/model = %q/%q", result.Harness, result.Model)
+	}
+	if len(tmuxMock.SentCommands) != 2 {
+		t.Fatalf("tmux commands = %v, want launch then detached prompt", tmuxMock.SentCommands)
+	}
+	launch := tmuxMock.SentCommands[0]
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	for _, want := range []string{
+		"__exec-agy",
+		"--session 'agy-detached'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '" + resolvedDir + "'",
+		"--permission 'auto'",
+		"--add-dir '/tmp/extra dir'",
+	} {
+		if !strings.Contains(launch, want) {
+			t.Errorf("AGY launch %q missing %q", launch, want)
+		}
+	}
+	if strings.Contains(launch, "--prompt-interactive") {
+		t.Errorf("AGY launch used prompt flag without a prompt: %q", launch)
+	}
+	if tmuxMock.SentCommands[1] != "detached AGY prompt" {
+		t.Fatalf("startup prompt = %q", tmuxMock.SentCommands[1])
+	}
+	if len(store.created) != 1 || store.created[0].Harness != "agy" || store.created[0].Model != "3.5-flash-low" {
+		t.Fatalf("stored AGY manifest = %+v", store.created)
+	}
+}
+
+func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationExactlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	locked := false
+	promptDeliveries := 0
+	order := []string{}
+	runtime := &createTestAgyBootstrapRuntime{createTestRuntime: &createTestRuntime{}}
+	runtime.launch = func(ctx context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+		if ctx != t.Context() || !locked || spec.SessionName != "agy-lazy-identity" {
+			t.Fatalf("launch input = caller:%t locked:%t session:%q", ctx == t.Context(), locked, spec.SessionName)
+		}
+		order = append(order, "launch")
+		return CreateSessionLaunchResult{}, nil
+	}
+	runtime.bootstrap = func(ctx context.Context, input AgyCreateIdentityBootstrap) error {
+		if ctx != t.Context() || !locked || input.SessionName != "agy-lazy-identity" || input.Prompt != "persist me once" {
+			t.Fatalf("bootstrap input = caller:%t locked:%t %+v", ctx == t.Context(), locked, input)
+		}
+		promptDeliveries++
+		order = append(order, "prompt")
+		return nil
+	}
+	runtime.complete = func(ctx context.Context, completion CreateSessionCompletion) error {
+		if ctx != t.Context() || locked {
+			t.Fatalf("completion input = caller:%t locked:%t", ctx == t.Context(), locked)
+		}
+		if !completion.Launch.PromptDelivered || completion.Prompt != "persist me once" {
+			t.Fatalf("completion prompt state = delivered:%t prompt:%q", completion.Launch.PromptDelivered, completion.Prompt)
+		}
+		order = append(order, "complete")
+		return nil
+	}
+	tracker := &createTestAgyIdentityTracker{
+		snapshot: func(context.Context, string) (string, error) {
+			order = append(order, "snapshot")
+			return "old-native-id", nil
+		},
+		discover: func(_ context.Context, workDir, previous string) (*agysession.Metadata, error) {
+			if !locked || promptDeliveries != 1 || previous != "old-native-id" {
+				t.Fatalf("discovery state = locked:%t prompt deliveries:%d previous:%q", locked, promptDeliveries, previous)
+			}
+			order = append(order, "discover")
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	}
+	store.onCreate = func() {
+		if !locked || promptDeliveries != 1 || store.created[0].Agy == nil || store.created[0].Agy.ConversationID != "new-native-id" {
+			t.Fatalf("registration state = locked:%t prompt deliveries:%d manifest:%+v", locked, promptDeliveries, store.created[0])
+		}
+		order = append(order, "register")
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: tracker,
+		AgyWorkspaceCreateLocker: func(context.Context, string) (func() error, error) {
+			locked = true
+			order = append(order, "lock")
+			return func() error {
+				locked = false
+				order = append(order, "unlock")
+				return nil
+			}, nil
+		},
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "persist me once", Title: "agy-lazy-identity", Harness: "agy",
+		Model: "3.5-flash-low", SessionID: "agy-lazy-id", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if result.SessionID != "agy-lazy-id" || promptDeliveries != 1 {
+		t.Fatalf("result/prompt deliveries = %+v/%d", result, promptDeliveries)
+	}
+	wantOrder := []string{"lock", "snapshot", "launch", "prompt", "discover", "register", "unlock", "complete"}
+	if !reflect.DeepEqual(order, wantOrder) {
+		t.Fatalf("AGY lazy identity lifecycle = %v, want %v", order, wantOrder)
+	}
+}
+
+func TestCreateSession_AgyRejectsMissingIdentityBootstrapPromptBeforeMutation(t *testing.T) {
+	for _, harness := range []string{"agy", "agy-cli", "antigravity"} {
+		t.Run(harness, func(t *testing.T) {
+			tmuxMock := session.NewMockTmux()
+			_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+				Cwd: t.TempDir(), Prompt: " \n\t", Title: "agy-no-prompt", Harness: harness, Model: "3.5-flash-low", AllowEmptyPrompt: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "startup prompt is required") {
+				t.Fatalf("CreateSessionWithContext error = %v, want actionable AGY prompt requirement", err)
+			}
+			if len(tmuxMock.CreatedSessions) != 0 || len(tmuxMock.SentCommands) != 0 {
+				t.Fatalf("missing-prompt create mutated tmux: created=%v sent=%v", tmuxMock.CreatedSessions, tmuxMock.SentCommands)
+			}
+		})
+	}
+}
+
+func TestCreateSession_AgyBootstrapFailureRollsBackBeforeDiscoveryAndRegistration(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	discovered, completed := false, false
+	wantErr := errors.New("fixture prompt delivery failed")
+	runtime := &createTestAgyBootstrapRuntime{
+		createTestRuntime: &createTestRuntime{complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		}},
+		bootstrap: func(context.Context, AgyCreateIdentityBootstrap) error { return wantErr },
+	}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		discovered = true
+		return nil, nil
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "must roll back", Title: "agy-bootstrap-failure", Harness: "agy", Model: "3.5-flash-low",
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-failure"] {
+		t.Fatalf("post-failure state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-failure"])
+	}
+}
+
+func TestCreateSession_AgyCancellationDuringIdentityBootstrapRollsBackWithCallerError(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	discovered, completed := false, false
+	runtime := &createTestAgyBootstrapRuntime{
+		createTestRuntime: &createTestRuntime{complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		}},
+		bootstrap: func(context.Context, AgyCreateIdentityBootstrap) error {
+			cancel()
+			return context.Canceled
+		},
+	}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		discovered = true
+		return nil, nil
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "cancel while sending", Title: "agy-bootstrap-cancel", Harness: "agy", Model: "3.5-flash-low",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
+	}
+	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-cancel"] {
+		t.Fatalf("post-cancel state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-cancel"])
+	}
+}
+
+func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.T) {
+	root := t.TempDir()
+	extensionRoot := t.TempDir()
+	t.Setenv("AGM_PI_SESSION_ROOT", root)
+	t.Setenv("AGM_PI_EXTENSION_ROOT", extensionRoot)
+	workDir := t.TempDir()
+	codingAgentDir := filepath.Join(t.TempDir(), "pi agent")
+	if err := os.Mkdir(codingAgentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", codingAgentDir)
+	store := &createMockStorage{}
+	tmuxMock := session.NewMockTmux()
+	var launched HarnessLaunchSpec
+	var completed *manifest.Manifest
+	runtime := &createTestRuntime{
+		launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launched = spec
+			return CreateSessionLaunchResult{ModeAppliedAtStartup: true}, nil
+		},
+		complete: func(_ context.Context, completion CreateSessionCompletion) error {
+			completed = completion.Manifest
+			return nil
+		},
+	}
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: workDir, Prompt: "hello", Title: "pi-worker", Harness: "pi", Model: "sonnet",
+		SessionID: "pi-native-id", PermissionMode: "plan",
+		Metadata: CreateSessionMetadata{PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Read(/work/**)"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Harness != "pi-cli" || launched.Pi == nil {
+		t.Fatalf("result/spec = %#v / %#v", result, launched)
+	}
+	if launched.Pi.SessionID != "pi-native-id" || launched.Pi.SessionDir != root {
+		t.Fatalf("Pi identity = %#v", launched.Pi)
+	}
+	if launched.Pi.CodingAgentDir != codingAgentDir || !launched.Pi.CodingAgentDirSet {
+		t.Fatalf("Pi coding agent directory = %q, want %q", launched.Pi.CodingAgentDir, codingAgentDir)
+	}
+	if launched.PiLaunchID == "" {
+		t.Fatal("Pi creation omitted process launch identity")
+	}
+	if launched.PiPolicyJSON != `{"allow":["Read(/work/**)"]}` {
+		t.Fatalf("Pi policy JSON = %q", launched.PiPolicyJSON)
+	}
+	policyData, readErr := os.ReadFile(launched.PiPolicyFile)
+	if readErr != nil || string(policyData) != launched.PiPolicyJSON {
+		t.Fatalf("Pi policy file = %q, read=%v data=%q", launched.PiPolicyFile, readErr, policyData)
+	}
+	if info, statErr := os.Stat(launched.PiExtension); statErr != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("Pi extension = %q, stat=%v info=%v", launched.PiExtension, statErr, info)
+	}
+	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.Pi.CodingAgentDir != codingAgentDir || !completed.Pi.CodingAgentDirSet || completed.WorkingDirectory != workDir {
+		t.Fatalf("Pi manifest = %#v", completed)
+	}
+}
+
+func TestCreateSessionPiRejectsInvalidCodingAgentDirectoryBeforeTmux(t *testing.T) {
+	t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(t.TempDir(), "missing"))
+	tmuxMock := session.NewMockTmux()
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Prompt: "fixture", Title: "pi-invalid-config", Harness: "pi", SessionID: "pi-invalid-config",
+	})
+	if err == nil || !strings.Contains(err.Error(), "coding agent directory") {
+		t.Fatalf("CreateSessionWithContext error = %v", err)
+	}
+	if tmuxMock.Sessions["pi-invalid-config"] {
+		t.Fatal("Pi tmux session was created before coding-agent directory validation")
+	}
+}
+
+func TestBuildAgyResumeCommandPreservesModelConversationAndMode(t *testing.T) {
+	command := BuildAgyResumeCommand(HarnessLaunchSpec{
+		Harness: "agy", Model: "claude-sonnet-4.6-thinking", SessionName: "agy-resume", WorkDir: "/tmp/agy resume",
+		PermissionMode: "auto", ExtraAddDirs: []string{"/tmp/agy resume"},
+	}, "117ff898-a964-4a9f-b460-1be4a8a49b17").Command
+	for _, want := range []string{
+		"agm __exec-agy",
+		"--session 'agy-resume'",
+		"--model 'Claude Sonnet 4.6 (Thinking)'",
+		"--workdir '/tmp/agy resume'",
+		"--permission 'auto'",
+		"--conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
+		"--add-dir '/tmp/agy resume'",
+		"&& exit",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("resume command %q missing %q", command, want)
+		}
+	}
+}
+
 func TestCreateSession_DefaultsModelAndHarness(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
@@ -151,14 +631,18 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		want    string
 	}{
 		{"codex-cli", "5.5"},
-		{"agy", "2.5-flash"},
+		{"agy", "3.5-flash"},
 		{"opencode-cli", "glm-5.2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {
 			// Isolate the codex trust pre-write from the developer's real ~/.codex.
 			t.Setenv("CODEX_HOME", t.TempDir())
-			result, err := CreateSession(&OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}, &CreateSessionRequest{
+			opCtx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+			if tt.harness == "agy" {
+				opCtx.AgyCreateIdentityTracker = successfulCreateTestAgyIdentityTracker()
+			}
+			result, err := CreateSession(opCtx, &CreateSessionRequest{
 				Cwd:     t.TempDir(),
 				Prompt:  "test",
 				Title:   "session-" + strings.ReplaceAll(tt.harness, "-", "_"),
@@ -224,6 +708,27 @@ func TestCreateSession_RejectsRelativeCwd(t *testing.T) {
 	}
 	if !strings.Contains(opErr.Detail, "absolute path") {
 		t.Errorf("error should mention absolute path, got: %s", opErr.Detail)
+	}
+}
+
+func TestCreateSession_GeminiAllowsControlWorkdirWhenNoRepairIsNeeded(t *testing.T) {
+	workdir := filepath.Join(t.TempDir(), "valid\tpath")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tmuxMock := session.NewMockTmux()
+
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd:     workdir,
+		Prompt:  "test",
+		Title:   "safe-title",
+		Harness: "gemini-cli",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want healthy non-repair creation", err)
+	}
+	if result == nil || len(tmuxMock.CreatedSessions) != 1 {
+		t.Fatalf("CreateSession() result = %#v, sessions = %v", result, tmuxMock.CreatedSessions)
 	}
 }
 
@@ -426,12 +931,728 @@ func TestCreateSession_WorksWithoutStorage(t *testing.T) {
 	}
 }
 
+func TestCreateSession_RequiresRollbackCapableTmuxBeforeCreate(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	_, err := CreateSession(&OpContext{Tmux: &createOnlyTmux{TmuxInterface: tmuxMock}}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Prompt: "test", Title: "no-rollback",
+	})
+	if err == nil || !strings.Contains(err.Error(), "KillSession") {
+		t.Fatalf("error = %v, want rollback capability failure", err)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux was mutated before rollback capability validation: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_LifecycleOrder(t *testing.T) {
+	dir := t.TempDir()
+	manifestDir := filepath.Join(t.TempDir(), "ordered")
+	var order []string
+	store := &createMockStorage{createOrder: &order}
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if !tmuxMock.Sessions["ordered"] {
+				t.Fatal("runtime launch ran before tmux creation")
+			}
+			order = append(order, "launch")
+			return CreateSessionLaunchResult{}, nil
+		},
+		complete: func(context.Context, CreateSessionCompletion) error {
+			order = append(order, "complete")
+			return nil
+		},
+	}
+
+	opCtx := &OpContext{
+		Tmux:            tmuxMock,
+		CreationRuntime: runtime,
+		OpenSessionStorage: func(context.Context) (dolt.Storage, func(), error) {
+			order = append(order, "storage")
+			return store, func() { order = append(order, "cleanup") }, nil
+		},
+	}
+	_, err := CreateSessionWithContext(context.Background(), opCtx, &CreateSessionRequest{
+		Cwd: dir, Title: "ordered", Model: "sonnet", Harness: "claude-code",
+		AllowEmptyPrompt: true, RequireStorage: true, ManifestDir: manifestDir,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	want := []string{"storage", "launch", "ready", "register", "complete", "cleanup"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_NoRuntimeInitialPromptRevalidatesAfterRegistration(t *testing.T) {
+	t.Parallel()
+
+	callerCtx := t.Context()
+	var order []string
+	registered := false
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	tmuxMock.InputReadiness = session.InputReadiness{State: "PERMISSION", PaneID: "%42"}
+	tmuxMock.atomic = func() {
+		if !registered {
+			t.Fatal("atomic initial-prompt readiness ran before registration")
+		}
+	}
+	store := &createMockStorage{createOrder: &order, onCreate: func() { registered = true }}
+
+	_, err := CreateSessionWithContext(callerCtx, &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "atomic-prompt", SessionID: "atomic-prompt-id",
+		Harness: "claude-code", Model: "sonnet", Prompt: "do not inject",
+	})
+	if err == nil || !strings.Contains(err.Error(), "harness input is PERMISSION") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want post-registration permission rejection", err)
+	}
+	if !reflect.DeepEqual(tmuxMock.AtomicInputChecks, []string{"atomic-prompt:claude-code"}) {
+		t.Fatalf("atomic input checks = %v", tmuxMock.AtomicInputChecks)
+	}
+	if tmuxMock.InputContext != callerCtx {
+		t.Fatal("atomic initial-prompt readiness did not receive the caller context")
+	}
+	if len(tmuxMock.SentCommands) != 1 || len(tmuxMock.ExactPaneDeliveries) != 0 {
+		t.Fatalf("tmux deliveries = commands %v panes %v, want launch only", tmuxMock.SentCommands, tmuxMock.ExactPaneDeliveries)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"atomic-prompt-id"}) || tmuxMock.Sessions["atomic-prompt"] {
+		t.Fatalf("failed prompt rollback = deleted %v sessionExists %v", store.deleted, tmuxMock.Sessions["atomic-prompt"])
+	}
+}
+
+func TestCreateSession_NoRuntimeInitialPromptUsesAtomicExactPaneDelivery(t *testing.T) {
+	t.Parallel()
+
+	callerCtx := t.Context()
+	var order []string
+	registered := false
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	tmuxMock.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%42"}
+	tmuxMock.atomic = func() {
+		if !registered {
+			t.Fatal("atomic initial-prompt readiness ran before registration")
+		}
+	}
+	store := &createMockStorage{createOrder: &order, onCreate: func() { registered = true }}
+
+	_, err := CreateSessionWithContext(callerCtx, &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "atomic-prompt", SessionID: "atomic-prompt-id",
+		Harness: "claude-code", Model: "sonnet", Prompt: "deliver exactly once",
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error = %v", err)
+	}
+	if !reflect.DeepEqual(tmuxMock.AtomicInputChecks, []string{"atomic-prompt:claude-code"}) ||
+		!reflect.DeepEqual(tmuxMock.ExactPaneDeliveries, []string{"%42"}) {
+		t.Fatalf("atomic input = checks %v panes %v", tmuxMock.AtomicInputChecks, tmuxMock.ExactPaneDeliveries)
+	}
+	if tmuxMock.InputContext != callerCtx || tmuxMock.PaneSendContext != callerCtx {
+		t.Fatal("atomic initial-prompt delivery did not retain the caller context")
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "deliver exactly once" {
+		t.Fatalf("tmux commands = %v, want launch then exact initial prompt", tmuxMock.SentCommands)
+	}
+}
+
+func TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral(t *testing.T) {
+	t.Parallel()
+
+	validRequest := &CreateSessionRequest{
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true,
+	}
+	validParams := &createSessionParams{name: "current", harness: "codex-cli"}
+	launch := CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli"} {
+		params := &createSessionParams{name: "current", harness: harness}
+		if err := establishCreatedHarnessReadiness(t.Context(), &OpContext{Tmux: session.NewMockTmux()}, validRequest, params, launch); err != nil {
+			t.Fatalf("valid current-tmux %s deferral: %v", harness, err)
+		}
+	}
+
+	tests := []struct {
+		name    string
+		request CreateSessionRequest
+		params  createSessionParams
+	}{
+		{name: "MCP surface", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceMCP}, ReuseExistingTmux: true}, params: *validParams},
+		{name: "unsupported harness", request: *validRequest, params: createSessionParams{name: "current", harness: "agy"}},
+		{name: "new tmux", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}}, params: *validParams},
+		{name: "initial prompt", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true, Prompt: "must wait"}, params: *validParams},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := establishCreatedHarnessReadiness(t.Context(), &OpContext{Tmux: session.NewMockTmux()}, &tt.request, &tt.params, launch)
+			if err == nil || !strings.Contains(err.Error(), "deferred readiness") {
+				t.Fatalf("establishCreatedHarnessReadiness() error = %v, want invalid deferral", err)
+			}
+		})
+	}
+}
+
+func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testing.T) {
+	dir, err := agysession.CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(dir, aliasDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	var order []string
+	locked := false
+	store := &createMockStorage{}
+	store.onCreate = func() {
+		if !locked {
+			t.Fatal("AGY workspace lock was released before registration")
+		}
+		created := store.created[len(store.created)-1]
+		if created.Agy == nil || created.Agy.ConversationID != "new-native-id" {
+			t.Fatalf("registered AGY identity = %+v, want new-native-id", created.Agy)
+		}
+		if created.WorkingDirectory != dir || created.Agy.WorkspacePath != dir {
+			t.Fatalf("registered canonical workspace = manifest %q AGY %q, want %q", created.WorkingDirectory, created.Agy.WorkspacePath, dir)
+		}
+	}
+	runtime := &createTestRuntime{
+		launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if !locked {
+				t.Fatal("AGY workspace lock was not held during launch")
+			}
+			if spec.WorkDir != dir {
+				t.Fatalf("AGY launch workspace = %q, want canonical %q", spec.WorkDir, dir)
+			}
+			order = append(order, "launch")
+			return CreateSessionLaunchResult{}, nil
+		},
+		complete: func(context.Context, CreateSessionCompletion) error {
+			if locked {
+				t.Fatal("AGY workspace lock remained held during surface completion")
+			}
+			order = append(order, "complete")
+			return nil
+		},
+	}
+	opCtx := &OpContext{
+		Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: &createTestAgyIdentityTracker{
+			snapshot: func(ctx context.Context, workDir string) (string, error) {
+				if !locked || ctx != t.Context() || workDir != dir {
+					t.Fatalf("AGY snapshot input = locked:%t %v/%q, want locked caller context/%q", locked, ctx, workDir, dir)
+				}
+				order = append(order, "snapshot")
+				return "previous-native-id", nil
+			},
+			discover: func(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+				if !locked || ctx != t.Context() || workDir != dir || previousConversationID != "previous-native-id" {
+					t.Fatalf("AGY discovery input = locked:%t %v/%q/%q", locked, ctx, workDir, previousConversationID)
+				}
+				order = append(order, "discover")
+				return &agysession.Metadata{
+					ConversationID:     "new-native-id",
+					WorkspacePath:      dir,
+					ConversationDBPath: "/provider/new-native-id.db",
+					TranscriptPath:     "/provider/new-native-id/transcript.jsonl",
+				}, nil
+			},
+		},
+		AgyWorkspaceCreateLocker: func(ctx context.Context, workDir string) (func() error, error) {
+			if ctx != t.Context() || workDir != dir {
+				t.Fatalf("AGY lock input = %v/%q, want caller context/%q", ctx, workDir, dir)
+			}
+			locked = true
+			order = append(order, "lock")
+			return func() error {
+				locked = false
+				order = append(order, "unlock")
+				return nil
+			}, nil
+		},
+	}
+	result, err := CreateSessionWithContext(t.Context(), opCtx, &CreateSessionRequest{
+		Cwd: aliasDir, Title: "agy-locked", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture", SessionID: "agy-locked-id", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if locked {
+		t.Fatal("AGY workspace lock was not released after lifecycle completion")
+	}
+	if result.Cwd != dir {
+		t.Fatalf("result cwd = %q, want canonical workspace %q", result.Cwd, dir)
+	}
+	want := []string{"lock", "snapshot", "launch", "discover", "unlock", "complete"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	wantErr := errors.New("corrupt provider snapshot")
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.snapshot = func(context.Context, string) (string, error) { return "", wantErr }
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-snapshot-failure", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture",
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux mutated after failed identity snapshot: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	wantErr := errors.New("provider still reports stale identity")
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		return nil, wantErr
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-discovery-failure", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture", SessionID: "agy-discovery-failure-id", RequireStorage: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if tmuxMock.Sessions["agy-discovery-failure"] {
+		t.Fatal("tmux survived failed identity discovery")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("registered manifests after failed identity discovery = %d, want 0", len(store.created))
+	}
+}
+
+func TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	store := &createMockStorage{onCreate: cancel}
+	tmuxMock := session.NewMockTmux()
+	completed := false
+	runtime := &createTestRuntime{
+		complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: successfulCreateTestAgyIdentityTracker(),
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "cancel-after-register", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "must not run", SessionID: "cancel-after-register-id", RequireStorage: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
+	}
+	if completed {
+		t.Fatal("runtime completion ran after registration canceled the request context")
+	}
+	if tmuxMock.Sessions["cancel-after-register"] {
+		t.Fatal("new tmux session survived cancellation rollback")
+	}
+	if !slices.Contains(store.deleted, "cancel-after-register-id") {
+		t.Fatalf("deleted registrations = %v, want canceled session ID", store.deleted)
+	}
+}
+
+func TestCreateSession_NoRuntimeWaitsBeforeRegistrationAndPrompt(t *testing.T) {
+	var order []string
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	store := &createMockStorage{createOrder: &order}
+
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "readiness-order", Model: "sonnet", Harness: "claude-code", Prompt: "start work",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if !result.Created {
+		t.Fatal("CreateSession() did not report creation")
+	}
+	want := []string{"launch", "ready", "register", "prompt"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("creation order = %v, want %v", order, want)
+	}
+	if got := tmuxMock.WaitedHarnesses; len(got) != 1 || got[0] != "readiness-order:claude-code" {
+		t.Fatalf("readiness checks = %v, want [readiness-order:claude-code]", got)
+	}
+}
+
+func TestCreateSession_ReadinessFailureRollsBackBeforeRegistrationOrPrompt(t *testing.T) {
+	var order []string
+	wantErr := errors.New("composer missing")
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order, waitErr: wantErr}
+	store := &createMockStorage{createOrder: &order}
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "readiness-failure", Model: "5.5", Harness: "codex-cli", Prompt: "must not send",
+		SkipCodexRemoteControl: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSession() error = %v, want readiness failure", err)
+	}
+	if tmuxMock.Sessions["readiness-failure"] {
+		t.Fatal("new tmux session survived readiness failure")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("readiness failure registered sessions: %d", len(store.created))
+	}
+	if len(tmuxMock.SentCommands) != 1 {
+		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
+	}
+	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("creation order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt(t *testing.T) {
+	var order []string
+	tmuxMock := &createReadinessTmux{
+		MockTmux: session.NewMockTmux(),
+		order:    &order,
+		waitErr:  tmux.CodexHookReviewError(),
+	}
+	store := &createMockStorage{createOrder: &order}
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "hook-review", Model: "5.6", Harness: "codex-cli", Prompt: "must not send",
+		SkipCodexRemoteControl: true,
+	})
+	if !errors.Is(err, tmux.ErrCodexHookReviewRequired) {
+		t.Fatalf("CreateSession() error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if tmuxMock.Sessions["hook-review"] {
+		t.Fatal("new tmux session survived Codex hook review failure")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("Codex hook review registered sessions: %d", len(store.created))
+	}
+	if len(tmuxMock.SentCommands) != 1 {
+		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
+	}
+	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("creation order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_ReadinessFailurePreservesReusedTmux(t *testing.T) {
+	var order []string
+	tmuxMock := &createReadinessTmux{
+		MockTmux: session.NewMockTmux(), order: &order, waitErr: errors.New("onboarding still visible"),
+	}
+	tmuxMock.Sessions["reused-readiness"] = true
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "reused-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
+		ReuseExistingTmux: true,
+	})
+	if err == nil {
+		t.Fatal("CreateSession() returned success without readiness")
+	}
+	if !tmuxMock.Sessions["reused-readiness"] {
+		t.Fatal("readiness rollback killed a pre-existing tmux session")
+	}
+	if len(tmuxMock.SentCommands) != 1 {
+		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
+	}
+}
+
+func TestCreateSession_NoRuntimeRequiresReadinessCapability(t *testing.T) {
+	base := session.NewMockTmux()
+	tmuxWithoutReadiness := &createNoReadinessTmux{
+		TmuxInterface: base,
+		kill:          base.KillSession,
+	}
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxWithoutReadiness}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "no-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not expose harness readiness") {
+		t.Fatalf("CreateSession() error = %v, want readiness capability failure", err)
+	}
+	if base.Sessions["no-readiness"] {
+		t.Fatal("new tmux session survived missing-readiness capability")
+	}
+}
+
+func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
+	tests := []struct {
+		name             string
+		stage            string
+		wantRegistration bool
+	}{
+		{name: "launch", stage: "launch"},
+		{name: "registration", stage: "registration"},
+		{name: "completion", stage: "completion", wantRegistration: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			manifestDir := filepath.Join(t.TempDir(), "rollback")
+			tmuxMock := session.NewMockTmux()
+			store := &createMockStorage{}
+			if tt.stage == "registration" {
+				store.createErr = errors.New("registration failed")
+			}
+			stageErr := errors.New(tt.stage + " failed")
+			runtime := &createTestRuntime{
+				launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+					if tt.stage == "launch" {
+						return CreateSessionLaunchResult{}, stageErr
+					}
+					return CreateSessionLaunchResult{}, nil
+				},
+				complete: func(context.Context, CreateSessionCompletion) error {
+					if tt.stage == "completion" {
+						return stageErr
+					}
+					return nil
+				},
+			}
+			_, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: tmuxMock, Storage: store, CreationRuntime: runtime}, &CreateSessionRequest{
+				Cwd: dir, Title: "rollback", Model: "sonnet", Harness: "claude-code", SessionID: "rollback-id",
+				AllowEmptyPrompt: true, RequireStorage: true, ManifestDir: manifestDir,
+			})
+			if err == nil {
+				t.Fatal("expected lifecycle failure")
+			}
+			if tmuxMock.Sessions["rollback"] {
+				t.Fatal("new tmux session survived failed creation")
+			}
+			if _, statErr := os.Stat(manifestDir); !os.IsNotExist(statErr) {
+				t.Fatalf("manifest directory survived rollback: %v", statErr)
+			}
+			if got := len(store.deleted); got != boolInt(tt.wantRegistration) {
+				t.Fatalf("storage deletes = %d, want %d", got, boolInt(tt.wantRegistration))
+			}
+		})
+	}
+}
+
+func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestPath, created, err := prepareCreateManifestDir(&CreateSessionRequest{
+		ManifestDir:         filepath.Join(blocker, "session"),
+		ManifestDirOptional: true,
+	})
+	if err != nil {
+		t.Fatalf("prepareCreateManifestDir: %v", err)
+	}
+	if manifestPath != "" {
+		t.Fatalf("manifest path = %q, want empty path after optional mkdir failure", manifestPath)
+	}
+	if created {
+		t.Fatalf("created = %v; want false", created)
+	}
+}
+
+func TestRollbackCreateSessionReportsCleanupFailures(t *testing.T) {
+	store := &createMockStorage{deleteErr: errors.New("delete failed")}
+	tmuxMock := &createFailingKillTmux{
+		TmuxInterface: session.NewMockTmux(),
+		err:           errors.New("kill failed"),
+	}
+
+	stderrPath := filepath.Join(t.TempDir(), "stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = stderrFile
+	t.Cleanup(func() { os.Stderr = oldStderr })
+
+	rollbackCreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{}, store, "rollback", "rollback-id", true, false, true)
+	os.Stderr = oldStderr
+	if err := stderrFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.ReadFile(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"delete session registration", "delete failed", "kill tmux session", "kill failed"} {
+		if !strings.Contains(string(output), want) {
+			t.Fatalf("rollback stderr = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestCreateSession_FailedReusePreservesExistingArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	manifestDir := filepath.Join(t.TempDir(), "existing")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(manifestDir, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions["existing"] = true
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CreationRuntime: &createTestRuntime{launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			return CreateSessionLaunchResult{}, errors.New("launch failed")
+		}},
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "existing", Model: "sonnet", Harness: "claude-code",
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, ManifestDir: manifestDir,
+	})
+	if err == nil {
+		t.Fatal("expected launch failure")
+	}
+	if !tmuxMock.Sessions["existing"] {
+		t.Fatal("rollback killed a reused tmux session")
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("rollback removed pre-existing manifest data: %v", statErr)
+	}
+}
+
+func TestCreateSession_CodexRemoteBootIsBounded(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("AGM_CODEX_REMOTE_CONTROL", "1")
+	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
+	tmuxMock := session.NewMockTmux()
+	started := time.Now()
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(ctx context.Context, _, _, _ string) (*manifest.Codex, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "bounded", Model: "5.4", Harness: "codex-cli",
+		AllowEmptyPrompt: true, CodexRemoteBootTimeout: 20 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("expected bounded remote-control failure")
+	}
+	if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("remote-control deadline was not bounded: %v", elapsed)
+	}
+	if tmuxMock.Sessions["bounded"] {
+		t.Fatal("timed-out Codex creation left a tmux session behind")
+	}
+}
+
+func TestCreateSession_CodexRejectsUnsafeLaunchInputBeforeRemoteOrTmuxMutation(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("AGM_CODEX_REMOTE_CONTROL", "1")
+	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
+	tmuxMock := session.NewMockTmux()
+	remoteCalls := 0
+
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(context.Context, string, string, string) (*manifest.Codex, error) {
+			remoteCalls++
+			return &manifest.Codex{SessionID: "must-not-exist"}, nil
+		},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "prevalidate", Model: "5.4", Harness: "codex-cli",
+		AllowEmptyPrompt: true, ExtraAddDirs: []string{"/tmp/unsafe\x1bdir"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "validate harness launch") {
+		t.Fatalf("CreateSessionWithContext error = %v, want terminal-control rejection", err)
+	}
+	if remoteCalls != 0 {
+		t.Fatalf("Codex remote thread creations = %d, want 0", remoteCalls)
+	}
+	if tmuxMock.Sessions["prevalidate"] {
+		t.Fatal("unsafe Codex request created a tmux session")
+	}
+}
+
+func TestCreateSession_CLIAndMCPShareCoreContract(t *testing.T) {
+	sharedDir := t.TempDir()
+	type surfaceResult struct {
+		result   *CreateSessionResult
+		manifest *manifest.Manifest
+		launch   HarnessLaunchSpec
+	}
+	run := func(t *testing.T, surface string) surfaceResult {
+		t.Helper()
+		store := &createMockStorage{}
+		var launch HarnessLaunchSpec
+		runtime := &createTestRuntime{launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launch = spec
+			return CreateSessionLaunchResult{ModeAppliedAtStartup: true}, nil
+		}}
+		result, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime}, &CreateSessionRequest{
+			Cwd: sharedDir, Prompt: "same prompt", Title: "parity", Model: "sonnet", Harness: "claude-code",
+			SessionID: "shared-id", Caller: CreateSessionCaller{Surface: surface}, PermissionMode: "plan",
+			Metadata: CreateSessionMetadata{Workspace: "shared", ModelTier: "high", Tags: []string{"role:worker"}},
+		})
+		if err != nil {
+			t.Fatalf("CreateSessionWithContext(%s): %v", surface, err)
+		}
+		if len(store.created) != 1 {
+			t.Fatalf("created manifests = %d, want 1", len(store.created))
+		}
+		return surfaceResult{result: result, manifest: store.created[0], launch: launch}
+	}
+
+	cli := run(t, CreateSurfaceCLI)
+	mcp := run(t, CreateSurfaceMCP)
+	if !reflect.DeepEqual(cli.launch, mcp.launch) {
+		t.Fatalf("launch specs diverged:\nCLI: %#v\nMCP: %#v", cli.launch, mcp.launch)
+	}
+	for label, got := range map[string]*manifest.Manifest{"cli": cli.manifest, "mcp": mcp.manifest} {
+		if got.Workspace != "shared" || got.ModelTier != "high" || got.PermissionMode != "plan" {
+			t.Fatalf("%s manifest lost shared metadata: %#v", label, got)
+		}
+	}
+	if !slicesContain(cli.manifest.Context.Tags, "source:cli") || !slicesContain(mcp.manifest.Context.Tags, "source:mcp") {
+		t.Fatalf("source provenance missing: cli=%v mcp=%v", cli.manifest.Context.Tags, mcp.manifest.Context.Tags)
+	}
+	if cli.result.Source != CreateSurfaceCLI || mcp.result.Source != CreateSurfaceMCP {
+		t.Fatalf("result provenance mismatch: cli=%q mcp=%q", cli.result.Source, mcp.result.Source)
+	}
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func slicesContain(values []string, want string) bool {
+	return slices.Contains(values, want)
+}
+
 func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
-	cmd := buildHarnessCommand("claude-code", "opus", "my-session", "/tmp/work", false)
+	cmd := testHarnessCommand("claude-code", "opus", "my-session", "/tmp/work", false)
 	if cmd == "" {
 		t.Fatal("empty command")
 	}
-	for _, want := range []string{"claude", "--model 'opus'", "AGM_SESSION_NAME='my-session'", "--enable-auto-mode", "--add-dir '/tmp/work'", "&& exit"} {
+	for _, want := range []string{"agm __exec-claude", "--model '" + agent.ResolveModelFullName("claude-code", "opus") + "'", "--session 'my-session'", "--auto-mode", "--add-dir '/tmp/work'", "&& exit"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
 		}
@@ -439,7 +1660,7 @@ func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_GeminiCli(t *testing.T) {
-	cmd := buildHarnessCommand("gemini-cli", "2.5-flash", "s", "/tmp", false)
+	cmd := testHarnessCommand("gemini-cli", "2.5-flash", "s", "/tmp", false)
 	if !strings.Contains(cmd, "gemini -m '2.5-flash'") {
 		t.Errorf("gemini command = %q", cmd)
 	}
@@ -449,13 +1670,13 @@ func TestBuildHarnessCommand_GeminiCli(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_CodexCli(t *testing.T) {
-	cmd := buildHarnessCommand("codex-cli", "5.4", "codex-session", "/tmp/work", false)
+	cmd := testHarnessCommand("codex-cli", "5.4", "codex-session", "/tmp/work", false)
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex -m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
@@ -468,27 +1689,56 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
-	cmd := buildHarnessCommandWithCodex("codex-cli", "5.4", "codex-session", "/tmp/work", false, &manifest.Codex{SessionID: "thr_123"})
+	req := &CreateSessionRequest{Cwd: "/tmp/work"}
+	params := &createSessionParams{name: "codex-session", harness: "codex-cli", model: "5.4"}
+	spec := buildHarnessLaunchSpec(req, params, "session-id", &manifest.Codex{SessionID: "thr_123"})
+	if spec.CodexRemoteResume {
+		t.Fatal("fresh remote Codex create was marked as a cold resume")
+	}
+	cmd := BuildHarnessLaunchCommand(spec).Command
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex resume --remote unix://",
-		"-m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
-		"'thr_123'",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
+		"--resume-id 'thr_123'",
+		"--remote",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("remote Codex command %q missing %q", cmd, want)
 		}
 	}
+	for _, forbidden := range []string{"--remote-resume", `model_reasoning_effort="xhigh"`} {
+		if strings.Contains(cmd, forbidden) {
+			t.Fatalf("fresh remote Codex command unexpectedly contains %q: %q", forbidden, cmd)
+		}
+	}
+}
+
+func TestBuildHarnessCommand_Agy(t *testing.T) {
+	cmd := testHarnessCommand("agy", "3.5-flash-low", "agy-session", "/tmp/work", false)
+	for _, want := range []string{
+		"agm __exec-agy",
+		"--session 'agy-session'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/work'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("AGY command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "OPENAI_API_KEY") || strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") ||
+		strings.Contains(cmd, "GOOGLE_APPLICATION_CREDENTIALS") || strings.Contains(cmd, "GEMINI_API_KEY") {
+		t.Errorf("AGY command leaked credential env: %s", cmd)
+	}
 }
 
 func TestBuildHarnessCommand_OpenCodeCli(t *testing.T) {
-	cmd := buildHarnessCommand("opencode-cli", "sonnet", "open-session", "/tmp/work", false)
+	cmd := testHarnessCommand("opencode-cli", "sonnet", "open-session", "/tmp/work", false)
 	for _, want := range []string{
-		"cd '/tmp/work'",
 		"opencode attach",
 		"&& exit",
 	} {
@@ -503,7 +1753,7 @@ func TestBuildHarnessCommand_OpenCodeCli(t *testing.T) {
 
 func TestBuildHarnessCommand_ActiveHarnessesSupported(t *testing.T) {
 	for _, harness := range agent.ActiveHarnesses() {
-		cmd := buildHarnessCommand(harness, "sonnet", "session", "/tmp/work", false)
+		cmd := testHarnessCommand(harness, "sonnet", "session", "/tmp/work", false)
 		if strings.Contains(cmd, "Unknown harness") {
 			t.Errorf("active harness %q produced unknown-harness command: %s", harness, cmd)
 		}
@@ -511,25 +1761,26 @@ func TestBuildHarnessCommand_ActiveHarnessesSupported(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_UnknownHarness(t *testing.T) {
-	cmd := buildHarnessCommand("unknown", "m", "s", "/tmp", false)
+	cmd := testHarnessCommand("unknown", "m", "s", "/tmp", false)
 	if !strings.Contains(cmd, "Unknown harness") {
 		t.Errorf("unknown harness command = %q", cmd)
 	}
 }
 
 func TestBuildHarnessCommand_EscapesSingleQuotes(t *testing.T) {
-	cmd := buildHarnessCommand("claude-code", "opus", "sess", "/tmp/it's a dir", false)
+	cmd := testHarnessCommand("claude-code", "opus", "sess", "/tmp/it's a dir", false)
 	if strings.Contains(cmd, "it's a") {
 		t.Errorf("unescaped single quote in command: %s", cmd)
 	}
-	if !strings.Contains(cmd, "it'\\''s a dir") {
+	if !strings.Contains(cmd, `it'"'"'s a dir`) {
 		t.Errorf("expected escaped single quote, got: %s", cmd)
 	}
 }
 
 func TestBuildHarnessCommand_BracketedModelQuoted(t *testing.T) {
-	cmd := buildHarnessCommand("claude-code", "claude-sonnet-4-6[1m]", "sess", "/tmp/work", false)
-	if !strings.Contains(cmd, "--model 'claude-sonnet-4-6[1m]'") {
+	model := agent.ResolveModelFullName("claude-code", "sonnet")
+	cmd := testHarnessCommand("claude-code", "sonnet", "sess", "/tmp/work", false)
+	if !strings.Contains(cmd, "--model '"+model+"'") {
 		t.Errorf("bracketed model not quoted; zsh would glob-expand [1m]: %s", cmd)
 	}
 }
@@ -539,7 +1790,7 @@ func TestBuildHarnessCommand_BracketedModelQuoted(t *testing.T) {
 // so supervisor sessions survive their Claude turn/loop ending (ce-pzca).
 func TestBuildHarnessCommand_Persistent(t *testing.T) {
 	for _, harness := range append(agent.ActiveHarnesses(), agent.DeprecatedHarnesses()...) {
-		cmd := buildHarnessCommand(harness, "opus", "sup-session", "/tmp/work", true)
+		cmd := testHarnessCommand(harness, "opus", "sup-session", "/tmp/work", true)
 		if strings.Contains(cmd, "&& exit") {
 			t.Errorf("persistent=true: harness %q command still has '&& exit': %s", harness, cmd)
 		}
@@ -550,26 +1801,162 @@ func TestBuildHarnessCommand_Persistent(t *testing.T) {
 // keeps the "&&  exit" suffix for clean one-shot worker teardown.
 func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
 	for _, harness := range append(agent.ActiveHarnesses(), agent.DeprecatedHarnesses()...) {
-		cmd := buildHarnessCommand(harness, "opus", "worker-session", "/tmp/work", false)
+		cmd := testHarnessCommand(harness, "opus", "worker-session", "/tmp/work", false)
 		if !strings.Contains(cmd, "&& exit") {
 			t.Errorf("persistent=false: harness %q command missing '&& exit': %s", harness, cmd)
 		}
 	}
 }
 
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"simple", "simple"},
-		{"it's", "it'\\''s"},
-		{"a'b'c", "a'\\''b'\\''c"},
-		{"no-quotes", "no-quotes"},
+func TestSharedShellQuote(t *testing.T) {
+	got := shellquote.Quote("a'b")
+	if got != `'a'"'"'b'` {
+		t.Errorf("ShellQuote = %q", got)
 	}
-	for _, tt := range tests {
-		got := shellQuote(tt.in)
-		if got != tt.want {
-			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+}
+
+func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
+	parentID := "parent-session-id"
+	req := &CreateSessionRequest{
+		Cwd:    "/tmp/work",
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI, Source: "session.create-child"},
+		Metadata: CreateSessionMetadata{
+			Tags:            []string{"inherited"},
+			ContextPurpose:  "Inherited purpose",
+			ContextNotes:    "Inherited notes",
+			ParentSessionID: &parentID,
+		},
+	}
+	params := &createSessionParams{name: "child", harness: "codex-cli", model: "gpt-5.3-codex"}
+
+	got := buildCreateSessionManifest(req, params, "child-id", nil)
+
+	if got.ParentSessionID == nil || *got.ParentSessionID != parentID {
+		t.Fatalf("ParentSessionID = %v, want %q", got.ParentSessionID, parentID)
+	}
+	if got.ParentSessionID == req.Metadata.ParentSessionID {
+		t.Fatal("ParentSessionID aliases request metadata")
+	}
+	if got.Context.Purpose != req.Metadata.ContextPurpose || got.Context.Notes != req.Metadata.ContextNotes {
+		t.Fatalf("Context = %#v, want purpose and notes from metadata", got.Context)
+	}
+	for _, want := range []string{"inherited", "source:session.create-child"} {
+		if !slices.Contains(got.Context.Tags, want) {
+			t.Fatalf("Context.Tags = %v, missing %q", got.Context.Tags, want)
 		}
+	}
+}
+
+func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
+	sandbox := &manifest.SandboxConfig{
+		Enabled:               true,
+		ID:                    "sandbox-session",
+		CodexHookSourceRepo:   "/src/reviewed",
+		CodexHookSourceCommit: strings.Repeat("a", 40),
+		CodexHookDigest:       strings.Repeat("b", 64),
+		CodexHookRoot:         "/trusted/hooks/" + strings.Repeat("b", 64),
+	}
+	req := &CreateSessionRequest{
+		Cwd:                  "/tmp/sandbox",
+		ExtraAddDirs:         []string{"/tmp/worktree", "/tmp/beads"},
+		BypassCodexHookTrust: true,
+		Metadata:             CreateSessionMetadata{Sandbox: sandbox},
+	}
+	params := &createSessionParams{name: "sandbox", harness: "codex-cli", model: "gpt-5.5"}
+
+	got := buildCreateSessionManifest(req, params, "sandbox-session", nil)
+
+	if got.Sandbox == sandbox {
+		t.Fatal("Sandbox aliases request metadata")
+	}
+	if !got.Sandbox.BypassCodexHookTrust {
+		t.Fatal("BypassCodexHookTrust = false, want true")
+	}
+	if got.Sandbox.CodexHookSourceRepo != sandbox.CodexHookSourceRepo ||
+		got.Sandbox.CodexHookSourceCommit != sandbox.CodexHookSourceCommit ||
+		got.Sandbox.CodexHookDigest != sandbox.CodexHookDigest ||
+		got.Sandbox.CodexHookRoot != sandbox.CodexHookRoot {
+		t.Fatalf("persisted Codex hook evidence = %#v, want %#v", got.Sandbox, sandbox)
+	}
+	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
+		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
+	}
+	req.ExtraAddDirs[0] = "/tmp/mutated"
+	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
+		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
+	}
+}
+
+func TestVerifyCreateCodexHookTrustRechecksSandboxAssets(t *testing.T) {
+	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	req := &CreateSessionRequest{
+		Cwd:                  worktreePath,
+		BypassCodexHookTrust: true,
+		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{
+			Enabled:               true,
+			CodexHookSourceRepo:   hookTrust.SourceRepo,
+			CodexHookSourceCommit: hookTrust.SourceCommit,
+			CodexHookDigest:       hookTrust.Digest,
+			CodexHookRoot:         hookTrust.HookRoot,
+		}},
+	}
+	params := &createSessionParams{harness: "codex-cli"}
+	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err != nil {
+		t.Fatalf("verifyCreateCodexHookTrust() error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, ".codex", "hooks.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err == nil {
+		t.Fatal("verifyCreateCodexHookTrust() error = nil after manifest mutation")
+	}
+}
+
+func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing.T) {
+	t.Setenv("AGM_ACTOR", "vroom-dispatch")
+	params := &createSessionParams{name: "codex", harness: "codex-cli", model: "gpt-5.5"}
+	for _, tt := range []struct {
+		name    string
+		sandbox *manifest.SandboxConfig
+		want    bool
+	}{
+		{name: "no sandbox"},
+		{name: "disabled sandbox", sandbox: &manifest.SandboxConfig{}},
+		{
+			name: "enabled sandbox",
+			sandbox: &manifest.SandboxConfig{
+				Enabled:                    true,
+				BypassCodexHookTrustReason: "sandbox path rotates per spawn so hooks cannot be pre-trusted",
+				CodexHookSourceRepo:        "/reviewed/dear-agent",
+				CodexHookSourceCommit:      strings.Repeat("a", 40),
+				CodexHookDigest:            strings.Repeat("b", 64),
+			},
+			want: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &CreateSessionRequest{
+				Cwd:                  "/tmp/work",
+				BypassCodexHookTrust: true,
+				Metadata:             CreateSessionMetadata{Sandbox: tt.sandbox},
+			}
+			got := buildHarnessLaunchSpec(req, params, "session-id", nil)
+			if got.BypassCodexHookTrust != tt.want {
+				t.Fatalf("BypassCodexHookTrust = %v, want %v", got.BypassCodexHookTrust, tt.want)
+			}
+			if tt.want && got.CodexHookTrustReason != tt.sandbox.BypassCodexHookTrustReason {
+				t.Fatalf("CodexHookTrustReason = %q, want %q", got.CodexHookTrustReason, tt.sandbox.BypassCodexHookTrustReason)
+			}
+			if tt.want && got.CodexHookTrustActor != "vroom-dispatch" {
+				t.Fatalf("CodexHookTrustActor = %q, want caller identity", got.CodexHookTrustActor)
+			}
+			if tt.want &&
+				(got.CodexHookSourceRepo != tt.sandbox.CodexHookSourceRepo ||
+					got.CodexHookSourceCommit != tt.sandbox.CodexHookSourceCommit ||
+					got.CodexHookDigest != tt.sandbox.CodexHookDigest) {
+				t.Fatalf("Codex hook source identity = (%q, %q, %q), want sandbox evidence",
+					got.CodexHookSourceRepo, got.CodexHookSourceCommit, got.CodexHookDigest)
+			}
+		})
 	}
 }

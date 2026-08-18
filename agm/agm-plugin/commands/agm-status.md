@@ -1,55 +1,24 @@
 ---
 model: haiku
 effort: low
-content-hash: a612f2c71d2d9ccee5199d3381292a3bbbe1f9aad55428362e3aa67813c6fff5
-description: Get detailed status of an AGM session
-argument-hint: "{session-name}"
-allowed-tools: Bash(agm status *), Bash(agm session list *)
+content-hash: c6d30fbd2a903a820ea00aad719af54031c354579db8419accacc92a7a3d238f
+description: >-
+  Show aggregate live status for AGM sessions. Use when the user needs session state, branch, worktree, workspace, or uncommitted-change information.
+argument-hint: "[--workspace VALUE]"
+allowed-tools: Bash(agm session status *)
 ---
 
-# AGM Session Status
+<!-- Code generated from registered Cobra metadata. DO NOT EDIT. -->
+# Show aggregate AGM status
 
-I'll get the status of an AGM session.
+## Run
 
-**Step 1: Parse arguments**
+- Treat user-provided values as separate argv values. Never build shell syntax with concatenation, command substitution, or unquoted interpolation.
+- Run `agm session status --format json`.
+- Forward only requested optional flags: `--workspace`.
 
-- Parse $ARGUMENTS to extract session name
-- If $ARGUMENTS is empty or whitespace only:
-  - Run: `agm status --output json`
-  - This shows the status of the currently associated session
-  - If this fails, show: "No session specified and no active association. Usage: /agm:status <session-name>"
-  - If this fails, also suggest: "Run /agm:list to see available sessions"
-  - Exit gracefully on failure
-- If session name is provided:
-  - Store as SESSION_NAME
-  - Run: `agm status --output json "{SESSION_NAME}"`
+## Report
 
-**Step 2: Handle result**
-
-- If exit code is not 0:
-  - If output contains "not found" or "no such session":
-    - Show: "Session not found: {SESSION_NAME}"
-    - Suggest: "Run /agm:list to see available sessions"
-  - Otherwise show the error output
-  - Suggest: "Try running: agm admin doctor"
-  - Exit gracefully
-
-**Step 3: Display status summary**
-
-Parse the JSON output and display a clear summary:
-
-```
-Session: {name}
-Status:  {state}
-Harness: {harness}
-Project: {working_directory}
-UUID:    {uuid}
-Created: {created_at}
-Updated: {updated_at}
-```
-
-If additional fields are present (tokens, messages, etc.), display them too.
-
-**Error Handling**:
-- If agm not found: "Install agm from github.com/vbonnet/dear-agent"
-- If session not found: suggest `/agm:list` to see available sessions
+- If AGM exits non-zero, show its stderr and stop. Do not invent a fallback command.
+- Present successful structured output with these useful fields when available: sessions[].name, sessions[].state, sessions[].branch, sessions[].workspace, sessions[].worktree_path, sessions[].uncommitted.
+- If no sessions match, say so without treating the empty result as an error.

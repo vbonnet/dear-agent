@@ -1,9 +1,21 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestMonitorCompactionUsesCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := monitorCompaction(ctx, "missing-session", "missing-session", time.Hour)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("monitorCompaction() error = %v, want context.Canceled", err)
+	}
+}
 
 func TestSessionCompactCommandMetadata(t *testing.T) {
 	if sessionCompactCmd.Use != "compact <identifier>" {

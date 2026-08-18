@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -164,11 +165,11 @@ func runSendWorkRequest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send via tmux (same pattern as sendDirectly)
-	return sendWorkRequestMessage(recipient, senderName, messageID, jsonStr)
+	return sendWorkRequestMessage(cmd.Context(), recipient, senderName, messageID, jsonStr)
 }
 
 // sendWorkRequestMessage delivers a work-request JSON message to a recipient
-func sendWorkRequestMessage(recipient, sender, messageID, jsonPayload string) error {
+func sendWorkRequestMessage(ctx context.Context, recipient, sender, messageID, jsonPayload string) error {
 	// Check recipient exists in tmux
 	exists, err := tmux.HasSession(recipient)
 	if err != nil {
@@ -199,7 +200,7 @@ func sendWorkRequestMessage(recipient, sender, messageID, jsonPayload string) er
 		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
-	if err := tmux.SendMultiLinePromptSafe(recipient, formattedMessage, true); err != nil {
+	if err := sendStructuredPrompt(ctx, recipient, formattedMessage, true); err != nil {
 		return fmt.Errorf("failed to send work request: %w", err)
 	}
 

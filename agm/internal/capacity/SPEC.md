@@ -29,6 +29,11 @@ platform-dependent memory and process probes.
 
 **AGM-CAPACITY-09** When `/proc/meminfo` is parsed, the system shall require both `MemTotal` and `MemAvailable` and convert kB values to bytes.
 
+**AGM-CAPACITY-10** When system information is detected on macOS, the system shall obtain total RAM from `hw.memsize` and available RAM from the platform `memory_pressure -Q` percentage.
+
+**AGM-CAPACITY-11** When a native memory probe fails, returns zero total RAM, or reports a percentage outside zero through 100, the system shall return an explicit error instead of inventing capacity.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/agm_runtime_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- `agm/test/bdd/features/agm_capacity_platform.feature` exercises the native detector on the current Linux or macOS host.

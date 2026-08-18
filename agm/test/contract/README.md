@@ -1,228 +1,63 @@
 # Contract Tests
 
-Contract tests verify end-to-end workflows with real AI CLI tools (Claude, Gemini).
+The `contract` build tag contains two distinct boundaries:
 
-## Overview
+- `TestActiveHarnessRegistryContract` is credential-free and always verifies
+  the production registry for `claude-code`, `codex-cli`, `agy`, and
+  `opencode-cli`, and `pi-cli`.
+- Provider-hosted scenarios are optional probes for Claude, OpenCode, and the
+  deprecated Gemini compatibility adapter. Each probe skips only when its own
+  binary, credential, server, or quota is unavailable.
+- Pi's host-dependent probes execute the installed binary's version and
+  project-loader paths, each with an explicit installation skip. Its managed
+  authorization-extension contract remains credential-free and always runs.
 
-Contract tests differ from unit and integration tests:
+Codex lifecycle behavior is CLI/tmux-backed rather than OpenAI-API-backed. Its
+real source-binary coverage therefore lives in
+`agm/test/integration/isolated/codex_lifecycle_test.go`, not in a
+mock HTTP Pact.
 
-| Test Type | Dependencies | Speed | API Calls | Build Tag |
-|-----------|-------------|-------|-----------|-----------|
-| Unit | None | <1s | 0 | None |
-| Integration | Mocks | <5s | 0 | `integration` |
-| Contract | Real APIs | <30s | <20 | `contract` |
+## Running
 
-## Requirements
-
-### API Keys
-
-Contract tests require real API keys:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export GOOGLE_API_KEY=...
-```
-
-Tests gracefully skip if keys are missing.
-
-### Dependencies
-
-- **tmux**: Required for session management
-- **agm**: AGM binary must be in PATH
-
-### Quota Limits
-
-- Maximum 20 API calls per test run
-- Tests consume quota and skip when exhausted
-- Quota is shared across all contract tests
-- Each test consumes 1-2 API calls
-
-## Running Tests
-
-### Run All Contract Tests
+From the repository root, run the portable active-harness contract:
 
 ```bash
-# Requires API keys
-ANTHROPIC_API_KEY=sk-... GOOGLE_API_KEY=... \
-  go test -tags=contract ./test/contract/...
+go test -tags=contract ./agm/test/contract \
+  -run '^TestActiveHarnessRegistryContract$'
 ```
 
-### Run Specific Contract Test
+Compile and run the complete contract-tagged package:
 
 ```bash
-# Claude contract tests only
-ANTHROPIC_API_KEY=sk-... \
-  go test -tags=contract ./test/contract -run TestClaudeAPI
-
-# Gemini contract tests only
-GOOGLE_API_KEY=... \
-  go test -tags=contract ./test/contract -run TestGeminiAPI
+go test -tags=contract ./agm/test/contract/...
 ```
 
-### Run with Verbose Output
+Without live provider prerequisites, the optional provider-hosted tests report
+explicit skips while the active registry contract still executes. CI runs the
+portable contract on every event and the complete credential-free graph on the
+daily schedule and manual dispatch.
 
-```bash
-ANTHROPIC_API_KEY=sk-... \
-  go test -tags=contract ./test/contract -v
-```
+## Optional live prerequisites
 
-## Test Coverage
+- Claude tests require their documented Claude CLI credential environment.
+- OpenCode tests require `OPENCODE_SERVER_URL` and a healthy server.
+- Gemini compatibility tests require `GOOGLE_API_KEY` and consume the shared
+  test quota.
 
-### Claude Contract Tests
+These probes invoke AGM commands through `agm/test/helpers`. They are not a
+substitute for the isolated source-built Codex lifecycle or portable adapter
+parity tests.
 
-- `TestClaudeAPI_SessionCreation`: Create session with Claude agent
-- `TestClaudeAPI_BasicPrompt`: Send prompt and verify response
-- `TestClaudeAPI_SessionArchive`: Archive session lifecycle
+## Retired mock Pact suite
 
-### Gemini Contract Tests
-
-- `TestGeminiAPI_SessionCreation`: Create session with Gemini agent
-- `TestGeminiAPI_BasicPrompt`: Send prompt and verify response
-- `TestGeminiAPI_SessionArchive`: Archive session lifecycle
-- `TestGeminiAPI_AgentParity`: Verify feature parity with Claude
-
-## Quota Management
-
-Contract tests use `helpers.GetAPIQuota()` to track API usage:
-
-```go
-func TestExample(t *testing.T) {
-    quota := helpers.GetAPIQuota()
-    if !quota.Consume() {
-        t.Skip("API quota exhausted")
-    }
-    // ... test code that calls API ...
-}
-```
-
-Quota features:
-- **Global quota**: Shared across all tests (20 calls)
-- **Thread-safe**: Safe for parallel test execution
-- **Graceful degradation**: Tests skip when quota exhausted
-
-## CI/CD Integration
-
-Contract tests run only on main branch (not every PR):
-
-```yaml
-# .github/workflows/contract-tests.yml
-name: Contract Tests
-on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly
-
-jobs:
-  contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-      - name: Run Contract Tests
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        run: go test -tags=contract ./test/contract/...
-```
-
-## Troubleshooting
-
-### Tests Skip with "API key not set"
-
-**Cause**: Environment variable not set
-
-**Solution**:
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export GOOGLE_API_KEY=...
-```
-
-### Tests Skip with "API quota exhausted"
-
-**Cause**: More than 20 tests ran in single execution
-
-**Solution**: Run fewer tests or reset quota:
-```bash
-# Run subset of tests
-go test -tags=contract ./test/contract -run TestClaudeAPI_SessionCreation
-```
-
-### Tests Fail with "agm: command not found"
-
-**Cause**: AGM binary not in PATH
-
-**Solution**:
-```bash
-# Install AGM
-go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
-
-# Or add to PATH
-export PATH=$PATH:$(go env GOPATH)/bin
-```
-
-### Tests Fail with "tmux: command not found"
-
-**Cause**: tmux not installed
-
-**Solution**:
-```bash
-# Ubuntu/Debian
-sudo apt-get install tmux
-
-# macOS
-brew install tmux
-```
-
-## Writing New Contract Tests
-
-### Template
-
-```go
-// +build contract
-
-package contract
-
-import (
-    "os"
-    "testing"
-    "github.com/vbonnet/dear-agent/agm/test/helpers"
-)
-
-func TestNewContractTest(t *testing.T) {
-    // 1. Check API key
-    if os.Getenv("ANTHROPIC_API_KEY") == "" {
-        t.Skip("ANTHROPIC_API_KEY not set")
-    }
-
-    // 2. Consume quota
-    quota := helpers.GetAPIQuota()
-    if !quota.Consume() {
-        t.Skip("API quota exhausted")
-    }
-
-    // 3. Run CLI command
-    result := helpers.RunCLI(t, "command", "args...")
-
-    // 4. Verify result
-    if result.ExitCode != 0 {
-        t.Fatalf("Command failed: %s", result.Stderr)
-    }
-}
-```
-
-### Best Practices
-
-1. **Always check API key availability** before consuming quota
-2. **Consume quota** before making API calls
-3. **Use helpers.RunCLI()** for isolated execution
-4. **Skip gracefully** on missing keys or exhausted quota
-5. **Keep tests fast** (<30s total runtime)
-6. **Limit API calls** (max 2 per test)
-7. **Clean up resources** (archive/delete test sessions)
+The former `agm/test/contracts` package only configured Pact mock servers and
+asserted that their generated base URLs were non-empty. It did not call AGM's
+provider clients, required an unscheduled native `libpact_ffi`, and caused the
+generic `contract` tag to fail at link time. It was removed instead of being
+reported as adapter-contract coverage.
 
 ## References
 
-- [Test Helpers](../helpers/README.md)
-- [Quota Management](../helpers/quota.go)
-- [CLI Execution](../helpers/cli.go)
+- [Contract specification](SPEC.md)
+- [Integration parity suite](../integration/AGENT_PARITY_TEST_SUITE.md)
+- [Integration test guide](../integration/README.md)

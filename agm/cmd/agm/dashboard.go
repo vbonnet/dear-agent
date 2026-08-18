@@ -33,7 +33,6 @@ For orchestrators, use --orchestrator to show:
   - Alerts for threshold violations
   - Top 5 and bottom 5 sessions by trust score
   - Throughput metrics (commits/hour, workers/hour)
-  - Next 3 backlog tasks
 
 Examples:
   agm session dashboard                    # Show active sessions
@@ -223,15 +222,4 @@ func printOrchestratorDashboardTable(cmd *cobra.Command, result *ops.Orchestrato
 	}
 	_, _ = fmt.Fprintf(out, "\n")
 
-	// Backlog
-	_, _ = fmt.Fprintf(out, "BACKLOG (Total: %d tasks)\n", result.Backlog.Total)
-	if len(result.Backlog.Next) > 0 {
-		_, _ = fmt.Fprintf(out, "  Next:\n")
-		for i, task := range result.Backlog.Next {
-			_, _ = fmt.Fprintf(out, "    %d. [%s] %s\n", i+1, task.Status, task.Description)
-		}
-	} else {
-		_, _ = fmt.Fprintf(out, "  No tasks pending\n")
-	}
-	_, _ = fmt.Fprintf(out, "\n")
 }

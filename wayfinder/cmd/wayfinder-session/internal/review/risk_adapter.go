@@ -16,15 +16,15 @@ import (
 // (`(?!`) that Go's RE2 engine rejects. Replaced with a two-step check:
 // match `yaml.load` and reject the safe form separately.
 var (
-	rxSQLInjection         = regexp.MustCompile(`(?i)execute\(.*\+.*\)`)
-	rxEvalExec             = regexp.MustCompile(`\b(eval|exec)\s*\(`)
-	rxHardcodedSecret      = regexp.MustCompile(`(?i)(password|secret|api[_-]?key)\s*=\s*["']`)
-	rxUnsafePickle         = regexp.MustCompile(`pickle\.loads`)
-	rxYAMLLoad             = regexp.MustCompile(`yaml\.load`)
-	rxYAMLLoadSafe         = regexp.MustCompile(`yaml\.load_safe|yaml\.safe_load`)
-	rxShellInjection       = regexp.MustCompile(`os\.system\(|subprocess\.call\(.*shell=True`)
-	rxPanic                = regexp.MustCompile(`panic\(`)
-	rxIgnoredError         = regexp.MustCompile(`_\s*=.*error`)
+	rxSQLInjection    = regexp.MustCompile(`(?i)execute\(.*\+.*\)`)
+	rxEvalExec        = regexp.MustCompile(`\b(eval|exec)\s*\(`)
+	rxHardcodedSecret = regexp.MustCompile(`(?i)(password|secret|api[_-]?key)\s*=\s*["']`)
+	rxUnsafePickle    = regexp.MustCompile(`pickle\.loads`)
+	rxYAMLLoad        = regexp.MustCompile(`yaml\.load`)
+	rxYAMLLoadSafe    = regexp.MustCompile(`yaml\.load_safe|yaml\.safe_load`)
+	rxShellInjection  = regexp.MustCompile(`os\.system\(|subprocess\.call\(.*shell=True`)
+	rxPanic           = regexp.MustCompile(`panic\(`)
+	rxIgnoredError    = regexp.MustCompile(`_\s*=.*error`)
 )
 
 // RiskLevel represents the risk level of a task

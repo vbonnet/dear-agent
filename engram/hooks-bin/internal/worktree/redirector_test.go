@@ -1,12 +1,12 @@
 package worktree
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestRedirector_RedirectIfNeeded_WriteOperation(t *testing.T) {
@@ -482,14 +482,13 @@ func BenchmarkRedirector_RedirectIfNeeded(b *testing.B) {
 	tmpDir := b.TempDir()
 	repoPath := filepath.Join(tmpDir, "repo")
 	os.Mkdir(repoPath, 0755)
-	exec.CommandContext(context.Background(), "git", "init", repoPath).Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "config", "user.email", "bench@test.com").Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "config", "user.name", "Bench").Run()
+	gittest.Command(b, tmpDir, "init", repoPath).Run()
+	gittest.HardenRepo(b, repoPath)
 
 	readme := filepath.Join(repoPath, "README.md")
 	os.WriteFile(readme, []byte("bench"), 0644)
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "add", ".").Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "commit", "-m", "Init").Run()
+	gittest.Command(b, repoPath, "add", ".").Run()
+	gittest.Command(b, repoPath, "commit", "-m", "Init").Run()
 
 	worktreeBase := filepath.Join(tmpDir, "worktrees")
 	config := &ProvisionerConfig{

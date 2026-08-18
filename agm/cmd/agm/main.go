@@ -4,19 +4,20 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/vbonnet/dear-agent/agm/internal/backend"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/freshness"
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -27,10 +28,6 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
-	// Import backends to trigger registration
-	_ "github.com/vbonnet/dear-agent/agm/internal/backend"
-	// Import manager backends to trigger registration
-	_ "github.com/vbonnet/dear-agent/agm/internal/manager/tmuxbackend"
 	// Import workflows to trigger registration
 	_ "github.com/vbonnet/dear-agent/agm/internal/workflow/deepresearch"
 )
@@ -55,7 +52,6 @@ var (
 	detailedMode     bool                  // --detailed: re-enable IDs/full paths/hints in agent-mode
 	outputMode       OutputMode            // resolved once in PersistentPreRunE
 	tmuxClient       session.TmuxInterface // Injected dependency for testing
-	managerBackend   manager.Backend       // New abstraction layer (nil = legacy path)
 	usageTracker     *usage.Tracker
 	commandStartTime time.Time
 	auditLogger      *ops.AuditLogger
@@ -562,7 +558,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 
 	// Case 1: No arguments provided - smart picker behavior
 	if len(args) == 0 {
-		return handleNoArgs(adapter, matchingSessions, projectDir, uiCfg)
+		return handleNoArgs(cmd.Context(), adapter, matchingSessions, projectDir, uiCfg)
 	}
 
 	// Case 2: Arguments provided - this is an error (removed 'agm <name>' shortcut)
@@ -579,7 +575,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("unknown command: %q", sessionName)
 }
 
-func handleNoArgs(adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
+func handleNoArgs(ctx context.Context, adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
 	if len(matchingSessions) == 0 {
 		// No sessions - offer to create new
 		fmt.Println("No sessions found in current directory.")
@@ -600,17 +596,17 @@ func handleNoArgs(adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, 
 	if len(matchingSessions) == 1 {
 		// Single session - resume it directly
 		fmt.Printf("Resuming session: %s\n", matchingSessions[0].Name)
-		return performResume(adapter, matchingSessions[0])
+		return performResume(ctx, adapter, matchingSessions[0])
 	}
 
 	// Multiple sessions - show picker
-	return showSessionPicker(adapter, matchingSessions, uiCfg)
+	return showSessionPicker(ctx, adapter, matchingSessions, uiCfg)
 }
 
 // handleNamedSession removed - 'agm <name>' shortcut no longer supported
 // Use 'agm session resume <name>' or 'agm session new <name>' instead
 
-func showSessionPicker(adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
+func showSessionPicker(ctx context.Context, adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
 	// Convert to UI sessions with status
 	uiSessions := make([]*ui.Session, len(sessions))
 
@@ -632,18 +628,18 @@ func showSessionPicker(adapter *dolt.Adapter, sessions []*manifest.Manifest, uiC
 	}
 
 	fmt.Printf("Resuming session: %s\n", selected.Name)
-	return performResume(adapter, selected.Manifest)
+	return performResume(ctx, adapter, selected.Manifest)
 }
 
 // performResume runs the full resume workflow for an already-selected session.
 // The bare `agm` default command resolved the session from the current directory
 // (or the interactive picker), so we delegate to the same resumeResolvedSession
 // helper that backs `agm session resume` rather than reimplementing the workflow.
-func performResume(adapter *dolt.Adapter, m *manifest.Manifest) error {
+func performResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest) error {
 	// Reconstruct the manifest path the same way resolveSessionIdentifier does,
 	// so resumeResolvedSession can update last-activity and auto-commit.
 	manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
-	return resumeResolvedSession(adapter, m.SessionID, manifestPath)
+	return resumeResolvedSession(ctx, adapter, m.SessionID, manifestPath)
 }
 
 func runNewSessionFlow(suggestedName *string) error {
@@ -670,10 +666,23 @@ func runNewSessionFlow(suggestedName *string) error {
 //	error - Command execution error (nil on success)
 func ExecuteWithDeps(tmux session.TmuxInterface) error {
 	tmuxClient = tmux
-	return rootCmd.Execute()
+	return executeWithSignalContext(context.Background(), rootCmd.ExecuteContext, os.Interrupt, syscall.SIGTERM)
+}
+
+func executeWithSignalContext(parent context.Context, execute func(context.Context) error, signals ...os.Signal) error {
+	ctx, stop := signal.NotifyContext(parent, signals...)
+	defer stop()
+	return execute(ctx)
 }
 
 func main() {
+	if len(os.Args) > 1 && harnessexec.IsProtocol(os.Args[1]) {
+		if err := harnessexec.Run(os.Args[1], os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "agm private harness executor: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	exitCode := run()
 	os.Exit(exitCode)
 }
@@ -700,23 +709,10 @@ func run() int {
 		}()
 	}
 
-	// Use backend adapter to support multiple backends
-	// The backend is selected via AGM_SESSION_BACKEND env var (defaults to tmux)
-	adapter, err := backend.GetDefaultBackendAdapter()
-	if err != nil {
-		// Fallback to tmux if backend initialization fails
-		fmt.Fprintf(os.Stderr, "Warning: failed to initialize backend, falling back to tmux: %v\n", err)
-		adapter = backend.NewBackendAdapter(backend.NewTmuxBackend())
-	}
-
-	// Initialize the new manager backend abstraction layer
-	mgr, mgrErr := manager.GetDefault("")
-	if mgrErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: manager backend unavailable: %v\n", mgrErr)
-	}
-	managerBackend = mgr
-
-	if err := ExecuteWithDeps(adapter); err != nil {
+	// Tmux is AGM's one production local runtime. RealTmux adapts the tmux
+	// process once at the composition root while ExecuteWithDeps preserves a
+	// deterministic test seam.
+	if err := ExecuteWithDeps(session.NewRealTmux()); err != nil {
 		// Map the failure onto the exit-code taxonomy so agent consumers can
 		// branch on $? (2=auth, 3=bad-input, 4=state-conflict, 5=not-found)
 		// without parsing stderr. Unmapped errors fall through to 1.

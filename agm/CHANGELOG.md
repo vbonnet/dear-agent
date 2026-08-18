@@ -109,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Session Kill Exact Matching** (2026-03-21):
   - Fixed `agm session kill` prefix-matching bug causing wrong sessions to be killed
-  - Applied exact matching pattern from ADR-0002 using `=` prefix for tmux session-level commands
+  - Applied the exact matching pattern from the [tmux safety decision](internal/tmux/ADR-001-capture-pane-vs-control-mode.md) using `=` prefix for tmux session-level commands
   - Normalized session names (dots/colons → dashes) via `tmux.NormalizeTmuxSessionName()`
   - Added `tmux.FormatSessionTarget()` to prepend `=` for exact session matching
   - **Impact**: Prevents scenarios where killing "astrocyte" could match "astrocyte-improvements"
@@ -118,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Files Modified**: `cmd/agm/kill.go` (killTmuxSession function)
   - **Testing**: Integration tests compile successfully, manual testing confirms fix
   - **Commit**: cd86f12
-  - **See**: internal/tmux/ADR-0002-exact-session-matching.md for tmux exact matching behavior
+  - Exact-session behavior is covered by internal/tmux tests
 
 ### Changed
 
@@ -142,14 +142,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - EventBus integration as canonical state change layer
   - Automatic agent type detection from manifest.yaml
   - Astrocyte filtering: skips OpenCode sessions (handled by SSE adapter)
-  - Fallback mechanism: Astrocyte can monitor OpenCode if SSE fails
-  - Configuration: `adapters.opencode.enabled`, `server_url`, `fallback_tmux`
+  - Startup failures leave OpenCode monitoring inactive; AGM does not start a fallback monitor automatically
+  - Configuration: `adapters.opencode.enabled`, `server_url`, and reconnect timing
   - Auto-reconnect with exponential backoff for resilient SSE connections
   - Health checks: `GetAdapterHealth()` exposes adapter status
-  - **Benefits**: Real-time state detection (<100ms vs 60s polling), no tmux scraping overhead
+  - **Benefits**: Event-driven state detection without tmux scraping
   - **Documentation**: See `docs/OPENCODE-INTEGRATION.md` for setup and configuration
-  - **Migration**: See `docs/MULTI-AGENT-MIGRATION-GUIDE.md` for upgrade path
-  - **Testing**: 88.4% code coverage (45 unit tests + 29 daemon integration tests)
+  - **Testing**: Unit and daemon integration coverage for the adapter lifecycle
   - **Phases**: 0-Planning, 1-SSE Adapter, 2-Daemon Integration, 3-Astrocyte Filtering, 4-Testing, 5-Documentation
   - **Beads**: oss-9k2z to oss-7jcf (18 tasks across 5 phases, all complete)
   - **Backward Compatible**: Existing Claude/Gemini sessions unaffected, opt-in for OpenCode

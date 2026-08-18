@@ -23,9 +23,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/monitor/opencode"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/state"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 const (
@@ -35,6 +34,8 @@ const (
 
 // errDeferred is returned by deliverMessage when a message is deferred (session busy).
 var errDeferred = errors.New("message deferred")
+
+type sendMessageOperation func(*ops.OpContext, *ops.SendMessageRequest) (*ops.SendMessageResult, error)
 
 // Config holds daemon configuration
 type Config struct {
@@ -75,6 +76,8 @@ type Daemon struct {
 	metrics         *MetricsCollector
 	alerts          []AlertRule
 	opencodeAdapter *opencode.Adapter
+	deliverDirect   sendMessageOperation
+	updateState     func(string, string, string, string, *dolt.Adapter) error
 }
 
 // NewDaemon creates a new daemon instance with the given configuration
@@ -82,11 +85,13 @@ func NewDaemon(cfg Config) *Daemon {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	d := &Daemon{
-		cfg:     cfg,
-		ctx:     ctx,
-		cancel:  cancel,
-		metrics: NewMetricsCollector(),
-		alerts:  GetDefaultAlertRules(),
+		cfg:           cfg,
+		ctx:           ctx,
+		cancel:        cancel,
+		metrics:       NewMetricsCollector(),
+		alerts:        GetDefaultAlertRules(),
+		deliverDirect: ops.SendMessage,
+		updateState:   session.UpdateSessionState,
 	}
 
 	// Initialize OpenCode adapter if enabled
@@ -106,7 +111,6 @@ func NewDaemon(cfg Config) *Daemon {
 					Multiplier:   cfg.AppConfig.Adapters.OpenCode.Reconnect.Multiplier,
 				},
 				MaxRetries:     0, // Unlimited retries for daemon
-				FallbackTmux:   cfg.AppConfig.Adapters.OpenCode.FallbackTmux,
 				HealthProbeURL: "/health",
 				HealthTimeout:  5 * time.Second,
 			}
@@ -114,12 +118,7 @@ func NewDaemon(cfg Config) *Daemon {
 			adapter, err := opencode.NewAdapter(cfg.EventBus, adapterConfig)
 			if err != nil {
 				cfg.Logger.Error("Failed to create OpenCode adapter", "error", err)
-				if adapterConfig.FallbackTmux {
-					cfg.Logger.Info("Fallback enabled: Will use Astrocyte tmux monitoring for OpenCode sessions")
-				} else {
-					cfg.Logger.Warn("OpenCode adapter creation failed and fallback disabled")
-					cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter is fixed")
-				}
+				cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter initialization succeeds")
 			} else {
 				d.opencodeAdapter = adapter
 				cfg.Logger.Info("OpenCode SSE adapter initialized", "server", adapterConfig.ServerURL)
@@ -179,29 +178,20 @@ func (d *Daemon) Start() error {
 	}
 }
 
-// startOpenCodeAdapter starts the OpenCode SSE adapter (when initialized) and
-// logs the appropriate fallback messaging when start fails or the adapter was
-// enabled but not initialized.
+// startOpenCodeAdapter starts the OpenCode SSE adapter when initialized and
+// reports explicitly when OpenCode monitoring remains inactive.
 func (d *Daemon) startOpenCodeAdapter() {
 	if d.opencodeAdapter == nil {
 		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.Enabled {
 			d.cfg.Logger.Warn("OpenCode adapter enabled but not initialized (initialization failed)")
-			if d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-				d.cfg.Logger.Info("Using Astrocyte tmux monitoring as fallback for OpenCode sessions")
-			}
+			d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter initialization succeeds")
 		}
 		return
 	}
 	d.cfg.Logger.Info("Starting OpenCode SSE adapter...")
 	if err := d.opencodeAdapter.Start(d.ctx); err != nil {
-		d.cfg.Logger.Warn("OpenCode adapter failed to start", "error", err)
-		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-			d.cfg.Logger.Info("Fallback enabled: OpenCode adapter will retry in background")
-			d.cfg.Logger.Info("Using Astrocyte tmux monitoring for OpenCode sessions until SSE adapter connects")
-		} else {
-			d.cfg.Logger.Error("OpenCode adapter start failed and fallback disabled")
-			d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
-		}
+		d.cfg.Logger.Error("OpenCode adapter failed to start", "error", err)
+		d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
 		return
 	}
 	d.cfg.Logger.Info("OpenCode SSE adapter started successfully")
@@ -307,97 +297,100 @@ func (d *Daemon) deliverPending() error {
 	return nil
 }
 
-// deliverMessage attempts to deliver a single message based on the target session's
-// current state. Messages are only delivered when the session is READY.
+// deliverMessage attempts the shared direct-delivery transaction, then applies
+// daemon-owned dequeue, retry, state, and acknowledgment policy.
 func (d *Daemon) deliverMessage(entry messages.QueueEntry) error {
-	// Resolve recipient session manifest to get tmux session name and manifest path
-	recipientManifest, manifestPath, err := session.ResolveIdentifier(entry.To, "", d.cfg.DoltAdapter)
+	deliveryStart := time.Now()
+	var storage dolt.Storage
+	if d.cfg.DoltAdapter != nil {
+		storage = d.cfg.DoltAdapter
+	}
+	result, err := d.deliverDirect(&ops.OpContext{
+		Context: d.ctx,
+		Storage: storage,
+		Tmux:    session.NewRealTmux(),
+	}, &ops.SendMessageRequest{
+		Recipient: entry.To,
+		Message:   entry.Message,
+	})
+	displayRecipient := entry.To
+	if result != nil && result.SessionID != "" {
+		displayRecipient = result.SessionID
+	}
+	displayState := d.recordDisplayState(displayRecipient)
 	if err != nil {
-		d.cfg.Logger.Warn("Cannot resolve session", "session", entry.To, "error", err)
-		d.metrics.RecordStateDetectionError()
-		return d.retryLater(entry, err)
-	}
-
-	// Display state detection is best-effort for logging/metrics only.
-	// It MUST NOT gate delivery decisions — that's CheckSessionDelivery's job.
-	currentState, detectErr := session.DetectState(recipientManifest.Tmux.SessionName)
-	if detectErr != nil {
-		d.cfg.Logger.Warn("Display state detection failed (non-fatal)", "session", entry.To, "error", detectErr)
-		d.metrics.RecordStateDetectionError()
-		currentState = "unknown"
-	} else {
-		d.metrics.RecordStateDetection(string(currentState))
-	}
-
-	// Delivery readiness check — sole authority for delivery decisions.
-	// Checks tmux session existence AND pane content independently of display state.
-	canReceive := session.CheckSessionDelivery(recipientManifest.Tmux.SessionName)
-	d.cfg.Logger.Info("Session delivery check", "session", entry.To, "display_state", currentState, "can_receive", canReceive, "message_id", entry.MessageID)
-
-	//nolint:exhaustive // intentional partial: handles the relevant subset
-	switch canReceive {
-	case state.CanReceiveYes:
-		// Prompt visible, no dialog blocking → deliver now
-		deliveryStart := time.Now()
-		if err := d.sendMessage(recipientManifest.Tmux.SessionName, entry.Message); err != nil {
-			d.cfg.Logger.Warn("Failed to send message", "session", entry.To, "error", err)
-			return d.retryLater(entry, err)
-		}
-
-		// Update session state to WORKING after successful delivery
-		if err := session.UpdateSessionState(manifestPath, manifest.StateWorking, "daemon", recipientManifest.SessionID, d.cfg.DoltAdapter); err != nil {
-			d.cfg.Logger.Warn("Could not update session state", "error", err)
-		}
-
-		// Mark as delivered in queue
-		if err := d.cfg.Queue.MarkDelivered(entry.MessageID); err != nil {
-			d.cfg.Logger.Warn("Could not mark message as delivered", "error", err)
-		}
-
-		// Send acknowledgment if AckManager is configured
-		if d.cfg.AckManager != nil {
-			if err := d.cfg.AckManager.SendAck(entry.MessageID); err != nil {
-				d.cfg.Logger.Warn("Could not send acknowledgment", "message_id", entry.MessageID, "error", err)
-			} else {
-				d.cfg.Logger.Info("Sent acknowledgment", "message_id", entry.MessageID)
+		if readiness, ok := daemonOperationReadiness(err); ok {
+			d.cfg.Logger.Info("Shared delivery deferred", "session", entry.To, "display_state", displayState, "readiness", readiness, "message_id", entry.MessageID)
+			if readiness != "NOT_FOUND" {
+				return errDeferred
 			}
 		}
-
-		deliveryLatency := time.Since(deliveryStart)
-		d.metrics.RecordDeliveryAttempt(true, deliveryLatency)
-		d.cfg.Logger.Info("Delivered message to session", "message_id", entry.MessageID, "session", entry.To, "latency", deliveryLatency)
-		return nil
-
-	case state.CanReceiveNotFound:
-		// Tmux session does not exist — retry (session may have died or not started yet)
-		d.cfg.Logger.Warn("Tmux session not found", "session", entry.To, "message_id", entry.MessageID)
-		return d.retryLater(entry, fmt.Errorf("tmux session '%s' does not exist", recipientManifest.Tmux.SessionName))
-
-	case state.CanReceiveQueue:
-		// Session is busy — defer delivery (leave in queue for next poll)
-		d.cfg.Logger.Info("Session busy, deferring message", "session", entry.To, "display_state", currentState, "message_id", entry.MessageID)
-		return errDeferred
-
-	case state.CanReceiveNo:
-		// Permission dialog or blocker — defer but log warning
-		d.cfg.Logger.Warn("Session has active permission prompt, deferring message", "session", entry.To, "message_id", entry.MessageID)
-		return errDeferred
-
-	default:
-		d.cfg.Logger.Warn("Unknown CanReceive state, deferring message", "session", entry.To, "can_receive", canReceive, "message_id", entry.MessageID)
-		return errDeferred
+		d.cfg.Logger.Warn("Shared delivery failed", "session", entry.To, "error", err, "message_id", entry.MessageID)
+		return d.retryLater(entry, err)
 	}
+	if result == nil || !result.Delivered || result.SessionID == "" {
+		return d.retryLater(entry, fmt.Errorf("shared delivery returned incomplete result for %q", entry.To))
+	}
+
+	if result.ResponsePending {
+		if err := d.updateState("", manifest.StateWorking, "daemon", result.SessionID, d.cfg.DoltAdapter); err != nil {
+			d.cfg.Logger.Warn("Could not update session state", "error", err)
+		}
+	}
+	if err := d.cfg.Queue.MarkDelivered(entry.MessageID); err != nil {
+		d.cfg.Logger.Warn("Could not mark message as delivered", "error", err)
+	}
+	if d.cfg.AckManager != nil {
+		if err := d.cfg.AckManager.SendAck(entry.MessageID); err != nil {
+			d.cfg.Logger.Warn("Could not send acknowledgment", "message_id", entry.MessageID, "error", err)
+		} else {
+			d.cfg.Logger.Info("Sent acknowledgment", "message_id", entry.MessageID)
+		}
+	}
+
+	deliveryLatency := time.Since(deliveryStart)
+	d.metrics.RecordDeliveryAttempt(true, deliveryLatency)
+	d.cfg.Logger.Info("Delivered message to session", "message_id", entry.MessageID, "session", result.Recipient, "latency", deliveryLatency)
+	return nil
 }
 
-// sendMessage delivers a message to the specified tmux session
-func (d *Daemon) sendMessage(sessionName, message string) error {
-	d.cfg.Logger.Info("Sending message to session", "session", sessionName, "message_preview", truncateMessage(message, 60))
-
-	if err := tmux.SendMultiLinePromptSafe(sessionName, message, false); err != nil {
-		return fmt.Errorf("tmux send failed: %w", err)
+func daemonOperationReadiness(err error) (string, bool) {
+	var opErr *ops.OpError
+	if !errors.As(err, &opErr) || opErr.Code != ops.ErrCodeSessionNotReady {
+		return "", false
 	}
+	readiness := opErr.Parameters["readiness"]
+	if readiness == "" {
+		readiness = "UNKNOWN"
+	}
+	return readiness, true
+}
 
-	return nil
+func (d *Daemon) recordDisplayState(recipient string) string {
+	if d.cfg.DoltAdapter == nil {
+		return "unknown"
+	}
+	m, _, err := session.ResolveIdentifier(recipient, "", d.cfg.DoltAdapter)
+	if err != nil {
+		d.metrics.RecordStateDetectionError()
+		return "unknown"
+	}
+	if m.Tmux.SessionName == "" {
+		currentState := strings.TrimSpace(m.State)
+		if currentState == "" {
+			return "unknown"
+		}
+		d.metrics.RecordStateDetection(currentState)
+		return currentState
+	}
+	currentState, err := session.DetectState(m.Tmux.SessionName)
+	if err != nil {
+		d.cfg.Logger.Warn("Display state detection failed (non-fatal)", "session", recipient, "error", err)
+		d.metrics.RecordStateDetectionError()
+		return "unknown"
+	}
+	d.metrics.RecordStateDetection(string(currentState))
+	return string(currentState)
 }
 
 // retryLater increments the retry count for a message. If the message has exceeded
@@ -505,14 +498,6 @@ func IsRunning(pidFile string) bool {
 	// Send signal 0 to check if process is alive
 	err = process.Signal(syscall.Signal(0))
 	return err == nil
-}
-
-// truncateMessage truncates a message for logging purposes
-func truncateMessage(msg string, maxLen int) string {
-	if len(msg) <= maxLen {
-		return msg
-	}
-	return msg[:maxLen] + "..."
 }
 
 // GetMetrics returns the current daemon metrics snapshot

@@ -2,9 +2,11 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,12 +33,24 @@ var ClaudePromptPatterns = []string{
 // critical when starting Claude in a sandbox where --add-dir does not pre-trust
 // the workspace path.
 func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
+	return WaitForClaudePromptContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForClaudePromptContext is the command-scoped variant of
+// WaitForClaudePrompt. It stops readiness polling when the caller cancels.
+//
+//nolint:gocyclo // Readiness is a stateful polling protocol with trust and harness-liveness transitions.
+func WaitForClaudePromptContext(parent context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting prompt detection for session: %s (using capture-pane polling)", sessionName)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Find which socket the session is on
 	socketPath := findSessionSocket(sessionName)
 
-	deadline := time.Now().Add(timeout)
 	pollInterval := 500 * time.Millisecond
 	checksPerformed := 0
 	lastLog := time.Now()
@@ -52,7 +66,13 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	captureFailures := 0
 	lastContent := ""
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d times)", timeout, checksPerformed)
+			}
+			return err
+		}
 		checksPerformed++
 
 		// Log progress every 10 seconds
@@ -61,11 +81,18 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			lastLog = time.Now()
 		}
 
-		// Capture last 50 lines from pane
-		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p", "-S", "-50")
-		output, err := cmd.CombinedOutput()
+		// Resolve and capture one exact pane with ANSI styling and wrapped rows
+		// preserved. The shared probe is the single source of truth for both
+		// trust-dialog ownership and Claude composer readiness.
+		observation, err := probeClaudeInputContext(ctx, sessionName, !trustAnswered)
+		if observation.content != "" {
+			lastContent = observation.content
+		}
 		if err != nil {
-			debug.Log("⚠️  capture-pane failed (attempt %d): %v", checksPerformed, err)
+			if ctx.Err() != nil {
+				continue
+			}
+			debug.Log("⚠️  Claude input probe failed (attempt %d): %v", checksPerformed, err)
 			// Repeated capture failures usually mean the session itself is
 			// gone (harness exited and closed the pane) — check and fail fast
 			// instead of silently polling out the whole timeout.
@@ -77,13 +104,14 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 				}
 				captureFailures = 0
 			}
-			time.Sleep(pollInterval)
+			if err := sleepWithContext(ctx, pollInterval); err != nil {
+				continue
+			}
 			continue
 		}
 		captureFailures = 0
 
-		content := string(output)
-		lastContent = content
+		content := observation.content
 
 		// Log a sample on first check to verify we're reading output
 		if checksPerformed == 1 {
@@ -94,35 +122,38 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			}
 		}
 
-		// Check for Claude's specific prompt pattern (❯)
-		// Use strict matching to avoid false positives from bash prompts.
-		// Suppress detection for ~2s after answering trust to avoid matching
-		// the still-visible trust prompt UI ("❯ 1. Yes, proceed").
-		if containsClaudePromptPattern(content) {
+		// Require the live, tail-owning Claude composer. Trust selectors and
+		// historical prompt glyphs are not readiness evidence, even after AGM has
+		// sent Enter; trustAnswered controls only the short transition settle.
+		if observation.probe.ComposerOwnsInput {
 			if trustAnswered && time.Since(trustAnsweredAt) < 2*time.Second {
 				// Trust prompt UI may still be on screen — ignore false match.
 			} else {
 				debug.Log("✓ Claude prompt detected after %d checks", checksPerformed)
 				// Brief sleep to ensure prompt is stable
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
 
 		// Detect and auto-answer trust prompt inline.
 		// Without this, the trust prompt blocks Claude's main UI from rendering,
-		// so the ❯ prompt never appears and we time out.
-		if !trustAnswered && containsTrustPromptPattern(content) && strings.Contains(content, "Yes, proceed") {
-			debug.Log("🛡️  Trust prompt detected — auto-answering with Enter")
-			if err := SendKeys(sessionName, "Enter"); err != nil {
-				debug.Log("⚠️  Failed to answer trust prompt: %v", err)
-				// Don't give up; maybe a retry will succeed.
-			} else {
+		// so the ❯ prompt never appears and we time out. Only answer when the
+		// selector currently OWNS input, so a historical answered selector still
+		// in the capture, or the question before its options render, never causes
+		// an Enter to land on whatever owns input now (ce-wn4qe).
+		if !trustAnswered && observation.probe.DialogOwnsInput {
+			debug.Log("🛡️  Trust dialog detected from exact-pane capture")
+			if observation.probe.TrustAnswered {
 				trustAnswered = true
 				trustAnsweredAt = time.Now()
 				debug.Log("✓ Trust prompt answered, continuing to wait for ❯")
 				// Brief sleep so Claude can transition past the trust UI
-				time.Sleep(1 * time.Second)
+				if err := sleepWithContext(ctx, time.Second); err != nil {
+					continue
+				}
 				continue
 			}
 		}
@@ -132,8 +163,8 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		// foreground process should exec into the harness almost immediately
 		// and stay there; a shell in the foreground means the harness either
 		// failed to start or died (ce-5zbg: instant Bun ENOENT in deleted cwd).
-		if fg, ok := paneForegroundCommand(socketPath, sessionName); ok {
-			if isShellCommand(fg) {
+		if fg, ok := paneForegroundCommand(ctx, socketPath, sessionName); ok {
+			if IsShellCommand(fg) {
 				consecutiveShell++
 				if sawHarness && consecutiveShell >= harnessExitedChecks {
 					return fmt.Errorf("harness process exited before becoming ready (pane foreground returned to %q); last pane output:\n%s",
@@ -150,10 +181,10 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		}
 
 		// Sleep before next poll
-		time.Sleep(pollInterval)
+		if err := sleepWithContext(ctx, pollInterval); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d times)", timeout, checksPerformed)
 }
 
 // Fast-fail thresholds for WaitForClaudePrompt, in units of poll iterations
@@ -175,8 +206,8 @@ var (
 // foreground of the session's active pane (#{pane_current_command}). The
 // boolean is false when the value could not be determined. The tmux call is
 // timeout-bounded so a wedged server cannot stall the caller's poll loop.
-func paneForegroundCommand(socketPath, sessionName string) (string, bool) {
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", socketPath,
+func paneForegroundCommand(ctx context.Context, socketPath, sessionName string) (string, bool) {
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
 		"display-message", "-p", "-t", sessionName, "#{pane_current_command}")
 	if err != nil {
 		return "", false
@@ -188,9 +219,9 @@ func paneForegroundCommand(socketPath, sessionName string) (string, bool) {
 	return fg, true
 }
 
-// isShellCommand reports whether a pane_current_command value is a plain
+// IsShellCommand reports whether a pane_current_command or process comm value is a plain
 // interactive shell (as opposed to a harness CLI like claude/codex/gemini).
-func isShellCommand(name string) bool {
+func IsShellCommand(name string) bool {
 	name = strings.TrimPrefix(filepath.Base(name), "-") // login shells may report as "-zsh"
 	switch name {
 	case "zsh", "bash", "sh", "ash", "fish", "dash", "ksh", "tcsh", "csh":
@@ -335,22 +366,605 @@ func containsClaudePromptPattern(content string) bool {
 	return strings.Contains(trimmed, "❯")
 }
 
-// containsTrustPromptPattern checks if content contains Claude Code trust prompt.
+func claudePromptEligible(content string) bool {
+	return hasTailOwnedClaudeComposer(content) && !TrustDialogOwnsInput(content)
+}
+
+// Claude Code's trust/onboarding dialog wording has changed across releases.
+// AGM must recognise every known variant, otherwise it never auto-answers the
+// prompt: Claude sits on the dialog forever and harness-readiness detection
+// times out with a misleading AGM-011 (ce-wn4qe). Keep these lists in sync with
+// the shipping Claude Code TUI.
 //
-// Claude Code shows a trust prompt when opening untrusted directories:
-// "Do you trust the files in this folder?"
-//
-// This is used during InitSequence to auto-answer trust prompts that appear
-// during session creation (e.g., after /rename or /agm:agm-assoc commands).
-func containsTrustPromptPattern(content string) bool {
+//	Legacy (≤ 2025): "Do you trust the files in this folder?"  / "Yes, proceed"
+//	Current (2.x):   "Quick safety check: Is this a project you created or one
+//	                  you trust?"                                / "Yes, I trust this folder"
+var claudeTrustQuestionMarkers = []string{
+	"Do you trust the files in this folder?",
+	"Is this a project you created or one you trust",
+}
+
+// The affirmative selector patterns match only option 1. Both current and
+// legacy wording require their adjacent trust question: either phrase can be
+// typed into Claude's composer, and lexical row shape is not input ownership.
+var (
+	claudeTrustCurrentAffirmativeSelectorPattern = regexp.MustCompile(`(?mi)^[ \t]*❯[ \t]*1[.)][ \t]+Yes,[ \t]+I trust this folder[ \t\r]*$`)
+	claudeTrustLegacyAffirmativeSelectorPattern  = regexp.MustCompile(`(?mi)^[ \t]*❯[ \t]*1[.)][ \t]+Yes,[ \t]+proceed[ \t\r]*$`)
+)
+
+// A selected negative row is only trust-dialog evidence when the immediately
+// preceding option is the trust-specific affirmative choice. "No, exit" also
+// appears in other interactive surfaces, so the negative row is not sufficient
+// on its own.
+var (
+	claudeTrustCurrentAffirmativeOptionPattern = regexp.MustCompile(`(?mi)^[ \t]*1[.)][ \t]+Yes,[ \t]+I trust this folder[ \t\r]*$`)
+	claudeTrustLegacyAffirmativeOptionPattern  = regexp.MustCompile(`(?mi)^[ \t]*1[.)][ \t]+Yes,[ \t]+proceed[ \t\r]*$`)
+	claudeTrustNegativeSelectorPattern         = regexp.MustCompile(`(?mi)^[ \t]*❯[ \t]*2[.)][ \t]+No,[ \t]+(?:exit|quit)[ \t\r]*$`)
+	claudeTrustNegativeOptionPattern           = regexp.MustCompile(`(?mi)^[ \t]*2[.)][ \t]+No,[ \t]+(?:exit|quit)[ \t\r]*$`)
+	claudeTrustDialogHintPattern               = regexp.MustCompile(`(?i)^(?:Enter to confirm(?:[ \t]*·[ \t]*Esc to cancel)?|Esc to cancel|Use arrow keys(?: to navigate)?)[ \t\r]*$`)
+)
+
+// ContainsClaudeTrustPrompt reports lexical evidence of the Claude Code trust
+// dialog in any known wording. An affirmative row qualifies only when its
+// same-dialog question remains in the capture; a matching composer draft is
+// not onboarding evidence.
+func ContainsClaudeTrustPrompt(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
+	for _, marker := range claudeTrustQuestionMarkers {
+		if strings.Contains(trimmed, marker) {
+			return true
+		}
+	}
+	return ContainsClaudeTrustAffirmative(trimmed)
+}
 
-	// Exact text match for trust prompt
-	// This text is stable and used consistently by Claude Code
-	return strings.Contains(trimmed, "Do you trust the files in this folder?")
+// ContainsClaudeTrustAffirmative reports lexical selected-row evidence in one
+// output fragment. It can wake a fresh ownership probe, but never authorizes
+// Enter by itself because control-mode events may be fragmented or historical.
+func ContainsClaudeTrustAffirmative(content string) bool {
+	lines := strings.Split(stripANSI(content), "\n")
+	for i := range lines {
+		if isClaudeTrustAffirmativeSelector(lines, i) {
+			return true
+		}
+	}
+	return false
+}
+
+const claudeTrustOwnershipCaptureLines = 50
+
+// ClaudeInputProbe is the current exact-pane input ownership observed during a
+// bounded startup probe. TrustAnswered means the probe itself sent raw Enter
+// to the same pane it captured.
+type ClaudeInputProbe struct {
+	DialogOwnsInput   bool
+	ComposerOwnsInput bool
+	TrustAnswered     bool
+}
+
+type claudeInputProbeRuntime struct {
+	resolve   func(context.Context, string) (activePaneTarget, bool, error)
+	capture   func(context.Context, string) (string, error)
+	liveness  func(context.Context, activePaneTarget) (PaneLiveness, error)
+	sendEnter func(context.Context, string) error
+}
+
+type claudeInputObservation struct {
+	probe   ClaudeInputProbe
+	content string
+}
+
+// ProbeClaudeInputContext resolves one active pane, captures that exact target,
+// and optionally answers a live affirmative trust selector on the same pane.
+// Control-mode output is intentionally absent because events may be fragmented
+// or historical; callers use each event only as a wake-up for this probe.
+func ProbeClaudeInputContext(ctx context.Context, sessionName string, autoAnswerTrust bool) (ClaudeInputProbe, error) {
+	observation, err := probeClaudeInputContext(ctx, sessionName, autoAnswerTrust)
+	return observation.probe, err
+}
+
+func probeClaudeInputContext(ctx context.Context, sessionName string, autoAnswerTrust bool) (claudeInputObservation, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runtime := claudeInputProbeRuntime{
+		resolve: func(ctx context.Context, sessionName string) (activePaneTarget, bool, error) {
+			return resolveActivePaneTarget(ctx, sessionName, GetSocketPath())
+		},
+		capture: func(ctx context.Context, targetPane string) (string, error) {
+			return capturePaneTargetWithOptions(ctx, targetPane, claudeTrustOwnershipCaptureLines, true, true)
+		},
+		liveness: func(ctx context.Context, targetPane activePaneTarget) (PaneLiveness, error) {
+			scanCtx, cancel := context.WithTimeout(ctx, livenessScanTimeout)
+			defer cancel()
+			return checkExpectedHarnessLivenessForPane(scanCtx, targetPane, "claude-code")
+		},
+		sendEnter: func(ctx context.Context, targetPane string) error {
+			_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "send-keys", "-t", targetPane, "-H", "0d")
+			return err
+		},
+	}
+	var observation claudeInputObservation
+	err := withTmuxLockContext(ctx, func() error {
+		var err error
+		observation, err = observeClaudeInput(ctx, sessionName, autoAnswerTrust, runtime)
+		return err
+	})
+	return observation, err
+}
+
+func probeClaudeInput(
+	ctx context.Context,
+	sessionName string,
+	autoAnswerTrust bool,
+	runtime claudeInputProbeRuntime,
+) (ClaudeInputProbe, error) {
+	observation, err := observeClaudeInput(ctx, sessionName, autoAnswerTrust, runtime)
+	return observation.probe, err
+}
+
+func observeClaudeInput(
+	ctx context.Context,
+	sessionName string,
+	autoAnswerTrust bool,
+	runtime claudeInputProbeRuntime,
+) (claudeInputObservation, error) {
+	targetPane, exists, err := runtime.resolve(ctx, sessionName)
+	if err != nil {
+		return claudeInputObservation{}, fmt.Errorf("resolve current Claude pane: %w", err)
+	}
+	if !exists {
+		return claudeInputObservation{}, fmt.Errorf("claude tmux session %q has no active pane", sessionName)
+	}
+	content, err := runtime.capture(ctx, targetPane.ID)
+	if err != nil {
+		return claudeInputObservation{}, fmt.Errorf("capture current Claude pane %q: %w", targetPane.ID, err)
+	}
+	observation, selection := classifyClaudeInputObservation(content)
+	needsLiveClaude := observation.probe.ComposerOwnsInput || autoAnswerTrust && selection == claudeTrustAffirmativeSelected
+	if !needsLiveClaude {
+		return observation, nil
+	}
+	liveness, err := runtime.liveness(ctx, targetPane)
+	if err != nil {
+		return observation, fmt.Errorf("verify Claude liveness on pane %q: %w", targetPane.ID, err)
+	}
+	if !liveness.SessionExists || !liveness.HarnessAlive {
+		return observation, fmt.Errorf("refuse Claude input ownership on pane %q without live Claude process evidence", targetPane.ID)
+	}
+	if observation.probe.ComposerOwnsInput {
+		return observation, nil
+	}
+
+	// The liveness scan is intentionally before the final authority capture:
+	// process-table round trips can take long enough for a human or the TUI to
+	// move the selector. Re-capture and reclassify immediately before Enter.
+	content, err = runtime.capture(ctx, targetPane.ID)
+	if err != nil {
+		return observation, fmt.Errorf("re-capture current Claude pane %q before trust answer: %w", targetPane.ID, err)
+	}
+	observation, selection = classifyClaudeInputObservation(content)
+	if selection != claudeTrustAffirmativeSelected {
+		return observation, nil
+	}
+	if err := runtime.sendEnter(ctx, targetPane.ID); err != nil {
+		return observation, fmt.Errorf("answer Claude trust selector on pane %q: %w", targetPane.ID, err)
+	}
+	observation.probe.TrustAnswered = true
+	return observation, nil
+}
+
+func classifyClaudeInputObservation(content string) (claudeInputObservation, claudeTrustSelection) {
+	selection := classifyTrustDialogOwnership(content)
+	probe := ClaudeInputProbe{
+		DialogOwnsInput:   selection != claudeTrustNotSelected,
+		ComposerOwnsInput: selection == claudeTrustNotSelected && hasTailOwnedClaudeComposer(content),
+	}
+	return claudeInputObservation{probe: probe, content: content}, selection
+}
+
+// TrustSelectorOwnsInput reports whether the trust dialog's affirmative selector
+// is the current tail-owning interactive element: the same-dialog question and
+// numbered "Yes, ..." option are present and only trust-dialog chrome (the other
+// option, the confirm/cancel hint, borders, blanks) follows it. This is the safe precondition for auto-
+// answering the dialog — a historical, already-answered selector with newer
+// content below it (a composer, a permission prompt, model output), or the
+// question text before its options have rendered, does NOT own input and must
+// not be answered (ce-wn4qe: otherwise the Enter could approve a permission
+// selector or submit a user draft).
+func TrustSelectorOwnsInput(content string) bool {
+	return classifyTrustDialogOwnership(content) == claudeTrustAffirmativeSelected
+}
+
+// TrustDialogOwnsInput reports whether the current tail-owning interactive
+// element is Claude's trust dialog, regardless of whether Yes or No is
+// selected. This broader predicate blocks readiness and safety checks while
+// the dialog owns input; only TrustSelectorOwnsInput may authorize Enter.
+func TrustDialogOwnsInput(content string) bool {
+	return classifyTrustDialogOwnership(content) != claudeTrustNotSelected
+}
+
+type claudeTrustSelection uint8
+
+const (
+	claudeTrustNotSelected claudeTrustSelection = iota
+	claudeTrustIndeterminateSelected
+	claudeTrustAffirmativeSelected
+	claudeTrustNegativeSelected
+)
+
+func classifyTrustDialogOwnership(content string) claudeTrustSelection {
+	// Normalize once before splitting. Control-mode captures preserve ANSI
+	// styling, and repeatedly stripping each row is both slower and easier to
+	// apply inconsistently across selector and chrome checks.
+	lines := strings.Split(stripANSI(content), "\n")
+	selectorIndex := -1
+	selection := claudeTrustNotSelected
+	for i, line := range lines {
+		if isClaudeTrustAffirmativeSelector(lines, i) {
+			selectorIndex = i
+			selection = claudeTrustIndeterminateSelected
+			if hasTrustNegativeOptionImmediatelyBelow(lines, i) {
+				selection = claudeTrustAffirmativeSelected
+			}
+			continue
+		}
+		if claudeTrustNegativeSelectorPattern.MatchString(line) &&
+			hasTrustAffirmativeOptionImmediatelyAbove(lines, i) {
+			selectorIndex = i
+			selection = claudeTrustNegativeSelected
+		}
+	}
+	if selectorIndex < 0 {
+		if partialTrustDialogOwnsTail(content) {
+			return claudeTrustIndeterminateSelected
+		}
+		return claudeTrustNotSelected
+	}
+	for _, line := range lines[selectorIndex+1:] {
+		if !isClaudeTrustDialogChrome(line) {
+			return claudeTrustNotSelected
+		}
+	}
+	return selection
+}
+
+// partialTrustDialogOwnsTail catches redraws before Claude has rendered a
+// complete numbered option. A known question or unselected affirmative row
+// followed only by trust chrome and a bare cursor still owns input; treating
+// that cursor as the main composer can submit text into onboarding.
+func partialTrustDialogOwnsTail(content string) bool {
+	styledLines := strings.Split(content, "\n")
+	lines := strings.Split(stripANSI(content), "\n")
+	anchor, anchorIsQuestion := latestClaudeTrustPartialAnchor(lines)
+	if anchor < 0 {
+		return false
+	}
+	lastPrompt := latestClaudePromptAfter(styledLines, lines, anchor)
+	if lastPrompt < 0 {
+		return partialTrustBodyOwnsTail(lines, anchor+1)
+	}
+	body := lines[anchor+1 : lastPrompt]
+	if anchorIsQuestion && !validClaudeTrustPartialBody(body) ||
+		!anchorIsQuestion && !onlyClaudeTrustDialogChrome(body) {
+		return false
+	}
+	// Styled ghost text or a real status-footer line proves that the cursor
+	// belongs to a newer main composer. A bare cursor without that structure
+	// remains indeterminate when only a known trust-body prefix precedes it.
+	return !HasGhostTextInANSI(styledLines[lastPrompt]) &&
+		!hasDefinitiveClaudeComposerFooter(styledLines[lastPrompt+1:])
+}
+
+func latestClaudeTrustPartialAnchor(lines []string) (int, bool) {
+	anchor := -1
+	isQuestion := false
+	for i, line := range lines {
+		plain := strings.TrimSpace(line)
+		if containsClaudeTrustQuestion(plain) {
+			anchor = i
+			isQuestion = true
+			continue
+		}
+		if isClaudeTrustAffirmativeOption(lines, i) {
+			anchor = i
+			isQuestion = false
+		}
+	}
+	return anchor, isQuestion
+}
+
+func latestClaudePromptAfter(styledLines, lines []string, anchor int) int {
+	lastPrompt := -1
+	for i := anchor + 1; i < len(lines); i++ {
+		plain := strings.TrimSpace(lines[i])
+		if plain == "❯" || strings.HasPrefix(plain, "❯") && HasGhostTextInANSI(styledLines[i]) {
+			lastPrompt = i
+		}
+	}
+	return lastPrompt
+}
+
+func partialTrustBodyOwnsTail(lines []string, start int) bool {
+	for i := start; i < len(lines); i++ {
+		plain := strings.TrimSpace(lines[i])
+		if isClaudeTrustDialogChrome(plain) || isClaudeTrustAffirmativeOption(lines, i) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func onlyClaudeTrustDialogChrome(lines []string) bool {
+	for _, line := range lines {
+		if !isClaudeTrustDialogChrome(line) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasDefinitiveClaudeComposerFooter(lines []string) bool {
+	for _, line := range lines {
+		plain := strings.TrimSpace(stripANSI(line))
+		if plain == "" || strings.Trim(plain, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+			continue
+		}
+		if isClaudeComposerFooterChrome(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsClaudeTrustQuestion(line string) bool {
+	for _, marker := range claudeTrustQuestionMarkers {
+		if strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTrustAffirmativeOptionImmediatelyAbove(lines []string, selectorIndex int) bool {
+	for i := selectorIndex - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		return isClaudeTrustAffirmativeOption(lines, i)
+	}
+	return false
+}
+
+func isClaudeTrustAffirmativeSelector(lines []string, index int) bool {
+	if index < 0 || index >= len(lines) {
+		return false
+	}
+	if claudeTrustCurrentAffirmativeSelectorPattern.MatchString(lines[index]) {
+		return hasTrustQuestionImmediatelyBefore(lines, index, claudeTrustQuestionMarkers[1])
+	}
+	return claudeTrustLegacyAffirmativeSelectorPattern.MatchString(lines[index]) &&
+		hasTrustQuestionImmediatelyBefore(lines, index, claudeTrustQuestionMarkers[0])
+}
+
+func isClaudeTrustAffirmativeOption(lines []string, index int) bool {
+	if index < 0 || index >= len(lines) {
+		return false
+	}
+	if claudeTrustCurrentAffirmativeOptionPattern.MatchString(lines[index]) {
+		return hasTrustQuestionImmediatelyBefore(lines, index, claudeTrustQuestionMarkers[1])
+	}
+	return claudeTrustLegacyAffirmativeOptionPattern.MatchString(lines[index]) &&
+		hasTrustQuestionImmediatelyBefore(lines, index, claudeTrustQuestionMarkers[0])
+}
+
+func hasTrustQuestionImmediatelyBefore(lines []string, optionIndex int, marker string) bool {
+	for i := optionIndex - 1; i >= 0; i-- {
+		plain := strings.TrimSpace(lines[i])
+		if strings.Contains(plain, marker) {
+			return validClaudeTrustDialogBody(lines[i+1 : optionIndex])
+		}
+	}
+	return false
+}
+
+func validClaudeTrustDialogBody(lines []string) bool {
+	body := normalizedClaudeTrustBody(lines)
+	if len(body) == 0 {
+		return true
+	}
+	if !strings.Contains(strings.ToLower(body[0]), "this folder pre-approves") {
+		return false
+	}
+
+	index := 1
+	summaryRows := 0
+	for index < len(body) && validClaudeTrustPermissionSummary(body[index]) {
+		summaryRows++
+		index++
+	}
+	if summaryRows == 0 {
+		return false
+	}
+
+	sawApplyWarning := false
+	sawTrustWarning := false
+	for index < len(body) {
+		lower := strings.ToLower(body[index])
+		if lower == "security guide" {
+			return sawApplyWarning && sawTrustWarning && index == len(body)-1
+		}
+		applyWarning := strings.Contains(lower, "these will apply without asking")
+		trustWarning := strings.Contains(lower, "only proceed if you trust this configuration")
+		if !applyWarning && !trustWarning {
+			return false
+		}
+		sawApplyWarning = sawApplyWarning || applyWarning
+		sawTrustWarning = sawTrustWarning || trustWarning
+		index++
+	}
+	return sawApplyWarning && sawTrustWarning
+}
+
+func validClaudeTrustPartialBody(lines []string) bool {
+	body := normalizedClaudeTrustBody(lines)
+	if len(body) == 0 {
+		return true
+	}
+	if !strings.Contains(strings.ToLower(body[0]), "this folder pre-approves") {
+		return false
+	}
+	consequenceStarted := false
+	for index, line := range body[1:] {
+		lower := strings.ToLower(line)
+		if !consequenceStarted && validClaudeTrustPermissionSummary(line) {
+			continue
+		}
+		if strings.Contains(lower, "these will apply without asking") ||
+			strings.Contains(lower, "only proceed if you trust this configuration") {
+			consequenceStarted = true
+			continue
+		}
+		if consequenceStarted && lower == "security guide" && index == len(body)-2 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func normalizedClaudeTrustBody(lines []string) []string {
+	body := make([]string, 0, len(lines))
+	for _, line := range lines {
+		plain := strings.TrimSpace(line)
+		if plain == "" || strings.Trim(plain, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+			continue
+		}
+		body = append(body, plain)
+	}
+	return body
+}
+
+func validClaudeTrustPermissionSummary(line string) bool {
+	line = strings.TrimSpace(line)
+	if remainder, ok := strings.CutPrefix(line, "- "); ok {
+		line = strings.TrimSpace(remainder)
+	} else if remainder, ok := strings.CutPrefix(line, "• "); ok {
+		line = strings.TrimSpace(remainder)
+	}
+	if line == "" || len(line) > 4096 {
+		return false
+	}
+	rules, ok := splitClaudeTrustPermissionRules(line)
+	if !ok || len(rules) == 0 {
+		return false
+	}
+	for _, rule := range rules {
+		if !validClaudeTrustPermissionRule(rule) {
+			return false
+		}
+	}
+	return true
+}
+
+func splitClaudeTrustPermissionRules(line string) ([]string, bool) {
+	const maxNesting = 8
+	rules := make([]string, 0, 4)
+	start := 0
+	depth := 0
+	for i, char := range line {
+		switch char {
+		case '(':
+			depth++
+			if depth > maxNesting {
+				return nil, false
+			}
+		case ')':
+			depth--
+			if depth < 0 {
+				return nil, false
+			}
+		case ',':
+			if depth == 0 {
+				rules = append(rules, strings.TrimSpace(line[start:i]))
+				start = i + 1
+			}
+		case '\r', '\n':
+			return nil, false
+		}
+	}
+	if depth != 0 {
+		return nil, false
+	}
+	return append(rules, strings.TrimSpace(line[start:])), true
+}
+
+func validClaudeTrustPermissionRule(rule string) bool {
+	if rule == "" || strings.TrimSpace(rule) != rule {
+		return false
+	}
+	name := rule
+	if open := strings.IndexByte(rule, '('); open >= 0 {
+		if !strings.HasSuffix(rule, ")") || open == 0 || open == len(rule)-1 {
+			return false
+		}
+		name = rule[:open]
+	}
+	if strings.HasPrefix(name, "mcp__") {
+		return validClaudePermissionName(name, true)
+	}
+	return name[0] >= 'A' && name[0] <= 'Z' && validClaudePermissionName(name, false)
+}
+
+func validClaudePermissionName(name string, allowWildcard bool) bool {
+	for _, char := range name {
+		if char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '_' || char == '-' {
+			continue
+		}
+		if allowWildcard && (char == '*' || char == '?') {
+			continue
+		}
+		return false
+	}
+	return name != ""
+}
+
+func hasTrustNegativeOptionImmediatelyBelow(lines []string, selectorIndex int) bool {
+	for i := selectorIndex + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		return claudeTrustNegativeOptionPattern.MatchString(lines[i])
+	}
+	return false
+}
+
+// isClaudeTrustDialogChrome reports whether a normalized line below the
+// selected option is part of the trust dialog itself (the reject option, the
+// confirm/cancel hint, a box border, or blank) rather than newer content that
+// has taken over input.
+func isClaudeTrustDialogChrome(line string) bool {
+	plain := strings.TrimSpace(line)
+	if plain == "" {
+		return true
+	}
+	if strings.Trim(plain, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+		return true
+	}
+	return claudeTrustNegativeOptionPattern.MatchString(plain) ||
+		claudeTrustDialogHintPattern.MatchString(plain)
+}
+
+// containsTrustPromptPattern checks if content contains the Claude Code trust
+// prompt in any known wording. It is used during readiness detection and
+// InitSequence to auto-answer trust prompts that appear during session
+// creation (e.g., after /rename or /agm:agm-assoc commands).
+func containsTrustPromptPattern(content string) bool {
+	return ContainsClaudeTrustPrompt(content)
 }
 
 // containsPromptPattern is deprecated. Use containsClaudePromptPattern instead.
@@ -388,38 +1002,89 @@ func containsPromptPattern(content string) bool {
 // It periodically captures the pane content and checks for prompt patterns.
 // Detects both Claude (❯) and Gemini (">   Type your message") prompts.
 func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
+	return WaitForPromptSimpleContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForPromptSimpleContext is the command-scoped variant of
+// WaitForPromptSimple. It stops polling when the caller cancels.
+func WaitForPromptSimpleContext(parent context.Context, sessionName string, timeout time.Duration) error {
+	return WaitForPromptSimpleForHarnessContext(parent, sessionName, timeout, "")
+}
+
+// WaitForPromptSimpleForHarnessContext scopes harness-specific blockers while
+// retaining the shared composer polling used by generic delivery.
+//
+//nolint:gocyclo // Stateful readiness keeps capture, liveness, harness-specific blockers, and cancellation in one polling protocol.
+func WaitForPromptSimpleForHarnessContext(parent context.Context, sessionName string, timeout time.Duration, expectedHarness string) error {
 	debug.Log("\n🔍 Starting simple prompt detection for session: %s", sessionName)
 
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	checkCount := 0
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
+			}
+			return err
+		}
 		checkCount++
 
 		// Capture enough of the visible pane to include multi-line TUI
 		// composers. Codex's stable readiness marker ("OpenAI Codex") can sit
 		// well above the footer line after previous prompts/responses.
-		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-30").Output()
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
+		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {
+			if ctx.Err() != nil {
+				continue
+			}
 			return fmt.Errorf("tmux capture-pane timed out while waiting for prompt: %w", cmdErr)
 		}
 		if err != nil {
 			// Session might not exist or not accessible
-			time.Sleep(500 * time.Millisecond)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				continue
+			}
 			continue
 		}
 
-		lines := strings.Split(string(output), "\n")
+		styledContent := string(output)
+		if expectedHarness == "codex-cli" && IsCodexHookReviewRequired(styledContent) {
+			return CodexHookReviewError()
+		}
+		if IsCodexComposerReady(styledContent) {
+			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
+		content := stripANSI(styledContent)
+		if containsPiReadyPattern(content) {
+			debug.Log("✓ Managed Pi prompt detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
+		// Codex readiness is a multi-line contract: the initial header must be
+		// paired with its hint, and the post-turn cursor with its footer. Evaluate
+		// the styled pane before stripping terminal controls for legacy
+		// line-oriented harness checks.
+		lines := strings.Split(content, "\n")
 
 		// Check each line for any harness prompt pattern (Claude or Gemini)
 		for i, line := range lines {
-			if containsAnyHarnessPromptPattern(line) {
+			if containsAnyNonPiHarnessPromptPattern(line) {
 				debug.Log("✓ Harness prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
 				// Found prompt - wait a bit to ensure it's stable
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -430,10 +1095,10 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 		}
 
 		// Wait before next check
-		time.Sleep(500 * time.Millisecond)
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
 }
 
 // ResumeFailurePatterns are substrings that indicate `claude --resume` failed
@@ -482,24 +1147,49 @@ func containsResumeFailurePattern(line string) (string, bool) {
 // prompt never renders. Without this check the caller would block for the
 // full timeout and then attach to a broken pane.
 func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) error {
+	return WaitForPromptOrResumeFailureContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForPromptOrResumeFailureContext is the command-scoped variant of
+// WaitForPromptOrResumeFailure. It stops polling when the caller cancels.
+func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName string, timeout time.Duration) error {
+	return WaitForPromptOrResumeFailureForHarnessContext(parent, sessionName, timeout, "")
+}
+
+// WaitForPromptOrResumeFailureForHarnessContext scopes harness-specific
+// blockers while retaining generic fatal-resume and composer detection.
+//
+//nolint:gocyclo // Stateful resume readiness keeps fatal output, harness blockers, composer detection, and cancellation in one polling protocol.
+func WaitForPromptOrResumeFailureForHarnessContext(parent context.Context, sessionName string, timeout time.Duration, expectedHarness string) error {
 	debug.Log("\n🔍 Starting resume-aware prompt detection for session: %s", sessionName)
 
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	checkCount := 0
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
+			}
+			return err
+		}
 		checkCount++
 
 		// Capture the recent pane tail (from 10 lines into scrollback through
 		// the visible region) so a multi-line failure message - the error plus
 		// the returned shell prompt - is visible in a single check.
-		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-10").Output()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				continue
+			}
 			continue
 		}
 
-		lines := strings.Split(string(output), "\n")
+		styledContent := string(output)
+		content := stripANSI(styledContent)
+		lines := strings.Split(content, "\n")
 
 		// Check for a fatal resume failure first - it is the more specific
 		// signal and a returned shell prompt could otherwise look like success.
@@ -510,10 +1200,23 @@ func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) err
 			}
 		}
 
+		if expectedHarness == "codex-cli" && IsCodexHookReviewRequired(styledContent) {
+			return CodexHookReviewError()
+		}
+		if IsCodexComposerReady(styledContent) {
+			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
+
 		for i, line := range lines {
 			if containsAnyHarnessPromptPattern(line) {
 				debug.Log("✓ Harness prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -522,138 +1225,67 @@ func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) err
 			debug.Log("⏳ Still waiting for prompt... (check #%d)", checkCount)
 		}
 
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
-}
-
-// WaitForClaudeReady waits for Claude to be fully ready, handling trust prompts if needed
-// This function:
-// 1. Detects and auto-answers trust prompts ("Yes, proceed")
-// 2. Waits for SessionStart hooks to complete
-// 3. Waits for the Claude prompt (❯) to appear
-//
-//nolint:gocyclo // reason: stateful readiness loop with many termination conditions; per-event helpers would obscure the polling protocol.
-func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
-	debug.Log("🔍 Waiting for Claude to be ready (session: %s)", sessionName)
-
-	// Start control mode
-	ctrl, err := StartControlMode(sessionName)
-	if err != nil {
-		return fmt.Errorf("failed to start control mode: %w", err)
-	}
-	defer ctrl.Close()
-
-	// Create output watcher
-	watcher := NewOutputWatcher(ctrl.Stdout)
-
-	// State tracking
-	trustPromptSeen := false
-	trustPromptAnswered := false
-	deadline := time.Now().Add(timeout)
-	linesChecked := 0
-
-	sessionStartSeen := false
-
-	for time.Now().Before(deadline) {
-		// Read next output line
-		line, err := watcher.ReadLine(2 * time.Second)
-		if err != nil {
-			// Timeout on individual read - might be ready
-			// Only consider it ready if we've seen SessionStart hooks complete
-			if sessionStartSeen && linesChecked > 20 {
-				debug.Log("✓ Session appears ready (SessionStart hooks completed)")
-				return nil
-			}
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 			continue
 		}
+	}
+}
 
-		linesChecked++
+// WaitForClaudeReady waits for Claude's current exact pane to expose the main
+// composer, handling a live affirmative trust selector first when needed.
+// Pane capture is authoritative: control-mode events can be historical,
+// fragmented, or lost while a reader times out.
+func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
+	debug.Log("🔍 Waiting for Claude to be ready (session: %s)", sessionName)
+	return waitForClaudeReadyWithProbe(
+		context.Background(), sessionName, timeout, 200*time.Millisecond, 2*time.Second, probeClaudeInputContext,
+	)
+}
 
-		// Extract content if it's an %output line
-		var content string
-		if strings.HasPrefix(line, "%output") {
-			content = ExtractOutputContent(line)
-		} else {
-			content = line
-		}
-
-		// Log output for debugging (first few lines and periodically)
-		if linesChecked <= 10 || linesChecked%20 == 0 {
-			if isVisibleContent(content) {
-				cleanContent := stripANSI(content)
-				if strings.TrimSpace(cleanContent) != "" {
-					debug.Log("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 100))
-				}
-			}
-		}
-
-		// Check for trust prompt
-		if !trustPromptSeen && strings.Contains(content, "Do you trust the files in this folder?") {
-			trustPromptSeen = true
-			debug.Log("🛡️  Trust prompt detected at line %d", linesChecked)
-		}
-
-		// If trust prompt seen but not answered yet, look for the prompt and answer
-		if trustPromptSeen && !trustPromptAnswered {
-			// Check if this line contains the selection prompt (❯ 1. Yes, proceed)
-			if strings.Contains(content, "Yes, proceed") {
-				debug.Log("✓ Answering trust prompt with Enter key")
-				trustPromptAnswered = true
-
-				// Close control mode session temporarily to send keys
-				ctrl.Close()
-
-				// Use regular tmux send-keys (not via control mode)
-				// This works better for interactive prompts
-				if err := SendCommand(sessionName, "C-m"); err != nil {
-					debug.Log("⚠ Failed to send Enter: %v", err)
-					return fmt.Errorf("failed to answer trust prompt: %w", err)
-				}
-
-				debug.Log("✓ Trust prompt answer sent, waiting 2s for processing...")
-				time.Sleep(2 * time.Second)
-
-				// Restart control mode to continue monitoring
-				ctrl, err = StartControlMode(sessionName)
-				if err != nil {
-					return fmt.Errorf("failed to restart control mode after trust prompt: %w", err)
-				}
-				// Note: we don't defer close here because it's handled at the function level
-
-				// Recreate watcher for the new control session
-				watcher = NewOutputWatcher(ctrl.Stdout)
-				debug.Log("✓ Control mode restarted, continuing to monitor...")
-			}
-		}
-
-		// Check for SessionStart hook completion indicator
-		// The hooks write output that ends with "Session Start ===", "success", etc.
-		if strings.Contains(content, "=== engram-research Session Start ===") ||
-			strings.Contains(content, "SessionStart:startup hook success") ||
-			strings.Contains(content, "Hook execution completed") {
-			sessionStartSeen = true
-			debug.Log("📋 SessionStart hooks activity detected at line %d", linesChecked)
-		}
-
-		// Check for Claude prompt (only after trust prompt handled)
-		if trustPromptAnswered && sessionStartSeen && containsPromptPattern(content) {
-			debug.Log("✓ Claude prompt detected at line %d: %q", linesChecked, truncate(content, 50))
-			// Wait a bit to ensure it's stable
-			time.Sleep(500 * time.Millisecond)
-			return nil
-		}
-
-		// Also check for the main prompt pattern even without session start (fallback)
-		if !trustPromptSeen && containsPromptPattern(content) {
-			debug.Log("✓ Claude prompt detected (no trust prompt) at line %d: %q", linesChecked, truncate(content, 50))
-			time.Sleep(500 * time.Millisecond)
-			return nil
-		}
+func waitForClaudeReadyWithProbe(
+	parent context.Context,
+	sessionName string,
+	timeout, pollInterval, trustSettle time.Duration,
+	probeInput func(context.Context, string, bool) (claudeInputObservation, error),
+) error {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	if pollInterval <= 0 {
+		pollInterval = 200 * time.Millisecond
 	}
 
-	return fmt.Errorf("timeout waiting for Claude to be ready (waited %v, checked %d lines)", timeout, linesChecked)
+	trustPromptAnswered := false
+	checks := 0
+	var trustAnsweredAt time.Time
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for Claude to be ready (waited %v, checked %d times)", timeout, checks)
+			}
+			return err
+		}
+		checks++
+		observation, probeErr := probeInput(ctx, sessionName, !trustPromptAnswered)
+		if probeErr != nil {
+			return probeErr
+		}
+		if observation.probe.TrustAnswered {
+			trustPromptAnswered = true
+			trustAnsweredAt = time.Now()
+			debug.Log("✓ Trust prompt answer sent to captured pane; waiting for Claude composer")
+		}
+		if observation.probe.ComposerOwnsInput &&
+			(!trustPromptAnswered || time.Since(trustAnsweredAt) >= trustSettle) {
+			debug.Log("✓ Claude composer owns current pane input")
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := sleepWithContext(ctx, pollInterval); err != nil {
+			continue
+		}
+	}
 }
 
 // truncate truncates a string to maxLen characters with "..." suffix
@@ -675,10 +1307,10 @@ func isVisibleContent(s string) bool {
 
 	// If content is mostly escape sequences, don't consider it visible
 	// Escape sequences typically start with \x1b or \033
-	if strings.HasPrefix(trimmed, "\x1b") || strings.HasPrefix(trimmed, "\033") {
+	if strings.HasPrefix(trimmed, "\x1b") {
 		// Check if there's any non-escape content
 		// Simple heuristic: if more than 50% is escape codes, skip it
-		escapeCount := strings.Count(trimmed, "\x1b") + strings.Count(trimmed, "\033")
+		escapeCount := strings.Count(trimmed, "\x1b")
 		if escapeCount*4 > len(trimmed) { // Escape sequences are typically 4+ chars
 			return false
 		}
@@ -857,12 +1489,17 @@ func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 }
 
 // containsAnyHarnessPromptPattern checks if content contains prompt patterns from
-// ANY supported harness (Claude, Gemini, OpenCode, Codex, or AGY). Used by SendMultiLinePromptSafe and
+// ANY supported harness (Claude, Gemini, OpenCode, Codex, AGY, or Pi). Used by SendMultiLinePromptSafe and
 // SendPromptLiteral which don't know the harness type but need to detect readiness.
 func containsAnyHarnessPromptPattern(content string) bool {
-	return containsClaudePromptPattern(content) || containsGeminiPromptPattern(content) ||
-		containsOpenCodePromptPattern(content) || containsCodexPromptPattern(content) ||
-		containsAgyPromptPattern(content)
+	return containsAnyNonPiHarnessPromptPattern(content) || containsPiReadyPattern(stripANSI(content))
+}
+
+func containsAnyNonPiHarnessPromptPattern(content string) bool {
+	plainContent := stripANSI(content)
+	return containsClaudePromptPattern(plainContent) || containsGeminiPromptPattern(plainContent) ||
+		containsOpenCodePromptPattern(plainContent) || IsCodexComposerReady(content) ||
+		containsAgyPromptPattern(plainContent)
 }
 
 // containsGeminiPromptPattern checks if content contains any Gemini prompt pattern

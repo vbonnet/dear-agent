@@ -45,7 +45,7 @@ type GateResult struct {
 
 // GateConfig defines gate configuration for phase transitions
 type GateConfig struct {
-	PhaseTransition         string // e.g., "S6_to_S7"
+	PhaseTransition         string // e.g., "SPEC_to_PLAN"
 	Tier                    GateTier
 	RequiredPersonas        []string // Must review
 	OptionalPersonas        []string // May review based on detection
@@ -55,11 +55,11 @@ type GateConfig struct {
 // MultiPersonaGate implements Multi-Persona Review Gates
 type MultiPersonaGate struct {
 	projectDir string
-	status     status.StatusInterface
+	status     *status.StatusV2
 }
 
 // NewMultiPersonaGate creates a new Multi-Persona gate validator
-func NewMultiPersonaGate(projectDir string, st status.StatusInterface) *MultiPersonaGate {
+func NewMultiPersonaGate(projectDir string, st *status.StatusV2) *MultiPersonaGate {
 	return &MultiPersonaGate{
 		projectDir: projectDir,
 		status:     st,
@@ -68,7 +68,7 @@ func NewMultiPersonaGate(projectDir string, st status.StatusInterface) *MultiPer
 
 // ValidateGate checks if a phase transition passes the Multi-Persona Review Gate
 // Returns ValidationError if gate is BLOCKED or CONDITIONAL
-func ValidateGate(projectDir, phaseName string, st status.StatusInterface) error {
+func ValidateGate(projectDir, phaseName string, st *status.StatusV2) error {
 	// Skip multi-persona gate in test environments without API keys or Vertex AI config
 	hasAnthropicKey := os.Getenv("ANTHROPIC_API_KEY") != ""
 	hasVertexConfig := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID") != "" &&

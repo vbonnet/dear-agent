@@ -52,7 +52,7 @@ func TestFullDaemonWorkflow(t *testing.T) {
 			StuckThresholdDuration: 10 * time.Second,
 		},
 		Tmux: config.TmuxConfig{
-			Socket: "",
+			Socket: filepath.Join(tmpDir, "sentinel-test.sock"),
 		},
 		Recovery: config.RecoveryConfig{
 			Enabled:     true,
@@ -349,7 +349,7 @@ func createTestConfigForIntegration(t *testing.T, tmpDir string) *config.Config 
 			StuckThresholdDuration: 10 * time.Second,
 		},
 		Tmux: config.TmuxConfig{
-			Socket: "",
+			Socket: filepath.Join(tmpDir, "sentinel-test.sock"),
 		},
 		Recovery: config.RecoveryConfig{
 			Enabled:     true,
@@ -399,9 +399,6 @@ func TestDaemonSignalHandling(t *testing.T) {
 
 	// Simulate signal stop
 	monitor.StopMonitoring()
-
-	// Wait for graceful shutdown
-	time.Sleep(200 * time.Millisecond)
 	assert.False(t, monitor.IsRunning(), "should stop gracefully")
 }
 
@@ -431,9 +428,6 @@ func TestFullLifecycle(t *testing.T) {
 
 	// Phase 3: Stop
 	monitor.StopMonitoring()
-	// Wait for goroutine to actually complete
-	// CheckAllSessions() now checks stopChan between sessions, so should exit quickly
-	time.Sleep(200 * time.Millisecond) // Allow time for current checkSession to complete and goroutine to exit
 	assert.False(t, monitor.IsRunning(), "should be stopped")
 }
 
@@ -528,12 +522,7 @@ func TestMonitorStability(t *testing.T) {
 	assert.True(t, monitor.IsRunning(), "should still be running after 5 cycles")
 
 	monitor.StopMonitoring()
-	// Poll for up to 2 seconds for the monitor goroutine to exit
-	deadline := time.Now().Add(2 * time.Second)
-	for monitor.IsRunning() && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
-	}
-	assert.False(t, monitor.IsRunning(), "monitor should stop within 2 seconds")
+	assert.False(t, monitor.IsRunning(), "monitor should stop synchronously")
 }
 
 // TestDetectorCursorFreezeIntegration tests cursor freeze with detector.

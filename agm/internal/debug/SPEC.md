@@ -16,6 +16,8 @@
 
 **DBG-04** When the logger is absent or closed, the system shall allow repeated close and log calls without panicking.
 
+**DBG-05** When debug logging is enabled, the system shall enforce owner-only permissions on the debug directory and log file, including when either path already exists with broader permissions.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_diagnostics_package_guardrails.feature`

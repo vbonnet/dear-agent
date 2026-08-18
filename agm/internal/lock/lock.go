@@ -2,11 +2,14 @@
 package lock
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
 )
+
+var tryFlock = syscall.Flock
 
 // FileLock represents a file-based lock using syscall.Flock
 type FileLock struct {
@@ -60,8 +63,11 @@ func New(path string) (*FileLock, error) {
 func (fl *FileLock) TryLock() error {
 	// LOCK_EX = exclusive lock
 	// LOCK_NB = non-blocking (fail immediately if locked)
-	err := syscall.Flock(int(fl.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	err := tryFlock(int(fl.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return fmt.Errorf("acquire flock for %q: %w", fl.path, err)
+		}
 		return &LockError{
 			Problem:  "Another agm command is currently running",
 			Recovery: "Wait for the other command to finish, or run 'agm unlock' to check for stale locks",

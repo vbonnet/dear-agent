@@ -11,7 +11,7 @@
 ###############################################################################
 
 resource "github_repository" "archived" {
-  for_each   = local.archived_repos
+  for_each   = var.archived_repos
   name       = each.key
   visibility = each.value.visibility
   archived   = true

@@ -16,7 +16,7 @@ var CreateSandboxCmd = &cobra.Command{
 Sandboxes provide directory + git worktree isolation (95% coverage).
 
 Example:
-  wayfinder-session create-sandbox test-sandbox`,
+  wayfinder session create-sandbox test-sandbox`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCreateSandbox,
 }

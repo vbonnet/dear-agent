@@ -16,7 +16,7 @@
 
 **WAYFINDER-COORD-04** While projects execute concurrently, the system shall enforce the configured concurrency limit.
 
-**WAYFINDER-COORD-05** When status output is monitored, the system shall parse canonical phase, progress, and message fields and use stable defaults for missing values.
+**WAYFINDER-COORD-05** When status output is monitored, the system shall update a project only after complete canonical schema 2.0 validation; a missing file may report a waiting default, while invalid status shall not be exposed.
 
 **WAYFINDER-COORD-06** When events are emitted, the system shall deliver them to registered listeners without deadlocking shutdown.
 

@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,22 +25,37 @@ type stallEventOutput struct {
 
 // recoveryActionOutput represents the JSON output for a recovery action.
 type recoveryActionOutput struct {
-	Timestamp       string `json:"timestamp"`
-	SessionName     string `json:"session_name"`
-	ActionType      string `json:"action_type"`
-	Description     string `json:"description"`
-	Sent            bool   `json:"sent"`
-	Error           string `json:"error,omitempty"`
+	Timestamp   string `json:"timestamp"`
+	SessionName string `json:"session_name"`
+	ActionType  string `json:"action_type"`
+	Description string `json:"description"`
+	Sent        bool   `json:"sent"`
+	Error       string `json:"error,omitempty"`
 }
 
 var (
-	stalledCheckInterval      time.Duration
-	stalledPermissionTimeout  time.Duration
-	stalledNoCommitTimeout    time.Duration
+	stalledCheckInterval        time.Duration
+	stalledPermissionTimeout    time.Duration
+	stalledNoCommitTimeout      time.Duration
 	stalledErrorRepeatThreshold int
-	stalledOrchestratorName   string
-	stalledDryRun             bool
+	stalledOrchestratorName     string
+	stalledDryRun               bool
+	stalledNotifyConfigPath     string
+	stalledWatchCompletions     bool
+	stalledCompletionExcludes   string
 )
+
+// completionEventOutput represents the JSON output for a completion event.
+type completionEventOutput struct {
+	Timestamp      string `json:"timestamp"`
+	EventType      string `json:"event_type"`
+	SessionName    string `json:"session_name"`
+	SessionID      string `json:"session_id"`
+	Harness        string `json:"harness"`
+	TransitionType string `json:"transition_type"`
+	OutputBytes    int    `json:"output_bytes"`
+	SurfaceErrors  string `json:"surface_errors,omitempty"`
+}
 
 var watchStalledCmd = &cobra.Command{
 	Use:   "watch-stalled",
@@ -76,7 +90,51 @@ func init() {
 		"Orchestrator session name for alerts (optional)")
 	watchStalledCmd.Flags().BoolVar(&stalledDryRun, "dry-run", false,
 		"Detect stalls without taking recovery actions")
+	watchStalledCmd.Flags().StringVar(&stalledNotifyConfigPath, "notify-config", "",
+		"Path to a notify dispatcher config (YAML). Defaults to ~/.agm/notify.yaml; falls back to the log dispatcher when absent.")
+	watchStalledCmd.Flags().BoolVar(&stalledWatchCompletions, "watch-completions", true,
+		"Also watch for session completions and surface their results")
+	watchStalledCmd.Flags().StringVar(&stalledCompletionExcludes, "completion-exclude", "orchestrator,overseer,meta-",
+		"Comma-separated name substrings whose sessions never emit completion notifications")
 	rootCmd.AddCommand(watchStalledCmd)
+}
+
+// emitCompletions scans for finished sessions, prints each event as JSON, and
+// surfaces it through the configured channels.
+//
+// A dry run keeps the JSON preview but delivers nothing: dispatchers can POST
+// to webhooks and raise desktop/tmux notifications, and the relay injects a
+// message into a live orchestrator session. Those are externally visible acts,
+// so a command documented as leaving no trace must skip them exactly as the
+// watcher skips its durable writes.
+func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfacer *completionSurfacer, dryRun bool) {
+	events, err := watcher.Scan(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error detecting completions: %v\n", err)
+		return
+	}
+	for _, event := range events {
+		out := completionEventOutput{
+			Timestamp:      time.Now().Format(time.RFC3339),
+			EventType:      "completion",
+			SessionName:    event.SessionName,
+			SessionID:      event.SessionID,
+			Harness:        event.Harness,
+			TransitionType: event.TransitionType,
+			OutputBytes:    len(event.Output),
+		}
+		if !dryRun && surfacer.shouldSurface(event) {
+			if errs := surfacer.Surface(ctx, event); len(errs) > 0 {
+				parts := make([]string, len(errs))
+				for i, surfaceErr := range errs {
+					parts[i] = surfaceErr.Error()
+				}
+				out.SurfaceErrors = strings.Join(parts, "; ")
+			}
+		}
+		data, _ := json.Marshal(out)
+		fmt.Println(string(data))
+	}
 }
 
 func runWatchStalled(cmd *cobra.Command, args []string) error {
@@ -93,17 +151,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "  Dry run: %v\n", stalledDryRun)
 	fmt.Fprintf(os.Stderr, "\n")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle OS signals for clean shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Fprintf(os.Stderr, "\nShutting down watcher...\n")
-		cancel()
-	}()
+	ctx := cmd.Context()
 
 	// Create detector and recovery handler
 	detector := ops.NewStallDetector(opCtx)
@@ -113,6 +161,20 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 
 	recovery := ops.NewStallRecovery(opCtx, stalledOrchestratorName)
 
+	var completions *ops.CompletionWatcher
+	var surfacer *completionSurfacer
+	if stalledWatchCompletions {
+		completions = ops.NewCompletionWatcher(opCtx)
+		// --dry-run must leave no trace: observe and report, but never write
+		// State/FinalOutput onto session records.
+		completions.DryRun = stalledDryRun
+		surfacer, err = newCompletionSurfacer(opCtx, stalledNotifyConfigPath, stalledOrchestratorName, stalledCompletionExcludes)
+		if err != nil {
+			return handleError(err)
+		}
+		defer surfacer.Close()
+	}
+
 	// Main watch loop
 	ticker := time.NewTicker(stalledCheckInterval)
 	defer ticker.Stop()
@@ -120,8 +182,12 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
 			return nil
 		case <-ticker.C:
+			if completions != nil {
+				emitCompletions(ctx, completions, surfacer, stalledDryRun)
+			}
 			events, err := detector.DetectStalls(ctx)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error detecting stalls: %v\n", err)

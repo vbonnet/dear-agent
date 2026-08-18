@@ -34,6 +34,9 @@ func TestEnrichManifestWithAgyConversation_PrefersContextProject(t *testing.T) {
 	if m.WorkingDirectory != projectPath {
 		t.Fatalf("working directory = %q, want %q", m.WorkingDirectory, projectPath)
 	}
+	if m.Model != "" {
+		t.Fatalf("discovered AGY model = %q, want unknown model left unset", m.Model)
+	}
 }
 
 func TestAgyWorkspaceCandidates_DeduplicatesAndOrdersPaths(t *testing.T) {

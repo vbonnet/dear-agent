@@ -11,8 +11,9 @@ import (
 // state it exercises; an unset key yields the zero value (the conservative
 // answer for the bool/known probes).
 type fakeSweepDeps struct {
-	discovered  []DiscoveredWorktree
-	discoverErr error
+	discovered    []DiscoveredWorktree
+	discoverErr   error
+	discoverCalls int
 
 	dirty    map[string]bool
 	dirtyErr map[string]error
@@ -50,6 +51,7 @@ type fakeSweepDeps struct {
 }
 
 func (f *fakeSweepDeps) Discover(string) ([]DiscoveredWorktree, error) {
+	f.discoverCalls++
 	return f.discovered, f.discoverErr
 }
 func (f *fakeSweepDeps) IsDirty(p string) (bool, error) {
@@ -437,7 +439,7 @@ func TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch(t *testing.T) {
 		ancestor: map[string]bool{"claude/m": true},
 		mainRepo: map[string]string{"/wt/m": "/repo"},
 	}
-	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true}, f, nil)
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true, ActiveSessionsKnown: true}, f, nil)
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -455,21 +457,30 @@ func TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch(t *testing.T) {
 	}
 }
 
-func TestSweep_RemoveFailureIsRecordedNotFatal(t *testing.T) {
+func TestSweep_RemoveFailureIsRecordedAndProcessingContinues(t *testing.T) {
 	f := &fakeSweepDeps{
-		discovered: []DiscoveredWorktree{{Path: "/wt/m", Repo: "r", Branch: "claude/m"}},
-		ancestor:   map[string]bool{"claude/m": true},
-		removeErr:  map[string]error{"/wt/m": errors.New("locked")},
+		discovered: []DiscoveredWorktree{
+			{Path: "/wt/a", Repo: "r", Branch: "claude/a"},
+			{Path: "/wt/b", Repo: "r", Branch: "claude/b"},
+		},
+		ancestor: map[string]bool{
+			"claude/a": true,
+			"claude/b": true,
+		},
+		removeErr: map[string]error{"/wt/a": errors.New("locked")},
 	}
-	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true}, f, nil)
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true, ActiveSessionsKnown: true}, f, nil)
 	if err != nil {
 		t.Fatalf("Sweep must be non-fatal: %v", err)
 	}
-	if len(res.Removed) != 0 {
-		t.Fatalf("failed removal must not be counted removed: %v", res.Removed)
+	if len(res.Removed) != 1 || res.Removed[0] != "/wt/b" {
+		t.Fatalf("processing must continue after failure; res.Removed = %v, want [/wt/b]", res.Removed)
 	}
-	if res.Failed["/wt/m"] == "" {
+	if res.Failed["/wt/a"] == "" {
 		t.Fatalf("failure must be recorded in res.Failed")
+	}
+	if len(f.delBranch) != 1 || f.delBranch[0] != "claude/b" {
+		t.Fatalf("failed worktree removal must preserve only its local branch: %v", f.delBranch)
 	}
 }
 
@@ -479,7 +490,7 @@ func TestSweep_BranchDeleteFailureStillCountsWorktreeRemoved(t *testing.T) {
 		ancestor:   map[string]bool{"claude/m": true},
 		deleteErr:  map[string]error{"claude/m": errors.New("still referenced")},
 	}
-	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true}, f, nil)
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true, ActiveSessionsKnown: true}, f, nil)
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -512,5 +523,58 @@ func TestAnnotateDuplicates(t *testing.T) {
 		if wts[i].DupCount != 0 {
 			t.Fatalf("index %d should not be a dup: %+v", i, wts[i])
 		}
+	}
+}
+
+// TestSweep_ExecuteRefusesWhenActiveSetIsUnknown is the ce-3knl.1 regression.
+// Before this guard the caller downgraded a failed active-session lookup to a
+// warning, on the reasoning that fewer ACTIVE matches is "more conservative".
+// It is the opposite: a live worktree sitting clean at origin/main classifies
+// as MERGED, so an unknown active set makes live work reapable. That is how
+// two live worktrees were deleted during the 2026-07-10 audit.
+func TestSweep_ExecuteRefusesWhenActiveSetIsUnknown(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{
+			{Path: "/wt/live", Repo: "r", Branch: "claude/live"},
+		},
+		ancestor: map[string]bool{"claude/live": true},
+		mainRepo: map[string]string{"/wt/live": "/repo"},
+	}
+
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true, ActiveSessionsKnown: false}, f, nil)
+	if !errors.Is(err, ErrActiveSessionsUnknown) {
+		t.Fatalf("Sweep err = %v, want ErrActiveSessionsUnknown", err)
+	}
+	if res != nil {
+		t.Fatalf("a refused sweep must return no result, got %+v", res)
+	}
+	if len(f.removed) != 0 || len(f.delBranch) != 0 {
+		t.Fatalf("a refused sweep must not mutate: removed=%v delBranch=%v", f.removed, f.delBranch)
+	}
+	if f.discoverCalls != 0 {
+		t.Fatalf("a refused sweep must fail before discovery, got %d discover call(s)", f.discoverCalls)
+	}
+}
+
+// TestSweep_DryRunStillClassifiesWhenActiveSetIsUnknown keeps the diagnostic
+// path open: an operator whose Dolt and tmux lookups are both down can still
+// see what the sweep would have done.
+func TestSweep_DryRunStillClassifiesWhenActiveSetIsUnknown(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{
+			{Path: "/wt/m", Repo: "r", Branch: "claude/m"},
+		},
+		ancestor: map[string]bool{"claude/m": true},
+	}
+
+	res, err := Sweep(SweepOptions{Execute: false, CheckPR: true, ActiveSessionsKnown: false}, f, nil)
+	if err != nil {
+		t.Fatalf("dry run must still classify: %v", err)
+	}
+	if len(res.Removed) != 1 || res.Removed[0] != "/wt/m" {
+		t.Fatalf("dry-run Removed = %v, want [/wt/m]", res.Removed)
+	}
+	if len(f.removed) != 0 || len(f.delBranch) != 0 {
+		t.Fatalf("dry-run must not mutate: removed=%v delBranch=%v", f.removed, f.delBranch)
 	}
 }

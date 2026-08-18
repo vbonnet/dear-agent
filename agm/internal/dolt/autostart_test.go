@@ -3,6 +3,7 @@ package dolt
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,20 +68,24 @@ func TestTryAutoStart_ScriptNotExecutable(t *testing.T) {
 }
 
 func TestTryAutoStart_ScriptSucceeds(t *testing.T) {
-	script := filepath.Join(t.TempDir(), "start.sh")
-	os.WriteFile(script, []byte("#!/bin/bash\nexit 0\n"), 0755)
+	script, err := exec.LookPath("true")
+	if err != nil {
+		t.Skip("true executable is unavailable")
+	}
 
-	err := tryAutoStart(script)
+	err = tryAutoStart(script)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
 }
 
 func TestTryAutoStart_ScriptFails(t *testing.T) {
-	script := filepath.Join(t.TempDir(), "fail.sh")
-	os.WriteFile(script, []byte("#!/bin/bash\necho 'something went wrong'\nexit 1\n"), 0755)
+	script, err := exec.LookPath("false")
+	if err != nil {
+		t.Skip("false executable is unavailable")
+	}
 
-	err := tryAutoStart(script)
+	err = tryAutoStart(script)
 	if err == nil {
 		t.Fatal("expected error for failing script")
 		return
@@ -124,6 +129,8 @@ func TestNewAdapter_EmptyPort(t *testing.T) {
 }
 
 func TestNewAdapter_ConnectionFailsNoScript(t *testing.T) {
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	// Use a port nothing listens on
 	_, err := New(&Config{
 		Workspace: "test",
@@ -148,6 +155,8 @@ func TestNewAdapter_ConnectionFailsNoScript(t *testing.T) {
 }
 
 func TestNewAdapter_ConnectionFailsWithScript(t *testing.T) {
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	// Use a port nothing listens on, with a start script path (won't be invoked
 	// because isRunningInTest() returns true)
 	_, err := New(&Config{

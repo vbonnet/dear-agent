@@ -124,43 +124,11 @@ func TestOpDefinitions_CLICommandPathConvention(t *testing.T) {
 	}
 }
 
-func TestOpDefinitions_SkillSurfaceConsistency(t *testing.T) {
+func TestOpDefinitions_DoNotOwnInstalledPluginSkills(t *testing.T) {
 	for _, op := range Registry {
 		t.Run(op.Name, func(t *testing.T) {
-			if op.Skill == nil {
-				return
-			}
-			if op.Skill.SlashCommand == "" {
-				t.Errorf("Skill SlashCommand must not be empty for op %q", op.Name)
-			}
-			if !strings.HasPrefix(op.Skill.SlashCommand, "agm-") {
-				t.Errorf("Skill SlashCommand %q must start with 'agm-'", op.Skill.SlashCommand)
-			}
-			if op.Skill.ActionVerb == "" {
-				t.Errorf("Skill ActionVerb must not be empty for op %q", op.Name)
-			}
-			if len(op.Skill.OutputTable) == 0 {
-				t.Errorf("Skill OutputTable must not be empty for op %q", op.Name)
-			}
-		})
-	}
-}
-
-func TestOpDefinitions_ManualSkillOps(t *testing.T) {
-	// Ops with ManualSkill=true should have a Skill surface but no auto-generated skill file
-	manualSkillOps := []string{"get_session", "archive_session"}
-	nameSet := make(map[string]bool)
-	for _, name := range manualSkillOps {
-		nameSet[name] = true
-	}
-
-	for _, op := range Registry {
-		t.Run(op.Name, func(t *testing.T) {
-			if nameSet[op.Name] && !op.ManualSkill {
-				t.Errorf("op %q should have ManualSkill=true", op.Name)
-			}
-			if !nameSet[op.Name] && op.ManualSkill {
-				t.Errorf("op %q has unexpected ManualSkill=true", op.Name)
+			if op.Skill != nil || op.ManualSkill {
+				t.Errorf("op %q declares a Skill surface; installed plugin skills are owned by the Cobra tree", op.Name)
 			}
 		})
 	}
@@ -183,17 +151,8 @@ func TestOpDefinitions_ListOpsIsMetaOnly(t *testing.T) {
 	if ListOps.CLI != nil {
 		t.Error("ListOps should not have a CLI surface")
 	}
-	if ListOps.Skill != nil {
-		t.Error("ListOps should not have a Skill surface")
-	}
 	if ListOps.MCP == nil {
 		t.Error("ListOps must have an MCP surface")
-	}
-}
-
-func TestOpDefinitions_KillSessionNoSkill(t *testing.T) {
-	if KillSession.Skill != nil {
-		t.Error("KillSession should not have a Skill surface (too destructive)")
 	}
 }
 

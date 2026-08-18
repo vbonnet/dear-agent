@@ -1,65 +1,20 @@
 ---
 model: haiku
 effort: low
-content-hash: 4ede339747a8a4ff9b6ae96884fcb6fe231f1a0b2a2c7528bdf1bb02a7f81a09
-description: Create a new AGM session
-argument-hint: "<session-name> [--harness TYPE] [--project PATH]"
-allowed-tools: Bash(agm session new *), Bash(pwd)
+content-hash: d1b464f25b40421fbb5a3c070f70e6e935aeb63e783e2e60b6974adda3ff808d
+description: Create an AGM-managed harness session. Use when the user wants a new Claude Code, Codex CLI, AGY, OpenCode, or Pi session.
+argument-hint: "[session-name] [--harness TYPE] [--workspace NAME]"
+allowed-tools: Bash(agm session new *)
 ---
 
-# AGM New Session
+# Create an AGM session
 
-I'll create a new AGM session.
-
-**Step 1: Parse arguments**
-
-- Parse $ARGUMENTS to extract:
-  - Session name (required positional argument)
-  - `--harness TYPE` (optional, defaults to "claude-code")
-  - `--project PATH` (optional, defaults to current working directory)
-- If no session name is provided:
-  - Run: `pwd`
-  - Auto-generate name as `claude-{basename of pwd}`
-  - Inform user: "No name provided, using: {generated-name}"
-
-**Step 2: Build and run command**
-
-Construct the command with extracted arguments:
-
-- Base: `agm session new "{SESSION_NAME}" --output json`
-- If harness was specified: add `--harness "{HARNESS}"`
-- If project was specified: add `-C "{PROJECT}"`
-
-Run the constructed command.
-
-**Step 3: Handle result**
-
-- If exit code is 0:
-  - Parse JSON output
-  - Continue to Step 4
-- If output contains "already exists":
-  - Show: "Session '{SESSION_NAME}' already exists"
-  - Suggest: "Use /agm:resume {SESSION_NAME} to resume it, or choose a different name"
-  - Exit gracefully
-- If any other error:
-  - Show the error output
-  - Suggest: "Try running: agm admin doctor"
-  - Exit gracefully
-
-**Step 4: Show completion message**
-
-```
-Session created successfully
-
-Name:    {session_name}
-Harness: {harness}
-Project: {project}
-
-To resume later: /agm:resume {session_name}
-To check status: /agm:status {session_name}
-```
-
-**Error Handling**:
-- If agm not found: "Install agm from github.com/vbonnet/dear-agent"
-- If session already exists: suggest resume or different name
-- If project path invalid: show path error and suggest valid path
+1. Forward the optional session name, `--harness`, and `--workspace` as
+   separate argv values to `agm session new`, adding `--output json`.
+2. If no name, harness, or workspace was supplied, let AGM perform its current
+   detection or prompt. Do not invent a Claude-specific name and do not use the
+   removed `--project` flag.
+3. Active harnesses are `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and
+   `pi-cli`. `gemini-cli` is deprecated compatibility only.
+4. Report the created session, harness, workspace, project, and resume hint from
+   AGM's result. On failure, show stderr and stop.

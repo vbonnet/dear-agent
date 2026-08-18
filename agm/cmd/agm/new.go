@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -13,13 +15,16 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/agm/internal/workflow"
 	"github.com/vbonnet/dear-agent/internal/pricing"
+	"github.com/vbonnet/dear-agent/pkg/override"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
 	// Import sandbox providers to trigger registration. Each provider's
@@ -62,6 +67,10 @@ var (
 	disposable         bool
 	disposableTTL      string
 	persistent         bool
+
+	// brakeOverrideReason requests the audited admission-brake override and
+	// states why. Empty means the brake is honoured, which is the default.
+	brakeOverrideReason string
 )
 
 // defaultPermissions are safe, read-only commands that are always pre-approved
@@ -92,10 +101,10 @@ Flags:
   --detached    - Create session without attaching (useful when inside tmux)
   --workspace   - Specify workspace (oss, acme) or "auto" for interactive selection
                   If omitted, uses auto-detected workspace or prompts if detection fails
-  --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli)
+  --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli)
                   Deprecated compatibility: gemini-cli
                   If omitted, prompts interactively
-  --model       - Model to use (e.g., sonnet, opus, 2.5-flash, 5.5)
+  --model       - Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5)
                   If omitted, uses default for harness
 
 Workspace Detection:
@@ -109,7 +118,7 @@ Behavior:
   • Outside tmux + no name → Prompts for name, creates tmux + selected harness
   • Outside tmux + name provided → Creates tmux session with that name + selected harness
   • Inside tmux + no name → Uses current tmux name, starts selected harness
-  • Inside tmux + matching name → Uses current tmux, starts selected harness
+  • Inside tmux + matching name → Uses current tmux, except AGY requires --detached
   • Inside tmux + different name → Error (name mismatch) unless --detached
   • --detached flag → Creates session, doesn't attach (stays in current context)
 
@@ -153,23 +162,15 @@ Examples:
 		// This must happen early so SetEnv() configures the tmux socket, sessions dir,
 		// etc. before any tmux operations occur.
 		if testEnvName != "" {
-			tc := testcontext.LoadNamed(testEnvName)
-			if tc == nil {
-				return fmt.Errorf("test environment '%s' not found. Create with: agm test-env create --name=%s", testEnvName, testEnvName)
+			tc, err := testcontext.LoadNamed(testEnvName)
+			if err != nil {
+				return fmt.Errorf("invalid test environment %q: %w", testEnvName, err)
 			}
 			if err := tc.SetEnv(); err != nil {
 				return fmt.Errorf("failed to activate test environment: %w", err)
 			}
 			testMode = true // treat as test mode for model selection, isolation, etc.
 			debug.Log("Using test environment: %s", testEnvName)
-		}
-
-		// FAIL FAST: Cannot run from within tmux unless --detached
-		if os.Getenv("TMUX") != "" && !detached {
-			return fmt.Errorf("cannot run 'agm new' from within tmux session\n\n" +
-				"Solutions:\n" +
-				"  • Use --detached flag: agm new --detached\n" +
-				"  • Exit tmux first: Press Ctrl+B then D to detach")
 		}
 
 		inTmux := os.Getenv("TMUX") != ""
@@ -492,6 +493,7 @@ Examples:
 				huh.NewOption("Codex CLI (OpenAI)", "codex-cli"),
 				huh.NewOption("AGY (Antigravity CLI)", "agy"),
 				huh.NewOption("OpenCode CLI (Multi-provider)", "opencode-cli"),
+				huh.NewOption("Pi (Extensible coding agent)", "pi-cli"),
 			}
 			err := huh.NewSelect[string]().
 				Title("Which harness would you like to use?").
@@ -503,7 +505,7 @@ Examples:
 					"Failed to read harness selection",
 					"  • Use --harness flag for non-interactive usage: agm session new --harness=claude-code\n"+
 						"  • Check terminal is interactive (TTY)\n"+
-						"  • Available harnesses: claude-code, codex-cli, agy, opencode-cli")
+						"  • Available harnesses: claude-code, codex-cli, agy, opencode-cli, pi-cli")
 				return err
 			}
 			harnessName = selectedHarness
@@ -525,7 +527,7 @@ Examples:
 		if err := agent.ValidateHarnessName(harnessName); err != nil {
 			ui.PrintError(err,
 				"Invalid harness specified",
-				"  • Valid active harnesses: claude-code, codex-cli, agy, opencode-cli\n"+
+				"  • Valid active harnesses: claude-code, codex-cli, agy, opencode-cli, pi-cli\n"+
 					"  • Deprecated compatibility harness: gemini-cli\n"+
 					"  • Run 'agm harness list' to see available harnesses")
 			return err
@@ -684,26 +686,54 @@ Examples:
 		// 1. Inside tmux + not detached: start Claude in current session
 		// 2. Outside tmux OR detached: create tmux session, start Claude, attach (or not if detached)
 
-		if inTmux && !detached {
-			return startClaudeInCurrentTmux(sessionName)
-		}
-
-		return createTmuxSessionAndStartClaude(sessionName)
+		return startNewSessionForContext(cmd.Context(), inTmux, detached, sessionName, harnessName, realNewSessionStartRuntime())
 	},
+}
+
+type newSessionStartRuntime struct {
+	currentTmux  func(context.Context, string) error
+	separateTmux func(context.Context, string) error
+}
+
+func realNewSessionStartRuntime() newSessionStartRuntime {
+	return newSessionStartRuntime{
+		currentTmux:  startClaudeInCurrentTmux,
+		separateTmux: createTmuxSessionAndStartClaude,
+	}
+}
+
+func startNewSessionForContext(ctx context.Context, inTmux, detached bool, sessionName, harness string, runtime newSessionStartRuntime) error {
+	if inTmux && !detached {
+		if agent.NormalizeHarnessName(harness) == "agy" {
+			return currentTmuxAgyUnsupportedError()
+		}
+		return runtime.currentTmux(ctx, sessionName)
+	}
+	return runtime.separateTmux(ctx, sessionName)
 }
 
 // applyCreationModeSwitch dispatches a mode switch during session creation.
 // Non-fatal: errors are logged as warnings and execution continues.
 func applyCreationModeSwitch(sessionName, harness, targetMode string) {
+	applyCreationModeSwitchContext(context.Background(), sessionName, harness, targetMode)
+}
+
+func applyCreationModeSwitchContext(ctx context.Context, sessionName, harness, targetMode string) {
 	if targetMode == "" {
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	debug.Log("Applying creation mode switch: default -> %s (harness: %s)", targetMode, harness)
-	if err := dispatchModeSwitch(harness, sessionName, targetMode, "default"); err != nil {
+	if err := dispatchModeSwitchContext(ctx, harness, sessionName, targetMode, "default"); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Mode switch to %s failed: %v (continuing with default mode)", targetMode, err))
 		return
 	}
 	ui.PrintSuccess(fmt.Sprintf("Mode set to %s", targetMode))
+	if ctx.Err() != nil {
+		return
+	}
 	adapter, err := getStorage()
 	if err != nil {
 		debug.Log("Could not connect to storage for mode manifest update: %v", err)
@@ -742,34 +772,215 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 	}
 }
 
-// enforceCircuitBreakers runs all circuit breaker gates and returns an
-// error if any gate refuses the spawn. On success it records the spawn time
-// so the stagger gate works for subsequent spawns.
-func enforceCircuitBreakers() error {
+// enforceCircuitBreakers runs an initial circuit-breaker check and returns an
+// error if the request cannot proceed toward launch. On success it returns
+// callbacks that repeat the live gates and consume any admission-brake
+// override, then record the spawn only after every override has been finalized.
+//
+// It is the single admission point for every sanctioned spawn path: `agm
+// session new` (and its current-tmux variant) and `agm supervisor run`.
+// vroom-dispatch shells out to `agm session new`, so it inherits the same
+// gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
+type circuitBreakerAdmission struct {
+	beforeSpawn        func(...*override.Reservation) ([]*override.Reservation, error)
+	afterAuthorization func()
+}
+
+func enforceCircuitBreakers(sessionName string) (*circuitBreakerAdmission, error) {
 	cfg := circuitbreaker.DefaultConfig()
-	lr := circuitbreaker.ProcLoadReader{}
+	lr := circuitbreaker.DefaultLoadReader()
+	// The worker cap defaults to disabled. Do not open session storage merely to
+	// enrich a best-effort status message in that mode; prefix counting remains
+	// sufficient until an operator enables the cap.
 	wc := circuitbreaker.TmuxWorkerCounter{}
+	if cfg.MaxWorkers > 0 {
+		wc.KnownWorkers = taggedWorkerSessions
+	}
 	st := circuitbreaker.NewFileSpawnTimer()
 	mr := circuitbreaker.DefaultMemReader()
+	dr := circuitbreaker.DefaultDiskReader()
+	pc := circuitbreaker.DefaultProcCounter()
+	br := circuitbreaker.DefaultBrakeReader()
 
-	result := circuitbreaker.Check(cfg, lr, wc, st, mr)
+	checkOpts := []circuitbreaker.CheckOption{
+		circuitbreaker.WithDiskReader(dr),
+		circuitbreaker.WithProcCounter(pc),
+		circuitbreaker.WithBrakeReader(br),
+	}
+	normalizedBrakeOverrideReason := ""
+	if brakeOverrideReason != "" {
+		var err error
+		normalizedBrakeOverrideReason, err = ops.ValidateAdmissionBrakeOverrideReason(brakeOverrideReason)
+		if err != nil {
+			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
+			return nil, err
+		}
+	}
 
-	// Log DEAR level regardless of outcome
+	result := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
+	logCircuitBreakerResult(result)
+
+	if !result.Allowed && (normalizedBrakeOverrideReason == "" || !onlyAdmissionBrakeRefused(result)) {
+		return nil, fmt.Errorf("%s", circuitbreaker.FormatDenied(result))
+	}
+
+	// Preflight proves that the request can reach launch, but does not consume
+	// an override or record a spawn. The returned one-shot callback repeats the
+	// live gates and crosses those boundaries only after every routine launch
+	// preparation step has succeeded.
+	var (
+		mu       sync.Mutex
+		consumed bool
+	)
+	admission := &circuitBreakerAdmission{}
+	admission.beforeSpawn = func(additionalReservations ...*override.Reservation) ([]*override.Reservation, error) {
+		mu.Lock()
+		if consumed {
+			mu.Unlock()
+			return nil, fmt.Errorf("circuit-breaker launch admission was already consumed for %q", sessionName)
+		}
+		consumed = true
+		mu.Unlock()
+
+		liveResult := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
+		liveResult, reservations, err := finalizeAdmissionBrakeOverride(
+			liveResult,
+			normalizedBrakeOverrideReason,
+			sessionName,
+			func() circuitbreaker.CheckResult {
+				return circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
+			},
+			ops.ReserveAdmissionBrakeOverride,
+			additionalReservations...,
+		)
+		if err != nil {
+			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
+			return nil, err
+		}
+		logCircuitBreakerResult(liveResult)
+		if !liveResult.Allowed {
+			return nil, fmt.Errorf("%s", circuitbreaker.FormatDenied(liveResult))
+		}
+		return reservations, nil
+	}
+	admission.afterAuthorization = func() {
+		if err := st.RecordSpawn(time.Now()); err != nil {
+			debug.Log("Warning: failed to record spawn time: %v", err)
+		}
+	}
+	return admission, nil
+}
+
+func finalizeAdmissionBrakeOverride(
+	initial circuitbreaker.CheckResult,
+	reason string,
+	sessionName string,
+	finalCheck func() circuitbreaker.CheckResult,
+	reserve func(string, string) (*override.Reservation, error),
+	additionalReservations ...*override.Reservation,
+) (circuitbreaker.CheckResult, []*override.Reservation, error) {
+	if !onlyAdmissionBrakeRefused(initial) {
+		if initial.Allowed {
+			return initial, additionalReservations, nil
+		}
+		return initial, nil, nil
+	}
+	if reason == "" {
+		return initial, nil, nil
+	}
+
+	// Reserve current human authorization without consuming the ledger quota,
+	// then repeat every live gate. A concurrent resource or stagger refusal
+	// abandons the reservation without recording a use.
+	brakeReservation, err := reserve(reason, sessionName)
+	if err != nil {
+		return initial, nil, err
+	}
+	result := finalCheck()
+	if !onlyAdmissionBrakeRefused(result) {
+		// The brake cleared, or another gate began refusing. Neither outcome
+		// crossed the brake, so the reserved use must not be committed.
+		if result.Allowed {
+			return result, additionalReservations, nil
+		}
+		return result, nil, nil
+	}
+	reservations := append([]*override.Reservation{brakeReservation}, additionalReservations...)
+	return applyAdmissionBrakeAuthorization(result, reason), reservations, nil
+}
+
+func applyAdmissionBrakeAuthorization(
+	result circuitbreaker.CheckResult,
+	reason string,
+) circuitbreaker.CheckResult {
+	result.Allowed = true
+	for i := range result.Gates {
+		gate := &result.Gates[i]
+		if gate.Gate == "admission_brake" && !gate.Passed && gate.RequiresOverride {
+			gate.Passed = true
+			gate.RequiresOverride = false
+			gate.Message = fmt.Sprintf("%s Crossed under an audited override: %s", gate.Message, reason)
+		}
+		if !gate.Passed {
+			result.Allowed = false
+		}
+	}
+	return result
+}
+
+func logCircuitBreakerResult(result circuitbreaker.CheckResult) {
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
 	for _, g := range result.Gates {
 		debug.Log("  gate %s: passed=%v — %s", g.Gate, g.Passed, g.Message)
 	}
+}
 
-	if !result.Allowed {
-		return fmt.Errorf("%s", circuitbreaker.FormatDenied(result))
+func onlyAdmissionBrakeRefused(result circuitbreaker.CheckResult) bool {
+	return circuitbreaker.RequiresAdmissionBrakeOverride(result)
+}
+
+// taggedWorkerSessions returns the tmux session names of non-archived sessions
+// AGM records as tagged role:worker. The circuit breaker uses it to recognise
+// workers whose tmux session name lacks the worker- prefix, so they still count
+// against the cap. It is consulted only when such a session is live, and every
+// failure path returns an error so the breaker falls back to prefix-only
+// classification rather than blocking a spawn on an unreadable database.
+//
+// A session's record name and its tmux session name can diverge (resume and
+// import both produce that state), and the breaker matches against what tmux
+// reports. Both names are therefore registered, mirroring how
+// ops.findOrphanTmuxSessions decides a tmux session belongs to AGM.
+//
+// This reads the manifests directly rather than going through ops.ListSessions:
+// SessionSummary does not carry Tmux.SessionName, and the status computation
+// ListSessions performs would re-enumerate tmux, which the caller has already
+// done. Stopped sessions need no filtering here — the breaker only counts names
+// that are live in tmux, so a record without a session cannot inflate the count.
+func taggedWorkerSessions() (map[string]bool, error) {
+	opCtx, cleanup, err := newOpContextWithStorage()
+	if err != nil {
+		return nil, fmt.Errorf("opening session storage: %w", err)
+	}
+	defer cleanup()
+
+	manifests, err := opCtx.Storage.ListSessions(&dolt.SessionFilter{
+		Tags:            []string{"role:worker"},
+		ExcludeArchived: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing worker sessions: %w", err)
 	}
 
-	// Record spawn time for stagger gate
-	if err := st.RecordSpawn(time.Now()); err != nil {
-		debug.Log("Warning: failed to record spawn time: %v", err)
+	workers := make(map[string]bool, len(manifests)*2)
+	for _, m := range manifests {
+		if m.Tmux.SessionName != "" {
+			workers[m.Tmux.SessionName] = true
+		}
+		if m.Name != "" {
+			workers[m.Name] = true
+		}
 	}
-
-	return nil
+	return workers, nil
 }
 
 // buildSessionTags combines --role and --tags into a single tag slice.
@@ -781,12 +992,15 @@ func enforceCircuitBreakers() error {
 //   - sessionName: target tmux session
 //   - promptText: the prompt content (used for keyword-based verification)
 //   - sendFunc: function that re-sends the prompt on retry
-func verifyAndRetryPromptDelivery(sessionName, promptText string, sendFunc func() error) {
-	result, err := tmux.VerifyPromptDelivery(sessionName, promptText, sendFunc, 3)
+func verifyAndRetryPromptDelivery(ctx context.Context, sessionName, promptText string, sendFunc func() error) error {
+	result, err := tmux.VerifyPromptDeliveryContext(ctx, sessionName, promptText, sendFunc, 3)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		debug.Log("Prompt delivery verification error: %v", err)
 		logger.Warn("Could not verify prompt delivery", "error", err)
-		return
+		return nil
 	}
 	if result.Delivered {
 		debug.Log("Prompt delivery confirmed (attempt %d, method: %s)", result.Attempt, result.Method)
@@ -798,6 +1012,7 @@ func verifyAndRetryPromptDelivery(sessionName, promptText string, sendFunc func(
 			"session", sessionName)
 		fmt.Println("  ⚠ Prompt delivery could not be verified — check session manually")
 	}
+	return nil
 }
 
 func buildSessionTags(role string, tags []string) []string {
@@ -825,9 +1040,13 @@ func init() {
 	// propagate to child commands for full isolation.
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session with per-run sandbox isolation")
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
-	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
-	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, opus, 2.5-flash, 5.5) (env: AGM_DEFAULT_MODEL)")
+	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
+	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
+	newCmd.Flags().StringVar(&codexHookTrustBypassReason, "dangerously-bypass-hook-trust", "",
+		"Request the audited Codex hook-trust override, stating why (requires `agm override approve codex-hook-trust --codex-hook-source <reviewed-repo>`)")
+	newCmd.Flags().StringVar(&brakeOverrideReason, "brake-override", "",
+		"Cross an engaged admission brake once, stating why (requires `agm override approve admission-brake`)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"cheap", "mid", "expensive"}, cobra.ShellCompDirectiveNoFileComp
 	})
@@ -838,7 +1057,7 @@ func init() {
 	newCmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send after session initialization")
 	newCmd.Flags().StringVar(&promptFile, "prompt-file", "", "File containing prompt to send")
 	newCmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "Disable sandbox isolation (sandbox is ON by default)")
-	newCmd.Flags().StringVar(&sandboxProvider, "sandbox-provider", "auto", "Sandbox provider (auto, overlayfs, apfs, mock)")
+	newCmd.Flags().StringVar(&sandboxProvider, "sandbox-provider", "auto", "Sandbox provider (auto, bubblewrap, overlayfs, gvisor, apfs, mock)")
 	newCmd.Flags().Float64Var(&maxBudgetUsd, "max-budget-usd", 0, "Maximum budget in USD for the session (passed to claude --max-budget-usd)")
 	newCmd.Flags().StringVar(&testEnvName, "test-env", "", "Use named test environment (created via 'agm test-env create')")
 	newCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
@@ -853,12 +1072,12 @@ func init() {
 	_ = newCmd.RegisterFlagCompletionFunc("role", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"orchestrator", "meta-orchestrator", "researcher", "worker", "reviewer"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	newCmd.Flags().StringSliceVar(&permissionsAllow, "permissions-allow", nil, "Permission patterns to pre-approve (e.g., 'Bash(tmux:*),Read(~/src/**)') — written to project .claude/settings.local.json")
+	newCmd.Flags().StringSliceVar(&permissionsAllow, "permissions-allow", nil, "Permission patterns to pre-approve (e.g., 'Bash(tmux:*),Read(~/src/**)') — persisted in the shared policy and projected to the selected harness")
 	newCmd.Flags().StringVar(&permissionProfile, "permission-profile", "", "Predefined permission profile (worker, monitor, audit)")
 	_ = newCmd.RegisterFlagCompletionFunc("permission-profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return rbac.ProfileNames(), cobra.ShellCompDirectiveNoFileComp
 	})
-	newCmd.Flags().BoolVar(&inheritPermissions, "inherit-permissions", false, "Inherit permission allowlist from parent's ~/.claude/settings.json")
+	newCmd.Flags().BoolVar(&inheritPermissions, "inherit-permissions", false, "Inherit the canonical parent permission allowlist from ~/.claude/settings.json")
 	newCmd.Flags().BoolVar(&disposable, "disposable", false, "Create a disposable session with TTL-based auto-archive")
 	newCmd.Flags().StringVar(&disposableTTL, "disposable-ttl", "4h", "TTL for disposable sessions (e.g., 1h, 4h, 30m)")
 	newCmd.Flags().BoolVar(&persistent, "persistent", false, "Omit '&&  exit' from the harness launch command; use for long-lived supervisor sessions that must survive a Claude turn/loop ending (e.g. vroom-meta-orchestrator)")

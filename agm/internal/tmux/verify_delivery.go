@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,9 +11,9 @@ import (
 
 // PromptDeliveryResult describes the outcome of a prompt delivery verification.
 type PromptDeliveryResult struct {
-	Delivered bool   // true if prompt was verified as delivered
+	Delivered bool   // true if delivery was confirmed or conservatively accepted without a risky resend
 	Attempt   int    // which attempt succeeded (1-indexed), 0 if all failed
-	Method    string // how delivery was confirmed ("processing", "keyword_match", "content_echo")
+	Method    string // how delivery was confirmed, or conservatively accepted when an idle Codex return is ambiguous
 }
 
 // VerifyPromptDelivery checks that a prompt was actually delivered to the session
@@ -24,6 +25,8 @@ type PromptDeliveryResult struct {
 //  1. Session is processing: spinner visible, no idle prompt
 //  2. Keyword match: one or more keywords from the prompt appear in scrollback
 //  3. Prompt gone: the harness prompt character disappeared (session accepted input)
+//  4. Ambiguous Codex idle return: a prompt without searchable keywords may
+//     already have completed before the first capture, so it must not be resent
 //
 // Parameters:
 //   - sessionName: tmux session to verify
@@ -34,6 +37,12 @@ type PromptDeliveryResult struct {
 // Returns the delivery result and any error. A non-nil error indicates a tmux
 // failure, not a delivery failure — check result.Delivered for delivery status.
 func VerifyPromptDelivery(sessionName, promptText string, sendFunc func() error, maxRetries int) (PromptDeliveryResult, error) {
+	return VerifyPromptDeliveryContext(context.Background(), sessionName, promptText, sendFunc, maxRetries)
+}
+
+// VerifyPromptDeliveryContext is the command-scoped delivery verifier. Caller
+// cancellation stops verification backoff and prevents subsequent retry sends.
+func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText string, sendFunc func() error, maxRetries int) (PromptDeliveryResult, error) {
 	keywords := extractKeywords(promptText)
 	debug.Log("Verifying prompt delivery (keywords: %v, maxRetries: %d)", keywords, maxRetries)
 
@@ -48,39 +57,33 @@ func VerifyPromptDelivery(sessionName, promptText string, sendFunc func() error,
 			waitDuration = time.Duration(1<<uint(attempt)) * time.Second
 		}
 		debug.Log("Verify attempt %d/%d: waiting %v before capture-pane check", attempt, maxRetries+1, waitDuration)
-		time.Sleep(waitDuration)
+		if err := sleepWithContext(ctx, waitDuration); err != nil {
+			return PromptDeliveryResult{}, err
+		}
 
 		// Capture pane content to check delivery status
-		content, err := CapturePaneOutput(sessionName, 50)
+		if err := ctx.Err(); err != nil {
+			return PromptDeliveryResult{}, err
+		}
+		styledContent, err := CapturePaneLogicalANSIOutputContext(ctx, sessionName, 50)
 		if err != nil {
 			return PromptDeliveryResult{}, fmt.Errorf("capture-pane failed during delivery verification: %w", err)
 		}
-
-		// Check 1: Is the session processing? (spinner visible = prompt was accepted)
-		if hasActiveSpinner(content) {
-			debug.Log("✓ Delivery verified (attempt %d): session is processing (spinner active)", attempt)
-			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "processing"}, nil
-		}
-
-		// Check 2: Do keywords from the prompt appear in the scrollback?
-		// Claude Code echoes user messages in the pane, so if we see our keywords,
-		// the prompt was delivered.
-		if len(keywords) > 0 && keywordsFoundInContent(keywords, content) {
-			debug.Log("✓ Delivery verified (attempt %d): keywords found in pane content", attempt)
-			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "keyword_match"}, nil
-		}
-
-		// Check 3: Has the prompt character disappeared? (session accepted input)
-		// If no harness prompt is visible, the session is processing something.
-		if !containsAnyHarnessPromptPattern(content) {
-			debug.Log("✓ Delivery verified (attempt %d): prompt character gone (session processing)", attempt)
-			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "content_echo"}, nil
+		if delivered, method := promptDeliveryEvidence(styledContent, keywords); delivered {
+			debug.Log("✓ Delivery accepted (attempt %d, method: %s)", attempt, method)
+			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: method}, nil
 		}
 
 		// Delivery not confirmed — prompt might be stuck
 		if attempt <= maxRetries {
 			debug.Log("⚠ Delivery not confirmed (attempt %d/%d): idle prompt visible, retrying send", attempt, maxRetries+1)
+			if err := ctx.Err(); err != nil {
+				return PromptDeliveryResult{}, err
+			}
 			if err := sendFunc(); err != nil {
+				if ctx.Err() != nil {
+					return PromptDeliveryResult{}, ctx.Err()
+				}
 				debug.Log("⚠ Retry send failed (attempt %d): %v", attempt, err)
 				// Don't return error — continue to next attempt, the session state
 				// might have changed (e.g., cooldown expired)
@@ -91,6 +94,28 @@ func VerifyPromptDelivery(sessionName, promptText string, sendFunc func() error,
 	// All attempts exhausted
 	debug.Log("✗ Delivery verification failed after %d attempts", maxRetries+1)
 	return PromptDeliveryResult{Delivered: false, Attempt: 0, Method: ""}, nil
+}
+
+func promptDeliveryEvidence(styledContent string, keywords []string) (bool, string) {
+	content := stripANSI(styledContent)
+	if hasActiveSpinner(content) {
+		return true, "processing"
+	}
+	if len(keywords) > 0 && keywordsFoundInContent(keywords, content) {
+		return true, "keyword_match"
+	}
+	if !containsAnyHarnessPromptPattern(styledContent) {
+		return true, "content_echo"
+	}
+	// The atomic sender already accepted the initial write. For a short prompt
+	// with no searchable keyword, a fast Codex turn can finish before this first
+	// capture and restore the styled idle composer. That state cannot distinguish
+	// "never delivered" from "already completed", so retrying risks duplicating
+	// completed work. Conservatively accept the ambiguous return without resend.
+	if len(keywords) == 0 && IsCodexComposerReady(styledContent) {
+		return true, "codex_idle_ambiguous"
+	}
+	return false, ""
 }
 
 // extractKeywords pulls significant words from the prompt text for verification.
@@ -119,9 +144,9 @@ func extractKeywords(text string) []string {
 // as delivery verification keywords.
 func isCommonWord(word string) bool {
 	common := map[string]bool{
-		"please": true, "should": true, "would":  true, "could":  true,
-		"their":  true, "there":  true, "these":  true, "those":  true,
-		"which":  true, "where":  true, "about":  true, "after":  true,
+		"please": true, "should": true, "would": true, "could": true,
+		"their": true, "there": true, "these": true, "those": true,
+		"which": true, "where": true, "about": true, "after": true,
 		"before": true, "between": true, "through": true, "during": true,
 	}
 	return common[strings.ToLower(word)]

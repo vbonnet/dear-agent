@@ -93,7 +93,9 @@ func ParseBenchmarkOutput(output string) ([]BenchmarkResult, error) {
 	return results, nil
 }
 
-// DefaultTargets returns the performance targets from docs/performance-benchmarks.md.
+// DefaultTargets returns the maintained performance targets enforced by the
+// benchmark package. Historical target documentation is archived at
+// https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/agm/docs/performance-benchmarks.md.
 func DefaultTargets() []PerformanceTarget {
 	return []PerformanceTarget{
 		{

@@ -11,7 +11,7 @@
 // coordination is out of scope (we federate via A2A topics instead, which
 // is built in pkg/a2a).
 //
-// See docs/design/three-way-sync.md for the full design.
+// See SPEC.md for the observable contract.
 package synchub
 
 import (

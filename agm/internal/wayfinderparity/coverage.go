@@ -29,29 +29,36 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 	case "claude-code":
 		return HarnessSurface{
 			Harness:          "claude-code",
-			DiscoverySurface: "native Claude plugin plus wayfinder/SKILL.md",
-			ExecutionSurface: "plugin slash commands and wayfinder-session CLI",
+			DiscoverySurface: "native Claude plugin root skill",
+			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
 	case "codex-cli":
 		return HarnessSurface{
 			Harness:          "codex-cli",
 			DiscoverySurface: "neutral marketplace plus AGENTS.md/SKILL fallback",
-			ExecutionSurface: "wayfinder-session CLI",
+			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
 	case "agy":
 		return HarnessSurface{
 			Harness:          "agy",
 			DiscoverySurface: "neutral marketplace plus AGENTS.md/SKILL fallback",
-			ExecutionSurface: "wayfinder-session CLI",
+			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
 	case "opencode-cli":
 		return HarnessSurface{
 			Harness:          "opencode-cli",
 			DiscoverySurface: "neutral marketplace plus AGENTS.md/SKILL fallback",
-			ExecutionSurface: "wayfinder-session CLI",
+			ExecutionSurface: "wayfinder session CLI",
+			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
+		}, true
+	case "pi-cli":
+		return HarnessSurface{
+			Harness:          "pi-cli",
+			DiscoverySurface: ".pi/settings.json native skill discovery plus AGENTS.md",
+			ExecutionSurface: "Wayfinder skill and wayfinder-session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
 	default:
@@ -93,8 +100,7 @@ func ValidateAssets(root string) error {
 		"wayfinder/SPEC.md",
 		"wayfinder/SKILL.md",
 		"wayfinder/.claude-plugin/plugin.json",
-		"wayfinder/commands",
-		"wayfinder/skills/wayfinder/SKILL.md",
+		"wayfinder/ARCHITECTURE.md",
 		"wayfinder/cmd/wayfinder-session/SPEC.md",
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {

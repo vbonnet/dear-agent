@@ -15,15 +15,10 @@ func writeExecutableFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o755)
 }
 
-// TestWaitForClaudePrompt_AutoAnswersTrustPrompt verifies that when a Claude
-// trust prompt ("Do you trust the files in this folder?") appears in the tmux
-// pane, WaitForClaudePrompt auto-answers it by sending Enter and continues
-// waiting for the Claude prompt (❯).
-//
-// This is a regression test for the VROOM startup blocker where Claude opening
-// in a sandbox path would show a trust prompt that blocked the ❯ from rendering,
-// causing WaitForClaudePrompt to time out.
-func TestWaitForClaudePrompt_AutoAnswersTrustPrompt(t *testing.T) {
+// TestWaitForClaudePrompt_DoesNotAnswerShellTrustPrompt verifies that rendered
+// trust chrome cannot authorize Enter unless a live Claude process owns the
+// exact pane. The pure probe tests cover the corresponding live-Claude path.
+func TestWaitForClaudePrompt_DoesNotAnswerShellTrustPrompt(t *testing.T) {
 	skipIfNoTmux(t)
 	setupTestSocket(t)
 	setupTestState(t)
@@ -44,10 +39,11 @@ echo "Do you trust the files in this folder?"
 echo "  ❯ 1. Yes, proceed"
 echo "    2. No, exit"
 read -r answer
+touch trust-answered
 # After Enter, render the Claude prompt.
 sleep 0.2
 printf '\n❯ '
-sleep 5
+sleep 30
 `
 	require.NoError(t, writeExecutableFile(script, scriptContent))
 
@@ -63,22 +59,15 @@ sleep 5
 	// Give the script a moment to print the trust prompt before we start polling.
 	time.Sleep(300 * time.Millisecond)
 
-	// WaitForClaudePrompt must:
-	//  1. See the trust prompt
-	//  2. Send Enter to answer it
-	//  3. See the ❯ prompt that the script prints after Enter
-	// All within 10s — far below the 90s production timeout.
-	start := time.Now()
-	err = WaitForClaudePrompt(sessionName, 10*time.Second)
-	elapsed := time.Since(start)
-	require.NoError(t, err, "should detect ❯ after auto-answering trust prompt (waited %v)", elapsed)
-	require.Less(t, elapsed, 10*time.Second, "should complete well under timeout")
+	err = WaitForClaudePrompt(sessionName, time.Second)
+	require.Error(t, err, "shell-rendered trust chrome must fail closed")
+	_, statErr := os.Stat(filepath.Join(tmpDir, "trust-answered"))
+	require.ErrorIs(t, statErr, os.ErrNotExist, "shell-rendered trust chrome received Enter")
 }
 
-// TestWaitForClaudePrompt_NoTrustPrompt verifies the existing behavior is
-// preserved: when ❯ appears directly with no trust prompt, the function returns
-// promptly and does NOT send any keys.
-func TestWaitForClaudePrompt_NoTrustPrompt(t *testing.T) {
+// TestWaitForClaudePrompt_DoesNotTrustShellComposer verifies that a bare prompt
+// glyph rendered by a shell is not Claude readiness evidence.
+func TestWaitForClaudePrompt_DoesNotTrustShellComposer(t *testing.T) {
 	skipIfNoTmux(t)
 	setupTestSocket(t)
 	setupTestState(t)
@@ -92,7 +81,7 @@ func TestWaitForClaudePrompt_NoTrustPrompt(t *testing.T) {
 echo "Welcome to Claude Code"
 sleep 0.2
 printf '\n❯ '
-sleep 5
+sleep 30
 `
 	require.NoError(t, writeExecutableFile(script, scriptContent))
 
@@ -104,8 +93,6 @@ sleep 5
 	cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, script, "C-m")
 	require.NoError(t, cmd.Run())
 
-	start := time.Now()
-	err = WaitForClaudePrompt(sessionName, 5*time.Second)
-	elapsed := time.Since(start)
-	require.NoError(t, err, "should detect ❯ without trust prompt (waited %v)", elapsed)
+	err = WaitForClaudePrompt(sessionName, time.Second)
+	require.Error(t, err, "shell-rendered composer must fail closed")
 }

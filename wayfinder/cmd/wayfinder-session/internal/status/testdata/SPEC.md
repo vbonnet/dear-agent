@@ -4,9 +4,9 @@
 
 ## EARS Requirements
 
-**FIX-STATUS-01** When Wayfinder status tests load fixtures, the system shall preserve valid V2, minimal V2, and invalid-cycle states.
+**FIX-STATUS-01** When Wayfinder status tests load fixtures, the system shall preserve valid schema 2.0, minimal schema 2.0, and invalid-cycle states.
 
-**FIX-STATUS-02** If invalid cyclic status is accepted or valid V2 state is rejected, the system shall fail the status scenario.
+**FIX-STATUS-02** If invalid cyclic status is accepted or valid schema 2.0 state is rejected, the system shall fail the status scenario.
 
 ## BDD Traceability
 

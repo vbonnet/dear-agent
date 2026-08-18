@@ -18,7 +18,7 @@ type CostSink interface {
 type CostInfo struct {
 	Provider  string // Provider name (e.g., "anthropic", "vertexai-gemini")
 	Model     string // Model identifier
-	Component string // Component name (e.g., "wayfinder-D1", "engram-search", "baseline")
+	Component string // Component name (e.g., "wayfinder-BUILD", "engram-search", "baseline")
 	Tokens    Tokens // Token usage
 	Cost      Cost   // Calculated costs
 	Cache     *Cache // Cache metrics (optional)

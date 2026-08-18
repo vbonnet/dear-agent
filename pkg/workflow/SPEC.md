@@ -24,3 +24,10 @@ execution, resume, review, and cost controls.
 **WFLOW-04** When a node declares permissions, budgets, outputs, hooks, or HITL policy, the system shall apply the configured enforcer or default implementation before treating the node as complete.
 
 **WFLOW-05** When workflow execution emits audit events, the system shall write them to the audit sink and notify audit hooks without allowing hook failure to abort the run.
+
+## Permission contract
+
+`DefaultPermissionEnforcer` is permissive when a policy section is absent. When
+declared, filesystem read/write entries use path globs, network entries accept
+an exact host or its subdomains (or `*`), and tool entries require an exact
+canonical tool name. A rejected check returns `ErrPermissionDenied`.

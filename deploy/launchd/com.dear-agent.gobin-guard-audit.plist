@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Independent liveness audit for com.dear-agent.gobin-guard. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.gobin-guard-audit</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>__HOME__/.local/lib/dear-agent/gobin-guard-audit.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>90</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/gobin-guard-audit.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/gobin-guard-audit.err.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>

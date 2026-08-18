@@ -33,6 +33,7 @@ func TestActiveHarnessDirectoryMappings(t *testing.T) {
 		"codex-cli":    ".codex",
 		"agy":          ".agents",
 		"opencode-cli": ".opencode",
+		"pi-cli":       ".pi",
 	}
 	for harness, dir := range want {
 		surface, ok := SurfaceForHarness(harness)

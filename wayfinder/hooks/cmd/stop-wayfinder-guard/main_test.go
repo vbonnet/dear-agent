@@ -10,32 +10,50 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/stophook"
 )
 
-// writeStatus writes a minimal WAYFINDER-STATUS.md with the given status value.
-func writeStatus(t *testing.T, dir, projectStatus, currentPhase string) {
+// writeStatus writes a minimal, canonical WAYFINDER-STATUS.md with the given
+// project status and current waypoint.
+func writeStatus(t *testing.T, dir, projectStatus, currentWaypoint string) {
 	t.Helper()
-	raw := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: test\nproject_type: feature\nrisk_level: M\ncurrent_waypoint: %s\nstatus: %s\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\nwaypoint_history: []\n---\n", currentPhase, projectStatus)
+	completionDate := ""
+	if projectStatus == statusCompleted {
+		completionDate = "completion_date: 2026-01-01T00:00:00Z\n"
+	}
+	history := strings.Builder{}
+	for _, waypoint := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+		if waypoint == currentWaypoint {
+			if projectStatus == statusCompleted {
+				fmt.Fprintf(&history, "  - name: %s\n    status: completed\n    started_at: 2026-01-01T00:00:00Z\n    completed_at: 2026-01-01T00:00:00Z\n", waypoint)
+			}
+			break
+		}
+		fmt.Fprintf(&history, "  - name: %s\n    status: completed\n    started_at: 2026-01-01T00:00:00Z\n    completed_at: 2026-01-01T00:00:00Z\n", waypoint)
+	}
+	historyYAML := "waypoint_history: []\n"
+	if history.Len() > 0 {
+		historyYAML = "waypoint_history:\n" + history.String()
+	}
+	raw := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: test\nproject_type: feature\nrisk_level: M\ncurrent_waypoint: %s\nstatus: %s\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n%s%s---\n", currentWaypoint, projectStatus, completionDate, historyYAML)
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
 		t.Fatalf("write status: %v", err)
 	}
 }
 
-func writeLegacyStatus(t *testing.T, dir string) {
+func writeUnsupportedStatus(t *testing.T, dir string) {
 	t.Helper()
-	raw := "---\nschema_version: \"1.0\"\ncurrent_phase: D1\nstatus: in-progress\n---\n"
+	raw := "---\nschema_version: \"unsupported\"\ncurrent_waypoint: PROBLEM\nstatus: in-progress\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
-		t.Fatalf("write legacy status: %v", err)
+		t.Fatalf("write unsupported status: %v", err)
 	}
 }
 
-func requireBlockedMigration(t *testing.T, r *stophook.Result, check string) {
+func requireBlockedInvalidStatus(t *testing.T, r *stophook.Result, check string) {
 	t.Helper()
 	for _, finding := range r.Findings {
-		if finding.Check == check && finding.Severity == stophook.SeverityBlock &&
-			strings.Contains(finding.Suggestion, "wayfinder session migrate") {
+		if finding.Check == check && finding.Severity == stophook.SeverityBlock {
 			return
 		}
 	}
-	t.Fatalf("expected %s to block with explicit migration guidance, got %+v", check, r.Findings)
+	t.Fatalf("expected %s to block invalid status, got %+v", check, r.Findings)
 }
 
 func newResult() *stophook.Result { return &stophook.Result{HookName: "test"} }
@@ -74,7 +92,7 @@ func TestCheckPhase_Completed(t *testing.T) {
 
 func TestCheckPhase_Abandoned(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, statusAbandoned, "")
+	writeStatus(t, dir, statusAbandoned, "RETRO")
 
 	r := newResult()
 	checkPhase(r, dir)
@@ -85,6 +103,19 @@ func TestCheckPhase_Abandoned(t *testing.T) {
 		}
 	}
 	t.Errorf("expected Pass for abandoned project, got %+v", r.Findings)
+}
+
+func TestCheckPhase_IncompleteCompletedStatusBlocks(t *testing.T) {
+	dir := t.TempDir()
+	raw := "---\nschema_version: \"2.0\"\nstatus: completed\ncurrent_waypoint: RETRO\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newResult()
+	checkPhase(r, dir)
+
+	requireBlockedInvalidStatus(t, r, "phase")
 }
 
 // B14 regression: "blocked" is not a valid status and must NOT be treated as Pass.
@@ -120,14 +151,14 @@ func TestCheckPhase_NoStatusFile(t *testing.T) {
 	t.Errorf("expected Pass (graceful skip) when no status file, got %+v", r.Findings)
 }
 
-func TestCheckPhase_LegacyStatusRequiresMigration(t *testing.T) {
+func TestCheckPhase_UnsupportedStatusBlocks(t *testing.T) {
 	dir := t.TempDir()
-	writeLegacyStatus(t, dir)
+	writeUnsupportedStatus(t, dir)
 
 	r := newResult()
 	checkPhase(r, dir)
 
-	requireBlockedMigration(t, r, "phase")
+	requireBlockedInvalidStatus(t, r, "phase")
 }
 
 // --- checkRetrospective ---
@@ -218,12 +249,12 @@ func TestCheckRetrospective_ExistsMinimalContent_IsBlock(t *testing.T) {
 	t.Errorf("expected Block when retro is nearly empty, got %+v", r.Findings)
 }
 
-func TestCheckRetrospective_LegacyStatusRequiresMigration(t *testing.T) {
+func TestCheckRetrospective_UnsupportedStatusBlocks(t *testing.T) {
 	dir := t.TempDir()
-	writeLegacyStatus(t, dir)
+	writeUnsupportedStatus(t, dir)
 
 	r := newResult()
 	checkRetrospective(r, dir)
 
-	requireBlockedMigration(t, r, "retrospective")
+	requireBlockedInvalidStatus(t, r, "retrospective")
 }

@@ -18,13 +18,15 @@
 
 **CODEGEN-04** When MCP output is generated, the system shall derive tool schema and dispatch from the same operation definition used by the CLI surface.
 
-**CODEGEN-05** When skill output is generated, the system shall derive invocation guidance from the shared operation definition without changing operation semantics.
+**CODEGEN-05** When skill output is generated, the system shall derive invocation guidance from the shared operation definition, prepend the configured CLI binary to its command path, and preserve operation semantics.
 
 **CODEGEN-06** When parity artifacts are generated, the system shall report operation exposure consistently across declared surfaces.
 
 **CODEGEN-07** When generated output is written, the system shall format deterministic Go source and shall return generation errors with output context.
 
 **CODEGEN-08** While generation is initiated by any supported harness and model family, the system shall produce the same intermediate representation and surface contracts.
+
+**CODEGEN-09** When generated skill permissions are rendered, the system shall use the governed space-separated command pattern rather than retired colon syntax.
 
 ## BDD Traceability
 

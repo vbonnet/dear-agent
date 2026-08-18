@@ -20,7 +20,7 @@ import (
 
 // escalate wires the pure pkg/vroom/escalation engine to AGM's session
 // hierarchy (the routing graph), `agm send` (delivery), and the Dispatch trail
-// (the human surface). It is the agent-facing implementation of ADR-031 §3.
+// (the human surface). It implements the escalation decision in ADR-031.
 //
 //	agm escalate ask     <question>   — a worker raises a question/decision
 //	agm escalate answer  <id> <text>  — a supervisor (or the human) answers

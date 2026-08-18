@@ -18,13 +18,17 @@ import (
 
 // --- Provider registration and lookup ---
 
-func TestProviderRegistration_ClaudeCodeWorktree(t *testing.T) {
+func TestProviderLookup_RetiredClaudeCodeWorktree(t *testing.T) {
 	t.Parallel()
 
 	provider, err := sandbox.NewProviderForPlatform("claudecode-worktree")
-	require.NoError(t, err, "claudecode-worktree should be registered via init()")
-	require.NotNil(t, provider)
-	assert.Equal(t, "claudecode-worktree", provider.Name())
+	assert.Nil(t, provider)
+	require.Error(t, err)
+
+	var sbErr *sandbox.Error
+	require.True(t, errors.As(err, &sbErr))
+	assert.Equal(t, sandbox.ErrCodeUnsupportedPlatform, sbErr.Code)
+	assert.Contains(t, err.Error(), "provider not available: claudecode-worktree")
 }
 
 func TestProviderRegistration_OverlayFS(t *testing.T) {
@@ -128,19 +132,6 @@ func TestDefaultProviderMatchesPlatformRecommendation(t *testing.T) {
 
 // --- Provider factory returns fresh instances ---
 
-func TestProviderFactory_ReturnsDistinctInstances(t *testing.T) {
-	t.Parallel()
-
-	p1, err := sandbox.NewProviderForPlatform("claudecode-worktree")
-	require.NoError(t, err)
-
-	p2, err := sandbox.NewProviderForPlatform("claudecode-worktree")
-	require.NoError(t, err)
-
-	// Each call should return a new instance (pointer inequality).
-	assert.NotSame(t, p1, p2, "factory should return distinct instances")
-}
-
 func TestProviderFactory_MockReturnsDistinctInstances(t *testing.T) {
 	t.Parallel()
 
@@ -159,6 +150,7 @@ func TestProviderLookup_MultipleUnimplemented(t *testing.T) {
 	t.Parallel()
 
 	unimplemented := []string{
+		"claudecode-worktree",
 		"fuse-overlayfs",
 		"macfuse",
 		"fallback",

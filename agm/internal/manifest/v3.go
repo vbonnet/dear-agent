@@ -67,6 +67,7 @@ func (m *ManifestV3) Validate() error {
 		"codex-cli":    true,
 		"opencode-cli": true,
 		"agy":          true, // Google Antigravity (agy CLI, Google AI Ultra)
+		"pi-cli":       true,
 	}
 	// Unknown harness names are accepted (forward-compatible). A future
 	// version may surface this via a logMigration call.

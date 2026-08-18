@@ -21,14 +21,14 @@ func TestAggregateSession_Complete(t *testing.T) {
 			EventTopic: "wayfinder.phase.started",
 			Timestamp:  parseTime("2025-12-09T10:00:05Z"),
 			SessionID:  "test-session",
-			Phase:      "D1",
+			Phase:      "PROBLEM",
 			Data:       map[string]interface{}{},
 		},
 		{
 			EventTopic: "wayfinder.phase.completed",
 			Timestamp:  parseTime("2025-12-09T10:15:00Z"),
 			SessionID:  "test-session",
-			Phase:      "D1",
+			Phase:      "PROBLEM",
 			Data: map[string]interface{}{
 				"files_modified": 5,
 			},
@@ -68,8 +68,8 @@ func TestAggregateSession_Complete(t *testing.T) {
 	}
 
 	phase := session.Phases[0]
-	if phase.Name != "D1" {
-		t.Errorf("Expected phase name 'D1', got '%s'", phase.Name)
+	if phase.Name != "PROBLEM" {
+		t.Errorf("Expected phase name 'PROBLEM', got '%s'", phase.Name)
 	}
 
 	expectedDuration := 14*time.Minute + 55*time.Second // 10:00:05 → 10:15:00
@@ -105,7 +105,7 @@ func TestAggregateSession_Incomplete(t *testing.T) {
 			EventTopic: "wayfinder.phase.started",
 			Timestamp:  parseTime("2025-12-09T10:00:05Z"),
 			SessionID:  "incomplete-session",
-			Phase:      "D1",
+			Phase:      "PROBLEM",
 			Data:       map[string]interface{}{},
 		},
 		// Missing phase.completed and session.completed
@@ -141,10 +141,10 @@ func TestAggregateSession_NoEvents(t *testing.T) {
 func TestAggregateSession_MultiplePhases(t *testing.T) {
 	events := []ParsedEvent{
 		{EventTopic: "wayfinder.session.started", Timestamp: parseTime("2025-12-09T10:00:00Z"), SessionID: "multi-phase", Data: map[string]interface{}{}},
-		{EventTopic: "wayfinder.phase.started", Timestamp: parseTime("2025-12-09T10:00:05Z"), SessionID: "multi-phase", Phase: "D1", Data: map[string]interface{}{}},
-		{EventTopic: "wayfinder.phase.completed", Timestamp: parseTime("2025-12-09T10:15:00Z"), SessionID: "multi-phase", Phase: "D1", Data: map[string]interface{}{}},
-		{EventTopic: "wayfinder.phase.started", Timestamp: parseTime("2025-12-09T10:15:05Z"), SessionID: "multi-phase", Phase: "D2", Data: map[string]interface{}{}},
-		{EventTopic: "wayfinder.phase.completed", Timestamp: parseTime("2025-12-09T10:30:00Z"), SessionID: "multi-phase", Phase: "D2", Data: map[string]interface{}{}},
+		{EventTopic: "wayfinder.phase.started", Timestamp: parseTime("2025-12-09T10:00:05Z"), SessionID: "multi-phase", Phase: "PROBLEM", Data: map[string]any{}},
+		{EventTopic: "wayfinder.phase.completed", Timestamp: parseTime("2025-12-09T10:15:00Z"), SessionID: "multi-phase", Phase: "PROBLEM", Data: map[string]any{}},
+		{EventTopic: "wayfinder.phase.started", Timestamp: parseTime("2025-12-09T10:15:05Z"), SessionID: "multi-phase", Phase: "RESEARCH", Data: map[string]any{}},
+		{EventTopic: "wayfinder.phase.completed", Timestamp: parseTime("2025-12-09T10:30:00Z"), SessionID: "multi-phase", Phase: "RESEARCH", Data: map[string]any{}},
 		{EventTopic: "wayfinder.session.completed", Timestamp: parseTime("2025-12-09T10:35:00Z"), SessionID: "multi-phase", Data: map[string]interface{}{"status": "success"}},
 	}
 
@@ -160,8 +160,8 @@ func TestAggregateSession_MultiplePhases(t *testing.T) {
 	}
 
 	// Verify phases are sorted by start time
-	if session.Phases[0].Name != "D1" || session.Phases[1].Name != "D2" {
-		t.Errorf("Expected phases D1, D2 in order, got %s, %s", session.Phases[0].Name, session.Phases[1].Name)
+	if session.Phases[0].Name != "PROBLEM" || session.Phases[1].Name != "RESEARCH" {
+		t.Errorf("Expected phases PROBLEM, RESEARCH in order, got %s, %s", session.Phases[0].Name, session.Phases[1].Name)
 	}
 
 	// Verify phase count metric

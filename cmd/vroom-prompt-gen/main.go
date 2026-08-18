@@ -167,7 +167,7 @@ func firstParagraph(desc string) string {
 
 // renderPrompt produces the dispatch prompt markdown for a bead. The body mirrors
 // the hand-written prompt files already in ~/.agm/vroom/prompts/ and bakes in the
-// standard worker rules (read-only ~/src, bd --db, no --no-verify/--force, etc.).
+// standard worker rules (read-only ~/src, canonical Beads access, no --no-verify/--force, etc.).
 func renderPrompt(b bead) string {
 	return renderPromptForRoute(b, vroomprompt.DefaultRoute())
 }
@@ -187,7 +187,7 @@ func renderPromptForRoute(b bead, route vroomprompt.Route) string {
 
 Bead %s (%s). %s
 
-**Stop after work complete + bead note written, OR PR created + auto-merge armed. Do NOT close bead. Do NOT create new beads.**
+**Stop after work complete + bead note written, OR provider-visible PR created through safe-pr. Never arm auto-merge. Do NOT close bead. Do NOT create new beads.**
 
 ## Goal
 
@@ -195,11 +195,11 @@ Bead %s (%s). %s
 
 ## Rules
 
-- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads`"+` (never bare bd)
+- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads --dolt-auto-commit on`"+` (never bare bd)
 - NEVER write to ~/src/** (read-only — use worktrees only)
 - NEVER use --no-verify or --force
 - NEVER run chezmoi apply
-- ALWAYS use `+"`GIT_TERMINAL_PROMPT=0 gtimeout 30`"+` for git push
+- ALWAYS publish with `+"`safe-push`"+`
 - %s
 - Do NOT run `+"`pkill -x gopls`"+`
 - STOP after the primary deliverable is done — write a bead note and stop

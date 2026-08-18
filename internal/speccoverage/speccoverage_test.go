@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestParitySurfacesHaveSpecAndBDD(t *testing.T) {
@@ -604,6 +606,37 @@ func TestValidateAllGoPackageSpecsSkipsNestedWorktreesAndOutputs(t *testing.T) {
 	}
 	if len(findings) != 0 {
 		t.Fatalf("expected excluded directories to be skipped, got %v", findings)
+	}
+}
+
+func TestRepositoryCoverageExcludesIgnoredAndGeneratedImplementationPaths(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if out, err := gittest.Output(t, root, "init", "-q"); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	writeCoverageFile(t, root, ".gitignore", ".beads/\nagm/agm-plugin/channels/agm-bus/dist/\n*~\n")
+	writeRepositoryPackageCoverage(t, root, "internal/example", "example.go")
+	for _, path := range []string{
+		".beads/hooks/uncovered.go",
+		"agm/agm-plugin/channels/agm-bus/dist/uncovered.js",
+		"~/beads/context-engine/.beads/embeddeddolt/beads/.dolt/uncovered.go",
+		"~/beads/context-engine/embeddeddolt/beads/.dolt/uncovered.go",
+	} {
+		writeCoverageFile(t, root, path, "package ignored\n")
+	}
+
+	findings, err := ValidateAllImplementationSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositoryFindings, err := ValidateAllRepositorySpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings = append(findings, repositoryFindings...)
+	if len(findings) != 0 {
+		t.Fatalf("ignored repository paths produced coverage findings: %v", findings)
 	}
 }
 

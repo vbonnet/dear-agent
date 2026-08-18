@@ -899,9 +899,9 @@ print(f"DEBUG: Filtering {len(entries)} entries with cutoff {cutoff}")
 
 **Related Documents**:
 - [Implementation]: `~/.claude/hooks/monitor-bypass-rate.py` (Python, current)
-- [Design Doc]: `the git history/S6-design.md`
-- [Implementation Doc]: `the git history/S8-implementation-complete.md`
-- [Validation Doc]: `the git history/S9-validation.md`
+- [Design Doc]: design documentation in the git history
+- [Implementation Doc]: implementation completion documentation in the git history
+- [Validation Doc]: validation documentation in the git history
 - [Related Hook]: `~/.claude/hooks/pretool-bash-blocker.py` (writes logs this script reads)
 
 **External References**:

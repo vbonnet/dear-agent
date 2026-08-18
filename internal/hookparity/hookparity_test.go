@@ -32,6 +32,7 @@ func TestHookHarnessesExposeRequiredGuardrails(t *testing.T) {
 		"codex-cli":    filepath.Join(root, ".codex", "hooks.json"),
 		"agy":          filepath.Join(root, ".agents", "hooks.json"),
 		"opencode-cli": filepath.Join(root, ".opencode", "hooks.json"),
+		"pi-cli":       filepath.Join(root, ".pi", "hooks.json"),
 	}
 
 	for harness, manifestPath := range harnesses {
@@ -68,6 +69,9 @@ func TestNonClaudeHookHarnessesExposeBeadsLifecycleHooks(t *testing.T) {
 		"codex-cli":    {path: filepath.Join(root, ".codex", "hooks.json"), prefix: "codex"},
 		"agy":          {path: filepath.Join(root, ".agents", "hooks.json"), prefix: "antigravity"},
 		"opencode-cli": {path: filepath.Join(root, ".opencode", "hooks.json"), prefix: "opencode"},
+		// Beads does not yet publish pi-hook; the managed Pi extension projects
+		// the same lifecycle events through the stable Codex adapter.
+		"pi-cli": {path: filepath.Join(root, ".pi", "hooks.json"), prefix: "codex"},
 	}
 
 	for harness, cfg := range harnesses {
@@ -79,7 +83,7 @@ func TestNonClaudeHookHarnessesExposeBeadsLifecycleHooks(t *testing.T) {
 				"PreCompact":       "PreCompact",
 				"PostCompact":      "PostCompact",
 			} {
-				want := "bd --db ~/beads/context-engine/.beads " + cfg.prefix + "-hook " + suffix
+				want := "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on " + cfg.prefix + "-hook " + suffix
 				if !eventHasCommandContaining(settings, event, want) {
 					t.Fatalf("%s missing %s Beads hook command %q", harness, event, want)
 				}
@@ -95,14 +99,16 @@ func TestHookManifestLocalScriptsExistAndAreExecutable(t *testing.T) {
 		filepath.Join(root, ".codex", "hooks.json"),
 		filepath.Join(root, ".agents", "hooks.json"),
 		filepath.Join(root, ".opencode", "hooks.json"),
+		filepath.Join(root, ".pi", "hooks.json"),
 	} {
 		t.Run(filepath.ToSlash(strings.TrimPrefix(manifestPath, root+string(os.PathSeparator))), func(t *testing.T) {
 			settings := readHookSettings(t, manifestPath)
 			for _, command := range allCommands(settings) {
-				if !strings.Contains(command, "${CLAUDE_PROJECT_DIR}/.") {
+				if !strings.Contains(command, "${CLAUDE_PROJECT_DIR}/.") && !strings.Contains(command, "${PI_PROJECT_DIR}/.") {
 					continue
 				}
 				localPath := strings.Replace(command, "${CLAUDE_PROJECT_DIR}", root, 1)
+				localPath = strings.Replace(localPath, "${PI_PROJECT_DIR}", root, 1)
 				info, err := os.Stat(localPath)
 				if err != nil {
 					t.Fatalf("hook command %q points to missing script %s: %v", command, localPath, err)
@@ -112,6 +118,80 @@ func TestHookManifestLocalScriptsExistAndAreExecutable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSpawnRoutingCreatesWorkersDetachedWithInitialPrompt(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-spawn-routing",
+		".codex/hooks/pretool-spawn-routing",
+		".agents/hooks/pretool-spawn-routing",
+		".opencode/hooks/pretool-spawn-routing",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{"agm session new", "--detached", "--prompt-file <path>"} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s spawn guidance missing %q", script, required)
+			}
+		}
+		if strings.Contains(guidance, "agm send msg <name>") {
+			t.Errorf("%s retains the separate send sequence", script)
+		}
+	}
+}
+
+func TestPRGuardEscalationWorksOutsideAGM(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-pr-guard",
+		".codex/hooks/pretool-pr-guard",
+		".agents/hooks/pretool-pr-guard",
+		".opencode/hooks/pretool-pr-guard",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{"agm escalate ask --session <registered-session>", "ask the current user directly"} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s escalation guidance missing %q", script, required)
+			}
+		}
+	}
+}
+
+func TestBypassGuardEscalationIsRunnableAndTruthful(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-bypass-guard",
+		".codex/hooks/pretool-bypass-guard",
+		".agents/hooks/pretool-bypass-guard",
+		".opencode/hooks/pretool-bypass-guard",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{
+			"agm escalate ask --kind blocked-action --context",
+			"--session <registered-session>",
+			"ask the current user directly",
+			"does not create or update a Bead",
+		} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s escalation guidance missing %q", script, required)
+			}
+		}
+		if strings.Contains(guidance, "Every escalation creates a bead") {
+			t.Errorf("%s promises unimplemented Beads creation", script)
+		}
 	}
 }
 

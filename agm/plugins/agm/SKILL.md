@@ -1,142 +1,56 @@
 ---
 name: agm
-description: >-
-  AGM (Agent Gateway Manager) session management across supported AI harnesses.
-  TRIGGER when: user asks to associate a session, manage AGM sessions, exit and archive, or says "/agm", "agm session", or "associate session".
-  DO NOT TRIGGER when: user wants to orchestrate multiple agents (use orchestrate/orchestrator) or manage tasks (use engram).
-allowed-tools:
-  - "Bash"
-  - "Read"
-  - "Write"
-metadata:
-  version: 0.4.0
-  author: ai-tools
-  activation_patterns:
-    - "/agm"
-    - "agm session"
-    - "associate session"
-    - "session management"
+description: Manage AGM sessions across Claude Code, Codex CLI, AGY, OpenCode, and Pi. Use when an agent needs to create, associate, list, inspect, resume, message, archive, or troubleshoot AGM-managed sessions; when a user mentions AGM session lifecycle; or when another workflow needs current session state. Do not use for task tracking or orchestration policy.
+content-hash: af0f3db9487a23f4c007c2f30f61d72cb0e5be1c46cd9fe13bca093bc48aecb3
 ---
 
-# agm Skill
+# AGM session management
 
-**Purpose**: Manage AI agent sessions with AGM (Agent Gateway Manager) for persistence, multi-workspace detection, and session archival.
+Use the installed `agm` binary as the source of truth. Inspect
+`agm <command> --help` when a flag is not covered here; do not infer removed
+root-form commands or copy a flag catalog into the response.
 
-**When to use**: Starting new sessions, associating with existing AGM sessions, or cleanly exiting and archiving completed work.
+## Route the request
 
-**Invocation**: `/agm:agm-assoc` or `/agm:agm-exit`
+- Create: `agm session new [name] --harness <type> --workspace <name>`
+- Associate: `agm session associate <name> --create --harness auto`
+- List: `agm session list --output json [--all]`
+- Aggregate status: `agm session status --format json [--workspace <name>]`
+- Inspect one session: `agm session get <identifier> --output json`
+- Resume: `agm session resume <identifier>`
+- Send: `agm send msg <identifier> --prompt-file <path>`
+- Archive: `agm session archive <identifier>`; follow the command's active
+  versus stopped guidance and never bypass a refusal with `--force`.
+- Diagnose: `agm admin doctor`
 
----
+For the richer Claude plugin workflows, read only the relevant file under
+`../../agm-plugin/commands/`.
 
-## Commands Reference
+## Preserve these invariants
 
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `/agm:agm-assoc` | Associate session with AGM | Auto-detects tmux session |
-| `/agm:agm-assoc "{name}"` | Associate with explicit name | `agm:agm-assoc "phase-6-testing"` |
-| `/agm:agm-exit` | Exit and archive session | Spawns async archive reaper |
+- Treat Claude Code, Codex CLI, AGY, OpenCode, and Pi as active harnesses. Mention
+  Gemini only as deprecated compatibility when an existing command accepts it.
+- Pass user-controlled message or wiki content through a file input. Never
+  interpolate it into shell syntax. For send, create a unique
+  `/tmp/agm-send-<random>.txt`, pass it with `--prompt-file`, and remove it
+  immediately after the command returns on success or failure.
+- Resolve session identifiers from AGM's structured list/get output before
+  invoking a lifecycle command. Session identifiers are typed AGM data, not
+  arbitrary user text; never splice an unverified user-provided token into a
+  shell command.
+- Resume requires an identifier. If none was provided, list all sessions and
+  ask the user to choose; the interactive picker is not implemented.
+- For a disposable recovery prompt, create a unique file, pass both
+  `--prompt-file <path>` and `--delete-prompt-file`, and let AGM delete it
+  after the prompt passes validation. Omit the delete flag for caller-owned
+  files.
+- Use global `--output json` or the command's documented structured-output flag;
+  do not invent `--json` on subcommands.
+- Keep stderr visible and stop on typed command errors.
+- A session is complete only after its work is merged, deployed when
+  applicable, and verified. Archival does not prove those delivery gates.
 
----
+## Verify
 
-## Workflow
-
-### Associating a Session
-
-**Auto-detect mode** (when in tmux):
-```
-/agm:agm-assoc
-```
-
-AGM will:
-1. Detect current tmux session name
-2. Create AGM manifest at `~/.agm/manifests/{session-name}.json`
-3. Create ready-file signal: `~/.agm/ready-{session-name}`
-4. Return success message
-
-**Explicit mode** (specify session name):
-```
-/agm:agm-assoc "my-session-name"
-```
-
-Use when:
-- Not in a tmux session
-- Want to override auto-detected name
-- Managing multiple concurrent sessions
-
-### Exiting a Session
-
-```
-/agm:agm-exit
-```
-
-AGM will:
-1. Spawn async archive reaper (background process)
-2. Archive session files to `~/.agm/archive/{session-name}/`
-3. Clean up manifest and ready-file
-4. Exit the agent session
-
-**Note**: The archival process runs asynchronously, so the session exits immediately.
-
----
-
-## Use Cases
-
-### Starting a New Project
-1. Start tmux session: `tmux new -s project-name`
-2. Start a supported agent CLI (Claude, Codex, Gemini, OpenCode, Antigravity/agy)
-3. Associate with AGM: `/agm:agm-assoc`
-4. Begin work
-
-### Resuming Existing Work
-1. Attach to tmux: `tmux attach -t project-name`
-2. Start the appropriate agent CLI
-3. AGM auto-detects and resumes session context
-
-### Completing a Session
-1. Finish work
-2. Exit cleanly: `/agm:agm-exit`
-3. AGM archives session history, transcripts, manifests
-
----
-
-## Requirements
-
-**Dependencies**:
-- `agm` CLI tool (installed at `~/go/bin/agm` or in PATH)
-- `tmux` (for session detection)
-
-**Verification**:
-```bash
-which agm    # Should return ~/go/bin/agm
-which tmux   # Should return /usr/bin/tmux (or similar)
-```
-
----
-
-## Troubleshooting
-
-**Problem**: "Not in tmux session and no session name provided"
-- **Solution**: Either start a tmux session first, or provide explicit name: `/agm:agm-assoc "session-name"`
-
-**Problem**: AGM association fails
-- **Solution**: Check AGM installation: `agm doctor`
-
-**Problem**: Session not persisting after restart
-- **Solution**: Verify manifest exists: `ls ~/.agm/manifests/` and ready-file: `ls ~/.agm/ready-*`
-
----
-
-## Integration with Other Tools
-
-**Wayfinder**: AGM sessions integrate with Wayfinder projects - session name becomes project context
-
-**Beads**: AGM tracks beads (tasks) associated with session
-
-**Astrocyte**: AGM enables Astrocyte monitoring for system health and recovery
-
----
-
-## Documentation
-
-- AGM CLI: `main/agm/`
-- Command files: `main/agm/agm-plugin/commands/`
+Confirm the command's structured result and, for lifecycle changes, re-read the
+session with `agm session get <identifier> --output json`.

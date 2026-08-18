@@ -39,9 +39,34 @@ func GetReadSocketPaths() []string {
 	return []string{GetSocketPath()}
 }
 
-// CleanStaleSocket removes the socket file if it exists but no tmux server is running
-// This prevents "socket is in use" errors when a previous tmux server crashed
+// CleanStaleSocket removes the socket file only if it is provably stale — the
+// file exists but no tmux server is bound to it. This prevents "socket is in
+// use" errors when a previous tmux server crashed.
+//
+// Deletion requires positive proof of death (ce-7ep9). Unlinking a socket does
+// not stop the server listening on it; it only makes that server permanently
+// unreachable and strands its sessions. So the file is removed only after all
+// three probes agree that nothing is there:
+//
+//  1. net.Dial fails — cheap, but also fails on a busy or backlogged server;
+//  2. `tmux list-sessions` fails — the real client, a slower second opinion;
+//  3. no tmux process in the table is bound to the path — authoritative.
+//
+// If (3) finds a tmux process configured for the path, the socket is left alone
+// and LiveServerBoundError is returned. This result is deliberately
+// non-destructive because a busy server can be temporarily unresponsive.
+//
+// Cleanup shares the tmux mutation lock with server creation. Without that
+// boundary, one process can create a server after another process probes an
+// apparently stale socket but before it unlinks the path.
 func CleanStaleSocket() error {
+	return withTmuxLock(cleanStaleSocketLocked)
+}
+
+// cleanStaleSocketLocked implements CleanStaleSocket while the tmux mutation
+// lock is held. Callers that will create a server in the same critical section
+// must use this helper to avoid releasing the lock between cleanup and start.
+func cleanStaleSocketLocked() error {
 	socketPath := GetSocketPath()
 
 	// Check if socket file exists
@@ -58,22 +83,36 @@ func CleanStaleSocket() error {
 		return fmt.Errorf("path exists but is not a socket: %s", socketPath)
 	}
 
-	// Try to connect to see if server is alive
-	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second) //nolint:noctx // TODO(context): plumb ctx through this layer
-	if err != nil {
-		// Connection failed - socket is stale or server is not responding
-		// Try to remove the stale socket
-		if err := os.Remove(socketPath); err != nil {
-			// Check if file was already removed (race condition)
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove stale socket: %w", err)
-			}
-		}
+	// Probe 1: a successful connect proves the server is alive.
+	if probeDialable(socketPath) {
 		return nil
 	}
 
-	// Server is alive, close connection and keep socket
-	conn.Close()
+	// Probe 2: the dial may simply have lost a race with a loaded server.
+	if probeTmuxCommand(socketPath) {
+		return nil
+	}
+
+	// Probe 3: unreachable by both, so now the process table decides.
+	pids, err := probeServerPIDs(socketPath)
+	if err != nil {
+		// The scan itself failed, so staleness is unproven. Refuse to delete:
+		// a spurious removal strands live sessions for good, while keeping a
+		// stale socket costs only a retry.
+		return fmt.Errorf("cannot verify whether a tmux server is bound to %s, "+
+			"refusing to remove socket: %w", socketPath, err)
+	}
+	if len(pids) > 0 {
+		return &LiveServerBoundError{SocketPath: socketPath, PIDs: pids}
+	}
+
+	// Proven stale: unreachable, and nothing is bound to it.
+	if err := os.Remove(socketPath); err != nil {
+		// Check if file was already removed (race condition)
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove stale socket: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -246,18 +285,25 @@ func IsSocketInUse() (bool, error) {
 // Useful after starting a tmux server
 func WaitForSocket(timeout time.Duration) error {
 	socketPath := GetSocketPath()
+	return waitForSocket(timeout, func() bool {
+		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
+		if err != nil {
+			return false
+		}
+		conn.Close()
+		return true
+	}, time.Sleep)
+}
+
+func waitForSocket(timeout time.Duration, probe func() bool, wait func(time.Duration)) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		// Check if socket exists and is accessible
-		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
-		if err == nil {
-			conn.Close()
+		if probe() {
 			return nil // Socket is ready
 		}
 
-		// Wait a bit before retrying
-		time.Sleep(100 * time.Millisecond)
+		wait(100 * time.Millisecond)
 	}
 
 	return fmt.Errorf("timeout waiting for socket to become available")

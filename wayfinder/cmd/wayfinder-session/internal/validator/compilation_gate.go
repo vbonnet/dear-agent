@@ -46,7 +46,7 @@ func validateCompilation(projectDir, phaseName string) error {
 		return NewValidationError(
 			"complete BUILD",
 			fmt.Sprintf("build failed with %d compilation errors", buildResult.ExitCode),
-			fmt.Sprintf("Fix compilation errors:\n%s\n\nThen re-run: wayfinder-session complete-phase BUILD", buildResult.Output),
+			fmt.Sprintf("Fix compilation errors:\n%s\n\nThen re-run: wayfinder session complete-phase BUILD", buildResult.Output),
 		)
 	}
 
@@ -64,7 +64,7 @@ func validateCompilation(projectDir, phaseName string) error {
 		return NewValidationError(
 			"complete BUILD",
 			fmt.Sprintf("tests failed with %d failures", testResult.FailureCount),
-			fmt.Sprintf("Fix failing tests:\n%s\n\nThen re-run: wayfinder-session complete-phase BUILD", testResult.Output),
+			fmt.Sprintf("Fix failing tests:\n%s\n\nThen re-run: wayfinder session complete-phase BUILD", testResult.Output),
 		)
 	}
 

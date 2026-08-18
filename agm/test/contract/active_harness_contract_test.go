@@ -12,7 +12,7 @@ import (
 func TestActiveHarnessRegistryContract(t *testing.T) {
 	t.Parallel()
 
-	want := []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
+	want := []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}
 	if got := agent.ActiveHarnesses(); !slices.Equal(got, want) {
 		t.Fatalf("ActiveHarnesses() = %v, want %v", got, want)
 	}

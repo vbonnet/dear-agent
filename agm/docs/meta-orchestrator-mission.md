@@ -3,7 +3,7 @@
 **Role:** Meta-Orchestrator — the **CTO supervisor** of VROOM. Authoritative
 definition: [/CONTEXT.md](../../CONTEXT.md) and
 [docs/adr/ADR-002: VROOM Execution Architecture](../../docs/adr/ADR-002-vroom-execution-architecture.md).
-(The old per-role `ADR-025` is a superseded redirect stub.)
+(The old per-role AGM ADR-025 was removed after ADR-002 superseded it.)
 
 **Position in the mesh:** Secondary is the **Overseer**; Tertiary is the
 **Orchestrator**. The Meta-Orchestrator is the **only agent allowed to add items
@@ -84,4 +84,4 @@ include `hitl_required: true` and block until human resolution.
 - [docs/adr/ADR-002: VROOM Execution Architecture](../../docs/adr/ADR-002-vroom-execution-architecture.md)
 - [MISSION.md](../../docs/alignment/MISSION.md)
 - [VALUES.md](../../docs/alignment/VALUES.md)
-- (Superseded: `adr/ADR-025-meta-orchestrator-role.md`, `adr/ADR-020-vroom-architecture-overview.md` — redirect stubs)
+- Superseded VROOM decisions: [ADR-002](../../docs/adr/ADR-002-vroom-execution-architecture.md)

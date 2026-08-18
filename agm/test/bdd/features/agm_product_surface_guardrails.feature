@@ -1,6 +1,8 @@
 # SPEC: agm/internal/gateway/SPEC.md
 # RELATED-SPEC: agm/agm-plugin/commands/SPEC.md
+# RELATED-SPEC: agm/cmd/plugin-hash/SPEC.md
 # RELATED-SPEC: agm/cmd/fix-uuid-manual/SPEC.md
+# RELATED-SPEC: agm/internal/pluginhash/SPEC.md
 # RELATED-SPEC: agm/internal/surface/cmd/generate/SPEC.md
 # RELATED-SPEC: agm/internal/tui/SPEC.md
 # RELATED-SPEC: agm/internal/ui/SPEC.md
@@ -18,8 +20,10 @@ Feature: AGM product surface guardrails
     Examples:
       | package                           |
       | agm/agm-plugin/commands           |
+      | agm/cmd/plugin-hash               |
       | agm/cmd/fix-uuid-manual           |
       | agm/internal/gateway              |
+      | agm/internal/pluginhash           |
       | agm/internal/surface/cmd/generate |
       | agm/internal/tui                  |
       | agm/internal/ui                   |

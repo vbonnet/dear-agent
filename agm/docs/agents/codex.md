@@ -24,19 +24,27 @@ Anthropic API keys, or Claude-specific environment.
 agm session new --harness=codex-cli --model=5.5 my-codex-session
 ```
 
-AGM launches Codex with:
-
-```bash
-env -u CLAUDECODE AGM_SESSION_NAME='<session>' codex -m '<model>' -C '<workdir>' -s workspace-write
-```
+AGM does not paste a raw `codex` command into tmux. The invoking AGM process
+copies only the documented Codex environment allowlist into an owner-only,
+one-shot handoff and sends a non-secret command for the absolute AGM private
+executor. The executor consumes and removes the handoff before resolving the
+fixed `codex` executable against the invoking AGM process's handed-off `PATH`,
+constructs validated model, workdir, and sandbox arguments, and directly
+replaces itself with Codex without another shell. A
+credential-free helper independently removes an unconsumed handoff after its
+bounded lifetime, including when the queued tmux command never executes. For a
+current-pane launch, a credential-free inherited pipe keeps the handoff valid
+only while the producing AGM process still owns the pane; the normal bounded
+lifetime starts when that process exits. The executor unlinks a securely opened
+handoff before decoding it, so malformed, expired, and protocol-mismatched
+handoffs cannot retain credentials.
 
 When Codex app-server remote control is available, AGM first creates a Codex
 thread through `codex app-server`, sets the Codex thread name to the AGM session
-name, stores that Codex thread id in AGM metadata, and launches the tmux UI with:
-
-```bash
-env -u CLAUDECODE AGM_SESSION_NAME='<session>' codex resume --remote unix:// -m '<model>' -C '<workdir>' -s workspace-write '<codex-thread-id>'
-```
+name, stores that Codex thread id in AGM metadata, and gives the private
+executor the non-secret remote resume metadata. The executor then directly
+starts the matching Codex remote UI; the raw resume command and credentials
+are never pasted into tmux.
 
 Set `AGM_CODEX_REMOTE_CONTROL=0` to skip this bridge. Set
 `AGM_CODEX_REQUIRE_REMOTE_CONTROL=1` to fail creation instead of falling back to
@@ -56,13 +64,26 @@ Important launch invariants:
   entries — including explicit `untrusted` — are never overwritten.
 - app-server-backed starts preserve the same thread in Codex remote-control
   surfaces and in the AGM tmux pane
-- no Claude, Anthropic, Engram, or OpenTelemetry environment is injected
+- the Codex child receives only the fixed allowlist; ambient Claude, Anthropic,
+  Google, GitHub, Engram, OpenTelemetry, SSH-agent, and arbitrary variables
+  are excluded
+- credential values never appear in the tmux command, process arguments, pane
+  scrollback, or debug logs
 
 ## Send
 
 `agm send msg` treats `codex-cli` as a tmux-backed harness. When the shared
-state detector sees the Codex composer (`OpenAI Codex` with `/model to change`
-footer chrome), delivery is `YES` and AGM sends directly to the tmux pane.
+state detector sees a complete Codex composer—the initial `OpenAI Codex`
+header with `/model to change` and an empty `›` or `»` cursor, or an empty
+post-turn `›` or `»` cursor paired with the structured `gpt-* · <workdir>`
+footer—delivery is `YES`
+and AGM sends directly to the tmux pane. Typed drafts and collapsed paste chips
+remain queued. Those markers must own the current pane tail: if newer shell or
+process-exit output follows them, the stale composer is not sendable. A new
+initial composer rendered after stale post-turn footer history is still
+sendable when that newer complete structure owns the pane tail. A model name in
+an echoed launch command or beside a `Working` status is not a composer and
+remains queued.
 
 Codex menus and trust prompts are not idle composers. They remain queued or
 blocked rather than receiving injected prompt text.
@@ -75,7 +96,24 @@ agm session resume my-codex-session
 
 If the tmux session already exists, AGM attaches without sending commands. If
 the tmux session must be recreated, AGM starts Codex with the same launch
-invariants as session creation and waits for the Codex composer to render.
+invariants as session creation and waits for both the Codex process and a
+structured idle composer to render. The complete resolved resume, including
+its health read and rollback or commit, is serialized by stable AGM session ID
+across direct, last-session, and bulk resume commands so a concurrent resume
+cannot adopt an uncommitted pane. AGM retains a
+creation-specific identity for the attempt: tmux's server-local session ID plus
+a random token embedded in
+a provisional creation name before being stored on that session. It then
+renames the session and persists that sanitized tmux name under an opaque storage
+ownership revision before submitting an optional resume prompt, and reports
+ordinary prompt-delivery failures. Failed cold resumes remove only the session
+whose ID and either creation marker match, including across tmux server restarts; a
+same-named or ID-reusing replacement is preserved. A provisional name write is
+restored only when no newer session metadata has superseded it, and its
+ownership revision is released after prompt delivery succeeds. If the
+post-write metadata reload fails, rollback retains that pending revision until
+compensation is proven; it preserves the pane when storage cannot prove that
+metadata stopped referencing the new tmux identity.
 
 For sessions with persisted Codex metadata, AGM resumes the matching Codex
 thread with `codex resume --remote unix:// <codex-thread-id>`. Older imported
@@ -85,6 +123,22 @@ the Codex CLI.
 Codex does not support Claude runtime permission-mode cycling. AGM stores and
 resumes the session shell/tmux environment, then lets Codex load its own local
 state.
+
+## Archive
+
+AGM first commits its own archived lifecycle, then reports a best-effort
+external Codex archive outcome without rolling back that durable state when the
+provider operation fails. For a persisted Codex session id, it first uses the
+supported `codex archive --remote unix:// <codex-thread-id>` surface. If Remote
+Control is unavailable while the caller is still active, it retries the same id
+through the local saved-session `codex archive <codex-thread-id>` surface so
+imported and local-only sessions remain archivable. The archive operation never
+starts, stops, or otherwise changes device-global Remote Control state.
+
+Older sessions without persisted Codex metadata are resolved from saved
+transcript cwd metadata and use the local saved-session command by default, or
+the explicit `AGM_CODEX_REMOTE` override when configured. AGM refuses to guess
+when neither that metadata nor a persisted id identifies the external session.
 
 ## Reconcile Codex-Originated Threads
 

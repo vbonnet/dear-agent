@@ -40,27 +40,11 @@ func verifyWorkspaceDB() error {
 // logger writes to stderr (required for stdio MCP transport)
 var logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-// Version, GitCommit, BuildDate, BuiltBy are local aliases that mirror
-// pkg/version vars (set by ldflags or VCS build info). Tests reference them
-// directly; callers should prefer pkg/version for new code.
-var (
-	Version   string
-	GitCommit string
-	BuildDate string
-	BuiltBy   string
-)
-
-func init() {
-	pkgversion.PopulateFromBuildInfo()
-	Version = pkgversion.Version
-	GitCommit = pkgversion.GitCommit
-	BuildDate = pkgversion.BuildDate
-	BuiltBy = pkgversion.BuiltBy
-}
-
 // Main entry point for AGM MCP server
 // Adapted from Engram MCP server pattern
 func main() {
+	pkgversion.PopulateFromBuildInfo()
+
 	// Parse flags
 	a2aPort := flag.Int("a2a-port", 0, "A2A HTTP port (0=disabled, e.g. 8080 to enable)")
 	noGateway := flag.Bool("no-gateway", false, "Bypass MCP Gateway middleware")
@@ -71,7 +55,7 @@ func main() {
 	if err != nil {
 		executable = "unknown"
 	}
-	fmt.Fprintf(os.Stderr, "agm-mcp-server %s (%s)\n", Version, executable)
+	fmt.Fprintf(os.Stderr, "agm-mcp-server %s (%s)\n", pkgversion.Version, executable)
 
 	// Load configuration
 	cfg, err := loadConfig("~/.config/agm/mcp-server.yaml")
@@ -113,36 +97,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info("Starting AGM MCP Server", "version", "1.0.0")
+	logger.Info("Starting AGM MCP Server", "version", pkgversion.Version)
 	logger.Info("Configuration loaded", "sessions_dir", cfg.SessionsDir)
 
-	// Create MCP server (v1.2.0 API)
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "agm",
-		Version: "1.0.0",
-	}, nil)
+	// Create MCP server.
+	server := newMCPServer()
 
-	// Register MCP tools (v1.2.0 API)
-	addListSessionsTool(server, cfg)
-	addSearchSessionsTool(server, cfg)
-	addGetSessionMetadataTool(server, cfg)
+	registerMCPTools(server, cfg)
 
-	// Register mutation tools
-	addArchiveSessionTool(server, cfg)
-	addKillSessionTool(server, cfg)
-
-	// Register session lifecycle tools
-	addCreateSessionTool(server, cfg)
-	addSendMessageTool(server, cfg)
-
-	// Register schema introspection tool
-	addListOpsTool(server, cfg)
-
-	// Register Wayfinder forwarding tools (Phase 7.1)
-	addListWayfinderSessionsTool(server, cfg)
-	addGetWayfinderSessionTool(server, cfg)
-
-	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_archive_session, agm_kill_session, agm_create_session, agm_send_message, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
+	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_get_session_output, agm_archive_session, agm_kill_session, agm_create_session, agm_send_message, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
 	logger.Info("Wayfinder forwarding enabled", "engram_mcp_url", cfg.EngramMCPURL)
 
 	installGateway(server, *noGateway)
@@ -192,7 +155,7 @@ func main() {
 
 	httpServer := startA2AServerIfEnabled(cfg, effectiveA2APort, stop)
 
-	// Create stdio transport (v1.2.0 API)
+	// Create the stdio transport.
 	transport := &mcp.StdioTransport{}
 
 	// Run MCP server (blocks until connection closes or context cancelled)
@@ -208,6 +171,31 @@ func main() {
 			logger.Error("A2A HTTP shutdown error", "error", err)
 		}
 	}
+}
+
+func newMCPServer() *mcp.Server {
+	return mcp.NewServer(&mcp.Implementation{
+		Name:    "agm",
+		Version: pkgversion.Version,
+	}, nil)
+}
+
+// registerMCPTools owns the provider-visible AGM MCP registration set. Tests
+// call this exact seam so registry compatibility is checked against the tools
+// compiled into the production server. The SDK sorts tool identifiers during
+// discovery, so call order is deliberately not part of the wire contract.
+func registerMCPTools(server *mcp.Server, cfg *Config) {
+	addListSessionsTool(server, cfg)
+	addSearchSessionsTool(server, cfg)
+	addGetSessionMetadataTool(server, cfg)
+	addGetSessionOutputTool(server, cfg)
+	addArchiveSessionTool(server, cfg)
+	addKillSessionTool(server, cfg)
+	addCreateSessionTool(server, cfg)
+	addSendMessageTool(server, cfg)
+	addListOpsTool(server, cfg)
+	addListWayfinderSessionsTool(server, cfg)
+	addGetWayfinderSessionTool(server, cfg)
 }
 
 // installGateway installs the MCP gateway middleware unless disabled by flag.

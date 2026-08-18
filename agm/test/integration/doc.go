@@ -1,20 +1,19 @@
 //go:build integration
 // +build integration
 
-// Package integration contains integration tests for AGM with real tmux.
+// Package integration contains current production-boundary tests for AGM.
 //
-// Integration tests verify component interactions with real dependencies:
-//   - Real tmux sessions (isolated via unique socket paths)
-//   - Real file I/O (isolated via t.TempDir())
-//   - Medium execution time (<5 seconds total)
+// Integration tests own mutable dependencies instead of using host AGM state:
+//   - portable adapter parity without credentials or services
+//   - real tmux sessions on unique socket paths
+//   - source-built AGM and fake harness executables
+//   - private filesystem and SQLite state
 //
 // Run integration tests:
 //
-//	go test -tags=integration ./test/integration/...
-//	go test -tags=integration -race ./test/integration/...
+//	go test -tags=integration ./agm/test/integration/...
+//	go test -tags=integration -race ./agm/test/integration/...
 //
-// Integration tests use:
-//   - helpers.SetupTestServer() for isolated tmux
-//   - helpers.CompareGolden() for output verification
-//   - Automatic cleanup via t.Cleanup()
+// Real lifecycle tests use helpers.NewIsolatedEnvironment and automatic
+// cleanup registered through testing.TB.Cleanup.
 package integration

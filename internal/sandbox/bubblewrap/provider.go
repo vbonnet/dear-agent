@@ -3,13 +3,11 @@
 package bubblewrap
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,8 +19,9 @@ import (
 // Bubblewrap creates isolated namespaces using bind mounts and user namespaces.
 // Works without root privileges or kernel-specific features.
 type Provider struct {
-	mu        sync.RWMutex
-	sandboxes map[string]*sandbox.Sandbox
+	mu         sync.RWMutex
+	sandboxes  map[string]*sandbox.Sandbox
+	destroying map[string]chan struct{}
 	// ShareNetwork controls whether the sandbox shares the host network namespace.
 	// Default is false (network is isolated via --unshare-net).
 	ShareNetwork bool
@@ -31,7 +30,8 @@ type Provider struct {
 // NewProvider creates a new Bubblewrap provider.
 func NewProvider() *Provider {
 	return &Provider{
-		sandboxes: make(map[string]*sandbox.Sandbox),
+		sandboxes:  make(map[string]*sandbox.Sandbox),
+		destroying: make(map[string]chan struct{}),
 	}
 }
 
@@ -46,8 +46,8 @@ func (p *Provider) Name() string {
 // LowerDirs. This gives workers full read-write access to repo content on
 // an isolated branch, with a proper .git directory so git commit/push works.
 //
-// If no git repo is found in LowerDirs, falls back to the symlink approach
-// (read-only access via symlinks into the source repos).
+// If no git repo is found in LowerDirs, creation fails. A symlink-populated
+// directory is not an isolation boundary because writes traverse to the host.
 //
 // Bubblewrap self-test is still run to validate namespace support.
 func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
@@ -68,6 +68,17 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	workDir := filepath.Join(req.WorkspaceDir, "work")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
+	workingDir, matchedRepo, err := sandbox.MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	if err != nil {
+		return nil, err
+	}
+	orderedLowerDirs := sandbox.PrioritizeLowerDir(req.LowerDirs, matchedRepo)
+	targetRepo := req.TargetRepo
+	if matchedRepo != "" {
+		// The requested directory is authoritative. Materializing a different
+		// target repository would make the mapped path point at unrelated data.
+		targetRepo = matchedRepo
+	}
 
 	if err := p.createDirectories(upperDir, workDir, mergedDir); err != nil {
 		return nil, sandbox.WrapError(sandbox.ErrCodePermissionDenied,
@@ -81,16 +92,12 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	// This replaces the symlink approach which only gave read access (writes
 	// through symlinks modify the source repo, and new files stay in the sandbox
 	// dir with no .git -- so git commit doesn't work).
-	worktreeRepo, worktreeCreated := p.tryCreateWorktree(req.LowerDirs, req.SessionID, mergedDir, req.TargetRepo)
-	if !worktreeCreated {
-		// Fallback: populate merged directory with symlinks to lower dir contents.
-		fmt.Fprintf(os.Stderr, "bubblewrap: no git repo in lower dirs, falling back to symlinks\n")
-		if err := p.populateMergedDir(req.LowerDirs, mergedDir); err != nil {
-			_ = p.cleanupDirectories(upperDir, workDir, mergedDir)
-			return nil, sandbox.WrapError(sandbox.ErrCodeMountFailed,
-				"failed to populate merged directory with repo symlinks", err)
-		}
+	worktreeRepo, err := p.createPrivateWorktree(orderedLowerDirs, req.SessionID, mergedDir, targetRepo)
+	if err != nil {
+		_ = p.cleanupDirectories(upperDir, workDir, mergedDir)
+		return nil, err
 	}
+	worktreeCreated := true
 
 	// Test bubblewrap functionality
 	if err := p.testBubblewrap(req.LowerDirs, upperDir, mergedDir, shareNetwork); err != nil {
@@ -113,20 +120,20 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 		}
 	}
 
-	// Build cleanup function that removes the worktree before cleaning dirs
+	// Build retryable cleanup that removes the worktree before cleaning dirs.
+	cleanupState := sandbox.NewWorktreeCleanup(worktreeCreated)
 	cleanupFn := func() error {
-		if worktreeCreated {
-			if err := p.removeWorktree(worktreeRepo, mergedDir); err != nil {
-				fmt.Fprintf(os.Stderr, "bubblewrap: warning: failed to remove worktree: %v\n", err)
-			}
-		}
-		return p.cleanup(upperDir, workDir, mergedDir)
+		return cleanupState.Run(
+			func() error { return p.removeWorktree(worktreeRepo, mergedDir) },
+			func() error { return p.cleanup(upperDir, workDir, mergedDir) },
+		)
 	}
 
 	// Create sandbox metadata
 	sb := &sandbox.Sandbox{
 		ID:          req.SessionID,
 		MergedPath:  mergedDir,
+		WorkingDir:  workingDir,
 		UpperPath:   upperDir,
 		WorkPath:    workDir,
 		Type:        p.Name(),
@@ -140,12 +147,13 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	return sb, nil
 }
 
-// tryCreateWorktree attempts to create a git worktree in mergedDir from the
-// first git repo found in lowerDirs. Returns the repo path and true on success.
-// If targetRepo is set, it is used directly instead of scanning lowerDirs.
-func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, bool) {
+func (p *Provider) createPrivateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, error) {
 	var repoPath string
-	if targetRepo != "" && p.isGitRepo(targetRepo) {
+	if targetRepo != "" {
+		if !p.isGitRepo(targetRepo) {
+			return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+				"bubblewrap requires a private Git worktree; refusing host-symlink fallback")
+		}
 		repoPath = targetRepo
 		fmt.Fprintf(os.Stderr, "bubblewrap: using explicit target repo: %s\n", repoPath)
 	} else {
@@ -153,14 +161,15 @@ func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, t
 		repoPath = p.findGitRepo(lowerDirs)
 	}
 	if repoPath == "" {
-		return "", false
+		return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+			"bubblewrap requires a private Git worktree; refusing host-symlink fallback")
 	}
 
 	// The mergedDir already exists (created by createDirectories). Git worktree
 	// add requires the target to not exist, so remove it first.
 	if err := os.RemoveAll(mergedDir); err != nil {
-		fmt.Fprintf(os.Stderr, "bubblewrap: failed to remove mergedDir for worktree: %v\n", err)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"bubblewrap failed to prepare private Git worktree", err)
 	}
 
 	// Create branch name from session ID (sanitized for git)
@@ -170,14 +179,14 @@ func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, t
 		repoPath, mergedDir, branchName)
 
 	if err := p.addWorktree(repoPath, mergedDir, branchName); err != nil {
-		fmt.Fprintf(os.Stderr, "bubblewrap: git worktree add failed: %v\n", err)
-		// Re-create mergedDir so the fallback symlink approach has somewhere to write
+		// Re-create mergedDir so the caller can clean the standard directory layout.
 		_ = os.MkdirAll(mergedDir, 0755)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"bubblewrap failed to create private Git worktree", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "bubblewrap: git worktree created successfully\n")
-	return repoPath, true
+	return repoPath, nil
 }
 
 // findGitRepo finds the first git repository among the lower directories.
@@ -236,41 +245,7 @@ func (p *Provider) findGitRepo(lowerDirs []string) string {
 		}
 	}
 
-	// Fallback: scan well-known workspace locations
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	// Check AGM config for workspace roots
-	repos := p.findReposFromAGMConfig(homeDir)
-	if repo := p.preferRepoWithGoMod(repos); repo != "" {
-		return repo
-	}
-
 	return ""
-}
-
-// preferRepoWithGoMod returns the first git repo that contains go.mod at its
-// root. This ensures the monorepo (ai-tools) is preferred over auxiliary repos
-// (ai-conversation-logs) when scanning alphabetically. Falls back to first git
-// repo if none has go.mod.
-func (p *Provider) preferRepoWithGoMod(repos []string) string {
-	var firstGitRepo string
-	for _, repo := range repos {
-		if !p.isGitRepo(repo) {
-			continue
-		}
-		if firstGitRepo == "" {
-			firstGitRepo = repo
-		}
-		goModPath := filepath.Join(repo, "go.mod")
-		if _, err := os.Stat(goModPath); err == nil {
-			fmt.Fprintf(os.Stderr, "bubblewrap: preferring repo with go.mod: %s\n", repo)
-			return repo
-		}
-	}
-	return firstGitRepo
 }
 
 // resolveRepoFromSymlinks traces symlinks in a directory back to their
@@ -416,22 +391,39 @@ func (p *Provider) removeWorktree(repoPath, worktreePath string) error {
 
 // Destroy tears down the sandbox and cleans up resources.
 func (p *Provider) Destroy(ctx context.Context, id string) error {
-	p.mu.Lock()
-	sb, exists := p.sandboxes[id]
-	if !exists {
-		p.mu.Unlock()
-		return nil // Idempotent
-	}
-	delete(p.sandboxes, id)
-	p.mu.Unlock()
-
-	if sb.CleanupFunc != nil {
-		if err := sb.CleanupFunc(); err != nil {
-			return err
+	for {
+		p.mu.Lock()
+		sb, exists := p.sandboxes[id]
+		if !exists {
+			p.mu.Unlock()
+			return nil // Idempotent
 		}
-	}
+		if done, active := p.destroying[id]; active {
+			p.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		done := make(chan struct{})
+		p.destroying[id] = done
+		p.mu.Unlock()
 
-	return nil
+		var cleanupErr error
+		if sb.CleanupFunc != nil {
+			cleanupErr = sb.CleanupFunc()
+		}
+		p.mu.Lock()
+		if cleanupErr == nil && p.sandboxes[id] == sb {
+			delete(p.sandboxes, id)
+		}
+		delete(p.destroying, id)
+		close(done)
+		p.mu.Unlock()
+		return cleanupErr
+	}
 }
 
 // Validate checks if a sandbox exists and is healthy.
@@ -598,245 +590,6 @@ func (p *Provider) cleanup(upperDir, workDir, mergedDir string) error {
 	if err := p.cleanupDirectories(upperDir, workDir, mergedDir); err != nil {
 		return sandbox.NewCleanupFailedError(mergedDir, err)
 	}
-	return nil
-}
-
-// populateMergedDir creates symlinks in mergedDir pointing to each top-level
-// entry from all lower directories. This gives the worker process read access
-// to repository content. Later lower dirs take priority (matching OverlayFS
-// semantics where the first lowerdir listed has highest priority).
-//
-// If the lower directories are effectively empty (e.g., a parent sandbox's
-// merged dir that was created before content was populated), this method
-// falls back to resolving the actual workspace repos from AGM configuration.
-func (p *Provider) populateMergedDir(lowerDirs []string, mergedDir string) error {
-	// Process lower dirs in reverse order so earlier entries (higher priority)
-	// overwrite later ones, matching OverlayFS lowerdir semantics.
-	for i := len(lowerDirs) - 1; i >= 0; i-- {
-		dir := lowerDirs[i]
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return fmt.Errorf("failed to read lower dir %s: %w", dir, err)
-		}
-
-		for _, entry := range entries {
-			name := entry.Name()
-			linkPath := filepath.Join(mergedDir, name)
-			targetPath := filepath.Join(dir, name)
-
-			// Resolve symlinks so we point to actual repo paths, not
-			// intermediate symlinks in a parent sandbox's merged dir.
-			// This prevents chained symlinks when a child sandbox is
-			// created from within a parent sandbox's merged directory.
-			if resolved, err := filepath.EvalSymlinks(targetPath); err == nil {
-				targetPath = resolved
-			}
-
-			// Remove existing symlink if present (higher-priority dir overrides)
-			if _, err := os.Lstat(linkPath); err == nil {
-				if err := os.Remove(linkPath); err != nil {
-					return fmt.Errorf("failed to remove existing entry %s: %w", linkPath, err)
-				}
-			}
-
-			if err := os.Symlink(targetPath, linkPath); err != nil {
-				return fmt.Errorf("failed to create symlink %s -> %s: %w", linkPath, targetPath, err)
-			}
-		}
-	}
-
-	// Check if the merged dir is effectively empty (only dotfiles/metadata).
-	// This happens when a child sandbox is created from a parent sandbox whose
-	// merged dir was never populated (parent created before the fix).
-	if p.isMergedDirEffectivelyEmpty(mergedDir) {
-		fmt.Fprintf(os.Stderr, "bubblewrap: merged dir effectively empty, attempting workspace repo fallback\n")
-		if err := p.fallbackToWorkspaceRepos(lowerDirs, mergedDir); err != nil {
-			fmt.Fprintf(os.Stderr, "bubblewrap: workspace repo fallback failed: %v\n", err)
-			// Not fatal -- we still have whatever was in lowerDirs
-		}
-	}
-
-	// Log what was linked for debugging
-	entries, _ := os.ReadDir(mergedDir)
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-	fmt.Fprintf(os.Stderr, "bubblewrap: populated merged dir with %d entries from %d lower dir(s)\n",
-		len(names), len(lowerDirs))
-
-	return nil
-}
-
-// isMergedDirEffectivelyEmpty returns true if mergedDir contains only dotfiles
-// and metadata (e.g., .claude, CLAUDE.md) but no actual repository content.
-func (p *Provider) isMergedDirEffectivelyEmpty(mergedDir string) bool {
-	entries, err := os.ReadDir(mergedDir)
-	if err != nil {
-		return true
-	}
-	for _, e := range entries {
-		name := e.Name()
-		// Skip dotfiles and known metadata
-		if strings.HasPrefix(name, ".") || name == "CLAUDE.md" {
-			continue
-		}
-		// Found real content
-		return false
-	}
-	return true
-}
-
-// fallbackToWorkspaceRepos attempts to find and symlink actual workspace repos
-// when the lower dirs are effectively empty (e.g., empty parent sandbox).
-//
-// Resolution strategy:
-//  1. Parse ~/.agm/config.yaml for workspace roots, scan {root}/repos/
-//  2. Detect sandbox-within-sandbox pattern and find original workspace
-func (p *Provider) fallbackToWorkspaceRepos(lowerDirs []string, mergedDir string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("cannot get home dir: %w", err)
-	}
-
-	// Strategy 1: Read ~/.agm/config.yaml for workspace roots
-	repoDirs := p.findReposFromAGMConfig(homeDir)
-	if len(repoDirs) > 0 {
-		return p.symlinkRepoContents(repoDirs, mergedDir)
-	}
-
-	// Strategy 2: Detect sandbox-in-sandbox pattern.
-	// If lowerDir is ~/.agm/sandboxes/*/merged, try common workspace paths.
-	sandboxPattern := filepath.Join(homeDir, ".agm", "sandboxes")
-	for _, dir := range lowerDirs {
-		if strings.HasPrefix(dir, sandboxPattern) {
-			fmt.Fprintf(os.Stderr, "bubblewrap: detected sandbox-in-sandbox (lower=%s)\n", dir)
-			break
-		}
-	}
-
-	// Strategy 3: Scan well-known workspace locations
-	candidates := []string{
-		filepath.Join(homeDir, "src", "ws", "oss", "repos"),
-		filepath.Join(homeDir, "src", "ws"),
-		filepath.Join(homeDir, "src"),
-	}
-	for _, candidate := range candidates {
-		repos := p.scanForRepos(candidate)
-		if len(repos) > 0 {
-			fmt.Fprintf(os.Stderr, "bubblewrap: found %d repos under %s\n", len(repos), candidate)
-			return p.symlinkRepoContents(repos, mergedDir)
-		}
-	}
-
-	return fmt.Errorf("no workspace repos found in any fallback location")
-}
-
-// findReposFromAGMConfig parses ~/.agm/config.yaml (lightweight, no YAML dep)
-// to find workspace roots, then scans for repos under {root}/repos/.
-func (p *Provider) findReposFromAGMConfig(homeDir string) []string {
-	cfgPath := filepath.Join(homeDir, ".agm", "config.yaml")
-	f, err := os.Open(cfgPath)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	var roots []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Look for "root: /path/to/workspace" lines
-		if strings.HasPrefix(line, "root:") {
-			root := strings.TrimSpace(strings.TrimPrefix(line, "root:"))
-			root = strings.ReplaceAll(root, "~", homeDir)
-			if root != "" {
-				roots = append(roots, root)
-			}
-		}
-	}
-
-	// For each workspace root, scan {root}/repos/ for actual repos
-	var allRepos []string
-	for _, root := range roots {
-		reposDir := filepath.Join(root, "repos")
-		repos := p.scanForRepos(reposDir)
-		allRepos = append(allRepos, repos...)
-	}
-
-	return allRepos
-}
-
-// scanForRepos returns directories under parentDir that look like repos
-// (contain .git, go.mod, package.json, or similar markers).
-func (p *Provider) scanForRepos(parentDir string) []string {
-	entries, err := os.ReadDir(parentDir)
-	if err != nil {
-		return nil
-	}
-
-	var repos []string
-	repoMarkers := []string{".git", "go.mod", "package.json", "Cargo.toml", "pyproject.toml", "Makefile"}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		dirPath := filepath.Join(parentDir, name)
-		for _, marker := range repoMarkers {
-			if _, err := os.Stat(filepath.Join(dirPath, marker)); err == nil {
-				repos = append(repos, dirPath)
-				break
-			}
-		}
-	}
-	return repos
-}
-
-// symlinkRepoContents creates symlinks in mergedDir for each top-level entry
-// across all repo directories.
-func (p *Provider) symlinkRepoContents(repoDirs []string, mergedDir string) error {
-	linked := 0
-	for _, repoDir := range repoDirs {
-		entries, err := os.ReadDir(repoDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "bubblewrap: skipping repo %s: %v\n", repoDir, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			name := entry.Name()
-			linkPath := filepath.Join(mergedDir, name)
-			targetPath := filepath.Join(repoDir, name)
-
-			// Resolve symlinks to actual paths
-			if resolved, err := filepath.EvalSymlinks(targetPath); err == nil {
-				targetPath = resolved
-			}
-
-			// Don't overwrite existing entries (original lowerDir has priority)
-			if _, err := os.Lstat(linkPath); err == nil {
-				continue
-			}
-
-			if err := os.Symlink(targetPath, linkPath); err != nil {
-				fmt.Fprintf(os.Stderr, "bubblewrap: failed to symlink %s: %v\n", name, err)
-				continue
-			}
-			linked++
-		}
-	}
-
-	if linked == 0 {
-		return fmt.Errorf("no entries linked from %d repo dirs", len(repoDirs))
-	}
-
-	fmt.Fprintf(os.Stderr, "bubblewrap: fallback linked %d entries from %d repos\n", linked, len(repoDirs))
 	return nil
 }
 

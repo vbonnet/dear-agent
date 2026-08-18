@@ -1,6 +1,6 @@
 # Backlog Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-18 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -22,7 +22,7 @@
 
 **BACKLOG-06** When no item is eligible, the system shall return an empty suggestion set instead of fabricating work.
 
-**BACKLOG-07** When a suggestion is dispatched, the system shall preserve the caller-selected worker route rather than forcing a harness.
+**BACKLOG-07** When suggestions are returned, the package shall not dispatch workers or mutate live work state; Beads and the caller own those operations.
 
 **BACKLOG-08** While backlog operations are called from any supported harness and model family, the system shall preserve identical parsing, ranking, and dependency semantics.
 

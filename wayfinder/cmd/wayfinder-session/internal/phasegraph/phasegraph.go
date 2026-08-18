@@ -21,8 +21,7 @@ const (
 	Skip LoadStrategy = "skip"
 )
 
-// PhaseDependencyConfig holds the parsed YAML configuration for
-// phase dependencies and V1-to-V2 name mapping.
+// PhaseDependencyConfig holds named-phase dependency loading strategies.
 type PhaseDependencyConfig struct {
 	Dependencies map[string]map[string]LoadStrategy `yaml:"dependencies"`
 }
@@ -80,7 +79,7 @@ func (c *PhaseDependencyConfig) GetDependencies(phase string) map[string]LoadStr
 	return result
 }
 
-// Phases returns all V2 phase names defined in the dependency graph.
+// Phases returns all named phases defined in the dependency graph.
 func (c *PhaseDependencyConfig) Phases() []string {
 	phases := make([]string, 0, len(c.Dependencies))
 	for phase := range c.Dependencies {

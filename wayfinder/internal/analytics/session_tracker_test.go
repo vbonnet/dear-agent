@@ -110,13 +110,13 @@ func TestSessionID(t *testing.T) {
 func TestStartPhase(t *testing.T) {
 	tracker := NewSessionTracker(nil)
 
-	err := tracker.StartPhase("D1")
+	err := tracker.StartPhase("PROBLEM")
 	if err != nil {
 		t.Errorf("StartPhase() failed: %v", err)
 	}
 
-	if tracker.currentPhase != "D1" {
-		t.Errorf("Current phase = %q, want %q", tracker.currentPhase, "D1")
+	if tracker.currentPhase != "PROBLEM" {
+		t.Errorf("Current phase = %q, want %q", tracker.currentPhase, "PROBLEM")
 	}
 
 	if tracker.phaseStartTime.IsZero() {
@@ -129,7 +129,7 @@ func TestCompletePhase(t *testing.T) {
 	tracker := NewSessionTracker(nil)
 
 	// Start a phase first
-	tracker.StartPhase("D1")
+	tracker.StartPhase("PROBLEM")
 	time.Sleep(10 * time.Millisecond) // Small delay to ensure duration > 0
 
 	// Complete the phase
@@ -139,7 +139,7 @@ func TestCompletePhase(t *testing.T) {
 		"tokensOutput":  567,
 	}
 
-	err := tracker.CompletePhase("D1", "success", metadata)
+	err := tracker.CompletePhase("PROBLEM", "success", metadata)
 	if err != nil {
 		t.Errorf("CompletePhase() failed: %v", err)
 	}
@@ -164,22 +164,22 @@ func TestSessionTrackerLifecycle(t *testing.T) {
 		t.Fatalf("StartSession() failed: %v", err)
 	}
 
-	// Phase 1: D1
-	if err := tracker.StartPhase("D1"); err != nil {
-		t.Fatalf("StartPhase(D1) failed: %v", err)
+	// Phase 1: PROBLEM
+	if err := tracker.StartPhase("PROBLEM"); err != nil {
+		t.Fatalf("StartPhase(PROBLEM) failed: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := tracker.CompletePhase("D1", "success", nil); err != nil {
-		t.Fatalf("CompletePhase(D1) failed: %v", err)
+	if err := tracker.CompletePhase("PROBLEM", "success", nil); err != nil {
+		t.Fatalf("CompletePhase(PROBLEM) failed: %v", err)
 	}
 
-	// Phase 2: D2
-	if err := tracker.StartPhase("D2"); err != nil {
-		t.Fatalf("StartPhase(D2) failed: %v", err)
+	// Phase 2: RESEARCH
+	if err := tracker.StartPhase("RESEARCH"); err != nil {
+		t.Fatalf("StartPhase(RESEARCH) failed: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := tracker.CompletePhase("D2", "success", nil); err != nil {
-		t.Fatalf("CompletePhase(D2) failed: %v", err)
+	if err := tracker.CompletePhase("RESEARCH", "success", nil); err != nil {
+		t.Fatalf("CompletePhase(RESEARCH) failed: %v", err)
 	}
 
 	// End session
@@ -194,7 +194,7 @@ func TestCompletePhase_WithoutStart(t *testing.T) {
 
 	// Complete phase without starting it
 	// Should not panic, but duration will be since session start
-	err := tracker.CompletePhase("D1", "success", nil)
+	err := tracker.CompletePhase("PROBLEM", "success", nil)
 	if err != nil {
 		t.Errorf("CompletePhase() without StartPhase failed: %v", err)
 	}
@@ -219,11 +219,11 @@ func TestNilEventBus(t *testing.T) {
 		t.Errorf("StartSession() with nil bus failed: %v", err)
 	}
 
-	if err := tracker.StartPhase("D1"); err != nil {
+	if err := tracker.StartPhase("PROBLEM"); err != nil {
 		t.Errorf("StartPhase() with nil bus failed: %v", err)
 	}
 
-	if err := tracker.CompletePhase("D1", "success", nil); err != nil {
+	if err := tracker.CompletePhase("PROBLEM", "success", nil); err != nil {
 		t.Errorf("CompletePhase() with nil bus failed: %v", err)
 	}
 

@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
@@ -40,7 +38,11 @@ var testEnvCreateCmd = &cobra.Command{
 		if name == "" {
 			tc = testcontext.New()
 		} else {
-			tc = testcontext.NewNamed(name)
+			var err error
+			tc, err = testcontext.NewNamed(name)
+			if err != nil {
+				return fmt.Errorf("invalid test environment name %q: %w", name, err)
+			}
 		}
 
 		if err := tc.EnsureDirs(); err != nil {
@@ -71,7 +73,10 @@ var testEnvDestroyCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		tc := testcontext.LoadNamed(name)
+		tc, err := testcontext.LoadNamed(name)
+		if err != nil {
+			return fmt.Errorf("invalid test environment name %q: %w", name, err)
+		}
 
 		if err := tc.Cleanup(); err != nil {
 			return fmt.Errorf("failed to destroy test environment %q: %w", name, err)
@@ -86,29 +91,18 @@ var testEnvListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List active test environments",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		tmpDir := os.TempDir()
-		entries, err := os.ReadDir(tmpDir)
+		contexts, err := testcontext.ListNamed()
 		if err != nil {
-			return fmt.Errorf("failed to read temp directory: %w", err)
+			return fmt.Errorf("failed to list test environments: %w", err)
 		}
 
-		found := false
 		fmt.Printf("%-20s  %s\n", "NAME", "PATH")
 		fmt.Printf("%-20s  %s\n", "----", "----")
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			if !strings.HasPrefix(entry.Name(), "agm-test-") {
-				continue
-			}
-			name := strings.TrimPrefix(entry.Name(), "agm-test-")
-			fullPath := filepath.Join(tmpDir, entry.Name())
-			fmt.Printf("%-20s  %s\n", name, fullPath)
-			found = true
+		for _, tc := range contexts {
+			fmt.Printf("%-20s  %s\n", tc.RunID, tc.BaseDir)
 		}
 
-		if !found {
+		if len(contexts) == 0 {
 			fmt.Println("No active test environments found.")
 		}
 		return nil

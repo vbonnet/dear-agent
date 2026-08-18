@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" // sqlite3 driver
+	_ "modernc.org/sqlite" // pure-Go SQLite driver keeps authenticated launchers cgo-free
 )
 
 // AgentLaunch represents a logged agent launch with features and outcome.
@@ -110,7 +110,7 @@ func NewStorageAt(path string) (*Storage, error) {
 	}
 
 	// Open database
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

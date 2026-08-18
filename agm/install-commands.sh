@@ -1,24 +1,15 @@
 #!/bin/bash
-# Install AGM slash commands to global Claude commands directory
-
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMANDS_SRC="$SCRIPT_DIR/agm-plugin/commands"
 COMMANDS_DST="$HOME/.claude/commands"
-
 echo "Installing AGM slash commands..."
-
-for cmd in "$COMMANDS_SRC"/*; do
-    if [ -f "$cmd" ]; then
-        cmd_name=$(basename "$cmd")
-        echo "  Installing /$cmd_name"
-        cp "$cmd" "$COMMANDS_DST/$cmd_name"
-        chmod +x "$COMMANDS_DST/$cmd_name"
-    fi
+mkdir -p "$COMMANDS_DST"
+rm -f "$COMMANDS_DST"/{SPEC.md,allowed_tools_test.go,agm-exit-bow-gate_test.sh,agm-exit_test.sh,audit-completion_test.sh}
+for cmd in "$COMMANDS_SRC"/agm-*.md "$COMMANDS_SRC"/audit-completion.md "$COMMANDS_SRC"/wiki-*.md; do
+    [[ -f "$cmd" ]] || continue
+    cmd_name=$(basename "$cmd")
+    echo "  Installing /$cmd_name"
+    cp "$cmd" "$COMMANDS_DST/$cmd_name"
 done
-
 echo "✓ AGM commands installed to $COMMANDS_DST"
-echo ""
-echo "Available commands:"
-ls -1 "$COMMANDS_DST" | grep -E "^agm-" | sed 's/^/  \//'

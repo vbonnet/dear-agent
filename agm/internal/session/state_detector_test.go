@@ -2,6 +2,7 @@ package session
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/testutil"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // TestDetectState_NonExistentSession verifies that a session not in tmux
@@ -93,6 +95,55 @@ func TestDetectState_ReturnsCorrectState(t *testing.T) {
 	state, err := DetectState("agm-test-nonexistent-xyz-88888")
 	assert.NoError(t, err)
 	assert.Equal(t, manifest.StateOffline, state)
+}
+
+func TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle(t *testing.T) {
+	socketPath := setupRealReadinessTmux(t)
+	sessionName := "real-state-codex-ghost"
+	script := "printf '\\033[2m│ >_ \\033[0;1mOpenAI Codex\\033[0;2m (v0.145.0) │\\033[0m\\n" +
+		"\\033[2m│ model: \\033[0mgpt-5.6 high\\033[2m \\033[0m/model to change │\\n" +
+		"To get started, describe a task or try /review\\n\\n" +
+		"\\033[1m›\\033[0m \\033[2mRun /review on my current changes\\033[0m\\n\\n" +
+		"gpt-5.6 high · ~/src/project\\n'; sleep 30"
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName, "sh", "-c", script).CombinedOutput(); err != nil {
+		t.Fatalf("create styled Codex fixture: %v\n%s", err, output)
+	}
+	t.Cleanup(func() { tmux.KillSession(sessionName) })
+	if output, err := exec.Command("tmux", "-S", socketPath, "resize-window", "-t", sessionName, "-x", "28", "-y", "20").CombinedOutput(); err != nil {
+		t.Fatalf("resize styled Codex fixture: %v\n%s", err, output)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := CheckSessionDelivery(sessionName)
+		if got == state.CanReceiveYes {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("CheckSessionDelivery() = %v, want %v before deadline", got, state.CanReceiveYes)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	gotState, err := DetectState(sessionName)
+	if err != nil {
+		t.Fatalf("DetectState() error = %v", err)
+	}
+	if gotState != manifest.StateReady {
+		t.Fatalf("DetectState() = %q, want %q", gotState, manifest.StateReady)
+	}
+
+	confident, err := DetectStateWithConfidence(sessionName)
+	if err != nil {
+		t.Fatalf("DetectStateWithConfidence() error = %v", err)
+	}
+	if confident.State != manifest.StateReady || confident.Confidence != 0.95 {
+		t.Fatalf("DetectStateWithConfidence() = %#v, want high-confidence READY", confident)
+	}
+
+	if got := ResolveSessionState(sessionName, manifest.StateWorking, "", time.Now()); got != manifest.StateDone {
+		t.Fatalf("ResolveSessionState(fresh WORKING) = %q, want terminal-ready override %q", got, manifest.StateDone)
+	}
 }
 
 // TestUpdateSessionState tests state updates via Dolt adapter

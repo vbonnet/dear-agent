@@ -7,7 +7,7 @@
 # this script exists.
 #
 # Usage:
-#   scripts/preflight.sh            # fast tier: vet + build + lint  (~25s)
+#   scripts/preflight.sh            # fast tier: vet + build + AI skills + lint
 #   scripts/preflight.sh --tests    # fast tier + go test (no -race, no vuln)
 #   scripts/preflight.sh --race     # fast tier + go test -race (no vuln)
 #   scripts/preflight.sh --full     # add: go test -race + govulncheck  (full CI parity)
@@ -66,12 +66,28 @@ step "go build ./..."
 mkdir -p build
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "local")
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS="-s -w -X main.Version=local -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=preflight"
+LDFLAGS="-s -w -X github.com/vbonnet/dear-agent/pkg/version.Version=local -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${GIT_COMMIT} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${BUILD_DATE} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=preflight"
 go build -ldflags="${LDFLAGS}" -o build/agm ./agm/cmd/agm
 go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
 go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
+
+step "validate tracked AI skills"
+go run ./tools/skill-lint -repo . || fail "AI skill validation failed"
+ok "AI skills valid"
+
+step "make lint-instructions"
+make lint-instructions || fail "active instruction policy integrity failed"
+ok "active instruction policy guidance intact"
+
+step "make lint-adrs"
+make lint-adrs || fail "ADR identity/index/lifecycle contract failed"
+ok "ADR identity/index/lifecycle contract intact"
+
+step "make lint-headers"
+make lint-headers || fail "doc header format validation failed"
+ok "doc header format valid"
 
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
@@ -85,6 +101,11 @@ LINT_VER="$(golangci-lint version 2>&1 | head -n 1 || true)"
 warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
+
+step "verify generated AGM surfaces and plugin hashes"
+make verify-surface-codegen || fail "generated AGM surface artifacts are stale"
+make plugin-verify-hashes || fail "AGM plugin content hashes are stale"
+ok "generated AGM surfaces and plugin hashes verified"
 
 TEST_TIMEOUT="20m"
 if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,7 +29,7 @@ Flags:
   --project-type   Project type: feature, research, infrastructure, refactor, bugfix (default: feature)
   --risk-level     Risk level: XS, S, M, L, XL (default: M)
 
-V2 Schema (9 phases):
+Canonical schema (9 phases):
   CHARTER  - Intake & Waypoint
   PROBLEM  - Discovery & Context
   RESEARCH - Investigation & Options
@@ -41,13 +42,13 @@ V2 Schema (9 phases):
 
 Examples:
   # Start feature project with medium risk
-  wayfinder-session start myproject
+  wayfinder session start myproject
 
   # Start research project with low risk
-  wayfinder-session start myproject --project-type research --risk-level S
+  wayfinder session start myproject --project-type research --risk-level S
 
   # Force overwrite
-  wayfinder-session start myproject --force`,
+  wayfinder session start myproject --force`,
 	Args: cobra.ExactArgs(1),
 	RunE: runStart,
 }
@@ -62,16 +63,22 @@ func init() {
 
 func runStart(cmd *cobra.Command, args []string) error {
 	projectName := args[0]
+	if strings.TrimSpace(projectName) == "" {
+		return fmt.Errorf("project name is required")
+	}
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
+	if !git.New(projectDir).IsGitWorktree() {
+		return fmt.Errorf("wayfinder session project directory must be inside a Git work tree: %s", projectDir)
+	}
 
 	// Check --force flag
 	forceFlag, _ := cmd.Flags().GetBool("force")
 	if forceFlag {
 		startReason, _ := cmd.Flags().GetString("reason")
 		if gerr := override.Require(context.Background(), override.Guard{
-			Tool: "wayfinder-session start",
+			Tool: "wayfinder session start",
 			Flag: "--force",
 			Gate: "overwrite-existing wayfinder session",
 			Risk: override.RiskP2,
@@ -82,12 +89,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 	} else {
 		statusPath := filepath.Join(projectDir, status.StatusFilename)
 		if _, err := os.Stat(statusPath); err == nil {
-			version, detectErr := status.DetectSchemaVersion(statusPath)
-			if detectErr != nil {
-				return fmt.Errorf("failed to inspect existing Wayfinder status: %w", detectErr)
-			}
-			if version != status.SchemaVersionV2 {
-				return fmt.Errorf("legacy Wayfinder status requires explicit migration before start")
+			if _, parseErr := status.ParseV2(statusPath); parseErr != nil {
+				return fmt.Errorf("existing Wayfinder status is not canonical: %w", parseErr)
 			}
 			return fmt.Errorf("canonical Wayfinder session already exists; use status or next-phase instead of start")
 		} else if !os.IsNotExist(err) {
@@ -95,12 +98,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get V2 schema flags
+	// Get canonical schema flags.
 	projectType, _ := cmd.Flags().GetString("project-type")
 	riskLevel, _ := cmd.Flags().GetString("risk-level")
 	skipRoadmap, _ := cmd.Flags().GetBool("skip-roadmap")
+	if err := validateStartMetadata(projectType, riskLevel); err != nil {
+		return err
+	}
 
-	// Create new V2 status
+	// Create canonical status.
 	st := status.NewStatusV2(projectName, projectType, riskLevel)
 	st.SkipRoadmap = skipRoadmap
 
@@ -126,7 +132,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		// Continue anyway - tracking is non-critical
 	}
 
-	// Write V2 STATUS file to project directory
+	// Write canonical status to the project directory.
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
@@ -143,7 +149,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Success message
-	fmt.Printf("✅ Wayfinder V2 session started\n")
+	fmt.Printf("✅ Wayfinder session started\n")
 	fmt.Printf("Project: %s\n", projectName)
 	fmt.Printf("Type: %s | Risk: %s | Profile: %s\n", projectType, riskLevel, profile.Profile)
 	if len(st.SkipPhases) > 0 {
@@ -154,9 +160,19 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Created: %s\n\n", status.StatusFilename)
 	fmt.Printf("Next steps:\n\n")
 	fmt.Printf("Run phases manually:\n")
-	fmt.Printf("  wayfinder-session next-phase\n\n")
+	fmt.Printf("  wayfinder session next-phase\n\n")
 	fmt.Printf("End session:\n")
-	fmt.Printf("  wayfinder-session end --status completed\n")
+	fmt.Printf("  wayfinder session end --status completed\n")
 
+	return nil
+}
+
+func validateStartMetadata(projectType, riskLevel string) error {
+	if !slices.Contains(status.ValidProjectTypes(), projectType) {
+		return fmt.Errorf("invalid project type %q (valid: %s)", projectType, strings.Join(status.ValidProjectTypes(), ", "))
+	}
+	if !slices.Contains(status.ValidRiskLevels(), riskLevel) {
+		return fmt.Errorf("invalid risk level %q (valid: %s)", riskLevel, strings.Join(status.ValidRiskLevels(), ", "))
+	}
 	return nil
 }

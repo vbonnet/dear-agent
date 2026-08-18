@@ -6,20 +6,23 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // OpContext holds dependencies for all operations.
 // CLI, MCP, and Skills each construct an OpContext and pass it to ops.
 type OpContext struct {
+	// Context carries request cancellation into external I/O performed by an
+	// operation. Nil preserves compatibility for non-request-scoped callers.
+	Context    context.Context
 	Storage    dolt.Storage
 	Tmux       session.TmuxInterface
-	Manager    manager.Backend // New abstraction layer (optional, nil = legacy path)
 	Config     *config.Config
 	DryRun     bool
 	Fields     []string // field mask: if non-empty, only include these fields in output
@@ -29,6 +32,37 @@ type OpContext struct {
 	// with its harness-specific desktop or remote representation. Nil selects
 	// the production dispatcher; tests inject a deterministic implementation.
 	ExternalSessionArchiver ExternalSessionArchiver
+	// CreationRuntime adapts harness-specific interactive startup and
+	// post-registration completion without exposing lifecycle phase hooks.
+	CreationRuntime CreateSessionRuntime
+	// OpenSessionStorage lazily constructs surface-specific session storage.
+	// Nil uses Storage directly.
+	OpenSessionStorage SessionStorageOpener
+	// CodexThreadCreator adapts the external Codex remote-control dependency.
+	// Nil selects the production implementation.
+	CodexThreadCreator CodexThreadCreator
+	// AgyWorkspaceCreateLocker serializes the provider-global identity window
+	// across every AGY creation surface. Nil selects the production lock.
+	AgyWorkspaceCreateLocker AgyWorkspaceCreateLocker
+	// AgyCreateIdentityTracker snapshots and correlates the provider-native AGY
+	// conversation while the shared workspace lock is held. Nil selects the
+	// production tracker.
+	AgyCreateIdentityTracker agysession.CreateIdentityTracker
+	// APIDeliveryFactory reconstructs a pure API adapter from the session's
+	// persisted non-secret runtime configuration. Nil selects the production
+	// factory. Tests and non-CLI surfaces may inject a deterministic adapter.
+	APIDeliveryFactory APISessionDeliveryFactory
+	// archiveSandboxCleaner is an internal archive-boundary seam. Production
+	// uses the host sandbox safety checker; package tests inject the same
+	// allowlist behavior without consulting the real process or mount tables.
+	archiveSandboxCleaner sandboxCleanupFunc
+}
+
+func requestContext(opCtx *OpContext) context.Context {
+	if opCtx != nil && opCtx.Context != nil {
+		return opCtx.Context
+	}
+	return context.Background()
 }
 
 // Result is the base type for all operation results.

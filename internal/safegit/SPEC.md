@@ -1,8 +1,8 @@
 # Safe Git Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-08-03 -->
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Baseline
 **Scope:** `internal/safegit`.
 
@@ -28,7 +28,7 @@ used by agents instead of raw git or raw GitHub merge commands.
 
 **SAFEGIT-06** When safe merge is invoked without a positive PR number or owner/repo, the system shall reject the request.
 
-**SAFEGIT-07** When safe merge gates run, the system shall require all CI checks to pass.
+**SAFEGIT-07** When safe merge gates run on a branch with required CI checks, the system shall require every provider-effective required check to pass and shall not block on failed informational checks.
 
 **SAFEGIT-08** When unresolved review threads exist and review checks are not skipped, the system shall block the merge.
 
@@ -39,6 +39,30 @@ used by agents instead of raw git or raw GitHub merge commands.
 **SAFEGIT-11** When repo safe-merge configuration is malformed, the system shall fail loudly before running merge gates.
 
 **SAFEGIT-12** When configured flaky checks fail for the first allowed occurrence, the system shall request the sanctioned rerun before treating the check as a hard block.
+
+**SAFEGIT-13** When an exact-head provider merge is confirmed for a local branch, the system shall attempt caller-cancelable, bounded linked-worktree removal before conservative local-branch deletion without depending on the continued existence of the invoking worktree, and shall report cleanup failures as warnings without changing the confirmed provider merge result.
+
+**SAFEGIT-14** When the effective required-check policy cannot be completely discovered, the system shall block the merge before classifying CI results.
+
+**SAFEGIT-15** When the effective base-branch policy is authoritatively known to require no CI checks, the system shall require every reported CI check to pass.
+
+**SAFEGIT-16** When multiple branch policies apply, the system shall enforce the union of their required CI contexts and shall treat an unreported required context as pending.
+
+**SAFEGIT-17** When a required CI context is scoped to a provider integration, the system shall use the provider's integration-aware required-check classification rather than context text alone, and shall block when multiple integration identities sharing one context cannot be proven independently.
+
+**SAFEGIT-18** When an applicable required workflow cannot be proven complete, the system shall block the merge.
+
+**SAFEGIT-19** When the provider's effective required-check projection contains a context absent from the discovered branch policy, the system shall block the merge as an incomplete-policy disagreement.
+
+**SAFEGIT-20** When the provider returns valid check JSON with a documented failed-check or pending-check status exit, the system shall classify the returned checks rather than treating the status exit as a query failure.
+
+**SAFEGIT-21** When classic branch protection repeats an app-scoped required context in both its legacy contexts and canonical checks fields, the system shall preserve only the canonical app-scoped identity.
+
+**SAFEGIT-22** When another repository component needs required-check classification, the system shall expose and reuse one context-aware effective-policy projection with normalized passing, pending, and failing statuses.
+
+**SAFEGIT-23** When the discovered policy is authoritatively empty and the provider reports that no required checks exist, the system shall accept the empty projection and shall preserve conservative validation of every reported check at the merge gate.
+
+**SAFEGIT-24** When a shared required-check consumer classifies a pull request whose effective policy is authoritatively empty, the system shall project every reported check so repair classification and the merge gate apply the same conservative verdict.
 
 ## BDD Traceability
 

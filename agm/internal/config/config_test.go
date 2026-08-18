@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -66,10 +67,6 @@ func TestDefault(t *testing.T) {
 	if cfg.Adapters.OpenCode.Reconnect.Multiplier != 2 {
 		t.Errorf("Adapters.OpenCode.Reconnect.Multiplier = %d, expected 2", cfg.Adapters.OpenCode.Reconnect.Multiplier)
 	}
-	if !cfg.Adapters.OpenCode.FallbackTmux {
-		t.Error("Adapters.OpenCode.FallbackTmux should be true by default")
-	}
-
 	// Check Claude hooks
 	if cfg.Adapters.ClaudeHooks.Enabled {
 		t.Error("Adapters.ClaudeHooks.Enabled should be false by default")
@@ -255,6 +252,10 @@ func TestLoad_ExpandHomePaths(t *testing.T) {
 log_file: ~/agm.log
 lock:
   path: ~/agm.lock
+sandbox:
+  writable_dirs:
+    - ~/worktrees
+    - /var/tmp/beads
 `
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
@@ -278,6 +279,10 @@ lock:
 	if cfg.Lock.Path != filepath.Join(homeDir, "agm.lock") {
 		t.Errorf("Lock.Path not expanded: %s", cfg.Lock.Path)
 	}
+	wantWritableDirs := []string{filepath.Join(homeDir, "worktrees"), "/var/tmp/beads"}
+	if !slices.Equal(cfg.Sandbox.WritableDirs, wantWritableDirs) {
+		t.Errorf("Sandbox.WritableDirs = %v, want %v", cfg.Sandbox.WritableDirs, wantWritableDirs)
+	}
 }
 
 // ============================================================================
@@ -297,7 +302,6 @@ func TestLoad_OpenCodeAdapterConfig(t *testing.T) {
       initial_delay: 2s
       max_delay: 60s
       multiplier: 3
-    fallback_to_tmux: false
   claude_hooks:
     enabled: true
     listen_addr: "0.0.0.0:9999"
@@ -331,10 +335,6 @@ func TestLoad_OpenCodeAdapterConfig(t *testing.T) {
 	if cfg.Adapters.OpenCode.Reconnect.Multiplier != 3 {
 		t.Errorf("Adapters.OpenCode.Reconnect.Multiplier = %d, expected 3", cfg.Adapters.OpenCode.Reconnect.Multiplier)
 	}
-	if cfg.Adapters.OpenCode.FallbackTmux {
-		t.Error("Adapters.OpenCode.FallbackTmux should be false")
-	}
-
 	// Verify Claude hooks
 	if !cfg.Adapters.ClaudeHooks.Enabled {
 		t.Error("Adapters.ClaudeHooks.Enabled should be true")
@@ -389,9 +389,6 @@ func TestLoad_PartialOpenCodeConfig(t *testing.T) {
 	}
 	if cfg.Adapters.OpenCode.Reconnect.Multiplier != 2 {
 		t.Errorf("Adapters.OpenCode.Reconnect.Multiplier = %d, expected default 2", cfg.Adapters.OpenCode.Reconnect.Multiplier)
-	}
-	if !cfg.Adapters.OpenCode.FallbackTmux {
-		t.Error("Adapters.OpenCode.FallbackTmux should be true by default")
 	}
 }
 

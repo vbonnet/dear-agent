@@ -21,12 +21,15 @@ import (
 )
 
 var (
-	listJSON    bool
-	listAll     bool
-	listTrust   bool
-	listTestEnv string
-	listTags    []string
-	listFilters []string
+	listJSON        bool
+	listAll         bool
+	listTrust       bool
+	listTestEnv     string
+	listTags        []string
+	listFilters     []string
+	listLimit       int
+	listOffset      int
+	listStableOrder bool
 )
 
 // listCmdDolt is the Dolt-backed version of the list command
@@ -43,12 +46,19 @@ Examples:
   agm session list                         # List running sessions only
   agm session list --all                   # List all sessions (stopped + archived)
   agm session list --json                  # Output as JSON
+  agm session list --all --limit 1000      # Paginate complete history
   agm session list --filter role:worker    # Filter by role tag
   agm session list --tag cap:claude-code   # Filter by capability tag`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateListPagination(listLimit, listOffset); err != nil {
+			return err
+		}
 		// Load named test environment if --test-env flag is set
 		if listTestEnv != "" {
-			tc := testcontext.LoadNamed(listTestEnv)
+			tc, err := testcontext.LoadNamed(listTestEnv)
+			if err != nil {
+				return fmt.Errorf("invalid test environment %q: %w", listTestEnv, err)
+			}
 			if err := tc.SetEnv(); err != nil {
 				return fmt.Errorf("failed to activate test environment %q: %w", listTestEnv, err)
 			}
@@ -82,7 +92,9 @@ Examples:
 		result, err := ops.ListSessions(opCtx, &ops.ListSessionsRequest{
 			Status:         status,
 			Tags:           tags,
-			Limit:          1000,
+			Limit:          listLimit,
+			Offset:         listOffset,
+			StableOrder:    listStableOrder,
 			ExcludeStopped: !listAll,
 		})
 		if err != nil {
@@ -132,6 +144,16 @@ Examples:
 		}
 		return nil
 	},
+}
+
+func validateListPagination(limit, offset int) error {
+	if limit < 1 || limit > 1000 {
+		return fmt.Errorf("--limit must be between 1 and 1000")
+	}
+	if offset < 0 {
+		return fmt.Errorf("--offset must be non-negative")
+	}
+	return nil
 }
 
 var listTopLevelFields = map[string]bool{
@@ -230,6 +252,9 @@ func init() {
 	listCmdDolt.Flags().StringSliceVar(&listFilters, "filter", nil, "filter by context tag (alias for --tag, e.g., --filter role:worker)")
 	listCmdDolt.Flags().BoolVar(&listTrust, "trust", false, "show trust score column")
 	listCmdDolt.Flags().StringVar(&listTestEnv, "test-env", "", "Use named test environment")
+	listCmdDolt.Flags().IntVar(&listLimit, "limit", 1000, "maximum sessions to return (1-1000)")
+	listCmdDolt.Flags().IntVar(&listOffset, "offset", 0, "sessions to skip for pagination")
+	listCmdDolt.Flags().BoolVar(&listStableOrder, "stable-order", false, "order by immutable creation key for reliable offset pagination")
 }
 
 // shortStatus maps session status and attachment to compact display icons.
@@ -271,6 +296,8 @@ func shortHarness(harness string) string {
 		return "oc"
 	case "agy", "antigravity", "agy-cli":
 		return "agy"
+	case "pi-cli", "pi":
+		return "pi"
 	default:
 		return harness
 	}

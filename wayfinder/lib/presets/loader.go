@@ -2,6 +2,7 @@
 package presets
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,7 +124,9 @@ func (l *Loader) loadFile(path string) (*Preset, error) {
 
 	// Parse YAML
 	var preset Preset
-	if err := yaml.Unmarshal(data, &preset); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&preset); err != nil {
 		return nil, fmt.Errorf("invalid YAML in %s: %w", path, err)
 	}
 
@@ -235,14 +238,14 @@ func mergeSpecAlignmentOverrides(result *Preset, override *Preset) {
 // mergePhaseGatesOverrides applies phase gates overrides to result
 func mergePhaseGatesOverrides(result *Preset, override *Preset) {
 	if o := override.Overrides.PhaseGates; o != nil {
-		if o.S8BuildVerification != nil {
-			result.PhaseGates.S8BuildVerification = *o.S8BuildVerification
+		if o.BuildVerification != nil {
+			result.PhaseGates.BuildVerification = *o.BuildVerification
 		}
-		if o.S9ValidationDepth != nil {
-			result.PhaseGates.S9ValidationDepth = *o.S9ValidationDepth
+		if o.ValidationDepth != nil {
+			result.PhaseGates.ValidationDepth = *o.ValidationDepth
 		}
-		if o.S9HaltOnMinorIssues != nil {
-			result.PhaseGates.S9HaltOnMinorIssues = *o.S9HaltOnMinorIssues
+		if o.HaltOnMinorIssues != nil {
+			result.PhaseGates.HaltOnMinorIssues = *o.HaltOnMinorIssues
 		}
 		if o.DeployGate != nil {
 			result.PhaseGates.DeployGate = *o.DeployGate

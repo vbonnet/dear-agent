@@ -6,14 +6,13 @@
 
 `cmd/recommendation-mcp` exposes the recommendation aggregator as a read-only
 JSON-RPC 2.0 MCP server. It lets MCP clients inspect collected signals, ranked
-recommendations, trend buckets, and backlog suggestions without knowing the
-underlying SQLite schema or backlog parser details.
+recommendations and trend buckets without knowing the underlying SQLite schema.
 
 ## EARS Requirements
 
 **RMS-01** When the server initializes, the system shall return MCP protocol version `2024-11-05`, a tools capability, server name `recommendation-mcp`, and the current server version.
 
-**RMS-02** When the client lists tools, the system shall expose `suggest_backlog`, `get_signals`, `get_recommendations`, and `get_signal_trends`.
+**RMS-02** When the client lists tools, the system shall expose `get_signals`, `get_recommendations`, and `get_signal_trends`.
 
 **RMS-03** When `get_signals` is called without a kind, the system shall query all known signal kinds from the store.
 
@@ -29,7 +28,7 @@ underlying SQLite schema or backlog parser details.
 
 **RMS-09** When `get_signal_trends` receives an invalid bucket, a bucket below the minimum, or a bucket count above the maximum, the system shall return an MCP parameter error.
 
-**RMS-10** When `suggest_backlog` is called, the system shall read one or more markdown backlog files, apply phase, effort, dependency, and capacity filters, and return suggested and blocked items.
+**RMS-10** When an unknown tool such as the retired `suggest_backlog` surface is called, the system shall return an MCP method-not-found error.
 
 **RMS-11** When any recommendation MCP tool succeeds, the system shall not mutate the signals database.
 
@@ -42,5 +41,3 @@ underlying SQLite schema or backlog parser details.
 - Feature: `agm/test/bdd/features/mcp_command_guardrails.feature`
 - Package tests: `cmd/recommendation-mcp/main_test.go`
 - Package tests: `cmd/recommendation-mcp/tools_test.go`
-- Package tests: `cmd/recommendation-mcp/backlog_test.go`
-

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -14,7 +13,7 @@ var NextPhaseCmd = &cobra.Command{
 	Short: "Get the next phase in the sequence",
 	Long: `Read WAYFINDER-STATUS.md and output the next phase.
 
-Works with the canonical V2 sequence (CHARTER through RETRO).
+Works with the canonical sequence (CHARTER through RETRO).
 Returns the current phase if it is not yet completed.
 Returns an error if already at the final phase.
 
@@ -30,16 +29,9 @@ func runNextPhase(cmd *cobra.Command, args []string) error {
 }
 
 func runNextPhaseInDir(projectDir string) error {
-	version, err := status.DetectSchemaVersion(filepath.Join(projectDir, status.StatusFilename))
-	if err != nil {
-		return fmt.Errorf("failed to read STATUS file: %w (run 'wayfinder session start' or use -C <project-dir>)", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before next-phase")
-	}
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to parse canonical V2 STATUS: %w (run 'wayfinder session start', migrate legacy state, or use -C <project-dir>)", err)
+		return fmt.Errorf("failed to parse canonical STATUS: %w (run 'wayfinder session start' or use -C <project-dir>)", err)
 	}
 	nextPhase, err := st.NextPhase()
 	if err != nil {

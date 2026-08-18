@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // parseFunc parses src and returns the first function declaration plus the
@@ -78,9 +80,9 @@ func TestParseGoFilesExcludesAndCounts(t *testing.T) {
 	}
 	write("a.go", "package p\nfunc A() {}\n")
 	write("a_test.go", "package p\nfunc TestA() {}\n")
-	write("vendor/v.go", "package v\nfunc V() {}\n")        // excluded dir
+	write("vendor/v.go", "package v\nfunc V() {}\n")       // excluded dir
 	write(".worktrees/w/x.go", "package w\nfunc W() {}\n") // excluded dir
-	write("broken.go", "package p\nfunc (\n")               // unparseable
+	write("broken.go", "package p\nfunc (\n")              // unparseable
 
 	sources, skipped := parseGoFiles(root)
 	if len(sources) != 2 {
@@ -99,6 +101,39 @@ func TestParseGoFilesExcludesAndCounts(t *testing.T) {
 	}
 	if tests != 1 || prod != 1 {
 		t.Errorf("got %d test / %d prod, want 1/1", tests, prod)
+	}
+}
+
+func TestParseGoFilesHonorsRepositoryIgnoreAndGeneratedPolicy(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cmd := gittest.Command(t, root, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel string) {
+		t.Helper()
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("package p\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("visible.go")
+	write("ignored/hidden.go")
+	write("dist/generated.go")
+
+	sources, skipped := parseGoFiles(root)
+	if len(skipped) != 0 {
+		t.Fatalf("unexpected skipped files: %v", skipped)
+	}
+	if len(sources) != 1 || filepath.Base(sources[0].path) != "visible.go" {
+		t.Fatalf("parsed sources = %v, want visible.go only", sourcePaths(sources))
 	}
 }
 

@@ -5,6 +5,7 @@ This package provides a Go client for the OpenAI API with support for both stand
 ## Features
 
 - **Conversation History Support**: Send full conversation history with each request
+- **Bounded Completed-Turn Persistence**: Serialize sends across processes, honor caller cancellation with a finite provider deadline, and atomically persist user/assistant turns only after provider success
 - **Error Classification**: Structured error types for better error handling
 - **Azure OpenAI Support**: Works with both OpenAI and Azure OpenAI endpoints
 - **Configuration Flexibility**: Environment variables or explicit configuration
@@ -278,13 +279,15 @@ The client is designed to integrate with the AGM (Agent Manager) multi-agent arc
    - Manages HTTP communication
    - Provides error classification
 
-2. **Adapter Layer** ✅ IMPLEMENTED: Implements the `agent.Agent` interface
+2. **Adapter Layer** ✅ IMPLEMENTED: Concrete `agent.OpenAIAdapter`
    - Session management (CreateSession, ResumeSession, TerminateSession)
    - Conversation history persistence (JSONL storage)
    - Command translation (RenameSession, SetDirectory, ClearHistory)
    - Hook integration (synthetic SessionStart/SessionEnd hooks)
 
-3. **Registry Integration** ✅ COMPLETE: Registered with `agent.Register()` for discovery
+3. **Delivery Integration** ✅ COMPLETE: Reconstructed by
+   `internal/ops.NewAPISessionDeliveryAdapter` behind context-aware status and message
+   capabilities
 
 ## Hook Support (Phase 3)
 

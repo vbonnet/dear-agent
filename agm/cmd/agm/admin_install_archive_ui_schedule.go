@@ -24,8 +24,8 @@ every CLI session writes a local_<id>.json with isArchived=false, and the only
 first-party way to clear them is the per-row UI archive action, so they
 accumulate into the hundreds (ADR-026). 'agm session archive-ui' flips the
 local isArchived flag for sessions idle past a threshold; this launchd job is
-what makes that automatic instead of a manual chore. It is Phase 3
-("wrappers + cron") of ADR-026 — the piece that closes the accumulation loop.
+what makes that automatic instead of a manual chore. It is the scheduled caller
+described by ADR-026 and closes the accumulation loop.
 
 It is conservative by construction: it only archives sessions with no live
 process owning them and last active more than 7 days ago. archive-ui never

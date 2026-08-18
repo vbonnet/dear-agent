@@ -203,16 +203,16 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`,
 	}
 }
 
-func TestValidateCompilation_NonS8Phase(t *testing.T) {
-	// validateCompilation should skip validation for non-S8 phases
+func TestValidateCompilation_NonBuildPhase(t *testing.T) {
+	// validateCompilation should skip validation for non-BUILD phases
 	tmpDir := t.TempDir()
 
 	// Test with different phases
-	phases := []string{"W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S9", "S10", "S11"}
+	phases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "SPEC", "PLAN", "SETUP", "PLAN", "RETRO", "RETRO", "RETRO"}
 	for _, phase := range phases {
 		err := validateCompilation(tmpDir, phase)
 		if err != nil {
-			t.Errorf("validateCompilation(%s) should skip validation for non-S8 phases, got error: %v", phase, err)
+			t.Errorf("validateCompilation(%s) should skip validation for non-BUILD phases, got error: %v", phase, err)
 		}
 	}
 }
@@ -228,7 +228,7 @@ func TestValidateCompilation_NoLanguageDetected(t *testing.T) {
 	}
 
 	// Should not error because no language is detected (allows docs-only projects)
-	err := validateCompilation(tmpDir, "S8")
+	err := validateCompilation(tmpDir, "BUILD")
 	if err != nil {
 		t.Errorf("validateCompilation() should skip validation for non-code projects, got error: %v", err)
 	}

@@ -56,11 +56,6 @@ func (u *MetadataUpdater) UpdateMetadata(path string, record *AccessRecord) erro
 		}
 	}
 
-	// Initialize EncodingStrength if not set (should already be set by parser, but double-check)
-	if eg.Frontmatter.EncodingStrength == 0.0 {
-		eg.Frontmatter.EncodingStrength = 1.0 // Default neutral
-	}
-
 	// 3. Serialize to YAML frontmatter + content
 	data, err := u.serialize(eg)
 	if err != nil {

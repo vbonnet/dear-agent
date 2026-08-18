@@ -24,5 +24,7 @@ var KillSession = codegen.Op{
 
 // KillSessionRequest mirrors ops.KillSessionRequest with ef tags for generation.
 type KillSessionRequest struct {
-	Identifier string `json:"identifier" ef:"identifier,pos=0,required" desc:"Session ID, name, or UUID prefix"`
+	Identifier     string `json:"identifier" ef:"identifier,pos=0,required" desc:"Session ID, name, or UUID prefix"`
+	Force          bool   `json:"force,omitempty" ef:"force" desc:"Bypass the recent-activity safety check"`
+	ConfirmedStuck bool   `json:"confirmed_stuck,omitempty" ef:"confirmed-stuck" desc:"Confirm that a live harness is stuck and may be killed"`
 }

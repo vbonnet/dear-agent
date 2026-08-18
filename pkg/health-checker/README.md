@@ -9,12 +9,12 @@ Framework for implementing CLI health check (doctor) commands with auto-fix capa
 - 📊 **Summary Generation** - Aggregate statistics and exit codes
 - ⚡ **Parallel Execution** - Optional parallel check execution
 - 🎯 **Categorization** - Group checks by category (core, dependency, etc.)
-- ✅ **Well tested** - 92.3% test coverage
+- ✅ **Well tested** - Focused unit and command-level behavioral tests
 
 ## Installation
 
 ```bash
-go get github.com/vbonnet/engram/libs/health-checker
+go get github.com/vbonnet/dear-agent/pkg/health-checker
 ```
 
 ## Quick Start
@@ -22,7 +22,7 @@ go get github.com/vbonnet/engram/libs/health-checker
 ### 1. Implement a Check
 
 ```go
-import "github.com/vbonnet/engram/libs/health-checker"
+import "github.com/vbonnet/dear-agent/pkg/health-checker"
 
 type WorkspaceCheck struct {
     path string
@@ -62,19 +62,26 @@ func (c WorkspaceCheck) Run(ctx context.Context) healthchecker.Result {
 ```go
 func main() {
     checks := []healthchecker.Check{
-        WorkspaceCheck{path: "~/.myapp"},
+        WorkspaceCheck{path: ".myapp"},
     }
 
     runner := healthchecker.NewRunner(checks...)
-    results, _ := runner.RunAll(context.Background())
+    results, err := runner.RunAll(context.Background())
+    if err != nil {
+        log.Fatal(err)
+    }
 
     summary := healthchecker.Summarize(results)
     fmt.Printf("Status: %s\n", summary.OverallStatus())
 
     if summary.Fixable > 0 {
         fixer := healthchecker.NewFixer()
-        applied, updated, _ := fixer.Apply(context.Background(), results)
+        applied, updated, err := fixer.Apply(context.Background(), results)
+        if err != nil {
+            log.Fatal(err)
+        }
         fmt.Printf("Applied %d fixes\n", applied)
+        summary = healthchecker.Summarize(updated)
     }
 
     os.Exit(summary.ExitCode())
@@ -153,7 +160,7 @@ fixer := healthchecker.NewFixer().WithDryRun(true)
 
 ## Requirements
 
-- Go 1.21 or later
+- The Go version declared in the repository's `go.mod`
 - No external dependencies
 
 ## Testing
@@ -164,4 +171,4 @@ go test -v -cover
 
 ## License
 
-Same as parent engram project.
+Apache License 2.0. See the repository [LICENSE](../../LICENSE).

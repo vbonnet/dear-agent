@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestMentionsID(t *testing.T) {
@@ -50,7 +55,7 @@ func TestInFlightInPR(t *testing.T) {
 	}
 }
 
-func TestLiveWorkerIDs(t *testing.T) {
+func TestOccupiedWorkerIDs(t *testing.T) {
 	// Mimics `agm session list` output: arbitrary columns after the session name.
 	// worker-ce-cd14.2 is a legacy pre-sanitization session (dotted name); the
 	// returned set holds NORMALIZED ids, so it appears as ce-cd14-2.
@@ -62,7 +67,7 @@ func TestLiveWorkerIDs(t *testing.T) {
 		"some-other-session         idle     -",
 		"", // trailing blank from the split
 	}
-	ids := liveWorkerIDs(lines)
+	ids := occupiedWorkerIDs(lines)
 	if !ids["ce-bi19"] {
 		t.Error("expected ce-bi19 to be live")
 	}
@@ -74,6 +79,56 @@ func TestLiveWorkerIDs(t *testing.T) {
 	}
 	if len(ids) != 2 {
 		t.Errorf("expected exactly 2 live worker ids, got %d: %v", len(ids), ids)
+	}
+}
+
+// TestOccupiedWorkerIDsJSONFormat guards dedup against `agm session list`'s
+// agent-mode JSON output (the default in the non-TTY dispatch context), where a
+// worker name follows a quote — `"name":"worker-ce-24f1"` — not whitespace. A
+// regex anchored only to whitespace saw 0 occupied workers, so the dispatcher
+// re-selected already-live beads and collision-aborted every tick.
+func TestOccupiedWorkerIDsJSONFormat(t *testing.T) {
+	// One line, as agm emits it: worker names embedded in JSON, alongside a
+	// supervisor session (vroom-overseer), a "subworker-" that must NOT match,
+	// and a non-name field ("harness":"worker-harness") that must NOT be misread
+	// as a live worker id (the structural parse reads only the name field).
+	line := `{"operation":"list_sessions","sessions":[{"name":"worker-ce-24f1","status":"active","harness":"worker-harness"},{"name":"worker-ce-py3x","status":"active"},{"name":"worker-ce-dead","status":"zombie"},{"name":"worker-ce-stopped","status":"stopped"},{"name":"worker-ce-archived","status":"archived"},{"name":"vroom-overseer","status":"active"},{"name":"subworker-ce-nope","status":"active"}]}`
+	ids := occupiedWorkerIDs([]string{line})
+	if !ids["ce-24f1"] {
+		t.Error("expected ce-24f1 to be live from JSON output")
+	}
+	if !ids["ce-py3x"] {
+		t.Error("expected ce-py3x to be live from JSON output")
+	}
+	if ids["ce-nope"] {
+		t.Error("subworker-ce-nope must NOT be read as a live worker")
+	}
+	if !ids["ce-dead"] {
+		t.Error("zombie worker-ce-dead must occupy its non-archived session name")
+	}
+	if !ids["ce-stopped"] {
+		t.Error("stopped worker-ce-stopped must occupy its non-archived session name")
+	}
+	if ids["ce-archived"] {
+		t.Error("archived worker-ce-archived must release its session name")
+	}
+	if ids["harness"] {
+		t.Error(`"harness":"worker-harness" is a non-name field and must NOT be read as a live worker`)
+	}
+	if len(ids) != 4 {
+		t.Errorf("expected exactly 4 occupied worker ids from JSON, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestOccupiedWorkerIDsLegacyTextIncludesZombie(t *testing.T) {
+	ids := occupiedWorkerIDs([]string{
+		"worker-ce-live running opus-200k",
+		"worker-ce-dead zombie opus-200k",
+		"worker-ce-stopped stopped opus-200k",
+		"worker-ce-archived archived opus-200k",
+	})
+	if !ids["ce-live"] || !ids["ce-dead"] || !ids["ce-stopped"] || ids["ce-archived"] {
+		t.Fatalf("occupied worker ids = %v, want every non-archived name", ids)
 	}
 }
 
@@ -111,13 +166,13 @@ func TestDottedIDDedupBothDirections(t *testing.T) {
 	beads := []bead{{ID: "ce-xyz.3", Title: "dotted sub-bead", Priority: 0}}
 
 	// Direction 1: live session already uses the sanitized name.
-	live := liveWorkerIDs([]string{"worker-ce-xyz-3   running  opus-200k"})
+	live := occupiedWorkerIDs([]string{"worker-ce-xyz-3   running  opus-200k"})
 	if got := selectCandidates(beads, live, nil, 2); len(got) != 0 {
 		t.Errorf("sanitized session worker-ce-xyz-3 must dedup bead ce-xyz.3, got candidates %+v", got)
 	}
 
 	// Direction 2: legacy live session still carries the dotted name.
-	live = liveWorkerIDs([]string{"worker-ce-xyz.3   running  opus-200k"})
+	live = occupiedWorkerIDs([]string{"worker-ce-xyz.3   running  opus-200k"})
 	if got := selectCandidates(beads, live, nil, 2); len(got) != 0 {
 		t.Errorf("legacy dotted session worker-ce-xyz.3 must dedup bead ce-xyz.3, got candidates %+v", got)
 	}
@@ -128,9 +183,46 @@ func TestDottedIDDedupBothDirections(t *testing.T) {
 	}
 }
 
-func TestLiveWorkerIDsEmpty(t *testing.T) {
-	if ids := liveWorkerIDs(nil); len(ids) != 0 {
+func TestOccupiedWorkerIDsEmpty(t *testing.T) {
+	if ids := occupiedWorkerIDs(nil); len(ids) != 0 {
 		t.Errorf("nil input should yield empty set, got %v", ids)
+	}
+}
+
+func TestListSessionsRetrievesEveryPage(t *testing.T) {
+	original := listSessionPage
+	t.Cleanup(func() { listSessionPage = original })
+	var offsets []int
+	listSessionPage = func(_ context.Context, offset int) (sessionListPayload, error) {
+		offsets = append(offsets, offset)
+		if offset == 0 {
+			sessions := make([]sessionNameStatus, sessionListPageSize)
+			for index := range sessions {
+				sessions[index] = sessionNameStatus{Name: fmt.Sprintf("archived-%d", index), Status: "archived"}
+			}
+			sessions[sessionListPageSize-1] = sessionNameStatus{Name: "worker-ce-first", Status: "stopped"}
+			return sessionListPayload{Sessions: sessions}, nil
+		}
+		return sessionListPayload{Sessions: []sessionNameStatus{{Name: "worker-ce-second", Status: "zombie"}}}, nil
+	}
+
+	lines, err := listSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := occupiedWorkerIDs(lines)
+	if len(offsets) != 2 || offsets[0] != 0 || offsets[1] != sessionListPageSize {
+		t.Fatalf("page offsets = %v, want [0 %d]", offsets, sessionListPageSize)
+	}
+	if !ids["ce-first"] || !ids["ce-second"] {
+		t.Fatalf("occupied ids = %v, want workers from both pages", ids)
+	}
+}
+
+func TestSessionListArgsRequestStablePagination(t *testing.T) {
+	args := sessionListArgs(sessionListPageSize)
+	if !slices.Contains(args, "--stable-order") {
+		t.Fatalf("session list args = %v, want --stable-order", args)
 	}
 }
 
@@ -232,14 +324,19 @@ func TestRenderPrompt(t *testing.T) {
 	for _, want := range []string{
 		"# Worker: ce-test — Do the thing",
 		"assigned to bead ce-test (P1): Make it work.",
-		"/wayfinder",                                // worker drives the bead through the SDLC workflow
-		"~/worktrees/dear-agent/ce-test/",           // isolated worktree off read-only ~/src
-		"A bead is Done ONLY when its PR is MERGED", // merged-PR DoD
-		"VERIFICATION GATE (MANDATORY",              // run a verification step before declaring done (ce-fvsv parity)
-		"DONE_WITH_CONCERNS",                        // terminal status code surfaces reservations (ce-n3v4 parity)
+		"Wayfinder V2 lifecycle",
+		"~/worktrees/dear-agent/ce-test/",
+		"~/worktrees/engram-research/ce-test/",
+		"do not run `git worktree add`",
+		"PR creation is not done",
+		"MERGED",
+		"DEPLOYED",
+		"VERIFIED",
+		"deployment: N/A",
+		"DONE_WITH_CONCERNS",
 		"bd --db ~/beads/context-engine/.beads",
 		"NEVER write to ~/src/**",
-		"claude-opus-4-8",
+		"safe-pr create --wayfinder",
 		"More detail here", // full description in the Goal block
 	} {
 		if !strings.Contains(out, want) {
@@ -249,6 +346,11 @@ func TestRenderPrompt(t *testing.T) {
 	summaryLine := strings.Split(out, "\n")[2]
 	if strings.Contains(summaryLine, "More detail here") {
 		t.Errorf("summary line should not contain second paragraph: %q", summaryLine)
+	}
+	for _, providerToken := range []string{"claude-opus", "Anthropic API", "Claude credential"} {
+		if strings.Contains(out, providerToken) {
+			t.Errorf("worker prompt must be harness-neutral; found %q", providerToken)
+		}
 	}
 }
 
@@ -261,7 +363,7 @@ func TestRenderPromptEmptyDescription(t *testing.T) {
 }
 
 func TestSessionNewArgs(t *testing.T) {
-	args := sessionNewArgs("worker-ce-test", "opus-200k")
+	args := sessionNewArgs("worker-ce-test", testWorkerLaunchConfig(), "/repo")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"session new worker-ce-test",
@@ -271,11 +373,158 @@ func TestSessionNewArgs(t *testing.T) {
 		"--model=opus-200k",
 		"--mode=auto",
 		"--role worker",
+		"--directory /repo",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("session args missing %q: %v", want, args)
 		}
 	}
+}
+
+func TestSessionNewArgsSupportsNonClaudeHarness(t *testing.T) {
+	cfg := workerLaunchConfig{
+		Harness:   "codex-cli",
+		Model:     "gpt-5.6-codex",
+		Mode:      "auto",
+		Workspace: "oss",
+	}
+	joined := strings.Join(sessionNewArgs("worker-ce-test", cfg, "/repo"), " ")
+	for _, want := range []string{"--harness=codex-cli", "--model=gpt-5.6-codex", "--mode=auto"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("non-Claude session args missing %q: %s", want, joined)
+		}
+	}
+}
+
+func TestTrustedAddDirsEnvironmentBindsPayloadToSession(t *testing.T) {
+	got, err := trustedAddDirsEnvironment("worker-ce-test", []string{"/worktree/one", "/beads"}, "/etc/codex/hooks/worker-guard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`AGM_TRUSTED_ADD_DIRS_JSON=["/worktree/one","/beads"]`,
+		"AGM_TRUSTED_ADD_DIRS_SESSION=worker-ce-test",
+		"AGM_TRUSTED_GUARD_PATH=/etc/codex/hooks/worker-guard",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("trustedAddDirsEnvironment() = %v, want %v", got, want)
+	}
+}
+
+func TestPrepareWorkerWorkspacePrecreatesTaskOwnedGitState(t *testing.T) {
+	root := t.TempDir()
+	dearRepo := filepath.Join(root, "dear-agent")
+	engramRepo := filepath.Join(root, "engram-research")
+	initGitRepo(t, dearRepo)
+	initGitRepo(t, engramRepo)
+	beadsDir := filepath.Join(root, "beads", ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testWorkerLaunchConfig()
+	cfg.BeadsDir = beadsDir
+	cfg.Worktrees = filepath.Join(root, "worktrees")
+	cfg.GitState = filepath.Join(root, "worker-git")
+	cfg.EngramRepo = engramRepo
+
+	addDirs, err := prepareWorkerWorkspace(t.Context(), "ce-test.1", cfg, dearRepo)
+	if err != nil {
+		t.Fatalf("prepareWorkerWorkspace() error: %v", err)
+	}
+	if _, err := prepareWorkerWorkspace(t.Context(), "ce-test.1", cfg, dearRepo); err != nil {
+		t.Fatalf("prepareWorkerWorkspace() idempotent call: %v", err)
+	}
+	dearCommon, err := gitOutput(t.Context(), dearRepo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engramCommon, err := gitOutput(t.Context(), engramRepo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []string{
+		filepath.Join(cfg.Worktrees, "dear-agent", "ce-test.1"),
+		filepath.Join(cfg.Worktrees, "engram-research", "ce-test.1"),
+	}
+	for _, target := range targets {
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("prepared worktree %s: %v", target, err)
+		}
+	}
+	for _, forbidden := range []string{
+		dearCommon,
+		filepath.Join(dearCommon, "config"),
+		filepath.Join(dearCommon, "hooks"),
+		engramCommon,
+	} {
+		if slices.Contains(addDirs, forbidden) {
+			t.Fatalf("prepared grants include forbidden Git control path %s: %v", forbidden, addDirs)
+		}
+	}
+	for _, want := range []string{
+		beadsDir,
+		targets[0],
+		targets[1],
+		filepath.Join(cfg.GitState, "dear-agent", "ce-test.1.git"),
+		filepath.Join(cfg.GitState, "engram-research", "ce-test.1.git"),
+	} {
+		if !slices.Contains(addDirs, want) {
+			t.Fatalf("prepared grants missing %s: %v", want, addDirs)
+		}
+	}
+	for _, target := range targets {
+		if err := os.WriteFile(filepath.Join(target, "worker.txt"), []byte("worker\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"add", "worker.txt"}, {"commit", "-m", "worker commit"}} {
+			if _, err := gitOutput(t.Context(), target, args...); err != nil {
+				t.Fatalf("git %v in prepared worktree: %v", args, err)
+			}
+		}
+		common, err := gitOutput(t.Context(), target, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolvedBase, err := filepath.EvalSymlinks(cfg.GitState)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(common, resolvedBase+string(os.PathSeparator)) {
+			t.Fatalf("prepared worktree common Git dir = %s, want under %s", common, cfg.GitState)
+		}
+	}
+}
+
+func initGitRepo(t *testing.T, path string) {
+	t.Helper()
+	sandbox := gittest.New(t)
+	sandbox.InitRepo(t, path)
+	sandbox.Run(t, path, "remote", "add", "origin", "https://example.invalid/"+filepath.Base(path)+".git")
+}
+
+func testWorkerLaunchConfig() workerLaunchConfig {
+	return workerLaunchConfig{
+		Harness:   defaultHarness,
+		Model:     defaultModel,
+		Mode:      defaultMode,
+		Workspace: defaultWorkspace,
+	}
+}
+
+// TestSessionNewArgsAlwaysPassesDirectory guards against the launchd
+// spawn-hang (ce-fmxv): --directory must always be set explicitly so
+// `agm session new` never falls back to an inherited (or absent) cwd.
+func TestSessionNewArgsAlwaysPassesDirectory(t *testing.T) {
+	args := sessionNewArgs("worker-ce-test", testWorkerLaunchConfig(), "/home/user/src/dear-agent")
+	for i, a := range args {
+		if a == "--directory" {
+			if i+1 >= len(args) || args[i+1] != "/home/user/src/dear-agent" {
+				t.Fatalf("--directory not followed by repoDir: %v", args)
+			}
+			return
+		}
+	}
+	t.Fatalf("--directory flag missing from session args: %v", args)
 }
 
 // TestDispatch verifies the spawn-then-send ordering and that a spawn failure
@@ -286,11 +535,14 @@ func TestDispatch(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent string
-	spawnSession = func(ctx context.Context, name, model string) error { spawned = name; return nil }
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawned = name
+		return nil
+	}
 	sendPrompt = func(ctx context.Context, name, prompt string) error { sent = name; return nil }
 
 	b := bead{ID: "ce-test", Title: "T", Priority: 1}
-	if err := dispatch(context.Background(), b, "opus-200k"); err != nil {
+	if err := dispatch(context.Background(), b, testWorkerLaunchConfig(), "/repo"); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if spawned != "worker-ce-test" {
@@ -301,15 +553,47 @@ func TestDispatch(t *testing.T) {
 	}
 }
 
+func TestDispatchPreparedWorkspaceBecomesSessionDirectory(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "dear-agent")
+	initGitRepo(t, repo)
+	beadsDir := filepath.Join(root, "beads", ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testWorkerLaunchConfig()
+	cfg.BeadsDir = beadsDir
+	cfg.Worktrees = filepath.Join(root, "worktrees")
+	cfg.GitState = filepath.Join(root, "worker-git")
+
+	var spawnedDir string
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawnedDir = repoDir
+		return nil
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	if err := dispatch(context.Background(), bead{ID: "ce-test", Title: "T"}, cfg, repo); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(cfg.Worktrees, "dear-agent", "ce-test")
+	if spawnedDir != want {
+		t.Fatalf("spawned directory = %q, want prepared worktree %q", spawnedDir, want)
+	}
+}
+
 func TestDispatchSpawnFailureSkipsSend(t *testing.T) {
 	origSpawn, origSend := spawnSession, sendPrompt
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
-	spawnSession = func(ctx context.Context, name, model string) error { return errStub }
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error { return errStub }
 	sendCalled := false
 	sendPrompt = func(ctx context.Context, name, prompt string) error { sendCalled = true; return nil }
 
-	if err := dispatch(context.Background(), bead{ID: "ce-x"}, "opus-200k"); err == nil {
+	if err := dispatch(context.Background(), bead{ID: "ce-x"}, testWorkerLaunchConfig(), "/repo"); err == nil {
 		t.Error("expected error when spawn fails")
 	}
 	if sendCalled {
@@ -325,14 +609,17 @@ func TestDispatchDottedBeadSpawnsSanitizedName(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent, sentPrompt string
-	spawnSession = func(ctx context.Context, name, model string) error { spawned = name; return nil }
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawned = name
+		return nil
+	}
 	sendPrompt = func(ctx context.Context, name, prompt string) error {
 		sent, sentPrompt = name, prompt
 		return nil
 	}
 
 	b := bead{ID: "ce-xyz.3", Title: "dotted", Priority: 0}
-	if err := dispatch(context.Background(), b, "opus-200k"); err != nil {
+	if err := dispatch(context.Background(), b, testWorkerLaunchConfig(), "/repo"); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if spawned != "worker-ce-xyz-3" {
@@ -384,7 +671,7 @@ func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawnedNames []string
-	spawnSession = func(ctx context.Context, name, model string) error {
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
 		spawnedNames = append(spawnedNames, name)
 		if name == "worker-ce-2" {
 			return fmt.Errorf("exit status 1\ncould not open a new TTY")
@@ -399,7 +686,7 @@ func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
 		{ID: "ce-3", Title: "three", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
 	if got != 2 {
 		t.Errorf("dispatched = %d, want 2 (skip the poisoned bead, keep going)\nstderr:\n%s", got, errOut.String())
 	}
@@ -418,7 +705,7 @@ func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	spawnCalls := 0
-	spawnSession = func(ctx context.Context, name, model string) error {
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
 		spawnCalls++
 		return fmt.Errorf("circuit breaker: spawn refused")
 	}
@@ -429,7 +716,7 @@ func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on backpressure", got)
 	}
@@ -445,7 +732,7 @@ func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	spawnCalls := 0
-	spawnSession = func(ctx context.Context, name, model string) error {
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
 		spawnCalls++
 		return fmt.Errorf("exit status 1\nsomething never seen before")
 	}
@@ -456,7 +743,7 @@ func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on unknown error", got)
 	}
@@ -486,7 +773,7 @@ func TestDispatchCandidates_DryRunHasNoWorkerCap(t *testing.T) {
 		{ID: "ce-4", Title: "four", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", true, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, nil)
 	if got != len(candidates) {
 		t.Fatalf("dry-run dispatched %d candidates, want all %d; output:\n%s", got, len(candidates), out.String())
 	}
@@ -504,7 +791,7 @@ func TestDispatchCandidates_StopsOnCanceledContext(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(ctx, candidates, "opus-200k", true, &out, &errOut)
+	got := dispatchCandidates(ctx, candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, nil)
 	if got != 0 {
 		t.Fatalf("dispatchCandidates dispatched %d candidates after context cancellation; output:\n%s", got, out.String())
 	}

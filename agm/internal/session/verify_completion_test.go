@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func setupTestRepo(t *testing.T) string {
@@ -18,22 +20,13 @@ func setupTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		out, err := cmd.CombinedOutput()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
 
 	run("init")
-	run("config", "user.email", "test@test.com")
-	run("config", "user.name", "test")
 	return dir
 }
 
@@ -46,17 +39,11 @@ func commitFile(t *testing.T, dir, filename, content, message string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "-C", dir, "add", filename)
+	cmd := gittest.Command(t, dir, "add", filename)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git add failed: %v\n%s", err, out)
 	}
-	cmd = exec.Command("git", "-C", dir, "commit", "-m", message)
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
+	cmd = gittest.Command(t, dir, "commit", "-m", message)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit failed: %v\n%s", err, out)
 	}
@@ -225,14 +212,7 @@ func TestVerifyCompletion_UnmergedBranchBlocks(t *testing.T) {
 	// Create main branch, then a feature branch with extra commits
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		out, err := cmd.CombinedOutput()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
@@ -294,14 +274,7 @@ func TestVerifyCompletion_CleanStateNotCritical(t *testing.T) {
 
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		out, err := cmd.CombinedOutput()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}

@@ -1,6 +1,6 @@
 # Context Management Parity Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -14,7 +14,7 @@ supported harness has an explicit and visibly estimated fallback.
 
 ## EARS Requirements
 
-**CONTEXT-01** When harness auto-detection runs, the system shall recognize Claude Code, Codex CLI, Antigravity, OpenCode, and deprecated Gemini compatibility session identifiers.
+**CONTEXT-01** When harness auto-detection runs, the system shall recognize Claude Code, Codex CLI, Pi CLI, Antigravity, OpenCode, and deprecated Gemini compatibility session identifiers.
 
 **CONTEXT-02** When exact portable context counters are supplied as structured JSON, the system shall deterministically read nested used tokens, total tokens, and model identity without depending on a harness-specific transcript layout.
 
@@ -41,6 +41,8 @@ supported harness has an explicit and visibly estimated fallback.
 **CONTEXT-13** When the summarization provider fails, the system shall return the original conversation and an error without discarding context.
 
 **CONTEXT-14** When compaction safety cooldown or count limits apply, the system shall block repeated compaction according to the shared anti-loop policy.
+
+**CONTEXT-15** When Pi supplies portable exact counters or requires a fallback, the system shall use Pi-specific session, usage, model, and message-count inputs and shall identify the result as `pi-cli`.
 
 ## BDD Traceability
 

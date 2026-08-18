@@ -47,6 +47,19 @@ func TestOpen_CreatesMissingVault(t *testing.T) {
 	}
 }
 
+func TestFetch_RejectsExcessiveK(t *testing.T) {
+	a, err := obsidian.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer a.Close()
+
+	_, err = a.Fetch(context.Background(), source.FetchQuery{K: source.MaxFetchK + 1})
+	if err == nil {
+		t.Fatalf("Fetch(K=%d) succeeded, want bound error", source.MaxFetchK+1)
+	}
+}
+
 func TestAddFetch_PreservesFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	a, err := obsidian.Open(dir)

@@ -120,6 +120,39 @@ func TestKeywordsFoundInContent(t *testing.T) {
 	}
 }
 
+func TestPromptDeliveryEvidenceAcceptsFastCodexCompletionWithoutResend(t *testing.T) {
+	styledIdleComposer := "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+		"\x1b[2m│ model: \x1b[0mgpt-5.6 high\x1b[2m \x1b[0m/model to change │\n" +
+		"To get started, describe a task or try /review\n\n" +
+		"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+		"gpt-5.6 high · ~/src/project"
+
+	delivered, method := promptDeliveryEvidence(styledIdleComposer, nil)
+	assert.True(t, delivered, "idle Codex return is ambiguous after a short prompt and must not trigger resend")
+	assert.Equal(t, "codex_idle_ambiguous", method)
+
+	delivered, method = promptDeliveryEvidence(styledIdleComposer, []string{"unobserved-keyword"})
+	assert.False(t, delivered, "searchable keyword absence remains retry evidence")
+	assert.Empty(t, method)
+}
+
+func TestVerifyPromptDeliveryDoesNotResendAfterFastCodexCompletion(t *testing.T) {
+	sessionName := "test-fast-codex-delivery"
+	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+
+	sendCalled := 0
+	result, err := VerifyPromptDeliveryContext(t.Context(), sessionName, "say hi", func() error {
+		sendCalled++
+		return nil
+	}, 3)
+
+	assert.NoError(t, err)
+	assert.True(t, result.Delivered)
+	assert.Equal(t, 1, result.Attempt)
+	assert.Equal(t, "codex_idle_ambiguous", result.Method)
+	assert.Zero(t, sendCalled, "ambiguous idle return must not duplicate the completed prompt")
+}
+
 // TestVerifyPromptDelivery_SuccessOnFirstAttempt tests that verification succeeds
 // immediately when the session shows processing indicators (keyword in content).
 func TestVerifyPromptDelivery_SuccessOnFirstAttempt(t *testing.T) {

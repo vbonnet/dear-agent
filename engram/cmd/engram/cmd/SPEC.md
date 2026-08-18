@@ -6,12 +6,14 @@
 
 **ECMDR-02** When a command accepts a context budget, the command package shall validate the value before invoking storage or retrieval behavior.
 
+**ECMDR-03** When `engram validate` selects a validator, the command package shall expose only maintained Engram, content, link, and YAML token contracts and shall not advertise retired Wayfinder schemas.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/engram_cli_support_guardrails.feature`
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-19 -->
 
 **Status:** Living documentation
 **Scope:** `engram/cmd/engram/cmd`

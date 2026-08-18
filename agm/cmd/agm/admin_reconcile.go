@@ -39,12 +39,18 @@ Examples:
 
 // mismatch represents a single tmux/Dolt inconsistency.
 type mismatch struct {
-	Kind         string // "zombie" or "orphan"
-	TmuxName     string
-	DoltName     string
-	SessionID    string
+	Kind          string // "zombie" or "orphan"
+	TmuxName      string
+	DoltName      string
+	SessionID     string
 	DoltLifecycle string
-	Description  string
+	Description   string
+}
+
+type reconcileLifecycleStore interface {
+	ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error)
+	UpdateSession(session *manifest.Manifest) error
+	ReactivateSession(session *manifest.Manifest) (dolt.ReactivateSessionResult, error)
 }
 
 func reconcileRun(cmd *cobra.Command, args []string) error {
@@ -177,7 +183,7 @@ func detectOrphans(allSessions []*manifest.Manifest, tmuxSet map[string]bool) []
 
 // applyReconcileFixes applies the fix action implied by each mismatch.
 // Returns (fixed, failed) counts.
-func applyReconcileFixes(adapter *dolt.Adapter, mismatches []mismatch) (int, int) {
+func applyReconcileFixes(adapter reconcileLifecycleStore, mismatches []mismatch) (int, int) {
 	var fixed, failed int
 	for _, mm := range mismatches {
 		switch mm.Kind {
@@ -204,7 +210,7 @@ func applyReconcileFixes(adapter *dolt.Adapter, mismatches []mismatch) (int, int
 	return fixed, failed
 }
 
-func setLifecycle(adapter *dolt.Adapter, sessionID, lifecycle string) error {
+func setLifecycle(adapter reconcileLifecycleStore, sessionID, lifecycle string) error {
 	filter := &dolt.SessionFilter{}
 	sessions, err := adapter.ListSessions(filter)
 	if err != nil {
@@ -212,6 +218,10 @@ func setLifecycle(adapter *dolt.Adapter, sessionID, lifecycle string) error {
 	}
 	for _, m := range sessions {
 		if m.SessionID == sessionID {
+			if lifecycle == "" && m.Lifecycle == manifest.LifecycleArchived {
+				_, err := adapter.ReactivateSession(m)
+				return err
+			}
 			m.Lifecycle = lifecycle
 			return adapter.UpdateSession(m)
 		}

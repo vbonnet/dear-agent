@@ -10,7 +10,6 @@ var ArchiveSession = codegen.Op{
 	RequestType:  "ArchiveSessionRequest",
 	ResponseType: "ArchiveSessionResult",
 	HandlerFunc:  "ArchiveSession",
-	ManualSkill:  true,
 	CLI: &codegen.CLISurface{
 		CommandPath:   "session archive",
 		Use:           "archive <identifier>",
@@ -19,12 +18,6 @@ var ArchiveSession = codegen.Op{
 	MCP: &codegen.MCPSurface{
 		ToolName:    "agm_archive_session",
 		Description: "Archive an AGM session by marking it as archived. Use when a session is no longer needed and should be hidden from the active list.",
-	},
-	Skill: &codegen.SkillSurface{
-		SlashCommand: "agm-exit",
-		AllowedTools: "Bash(agm session archive:*)",
-		ActionVerb:   "archive the session",
-		OutputTable:  []string{"Name", "PreviousStatus", "Result"},
 	},
 }
 

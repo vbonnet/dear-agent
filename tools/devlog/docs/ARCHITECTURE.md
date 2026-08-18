@@ -108,7 +108,7 @@ Devlog is a documentation-only knowledge base library with no executable code. T
 │  README.md ─────────┐                                       │
 │  SPEC.md            │  Navigation & Overview               │
 │  ARCHITECTURE.md    │  System Documentation                │
-│  .docs/adr/         │  Decision Records                    │
+│  ../ADR.md          │  Current Tool Decisions              │
 │                     │                                       │
 │  ┌──────────────────┼──────────────────────────────────┐  │
 │  │                  │                                    │  │
@@ -176,7 +176,7 @@ Navigation Navigation Single       System
 Hub        Hub        File         Docs
    ↓         ↓                          ↓
 Detailed   Detailed                Decision
-Docs       Docs                    Records (.docs/adr/)
+Docs       Docs                    Decisions (../ADR.md)
    ↓         ↓
 Templates  Examples
 ```
@@ -193,7 +193,7 @@ Templates  Examples
 - `README.md`: Entry point, navigation to subsystems
 - `SPEC.md`: Comprehensive specification (this document's companion)
 - `ARCHITECTURE.md`: This file - system architecture
-- `.docs/adr/`: Architecture decision records
+- `../ADR.md`: current durable tool decisions
 
 **Design Decisions**:
 - Minimal root clutter - most content in subsystem directories

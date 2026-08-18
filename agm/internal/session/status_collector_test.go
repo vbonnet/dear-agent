@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,54 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
+
+func TestWorkspaceStatusJSONContract(t *testing.T) {
+	status := &WorkspaceStatus{
+		Workspace: "oss",
+		Sessions: []*SessionStatus{{
+			Name:         "worker",
+			SessionID:    "session-1",
+			State:        "WORKING",
+			StateSource:  "hook",
+			Branch:       "agent/review",
+			Uncommitted:  2,
+			WorktreePath: "/tmp/worker",
+			Workspace:    "oss",
+		}},
+		TotalSessions:   1,
+		WorkingSessions: 1,
+	}
+
+	data, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal workspace status: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("decode workspace status: %v", err)
+	}
+	for _, key := range []string{"workspace", "sessions", "total_sessions", "done_sessions", "working_sessions"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("workspace status JSON missing stable key %q: %s", key, data)
+		}
+	}
+	if _, ok := decoded["Sessions"]; ok {
+		t.Fatalf("workspace status JSON exposed Go field names: %s", data)
+	}
+	sessions, ok := decoded["sessions"].([]any)
+	if !ok || len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, want one JSON object", decoded["sessions"])
+	}
+	entry, ok := sessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("session entry = %#v, want JSON object", sessions[0])
+	}
+	for _, key := range []string{"name", "session_id", "state", "state_source", "branch", "uncommitted", "worktree_path", "tests_passing", "workspace", "last_state_update"} {
+		if _, ok := entry[key]; !ok {
+			t.Errorf("session status JSON missing stable key %q: %s", key, data)
+		}
+	}
+}
 
 func TestCollectStatus(t *testing.T) {
 	// Create test manifest — session doesn't exist in tmux, so

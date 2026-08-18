@@ -6,12 +6,15 @@ import "context"
 // Implementations must be safe for concurrent use.
 type Provider interface {
 	// Create provisions a new isolated sandbox environment.
-	// Returns Sandbox metadata including the merged path where agents operate.
+	// Returns Sandbox metadata including the workspace root and the mapped
+	// working directory where the harness operates.
 	//
 	// The sandbox MUST guarantee:
 	//   - Read-only access to all repos in LowerDirs
 	//   - Copy-on-write for modifications (saved in UpperDir)
 	//   - Complete isolation (rm -rf in sandbox doesn't affect host)
+	//   - WorkingDir maps the requested host directory without changing its
+	//     repository-relative location
 	//
 	// Context cancellation should abort creation and clean up partial state.
 	Create(ctx context.Context, req SandboxRequest) (*Sandbox, error)

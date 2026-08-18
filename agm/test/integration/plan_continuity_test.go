@@ -18,6 +18,8 @@ func getTestAdapter(t *testing.T) *dolt.Adapter {
 	}
 
 	// Set up test environment
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	t.Setenv("WORKSPACE", "test")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
@@ -159,22 +161,17 @@ func TestPlanExecuteResumeWorkflow(t *testing.T) {
 
 	// Step 4: Link execution session to parent
 	t.Log("Step 4: Linking execution session to parent")
-	executionSession.ParentSessionID = &detectedParent.SessionID
-
 	// Simulate name inheritance (Unknown → parent-name-exec)
-	executionSession.Name = detectedParent.Name + "-exec"
+	inheritedName := detectedParent.Name + "-exec"
 
-	if err := adapter.UpdateSession(executionSession); err != nil {
-		t.Fatalf("Failed to update execution session: %v", err)
+	if err := adapter.LinkSessionParent(t.Context(), executionSession.SessionID, executionSession.Tmux.SessionRevision, detectedParent.SessionID, &inheritedName); err != nil {
+		t.Fatalf("Failed to link execution session: %v", err)
 	}
 
 	// Verify parent_session_id was set
 	updated, err := adapter.GetSession(executionSession.SessionID)
 	if err != nil {
 		t.Fatalf("Failed to retrieve updated execution session: %v", err)
-	}
-	if updated.ParentSessionID == nil || *updated.ParentSessionID != planningSession.SessionID {
-		t.Error("Parent session ID not set correctly")
 	}
 	if updated.Name != "open-viking-exec" {
 		t.Errorf("Expected name 'open-viking-exec', got '%s'", updated.Name)

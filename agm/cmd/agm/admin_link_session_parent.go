@@ -91,21 +91,23 @@ func runLinkSessionParent(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Yellow("  This creates a multi-level hierarchy"))
 	}
 
-	// Set parent_session_id on child
-	child.ParentSessionID = &linkParentID
-
 	// Handle name inheritance
+	var inheritedName *string
 	if linkInheritName && (child.Name == "" || child.Name == "Unknown") {
 		if parent.Name != "" {
-			child.Name = parent.Name + "-exec"
+			name := parent.Name + "-exec"
+			inheritedName = &name
+			child.Name = name
 			fmt.Printf("%s Inherited name: '%s' → '%s'\n",
 				ui.Blue("ℹ"), parent.Name, child.Name)
 		}
 	}
 
-	// Update child session in both Dolt and SQLite
-	if err := adapter.UpdateSession(child); err != nil {
-		return fmt.Errorf("failed to update child session in Dolt: %w", err)
+	// Parent assignment and optional name inheritance are one explicit identity
+	// CAS. A concurrent writer is reported instead of silently dropping the
+	// inherited name while claiming the link succeeded.
+	if err := persistSessionParentLink(cmd.Context(), adapter, child, linkParentID, inheritedName); err != nil {
+		return fmt.Errorf("failed to link child session in Dolt: %w", err)
 	}
 
 	// Success feedback

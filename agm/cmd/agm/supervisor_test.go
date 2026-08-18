@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/pkg/override"
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
 // fakeSupervisorEnv is a stub supervisorEnv for unit tests.
@@ -82,6 +84,106 @@ func TestCheckSupervisorEnvSkipFlag(t *testing.T) {
 	}
 }
 
+func TestReserveSupervisorOAuthOverrideUsesSharedDangerousOverrideKind(t *testing.T) {
+	original := reserveSupervisorDangerousOverride
+	t.Cleanup(func() { reserveSupervisorDangerousOverride = original })
+	t.Setenv("AGM_ACTOR", "supervisor-test")
+
+	wantReservation := &override.Reservation{}
+	var got override.Request
+	reserveSupervisorDangerousOverride = func(req override.Request) (*override.Reservation, error) {
+		got = req
+		return wantReservation, nil
+	}
+
+	reservation, err := reserveSupervisorOAuthOverride(
+		"validating a development supervisor without stored OAuth",
+		"vroom-orchestrator",
+	)
+	if err != nil {
+		t.Fatalf("reserveSupervisorOAuthOverride() error: %v", err)
+	}
+	if reservation != wantReservation {
+		t.Fatal("reserveSupervisorOAuthOverride() lost the shared reservation")
+	}
+	if got.Kind != override.KindSupervisorOAuthCheck ||
+		got.Actor != "supervisor-test" ||
+		got.Session != "vroom-orchestrator" ||
+		got.Reason != "validating a development supervisor without stored OAuth" {
+		t.Fatalf("shared override request = %+v", got)
+	}
+}
+
+func TestSubmitSupervisorLaunchBindsEffectsAfterLiveAdmission(t *testing.T) {
+	var events []string
+	reservation := &override.Reservation{}
+	err := submitSupervisorLaunch(func(reservations ...*override.Reservation) ([]*override.Reservation, error) {
+		events = append(events, "admission")
+		return reservations, nil
+	}, func(recordSpawn bool, got ...*override.Reservation) error {
+		if !recordSpawn {
+			t.Fatal("supervisor launch did not bind the spawn-recording obligation")
+		}
+		if len(got) != 1 || got[0] != reservation {
+			t.Fatalf("bound reservations = %v, want OAuth reservation", got)
+		}
+		events = append(events, "bind")
+		return nil
+	}, func() error {
+		events = append(events, "run")
+		return nil
+	}, reservation)
+	if err != nil {
+		t.Fatalf("submitSupervisorLaunch() error: %v", err)
+	}
+	if got, want := strings.Join(events, ","), "admission,bind,run"; got != want {
+		t.Fatalf("launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitSupervisorLaunchDoesNotBindRefusedLaunch(t *testing.T) {
+	refusal := errors.New("concurrent admission brake engaged")
+	var events []string
+	reservation := &override.Reservation{}
+	err := submitSupervisorLaunch(func(...*override.Reservation) ([]*override.Reservation, error) {
+		events = append(events, "admission")
+		return nil, refusal
+	}, func(bool, ...*override.Reservation) error {
+		events = append(events, "bind")
+		return nil
+	}, func() error {
+		events = append(events, "run")
+		return nil
+	}, reservation)
+	if !errors.Is(err, refusal) {
+		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, refusal)
+	}
+	if got, want := strings.Join(events, ","), "admission"; got != want {
+		t.Fatalf("refused launch boundary events = %q, want %q", got, want)
+	}
+}
+
+func TestSubmitSupervisorLaunchReturnsConfirmedExecutorStartFailure(t *testing.T) {
+	startFailure := errors.New("private executor disappeared before start")
+	var events []string
+	err := submitSupervisorLaunch(nil, func(recordSpawn bool, _ ...*override.Reservation) error {
+		if !recordSpawn {
+			t.Fatal("supervisor launch did not bind spawn recording")
+		}
+		events = append(events, "bind")
+		return nil
+	}, func() error {
+		events = append(events, "run")
+		return startFailure
+	}, nil)
+	if !errors.Is(err, startFailure) {
+		t.Fatalf("submitSupervisorLaunch() error = %v, want %v", err, startFailure)
+	}
+	if got, want := strings.Join(events, ","), "bind,run"; got != want {
+		t.Fatalf("failed executor events = %q, want %q", got, want)
+	}
+}
+
 func TestCheckSupervisorEnvAPIKeyWinsOverSkipFlag(t *testing.T) {
 	// Even with skip-oauth-check, the API-key guard still applies: that's
 	// the invariant we never want to bypass.
@@ -115,17 +217,13 @@ func TestCheckSupervisorEnvAcceptsFileToken(t *testing.T) {
 }
 
 func TestBuildSupervisorClaudeArgsAvoidsBootPromptsByDefault(t *testing.T) {
-	args := buildSupervisorClaudeArgs("", false, nil)
-	joined := strings.Join(args, " ")
-
-	for _, want := range []string{
-		"--model claude-sonnet-4-6",
-		"--enable-auto-mode",
-		"--permission-mode auto",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("supervisor Claude args missing %q: %v", want, args)
-		}
+	launch := buildSupervisorClaudeLaunch("/usr/local/bin/claude", "", false, nil, false)
+	if launch.Binary != "/usr/local/bin/claude" ||
+		launch.Model != "claude-sonnet-4-6" ||
+		!launch.AutoMode ||
+		launch.Permission != "auto" ||
+		!launch.Persistent {
+		t.Fatalf("supervisor Claude launch = %+v", launch)
 	}
 
 	for _, blocked := range []string{
@@ -133,25 +231,27 @@ func TestBuildSupervisorClaudeArgsAvoidsBootPromptsByDefault(t *testing.T) {
 		"server:agm-bus",
 		"claude-sonnet-4-6[1m]",
 	} {
-		if strings.Contains(joined, blocked) {
-			t.Errorf("supervisor Claude args include boot-prompt risk %q by default: %v", blocked, args)
+		if slices.Contains(launch.ExtraArgs, blocked) {
+			t.Errorf("supervisor Claude launch includes boot-prompt risk %q by default: %+v", blocked, launch)
 		}
 	}
 }
 
 func TestBuildSupervisorClaudeArgsCanOptIntoDevelopmentChannels(t *testing.T) {
-	args := buildSupervisorClaudeArgs("opus-200k", true, []string{"--verbose"})
-	joined := strings.Join(args, " ")
-
+	launch := buildSupervisorClaudeLaunch("claude-dev", "opus-200k", true, []string{"--verbose"}, true)
+	if launch.Binary != "claude-dev" ||
+		launch.Model != "claude-opus-4-8" ||
+		launch.Permission != "auto" ||
+		!launch.DisableOAuth {
+		t.Fatalf("supervisor Claude development launch = %+v", launch)
+	}
 	for _, want := range []string{
-		"--model claude-opus-4-8",
-		"--permission-mode auto",
 		"--dangerously-load-development-channels",
 		"server:agm-bus",
 		"--verbose",
 	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("supervisor Claude args missing %q: %v", want, args)
+		if !slices.Contains(launch.ExtraArgs, want) {
+			t.Errorf("supervisor Claude args missing %q: %+v", want, launch)
 		}
 	}
 }
@@ -266,6 +366,17 @@ func TestSyncVroomHeartbeatFile(t *testing.T) {
 	if got.TS != wantTS {
 		t.Errorf("ts = %v, want %v", got.TS, wantTS)
 	}
+
+	// Canonical IDs must target the same compact heartbeat file as aliases.
+	if err := syncVroomHeartbeatFile(dir, vroomsupervisor.IDMetaOrchestrator, ts); err != nil {
+		t.Fatalf("sync canonical supervisor ID: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, vroomsupervisor.AliasMetaOrchestrator+".json")); err != nil {
+		t.Errorf("canonical ID did not write compact heartbeat file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, vroomsupervisor.IDMetaOrchestrator+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("canonical ID created a second heartbeat filename instead of using the topology alias")
+	}
 }
 
 func TestSyncHeartbeatFiles(t *testing.T) {
@@ -333,16 +444,76 @@ func TestSyncHeartbeatFilesNoSupervisors(t *testing.T) {
 	}
 }
 
-func TestSupervisorRole(t *testing.T) {
-	cases := []struct{ id, want string }{
-		{"meta-o", "meta-orchestrator"},
-		{"orch", "orchestrator"},
-		{"overseer", "overseer"},
-		{"custom", "custom"},
+func TestCanonicalizeSupervisorHeartbeatMesh(t *testing.T) {
+	tests := []struct {
+		name                              string
+		id, primary, tertiary             string
+		wantID, wantPrimary, wantTertiary string
+		wantErr                           bool
+	}{
+		{
+			name:         "alias derives canonical graph",
+			id:           vroomsupervisor.AliasMetaOrchestrator,
+			wantID:       vroomsupervisor.IDMetaOrchestrator,
+			wantPrimary:  vroomsupervisor.IDOrchestrator,
+			wantTertiary: vroomsupervisor.IDOverseer,
+		},
+		{
+			name:         "role and peer aliases normalize",
+			id:           string(vroomsupervisor.RoleOrchestrator),
+			primary:      vroomsupervisor.AliasOverseer,
+			tertiary:     vroomsupervisor.AliasMetaOrchestrator,
+			wantID:       vroomsupervisor.IDOrchestrator,
+			wantPrimary:  vroomsupervisor.IDOverseer,
+			wantTertiary: vroomsupervisor.IDMetaOrchestrator,
+		},
+		{
+			name: "custom supervisor passes through",
+			id:   "custom", primary: "peer-a", tertiary: "peer-b",
+			wantID: "custom", wantPrimary: "peer-a", wantTertiary: "peer-b",
+		},
+		{
+			name:    "canonical supervisor rejects a different primary peer",
+			id:      vroomsupervisor.IDOverseer,
+			primary: vroomsupervisor.IDOrchestrator,
+			wantErr: true,
+		},
+		{
+			name:     "canonical supervisor rejects an unknown tertiary peer",
+			id:       vroomsupervisor.IDOverseer,
+			tertiary: "mystery",
+			wantErr:  true,
+		},
 	}
-	for _, c := range cases {
-		if got := supervisorRole(c.id); got != c.want {
-			t.Errorf("supervisorRole(%q) = %q, want %q", c.id, got, c.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, primary, tertiary, err := canonicalizeSupervisorHeartbeatMesh(tt.id, tt.primary, tt.tertiary)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("canonicalizeSupervisorHeartbeatMesh() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("canonicalizeSupervisorHeartbeatMesh(): %v", err)
+			}
+			if id != tt.wantID || primary != tt.wantPrimary || tertiary != tt.wantTertiary {
+				t.Errorf("canonicalizeSupervisorHeartbeatMesh() = (%q, %q, %q), want (%q, %q, %q)",
+					id, primary, tertiary, tt.wantID, tt.wantPrimary, tt.wantTertiary)
+			}
+		})
+	}
+}
+
+func TestHeartbeatSurfaceUsesCanonicalTopology(t *testing.T) {
+	for _, member := range vroomsupervisor.AllMembers() {
+		id, primary, tertiary, err := canonicalizeSupervisorHeartbeatMesh(member.Alias, "", "")
+		if err != nil {
+			t.Fatalf("canonicalize %q: %v", member.Alias, err)
+		}
+		if id != member.ID || primary != member.PrimaryFor || tertiary != member.TertiaryFor {
+			t.Errorf("AGM heartbeat mapping for %q = (%q, %q, %q), want topology %+v",
+				member.Alias, id, primary, tertiary, member)
 		}
 	}
 }
@@ -747,5 +918,87 @@ func TestSupervisorTmuxSession(t *testing.T) {
 				t.Errorf("supervisorTmuxSession() = (%q, %v), want (%q, %v)", got, explicit, tt.want, tt.wantExplicit)
 			}
 		})
+	}
+}
+
+// --- admission gating on the supervisor spawn path (ce-93lw.18) ---
+
+// supervisorPreflight is the ordering contract for `agm supervisor run`: env
+// guards, then binary lookup, then host admission. Before ce-93lw.18 this path
+// had no admission check at all, so a supervisor could launch onto a host that
+// `agm session new` was already refusing.
+
+func TestSupervisorPreflight_RefusesWhenAdmissionGateRefuses(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{"claude": "/usr/local/bin/claude"},
+	}
+	refusal := errors.New("circuit breaker: spawn refused (load level: RED)")
+
+	bin, err := supervisorPreflight(env, false, noCredsPath(t), func() error { return refusal })
+	if err == nil {
+		t.Fatal("expected the admission refusal to propagate")
+	}
+	if !errors.Is(err, refusal) {
+		t.Errorf("error = %v, want it to wrap the circuit-breaker refusal", err)
+	}
+	if bin != "" {
+		t.Errorf("bin = %q, want empty — a refused supervisor must not resolve a binary to exec", bin)
+	}
+}
+
+func TestSupervisorPreflight_ReturnsBinaryWhenAdmitted(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{"claude": "/usr/local/bin/claude"},
+	}
+	called := false
+
+	bin, err := supervisorPreflight(env, false, noCredsPath(t), func() error { called = true; return nil })
+	if err != nil {
+		t.Fatalf("supervisorPreflight: %v", err)
+	}
+	if bin != "/usr/local/bin/claude" {
+		t.Errorf("bin = %q, want /usr/local/bin/claude", bin)
+	}
+	if !called {
+		t.Error("admission gate was never consulted — the supervisor path must go through it")
+	}
+}
+
+// A misconfigured invocation should report its real problem, not a resource
+// refusal, so admission runs last.
+func TestSupervisorPreflight_EnvGuardPrecedesAdmission(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"ANTHROPIC_API_KEY": "sk-fake", "CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{"claude": "/usr/local/bin/claude"},
+	}
+	called := false
+
+	_, err := supervisorPreflight(env, false, noCredsPath(t), func() error { called = true; return nil })
+	if err == nil {
+		t.Fatal("expected the ANTHROPIC_API_KEY refusal")
+	}
+	if called {
+		t.Error("admission gate ran before the env guard; a bad env must report itself first")
+	}
+}
+
+func TestSupervisorPreflight_MissingBinaryPrecedesAdmission(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{},
+	}
+	called := false
+
+	_, err := supervisorPreflight(env, false, noCredsPath(t), func() error { called = true; return nil })
+	if err == nil {
+		t.Fatal("expected a missing-binary refusal")
+	}
+	if !strings.Contains(err.Error(), "cannot locate claude binary") {
+		t.Errorf("error = %v, want a missing-binary message", err)
+	}
+	if called {
+		t.Error("admission gate ran before the binary lookup")
 	}
 }

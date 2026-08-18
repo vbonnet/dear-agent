@@ -1,7 +1,12 @@
 package retrospective
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 )
 
 func TestCalculateMagnitude(t *testing.T) {
@@ -78,17 +83,29 @@ func TestFindPhaseIndex(t *testing.T) {
 
 func TestLogRewindEvent_Magnitude0(t *testing.T) {
 	tmpDir := t.TempDir()
+	createStatusFile(t, tmpDir, "RETRO")
+	legacyPath := filepath.Join(tmpDir, history.LegacyHistoryFilename)
+	if err := os.WriteFile(legacyPath, []byte("{\"event\":\"seed\"}\n"), 0o600); err != nil {
+		t.Fatalf("seed legacy history: %v", err)
+	}
 
-	// Create minimal WAYFINDER-STATUS.md for ReadFrom
-	// (LogRewindEvent should skip early for magnitude 0)
-	flags := RewindFlags{}
+	flags := RewindFlags{NoPrompt: true}
 
-	// RETRO→RETRO is magnitude 0, should skip logging
+	// RETRO→RETRO is magnitude 0, but it is an accepted replay that must log.
 	err := LogRewindEvent(tmpDir, "RETRO", "RETRO", flags)
 	if err != nil {
 		t.Errorf("LogRewindEvent failed: %v", err)
 	}
 
-	// RETRO-retrospective.md should not be created (magnitude 0 skips logging)
-	// This test validates early return logic
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("same-phase rewind did not migrate legacy history: %v", err)
+	}
+	historyBytes, err := os.ReadFile(filepath.Join(tmpDir, history.HistoryFilename))
+	if err != nil || !strings.Contains(string(historyBytes), "rewind.logged") {
+		t.Fatalf("same-phase rewind history = %q, err = %v", historyBytes, err)
+	}
+	retroBytes, err := os.ReadFile(filepath.Join(tmpDir, RetroFilename))
+	if err != nil || !strings.Contains(string(retroBytes), "RETRO → RETRO (magnitude 0)") {
+		t.Fatalf("same-phase rewind RETRO = %q, err = %v", retroBytes, err)
+	}
 }

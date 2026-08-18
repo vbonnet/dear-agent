@@ -1,10 +1,15 @@
 package deploy
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // stubBuild swaps buildBinary for the duration of a test. The stub writes the
@@ -116,6 +121,92 @@ func TestAtomicInstall_FailsLoudOnUnstamped(t *testing.T) {
 	}
 	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
 		t.Error("target must not exist for an unstamped build")
+	}
+}
+
+func TestAtomicInstall_LinkedWorktreeRetriesCleanCloneForUnstampedBuild(t *testing.T) {
+	repo, _, headSha := gitRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	if out, err := gittest.Output(t, repo, "worktree", "add", "--detach", linked, "HEAD"); err != nil {
+		t.Fatalf("create linked worktree: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _ = gittest.Command(t, repo, "worktree", "remove", "--force", linked).Run() })
+
+	origBuild, origFallback, origVersion := buildBinary, buildFromCleanClone, readBinaryVersion
+	buildBinary = func(_, _, outPath string) error { return os.WriteFile(outPath, []byte("unstamped"), 0o644) }
+	usedFallback := false
+	buildFromCleanClone = func(_, _, outPath string) error {
+		usedFallback = true
+		return os.WriteFile(outPath, []byte("stamped"), 0o644)
+	}
+	reads := 0
+	readBinaryVersion = func(string) (string, bool, error) {
+		reads++
+		if reads == 1 {
+			return "", false, nil
+		}
+		return headSha, false, nil
+	}
+	t.Cleanup(func() {
+		buildBinary = origBuild
+		buildFromCleanClone = origFallback
+		readBinaryVersion = origVersion
+	})
+
+	target := filepath.Join(t.TempDir(), "agm")
+	if _, err := AtomicInstall("./cmd/agm", target, headSha, Options{RepoRoot: linked}); err != nil {
+		t.Fatalf("AtomicInstall: %v", err)
+	}
+	if !usedFallback {
+		t.Fatal("expected clean-clone fallback for unstamped linked-worktree build")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "stamped" {
+		t.Fatalf("installed content = %q, %v; want stamped", got, err)
+	}
+}
+
+func TestRunGitCheckout_UsesCloneFallbackDeadline(t *testing.T) {
+	orig := gitCheckout
+	gitCheckout = func(ctx context.Context, _ string) ([]byte, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("checkout context must have a deadline")
+		}
+		if remaining := time.Until(deadline); remaining < cloneTimeout-time.Second {
+			t.Fatalf("checkout deadline leaves %s; want approximately %s", remaining, cloneTimeout)
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { gitCheckout = orig })
+
+	if err := runGitCheckout(t.TempDir()); err != nil {
+		t.Fatalf("checkout must receive the standalone-clone deadline: %v", err)
+	}
+}
+
+func TestGoBuild_UsesColdBuildDeadline(t *testing.T) {
+	if buildTimeout != 10*time.Minute {
+		t.Fatalf("buildTimeout = %s; want 10m", buildTimeout)
+	}
+
+	orig := goBuildCommand
+	goBuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("build context must have a deadline")
+		}
+		if remaining := time.Until(deadline); remaining < buildTimeout-time.Second {
+			t.Fatalf("build deadline leaves %s; want approximately %s", remaining, buildTimeout)
+		}
+		if name != "go" || strings.Join(args, " ") != "build -buildvcs=true -o /tmp/agm ./agm/cmd/agm" {
+			t.Fatalf("build command = %q %q", name, args)
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { goBuildCommand = orig })
+
+	if err := goBuild(t.TempDir(), "./agm/cmd/agm", "/tmp/agm"); err != nil {
+		t.Fatalf("goBuild: %v", err)
 	}
 }
 

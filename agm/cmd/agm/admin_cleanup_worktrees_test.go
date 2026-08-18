@@ -106,47 +106,47 @@ func TestCleanupWorktreesCmd_SessionFlag(t *testing.T) {
 }
 
 func TestCleanupWorktreesCmd_FlagParsing_Force(t *testing.T) {
-	oldVal := wtCleanupForce
-	defer func() { wtCleanupForce = oldVal }()
+	restoreCommandFlagForTest(t, cleanupWorktreesCmd, "force")
 
-	cleanupWorktreesCmd.Flags().Set("force", "true")
+	if err := cleanupWorktreesCmd.Flags().Set("force", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if !wtCleanupForce {
 		t.Error("Expected wtCleanupForce to be true after setting flag")
 	}
-	cleanupWorktreesCmd.Flags().Set("force", "false")
 }
 
 func TestCleanupWorktreesCmd_FlagParsing_DryRun(t *testing.T) {
-	oldVal := wtCleanupDryRun
-	defer func() { wtCleanupDryRun = oldVal }()
+	restoreCommandFlagForTest(t, cleanupWorktreesCmd, "dry-run")
 
-	cleanupWorktreesCmd.Flags().Set("dry-run", "true")
+	if err := cleanupWorktreesCmd.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if !wtCleanupDryRun {
 		t.Error("Expected wtCleanupDryRun to be true after setting flag")
 	}
-	cleanupWorktreesCmd.Flags().Set("dry-run", "false")
 }
 
 func TestCleanupWorktreesCmd_FlagParsing_DeleteBranches(t *testing.T) {
-	oldVal := wtCleanupDeleteBranches
-	defer func() { wtCleanupDeleteBranches = oldVal }()
+	restoreCommandFlagForTest(t, cleanupWorktreesCmd, "delete-branches")
 
-	cleanupWorktreesCmd.Flags().Set("delete-branches", "true")
+	if err := cleanupWorktreesCmd.Flags().Set("delete-branches", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if !wtCleanupDeleteBranches {
 		t.Error("Expected wtCleanupDeleteBranches to be true after setting flag")
 	}
-	cleanupWorktreesCmd.Flags().Set("delete-branches", "false")
 }
 
 func TestCleanupWorktreesCmd_FlagParsing_Session(t *testing.T) {
-	oldVal := wtCleanupSession
-	defer func() { wtCleanupSession = oldVal }()
+	restoreCommandFlagForTest(t, cleanupWorktreesCmd, "session")
 
-	cleanupWorktreesCmd.Flags().Set("session", "test-session")
+	if err := cleanupWorktreesCmd.Flags().Set("session", "test-session"); err != nil {
+		t.Fatal(err)
+	}
 	if wtCleanupSession != "test-session" {
 		t.Errorf("Expected session 'test-session', got %q", wtCleanupSession)
 	}
-	cleanupWorktreesCmd.Flags().Set("session", "")
 }
 
 func TestCleanupWorktreesCmd_AllFlagsCount(t *testing.T) {

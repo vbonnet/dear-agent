@@ -158,7 +158,7 @@ agm archive debug-payment-timeout
 **Recovery scenario:**
 ```bash
 # If session hangs during analysis
-agm session send debug-payment-timeout \
+agm send msg debug-payment-timeout \
   --prompt "⚠️ Session was stuck. Please continue analysis."
 ```
 
@@ -910,7 +910,7 @@ for session in $STUCK_SESSIONS; do
   echo "Recovering stuck session: $session"
 
   # Send diagnosis prompt
-  agm session send "$session" --prompt-file ~/prompts/diagnosis.txt
+  agm send msg "$session" --prompt-file ~/prompts/diagnosis.txt
 
   # Wait for response
   sleep 30

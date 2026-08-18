@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func writeSpec(t *testing.T, dir, name, body string) string {
@@ -93,6 +95,33 @@ func TestRun_DirectoryRecursion(t *testing.T) {
 	}
 	if c := strings.Count(out.String(), "valid requirements"); c != 2 {
 		t.Errorf("expected 2 SPEC.md files linted, got %d\n%s", c, out.String())
+	}
+}
+
+func TestExpandPathsHonorsRepositoryIgnoreAndGeneratedPolicy(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cmd := gittest.Command(t, root, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"visible", "ignored", "dist"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeSpec(t, filepath.Join(root, dir), "SPEC.md", "The system shall be deterministic.\n")
+	}
+
+	files, err := expandPaths([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "visible", "SPEC.md")}
+	if !slices.Equal(files, want) {
+		t.Fatalf("expanded files = %v, want %v", files, want)
 	}
 }
 

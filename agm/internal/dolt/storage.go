@@ -41,6 +41,14 @@ type Storage interface {
 	GetHarnessHistory(sessionID string) ([]manifest.HarnessSwitch, error)
 }
 
+// SessionNameReservationStore serializes active session-name claims across
+// processes before any harness launch side effect occurs.
+type SessionNameReservationStore interface {
+	ReserveSessionName(sessionID, name string) error
+	RenewSessionNameReservation(sessionID, name string) error
+	ReleaseSessionNameReservation(sessionID string) error
+}
+
 // Verify that Adapter implements manifest.Store at compile time.
 var _ manifest.Store = (*Adapter)(nil)
 
@@ -50,6 +58,8 @@ var _ manifest.Store = (*MockAdapter)(nil)
 // Verify that both types implement the full Storage interface.
 var _ Storage = (*Adapter)(nil)
 var _ Storage = (*MockAdapter)(nil)
+var _ SessionNameReservationStore = (*Adapter)(nil)
+var _ SessionNameReservationStore = (*MockAdapter)(nil)
 
 // Verify that LogAdapter implements logs.Store at compile time.
 var _ logs.Store = (*LogAdapter)(nil)

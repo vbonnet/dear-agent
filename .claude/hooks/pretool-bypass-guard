@@ -25,9 +25,10 @@ block() {
 You are trying to bypass a safety gate with ${flag}.
 Approved path: ${approved_path}
 
-If no approved path exists for your situation, escalate via:
-  agm escalate --action \"<describe what you need>\" --reason \"<why this flag was needed>\"
-Every escalation creates a bead and routes up the VROOM chain for human review."
+If no approved path exists and this is an AGM session, escalate via:
+  agm escalate ask --kind blocked-action --context \"<why this flag was needed>\" \"<describe what you need>\"
+Outside AGM, add --session <registered-session>; if none exists, ask the current user directly.
+The command creates a durable escalation record and routes it through supervisory review; it does not create or update a Bead."
   jq -cn --arg m "$msg" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m},permissionDecision:"deny",denialReason:$m}'
   exit 2
@@ -36,7 +37,7 @@ Every escalation creates a bead and routes up the VROOM chain for human review."
 # safe-pr --emergency (removed in ADR-031; wayfinder session required).
 if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])safe-pr([[:space:]]|$)' \
    && printf '%s' "$cmd" | grep -q -- '--emergency'; then
-  block "safe-pr" "--emergency" \
+  block "safe-pr lifecycle" "a retired bypass flag" \
     "safe-pr create --wayfinder <project-dir> --title '...' --body '...'"
 fi
 

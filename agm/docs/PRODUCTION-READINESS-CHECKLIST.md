@@ -196,14 +196,10 @@ go test -C ./agm ./test/integration/... -run TestConcurrent -v
 
 **Validation**:
 ```bash
-# Before test
-tmux ls | wc -l
-
-# Run session lifecycle test
-go test -C ./agm ./test/integration/lifecycle/... -run TestSessionLifecycle -v
-
-# After test - count should be same
-tmux ls | wc -l
+# The test builds AGM from the checkout and uses a unique tmux socket.
+go test -race -count=1 -tags=integration \
+  ./agm/test/integration/isolated \
+  -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
 ```
 
 ### 5.2 Temporary Files
@@ -262,11 +258,8 @@ ps aux | grep gemini | grep defunct
 
 ### 6.3 ADRs (Architecture Decision Records)
 
-- [x] **ADR-001**: Multi-agent architecture updated with Gemini
-- [x] **ADR-002**: Command translation documented
-- [x] **ADR-011**: Gemini CLI vs API adapter strategy
-  - File: `docs/adr/ADR-011-gemini-cli-adapter-strategy.md`
-  - Verified: Created in Phase 3
+- [x] **ADR-001**: CLI harness adapter boundary
+  - File: `docs/adr/ADR-001-multi-agent-architecture.md`
 
 ### 6.4 Code Documentation
 

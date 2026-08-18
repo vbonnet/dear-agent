@@ -5,7 +5,7 @@
 # Blocks temporal artifacts (Wayfinder SDLC runs, retros, designs, research)
 # from entering this code repo. Thin wrapper over the routing-guard Go tool,
 # whose forbidden globs come from .dear-agent.yml (single source of truth, no
-# drift). The Wayfinder TOOL SOURCE (wayfinder/, *.go, ADR-035) is NOT blocked.
+# drift). The Wayfinder TOOL SOURCE (wayfinder/, *.go, ADR-036) is NOT blocked.
 #
 # Prefers a prebuilt ./build/routing-guard (installed by
 # `make install-routing-guard-hook`); falls back to `go run`.

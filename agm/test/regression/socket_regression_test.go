@@ -189,7 +189,9 @@ func TestAllTmuxCommandsUseSocketPath(t *testing.T) {
 				// CapturePaneCommandArgs is separately unit- and BDD-tested to
 				// begin with the canonical -S socket arguments.
 				hasSocketFlag := strings.Contains(line, `"-S"`) ||
-					strings.Contains(line, "CapturePaneCommandArgs(")
+					strings.Contains(line, "CapturePaneCommandArgs(") ||
+					strings.Contains(line, "capturePaneTargetCommandArgs(") ||
+					strings.Contains(line, "capturePaneTargetCommandArgsWithOptions(")
 
 				// Allow specific exceptions
 				isVersionCheck := strings.Contains(line, "tmux -V") || strings.Contains(line, "\"-V\"")

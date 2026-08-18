@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Test helpers
@@ -12,25 +13,37 @@ import (
 func createStatusFile(t *testing.T, dir string, status string) {
 	t.Helper()
 
-	content := `---
-schema_version: "1.0"
-session_id: test-session
-project_path: .
-started_at: 2026-01-29T12:00:00Z
-status: ` + status + `
-current_phase: D1
-phases:
-  - name: D1
-    status: in_progress
----
-
-# Wayfinder Status
-`
-
-	err := os.WriteFile(filepath.Join(dir, StatusFilename), []byte(content), 0644)
-	if err != nil {
+	now := time.Now().UTC().Truncate(time.Second)
+	projectStatus := NewStatusV2(filepath.Base(dir), ProjectTypeFeature, RiskLevelM)
+	projectStatus.Status = status
+	projectStatus.CreatedAt = now
+	projectStatus.UpdatedAt = now
+	projectStatus.WaypointHistory = []WaypointHistory{{
+		Name:      WaypointV2Charter,
+		Status:    WaypointStatusV2InProgress,
+		StartedAt: now,
+	}}
+	if status == StatusV2Completed {
+		projectStatus.CurrentWaypoint = WaypointV2Retro
+		projectStatus.CompletionDate = &now
+		projectStatus.WaypointHistory = completedWaypointHistory(now)
+	}
+	if err := WriteV2ToDir(projectStatus, dir); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func completedWaypointHistory(now time.Time) []WaypointHistory {
+	history := make([]WaypointHistory, 0, len(AllWaypointsV2Schema()))
+	for _, waypoint := range AllWaypointsV2Schema() {
+		history = append(history, WaypointHistory{
+			Name:        waypoint,
+			Status:      WaypointStatusV2Completed,
+			StartedAt:   now,
+			CompletedAt: &now,
+		})
+	}
+	return history
 }
 
 func createChildProject(t *testing.T, parentDir, childName, status string) string {
@@ -62,15 +75,15 @@ func TestHasChildren(t *testing.T) {
 		{
 			name: "directory with tasks containing projects",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
-				createChildProject(t, tmpDir, "child-a", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				createChildProject(t, tmpDir, "child-a", StatusV2InProgress)
 			},
 			expected: true,
 		},
 		{
 			name: "directory with tasks but no STATUS files",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 				tasksDir := filepath.Join(tmpDir, TasksDirectoryName)
 				os.MkdirAll(filepath.Join(tasksDir, "child-a"), 0755)
 				// No STATUS file created
@@ -80,7 +93,7 @@ func TestHasChildren(t *testing.T) {
 		{
 			name: "directory without tasks",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 			},
 			expected: false,
 		},
@@ -94,9 +107,9 @@ func TestHasChildren(t *testing.T) {
 		{
 			name: "multiple children",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
-				createChildProject(t, tmpDir, "child-a", "completed")
-				createChildProject(t, tmpDir, "child-b", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				createChildProject(t, tmpDir, "child-a", StatusV2Completed)
+				createChildProject(t, tmpDir, "child-b", StatusV2InProgress)
 			},
 			expected: true,
 		},
@@ -127,10 +140,10 @@ func TestListChildren(t *testing.T) {
 		{
 			name: "multiple children",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
-				createChildProject(t, tmpDir, "child-a", "completed")
-				createChildProject(t, tmpDir, "child-b", "in_progress")
-				createChildProject(t, tmpDir, "child-c", "completed")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				createChildProject(t, tmpDir, "child-a", StatusV2Completed)
+				createChildProject(t, tmpDir, "child-b", StatusV2InProgress)
+				createChildProject(t, tmpDir, "child-c", StatusV2Completed)
 			},
 			expectedCount: 3,
 			expectedNames: []string{"child-a", "child-b", "child-c"},
@@ -138,8 +151,8 @@ func TestListChildren(t *testing.T) {
 		{
 			name: "single child",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
-				createChildProject(t, tmpDir, "only-child", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				createChildProject(t, tmpDir, "only-child", StatusV2InProgress)
 			},
 			expectedCount: 1,
 			expectedNames: []string{"only-child"},
@@ -147,7 +160,7 @@ func TestListChildren(t *testing.T) {
 		{
 			name: "no children",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 			},
 			expectedCount: 0,
 			expectedNames: []string{},
@@ -155,7 +168,7 @@ func TestListChildren(t *testing.T) {
 		{
 			name: "tasks dir exists but empty",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 				os.Mkdir(filepath.Join(tmpDir, TasksDirectoryName), 0755)
 			},
 			expectedCount: 0,
@@ -164,8 +177,8 @@ func TestListChildren(t *testing.T) {
 		{
 			name: "children without STATUS files excluded",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
-				createChildProject(t, tmpDir, "valid-child", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				createChildProject(t, tmpDir, "valid-child", StatusV2InProgress)
 
 				// Create child without STATUS file
 				tasksDir := filepath.Join(tmpDir, TasksDirectoryName)
@@ -177,8 +190,8 @@ func TestListChildren(t *testing.T) {
 		{
 			name: "non-directory entries ignored",
 			setup: func(t *testing.T, tmpDir string) {
-				createStatusFile(t, tmpDir, "in_progress")
-				createChildProject(t, tmpDir, "valid-child", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				createChildProject(t, tmpDir, "valid-child", StatusV2InProgress)
 
 				// Create file in tasks/ directory
 				tasksDir := filepath.Join(tmpDir, TasksDirectoryName)
@@ -220,19 +233,19 @@ func TestListChildren(t *testing.T) {
 
 func TestListChildren_SymlinkRejection(t *testing.T) {
 	tmpDir := t.TempDir()
-	createStatusFile(t, tmpDir, "in_progress")
+	createStatusFile(t, tmpDir, StatusV2InProgress)
 
 	tasksDir := filepath.Join(tmpDir, TasksDirectoryName)
 	os.Mkdir(tasksDir, 0755)
 
 	// Create valid child
-	createChildProject(t, tmpDir, "valid-child", "in_progress")
+	createChildProject(t, tmpDir, "valid-child", StatusV2InProgress)
 
 	// Create symlink in tasks/
 	symlinkPath := filepath.Join(tasksDir, "symlink-child")
 	targetPath := filepath.Join(tmpDir, "external")
 	os.Mkdir(targetPath, 0755)
-	createStatusFile(t, targetPath, "in_progress")
+	createStatusFile(t, targetPath, StatusV2InProgress)
 
 	err := os.Symlink(targetPath, symlinkPath)
 	if err != nil {
@@ -266,8 +279,8 @@ func TestHasParent(t *testing.T) {
 			name: "project in tasks directory",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				return createChildProject(t, tmpDir, "child", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				return createChildProject(t, tmpDir, "child", StatusV2InProgress)
 			},
 			expected: true,
 		},
@@ -275,7 +288,7 @@ func TestHasParent(t *testing.T) {
 			name: "top-level project",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 				return tmpDir
 			},
 			expected: false,
@@ -284,9 +297,9 @@ func TestHasParent(t *testing.T) {
 			name: "deep nesting (grandchild has parent)",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				childDir := createChildProject(t, tmpDir, "child", "in_progress")
-				return createChildProject(t, childDir, "grandchild", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				childDir := createChildProject(t, tmpDir, "child", StatusV2InProgress)
+				return createChildProject(t, childDir, "grandchild", StatusV2InProgress)
 			},
 			expected: true,
 		},
@@ -303,7 +316,7 @@ func TestHasParent(t *testing.T) {
 
 				childDir := filepath.Join(tasksDir, "child")
 				os.Mkdir(childDir, 0755)
-				createStatusFile(t, childDir, "in_progress")
+				createStatusFile(t, childDir, StatusV2InProgress)
 
 				return childDir
 			},
@@ -336,8 +349,8 @@ func TestGetParentPath(t *testing.T) {
 			name: "child project returns parent path",
 			setup: func(t *testing.T) (string, string) {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				childDir := createChildProject(t, tmpDir, "child", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				childDir := createChildProject(t, tmpDir, "child", StatusV2InProgress)
 				return childDir, tmpDir
 			},
 			expectEmpty:    false,
@@ -347,7 +360,7 @@ func TestGetParentPath(t *testing.T) {
 			name: "top-level returns empty string",
 			setup: func(t *testing.T) (string, string) {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 				return tmpDir, ""
 			},
 			expectEmpty:    true,
@@ -357,9 +370,9 @@ func TestGetParentPath(t *testing.T) {
 			name: "grandchild returns child's path",
 			setup: func(t *testing.T) (string, string) {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				childDir := createChildProject(t, tmpDir, "child", "in_progress")
-				grandchildDir := createChildProject(t, childDir, "grandchild", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				childDir := createChildProject(t, tmpDir, "child", StatusV2InProgress)
+				grandchildDir := createChildProject(t, childDir, "grandchild", StatusV2InProgress)
 				return grandchildDir, childDir
 			},
 			expectEmpty:    false,
@@ -452,7 +465,7 @@ func TestGetNestingLevel(t *testing.T) {
 			name: "top-level project",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
 				return tmpDir
 			},
 			expectedLevel: 0,
@@ -461,8 +474,8 @@ func TestGetNestingLevel(t *testing.T) {
 			name: "child project (level 1)",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				return createChildProject(t, tmpDir, "child", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				return createChildProject(t, tmpDir, "child", StatusV2InProgress)
 			},
 			expectedLevel: 1,
 		},
@@ -470,9 +483,9 @@ func TestGetNestingLevel(t *testing.T) {
 			name: "grandchild project (level 2)",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				childDir := createChildProject(t, tmpDir, "child", "in_progress")
-				return createChildProject(t, childDir, "grandchild", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				childDir := createChildProject(t, tmpDir, "child", StatusV2InProgress)
+				return createChildProject(t, childDir, "grandchild", StatusV2InProgress)
 			},
 			expectedLevel: 2,
 		},
@@ -480,10 +493,10 @@ func TestGetNestingLevel(t *testing.T) {
 			name: "three levels deep",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress")
-				childDir := createChildProject(t, tmpDir, "child", "in_progress")
-				grandchildDir := createChildProject(t, childDir, "grandchild", "in_progress")
-				return createChildProject(t, grandchildDir, "greatgrandchild", "in_progress")
+				createStatusFile(t, tmpDir, StatusV2InProgress)
+				childDir := createChildProject(t, tmpDir, "child", StatusV2InProgress)
+				grandchildDir := createChildProject(t, childDir, "grandchild", StatusV2InProgress)
+				return createChildProject(t, grandchildDir, "greatgrandchild", StatusV2InProgress)
 			},
 			expectedLevel: 3,
 		},
@@ -506,12 +519,12 @@ func TestGetNestingLevel(t *testing.T) {
 func TestValidateNestingDepth(t *testing.T) {
 	t.Run("within limit", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		createStatusFile(t, tmpDir, "in_progress")
+		createStatusFile(t, tmpDir, StatusV2InProgress)
 
 		// Create 5 levels (well within limit)
 		current := tmpDir
 		for i := 0; i < 5; i++ {
-			current = createChildProject(t, current, "child", "in_progress")
+			current = createChildProject(t, current, "child", StatusV2InProgress)
 		}
 
 		err := ValidateNestingDepth(current)
@@ -522,12 +535,12 @@ func TestValidateNestingDepth(t *testing.T) {
 
 	t.Run("at limit", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		createStatusFile(t, tmpDir, "in_progress")
+		createStatusFile(t, tmpDir, StatusV2InProgress)
 
 		// Create exactly MaxNestingDepth levels
 		current := tmpDir
 		for i := 0; i < MaxNestingDepth; i++ {
-			current = createChildProject(t, current, "child", "in_progress")
+			current = createChildProject(t, current, "child", StatusV2InProgress)
 		}
 
 		err := ValidateNestingDepth(current)
@@ -538,12 +551,12 @@ func TestValidateNestingDepth(t *testing.T) {
 
 	t.Run("exceeds limit", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		createStatusFile(t, tmpDir, "in_progress")
+		createStatusFile(t, tmpDir, StatusV2InProgress)
 
 		// Create MaxNestingDepth + 1 levels
 		current := tmpDir
 		for i := 0; i < MaxNestingDepth+1; i++ {
-			current = createChildProject(t, current, "child", "in_progress")
+			current = createChildProject(t, current, "child", StatusV2InProgress)
 		}
 
 		err := ValidateNestingDepth(current)
@@ -557,7 +570,7 @@ func TestValidateNestingDepth(t *testing.T) {
 
 func TestHasChildren_PermissionDenied(t *testing.T) {
 	tmpDir := t.TempDir()
-	createStatusFile(t, tmpDir, "in_progress")
+	createStatusFile(t, tmpDir, StatusV2InProgress)
 
 	tasksDir := filepath.Join(tmpDir, TasksDirectoryName)
 	os.Mkdir(tasksDir, 0755)
@@ -578,7 +591,7 @@ func TestHasChildren_PermissionDenied(t *testing.T) {
 
 func TestListChildren_PermissionDenied(t *testing.T) {
 	tmpDir := t.TempDir()
-	createStatusFile(t, tmpDir, "in_progress")
+	createStatusFile(t, tmpDir, StatusV2InProgress)
 
 	tasksDir := filepath.Join(tmpDir, TasksDirectoryName)
 	os.Mkdir(tasksDir, 0755)

@@ -1,6 +1,6 @@
 # AGM Performance Tests Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Requirements
 
@@ -9,6 +9,8 @@
 **PERF-02** When burst, sustained, filtered, or churn workloads execute, the suite shall use bounded durations and deterministic completion criteria.
 
 **PERF-03** If the host cannot provide a dedicated performance environment, then the suite shall skip timing-sensitive tests instead of asserting unstable thresholds.
+
+**PERF-04** When WebSocket client counts gate a performance workload, the suite shall use bounded observed hub readiness for registration and unregistration instead of assuming dial completion or a fixed sleep proves readiness.
 
 ## BDD Traceability
 

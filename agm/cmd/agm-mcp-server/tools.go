@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -36,7 +38,7 @@ func injectTraceContext(ctx context.Context) map[string]interface{} {
 type ListSessionsInput struct {
 	Filters struct {
 		Status    string `json:"status,omitempty" jsonschema:"Filter by status: active (default), archived, or all"`
-		AgentType string `json:"agent_type,omitempty" jsonschema:"Filter by harness: claude-code, codex-cli, agy, opencode-cli, gemini-cli, or all"`
+		AgentType string `json:"agent_type,omitempty" jsonschema:"Filter by harness: claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli, or all"`
 		Limit     int    `json:"limit,omitempty" jsonschema:"Maximum sessions to return (1-1000, default 100)"`
 	} `json:"filters"`
 	Fields []string `json:"fields,omitempty" jsonschema:"Field mask: only return these fields (e.g. [id, name, status]). Omit for all fields."`
@@ -54,25 +56,59 @@ type GetSessionInput struct {
 	Identifier string `json:"identifier" jsonschema:"Session ID, name, or UUID prefix"`
 }
 
+func listSessionsRequestFromMCP(input ListSessionsInput) (*ops.ListSessionsRequest, []string) {
+	return &ops.ListSessionsRequest{
+		Status:  input.Filters.Status,
+		Harness: input.Filters.AgentType,
+		Limit:   input.Filters.Limit,
+	}, input.Fields
+}
+
+func searchSessionsRequestFromMCP(input SearchSessionsInput) *ops.SearchSessionsRequest {
+	return &ops.SearchSessionsRequest{
+		Query:  input.Query,
+		Status: input.Filters.Status,
+		Limit:  input.Filters.Limit,
+	}
+}
+
+func getSessionRequestFromMCP(input GetSessionInput) *ops.GetSessionRequest {
+	return &ops.GetSessionRequest{Identifier: input.Identifier}
+}
+
 // --- Tool registration ---
 
+type mcpOpContextFactory func() (*ops.OpContext, func(), error)
+
+type listSessionsOperation func(*ops.OpContext, *ops.ListSessionsRequest) (*ops.ListSessionsResult, error)
+type searchSessionsOperation func(*ops.OpContext, *ops.SearchSessionsRequest) (*ops.SearchSessionsResult, error)
+type getSessionOperation func(*ops.OpContext, *ops.GetSessionRequest) (*ops.GetSessionResult, error)
+type archiveSessionOperation func(*ops.OpContext, *ops.ArchiveSessionRequest) (*ops.ArchiveSessionResult, error)
+type killSessionOperation func(*ops.OpContext, *ops.KillSessionRequest) (*ops.KillSessionResult, error)
+
 func addListSessionsTool(server *mcp.Server, _ *Config) {
+	addListSessionsToolWithDependencies(server, newMCPOpContext, ops.ListSessions)
+}
+
+func addListSessionsToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	listSessions listSessionsOperation,
+) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_list_sessions",
 		Description: "List AGM sessions. Use when you need to see all active sessions or find sessions by status/type.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input ListSessionsInput) (*mcp.CallToolResult, any, error) {
-		opCtx, cleanup, err := newMCPOpContext()
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input ListSessionsInput) (*mcp.CallToolResult, any, error) {
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
-		opCtx.Fields = input.Fields
+		req, fields := listSessionsRequestFromMCP(input)
+		opCtx.Context = ctx
+		opCtx.Fields = fields
 
-		result, opErr := ops.ListSessions(opCtx, &ops.ListSessionsRequest{
-			Status:  input.Filters.Status,
-			Harness: input.Filters.AgentType,
-			Limit:   input.Filters.Limit,
-		})
+		result, opErr := listSessions(opCtx, req)
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
 		}
@@ -82,25 +118,30 @@ func addListSessionsTool(server *mcp.Server, _ *Config) {
 }
 
 func addSearchSessionsTool(server *mcp.Server, _ *Config) {
+	addSearchSessionsToolWithDependencies(server, newMCPOpContext, ops.SearchSessions)
+}
+
+func addSearchSessionsToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	searchSessions searchSessionsOperation,
+) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_search_sessions",
 		Description: "Search AGM sessions by name. Use when you need to find a specific session by partial name match.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input SearchSessionsInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SearchSessionsInput) (*mcp.CallToolResult, any, error) {
 		if input.Query == "" {
 			return mcpError(ops.ErrInvalidInput("query", "Search query is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
-		result, opErr := ops.SearchSessions(opCtx, &ops.SearchSessionsRequest{
-			Query:  input.Query,
-			Status: input.Filters.Status,
-			Limit:  input.Filters.Limit,
-		})
+		result, opErr := searchSessions(opCtx, searchSessionsRequestFromMCP(input))
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
 		}
@@ -110,22 +151,72 @@ func addSearchSessionsTool(server *mcp.Server, _ *Config) {
 }
 
 func addGetSessionMetadataTool(server *mcp.Server, _ *Config) {
+	addGetSessionMetadataToolWithDependencies(server, newMCPOpContext, ops.GetSession)
+}
+
+func addGetSessionMetadataToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	getSession getSessionOperation,
+) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_get_session_metadata",
 		Description: "Get detailed metadata for an AGM session. Use when you need full session details by ID or name.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input GetSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
-		result, opErr := ops.GetSession(opCtx, &ops.GetSessionRequest{
+		result, opErr := getSession(opCtx, getSessionRequestFromMCP(input))
+		if opErr != nil {
+			return mcpError(opErr), nil, nil
+		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
+type GetSessionOutputInput struct {
+	Identifier string `json:"identifier" jsonschema:"Session ID, name, or UUID prefix"`
+	Lines      int    `json:"lines,omitempty" jsonschema:"Trailing pane lines to capture (default 100, max 2000)"`
+}
+
+func addGetSessionOutputTool(server *mcp.Server, _ *Config) {
+	addGetSessionOutputToolWithDependencies(server, newMCPOpContext, ops.GetSessionOutput)
+}
+
+type getSessionOutputOperation func(*ops.OpContext, *ops.GetSessionOutputRequest) (*ops.GetSessionOutputResult, error)
+
+func addGetSessionOutputToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	getSessionOutput getSessionOutputOperation,
+) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_session_output",
+		Description: "Read the tail of an AGM session's terminal output — live pane while running, durable final capture after completion. Use to collect a worker's result without attaching to its pane.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input GetSessionOutputInput) (*mcp.CallToolResult, any, error) {
+		if input.Identifier == "" {
+			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
+		}
+
+		opCtx, cleanup, err := newOpContext()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+		opCtx.Context = ctx
+
+		result, opErr := getSessionOutput(opCtx, &ops.GetSessionOutputRequest{
 			Identifier: input.Identifier,
+			Lines:      input.Lines,
 		})
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
@@ -139,6 +230,12 @@ func addGetSessionMetadataTool(server *mcp.Server, _ *Config) {
 
 // newMCPOpContext creates an OpContext with Dolt storage for MCP tool handlers.
 // Returns a cleanup function that must be deferred.
+//
+// The context carries a real tmux client: session status is derived from tmux
+// liveness, so a tmux-less context makes every read tool report live sessions
+// as stopped/unknown and orchestrators conclude spawned work never ran
+// (ce-0zng9). The MCP server always runs on the host next to the AGM tmux
+// socket, so the real client is always available here.
 func newMCPOpContext() (*ops.OpContext, func(), error) {
 	doltCfg, err := dolt.DefaultConfig()
 	if err != nil {
@@ -154,6 +251,7 @@ func newMCPOpContext() (*ops.OpContext, func(), error) {
 
 	return &ops.OpContext{
 		Storage:    adapter,
+		Tmux:       session.NewRealTmux(),
 		OutputMode: "json",
 	}, cleanup, nil
 }
@@ -190,16 +288,30 @@ type ArchiveSessionInput struct {
 }
 
 type KillSessionInput struct {
-	Identifier string `json:"identifier" jsonschema:"Session ID, name, or tmux session name to kill"`
-	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
+	Identifier     string `json:"identifier" jsonschema:"Session ID, name, or tmux session name to kill"`
+	Force          bool   `json:"force,omitempty" jsonschema:"Bypass the recent-activity safety check."`
+	ConfirmedStuck bool   `json:"confirmed_stuck,omitempty" jsonschema:"Confirm that a live harness is stuck and may be killed. Required for an active session."`
+	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
 }
 
 type CreateSessionInput struct {
 	Cwd     string `json:"cwd" jsonschema:"Absolute path to the working directory for the new session (required)"`
 	Prompt  string `json:"prompt" jsonschema:"Initial prompt to send to the session after startup (required)"`
 	Title   string `json:"title,omitempty" jsonschema:"Session name. If omitted, derived from cwd directory name."`
-	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 2.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
-	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, or deprecated gemini-cli. Defaults to claude-code."`
+	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 3.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
+	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, pi-cli, or deprecated gemini-cli. Defaults to claude-code."`
+}
+
+func archiveSessionRequestFromMCP(input ArchiveSessionInput) (*ops.ArchiveSessionRequest, bool) {
+	return &ops.ArchiveSessionRequest{Identifier: input.Identifier}, input.DryRun
+}
+
+func killSessionRequestFromMCP(input KillSessionInput) (*ops.KillSessionRequest, bool) {
+	return &ops.KillSessionRequest{
+		Identifier:     input.Identifier,
+		Force:          input.Force,
+		ConfirmedStuck: input.ConfirmedStuck,
+	}, input.DryRun
 }
 
 type SendMessageInput struct {
@@ -208,24 +320,40 @@ type SendMessageInput struct {
 }
 
 func addArchiveSessionTool(server *mcp.Server, _ *Config) {
+	addArchiveSessionToolWithFactory(server, newMCPOpContext)
+}
+
+func archiveSessionWithOps(opCtx *ops.OpContext, request *ops.ArchiveSessionRequest) (*ops.ArchiveSessionResult, error) {
+	return ops.ArchiveSession(opCtx, request)
+}
+
+func addArchiveSessionToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
+	addArchiveSessionToolWithDependencies(server, newOpContext, archiveSessionWithOps)
+}
+
+func addArchiveSessionToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	archiveSession archiveSessionOperation,
+) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_archive_session",
 		Description: "Archive an AGM session by marking it as archived. Use when a session is no longer needed and should be hidden from the active list.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input ArchiveSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input ArchiveSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
-		opCtx.DryRun = input.DryRun
+		req, dryRun := archiveSessionRequestFromMCP(input)
+		opCtx.Context = ctx
+		opCtx.DryRun = dryRun
 
-		result, opErr := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{
-			Identifier: input.Identifier,
-		})
+		result, opErr := archiveSession(opCtx, req)
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
 		}
@@ -235,24 +363,43 @@ func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 }
 
 func addKillSessionTool(server *mcp.Server, _ *Config) {
+	addKillSessionToolWithFactory(server, newMCPOpContextWithTmux)
+}
+
+func killSessionWithOps(opCtx *ops.OpContext, request *ops.KillSessionRequest) (*ops.KillSessionResult, error) {
+	return ops.KillSession(opCtx, request)
+}
+
+// addKillSessionToolWithFactory keeps dependency construction private while
+// allowing the complete MCP transport and shared mutation contract to be
+// exercised with deterministic storage and tmux adapters.
+func addKillSessionToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
+	addKillSessionToolWithDependencies(server, newOpContext, killSessionWithOps)
+}
+
+func addKillSessionToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	killSession killSessionOperation,
+) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_kill_session",
 		Description: "Kill the tmux session for an AGM session. Use when a session is stuck or unresponsive and needs to be force-stopped.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input KillSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input KillSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
-		opCtx.DryRun = input.DryRun
+		req, dryRun := killSessionRequestFromMCP(input)
+		opCtx.Context = ctx
+		opCtx.DryRun = dryRun
 
-		result, opErr := ops.KillSession(opCtx, &ops.KillSessionRequest{
-			Identifier: input.Identifier,
-		})
+		result, opErr := killSession(opCtx, req)
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
 		}
@@ -263,16 +410,100 @@ func addKillSessionTool(server *mcp.Server, _ *Config) {
 
 // --- Session lifecycle tools ---
 
-// newMCPOpContextWithTmux creates an OpContext with both Dolt storage and a
-// real Tmux interface. Used by tools that need to create sessions or send
-// messages (as opposed to read-only tools that only query Dolt).
+// newMCPOpContextWithTmux extends the shared context with the MCP creation
+// runtime. Used by tools that create sessions or send messages.
 func newMCPOpContextWithTmux() (*ops.OpContext, func(), error) {
 	opCtx, cleanup, err := newMCPOpContext()
 	if err != nil {
 		return nil, cleanup, err
 	}
-	opCtx.Tmux = session.NewRealTmux()
+	opCtx.CreationRuntime = newMCPCreateSessionRuntime(opCtx.Tmux)
 	return opCtx, cleanup, nil
+}
+
+type mcpCreateSessionRuntime struct {
+	tmux             session.TmuxInterface
+	lookPath         func(string) (string, error)
+	waitForAgyPrompt func(context.Context, string, time.Duration) error
+	sleep            func(time.Duration)
+}
+
+func newMCPCreateSessionRuntime(tmuxClient session.TmuxInterface) *mcpCreateSessionRuntime {
+	return &mcpCreateSessionRuntime{
+		tmux:             tmuxClient,
+		lookPath:         exec.LookPath,
+		waitForAgyPrompt: tmux.WaitForAgyPrompt,
+		sleep:            time.Sleep,
+	}
+}
+
+func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	if spec.Harness == "agy" {
+		if _, err := r.lookPath("agy"); err != nil {
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("find AGY executable: %w", err)
+		}
+	}
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return ops.CreateSessionLaunchResult{}, fmt.Errorf("prepare harness launch: %w", err)
+	}
+	if launch.BindOverrideReservations != nil {
+		if err := launch.FinalizeLaunch(true); err != nil {
+			_ = launch.CancelUndelivered()
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("finalize harness launch: %w", err)
+		}
+	}
+	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
+	submissionErr := r.tmux.SendKeys(spec.SessionName, launch.Command)
+	if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
+		return result, err
+	}
+	if spec.Harness != "agy" {
+		return result, nil
+	}
+	r.sleep(500 * time.Millisecond)
+	if err := r.waitForAgyPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
+		return result, fmt.Errorf("wait for AGY readiness: %w", err)
+	}
+	// The native wait handles AGY onboarding, but it does not prove that the
+	// process rendering the composer is still alive. Leave the result unverified
+	// so the shared process-and-composer gate owns the final readiness verdict.
+	return result, nil
+}
+
+func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.CreateSessionCompletion) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if completion.Prompt == "" || completion.Launch.PromptDelivered {
+		return nil
+	}
+	return r.sendPromptAtomically(ctx, completion.Manifest.Name, completion.Manifest.Harness, completion.Prompt, "startup prompt delivery")
+}
+
+func (r *mcpCreateSessionRuntime) sendPromptAtomically(ctx context.Context, sessionName, harness, prompt, operation string) error {
+	sender, ok := r.tmux.(session.AtomicInputSender)
+	if !ok {
+		return fmt.Errorf("MCP tmux runtime does not expose atomic input delivery")
+	}
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, prompt, session.InputDeliveryOptions{})
+	if err != nil {
+		return fmt.Errorf("revalidate MCP %s: %w", operation, err)
+	}
+	if !readiness.Ready {
+		return fmt.Errorf("revalidate MCP %s: harness input is %s", operation, readiness.State)
+	}
+	if readiness.PaneID == "" {
+		return fmt.Errorf("revalidate MCP %s: harness returned no verified pane", operation)
+	}
+	return nil
+}
+
+func (r *mcpCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.sendPromptAtomically(ctx, input.SessionName, "agy", input.Prompt, "AGY identity bootstrap prompt")
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.
@@ -305,29 +536,62 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
-		result, opErr := ops.CreateSession(opCtx, &ops.CreateSessionRequest{
-			Cwd:     input.Cwd,
-			Prompt:  input.Prompt,
-			Title:   input.Title,
-			Model:   input.Model,
-			Harness: input.Harness,
-		})
+		result, opErr := ops.CreateSessionRouted(ctx, opCtx, createSessionRequestFromMCP(input))
 		if opErr != nil {
 			span.RecordError(opErr)
 			return mcpError(opErr), nil, nil
 		}
 
+		// Record the harness/model actually created: CreateSessionRouted may have
+		// fallen back from agy to codex, so the requested agm.harness (set at span
+		// start) is not necessarily what ran.
 		span.SetAttributes(
 			attribute.String("agm.session_id", result.SessionID),
 			attribute.String("agm.session_name", result.Name),
+			attribute.String("agm.effective_harness", result.Harness),
+			attribute.String("agm.effective_model", result.Model),
 		)
 
 		return mcpSuccess(result), result, nil
 	})
 }
 
+func createSessionRequestFromMCP(input CreateSessionInput) *ops.CreateSessionRequest {
+	return &ops.CreateSessionRequest{
+		Cwd:                input.Cwd,
+		Prompt:             input.Prompt,
+		Title:              input.Title,
+		Model:              input.Model,
+		Harness:            input.Harness,
+		Caller:             ops.CreateSessionCaller{Surface: ops.CreateSurfaceMCP},
+		ForwardClaudeOAuth: true,
+		// Dispatch-driven (MCP) agy spawns are the ones that hit the Antigravity
+		// identity-discovery race under provider throttle. Default them to
+		// retry-with-backoff and fall back to codex so a throttled Gemini keeps
+		// the pipeline moving instead of dropping the work. Ignored for non-agy
+		// harnesses by CreateSessionRouted.
+		SpawnRetries:    mcpAgySpawnRetries,
+		FallbackHarness: mcpAgyFallbackHarness,
+	}
+}
+
+// Defaults that make Dispatch-spawned agy (Gemini/Antigravity) sessions
+// resilient to the provider-throttle identity-discovery race.
+const (
+	mcpAgySpawnRetries    = 3
+	mcpAgyFallbackHarness = "codex-cli"
+)
+
 func addSendMessageTool(server *mcp.Server, _ *Config) {
+	addSendMessageToolWithFactory(server, newMCPOpContextWithTmux)
+}
+
+// addSendMessageToolWithFactory exercises the complete MCP transport while
+// allowing tests to prove that a context carrying tmux still routes pure API
+// manifests through the shared adapter transaction first.
+func addSendMessageToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_send_message",
 		Description: "Send a message to a running AGM session. Use when you need to deliver a prompt or instruction to an existing session.",
@@ -347,13 +611,13 @@ func addSendMessageTool(server *mcp.Server, _ *Config) {
 			return mcpError(ops.ErrInvalidInput("message", "Message text is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContextWithTmux()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			span.RecordError(err)
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
-
+		opCtx.Context = ctx
 		result, opErr := ops.SendMessage(opCtx, &ops.SendMessageRequest{
 			Recipient: input.SessionID,
 			Message:   input.Message,

@@ -1,12 +1,16 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -21,10 +25,10 @@ var (
 // RewindCmd is the cobra command that rewinds the session to a previous phase.
 var RewindCmd = &cobra.Command{
 	Use:   "rewind-to <phase-name>",
-	Short: "Rewind to a previous phase in V2 sequence",
-	Long: `Rewind the V2 session to a previously completed phase.
+	Short: "Rewind to a previous phase in the canonical sequence",
+	Long: `Rewind the session to a previously completed phase.
 
-V2 Phase Sequence:
+Phase sequence:
   CHARTER → PROBLEM → RESEARCH → DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO
 
 This will:
@@ -32,11 +36,12 @@ This will:
 2. Mark all phases after the target phase as pending
 3. Set the current phase to the target phase
 4. Log rewind event to retrospective (with optional prompting)
+5. Commit canonical rewind markers when the project is a Git repository
 
 Examples:
-  wayfinder-session rewind-to RESEARCH
-  wayfinder-session rewind-to PLAN --no-prompt
-  wayfinder-session rewind-to DESIGN --reason "Design was too complex"`,
+  wayfinder session rewind-to RESEARCH
+  wayfinder session rewind-to PLAN --no-prompt
+  wayfinder session rewind-to DESIGN --reason "Design was too complex"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRewind,
 }
@@ -48,19 +53,30 @@ func init() {
 }
 
 //nolint:gocyclo // reason: linear CLI driver covering many rewind targets
-func runRewind(cmd *cobra.Command, args []string) error {
+func runRewind(cmd *cobra.Command, args []string) (runErr error) {
 	targetPhase := args[0]
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
+	transitionLock, err := acquireRewindTransitionLock(projectDir)
+	if err != nil {
+		return fmt.Errorf("acquire rewind transition lock: %w", err)
+	}
+	defer func() {
+		if transitionLock != nil {
+			if closeErr := transitionLock.Close(); closeErr != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("release rewind transition lock: %w", closeErr))
+			}
+		}
+	}()
 
-	// Read existing V2 STATUS from project directory
+	// Read existing canonical status from the project directory.
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
-	// Get all V2 phases
+	// Get the canonical phase sequence.
 	allPhases := status.AllPhasesV2Schema()
 
 	// Find target phase index
@@ -76,85 +92,125 @@ func runRewind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid target phase: %s (valid phases: CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)", targetPhase)
 	}
 
-	// Validate that target phase has been completed
-	targetHistory := st.GetPhaseHistory(targetPhase)
-	if targetHistory == nil || (targetHistory.Status != status.PhaseStatusV2Completed && targetHistory.Status != status.PhaseStatusV2Skipped) {
-		return fmt.Errorf("cannot rewind to phase %s: phase has not been completed yet", targetPhase)
+	if err := validateRewindTarget(st, targetPhase); err != nil {
+		return err
 	}
 
-	// Archive current state before rewinding
-	archiver := archive.New(projectDir)
-	if err := archiver.ArchivePhase(st.CurrentWaypoint); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to archive current state: %v\n", err)
-	} else {
-		fmt.Println("📦 Current state archived")
+	// Migrate a legacy history filename only after every rewind precondition
+	// holds. A rejected rewind must leave lifecycle and trace evidence
+	// byte-for-byte unchanged; renaming first strands an uncommitted rename that
+	// the next start-phase refuses to migrate because its dirty-worktree check
+	// runs first. Project-internal lock metadata may already exist by this point.
+	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for rewind: %w", err)
 	}
+
+	// Archive current state before rewinding. Archive publication is required so
+	// a reset status never exists without its pre-rewind snapshot.
+	archiver := archive.New(projectDir)
+	archiveRef, err := archiver.ArchivePhase(st.CurrentWaypoint)
+	if err != nil {
+		return fmt.Errorf("archive current state: %w", err)
+	}
+	fmt.Println("📦 Current state archived")
 
 	// Capture fromPhase BEFORE updating (needed for retrospective logging)
 	fromPhase := st.CurrentWaypoint
 
-	// Mark all phases after target as pending in phase history
-	for i := range st.WaypointHistory {
-		phaseData := &st.WaypointHistory[i]
-		// Find this phase's index in allPhases
-		phaseIdx := -1
-		for j, p := range allPhases {
-			if p == phaseData.Name {
-				phaseIdx = j
-				break
-			}
-		}
-
-		// If phase is after target, mark as pending
-		if phaseIdx > targetIdx {
-			phaseData.Status = status.PhaseStatusV2Pending
-			phaseData.CompletedAt = nil
-			phaseData.Outcome = nil
-		}
-	}
-
-	// Update roadmap phases if present
-	if st.Roadmap != nil {
-		for i := range st.Roadmap.Phases {
-			roadmapPhase := &st.Roadmap.Phases[i]
-			// Find this phase's index in allPhases
-			phaseIdx := -1
-			for j, p := range allPhases {
-				if p == roadmapPhase.ID {
-					phaseIdx = j
-					break
-				}
-			}
-
-			// If phase is after target, mark as pending
-			if phaseIdx > targetIdx {
-				roadmapPhase.Status = status.PhaseStatusV2Pending
-				roadmapPhase.CompletedAt = nil
-			}
-		}
-	}
+	resetForRewind(st, allPhases, targetIdx)
+	resetLifecycleForRewind(st, time.Now())
 
 	// Update current phase
 	st.CurrentWaypoint = targetPhase
-	st.UpdatedAt = time.Now()
 
-	// Write updated V2 STATUS to project directory
+	// Write updated canonical status to the project directory.
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
 
-	// Log rewind event to retrospective (dual logging: JSON + markdown)
-	// Errors are non-blocking (logged to stderr)
+	// Log rewind event to retrospective (dual logging: JSON + markdown). These
+	// writes are required evidence for every accepted rewind, including a
+	// same-phase replay with magnitude zero.
 	flags := retrospective.RewindFlags{
 		NoPrompt:  rewindNoPrompt,
 		Reason:    rewindReason,
 		Learnings: rewindLearnings,
 	}
 	if err := retrospective.LogRewindEvent(projectDir, fromPhase, targetPhase, flags); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: retrospective logging failed: %v\n", err)
+		return fmt.Errorf("persist rewind trace: %w", err)
 	}
+	gitIntegrator := git.New(projectDir)
+	if err := commitRewindState(gitIntegrator, fromPhase, targetPhase, archiveRef, os.Stdout); err != nil {
+		return err
+	}
+
+	if err := transitionLock.Close(); err != nil {
+		return fmt.Errorf("release rewind transition lock: %w", err)
+	}
+	transitionLock = nil
 
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
 	return nil
+}
+
+type rewindCommitter interface {
+	CheckGitRepo() (bool, error)
+	CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error
+}
+
+func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, archiveRef archive.ArchiveRef, stdout io.Writer) error {
+	isRepo, err := integrator.CheckGitRepo()
+	if err != nil {
+		return fmt.Errorf("check git repository: %w", err)
+	}
+	if !isRepo {
+		return nil
+	}
+	if err := integrator.CommitRewind(fromPhase, targetPhase, archiveRef); err != nil {
+		return fmt.Errorf("commit rewind trace: %w", err)
+	}
+	fmt.Fprintln(stdout, "📝 Rewind state committed")
+	return nil
+}
+
+func validateRewindTarget(st *status.StatusV2, targetPhase string) error {
+	targetHistory := st.GetPhaseHistory(targetPhase)
+	if targetHistory == nil || (targetHistory.Status != status.PhaseStatusV2Completed && targetHistory.Status != status.PhaseStatusV2Skipped) {
+		return fmt.Errorf("cannot rewind to phase %s: phase has not been completed yet", targetPhase)
+	}
+	if st.IsPhaseSkipped(targetPhase) {
+		return fmt.Errorf("cannot rewind to phase %s: phase is configured to be skipped", targetPhase)
+	}
+	return nil
+}
+
+func resetLifecycleForRewind(st *status.StatusV2, now time.Time) {
+	applyLifecycleState(st, status.LifecycleWorking, "", "", "", now)
+}
+
+func resetForRewind(st *status.StatusV2, allPhases []string, targetIdx int) {
+	positions := make(map[string]int, len(allPhases))
+	for index, phase := range allPhases {
+		positions[phase] = index
+	}
+	retainedHistory := st.WaypointHistory[:0]
+	for _, phase := range st.WaypointHistory {
+		if positions[phase.Name] < targetIdx {
+			retainedHistory = append(retainedHistory, phase)
+		}
+	}
+	st.WaypointHistory = retainedHistory
+	if st.Roadmap == nil {
+		return
+	}
+	for index := range st.Roadmap.Phases {
+		phase := &st.Roadmap.Phases[index]
+		if positions[phase.ID] < targetIdx {
+			continue
+		}
+		phase.Status = status.PhaseStatusV2Pending
+		phase.StartedAt = nil
+		phase.CompletedAt = nil
+	}
 }

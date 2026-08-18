@@ -18,7 +18,7 @@ across two domains.
 | `agm_search_sessions` | Search sessions by partial name match |
 | `agm_get_session_metadata` | Full session metadata by ID or name |
 | `agm_archive_session` | Mark a session archived (dry-run supported) |
-| `agm_kill_session` | Kill the tmux session (dry-run supported) |
+| `agm_kill_session` | Kill the exact tmux session (`dry_run`, `force`, and active-session `confirmed_stuck` supported) |
 | `agm_list_ops` | List available ops (schema discovery) |
 
 ### Wayfinder tools

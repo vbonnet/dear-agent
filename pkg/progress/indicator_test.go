@@ -42,9 +42,9 @@ func TestUpdatePhase(t *testing.T) {
 		name     string
 		expected string
 	}{
-		{1, 11, "W0 - Project Framing", "Phase 1/11: W0 - Project Framing"},
-		{3, 11, "D2 - Existing Solutions", "Phase 3/11: D2 - Existing Solutions"},
-		{11, 11, "S11 - Retrospective", "Phase 11/11: S11 - Retrospective"},
+		{1, 9, "CHARTER - Project Framing", "Phase 1/9: CHARTER - Project Framing"},
+		{3, 9, "RESEARCH - Existing Solutions", "Phase 3/9: RESEARCH - Existing Solutions"},
+		{9, 9, "RETRO - Retrospective", "Phase 9/9: RETRO - Retrospective"},
 	}
 
 	for _, tt := range tests {
@@ -145,19 +145,19 @@ func TestUpdateAfterStart(t *testing.T) {
 
 func TestUpdatePhaseMethod(t *testing.T) {
 	t.Run("UpdatePhase calls Update with formatted message", func(t *testing.T) {
-		p := New(Options{Total: 11, Label: "Wayfinder"})
+		p := New(Options{Total: 9, Label: "Wayfinder"})
 		p.Start()
 		// Should not panic; exercises the actual UpdatePhase method
-		p.UpdatePhase(1, 11, "W0 - Project Framing")
-		p.UpdatePhase(5, 11, "D4 - Architecture")
-		p.UpdatePhase(11, 11, "S11 - Retrospective")
+		p.UpdatePhase(1, 9, "CHARTER - Project Framing")
+		p.UpdatePhase(4, 9, "DESIGN - Architecture")
+		p.UpdatePhase(9, 9, "RETRO - Retrospective")
 		p.Complete("All phases done")
 	})
 
 	t.Run("UpdatePhase without start is no-op", func(t *testing.T) {
-		p := New(Options{Total: 11, Label: "Wayfinder"})
+		p := New(Options{Total: 9, Label: "Wayfinder"})
 		// Should not panic
-		p.UpdatePhase(1, 11, "W0")
+		p.UpdatePhase(1, 9, "CHARTER")
 	})
 }
 

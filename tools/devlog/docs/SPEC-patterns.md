@@ -356,7 +356,7 @@ devlog/
 ├── README.md                       # Root navigation hub
 ├── SPEC.md                         # This specification
 ├── ARCHITECTURE.md                 # System architecture
-├── .docs/adr/                      # Architecture decision records
+├── ../ADR.md                       # Current tool decision record
 ├── session-artifact-tracking.md   # Artifact preservation guide
 ├── workspace-patterns/             # Workspace organization patterns
 │   ├── README.md                   # Navigation hub

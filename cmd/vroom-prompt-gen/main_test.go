@@ -146,7 +146,9 @@ func TestRenderPrompt(t *testing.T) {
 	for _, want := range []string{
 		"# Worker: ce-test — Do the thing",
 		"Bead ce-test (P1). Make it work.",
-		"bd --db ~/beads/context-engine/.beads",
+		"provider-visible PR created through safe-pr",
+		"Never arm auto-merge",
+		"bd --db ~/beads/context-engine/.beads --dolt-auto-commit on",
 		"NEVER write to ~/src/**",
 		"claude-opus-4-8",
 		"More detail here", // full description in the Goal block
@@ -154,6 +156,9 @@ func TestRenderPrompt(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered prompt missing %q\n---\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "auto-merge armed") {
+		t.Fatalf("rendered prompt retained retired safe-pr auto-arming guidance:\n%s", out)
 	}
 	// The summary line should be just the first paragraph, not the whole desc.
 	summaryLine := strings.Split(out, "\n")[2]
@@ -178,6 +183,9 @@ func TestRenderPromptForRoute(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, got)
 		}
+	}
+	if !strings.Contains(got, "safe-push") || strings.Contains(got, "git push") {
+		t.Fatalf("prompt must require safe-push without raw git-push guidance:\n%s", got)
 	}
 }
 

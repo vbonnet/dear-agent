@@ -10,6 +10,11 @@ func TestValidateModel(t *testing.T) {
 	if err := ValidateModel("claude-code", "sonnet"); err != nil {
 		t.Errorf("expected nil for known model, got %v", err)
 	}
+	for _, model := range []string{"gpt-5.6", "gpt-5.5-codex"} {
+		if err := ValidateModel("codex-cli", model); err != nil {
+			t.Errorf("expected nil for mapped Codex model %q, got %v", model, err)
+		}
+	}
 	// Unknown model should also return nil (warn but allow)
 	if err := ValidateModel("claude-code", "unknown-model"); err != nil {
 		t.Errorf("expected nil for unknown model (warn policy), got %v", err)
@@ -28,7 +33,17 @@ func TestResolveModelFullName(t *testing.T) {
 		{"claude-code", "haiku", "claude-haiku-4-5"},
 		{"claude-code", "fable", "claude-fable-5"},
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
+		{"agy", "3.5-flash", "Gemini 3.5 Flash (Medium)"},
+		{"agy", "Gemini 3.5 Flash (Low)", "Gemini 3.5 Flash (Low)"},
+		{"agy", "2.5-flash", "Gemini 3.5 Flash (Medium)"},
+		{"agy", "gemini-2.5-flash", "Gemini 3.5 Flash (Medium)"},
+		{"agy", "2.5-pro", "Gemini 3.1 Pro (High)"},
+		{"agy", "gemini-2.5-pro", "Gemini 3.1 Pro (High)"},
+		{"agy", "2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
+		{"agy", "gemini-2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
 		{"codex-cli", "5.6", "gpt-5.6-terra"},
+		{"codex-cli", "gpt-5.6", "gpt-5.6-terra"},
+		{"codex-cli", "gpt-5.5-codex", "gpt-5.5"},
 		{"codex-cli", "5.5", "gpt-5.5"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough
@@ -40,6 +55,24 @@ func TestResolveModelFullName(t *testing.T) {
 		got := ResolveModelFullName(tt.harness, tt.input)
 		if got != tt.expected {
 			t.Errorf("ResolveModelFullName(%q, %q) = %q, want %q", tt.harness, tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestNormalizeModelInputPreservesAgyPublicLabels(t *testing.T) {
+	const publicLabel = "Gemini 3.5 Flash (Low)"
+	if got := NormalizeModelInput("agy", publicLabel); got != publicLabel {
+		t.Fatalf("NormalizeModelInput(agy, public label) = %q, want %q", got, publicLabel)
+	}
+	if got := NormalizeModelInput("agy", "3.5-FLASH-LOW"); got != "3.5-flash-low" {
+		t.Fatalf("NormalizeModelInput(agy, alias) = %q, want 3.5-flash-low", got)
+	}
+}
+
+func TestNormalizeModelInputCanonicalizesCrossHarnessAliases(t *testing.T) {
+	for _, harness := range []string{"agy", "codex-cli"} {
+		if got := NormalizeModelInput(harness, "OPUS"); got != "opus" {
+			t.Errorf("NormalizeModelInput(%s, OPUS) = %q, want opus", harness, got)
 		}
 	}
 }
@@ -62,8 +95,8 @@ func TestDefaultModelForHarness(t *testing.T) {
 		t.Fatalf("codex-cli default resolved to %q, want gpt-5.5", resolved)
 	}
 	model, ok = DefaultModelForHarness("agy")
-	if !ok || model != "2.5-flash" {
-		t.Errorf("agy default: got (%q, %v), want (2.5-flash, true)", model, ok)
+	if !ok || model != "3.5-flash" {
+		t.Errorf("agy default: got (%q, %v), want (3.5-flash, true)", model, ok)
 	}
 	model, ok = DefaultModelForHarness("gemini-cli")
 	if ok {
@@ -157,10 +190,11 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		{"codex-cli", "opus", "gpt-5.5"},
 		{"codex-cli", "sonnet", "gpt-5.5"},
 		{"codex-cli", "haiku", "gpt-5.4-mini"},
-		// Claude aliases → AGY models (ce-7sh1: proper tier mapping)
-		{"agy", "opus", "gemini-2.5-pro"},
-		{"agy", "sonnet", "gemini-2.5-flash"},
-		{"agy", "haiku", "gemini-2.0-flash-lite"},
+		// Claude aliases → current AGY catalog models
+		{"agy", "fable", "Claude Opus 4.6 (Thinking)"},
+		{"agy", "opus", "Claude Opus 4.6 (Thinking)"},
+		{"agy", "sonnet", "Gemini 3.5 Flash (Medium)"},
+		{"agy", "haiku", "Gemini 3.5 Flash (Low)"},
 		// Gemini aliases → Claude models
 		{"claude-code", "2.5-pro", "claude-opus-4-8[1m]"},
 		{"claude-code", "3.5-flash", "claude-haiku-4-5"},
@@ -171,8 +205,8 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		// Native aliases still work (not affected)
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"claude-code", "opus", "claude-opus-4-8[1m]"},
-		{"agy", "2.5-pro", "gemini-2.5-pro"},
-		{"agy", "2.5-flash", "gemini-2.5-flash"},
+		{"agy", "3.1-pro-high", "Gemini 3.1 Pro (High)"},
+		{"agy", "3.5-flash", "Gemini 3.5 Flash (Medium)"},
 	}
 	for _, tt := range tests {
 		got := ResolveModelFullName(tt.harness, tt.input)
@@ -211,7 +245,7 @@ func TestGetModelsForHarness_OpenCode(t *testing.T) {
 		if m.FullName == "claude-sonnet-4-6[1m]" {
 			foundClaude = true
 		}
-		if m.FullName == "gemini-2.5-flash" {
+		if m.FullName == "Gemini 3.5 Flash (Medium)" {
 			foundAgy = true
 		}
 		if m.FullName == "gemini-3.5-flash" {
@@ -226,6 +260,37 @@ func TestGetModelsForHarness_OpenCode(t *testing.T) {
 	}
 	if foundDeprecatedGemini {
 		t.Error("opencode-cli models should not include deprecated gemini-cli-only models")
+	}
+}
+
+func TestAgyModelCatalogMatchesPublicCLI(t *testing.T) {
+	want := map[string]string{
+		"3.5-flash":                  "Gemini 3.5 Flash (Medium)",
+		"3.5-flash-medium":           "Gemini 3.5 Flash (Medium)",
+		"3.5-flash-high":             "Gemini 3.5 Flash (High)",
+		"3.5-flash-low":              "Gemini 3.5 Flash (Low)",
+		"3.1-pro-low":                "Gemini 3.1 Pro (Low)",
+		"3.1-pro-high":               "Gemini 3.1 Pro (High)",
+		"claude-sonnet-4.6-thinking": "Claude Sonnet 4.6 (Thinking)",
+		"claude-opus-4.6-thinking":   "Claude Opus 4.6 (Thinking)",
+		"gpt-oss-120b-medium":        "GPT-OSS 120B (Medium)",
+	}
+	for _, model := range GetModelsForHarness("agy") {
+		if fullName, ok := want[model.Alias]; ok {
+			if model.FullName != fullName {
+				t.Errorf("AGY alias %q resolves to %q, want %q", model.Alias, model.FullName, fullName)
+			}
+			delete(want, model.Alias)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("AGY model aliases missing from registry: %v", want)
+	}
+	if got := HarnessModelFlag["agy"]; got != "--model" {
+		t.Fatalf("AGY model flag = %q, want --model", got)
+	}
+	if got, ok := TestModelForHarness("agy"); !ok || got != "3.5-flash-low" {
+		t.Fatalf("AGY test default = (%q, %v), want (3.5-flash-low, true)", got, ok)
 	}
 }
 

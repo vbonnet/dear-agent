@@ -1,15 +1,228 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
+
+func newDaemonDeliveryQueue(t *testing.T, entry messages.QueueEntry) *messages.MessageQueue {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	queue, err := messages.NewMessageQueue()
+	if err != nil {
+		t.Fatalf("NewMessageQueue() error: %v", err)
+	}
+	t.Cleanup(func() { _ = queue.Close() })
+	if err := queue.Enqueue(&entry); err != nil {
+		t.Fatalf("Enqueue() error: %v", err)
+	}
+	return queue
+}
+
+func TestDaemonDeliveryUsesSharedOperationAndStableResult(t *testing.T) {
+	entry := messages.QueueEntry{
+		MessageID: "message-id",
+		From:      "sender",
+		To:        "recipient",
+		Message:   "header\nmessage body",
+		Priority:  messages.PriorityMedium,
+		QueuedAt:  time.Now(),
+	}
+	queue := newDaemonDeliveryQueue(t, entry)
+	storage, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	if err := storage.CreateSession(&manifest.Manifest{
+		SessionID: "stable-session-id",
+		Name:      "recipient",
+		Harness:   "agy",
+		State:     manifest.StateReady,
+	}); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	d := NewDaemon(Config{Queue: queue, Logger: logging.NewTextLogger(io.Discard), DoltAdapter: storage})
+	calls := 0
+	updatedSessionID := ""
+	d.updateState = func(_ string, state, source, sessionID string, adapter *dolt.Adapter) error {
+		if state != manifest.StateWorking || source != "daemon" || adapter != storage {
+			t.Fatalf("state update = %q/%q/%p, want WORKING/daemon/%p", state, source, adapter, storage)
+		}
+		updatedSessionID = sessionID
+		return nil
+	}
+	d.deliverDirect = func(opCtx *ops.OpContext, req *ops.SendMessageRequest) (*ops.SendMessageResult, error) {
+		calls++
+		if opCtx.Context != d.ctx || opCtx.Storage != storage || opCtx.Tmux == nil {
+			t.Fatalf("operation context = %#v, want daemon context/storage/tmux", opCtx)
+		}
+		if req.Recipient != entry.To || req.Message != entry.Message {
+			t.Fatalf("operation request = %#v, want queue entry", req)
+		}
+		return &ops.SendMessageResult{
+			Operation:       "send_message",
+			Recipient:       entry.To,
+			SessionID:       "stable-session-id",
+			Delivered:       true,
+			ResponsePending: true,
+		}, nil
+	}
+
+	if err := d.deliverMessage(entry); err != nil {
+		t.Fatalf("deliverMessage() error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("shared operation calls = %d, want 1", calls)
+	}
+	if updatedSessionID != "stable-session-id" {
+		t.Fatalf("updated session ID = %q, want stable-session-id", updatedSessionID)
+	}
+	pending, err := queue.GetAllPending()
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending after delivery = %#v, %v; want empty", pending, err)
+	}
+}
+
+func TestDaemonDeliveryDoesNotMarkCompletedAPITurnWorking(t *testing.T) {
+	entry := messages.QueueEntry{
+		MessageID: "api-message-id",
+		From:      "sender",
+		To:        "api-recipient",
+		Message:   "message body",
+		Priority:  messages.PriorityMedium,
+		QueuedAt:  time.Now(),
+	}
+	queue := newDaemonDeliveryQueue(t, entry)
+	d := NewDaemon(Config{Queue: queue, Logger: logging.NewTextLogger(io.Discard)})
+	d.updateState = func(string, string, string, string, *dolt.Adapter) error {
+		t.Fatal("completed API turn was marked WORKING")
+		return nil
+	}
+	d.deliverDirect = func(*ops.OpContext, *ops.SendMessageRequest) (*ops.SendMessageResult, error) {
+		return &ops.SendMessageResult{
+			Operation: "send_message",
+			Recipient: entry.To,
+			SessionID: "api-session-id",
+			Delivered: true,
+		}, nil
+	}
+
+	if err := d.deliverMessage(entry); err != nil {
+		t.Fatalf("deliverMessage() error: %v", err)
+	}
+	pending, err := queue.GetAllPending()
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending after API delivery = %#v, %v; want empty", pending, err)
+	}
+}
+
+func TestDaemonDisplayStateUsesManifestForNonTmuxSession(t *testing.T) {
+	storage, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	if err := storage.CreateSession(&manifest.Manifest{
+		SessionID: "api-session-id",
+		Name:      "api-recipient",
+		Harness:   "openai",
+		State:     manifest.StateReady,
+	}); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	d := NewDaemon(Config{Logger: logging.NewTextLogger(io.Discard), DoltAdapter: storage})
+	// Session state is now persisted at creation (the completion pipeline
+	// depends on it), so a non-tmux session surfaces its manifest state
+	// instead of the old "unknown" that unpersisted state produced.
+	if got := d.recordDisplayState("api-recipient"); got != string(manifest.StateReady) {
+		t.Fatalf("recordDisplayState() = %q, want %q from the persisted manifest state", got, manifest.StateReady)
+	}
+	metrics := d.GetMetrics()
+	if len(metrics.StateDetectionAccuracy) != 1 {
+		t.Fatalf("display-state detections = %v, want exactly the manifest-state detection", metrics.StateDetectionAccuracy)
+	}
+	if metrics.StateDetectionErrors != 0 {
+		t.Fatalf("display-state errors = %d, want 0", metrics.StateDetectionErrors)
+	}
+}
+
+func TestDaemonDeliveryDefersTypedNotReadyWithoutRetry(t *testing.T) {
+	for _, readiness := range []string{"QUEUE", "QUEUED_AGM", "PERMISSION", "OVERLAY", "ONBOARDING", "REVIEW_REQUIRED", "WRONG_HARNESS", "UNKNOWN"} {
+		t.Run(readiness, func(t *testing.T) {
+			entry := messages.QueueEntry{
+				MessageID: "message-" + readiness,
+				From:      "sender",
+				To:        "recipient",
+				Message:   "message",
+				Priority:  messages.PriorityMedium,
+				QueuedAt:  time.Now(),
+			}
+			queue := newDaemonDeliveryQueue(t, entry)
+			d := NewDaemon(Config{Queue: queue, Logger: logging.NewTextLogger(io.Discard)})
+			d.deliverDirect = func(*ops.OpContext, *ops.SendMessageRequest) (*ops.SendMessageResult, error) {
+				return &ops.SendMessageResult{Operation: "send_message", Recipient: entry.To}, ops.ErrSessionNotReady(entry.To, readiness)
+			}
+
+			err := d.deliverMessage(entry)
+			if !errors.Is(err, errDeferred) {
+				t.Fatalf("deliverMessage(%s) error = %v, want errDeferred", readiness, err)
+			}
+			pending, getErr := queue.GetAllPending()
+			if getErr != nil || len(pending) != 1 || pending[0].AttemptCount != 0 {
+				t.Fatalf("pending after defer = %#v, %v; want one attempt 0", pending, getErr)
+			}
+		})
+	}
+}
+
+func TestDaemonDeliveryRetriesMissingAndOperationFailures(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "not found", err: ops.ErrSessionNotReady("recipient", "NOT_FOUND")},
+		{name: "operation failure", err: errors.New("provider unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			entry := messages.QueueEntry{
+				MessageID: "message-" + test.name,
+				From:      "sender",
+				To:        "recipient",
+				Message:   "message",
+				Priority:  messages.PriorityMedium,
+				QueuedAt:  time.Now(),
+			}
+			queue := newDaemonDeliveryQueue(t, entry)
+			d := NewDaemon(Config{Queue: queue, Logger: logging.NewTextLogger(io.Discard)})
+			d.deliverDirect = func(*ops.OpContext, *ops.SendMessageRequest) (*ops.SendMessageResult, error) {
+				return nil, test.err
+			}
+
+			err := d.deliverMessage(entry)
+			if err == nil || errors.Is(err, errDeferred) {
+				t.Fatalf("deliverMessage(%s) error = %v, want retry error", test.name, err)
+			}
+			pending, getErr := queue.GetAllPending()
+			if getErr != nil || len(pending) != 1 || pending[0].AttemptCount != 1 {
+				t.Fatalf("pending after retry = %#v, %v; want one attempt 1", pending, getErr)
+			}
+		})
+	}
+}
 
 func TestNewDaemon(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -228,42 +441,5 @@ func TestDaemon_DeliverPending_EmptyQueue(t *testing.T) {
 	// Deliver pending (should return without error on empty queue)
 	if err := d.deliverPending(); err != nil {
 		t.Errorf("deliverPending should not error on empty queue: %v", err)
-	}
-}
-
-func TestTruncateMessage(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		maxLen int
-		want   string
-	}{
-		{
-			name:   "short message",
-			input:  "hello",
-			maxLen: 10,
-			want:   "hello",
-		},
-		{
-			name:   "exact length",
-			input:  "helloworld",
-			maxLen: 10,
-			want:   "helloworld",
-		},
-		{
-			name:   "truncate long message",
-			input:  "hello world this is a long message",
-			maxLen: 10,
-			want:   "hello worl...",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := truncateMessage(tt.input, tt.maxLen)
-			if got != tt.want {
-				t.Errorf("truncateMessage() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }

@@ -734,10 +734,7 @@ To add a new judge (e.g., Gemini, Mistral):
 
 See [ADR/](./ADR/) directory for detailed architecture decision records:
 
-- [ADR-001: Dual Judge Interfaces](./ADR/ADR-001-dual-judge-interfaces.md)
-- [ADR-002: Multiple LLM Judges](./ADR/ADR-002-multiple-llm-judges.md)
-- [ADR-003: Threshold-Based Deployment Blocking](./ADR/ADR-003-threshold-based-deployment-blocking.md)
-- [ADR-004: Pluggable Alert Channels](./ADR/ADR-004-pluggable-alert-channels.md)
+- [ADR-001: Evaluation Boundaries](./ADR/ADR-001-evaluation-boundaries.md)
 
 ## License
 

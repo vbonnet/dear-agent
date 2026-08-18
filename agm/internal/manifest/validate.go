@@ -64,10 +64,11 @@ func (m *Manifest) Validate() error {
 			MaxNotesLen, utf8.RuneCountInString(m.Context.Notes))
 	}
 
-	// Lifecycle validation
-	if m.Lifecycle != "" && m.Lifecycle != LifecycleReaping && m.Lifecycle != LifecycleArchived {
-		return fmt.Errorf("invalid lifecycle: %s (must be empty, %s, or %s)",
-			m.Lifecycle, LifecycleReaping, LifecycleArchived)
+	if _, err := ParseSessionLifecycle(m.Lifecycle); err != nil {
+		return err
+	}
+	if _, err := ParseSessionOutcome(string(m.Outcome)); err != nil {
+		return err
 	}
 
 	return nil

@@ -394,7 +394,7 @@ func TestValidateCodeDeliverables_GracefulDegradation(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("spec"), 0600)
 				return dir
 			},
-			phase:     "S8",
+			phase:     "BUILD",
 			wantError: false, // Should skip gracefully
 		},
 		{
@@ -405,7 +405,7 @@ func TestValidateCodeDeliverables_GracefulDegradation(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, "script.sh"), []byte("#!/bin/bash"), 0600)
 				return dir
 			},
-			phase:     "S8",
+			phase:     "BUILD",
 			wantError: false, // Should skip gracefully
 		},
 	}

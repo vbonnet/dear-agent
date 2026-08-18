@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,49 @@ func TestNewSessionMonitor(t *testing.T) {
 	assert.NotNil(t, monitor.incidentLogger)
 	assert.NotNil(t, monitor.recoveryHistories)
 	assert.False(t, monitor.IsRunning())
+}
+
+func TestNewSessionMonitorUsesOnlyConfiguredTmuxSocket(t *testing.T) {
+	cfg := createTestConfig(t)
+	cfg.Tmux.Socket = filepath.Join(t.TempDir(), "owned.sock")
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+	socketPath, explicitlyConfigured := monitor.tmuxClient.ConfiguredSocket()
+	assert.True(t, explicitlyConfigured)
+	assert.Equal(t, cfg.Tmux.Socket, socketPath)
+}
+
+func TestNewSessionMonitorPropagatesConfiguredSocketToNestedCommands(t *testing.T) {
+	binDir := t.TempDir()
+	fakeAGM := filepath.Join(binDir, "agm")
+	require.NoError(t, os.WriteFile(fakeAGM, []byte("#!/bin/sh\nprintf '%s' \"$AGM_TMUX_SOCKET\"\n"), 0o700))
+	t.Setenv("AGM_TMUX_SOCKET", "/tmp/ambient.sock")
+
+	cfg := createTestConfig(t)
+	cfg.Escalation.AgmBinary = fakeAGM
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	runners := []struct {
+		name string
+		run  func() ([]byte, error)
+	}{
+		{name: "monitor", run: func() ([]byte, error) { return monitor.executeAGM("probe") }},
+		{name: "escalation", run: func() ([]byte, error) { return monitor.escalation.executor.Execute(fakeAGM, "probe") }},
+		{name: "heartbeat", run: func() ([]byte, error) {
+			return monitor.sessionHeartbeatMonitor.runCommand(monitor.sessionHeartbeatMonitor.agmBinary, "probe")
+		}},
+		{name: "loop", run: func() ([]byte, error) {
+			return monitor.loopMonitor.runCommand(monitor.loopMonitor.agmBinary, "probe")
+		}},
+	}
+	for _, runner := range runners {
+		t.Run(runner.name, func(t *testing.T) {
+			output, runErr := runner.run()
+			require.NoError(t, runErr)
+			assert.Equal(t, cfg.Tmux.Socket, string(output))
+		})
+	}
 }
 
 func TestIncidentLogger_LogIncident(t *testing.T) {
@@ -305,10 +349,80 @@ func TestSessionMonitor_StopMonitoring(t *testing.T) {
 
 	// Stop monitoring
 	monitor.StopMonitoring()
-
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
 	assert.False(t, monitor.IsRunning())
+}
+
+func TestSessionMonitor_StopMonitoringIsConcurrentAndIdempotent(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	go func() {
+		_ = monitor.StartMonitoring()
+	}()
+	require.Eventually(t, monitor.IsRunning, time.Second, 10*time.Millisecond)
+
+	const callers = 8
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			monitor.StopMonitoring()
+		}()
+	}
+	stopped := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent stop calls did not return")
+	}
+
+	monitor.StopMonitoring()
+	assert.False(t, monitor.IsRunning())
+}
+
+func TestSessionMonitor_StopMonitoringHasBoundedWait(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	monitor.mu.Lock()
+	monitor.running = true
+	monitor.stopChan = make(chan struct{})
+	monitor.doneChan = make(chan struct{})
+	monitor.stopOnce = sync.Once{}
+	monitor.shutdownTimeout = 20 * time.Millisecond
+	monitor.mu.Unlock()
+
+	started := time.Now()
+	monitor.StopMonitoring()
+	assert.Less(t, time.Since(started), 500*time.Millisecond)
+	assert.True(t, monitor.IsRunning(), "a timed-out stop must not claim the loop exited")
+
+	monitor.mu.Lock()
+	monitor.running = false
+	close(monitor.doneChan)
+	monitor.mu.Unlock()
+}
+
+func TestSessionMonitor_CanRestartAfterStop(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	for range 2 {
+		go func() {
+			_ = monitor.StartMonitoring()
+		}()
+		require.Eventually(t, monitor.IsRunning, time.Second, 10*time.Millisecond)
+		monitor.StopMonitoring()
+		assert.False(t, monitor.IsRunning())
+	}
 }
 
 // Helper functions
@@ -357,7 +471,7 @@ patterns:
 			StuckThresholdDuration: 10 * time.Minute,
 		},
 		Tmux: config.TmuxConfig{
-			Socket: "",
+			Socket: filepath.Join(tmpDir, "sentinel-test.sock"),
 		},
 		Recovery: config.RecoveryConfig{
 			Enabled:     true,

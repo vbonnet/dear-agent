@@ -5,13 +5,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+func ensureTestRepo(t *testing.T, dir, remoteName, remoteURL, branch string) (*Repo, error) {
+	t.Helper()
+	return ensureRepoWithEnv(dir, remoteName, remoteURL, branch, gittest.Env(t))
+}
 
 func TestEnsureRepo_InitializesNewRepo(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := filepath.Join(dir, "memories")
 
-	repo, err := EnsureRepo(repoDir, "", "", "main")
+	repo, err := ensureTestRepo(t, repoDir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -43,14 +50,14 @@ func TestEnsureRepo_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := filepath.Join(dir, "memories")
 
-	repo1, err := EnsureRepo(repoDir, "", "", "main")
+	repo1, err := ensureTestRepo(t, repoDir, "", "", "main")
 	if err != nil {
 		t.Fatalf("first EnsureRepo: %v", err)
 	}
 
 	hash1, _ := repo1.HeadHash()
 
-	repo2, err := EnsureRepo(repoDir, "", "", "main")
+	repo2, err := ensureTestRepo(t, repoDir, "", "", "main")
 	if err != nil {
 		t.Fatalf("second EnsureRepo: %v", err)
 	}
@@ -65,7 +72,7 @@ func TestEnsureRepo_Idempotent(t *testing.T) {
 func TestEnsureRepo_WithRemote(t *testing.T) {
 	// Create a bare repo to act as remote
 	bareDir := t.TempDir()
-	bareRepo := &Repo{dir: bareDir}
+	bareRepo := &Repo{dir: bareDir, env: gittest.Env(t)}
 	if err := bareRepo.run("init", "--bare"); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
@@ -73,7 +80,7 @@ func TestEnsureRepo_WithRemote(t *testing.T) {
 	dir := t.TempDir()
 	repoDir := filepath.Join(dir, "memories")
 
-	_, err := EnsureRepo(repoDir, "origin", bareDir, "main")
+	_, err := ensureTestRepo(t, repoDir, "origin", bareDir, "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo with remote: %v", err)
 	}
@@ -81,7 +88,7 @@ func TestEnsureRepo_WithRemote(t *testing.T) {
 
 func TestTrackChange_CommitsFile(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -116,7 +123,7 @@ func TestTrackChange_CommitsFile(t *testing.T) {
 
 func TestTrackChange_IncludesCompanion(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -148,7 +155,7 @@ func TestTrackChange_IncludesCompanion(t *testing.T) {
 
 func TestTrackChange_DefaultMessage(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -174,7 +181,7 @@ func TestTrackChange_DefaultMessage(t *testing.T) {
 
 func TestTrackDelete_CommitsDeletion(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -205,7 +212,7 @@ func TestTrackDelete_CommitsDeletion(t *testing.T) {
 
 func TestRestore_RevertsFile(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -245,7 +252,7 @@ func TestRestore_RevertsFile(t *testing.T) {
 
 func TestLog_ReturnsHistory(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -280,7 +287,7 @@ func TestLog_ReturnsHistory(t *testing.T) {
 
 func TestLog_WithLimit(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -400,7 +407,7 @@ func TestValidateEngramFrontmatter(t *testing.T) {
 
 func TestInstallPreCommitHook(t *testing.T) {
 	dir := t.TempDir()
-	repo, err := EnsureRepo(dir, "", "", "main")
+	repo, err := ensureTestRepo(t, dir, "", "", "main")
 	if err != nil {
 		t.Fatalf("EnsureRepo: %v", err)
 	}
@@ -470,6 +477,7 @@ func TestMemoryVCS_Disabled(t *testing.T) {
 
 func TestMemoryVCS_EndToEnd(t *testing.T) {
 	dir := t.TempDir()
+	gittest.InitRepo(t, dir)
 	cfg := &Config{
 		Enabled:      true,
 		RepoPath:     dir,
@@ -545,12 +553,14 @@ func TestMemoryVCS_Push_ToLocalBare(t *testing.T) {
 	// HEAD (often "master" on CI runners), so a clone after pushing main
 	// would check out an empty default branch and miss the pushed file.
 	bareDir := t.TempDir()
-	bareRepo := &Repo{dir: bareDir}
+	bareRepo := &Repo{dir: bareDir, env: gittest.Env(t)}
 	if err := bareRepo.run("init", "--bare", "--initial-branch=main"); err != nil {
 		t.Fatalf("init bare: %v", err)
 	}
 
 	dir := t.TempDir()
+	gittest.InitRepo(t, dir)
+	gittest.Run(t, dir, "remote", "add", "origin", bareDir)
 	cfg := &Config{
 		Enabled:      true,
 		RepoPath:     dir,
@@ -582,7 +592,7 @@ func TestMemoryVCS_Push_ToLocalBare(t *testing.T) {
 
 	// Verify remote received the commit by cloning
 	cloneDir := t.TempDir()
-	cloneRepo := &Repo{dir: cloneDir}
+	cloneRepo := &Repo{dir: cloneDir, env: gittest.Env(t)}
 	if err := cloneRepo.run("clone", bareDir, cloneDir); err != nil {
 		t.Fatalf("clone: %v", err)
 	}

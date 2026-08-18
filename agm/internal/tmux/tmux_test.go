@@ -1,7 +1,10 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,7 +126,7 @@ func TestIsTmuxAvailableHonorsCISkip(t *testing.T) {
 // exceeding the 104-byte sockaddr_un.sun_path limit. /tmp-based paths are ~30 chars.
 func socketDir(tb testing.TB) string {
 	tb.Helper()
-	dir, err := os.MkdirTemp("", "agm") //nolint:usetesting // t.TempDir() paths exceed 104-byte Unix socket limit on macOS
+	dir, err := os.MkdirTemp(filepath.Dir(LegacySocketPath), "agm") //nolint:usetesting // t.TempDir() paths exceed 104-byte Unix socket limit on macOS
 	if err != nil {
 		tb.Fatalf("socketDir: %v", err)
 	}
@@ -172,14 +175,43 @@ func TestHasSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, exists, "Session should exist after creation")
 
-	// Kill session
-	killSession(sessionName)
+	// Kill session through the production boundary and require the backend
+	// command to succeed.
+	require.NoError(t, KillSessionWithError(sessionName))
 	time.Sleep(100 * time.Millisecond)
 
 	// Session should not exist after killing
 	exists, err = HasSession(sessionName)
 	require.NoError(t, err)
 	assert.False(t, exists, "Session should not exist after killing")
+}
+
+func TestKillSession_ReturnsBackendError(t *testing.T) {
+	_, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	err := KillSessionWithError("definitely-not-running")
+	require.Error(t, err, "a failed tmux kill command must be observable")
+}
+
+func TestKillSession_UsesExactTarget(t *testing.T) {
+	skipIfNoTmux(t)
+	_, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	for _, name := range []string{"kill-exact", "kill-exact-child"} {
+		require.NoError(t, NewSession(name, t.TempDir()))
+		name := name
+		t.Cleanup(func() { _ = KillSessionWithError(name) })
+	}
+
+	require.NoError(t, KillSessionWithError("kill-exact"))
+	exists, err := HasSession("kill-exact")
+	require.NoError(t, err)
+	assert.False(t, exists, "exact target should be absent")
+	exists, err = HasSession("kill-exact-child")
+	require.NoError(t, err)
+	assert.True(t, exists, "prefix-related non-target must remain")
 }
 
 // TestNewSession tests session creation
@@ -231,13 +263,258 @@ func TestNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionIdentityValidation(t *testing.T) {
+	valid := SessionIdentity{ID: "$7", Token: "0123456789abcdef0123456789abcdef"}
+	if !valid.Valid() {
+		t.Fatalf("valid creation identity was rejected: %#v", valid)
+	}
+	for _, invalid := range []SessionIdentity{
+		{},
+		{ID: "7", Token: valid.Token},
+		{ID: "$7", Token: "short"},
+		{ID: "$7", Token: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+		{ID: "$7", Token: valid.Token, CreationName: "agm-create-wrong"},
+	} {
+		if invalid.Valid() {
+			t.Fatalf("invalid creation identity was accepted: %#v", invalid)
+		}
+	}
+	partial := SessionIdentity{Token: valid.Token, CreationName: sessionIdentityCreationPrefix + valid.Token}
+	if partial.Valid() || !partial.Cleanable() {
+		t.Fatalf("provisional-only identity validity = (complete=%v, cleanable=%v), want (false, true)", partial.Valid(), partial.Cleanable())
+	}
+	partial.CreationName = sessionIdentityCreationPrefix + "ffffffffffffffffffffffffffffffff"
+	if partial.Cleanable() {
+		t.Fatalf("mismatched provisional identity was accepted: %#v", partial)
+	}
+}
+
+func TestRenameSessionIdentityTracksClaimedSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "rename-source").Run(); err != nil {
+		t.Fatalf("create source session: %v", err)
+	}
+	identity, err := ClaimSessionRenameIdentityContext(t.Context(), "rename-source")
+	if err != nil {
+		t.Fatalf("ClaimSessionRenameIdentityContext() error: %v", err)
+	}
+	if name, owned, inspectErr := InspectSessionRenameIdentityContext(t.Context(), identity); inspectErr != nil || !owned || name != "rename-source" {
+		t.Fatalf("claimed identity before rename = (name=%q owned=%v err=%v)", name, owned, inspectErr)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "rename-session", "-t", identity.ID, "rename-target").Run(); err != nil {
+		t.Fatalf("rename claimed session: %v", err)
+	}
+	if name, owned, inspectErr := InspectSessionRenameIdentityContext(t.Context(), identity); inspectErr != nil || !owned || name != "rename-target" {
+		t.Fatalf("claimed identity after rename = (name=%q owned=%v err=%v)", name, owned, inspectErr)
+	}
+	if err := ClearSessionRenameIdentityContext(t.Context(), identity); err != nil {
+		t.Fatalf("ClearSessionRenameIdentityContext() error: %v", err)
+	}
+	if name, owned, inspectErr := InspectSessionRenameIdentityContext(t.Context(), identity); inspectErr != nil || owned || name != "rename-target" {
+		t.Fatalf("cleared identity = (name=%q owned=%v err=%v)", name, owned, inspectErr)
+	}
+}
+
+func waitForTestTmuxServerExit(t *testing.T, socketPath string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conn, err := net.DialTimeout("unix", socketPath, 50*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		if time.Now().After(deadline) {
+			t.Fatalf("tmux server at %s did not exit", socketPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRenameSessionIdentityRejectsIDReuseAfterServerRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "rename-source").Run(); err != nil {
+		t.Fatalf("create source session: %v", err)
+	}
+	identity, err := ClaimSessionRenameIdentityContext(t.Context(), "rename-source")
+	if err != nil {
+		t.Fatalf("ClaimSessionRenameIdentityContext() error: %v", err)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "kill-server").Run(); err != nil {
+		t.Fatalf("kill original tmux server: %v", err)
+	}
+	waitForTestTmuxServerExit(t, socketPath)
+	output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", "rename-target").Output()
+	if err != nil {
+		t.Fatalf("create replacement session: %v", err)
+	}
+	replacementID := strings.TrimSpace(string(output))
+	if replacementID != identity.ID {
+		t.Fatalf("server restart did not reuse session ID: original=%q replacement=%q", identity.ID, replacementID)
+	}
+	if err := RenameClaimedSessionContext(t.Context(), identity, "must-not-adopt"); err != nil {
+		t.Fatalf("RenameClaimedSessionContext() replacement error: %v", err)
+	}
+	name, owned, err := InspectSessionRenameIdentityContext(t.Context(), identity)
+	if err != nil {
+		t.Fatalf("InspectSessionRenameIdentityContext() replacement error: %v", err)
+	}
+	if owned || name != "rename-target" {
+		t.Fatalf("replacement satisfied stale rename identity: name=%q owned=%v", name, owned)
+	}
+	if err := ClearSessionRenameIdentityContext(t.Context(), identity); err != nil {
+		t.Fatalf("ClearSessionRenameIdentityContext() replacement error: %v", err)
+	}
+	if exists, err := HasSessionStrict("rename-target"); err != nil || !exists {
+		t.Fatalf("replacement after stale marker cleanup = (exists=%v err=%v)", exists, err)
+	}
+}
+
+func TestIsMissingSessionOutputRequiresExplicitMissingTarget(t *testing.T) {
+	for _, output := range []string{
+		"can't find session: missing",
+		"no current target",
+	} {
+		if !isMissingSessionOutput([]byte(output)) {
+			t.Fatalf("isMissingSessionOutput(%q) = false, want true", output)
+		}
+	}
+	for _, output := range []string{
+		"no server running on /private/tmp/agm.sock",
+		"permission denied",
+		"failed to connect to server",
+		"server exited unexpectedly",
+	} {
+		if isMissingSessionOutput([]byte(output)) {
+			t.Fatalf("operational failure %q was classified as a missing session", output)
+		}
+	}
+}
+
+func TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "partial-create").Run(); err != nil {
+		t.Fatalf("create occupied final name: %v", err)
+	}
+
+	identity, err := NewSessionWithIdentity("partial-create", t.TempDir())
+	if err == nil {
+		t.Fatal("NewSessionWithIdentity() succeeded despite queued set-option failure")
+	}
+	if !identity.Valid() {
+		t.Fatalf("NewSessionWithIdentity() lost partial creation identity: %#v", identity)
+	}
+	if exists, hasErr := HasSessionIdentityStrict(identity); hasErr != nil || !exists {
+		t.Fatalf("partial creation identity = (exists=%v, err=%v), want owned survivor", exists, hasErr)
+	}
+	if err := KillSessionIdentityChecked(identity); err != nil {
+		t.Fatalf("clean up partial creation: %v", err)
+	}
+	if exists, hasErr := HasSession("partial-create"); hasErr != nil || !exists {
+		t.Fatalf("occupied final session = (exists=%v, err=%v), want preserved", exists, hasErr)
+	}
+}
+
+func TestSessionIdentityCleansCreationBeforeTokenWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	identity, err := newSessionIdentity()
+	if err != nil {
+		t.Fatalf("newSessionIdentity() error = %v", err)
+	}
+	output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName).Output()
+	if err != nil {
+		t.Fatalf("create provisional session: %v", err)
+	}
+	identity.ID = strings.TrimSpace(string(output))
+
+	exists, err := HasSessionIdentityStrict(identity)
+	if err != nil || !exists {
+		t.Fatalf("HasSessionIdentityStrict(provisional) = (%v, %v), want (true, nil)", exists, err)
+	}
+	if err := KillSessionIdentityChecked(identity); err != nil {
+		t.Fatalf("KillSessionIdentityChecked(provisional) error = %v", err)
+	}
+	if exists, err := HasSessionStrict(identity.CreationName); err != nil || exists {
+		t.Fatalf("provisional session after cleanup = (%v, %v), want (false, nil)", exists, err)
+	}
+}
+
+func TestSessionIdentityCleansCreationWhenSessionIDOutputIsLost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	identity, err := newSessionIdentity()
+	if err != nil {
+		t.Fatalf("newSessionIdentity() error = %v", err)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", identity.CreationName).Run(); err != nil {
+		t.Fatalf("create provisional session without captured ID: %v", err)
+	}
+
+	if err := KillSessionIdentityChecked(identity); err != nil {
+		t.Fatalf("KillSessionIdentityChecked(provisional without ID) error = %v", err)
+	}
+	if exists, err := HasSessionStrict(identity.CreationName); err != nil || exists {
+		t.Fatalf("provisional session after cleanup = (%v, %v), want (false, nil)", exists, err)
+	}
+}
+
+func TestNewSessionCleansProvisionalSessionWhenFinalNameExists(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "occupied").Run(); err != nil {
+		t.Fatalf("create occupied session: %v", err)
+	}
+	if err := NewSession("occupied", t.TempDir()); err == nil {
+		t.Fatal("NewSession() succeeded despite occupied final name")
+	}
+	output, err := exec.Command("tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if got := strings.TrimSpace(string(output)); got != "occupied" {
+		t.Fatalf("sessions after failed creation = %q, want only occupied", got)
+	}
+}
+
 // TestNewSession_SettingsInjection verifies tmux settings are injected
 func TestNewSession_SettingsInjection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
 	}
 	skipIfNoTmux(t)
-	_, cleanup := setupTestSocket(t)
+	socketPath, cleanup := setupTestSocket(t)
 	defer cleanup()
 
 	sessionName := "test-settings"
@@ -245,21 +522,49 @@ func TestNewSession_SettingsInjection(t *testing.T) {
 	require.NoError(t, err)
 	defer killSession(sessionName)
 
-	// Give settings time to apply
-	time.Sleep(300 * time.Millisecond)
-
-	// Verify session exists
 	exists, err := HasSession(sessionName)
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	// Note: Testing actual tmux option values requires parsing tmux output
-	// For now, we just verify the session was created successfully
-	t.Log("Settings injection:")
-	t.Log("  - set-window-option -g aggressive-resize on")
-	t.Log("  - set-option -g window-size latest")
-	t.Log("  - set -g mouse on")
-	t.Log("  - set -s set-clipboard on")
+	tests := []struct {
+		name     string
+		args     []string
+		expected string
+	}{
+		{
+			name:     "aggressive resize",
+			args:     []string{"show-options", "-w", "-v", "-t", sessionName, "aggressive-resize"},
+			expected: "on",
+		},
+		{
+			name:     "window size",
+			args:     []string{"show-options", "-w", "-v", "-t", sessionName, "window-size"},
+			expected: "latest",
+		},
+		{
+			name:     "mouse",
+			args:     []string{"show-options", "-v", "-t", sessionName, "mouse"},
+			expected: "on",
+		},
+		{
+			name:     "clipboard",
+			args:     []string{"show-options", "-s", "-v", "set-clipboard"},
+			expected: "on",
+		},
+		{
+			name:     "escape time",
+			args:     []string{"show-options", "-s", "-v", "escape-time"},
+			expected: "10",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"-S", socketPath}, tt.args...)
+			output, err := exec.Command("tmux", args...).Output()
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, strings.TrimSpace(string(output)))
+		})
+	}
 }
 
 // TestNewSession_BuildEnvVars verifies build environment variables are set on new sessions
@@ -430,6 +735,90 @@ func TestWaitForProcessReady(t *testing.T) {
 	err = WaitForProcessReady(sessionName, "definitely-not-running-12345", 500*time.Millisecond)
 	assert.Error(t, err, "Should timeout waiting for non-existent process")
 	assert.Contains(t, err.Error(), "timeout", "Error should mention timeout")
+}
+
+func TestIsProcessReadyWithRuntimeSupportsCodexNodeWrapper(t *testing.T) {
+	var treeChecks []string
+	running, err := isProcessReadyWithRuntime(
+		t.Context(),
+		"codex-session",
+		"codex",
+		"/tmp/agm.sock",
+		func(sessionName, processName string) (bool, error) {
+			assert.Equal(t, "codex-session", sessionName)
+			assert.Equal(t, "codex", processName)
+			return false, nil
+		},
+		func(_ context.Context, sessionName, socketPath, processName string) (bool, error) {
+			assert.Equal(t, "codex-session", sessionName)
+			assert.Equal(t, "/tmp/agm.sock", socketPath)
+			treeChecks = append(treeChecks, processName)
+			return processName == "node", nil
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, running, "Node-backed Codex should satisfy process readiness")
+	assert.Equal(t, []string{"codex", "node"}, treeChecks)
+}
+
+func TestIsProcessReadyWithRuntimeDoesNotBroadenOtherProcesses(t *testing.T) {
+	treeCalled := false
+	running, err := isProcessReadyWithRuntime(
+		t.Context(),
+		"claude-session",
+		"claude",
+		"/tmp/agm.sock",
+		func(string, string) (bool, error) { return false, nil },
+		func(context.Context, string, string, string) (bool, error) {
+			treeCalled = true
+			return true, nil
+		},
+	)
+	require.NoError(t, err)
+	assert.False(t, running)
+	assert.False(t, treeCalled, "Codex-specific Node fallback must not change other process checks")
+}
+
+func TestIsProcessReadyWithRuntimePreservesCancellationBeforeCodexFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	treeCalled := false
+	running, err := isProcessReadyWithRuntime(
+		ctx,
+		"codex-session",
+		"codex",
+		"/tmp/agm.sock",
+		func(string, string) (bool, error) {
+			cancel()
+			return false, errors.New("foreground probe interrupted")
+		},
+		func(context.Context, string, string, string) (bool, error) {
+			treeCalled = true
+			return true, nil
+		},
+	)
+	assert.False(t, running)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, treeCalled, "canceled foreground probe must not enter the process-tree fallback")
+}
+
+func TestIsProcessReadyWithRuntimePreservesCancellationDuringCodexFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	var treeChecks []string
+	running, err := isProcessReadyWithRuntime(
+		ctx,
+		"codex-session",
+		"codex",
+		"/tmp/agm.sock",
+		func(string, string) (bool, error) { return false, nil },
+		func(_ context.Context, _, _, processName string) (bool, error) {
+			treeChecks = append(treeChecks, processName)
+			cancel()
+			return false, nil
+		},
+	)
+	assert.False(t, running)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, []string{"codex"}, treeChecks, "cancellation must prevent the Node fallback scan")
 }
 
 // TestIsClaudeProcess tests Claude Code process name detection.

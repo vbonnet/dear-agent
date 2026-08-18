@@ -33,7 +33,7 @@ func eq(a, b []string) bool {
 
 func newFixtureSuggester(t *testing.T) *Suggester {
 	t.Helper()
-	return NewSuggester(NewMarkdownSource("testdata/sample_backlog.md"))
+	return NewSuggester(NewMarkdownSource("testdata/sample.md"))
 }
 
 func TestSuggestDefault(t *testing.T) {

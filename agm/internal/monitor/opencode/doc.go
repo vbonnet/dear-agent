@@ -16,11 +16,11 @@
 //
 // Event Mapping:
 //   - permission.asked     → AWAITING_PERMISSION
-//   - tool.execute.before  → THINKING
+//   - tool.execute.before  → WORKING
 //   - tool.execute.after   → IDLE
-//   - session.created      → READY
+//   - session.created      → DONE
 //   - session.closed       → TERMINATED
-//   - unknown event types  → THINKING (safe default)
+//   - unknown event types  → WORKING (safe default)
 //
 // Example usage:
 //
@@ -52,5 +52,5 @@
 // are published to the canonical EventBus for consumption by notification managers,
 // state file writers, and tmux status displays.
 //
-// See ARCHITECTURE.md and MULTI-AGENT-INTEGRATION-SPEC.md for complete integration details.
+// See ARCHITECTURE.md, README.md, and SPEC.md for the current integration contract.
 package opencode

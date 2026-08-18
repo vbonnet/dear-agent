@@ -1,11 +1,121 @@
 package openai
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestWithSessionLockContextCancelsContendedWait(t *testing.T) {
+	sm, err := NewSessionManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSessionManager() error: %v", err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- sm.WithSessionLock("context-lock", func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first session lock was not acquired")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	defer cancel()
+	callbackCalled := false
+	err = sm.WithSessionLockContext(ctx, "context-lock", func() error {
+		callbackCalled = true
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended context lock error = %v, want deadline exceeded", err)
+	}
+	if callbackCalled {
+		t.Fatal("contended callback ran after its context expired")
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("release first session lock: %v", err)
+	}
+}
+
+func TestMetadataUpdatesSerializeAndPreserveIndependentFields(t *testing.T) {
+	sessionsDir := t.TempDir()
+	first, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create first manager: %v", err)
+	}
+	const sessionID = "serialized-metadata"
+	if _, err := first.CreateSession(sessionID, "gpt-4", "/original"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	second, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create second manager: %v", err)
+	}
+
+	lockEntered := make(chan struct{})
+	releaseLock := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- first.WithSessionLock(sessionID, func() error {
+			close(lockEntered)
+			<-releaseLock
+			return nil
+		})
+	}()
+	select {
+	case <-lockEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("metadata transaction lock was not acquired")
+	}
+
+	updateDone := make(chan error, 1)
+	go func() { updateDone <- second.UpdateTitle(sessionID, "updated-title") }()
+	select {
+	case err := <-updateDone:
+		close(releaseLock)
+		t.Fatalf("metadata update bypassed the session lock: %v", err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(releaseLock)
+	if err := <-lockDone; err != nil {
+		t.Fatalf("release metadata transaction lock: %v", err)
+	}
+	if err := <-updateDone; err != nil {
+		t.Fatalf("update title after lock release: %v", err)
+	}
+
+	if err := first.UpdateWorkingDirectory(sessionID, "/updated"); err != nil {
+		t.Fatalf("update directory through stale manager: %v", err)
+	}
+	wantRuntime := SessionRuntimeConfig{Temperature: 0.7, MaxTokens: 707}
+	if err := second.UpdateRuntimeConfig(sessionID, wantRuntime); err != nil {
+		t.Fatalf("update runtime config through stale manager: %v", err)
+	}
+	reader, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create metadata reader: %v", err)
+	}
+	info, err := reader.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("read serialized metadata: %v", err)
+	}
+	if info.Title != "updated-title" || info.WorkingDirectory != "/updated" || info.RuntimeConfig == nil || *info.RuntimeConfig != wantRuntime {
+		t.Fatalf("independent metadata updates clobbered fields: %#v", info)
+	}
+}
 
 func TestNewSessionManager(t *testing.T) {
 	tempDir := t.TempDir()
@@ -257,6 +367,47 @@ func TestAddMultipleMessages(t *testing.T) {
 		if msg.Content != messages[i].Content {
 			t.Errorf("Message %d: expected Content %s, got %s", i, messages[i].Content, msg.Content)
 		}
+	}
+}
+
+func TestSessionHistoryReloadSupportsLargeJSONLRecords(t *testing.T) {
+	sessionsDir := t.TempDir()
+	writer, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+	const sessionID = "large-jsonl-record"
+	if _, err := writer.CreateSession(sessionID, "gpt-4", "/work"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	largeContent := strings.Repeat("x", 128*1024)
+	if err := writer.AddMessage(sessionID, Message{Role: "user", Content: largeContent}); err != nil {
+		t.Fatalf("persist large message: %v", err)
+	}
+
+	reloader, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create reloader: %v", err)
+	}
+	if err := reloader.AddMessage(sessionID, Message{Role: "assistant", Content: "after-large-record"}); err != nil {
+		t.Fatalf("append after large message: %v", err)
+	}
+	messages, err := reloader.GetMessages(sessionID)
+	if err != nil {
+		t.Fatalf("reload large history: %v", err)
+	}
+	if len(messages) != 2 || messages[0].Content != largeContent || messages[1].Content != "after-large-record" {
+		t.Fatalf("large history reload = %#v, want preserved large record and appended response", messages)
+	}
+	if err := writer.ClearMessages(sessionID); err != nil {
+		t.Fatalf("clear history containing large record through stale manager: %v", err)
+	}
+	messages, err = reloader.GetMessages(sessionID)
+	if err != nil {
+		t.Fatalf("reload cleared large history: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("history after clear = %#v, want empty", messages)
 	}
 }
 
@@ -630,5 +781,38 @@ func TestCreateSession_ModelPersistence(t *testing.T) {
 
 	if loaded.Model != testModel {
 		t.Errorf("expected persisted model %q, got %q", testModel, loaded.Model)
+	}
+}
+
+func TestUpdateRuntimeConfigPersistence(t *testing.T) {
+	tempDir := t.TempDir()
+	sm, err := NewSessionManager(tempDir)
+	if err != nil {
+		t.Fatalf("NewSessionManager failed: %v", err)
+	}
+	if _, err := sm.CreateSession("runtime-config-session", "gpt-4o", "/work"); err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	want := SessionRuntimeConfig{
+		Temperature:     1.15,
+		MaxTokens:       2048,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01-preview",
+	}
+	if err := sm.UpdateRuntimeConfig("runtime-config-session", want); err != nil {
+		t.Fatalf("UpdateRuntimeConfig failed: %v", err)
+	}
+
+	reloaded, err := NewSessionManager(tempDir)
+	if err != nil {
+		t.Fatalf("reload SessionManager failed: %v", err)
+	}
+	info, err := reloaded.GetSession("runtime-config-session")
+	if err != nil {
+		t.Fatalf("GetSession after reload failed: %v", err)
+	}
+	if info.RuntimeConfig == nil || *info.RuntimeConfig != want {
+		t.Fatalf("persisted runtime config = %#v, want %#v", info.RuntimeConfig, want)
 	}
 }

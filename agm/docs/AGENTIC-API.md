@@ -13,6 +13,49 @@ AGM exposes three API surfaces, all backed by a shared operations layer (`intern
 Every operation flows through `ops.OpContext`, ensuring identical behavior,
 error handling, and output formatting regardless of surface.
 
+Creation and message delivery use the same fail-closed readiness boundary on
+every surface. Registration and startup prompts require a live configured
+harness plus its tail-owning composer; an MCP-native onboarding wait is not a
+substitute for that proof. Message sends resolve one active tmux pane and pin
+process inspection, styled capture, and delivery to that pane ID, so another
+pane or a later focus change cannot validate or redirect input.
+`agm send msg` uses that shared operation for every CLI recipient in both
+single-recipient and fan-out delivery; it does not retain a weaker CLI-only
+tmux path or deliver to unregistered sessions whose harness identity cannot be
+proven. Pure API recipients intentionally have no tmux pane: single-recipient
+preflight resolves the registered delivery surface before any tmux probe, and
+single-recipient plus fan-out sends reconstruct the adapter from the session's
+persisted model, storage location, endpoint, and Azure settings. Credentials
+remain runtime-only. The adapter's session status is the final common delivery
+boundary, delivering only while it reports active or idle and failing closed
+before any pending artifact when status is unavailable, suspended, or
+terminated. Successful API delivery does not run tmux state resolution or
+rewrite the manifest to `OFFLINE`. Under a provider-appropriate stable session-ID lock, API delivery
+reloads lifecycle before adapter construction and shares that boundary with
+archive: an in-flight completed turn commits before archive, or delivery sees
+the reaping or archived lifecycle before paid provider work. The lock wait and provider
+completion honor request cancellation, and the provider call has a finite
+ceiling. Each sequential fan-out recipient receives a fresh outer deadline;
+stable-lock acquisition, reconstruction, and readiness use an independently
+bounded preflight context so the completed-turn phase starts with the adapter's
+complete provider budget. Reconstruction loads only the requested session's
+authoritative metadata and never scans unrelated session directories while the
+lifecycle lock is held. Direct adapter callers use a context-aware store-scoped session lock
+and the same provider ceiling. Provider failures, cancellation, and timeouts
+leave no provisional user message in durable history.
+
+Clearing OpenAI-compatible history atomically empties only the message stream
+under the store lock. It reloads current on-disk metadata first, preserving the
+model, title, working directory, and non-secret runtime configuration used by
+later process reconstruction even when another process updated those fields.
+Completed-turn commits reload the same metadata before updating history counts,
+and every title, directory, or runtime-configuration writer participates in the
+same lock and applies only its requested field.
+Valid JSONL message records are reloaded without the standard scanner token
+limit, so a long prompt or response cannot make the next append, read, or clear
+transaction fail. Import converts a parsed conversation once and persists the
+complete batch with one history transaction; an empty import performs none.
+
 ## Error Code Catalog
 
 All errors use stable codes that agents can match on programmatically.
@@ -30,6 +73,11 @@ All errors use stable codes that agents can match on programmatically.
 | AGM-009 | 404 | `workspace/not_found` | Workspace not found | Workspace detection failed | Set `--workspace` explicitly |
 | AGM-010 | 404 | `uuid/not_associated` | UUID not associated | UUID not linked to session | `agm admin fix-uuid` |
 | AGM-011 | 500 | `storage/error` | Storage error | Storage read/write failed | `agm admin doctor` |
+| AGM-012 | 403/409 | archive verification types | Verification failed | Archive safety or cleanup verification failed | Inspect the returned suggestions |
+| AGM-013 | 409 | `session/kill_protected` | Session recently active | Killing a recently active session without confirmation | Retry with the suggested confirmation flag |
+| AGM-014 | 409 | `session/active_kill` | Session is active | Killing a live harness without stuck confirmation | Retry with `--confirmed-stuck` only when verified stuck |
+| AGM-015 | 409 | `session/lock_timeout` | Session lock timeout | Another lifecycle mutation owns the stable session lock | Wait for it to finish and retry |
+| AGM-016 | 409 | `session/not_ready` | Session not ready | The exact target harness cannot safely receive input | Wait for the harness composer to become ready and retry |
 | AGM-100 | 200 | `dry_run` | Dry run | `--dry-run` flag is set | Remove flag to execute |
 
 ## RFC 7807 Error Format
@@ -117,13 +165,22 @@ $ agm session archive my-project --dry-run -o json
   "code": "AGM-100",
   "title": "Dry run",
   "detail": "Would archive session \"my-project\".",
-  "suggestions": ["Remove --dry-run flag to execute."]
+  "instance": "session/archive",
+  "suggestions": ["Remove `--dry-run` to execute."],
+  "parameters": {
+    "session_id": "01234567-89ab-cdef-0123-456789abcdef",
+    "session_name": "my-project"
+  }
 }
 ```
 
 Dry-run returns an AGM-100 `OpError` with status 200. Agents can parse
-the `detail` field to confirm the intended action before re-running
-without the flag.
+the `detail` and `parameters` fields to confirm the exact resolved target before
+re-running without the flag. Single-session archive previews execute the shared
+archive guards but return before any AGM, provider, process, worktree, branch,
+sandbox, settings, telemetry, or reaper mutation. Execution reuses the returned
+stable AGM session ID; active asynchronous execution carries its resolved tmux
+identity separately to the detached reaper.
 
 ## Progressive Disclosure (Skills)
 

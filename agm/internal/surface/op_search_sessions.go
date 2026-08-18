@@ -19,12 +19,6 @@ var SearchSessions = codegen.Op{
 		ToolName:    "agm_search_sessions",
 		Description: "Search AGM sessions by name. Use when you need to find a specific session by partial name match.",
 	},
-	Skill: &codegen.SkillSurface{
-		SlashCommand: "agm-search",
-		AllowedTools: "Bash(agm session search:*)",
-		ActionVerb:   "search for matching sessions",
-		OutputTable:  []string{"Name", "Status", "Harness", "Score"},
-	},
 }
 
 // SearchSessionsRequest mirrors ops.SearchSessionsRequest with ef tags for generation.

@@ -84,10 +84,9 @@ type AdaptersConfig struct {
 
 // OpenCodeConfig holds configuration for OpenCode SSE adapter
 type OpenCodeConfig struct {
-	Enabled      bool         `yaml:"enabled"`
-	ServerURL    string       `yaml:"server_url"`
-	Reconnect    ReconnectCfg `yaml:"reconnect"`
-	FallbackTmux bool         `yaml:"fallback_to_tmux"`
+	Enabled   bool         `yaml:"enabled"`
+	ServerURL string       `yaml:"server_url"`
+	Reconnect ReconnectCfg `yaml:"reconnect"`
 }
 
 // ReconnectCfg holds reconnection configuration for SSE adapter
@@ -131,10 +130,53 @@ type StatusLineConfig struct {
 // SandboxConfig holds configuration for sandbox isolation
 type SandboxConfig struct {
 	Enabled    bool              `yaml:"enabled"`              // Default: true (sandbox-by-default)
-	Provider   string            `yaml:"provider"`             // Provider type: "auto", "overlayfs", "apfs", "claudecode-worktree", "mock"
+	Provider   string            `yaml:"provider"`             // Provider type: "auto", "bubblewrap", "overlayfs", "gvisor", "apfs", "mock"
 	Repos      []string          `yaml:"repos"`                // Repositories to include as lower dirs
 	Secrets    map[string]string `yaml:"secrets,omitempty"`    // Secrets to inject into sandbox
 	Onboarding OnboardingConfig  `yaml:"onboarding,omitempty"` // Onboarding CLAUDE.md injection
+
+	// WritableDirs are host paths a sandboxed session may write in addition to
+	// its workspace, surfaced to the harness as --add-dir entries. Unlike Repos
+	// these are NOT reflinked into the sandbox as lower dirs: they stay the real
+	// host paths, which is what lets a worker commit to a real worktree or close
+	// a bead in the real Beads DB. Empty by default.
+	WritableDirs []string `yaml:"writable_dirs,omitempty"`
+
+	// BypassCodexHookTrustReason requests the audited Codex hook-trust override
+	// and states why. It is a reason rather than a bool on purpose: a bool is
+	// exactly the switch an unattended agent flips and nobody reviews.
+	//
+	// Codex persists hook trust keyed by the ABSOLUTE path of hooks.json. A
+	// sandboxed session runs from a fresh per-session workspace, so the hooks
+	// reflinked into it always present at a never-before-seen path and Codex
+	// blocks startup on "Hooks need review" — every time, unrecoverably, because
+	// the path is different on the next spawn too.
+	//
+	// Two independent controls both have to pass, because they answer different
+	// questions. Attestation asks whether the hooks are the reviewed ones:
+	// enabling this requires an explicit Repos entry for the reviewed golden
+	// checkout, and AGM pins the source commit, reads hooks.json and every
+	// project-referenced hook from immutable Git objects, verifies their
+	// SHA-256 digest against the sandbox copy, and materializes those exact
+	// objects in a content-addressed, read-only host directory outside every
+	// agent-writable root. Bypassed sessions execute project hooks only from
+	// that immutable root for their full lifetime. AGM repeats verification
+	// immediately before each launch and cold resume. The reviewed checkout is
+	// never forwarded as a writable Codex add-dir. Any missing, uncommitted,
+	// symlinked, changed, writable, or overlapping asset fails closed.
+	//
+	// Governance asks whether anyone agreed to run them unreviewed. Setting this
+	// is a request, not a grant: the launch still refuses unless a human has
+	// approved override kind "codex-hook-trust" through an interactive terminal
+	// into root-owned storage (`agm override approve`), and every authorized launch is recorded to the
+	// override ledger. See pkg/override.
+	//
+	// It is a reason rather than a bool on purpose: a bool is exactly the switch
+	// an unattended agent flips and nobody reviews. Attested hooks are still
+	// hooks running without per-path review, so this does not honour per-hook
+	// "enabled = false" decisions recorded against the golden path. Empty by
+	// default.
+	BypassCodexHookTrustReason string `yaml:"bypass_codex_hook_trust_reason,omitempty"`
 }
 
 // OnboardingConfig controls CLAUDE.md injection into sandboxed sessions
@@ -159,7 +201,8 @@ type BudgetConfig struct {
 	StateFile string `yaml:"state_file,omitempty"`
 
 	// SessionTokenCaps maps harness name → max tokens per individual session.
-	// Keys: "claude-code", "codex-cli", "gemini-cli", "opencode-cli"
+	// Keys: "claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli",
+	// plus deprecated "gemini-cli" compatibility.
 	// 0 means no per-session cap for that harness.
 	SessionTokenCaps map[string]int64 `yaml:"session_token_caps,omitempty"`
 
@@ -204,7 +247,6 @@ func Default() *Config {
 					MaxDelay:     30 * time.Second,
 					Multiplier:   2,
 				},
-				FallbackTmux: true,
 			},
 			ClaudeHooks: ClaudeHooksConfig{
 				Enabled:    false,
@@ -232,6 +274,7 @@ func Default() *Config {
 				"gemini-cli":   "✨",
 				"codex-cli":    "🧠",
 				"opencode-cli": "💻",
+				"pi-cli":       "π",
 			},
 			CustomFormats: map[string]string{
 				"minimal":     "{{.AgentIcon}} {{.State}} | {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}}",
@@ -258,6 +301,7 @@ func Default() *Config {
 				"codex-cli":    0,
 				"gemini-cli":   0,
 				"opencode-cli": 0,
+				"pi-cli":       0,
 			},
 			FallbackChain: []string{"sonnet", "haiku"},
 		},
@@ -308,6 +352,9 @@ func Load(cfgFile string) (*Config, error) {
 	}
 	if cfg.Lock.Path != "" {
 		cfg.Lock.Path = expandHome(cfg.Lock.Path)
+	}
+	for i, dir := range cfg.Sandbox.WritableDirs {
+		cfg.Sandbox.WritableDirs[i] = expandHome(dir)
 	}
 
 	// Validate configuration

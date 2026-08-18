@@ -36,10 +36,18 @@ type OpError struct {
 
 	// Parameters echo back the input that caused the error.
 	Parameters map[string]string `json:"parameters,omitempty"`
+
+	cause error
 }
 
 func (e *OpError) Error() string {
 	return fmt.Sprintf("[%s] %s: %s", e.Code, e.Title, e.Detail)
+}
+
+// Unwrap preserves typed backend failures for in-process callers while the
+// stable RFC 7807 envelope remains suitable for CLI, MCP, and JSON surfaces.
+func (e *OpError) Unwrap() error {
+	return e.cause
 }
 
 // JSON returns the error as a JSON byte slice for programmatic consumers.
@@ -64,10 +72,29 @@ const (
 	ErrCodeVerificationFailed = "AGM-012"
 	ErrCodeKillProtected      = "AGM-013"
 	ErrCodeActiveSessionKill  = "AGM-014"
+	ErrCodeLockTimeout        = "AGM-015"
+	ErrCodeSessionNotReady    = "AGM-016"
 	ErrCodeDryRun             = "AGM-100"
 )
 
 // Constructor functions for common errors.
+
+// NewDryRunPreview returns the stable successful problem-details envelope used
+// when a mutation command has validated a target without changing it.
+func NewDryRunPreview(instance, detail string, parameters map[string]string) *OpError {
+	return &OpError{
+		Status:   200,
+		Type:     "dry_run",
+		Code:     ErrCodeDryRun,
+		Title:    "Dry run",
+		Detail:   detail,
+		Instance: instance,
+		Suggestions: []string{
+			"Remove `--dry-run` to execute.",
+		},
+		Parameters: parameters,
+	}
+}
 
 // ErrSessionNotFound returns an error indicating no session matches the given identifier.
 func ErrSessionNotFound(identifier string) *OpError {
@@ -138,6 +165,7 @@ func ErrStorageError(operation string, cause error) *OpError {
 			"Run `agm admin doctor` to check storage health.",
 			"Verify Dolt server is running: `agm admin dolt-status`.",
 		},
+		cause: cause,
 	}
 }
 
@@ -177,6 +205,30 @@ func ErrActiveSessionKill(name string) *OpError {
 		},
 		Parameters: map[string]string{
 			"session": name,
+		},
+	}
+}
+
+// ErrSessionNotReady reports a non-delivery decision made before any input is
+// sent to the tmux pane.
+func ErrSessionNotReady(name, readiness string) *OpError {
+	if readiness == "" {
+		readiness = "UNKNOWN"
+	}
+	return &OpError{
+		Status:   409,
+		Type:     "session/not_ready",
+		Code:     ErrCodeSessionNotReady,
+		Title:    "Session is not ready for input",
+		Detail:   fmt.Sprintf("Session %q cannot safely receive input (readiness: %s). No input was sent.", name, readiness),
+		Instance: "session/send",
+		Suggestions: []string{
+			fmt.Sprintf("Inspect the pane: `agm capture %s`.", name),
+			fmt.Sprintf("Wait until the harness composer is ready, then retry: `agm send msg %s --prompt <text>`.", name),
+		},
+		Parameters: map[string]string{
+			"session":   name,
+			"readiness": readiness,
 		},
 	}
 }

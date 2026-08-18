@@ -6,16 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
-	"context"
-
-	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -30,8 +27,9 @@ const (
 	// within seconds; if no prompt after 90s, likely stuck and fallback should trigger.
 	PromptDetectionTimeout = 90 * time.Second
 
-	// PaneCloseTimeout is how long to wait for the tmux pane to close after sending /exit.
-	// Agents should exit quickly after receiving /exit, but we allow extra time
+	// PaneCloseTimeout is how long to wait for the tmux pane to close after sending
+	// its native graceful-exit command. Agents should exit quickly after receiving
+	// it, but we allow extra time
 	// for cleanup operations and SessionEnd hooks.
 	PaneCloseTimeout = 60 * time.Second
 
@@ -48,7 +46,7 @@ const (
 	PostKillPaneTimeout = 5 * time.Second
 
 	// ReaperTimeout is the maximum wall-clock time a reaper may run before
-	// it is considered a zombie itself. If exceeded, Phase 1 (graceful /exit)
+	// it is considered a zombie itself. If exceeded, Phase 1 (graceful exit)
 	// is abandoned: tmux is force-killed and the session is archived directly.
 	ReaperTimeout = 10 * time.Minute
 )
@@ -67,26 +65,46 @@ var (
 	sendPromptSafeFn   = tmux.SendMultiLinePromptSafe
 	waitForPaneCloseFn = tmux.WaitForPaneClose
 	isPaneActiveFn     = tmux.IsPaneActive
-	killSessionFn      = tmux.KillSession
+	killSessionFn      = tmux.KillSessionChecked
 	getPanePIDFn       = tmux.GetPanePID
 	processKillFn      = syscall.Kill
+	openStorageFn      = openStorage
 )
 
 // Reaper manages the async archival process for a AGM session.
-// It waits for the harness to return to prompt, sends /exit, and archives the session.
+// It waits for the harness to return to prompt, sends its native graceful-exit
+// command, and archives the session.
 type Reaper struct {
 	SessionName string
 	SessionsDir string
 	SocketPath  string
+	Options     ArchiveOptions
 	logger      *slog.Logger
+}
+
+// ArchiveOptions are the lifecycle choices captured by the parent archive
+// command and propagated into the detached reaper process.
+type ArchiveOptions struct {
+	SessionID           string
+	Force               bool
+	KeepSandbox         bool
+	Outcome             manifest.SessionOutcome
+	AllowSupervisorReap bool
 }
 
 // New creates a new Reaper for the given session
 func New(sessionName, sessionsDir string) *Reaper {
+	return NewWithOptions(sessionName, sessionsDir, ArchiveOptions{})
+}
+
+// NewWithOptions creates a Reaper with archive options preserved across the
+// detached process boundary.
+func NewWithOptions(sessionName, sessionsDir string, options ArchiveOptions) *Reaper {
 	return &Reaper{
 		SessionName: sessionName,
 		SessionsDir: sessionsDir,
 		SocketPath:  tmux.GetSocketPath(),
+		Options:     options,
 		logger:      logging.DefaultLogger(),
 	}
 }
@@ -95,7 +113,7 @@ func New(sessionName, sessionsDir string) *Reaper {
 //
 // Phase 1 — Stop the process (must complete before Phase 2):
 //  1. Wait for the agent to return to prompt (prompt detection)
-//  2. Send /exit command to exit the agent
+//  2. Send the harness-native graceful-exit command
 //  3. Wait for pane to close (timeout: 60s)
 //  4. If timeout: send SIGTERM to pane process, wait 10s
 //  5. If still alive: send SIGKILL, wait 5s
@@ -110,7 +128,7 @@ func (r *Reaper) Run() error {
 	startTime := time.Now()
 	r.logger.Info("Starting reaper sequence (two-phase)", "session", r.SessionName, "timeout", ReaperTimeout)
 
-	// Step 0: Safety guard check - don't /exit if a human is present
+	// Step 0: Safety guard check - don't send a shutdown command if a human is present.
 	guardResult := checkSafetyFn(r.SessionName, safety.GuardOptions{
 		SkipUninitialized: true, // reaper only runs on initialized sessions
 		SkipMidResponse:   true, // reaper already waits for prompt
@@ -120,23 +138,45 @@ func (r *Reaper) Run() error {
 		return fmt.Errorf("safety guard blocked reaper on session '%s':\n%s", r.SessionName, guardResult.Error())
 	}
 
+	adapter, sessionsDir, err := r.openLifecycleStorage()
+	if err != nil {
+		return err
+	}
+	defer adapter.Close()
+
+	// Validate the same supervisor, verification, and delegation guards used by
+	// immediate and bulk archive before touching the pane. Active tmux is the
+	// only allowed condition here because stopping that pane is the reaper's
+	// purpose; the final shared operation checks again after pane death.
+	preflight, err := r.preflightArchive(adapter)
+	if err != nil {
+		return fmt.Errorf("archive preflight failed: %w", err)
+	}
+	if preflight.AlreadyArchived {
+		r.logger.Info("Session already archived, skipping reaper")
+		return nil
+	}
+
 	// Step 1: Mark session as "reaping" in Dolt BEFORE touching tmux.
 	// This ensures that if the reaper is killed mid-sequence (e.g., machine
 	// restart), the GC startup scan will find the session in "reaping" state
 	// with a dead tmux and archive it automatically.
 	r.logger.Info("Marking session as reaping in Dolt")
-	if err := r.markReaping(); err != nil {
+	harness, markErr := r.markReaping(adapter, sessionsDir)
+	if markErr != nil {
 		// Non-fatal: proceed with reaping even if we can't mark state.
 		// The GC startup scan will catch it as "stopped" anyway.
-		r.logger.Warn("Failed to mark session as reaping (will proceed)", "error", err)
+		r.logger.Warn("Failed to mark session as reaping (will proceed)", "error", markErr)
 	}
 
 	// ── Phase 1: Stop the process (gated by ReaperTimeout) ─────────────
-	zombieDetected := r.stopProcess(startTime)
+	zombieDetected := r.stopProcess(startTime, harness)
 
 	// Step 6: Kill tmux session as final cleanup (idempotent, always runs)
 	r.logger.Info("Killing tmux session (final cleanup)")
-	killSessionFn(r.SessionName)
+	if err := killSessionFn(r.SessionName); err != nil {
+		r.logger.Warn("tmux kill-session cleanup returned an error", "error", err)
+	}
 
 	// Verify pane is actually gone
 	if active, _ := isPaneActiveFn(r.SessionName); active {
@@ -147,7 +187,7 @@ func (r *Reaper) Run() error {
 	// ── Phase 2: Archive in Dolt (pane is confirmed dead) ──────────────
 
 	r.logger.Info("Archiving session (pane confirmed dead)")
-	if err := r.archiveSession(); err != nil {
+	if err := r.archiveSessionWithStorage(adapter, sessionsDir); err != nil {
 		return fmt.Errorf("archive failed: %w", err)
 	}
 
@@ -162,8 +202,8 @@ func (r *Reaper) Run() error {
 
 // stopProcess runs Phase 1: graceful shutdown with timeout protection.
 // Returns true if the ReaperTimeout was exceeded (zombie detected),
-// meaning /exit was skipped and tmux should be force-killed.
-func (r *Reaper) stopProcess(startTime time.Time) bool {
+// meaning the graceful-exit command was skipped and tmux should be force-killed.
+func (r *Reaper) stopProcess(startTime time.Time, harness string) bool {
 	// Step 2: Wait for the agent to be ready (prompt detection)
 	if remaining := r.timeRemaining(startTime); remaining > 0 {
 		r.logger.Info("Waiting for agent to return to prompt")
@@ -182,22 +222,23 @@ func (r *Reaper) stopProcess(startTime time.Time) bool {
 
 	// Check for zombie timeout
 	if r.timeRemaining(startTime) <= 0 {
-		r.logger.Warn("Reaper timeout exceeded, force-archiving (skipping /exit)",
+		r.logger.Warn("Reaper timeout exceeded, force-archiving (skipping graceful exit)",
 			"elapsed", time.Since(startTime), "timeout", ReaperTimeout)
 		return true
 	}
 
-	// Step 3: Send /exit to exit the agent
+	// Step 3: Send the harness-native graceful-exit command.
+	exitCommand := GracefulExitCommand(harness)
 	paneAlive := true
-	r.logger.Info("Sending /exit to exit agent")
-	if err := r.sendExit(); err != nil {
-		r.logger.Warn("Failed to send /exit (session may have already exited)", "error", err)
+	r.logger.Info("Sending graceful exit command", "command", exitCommand, "harness", harness)
+	if err := r.sendExit(exitCommand); err != nil {
+		r.logger.Warn("Failed to send graceful exit command (session may have already exited)", "command", exitCommand, "error", err)
 		if active, _ := isPaneActiveFn(r.SessionName); !active {
 			paneAlive = false
 			r.logger.Info("Pane already closed")
 		}
 	} else {
-		r.logger.Info("/exit sent successfully")
+		r.logger.Info("Graceful exit command sent successfully", "command", exitCommand)
 	}
 
 	// Step 4: Wait for pane to close
@@ -206,7 +247,7 @@ func (r *Reaper) stopProcess(startTime time.Time) bool {
 	}
 	remaining := r.timeRemaining(startTime)
 	if remaining <= 0 {
-		r.logger.Warn("Reaper timeout exceeded after /exit, force-archiving",
+		r.logger.Warn("Reaper timeout exceeded after graceful exit, force-archiving",
 			"elapsed", time.Since(startTime), "timeout", ReaperTimeout)
 		return true
 	}
@@ -214,11 +255,11 @@ func (r *Reaper) stopProcess(startTime time.Time) bool {
 	paneTimeout := min(PaneCloseTimeout, remaining)
 	r.logger.Info("Waiting for pane to close", "timeout", paneTimeout)
 	if err := r.waitForPaneClose(paneTimeout); err != nil {
-		r.logger.Warn("Pane did not close after /exit, escalating to SIGTERM", "error", err)
+		r.logger.Warn("Pane did not close after graceful exit, escalating to SIGTERM", "command", exitCommand, "error", err)
 		// Step 5: SIGTERM → wait → SIGKILL escalation
 		r.forceKillPaneProcess()
 	} else {
-		r.logger.Info("Pane closed successfully after /exit")
+		r.logger.Info("Pane closed successfully after graceful exit", "command", exitCommand)
 	}
 
 	return false
@@ -231,7 +272,7 @@ func (r *Reaper) timeRemaining(startTime time.Time) time.Duration {
 }
 
 // forceKillPaneProcess escalates from SIGTERM to SIGKILL to ensure the
-// pane process is dead. Called when /exit + wait times out.
+// pane process is dead. Called when graceful exit plus wait times out.
 func (r *Reaper) forceKillPaneProcess() {
 	// Get the PID of the process in the pane
 	pid, err := getPanePIDFn(r.SessionName)
@@ -270,38 +311,31 @@ func (r *Reaper) forceKillPaneProcess() {
 // markReaping updates the session lifecycle to "reaping" in Dolt.
 // This must happen BEFORE killing tmux so that if the reaper crashes,
 // the GC startup scan can detect and archive the orphaned session.
-func (r *Reaper) markReaping() error {
-	sessionsDir, err := r.getSessionsDir()
+func (r *Reaper) markReaping(adapter *dolt.Adapter, sessionsDir string) (string, error) {
+	m, _, err := session.ResolveIdentifier(r.archiveIdentifier(), sessionsDir, adapter)
 	if err != nil {
-		return fmt.Errorf("failed to get sessions directory: %w", err)
-	}
-
-	adapter, err := openStorage()
-	if err != nil {
-		return err
-	}
-	defer adapter.Close()
-
-	if err := adapter.ApplyMigrations(); err != nil {
-		return fmt.Errorf("failed to apply Dolt migrations: %w", err)
-	}
-
-	m, _, err := session.ResolveIdentifier(r.SessionName, sessionsDir, adapter)
-	if err != nil {
-		return fmt.Errorf("session not found: %w", err)
+		return "", fmt.Errorf("session not found: %w", err)
 	}
 
 	if m.Lifecycle == manifest.LifecycleArchived {
-		return nil // already archived, nothing to do
+		return m.Harness, nil // already archived, nothing to do
 	}
 
 	m.Lifecycle = manifest.LifecycleReaping
 	if err := adapter.UpdateSession(m); err != nil {
-		return fmt.Errorf("failed to update session in Dolt: %w", err)
+		return m.Harness, fmt.Errorf("failed to update session in Dolt: %w", err)
 	}
 
 	r.logger.Info("Session marked as reaping in Dolt")
-	return nil
+	return m.Harness, nil
+}
+
+func (r *Reaper) preflightArchive(adapter *dolt.Adapter) (*ops.ArchiveSessionResult, error) {
+	opCtx := &ops.OpContext{Storage: adapter, DryRun: true}
+	req := r.archiveRequest()
+	req.AllowActiveTmux = true
+	req.Idempotent = true
+	return ops.ArchiveSession(opCtx, &req)
 }
 
 // waitForPrompt monitors output stream for the agent prompt.
@@ -310,21 +344,31 @@ func (r *Reaper) waitForPrompt(timeout time.Duration) error {
 	return waitForPromptFn(r.SessionName, timeout)
 }
 
-// sendExit sends /exit command to exit the harness cleanly.
-// Uses tmux.SendMultiLinePromptSafe which waits for prompt and sends literal /exit
-// This avoids the sender attribution header that agm send adds
-func (r *Reaper) sendExit() error {
-	// Use tmux.SendMultiLinePromptSafe to send /exit as a literal command
-	// This function:
+// GracefulExitCommand owns the native shutdown command selected for a harness.
+// Pi removed /exit in favor of /quit; the remaining interactive harnesses retain
+// the existing /exit contract. Legacy Pi aliases are accepted for old manifests.
+func GracefulExitCommand(harness string) string {
+	switch strings.ToLower(strings.TrimSpace(harness)) {
+	case "pi", "pi-cli":
+		return "/quit"
+	default:
+		return "/exit"
+	}
+}
+
+// sendExit sends one already-selected native command to exit the harness cleanly.
+// It avoids the sender attribution header that agm send adds.
+func (r *Reaper) sendExit(exitCommand string) error {
+	// Use tmux.SendMultiLinePromptSafe to send the command literally. This function:
 	// 1. Waits for the agent prompt (handles busy pane states)
 	// 2. Sends ESC to interrupt any thinking (shouldInterrupt=true)
-	// 3. Sends /exit in literal mode (not as a message)
+	// 3. Sends the native exit command in literal mode (not as a message)
 	// 4. Sends Enter to execute
-	if err := sendPromptSafeFn(r.SessionName, "/exit", true); err != nil {
-		return fmt.Errorf("failed to send /exit: %w", err)
+	if err := sendPromptSafeFn(r.SessionName, exitCommand, true); err != nil {
+		return fmt.Errorf("failed to send %s: %w", exitCommand, err)
 	}
 
-	r.logger.Info("/exit sent via SendMultiLinePromptSafe")
+	r.logger.Info("Graceful exit sent via SendMultiLinePromptSafe", "command", exitCommand)
 	return nil
 }
 
@@ -333,94 +377,68 @@ func (r *Reaper) waitForPaneClose(timeout time.Duration) error {
 	return waitForPaneCloseFn(r.SessionName, timeout)
 }
 
-// archiveSession updates manifest and moves directory
-// This is based on cmd/agm/archive.go but without interactive prompts
+// archiveSession delegates the durable lifecycle transition and all archive
+// side effects to ops.ArchiveSession. The reaper owns only the preceding
+// process-stop phase and reaping tombstone.
 func (r *Reaper) archiveSession() error {
-	sessionsDir, err := r.getSessionsDir()
-	if err != nil {
-		return fmt.Errorf("failed to get sessions directory: %w", err)
-	}
-
-	// Connect to lifecycle storage (needed for session resolution).
-	adapter, err := openStorage()
+	adapter, sessionsDir, err := r.openLifecycleStorage()
 	if err != nil {
 		return err
 	}
 	defer adapter.Close()
+	return r.archiveSessionWithStorage(adapter, sessionsDir)
+}
 
-	// Apply migrations
-	if err := adapter.ApplyMigrations(); err != nil {
-		return fmt.Errorf("failed to apply Dolt migrations: %w", err)
-	}
-
-	// Resolve session identifier to manifest using Dolt adapter
-	m, manifestPath, err := session.ResolveIdentifier(r.SessionName, sessionsDir, adapter)
+func (r *Reaper) openLifecycleStorage() (*dolt.Adapter, string, error) {
+	sessionsDir, err := r.getSessionsDir()
 	if err != nil {
-		return fmt.Errorf("session not found: %w", err)
+		return nil, "", fmt.Errorf("failed to get sessions directory: %w", err)
 	}
+	adapter, err := openStorageFn()
+	if err != nil {
+		return nil, "", err
+	}
+	if err := adapter.ApplyMigrations(); err != nil {
+		_ = adapter.Close()
+		return nil, "", fmt.Errorf("failed to apply Dolt migrations: %w", err)
+	}
+	return adapter, sessionsDir, nil
+}
 
-	r.logger.Info("Manifest path", "path", manifestPath)
-
-	// Check if already archived
-	if m.Lifecycle == manifest.LifecycleArchived {
-		r.logger.Info("Session already archived, skipping")
-		return nil
+func (r *Reaper) archiveSessionWithStorage(adapter *dolt.Adapter, sessionsDir string) error {
+	req := r.archiveRequest()
+	req.Idempotent = true
+	req.LegacySessionsDir = sessionsDir
+	result, err := ops.ArchiveSession(&ops.OpContext{Storage: adapter}, &req)
+	if err != nil {
+		return err
 	}
-
-	// Best-effort MCP process cleanup before archiving
-	sandboxPath := ""
-	if m.Sandbox != nil {
-		sandboxPath = m.Sandbox.MergedPath
-	}
-	mcpKilled, mcpErr := mcp.CleanupSessionMCPProcesses(
-		mcp.DefaultProcessFinder(), &mcp.SignalKiller{},
-		m.SessionID, sandboxPath,
-	)
-	if mcpErr != nil {
-		r.logger.Warn("MCP cleanup error during reap", "session", r.SessionName, "error", mcpErr)
-	}
-	if mcpKilled > 0 {
-		r.logger.Info("Cleaned up MCP processes during reap", "session", r.SessionName, "killed", mcpKilled)
-	}
-
-	// Update lifecycle field
-	m.Lifecycle = manifest.LifecycleArchived
-
-	// Update session in Dolt
-	if err := adapter.UpdateSession(m); err != nil {
-		return fmt.Errorf("failed to update session in Dolt: %w", err)
-	}
-	r.logger.Info("Dolt database updated to archived")
-	for _, outcome := range ops.ArchiveExternalSession(context.Background(), m) {
+	for _, outcome := range result.ExternalArchives {
 		if outcome.Status == ops.ExternalArchiveFailed {
-			r.logger.Warn("External session archive failed after AGM archival", "session", m.SessionID, "provider", outcome.Provider, "error", outcome.Detail)
+			r.logger.Warn("External session archive failed after AGM archival", "session", result.SessionID, "provider", outcome.Provider, "error", outcome.Detail)
 		}
 	}
-
-	r.runReaperResourceCleanup(adapter)
-	r.cleanupPendingDir()
-	r.archiveLegacySessionDir(sessionsDir, manifestPath)
+	if result.AlreadyArchived {
+		r.logger.Info("Session already archived, skipping duplicate cleanup")
+	}
 	return nil
 }
 
-// runReaperResourceCleanup performs best-effort worktree/branch/tmp cleanup
-// during reap and logs the per-category counts.
-func (r *Reaper) runReaperResourceCleanup(adapter *dolt.Adapter) {
-	if adapter.IsTestStore() {
-		r.logger.Info("Skipping worktree cleanup for isolated test store")
-		return
+func (r *Reaper) archiveRequest() ops.ArchiveSessionRequest {
+	return ops.ArchiveSessionRequest{
+		Identifier:          r.archiveIdentifier(),
+		Force:               r.Options.Force,
+		KeepSandbox:         r.Options.KeepSandbox,
+		Outcome:             r.Options.Outcome,
+		AllowSupervisorReap: r.Options.AllowSupervisorReap,
 	}
-	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
-	cleanupResult := cleanup.SessionResources(context.Background(), r.SessionName, store, cleanup.RealGitOps{}, r.logger)
-	if cleanupResult.WorktreesRemoved > 0 {
-		r.logger.Info("Cleaned up worktrees during reap", "count", cleanupResult.WorktreesRemoved)
+}
+
+func (r *Reaper) archiveIdentifier() string {
+	if r.Options.SessionID != "" {
+		return r.Options.SessionID
 	}
-	if cleanupResult.BranchesDeleted > 0 {
-		r.logger.Info("Deleted branches during reap", "count", cleanupResult.BranchesDeleted)
-	}
-	if cleanupResult.TmpFilesRemoved > 0 {
-		r.logger.Info("Removed tmp files during reap", "count", cleanupResult.TmpFilesRemoved)
-	}
+	return r.SessionName
 }
 
 // openStorage selects the same isolated SQLite lifecycle store used by AGM
@@ -445,55 +463,6 @@ func openStorage() (*dolt.Adapter, error) {
 		return nil, fmt.Errorf("failed to connect to Dolt: %w", err)
 	}
 	return adapter, nil
-}
-
-// cleanupPendingDir removes the pending-message directory for the reaped session.
-func (r *Reaper) cleanupPendingDir() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	pendingDir := filepath.Join(homeDir, ".agm", "pending", r.SessionName)
-	if _, err := os.Stat(pendingDir); err != nil {
-		return
-	}
-	if removeErr := os.RemoveAll(pendingDir); removeErr != nil {
-		r.logger.Warn("Failed to remove pending directory", "path", pendingDir, "error", removeErr)
-		return
-	}
-	r.logger.Info("Cleaned up pending message directory", "path", pendingDir)
-}
-
-// archiveLegacySessionDir moves a session's filesystem directory to
-// .archive-old-format/ when one exists (pure-Dolt sessions skip this).
-func (r *Reaper) archiveLegacySessionDir(sessionsDir, manifestPath string) {
-	sessionDir := filepath.Dir(manifestPath)
-	info, err := os.Stat(sessionDir)
-	if os.IsNotExist(err) {
-		r.logger.Info("No filesystem directory to move (pure-Dolt session)", "path", sessionDir)
-		return
-	}
-	if err != nil {
-		r.logger.Warn("Could not stat session directory, skipping move", "path", sessionDir, "error", err)
-		return
-	}
-	_ = info
-	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
-	archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
-	if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
-		r.logger.Warn("Failed to create archive dir, skipping move", "error", err)
-		return
-	}
-	if _, err := os.Stat(archiveTargetDir); err == nil {
-		timestamp := time.Now().Format("20060102T150405Z")
-		archiveTargetDir = archiveTargetDir + "-" + timestamp
-		r.logger.Warn("Archive conflict - renaming", "target", filepath.Base(archiveTargetDir))
-	}
-	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
-		r.logger.Warn("Failed to move session directory to archive", "error", err)
-		return
-	}
-	r.logger.Info("Session moved to archive", "path", archiveTargetDir)
 }
 
 // getSessionsDir returns the configured sessions directory path

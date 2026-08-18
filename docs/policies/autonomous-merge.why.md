@@ -21,9 +21,11 @@ a subtle, high-blast-radius mistake lands unreviewed. The carve-out
 ## How to apply
 - Ask: does this touch a security control, user-visible product behavior, or
   money/billing? If yes → open the PR, do NOT merge, flag for human review.
-- Otherwise → merge autonomously once green + threads resolved, via `safe-pr` /
-  `gh pr merge --squash`.
-- Never reach for `--admin` / `--force` / `--no-verify` to get past a gate — fix
-  the cause or escalate.
+- Otherwise → merge autonomously once green and all threads are resolved via
+  `safe-merge --pr <number>`.
+- Never reach for `--admin`, `--force`, `--no-verify`,
+  `safe-merge --skip-review-check`, or `safe-merge break-glass` in a routine
+  agent flow — fix the cause or escalate. The audited, TTY-only break-glass
+  path remains human-operated.
 
 See also: [definition-of-done](definition-of-done.why.md).

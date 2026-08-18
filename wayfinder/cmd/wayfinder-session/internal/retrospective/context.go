@@ -13,15 +13,8 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
-// CaptureContext captures git state, deliverable summaries, and phase state concurrently
-//
-// Uses parallel goroutines with sync.WaitGroup for performance (<500ms target).
-// Git operations have 500ms timeout to prevent blocking on large repos.
-func CaptureContext(projectDir string, st *status.Status) ContextSnapshot {
-	return captureContext(projectDir, func() PhaseContext { return capturePhaseContext(st) })
-}
-
-// CaptureContextV2 captures context from the canonical V2 status schema.
+// CaptureContextV2 captures git, deliverable, and phase context from the
+// canonical status schema.
 func CaptureContextV2(projectDir string, st *status.StatusV2) ContextSnapshot {
 	return captureContext(projectDir, func() PhaseContext { return capturePhaseContextV2(st) })
 }
@@ -67,7 +60,7 @@ func captureContext(projectDir string, phaseContext func() PhaseContext) Context
 		snapshot.Deliverables = deliverables
 	}()
 
-	// Capture phase state (from status.Status)
+	// Capture phase state.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -149,24 +142,6 @@ func captureDeliverables(projectDir string) ([]string, error) {
 	}
 
 	return deliverables, nil
-}
-
-// capturePhaseContext extracts phase state from status.Status
-func capturePhaseContext(st *status.Status) PhaseContext {
-	phaseCtx := PhaseContext{
-		CurrentPhase:    st.CurrentPhase,
-		SessionID:       st.SessionID,
-		CompletedPhases: []string{},
-	}
-
-	// Collect completed phases
-	for _, phase := range st.Phases {
-		if phase.Status == status.PhaseStatusCompleted {
-			phaseCtx.CompletedPhases = append(phaseCtx.CompletedPhases, phase.Name)
-		}
-	}
-
-	return phaseCtx
 }
 
 func capturePhaseContextV2(st *status.StatusV2) PhaseContext {

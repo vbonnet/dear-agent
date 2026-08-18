@@ -2,9 +2,10 @@ package ops
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // initTestRepo creates a temporary git repo with an initial commit on main
@@ -14,32 +15,15 @@ func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	cmds := [][]string{
-		{"git", "init", "-b", "main", dir},
-		{"git", "-C", dir, "config", "user.email", "test@test.com"},
-		{"git", "-C", dir, "config", "user.name", "Test"},
-	}
-	for _, args := range cmds {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, dir, "init", "-b", "main", dir)
 
 	// Create an initial commit so main has history.
 	f := filepath.Join(dir, "README.md")
 	if err := os.WriteFile(f, []byte("init"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"git", "-C", dir, "add", "."},
-		{"git", "-C", dir, "commit", "-m", "initial"},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, dir, "add", ".")
+	gittest.Run(t, dir, "commit", "-m", "initial")
 
 	return dir
 }
@@ -47,11 +31,11 @@ func initTestRepo(t *testing.T) string {
 // headSHA returns the HEAD commit SHA for the repo at dir.
 func headSHA(t *testing.T, dir string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").CombinedOutput()
+	out, err := gittest.Output(t, dir, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("rev-parse HEAD failed: %v\n%s", err, out)
 	}
-	return string(out[:len(out)-1]) // trim newline
+	return out[:len(out)-1] // trim newline
 }
 
 func TestVerifyOnMain_CommitOnMain(t *testing.T) {
@@ -71,28 +55,14 @@ func TestVerifyOnMain_CommitNotOnMain(t *testing.T) {
 	repo := initTestRepo(t)
 
 	// Create a feature branch with a commit not merged to main.
-	for _, args := range [][]string{
-		{"git", "-C", repo, "checkout", "-b", "feature"},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, repo, "checkout", "-b", "feature")
 
 	f := filepath.Join(repo, "feature.txt")
 	if err := os.WriteFile(f, []byte("feature work"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"git", "-C", repo, "add", "."},
-		{"git", "-C", repo, "commit", "-m", "feature commit"},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, repo, "add", ".")
+	gittest.Run(t, repo, "commit", "-m", "feature commit")
 
 	featureSHA := headSHA(t, repo)
 
@@ -109,41 +79,20 @@ func TestVerifyOnMain_MergedFeature(t *testing.T) {
 	repo := initTestRepo(t)
 
 	// Create feature branch, commit, then merge to main.
-	for _, args := range [][]string{
-		{"git", "-C", repo, "checkout", "-b", "feature"},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, repo, "checkout", "-b", "feature")
 
 	f := filepath.Join(repo, "feature.txt")
 	if err := os.WriteFile(f, []byte("merged work"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"git", "-C", repo, "add", "."},
-		{"git", "-C", repo, "commit", "-m", "feature commit"},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, repo, "add", ".")
+	gittest.Run(t, repo, "commit", "-m", "feature commit")
 
 	featureSHA := headSHA(t, repo)
 
 	// Merge feature into main.
-	for _, args := range [][]string{
-		{"git", "-C", repo, "checkout", "main"},
-		{"git", "-C", repo, "merge", "feature", "--no-ff", "-m", "merge feature"},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, repo, "checkout", "main")
+	gittest.Run(t, repo, "merge", "feature", "--no-ff", "-m", "merge feature")
 
 	ok, err := VerifyOnMain(repo, featureSHA)
 	if err != nil {

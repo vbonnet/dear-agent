@@ -20,8 +20,7 @@ type bucketResult struct {
 
 // bucketize groups signals into evenly-spaced time buckets starting at
 // `since` and ending at `since + window`. Bucket boundaries align to
-// `since` (not to wall-clock midnight) so the caller controls the
-// zero-point — see ADR-015 §D-MCP-3.
+// `since` (not to wall-clock midnight) so the caller controls the zero-point.
 //
 // Empty buckets are emitted with Count=0 so the consumer can chart
 // "we lost collection here" without re-creating the time grid.

@@ -2,11 +2,12 @@ package progress
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // Test helpers
@@ -15,19 +16,19 @@ func setupTestRepo(t *testing.T) string {
 	tmpDir := t.TempDir()
 
 	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
+	cmd := gittest.Command(t, tmpDir, "init")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
-	// Configure git user (required for commits)
+	// Configure git user (required for commits by the code under test, which
+	// runs git outside the sandbox).
 	for _, cfg := range [][]string{
 		{"config", "user.email", "test@example.com"},
 		{"config", "user.name", "Test User"},
 	} {
-		cmd := exec.Command("git", cfg...)
-		cmd.Dir = tmpDir
+		cmd := gittest.Command(t, tmpDir, cfg...)
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("Failed to configure git: %v", err)
 		}
@@ -39,14 +40,12 @@ func setupTestRepo(t *testing.T) string {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	cmd = exec.Command("git", "add", "test.txt")
-	cmd.Dir = tmpDir
+	cmd = gittest.Command(t, tmpDir, "add", "test.txt")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to add file: %v", err)
 	}
 
-	cmd = exec.Command("git", "commit", "-m", "Initial commit")
-	cmd.Dir = tmpDir
+	cmd = gittest.Command(t, tmpDir, "commit", "-m", "Initial commit")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create initial commit: %v", err)
 	}
@@ -70,7 +69,7 @@ func TestLedgerCommit(t *testing.T) {
 	}
 
 	// Verify commit was created
-	cmd := exec.Command("git", "-C", repoPath, "log", "--oneline", "-1")
+	cmd := gittest.Command(t, repoPath, "log", "--oneline", "-1")
 	output, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to get git log: %v", err)
@@ -250,7 +249,7 @@ func TestLedgerTrailerFormatting(t *testing.T) {
 	}
 
 	// Read commit message directly from git
-	cmd := exec.Command("git", "-C", repoPath, "log", "-1", "--format=%B")
+	cmd := gittest.Command(t, repoPath, "log", "-1", "--format=%B")
 	output, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to read commit message: %v", err)

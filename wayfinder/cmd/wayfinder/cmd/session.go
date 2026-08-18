@@ -104,9 +104,6 @@ func init() {
 	// Add task commands
 	sessionCmd.AddCommand(sessioncmd.TaskCmd)
 
-	// Add migration commands
-	sessionCmd.AddCommand(sessioncmd.MigrateCmd)
-	sessionCmd.AddCommand(sessioncmd.MigrateAllCmd)
 	sessionCmd.AddCommand(sessioncmd.RewindCmd)
 	sessionCmd.AddCommand(sessioncmd.GetLifecycleStateCmd())
 	sessionCmd.AddCommand(sessioncmd.GetCoordCmd())

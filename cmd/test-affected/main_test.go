@@ -1,8 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // pkgFixture returns a small synthetic module: three packages
@@ -200,6 +210,224 @@ func TestSelectPackages_ExcludesThirdPartyAndStdlib(t *testing.T) {
 	if !sliceEqual(got, want) {
 		t.Fatalf("selectPackages must exclude third-party and stdlib: got %v, want %v", got, want)
 	}
+}
+
+func TestGoTestArgs_BoundsNativeTestBinary(t *testing.T) {
+	got := goTestArgs(
+		options{tags: "integration"},
+		[]string{"example.com/m/a", "example.com/m/b"},
+	)
+	want := []string{
+		"test",
+		"-race",
+		"-count=1",
+		"-timeout=20m0s",
+		"-tags=integration",
+		"example.com/m/a",
+		"example.com/m/b",
+	}
+	if !sliceEqual(got, want) {
+		t.Fatalf("goTestArgs: got %v, want %v", got, want)
+	}
+}
+
+func TestGoCommandTimeoutPreservesNativeAndBuildBudgets(t *testing.T) {
+	if goCommandTimeout != 55*time.Minute {
+		t.Fatalf("goCommandTimeout = %v, want 55m", goCommandTimeout)
+	}
+	if goListCommandTimeout != goTestTimeout {
+		t.Fatalf("goListCommandTimeout = %v, want native timeout %v", goListCommandTimeout, goTestTimeout)
+	}
+	if goCommandTimeout < 2*goTestTimeout {
+		t.Fatalf("goCommandTimeout = %v, want at least two native intervals", goCommandTimeout)
+	}
+}
+
+func TestRunTestsPassesNativeTimeoutToGo(t *testing.T) {
+	binDir := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "go-args")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_AFFECTED_GO_ARGS_FILE\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_AFFECTED_GO_ARGS_FILE", argsFile)
+
+	var stderr bytes.Buffer
+	code := runTests(
+		context.Background(),
+		options{base: "origin/main", root: t.TempDir(), tags: "integration"},
+		[]string{"example.com/m/a"},
+		&bytes.Buffer{},
+		&stderr,
+	)
+	if code != 0 {
+		t.Fatalf("runTests returned %d: %s", code, stderr.String())
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(string(raw))
+	want := []string{"test", "-race", "-count=1", "-timeout=20m0s", "-tags=integration", "example.com/m/a"}
+	if !sliceEqual(got, want) {
+		t.Fatalf("captured go args: got %v, want %v", got, want)
+	}
+}
+
+func TestProtectGoCommandProcessTreeIsGroupCancelable(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "true")
+	protectGoCommandProcessTree(cmd)
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatal("bounded Go child must run in an isolated process group")
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("bounded Go child must cancel its process group")
+	}
+	if cmd.WaitDelay != time.Second {
+		t.Fatalf("bounded Go child WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
+	}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel before start = %v", err)
+	}
+	cmd.Process = &os.Process{Pid: 0}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel with invalid pid = %v", err)
+	}
+}
+
+func TestRunGoTestCommandTimeoutKillsProcessGroup(t *testing.T) {
+	binDir := t.TempDir()
+	pidFile := filepath.Join(t.TempDir(), "go-pids")
+	stub := "#!/bin/sh\nsleep 120 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_PID_FILE\"\nwait \"$child\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_AFFECTED_GO_PID_FILE", pidFile)
+
+	const reportedTimeout = time.Second
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(context.Canceled) })
+	root := t.TempDir()
+	var stderr bytes.Buffer
+	result := make(chan int, 1)
+	go func() {
+		result <- runGoTestCommand(
+			ctx,
+			reportedTimeout,
+			options{root: root},
+			[]string{"example.com/m/a"},
+			&bytes.Buffer{},
+			&stderr,
+		)
+	}()
+
+	pids, err := awaitProcessFixture(
+		pidFile,
+		result,
+		func() { cancel(context.Canceled) },
+		func(code int) string {
+			return fmt.Sprintf("exit code %d: %s", code, stderr.String())
+		},
+		processFixtureSetupTimeout,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaderPID := pids.leader
+	childPID := pids.child
+	t.Cleanup(func() {
+		_ = syscall.Kill(-leaderPID, syscall.SIGKILL)
+	})
+
+	cancel(context.DeadlineExceeded)
+	var code int
+	select {
+	case code = <-result:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runGoTestCommand did not return after deadline cancellation")
+	}
+	if code != goCommandTimeoutExitCode {
+		t.Fatalf("runGoTestCommand returned %d, want %d: %s", code, goCommandTimeoutExitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "timed out after 1s") {
+		t.Fatalf("timeout diagnostic missing from stderr: %q", stderr.String())
+	}
+	waitForProcessGone(t, leaderPID)
+	waitForProcessGone(t, childPID)
+}
+
+func TestListPackagesContextCancellationKillsProcessGroup(t *testing.T) {
+	binDir := t.TempDir()
+	pidFile := filepath.Join(t.TempDir(), "go-list-pids")
+	stub := "#!/bin/sh\nsleep 120 &\nchild=$!\nprintf '%s\\n%s\\n' \"$$\" \"$child\" > \"$TEST_AFFECTED_GO_LIST_PID_FILE\"\nwait \"$child\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_AFFECTED_GO_LIST_PID_FILE", pidFile)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	result := make(chan error, 1)
+	go func() {
+		_, err := listPackagesWithContext(ctx, t.TempDir(), "")
+		result <- err
+	}()
+
+	pids, err := awaitProcessFixture(
+		pidFile,
+		result,
+		cancel,
+		func(err error) string { return fmt.Sprintf("error %v", err) },
+		processFixtureSetupTimeout,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaderPID := pids.leader
+	childPID := pids.child
+	t.Cleanup(func() {
+		_ = syscall.Kill(-leaderPID, syscall.SIGKILL)
+	})
+
+	cancel()
+	select {
+	case resultErr := <-result:
+		if resultErr == nil {
+			t.Fatal("listPackagesWithContext returned nil after cancellation")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("listPackagesWithContext did not return after cancellation")
+	}
+	waitForProcessGone(t, leaderPID)
+	waitForProcessGone(t, childPID)
+}
+
+func waitForProcessGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		if err == nil && processIsZombie(pid) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("process %d still exists after process-group cancellation", pid)
+}
+
+func processIsZombie(pid int) bool {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(raw))
+	return len(fields) > 2 && fields[2] == "Z"
 }
 
 func TestIsForceFullPath(t *testing.T) {

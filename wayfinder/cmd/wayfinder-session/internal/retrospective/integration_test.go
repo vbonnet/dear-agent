@@ -2,39 +2,65 @@ package retrospective
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
+	wayfinderstatus "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
 // Integration tests for end-to-end retrospective logging workflows
 // These tests exercise the full rewind retrospective logging flow
 
-// TestIntegration_Magnitude0_NoLogging tests that magnitude 0 rewinds skip logging
-func TestIntegration_Magnitude0_NoLogging(t *testing.T) {
+// TestIntegration_Magnitude0_LogsSamePhaseReplay proves that an accepted
+// same-phase rewind leaves complete, exactly-once trace evidence.
+func TestIntegration_Magnitude0_LogsSamePhaseReplay(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create WAYFINDER-STATUS.md
 	createStatusFile(t, tmpDir, "RETRO")
 
 	// Rewind RETRO→RETRO (magnitude 0)
-	flags := RewindFlags{NoPrompt: true}
+	flags := RewindFlags{
+		NoPrompt:  true,
+		Reason:    "replay RETRO",
+		Learnings: "keep the trace complete",
+	}
 	err := LogRewindEvent(tmpDir, "RETRO", "RETRO", flags)
 	if err != nil {
 		t.Fatalf("LogRewindEvent failed: %v", err)
 	}
 
-	// Verify RETRO was NOT created (magnitude 0 skips logging)
+	// Verify RETRO contains exactly one same-phase rewind block.
 	s11Path := filepath.Join(tmpDir, RetroFilename)
-	if _, err := os.Stat(s11Path); !os.IsNotExist(err) {
-		t.Errorf("RETRO file should not exist for magnitude 0 rewind")
+	retro, err := os.ReadFile(s11Path)
+	if err != nil {
+		t.Fatalf("read RETRO: %v", err)
+	}
+	if got := strings.Count(string(retro), "## Rewind: RETRO → RETRO (magnitude 0)"); got != 1 {
+		t.Errorf("same-phase RETRO blocks = %d, want 1", got)
+	}
+	for _, want := range []string{"**Reason**: " + flags.Reason, "**Learnings**: " + flags.Learnings} {
+		if !strings.Contains(string(retro), want) {
+			t.Errorf("same-phase RETRO missing %q:\n%s", want, retro)
+		}
 	}
 
-	// Verify HISTORY was NOT created
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
-	if _, err := os.Stat(historyPath); !os.IsNotExist(err) {
-		t.Errorf("HISTORY file should not exist for magnitude 0 rewind")
+	// Verify HISTORY contains exactly one canonical event.
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
+	history, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if got := strings.Count(string(history), "rewind.logged"); got != 1 {
+		t.Errorf("same-phase history events = %d, want 1", got)
+	}
+	for _, want := range []string{`"reason":"` + flags.Reason + `"`, `"learnings":"` + flags.Learnings + `"`} {
+		if !strings.Contains(string(history), want) {
+			t.Errorf("same-phase history missing %q:\n%s", want, history)
+		}
 	}
 }
 
@@ -80,7 +106,7 @@ func TestIntegration_Magnitude1_WithFlags(t *testing.T) {
 	}
 
 	// Verify HISTORY exists
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	historyContent, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatalf("Failed to read HISTORY file: %v", err)
@@ -146,7 +172,7 @@ func TestIntegration_ParallelDualLogging(t *testing.T) {
 
 	// Verify BOTH files exist
 	s11Path := filepath.Join(tmpDir, RetroFilename)
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 
 	if _, err := os.Stat(s11Path); os.IsNotExist(err) {
 		t.Errorf("RETRO file was not created")
@@ -169,20 +195,20 @@ func TestIntegration_ParallelDualLogging(t *testing.T) {
 	}
 }
 
-// TestIntegration_FailGracefully tests error handling (fail-gracefully design)
-func TestIntegration_FailGracefully(t *testing.T) {
+// TestIntegration_MissingStatusReturnsError proves required trace persistence
+// failures are visible to the command instead of being mistaken for success.
+func TestIntegration_MissingStatusReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Don't create STATUS file - should fail gracefully
+	// Don't create STATUS file.
 	flags := RewindFlags{
 		NoPrompt: true,
 		Reason:   "Test error handling",
 	}
 
-	// Should NOT panic, should return nil (fail-gracefully)
 	err := LogRewindEvent(tmpDir, "RETRO", "SETUP", flags)
-	if err != nil {
-		t.Errorf("LogRewindEvent should return nil on errors (fail-gracefully), got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "read rewind status") {
+		t.Errorf("LogRewindEvent error = %v, want missing-status error", err)
 	}
 
 	// Should not create files if error occurred
@@ -238,14 +264,10 @@ func TestIntegration_NonInteractiveEnvironment(t *testing.T) {
 func TestIntegration_ContextCaptureCompleteness(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create git repository
-	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+	// Create git repository (the sandbox also supplies the commit identity)
+	if err := gittest.Command(t, tmpDir, "init", tmpDir).Run(); err != nil {
 		t.Skipf("Skipping test: git not available")
 	}
-
-	// Configure git
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
 
 	// Create deliverable files
 	deliverables := []string{
@@ -259,8 +281,8 @@ func TestIntegration_ContextCaptureCompleteness(t *testing.T) {
 	}
 
 	// Commit files
-	exec.Command("git", "-C", tmpDir, "add", ".").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "Initial commit").Run()
+	gittest.Command(t, tmpDir, "add", ".").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "Initial commit").Run()
 
 	// Create STATUS file
 	createStatusFile(t, tmpDir, "RETRO")
@@ -364,48 +386,33 @@ func TestIntegration_RETROMarkdownFormat(t *testing.T) {
 	}
 }
 
-// Helper function to create WAYFINDER-STATUS.md file
-func createStatusFile(t *testing.T, dir string, currentPhase string) {
+// Helper function to create a canonical WAYFINDER-STATUS.md file.
+func createStatusFile(t *testing.T, dir string, currentWaypoint string) {
 	t.Helper()
-
-	statusContent := `---
-schema_version: "2.0"
-project_name: test-session-integration
-project_type: feature
-risk_level: S
-current_waypoint: ` + currentPhase + `
-status: in-progress
-created_at: "2024-01-01T09:00:00Z"
-updated_at: "2024-01-07T10:00:00Z"
-waypoint_history:
-  - name: CHARTER
-    status: completed
-    started_at: "2024-01-01T10:00:00Z"
-    completed_at: "2024-01-01T11:00:00Z"
-  - name: PROBLEM
-    status: completed
-    started_at: "2024-01-01T12:00:00Z"
-    completed_at: "2024-01-01T13:00:00Z"
-  - name: RESEARCH
-    status: completed
-  - name: DESIGN
-    status: completed
-  - name: SPEC
-    status: completed
-  - name: PLAN
-    status: completed
-  - name: SETUP
-    status: completed
-  - name: BUILD
-    status: completed
-  - name: RETRO
-    status: in_progress
-    started_at: "2024-01-07T10:00:00Z"
----
-`
-
+	now := time.Date(2024, time.January, 7, 10, 0, 0, 0, time.UTC)
+	projectStatus := &wayfinderstatus.StatusV2{
+		SchemaVersion:   wayfinderstatus.SchemaVersion,
+		ProjectName:     "test-session-integration",
+		ProjectType:     wayfinderstatus.ProjectTypeFeature,
+		RiskLevel:       wayfinderstatus.RiskLevelS,
+		CurrentWaypoint: currentWaypoint,
+		Status:          wayfinderstatus.StatusV2InProgress,
+		CreatedAt:       now.Add(-time.Hour),
+		UpdatedAt:       now,
+	}
+	for _, waypoint := range wayfinderstatus.AllWaypointsV2Schema() {
+		entry := wayfinderstatus.WaypointHistory{Name: waypoint, StartedAt: now}
+		if waypoint == currentWaypoint {
+			entry.Status = wayfinderstatus.WaypointStatusV2InProgress
+			projectStatus.WaypointHistory = append(projectStatus.WaypointHistory, entry)
+			break
+		}
+		entry.Status = wayfinderstatus.WaypointStatusV2Completed
+		entry.CompletedAt = &now
+		projectStatus.WaypointHistory = append(projectStatus.WaypointHistory, entry)
+	}
 	statusPath := filepath.Join(dir, "WAYFINDER-STATUS.md")
-	if err := os.WriteFile(statusPath, []byte(statusContent), 0644); err != nil {
+	if err := wayfinderstatus.WriteV2(projectStatus, statusPath); err != nil {
 		t.Fatalf("Failed to create STATUS file: %v", err)
 	}
 }

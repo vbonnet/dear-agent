@@ -23,14 +23,14 @@ var (
 
 // ScanCycleResult holds the aggregated results of one scan cycle
 type ScanCycleResult struct {
-	Timestamp      time.Time                     `json:"timestamp"`
-	Sessions       *ops.ListSessionsResult       `json:"sessions,omitempty"`
-	Metrics        *ops.MetricsResult            `json:"metrics,omitempty"`
-	MetricsAlerts  []ops.Alert                   `json:"metrics_alerts,omitempty"`
-	WorkerBranches map[string][]WorkerCommit     `json:"worker_branches,omitempty"`
-	CrossCheck     *ops.CrossCheckReport         `json:"cross_check,omitempty"`
-	Findings       ScanFindings                  `json:"findings"`
-	Errors         []string                      `json:"errors,omitempty"`
+	Timestamp      time.Time                 `json:"timestamp"`
+	Sessions       *ops.ListSessionsResult   `json:"sessions,omitempty"`
+	Metrics        *ops.MetricsResult        `json:"metrics,omitempty"`
+	MetricsAlerts  []ops.Alert               `json:"metrics_alerts,omitempty"`
+	WorkerBranches map[string][]WorkerCommit `json:"worker_branches,omitempty"`
+	CrossCheck     *ops.CrossCheckReport     `json:"cross_check,omitempty"`
+	Findings       ScanFindings              `json:"findings"`
+	Errors         []string                  `json:"errors,omitempty"`
 }
 
 // WorkerCommit represents a recent commit on a worker branch
@@ -81,14 +81,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 	loopMode := scanForceLoop
 
 	if loopMode {
-		return runScanLoop()
+		return runScanLoop(cmd.Context())
 	}
-	return runSingleScan()
+	return runSingleScan(cmd.Context())
 }
 
 // runSingleScan executes one scan cycle
-func runSingleScan() error {
-	result, err := performScanCycle()
+func runSingleScan(ctx context.Context) error {
+	result, err := performScanCycle(ctx)
 	if err != nil {
 		return handleError(err)
 	}
@@ -99,23 +99,44 @@ func runSingleScan() error {
 }
 
 // runScanLoop continuously runs scan cycles
-func runScanLoop() error {
-	for {
-		result, err := performScanCycle()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "scan error: %v\n", err)
-		} else {
-			data, _ := json.MarshalIndent(result, "", "  ")
-			fmt.Println(string(data))
-		}
+func runScanLoop(ctx context.Context) error {
+	return runScanLoopWithCycle(ctx, scanInterval, func() (*ScanCycleResult, error) {
+		return performScanCycle(ctx)
+	})
+}
 
-		fmt.Fprintf(os.Stderr, "next scan in %v...\n", scanInterval)
-		time.Sleep(scanInterval)
+func runScanLoopWithCycle(ctx context.Context, interval time.Duration, cycle func() (*ScanCycleResult, error)) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		emitScanCycle(cycle)
+
+		fmt.Fprintf(os.Stderr, "next scan in %v...\n", interval)
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
 	}
 }
 
+func emitScanCycle(cycle func() (*ScanCycleResult, error)) {
+	result, err := cycle()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "scan error: %v\n", err)
+		return
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Println(string(data))
+}
+
 // performScanCycle executes the core scan logic
-func performScanCycle() (*ScanCycleResult, error) {
+func performScanCycle(ctx context.Context) (*ScanCycleResult, error) {
 	result := &ScanCycleResult{
 		Timestamp:      time.Now(),
 		WorkerBranches: make(map[string][]WorkerCommit),
@@ -165,39 +186,45 @@ func performScanCycle() (*ScanCycleResult, error) {
 
 	// 4. Cross-check via tmux capture-pane (only when --cross-check is set)
 	if scanCrossCheck {
-		crossCheckCfg := ops.DefaultCrossCheckConfig()
-		crossCheckCfg.CallerSession = os.Getenv("AGM_SESSION_NAME")
-		crossCheckReport, err := ops.RunCrossCheck(opCtx, crossCheckCfg)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("cross-check failed: %v", err))
-		} else {
-			result.CrossCheck = crossCheckReport
-			// Count issues (non-HEALTHY states)
-			for _, r := range crossCheckReport.Results {
-				if r.State != ops.StateHealthy {
-					result.Findings.CrossCheckIssues++
-				}
-			}
-			result.Findings.UnmanagedSessions = len(crossCheckReport.UnmanagedSessions)
-		}
-
-		// 4b. Ghost-worker sentinel: detect workers with closed/done beads.
-		if sessionResult != nil {
-			var sessionNames []string
-			for _, s := range sessionResult.Sessions {
-				sessionNames = append(sessionNames, s.Name)
-			}
-			ghosts, err := ops.RunGhostWorkerCheck(context.Background(), sessionNames, 0, false)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("ghost-worker check failed: %v", err))
-			} else {
-				result.Findings.GhostWorkers = ghosts
-				result.Findings.GhostWorkerCount = len(ghosts)
-			}
-		}
+		populateScanCrossCheck(ctx, opCtx, sessionResult, result)
 	}
 
-	// Determine overall health status
+	evaluateScanHealth(result)
+	return result, nil
+}
+
+func populateScanCrossCheck(ctx context.Context, opCtx *ops.OpContext, sessionResult *ops.ListSessionsResult, result *ScanCycleResult) {
+	crossCheckCfg := ops.DefaultCrossCheckConfig()
+	crossCheckCfg.CallerSession = os.Getenv("AGM_SESSION_NAME")
+	crossCheckReport, err := ops.RunCrossCheck(opCtx, crossCheckCfg)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("cross-check failed: %v", err))
+	} else {
+		result.CrossCheck = crossCheckReport
+		for _, r := range crossCheckReport.Results {
+			if r.State != ops.StateHealthy {
+				result.Findings.CrossCheckIssues++
+			}
+		}
+		result.Findings.UnmanagedSessions = len(crossCheckReport.UnmanagedSessions)
+	}
+	if sessionResult == nil {
+		return
+	}
+	var sessionNames []string
+	for _, s := range sessionResult.Sessions {
+		sessionNames = append(sessionNames, s.Name)
+	}
+	ghosts, err := ops.RunGhostWorkerCheck(ctx, sessionNames, 0, false)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("ghost-worker check failed: %v", err))
+		return
+	}
+	result.Findings.GhostWorkers = ghosts
+	result.Findings.GhostWorkerCount = len(ghosts)
+}
+
+func evaluateScanHealth(result *ScanCycleResult) {
 	result.Findings.HealthStatus = "healthy"
 	if result.Findings.MetricsAlertCount > 0 {
 		// Check alert levels
@@ -219,8 +246,6 @@ func performScanCycle() (*ScanCycleResult, error) {
 	if result.Findings.GhostWorkerCount > 0 && result.Findings.HealthStatus == "healthy" {
 		result.Findings.HealthStatus = "warning"
 	}
-
-	return result, nil
 }
 
 // scanWorkerBranches checks for new commits on worker branches

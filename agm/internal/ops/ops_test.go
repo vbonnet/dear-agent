@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -19,13 +20,26 @@ type sentKey struct {
 
 // mockTmux implements the tmux interfaces needed by ops.
 type mockTmux struct {
-	sessions map[string]bool
-	sent     []sentKey
-	sendErr  error
+	sessions        map[string]bool
+	sent            []sentKey
+	sendErr         error
+	killed          []string
+	killErr         error
+	hasErr          error
+	readiness       session.InputReadiness
+	readinessErr    error
+	readinessChecks []string
+	atomicChecks    []string
+	atomicOptions   []session.InputDeliveryOptions
+	inputCtx        context.Context
+	paneSendCtx     context.Context
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
-	m := &mockTmux{sessions: make(map[string]bool)}
+	m := &mockTmux{
+		sessions:  make(map[string]bool),
+		readiness: session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"},
+	}
 	for _, s := range sessions {
 		m.sessions[s] = true
 	}
@@ -33,6 +47,9 @@ func newMockTmux(sessions ...string) *mockTmux {
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
+	if m.hasErr != nil {
+		return false, m.hasErr
+	}
 	return m.sessions[name], nil
 }
 
@@ -61,12 +78,55 @@ func (m *mockTmux) ListClients(string) ([]session.ClientInfo, error) {
 
 func (m *mockTmux) CreateSession(name, workdir string) error { return nil }
 func (m *mockTmux) AttachSession(name string) error          { return nil }
+func (m *mockTmux) KillSession(name string) error {
+	if m.killErr != nil {
+		return m.killErr
+	}
+	m.killed = append(m.killed, name)
+	delete(m.sessions, name)
+	return nil
+}
 func (m *mockTmux) SendKeys(session, keys string) error {
 	if m.sendErr != nil {
 		return m.sendErr
 	}
 	m.sent = append(m.sent, sentKey{session: session, keys: keys})
 	return nil
+}
+
+func (m *mockTmux) SendKeysToPane(ctx context.Context, paneID, keys string) error {
+	m.paneSendCtx = ctx
+	return m.SendKeys(paneID, keys)
+}
+
+func (m *mockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness string) (session.InputReadiness, error) {
+	m.inputCtx = ctx
+	m.readinessChecks = append(m.readinessChecks, sessionName+":"+harness)
+	if m.readinessErr != nil {
+		return session.InputReadiness{}, m.readinessErr
+	}
+	return m.readiness, nil
+}
+
+func (m *mockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	m.atomicChecks = append(m.atomicChecks, sessionName+":"+harness)
+	m.atomicOptions = append(m.atomicOptions, options)
+	readiness, err := m.CheckInputReadiness(ctx, sessionName, harness)
+	if err != nil {
+		return readiness, err
+	}
+	if !readiness.Ready {
+		if !options.AllowQueuedAGM || readiness.State != "QUEUED_AGM" {
+			return readiness, nil
+		}
+		readiness.Ready = true
+		readiness.State = "YES"
+		readiness.Forced = true
+	}
+	if readiness.PaneID == "" {
+		return readiness, nil
+	}
+	return readiness, m.SendKeysToPane(ctx, readiness.PaneID, keys)
 }
 
 // mockTmuxWithLiveness wraps mockTmux with the optional

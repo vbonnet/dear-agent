@@ -53,8 +53,8 @@ After install, the following are exposed:
   `/agm:agm-search`, `/agm:agm-send`, `/agm:agm-status`,
   `/agm:audit-completion`, `/agm:wiki-ingest`, `/agm:wiki-lint`,
   `/agm:wiki-query-save`, and the `scan-health` skill.
-- **`wayfinder@dear-agent`** — `/wayfinder:validate-phase` plus the
-  top-level `wayfinder` skill (9-phase SDLC workflow).
+- **`wayfinder@dear-agent`** — the top-level `wayfinder` skill (9-phase SDLC
+  workflow); it does not install slash commands.
 - **`youtube@dear-agent`** — `/youtube:youtube` for transcript extraction
   (needs `yt-dlp`).
 

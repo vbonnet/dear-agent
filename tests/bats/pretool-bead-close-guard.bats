@@ -114,6 +114,27 @@ guard_calls() { [ -f "$GUARD_LOG" ] && cat "$GUARD_LOG" || true; }
     [ -z "$(guard_calls)" ]
 }
 
+@test "Codex hook-trust bypass blocks force-close before invoking user-authenticated CLIs" {
+    local codex_hook test_hook jq_path
+    codex_hook="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/.codex/hooks/pretool-bead-close-guard"
+    test_hook="$BATS_TEST_TMPDIR/pretool-bead-close-guard"
+    jq_path="$(command -v jq)"
+    sed \
+        -e "s|/usr/local/libexec/dear-agent-codex-hook-json|$jq_path|g" \
+        -e "s|/usr/local/libexec/dear-agent-bead-close-guard|$STUBDIR/bead-close-guard|g" \
+        "$codex_hook" > "$test_hook"
+    chmod +x "$test_hook"
+    HOOK="$test_hook"
+
+    AGM_CODEX_HOOK_ROOT="$BATS_TEST_TMPDIR/immutable-hooks" \
+        bd "bd close ce-rpet --force"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *'"permissionDecision":"deny"'* ]]
+    [[ "$output" == *"ordinary reviewed session"* ]]
+    [ -z "$(guard_calls)" ]
+}
+
 @test "silent on a read: bd list --status closed" {
     bd "bd list --status closed"
     [ "$status" -eq 0 ]

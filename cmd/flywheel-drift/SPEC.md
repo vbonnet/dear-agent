@@ -1,6 +1,6 @@
 # Flywheel Drift Command Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-08-01 -->
 
 ## Overview
 
@@ -19,11 +19,13 @@ to expose work that has stopped feeding the delivery flywheel.
 
 **FDC-05** When Jaeger or Beads evidence cannot be read, the command shall report that failure rather than declaring the flywheel healthy.
 
-**FDC-06** When JSON output is selected, the command shall emit the same stale and observability evidence represented in text output.
+**FDC-06** When JSON output is selected, the command shall emit the same stale and observability evidence represented in text output, preserve the four declared health-status wire strings, and return the shared health summary exit code.
 
 **FDC-07** When no stale work exists, the command shall report a healthy steady state and exit successfully.
 
 **FDC-08** When evidence originates from different harnesses or models, the command shall correlate shared Bead and trace identifiers without provider-specific assumptions.
+
+**FDC-09** When the health runner canonicalizes malformed check output, the JSON report shall emit a non-fixable error result and return critical exit code 2.
 
 ## BDD Traceability
 

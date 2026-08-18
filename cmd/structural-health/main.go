@@ -4,7 +4,7 @@
 // drift of the codebase visible and ratchet it down over time, without
 // blocking work on the large pile of pre-existing findings.
 //
-// Five scans run today:
+// Six scans run today:
 //
 //	dead-package       Go packages with zero importers (excludes cmd/ and
 //	                   package main — those are entry points, not dead).
@@ -15,20 +15,30 @@
 //	goroutine-recover  `go func() { ... }()` launches whose body never
 //	                   calls recover() — an unguarded goroutine panic
 //	                   takes down the whole process.
+//	raw-mem-gate       Shell scripts that gate/alert on a raw macOS
+//	                   free-page metric (`vm_stat` free pages,
+//	                   page_free_count) without deferring to
+//	                   `memory_pressure`. macOS parks reclaimable pages off
+//	                   the free list, so raw "free" reads near-zero forever —
+//	                   a spawn/dispatch gate built on it deadlocks the thing
+//	                   it protects. See docs/policies/harness-hygiene and the
+//	                   ce-xj1b over-fit class (re-embedded three times).
 //
-// Each scan emits a set of stable "finding keys". The baseline file is a
-// JSON snapshot of those keys. On every run the tool diffs current findings
-// against the baseline:
+// Each scan emits a set of finding keys. The baseline file records accepted
+// keys and append-only provenance for changes to that set. File-size findings
+// include a line-count budget; their stable identity is the path, so a
+// same-path reduction is accepted while growth is a regression. On every run
+// the tool diffs current findings against the baseline:
 //
-//   - A key present now but absent from the baseline is a REGRESSION and
-//     fails the build (exit 1).
-//   - A key in the baseline but no longer present is FIXED — informational,
-//     and a nudge to re-baseline so the ratchet tightens.
+//   - A non-file-size key present now but absent from the baseline is a
+//     REGRESSION and fails the build (exit 1).
+//   - A non-file-size key in the baseline but no longer present is FIXED —
+//     informational, and a nudge to re-baseline so the ratchet tightens.
 //
 // Usage:
 //
 //	structural-health [flags]
-//	structural-health --update-baseline   # snapshot current state
+//	structural-health --update-baseline   # remove findings that are now fixed
 //	structural-health --json              # machine-readable report
 //
 // Exit codes:
@@ -44,6 +54,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -53,6 +64,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -77,6 +89,7 @@ var scanNames = []string{
 	"zero-test",
 	"doc-path",
 	"goroutine-recover",
+	"raw-mem-gate",
 }
 
 // skipDirs are directory names pruned from filesystem walks. These hold
@@ -100,21 +113,27 @@ type finding struct {
 	Detail string
 }
 
-// baseline is the on-disk snapshot. Findings maps each scan name to its
-// sorted list of accepted finding keys.
-type baseline struct {
-	Version  int                 `json:"version"`
-	Findings map[string][]string `json:"findings"`
-}
-
 func main() {
 	var (
 		root           = flag.String("root", ".", "repository root to scan")
 		baselinePath   = flag.String("baseline", defaultBaselinePath, "path to the baseline JSON file (relative to --root unless absolute)")
-		updateBaseline = flag.Bool("update-baseline", false, "overwrite the baseline with the current findings, then exit 0")
+		updateBaseline = flag.Bool("update-baseline", false, "update the baseline without admitting new finding keys, then exit 0")
+		acceptNew      = flag.Bool("accept-new", false, "allow --update-baseline to admit new finding keys")
+		acceptScanner  = flag.Bool("accept-scanner-change", false, "allow --update-baseline to migrate stable-key semantics")
+		reason         = flag.String("reason", "", "reason for accepting findings or scanner changes")
+		reference      = flag.String("reference", "", "durable tracker, PR, URL, or commit reference for an acceptance")
 		jsonOut        = flag.Bool("json", false, "emit a machine-readable JSON report")
 	)
 	flag.Parse()
+	request := updateRequest{
+		AcceptNew:           *acceptNew,
+		AcceptScannerChange: *acceptScanner,
+		Reason:              *reason,
+		Reference:           *reference,
+	}
+	if err := validateModeFlags(*updateBaseline, *jsonOut, request); err != nil {
+		fail("%v", err)
+	}
 
 	absRoot, err := filepath.Abs(*root)
 	if err != nil {
@@ -132,21 +151,29 @@ func main() {
 	}
 
 	if *updateBaseline {
-		if err := writeBaseline(blPath, current); err != nil {
-			fail("write baseline: %v", err)
+		plan, err := updateBaselineFile(blPath, current, request)
+		if err != nil {
+			fail("update baseline: %v", err)
+		}
+		if !plan.Write {
+			fmt.Printf("baseline unchanged: %s\n", blPath)
+			return
 		}
 		fmt.Printf("baseline updated: %s\n", blPath)
-		total := 0
-		for _, fs := range current {
-			total += len(fs)
-		}
+		total := keyMapCount(plan.Baseline.Findings)
 		fmt.Printf("recorded %d findings across %d scans\n", total, len(scanNames))
+		fmt.Printf("transition added=%d removed=%d\n", plan.Change.addedCount(), plan.Change.removedCount())
 		return
 	}
 
 	bl, err := readBaseline(blPath)
 	if err != nil {
-		fail("read baseline %s: %v\n\nIf this is the first run, generate it with:\n  structural-health --update-baseline", blPath, err)
+		fail(
+			"read baseline %s: %v\n\nIf this is the first run, generate it with:\n  %s",
+			blPath,
+			err,
+			bootstrapCommand(*root, *baselinePath, findingCount(current) > 0),
+		)
 	}
 
 	report := diff(current, bl)
@@ -161,6 +188,41 @@ func main() {
 	if report.regressionCount() > 0 {
 		os.Exit(1)
 	}
+}
+
+func bootstrapCommand(root, baselinePath string, acceptNew bool) string {
+	command := fmt.Sprintf(
+		"structural-health --root %s --baseline %s --update-baseline",
+		quoteShellWord(root),
+		quoteShellWord(baselinePath),
+	)
+	if !acceptNew {
+		return command
+	}
+	return command + " --accept-new --accept-scanner-change \\\n    --reason '<why>' --reference '<bead-or-pr>'"
+}
+
+func quoteShellWord(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func findingCount(findings map[string][]finding) int {
+	count := 0
+	for _, scanFindings := range findings {
+		count += len(scanFindings)
+	}
+	return count
+}
+
+func validateModeFlags(updateBaseline, jsonOut bool, request updateRequest) error {
+	if updateBaseline && jsonOut {
+		return errors.New("--json cannot be combined with --update-baseline")
+	}
+	if !updateBaseline && (request.AcceptNew || request.AcceptScannerChange ||
+		strings.TrimSpace(request.Reason) != "" || strings.TrimSpace(request.Reference) != "") {
+		return errors.New("baseline acceptance flags require --update-baseline")
+	}
+	return nil
 }
 
 // fail prints a message to stderr and exits with the usage/setup code.
@@ -193,6 +255,12 @@ func runScans(root string) (map[string][]finding, error) {
 		return nil, fmt.Errorf("goroutine-recover scan: %w", err)
 	}
 	out["goroutine-recover"] = gor
+
+	rawMem, err := scanRawMemGate(root)
+	if err != nil {
+		return nil, fmt.Errorf("raw-mem-gate scan: %w", err)
+	}
+	out["raw-mem-gate"] = rawMem
 
 	for _, fs := range out {
 		sort.Slice(fs, func(i, j int) bool { return fs[i].Key < fs[j].Key })
@@ -299,7 +367,8 @@ func isUnderCmd(importPath string) bool {
 }
 
 // scanFileSize walks the tree and flags .go files longer than the threshold.
-// Keys are repo-relative paths so the baseline is location-independent.
+// Keys include the observed line count so an admitted file cannot grow without
+// producing a new finding and an explicit baseline transition.
 func scanFileSize(root string) ([]finding, error) {
 	var out []finding
 	err := walkGoFiles(root, func(path, rel string) error {
@@ -308,11 +377,35 @@ func scanFileSize(root string) ([]finding, error) {
 			return err
 		}
 		if n > fileSizeThreshold {
-			out = append(out, finding{Key: rel, Detail: fmt.Sprintf("%d lines", n)})
+			out = append(out, finding{
+				Key:    fmt.Sprintf("%s (%d lines)", rel, n),
+				Detail: fmt.Sprintf("%d lines", n),
+			})
 		}
 		return nil
 	})
 	return out, err
+}
+
+// parseFileSizeKey splits a size finding into its stable file identity and
+// the admitted line-count budget. The count is part of the persisted key
+// because the baseline stores findings as strings; callers that compare
+// budgets use the path portion rather than treating every count change as a
+// new file.
+func parseFileSizeKey(key string) (string, int, bool) {
+	const suffix = " lines)"
+	if !strings.HasSuffix(key, suffix) {
+		return "", 0, false
+	}
+	open := strings.LastIndex(key, " (")
+	if open <= 0 {
+		return "", 0, false
+	}
+	lines, err := strconv.Atoi(key[open+2 : len(key)-len(suffix)])
+	if err != nil || lines <= fileSizeThreshold {
+		return "", 0, false
+	}
+	return key[:open], lines, true
 }
 
 // countLines returns the number of newline-delimited lines in a file.
@@ -486,6 +579,115 @@ func walkGoFiles(root string, fn func(path, rel string) error) error {
 	})
 }
 
+// walkShellFiles invokes fn for every non-skipped .sh/.bash file under root,
+// passing both the absolute path and the repo-relative path. Shell is where
+// the raw-mem-gate over-fit lives: the ce-xj1b class was hand-typed back into
+// untracked watchdog scripts, not the (carefully written) Go probes.
+func walkShellFiles(root string, fn func(path, rel string) error) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".sh") && !strings.HasSuffix(path, ".bash") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		return fn(path, filepath.ToSlash(rel))
+	})
+}
+
+// rawFreeMemoryIdioms are lowercased substrings that indicate a script is
+// reading a raw macOS free-page count. On macOS these numbers are near-zero
+// permanently (reclaimable pages are parked off the free list), so gating or
+// alerting on them deadlocks/false-alarms the very thing they protect — the
+// ce-xj1b over-fit class that has been re-embedded three times. `vm_stat`
+// alone is intentionally NOT listed: plenty of scripts pipe vm_stat for
+// legitimate reporting. We flag only the specific free-page idioms.
+var rawFreeMemoryIdioms = []string{
+	"pages free",      // `vm_stat | grep "Pages free"`
+	"page_free_count", // `sysctl vm.page_free_count`
+	"pages_free",
+}
+
+// memoryPressureEscapeHatch is the correct macOS free-headroom source. A shell
+// script that consults it is doing the right thing, so its presence anywhere
+// in the file suppresses a raw-mem-gate finding. This is the deliberate
+// low-noise seam: the fix for a flagged script is to route the decision
+// through `memory_pressure -Q` (as cmd/vroom-governor and the Go
+// circuitbreaker already do).
+var memoryPressureEscapeHatch = []string{
+	"memory_pressure",
+	"pressure_level",
+}
+
+// scanRawMemGate flags shell scripts that read a raw free-page memory metric
+// without also deferring to memory_pressure. Keys are repo-relative paths so
+// the baseline is location-independent. Detail records the first offending
+// idiom and line so the fix is obvious.
+//
+// This is the deterministic enforcement of the harness-hygiene doctrine's
+// "hard requirements need hard checks": the RAM-gate over-fit is caught at
+// authoring time (a red diff) instead of at 3am as a pipeline stall. It is
+// also the reference lint that ce-2vbg asks to run over the (currently
+// untracked) host watchdogs once they are brought under version control.
+func scanRawMemGate(root string) ([]finding, error) {
+	var out []finding
+	err := walkShellFiles(root, func(path, rel string) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		var (
+			idiomFound string
+			idiomLine  int
+		)
+		sc := bufio.NewScanner(f)
+		for lineNum := 1; sc.Scan(); lineNum++ {
+			line := strings.ToLower(sc.Text())
+			for _, hatch := range memoryPressureEscapeHatch {
+				if strings.Contains(line, hatch) {
+					return nil // careful script: routes through memory_pressure
+				}
+			}
+			if idiomFound == "" {
+				for _, idiom := range rawFreeMemoryIdioms {
+					if strings.Contains(line, idiom) {
+						idiomFound, idiomLine = idiom, lineNum
+						break
+					}
+				}
+			}
+		}
+		if err := sc.Err(); err != nil {
+			return err
+		}
+		if idiomFound != "" {
+			out = append(out, finding{
+				Key: rel,
+				Detail: fmt.Sprintf(
+					"gates on raw free-page memory (%q, line %d) without memory_pressure — macOS reports free≈0 permanently (ce-xj1b)",
+					idiomFound, idiomLine),
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // scanReport holds the per-scan diff between current findings and baseline.
 type scanReport struct {
 	Scan        string   `json:"scan"`
@@ -515,6 +717,10 @@ func diff(current map[string][]finding, bl baseline) report {
 	var rep report
 	for _, name := range scanNames {
 		findings := current[name]
+		if name == "file-size" {
+			rep.Scans = append(rep.Scans, diffFileSize(findings, bl.Findings[name]))
+			continue
+		}
 		base := map[string]bool{}
 		for _, k := range bl.Findings[name] {
 			base[k] = true
@@ -550,6 +756,56 @@ func diff(current map[string][]finding, bl baseline) report {
 	return rep
 }
 
+func diffFileSize(findings []finding, baselineKeys []string) scanReport {
+	currentByPath := make(map[string]finding, len(findings))
+	for _, finding := range findings {
+		if path, _, ok := parseFileSizeKey(finding.Key); ok {
+			currentByPath[path] = finding
+		}
+	}
+	baselineByPath := make(map[string]string, len(baselineKeys))
+	for _, key := range baselineKeys {
+		if path, _, ok := parseFileSizeKey(key); ok {
+			baselineByPath[path] = key
+		}
+	}
+
+	regressions := make([]string, 0)
+	for path, finding := range currentByPath {
+		baselineKey, exists := baselineByPath[path]
+		if !exists {
+			regressions = append(regressions, finding.Key)
+			continue
+		}
+		_, currentLines, _ := parseFileSizeKey(finding.Key)
+		_, baselineLines, _ := parseFileSizeKey(baselineKey)
+		if currentLines > baselineLines {
+			regressions = append(regressions, finding.Key)
+		}
+	}
+
+	fixed := make([]string, 0)
+	for path, key := range baselineByPath {
+		if _, exists := currentByPath[path]; !exists {
+			fixed = append(fixed, key)
+		}
+	}
+	sort.Strings(regressions)
+	sort.Strings(fixed)
+	details := make(map[string]string, len(findings))
+	for _, finding := range findings {
+		details[finding.Key] = finding.Detail
+	}
+	return scanReport{
+		Scan:        "file-size",
+		Regressions: regressions,
+		Fixed:       fixed,
+		Current:     len(findings),
+		Baseline:    len(baselineKeys),
+		details:     details,
+	}
+}
+
 // emitText prints a human-readable report and a final verdict.
 func emitText(rep report) {
 	regressions := rep.regressionCount()
@@ -576,8 +832,9 @@ func emitText(rep report) {
 	switch {
 	case regressions > 0:
 		fmt.Printf("FAIL: %d new finding(s) versus baseline.\n", regressions)
-		fmt.Println("Fix the regressions above, or — if intentional — re-baseline with:")
-		fmt.Println("  go run ./cmd/structural-health --update-baseline")
+		fmt.Println("Fix the regressions above. If they are intentional, admit them with:")
+		fmt.Println("  go run ./cmd/structural-health --update-baseline --accept-new \\")
+		fmt.Println("    --reason \"<why>\" --reference \"<bead-or-pr>\"")
 	default:
 		fmt.Println("PASS: no regressions versus baseline.")
 		if fixedTotal(rep) > 0 {
@@ -600,43 +857,4 @@ func emitJSON(rep report) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(rep)
-}
-
-// readBaseline loads and validates the baseline file.
-func readBaseline(path string) (baseline, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return baseline{}, err
-	}
-	var bl baseline
-	if err := json.Unmarshal(data, &bl); err != nil {
-		return baseline{}, fmt.Errorf("parse: %w", err)
-	}
-	if bl.Findings == nil {
-		bl.Findings = map[string][]string{}
-	}
-	return bl, nil
-}
-
-// writeBaseline snapshots the current findings into the baseline file,
-// sorting every list so the on-disk form is stable and diff-friendly.
-func writeBaseline(path string, current map[string][]finding) error {
-	bl := baseline{Version: 1, Findings: map[string][]string{}}
-	for _, name := range scanNames {
-		keys := make([]string, 0, len(current[name]))
-		for _, f := range current[name] {
-			keys = append(keys, f.Key)
-		}
-		sort.Strings(keys)
-		if keys == nil {
-			keys = []string{}
-		}
-		bl.Findings[name] = keys
-	}
-	data, err := json.MarshalIndent(bl, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
 }

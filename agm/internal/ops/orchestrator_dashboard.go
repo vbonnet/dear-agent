@@ -19,22 +19,15 @@ type OrchestratorTrustSummary struct {
 	Total  int                     `json:"total"`
 }
 
-// BacklogSummary shows next items in the queue.
-type BacklogSummary struct {
-	Next  []Task `json:"next"`
-	Total int    `json:"total"`
-}
-
 // OrchestratorDashboardResult contains unified orchestrator view.
 type OrchestratorDashboardResult struct {
-	Operation  string                   `json:"operation"`
-	Timestamp  string                   `json:"timestamp"`
-	Sessions   SessionMetrics           `json:"sessions"`
-	Metrics    ThroughputMetrics        `json:"throughput"`
-	Resources  ResourceMetrics          `json:"resources"`
-	Alerts     []Alert                  `json:"alerts"`
-	Trust      OrchestratorTrustSummary `json:"trust"`
-	Backlog    BacklogSummary           `json:"backlog"`
+	Operation string                   `json:"operation"`
+	Timestamp string                   `json:"timestamp"`
+	Sessions  SessionMetrics           `json:"sessions"`
+	Metrics   ThroughputMetrics        `json:"throughput"`
+	Resources ResourceMetrics          `json:"resources"`
+	Alerts    []Alert                  `json:"alerts"`
+	Trust     OrchestratorTrustSummary `json:"trust"`
 }
 
 // OrchestratorDashboard returns a unified view for orchestrators.
@@ -67,14 +60,6 @@ func OrchestratorDashboard(ctx *OpContext, req *OrchestratorDashboardRequest) (*
 		return nil, fmt.Errorf("failed to get trust leaderboard: %w", err)
 	}
 	result.Trust = extractTrustSummary(trustResult)
-
-	// 3. Get backlog (next 3 tasks)
-	backlogReq := &TaskListRequest{Status: ""}
-	backlogResult, err := ListTasks(ctx, backlogReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get backlog: %w", err)
-	}
-	result.Backlog = extractBacklogSummary(backlogResult)
 
 	return result, nil
 }
@@ -112,32 +97,6 @@ func extractTrustSummary(lb *TrustLeaderboardResult) OrchestratorTrustSummary {
 	}
 	if len(sorted) > bottom {
 		summary.Bottom = sorted[len(sorted)-bottom:]
-	}
-
-	return summary
-}
-
-// extractBacklogSummary returns next 3 unfinished tasks.
-func extractBacklogSummary(backlog *TaskListResult) BacklogSummary {
-	summary := BacklogSummary{
-		Next:  []Task{},
-		Total: backlog.Total,
-	}
-
-	if len(backlog.Tasks) == 0 {
-		return summary
-	}
-
-	// Get next 3 unfinished tasks
-	count := 3
-	if len(backlog.Tasks) < 3 {
-		count = len(backlog.Tasks)
-	}
-
-	for i := 0; i < count; i++ {
-		if backlog.Tasks[i].Status != "done" {
-			summary.Next = append(summary.Next, backlog.Tasks[i])
-		}
 	}
 
 	return summary

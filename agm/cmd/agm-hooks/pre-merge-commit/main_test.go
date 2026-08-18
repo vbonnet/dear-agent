@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vbonnet/dear-agent/internal/ci"
 	"github.com/vbonnet/dear-agent/internal/ci/act"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // -----------------------------------------------------------------------------
@@ -113,7 +113,7 @@ func TestRollback(t *testing.T) {
 	createFile(t, tmpDir, "feature.txt", "main content")
 	gitAdd(t, tmpDir, "feature.txt")
 	gitCommit(t, tmpDir, "Add conflicting file")
-	_ = exec.Command("git", "-C", tmpDir, "merge", "feature", "--no-commit").Run()
+	_ = gittest.Command(t, tmpDir, "merge", "feature", "--no-commit").Run()
 
 	mergeHeadPath := filepath.Join(tmpDir, ".git", "MERGE_HEAD")
 	if _, err := os.Stat(mergeHeadPath); err != nil {
@@ -402,11 +402,11 @@ func TestReportResults(t *testing.T) {
 				RequireAllPassing: true,
 			},
 			results: map[string]*act.WorkflowResult{
-				path("a.yml"):         pass(time.Second),
-				path("o-pass.yml"):    pass(time.Second),
-				path("o-fail.yml"):    fail(1, ""),
-				path("o-skip.yml"):    skip("upstream failed"),
-				path("o-err.yml"):     infraErr("network down"),
+				path("a.yml"):      pass(time.Second),
+				path("o-pass.yml"): pass(time.Second),
+				path("o-fail.yml"): fail(1, ""),
+				path("o-skip.yml"): skip("upstream failed"),
+				path("o-err.yml"):  infraErr("network down"),
 				// o-missing.yml deliberately absent
 			},
 			want: 0,
@@ -615,11 +615,11 @@ func TestRun_FailingExecutor_RespectsFailureBehavior(t *testing.T) {
 	// error → exit code 1 from that helper. run() then decides what to do
 	// based on the policy's failure_behavior. We sweep all three.
 	tests := []struct {
-		name        string
-		behavior    string
-		want        int
-		mustStdout  string
-		mustStderr  string
+		name       string
+		behavior   string
+		want       int
+		mustStdout string
+		mustStderr string
 	}{
 		{
 			name:       "warn keeps the merge",
@@ -704,9 +704,7 @@ default:
 
 func initGitRepo(t *testing.T, dir, branch string) {
 	t.Helper()
-	require.NoError(t, exec.Command("git", "-C", dir, "init", "--initial-branch="+branch).Run(), "git init failed")
-	require.NoError(t, exec.Command("git", "-C", dir, "config", "user.name", "Test User").Run())
-	require.NoError(t, exec.Command("git", "-C", dir, "config", "user.email", "test@example.com").Run())
+	require.NoError(t, gittest.Command(t, dir, "init", "--initial-branch="+branch).Run(), "git init failed")
 	createFile(t, dir, "README.md", "# Test Repo")
 	gitAdd(t, dir, "README.md")
 	gitCommit(t, dir, "Initial commit")
@@ -714,12 +712,12 @@ func initGitRepo(t *testing.T, dir, branch string) {
 
 func checkoutBranch(t *testing.T, dir, branch string) {
 	t.Helper()
-	require.NoError(t, exec.Command("git", "-C", dir, "checkout", "-b", branch).Run(), "git checkout -b failed")
+	require.NoError(t, gittest.Command(t, dir, "checkout", "-b", branch).Run(), "git checkout -b failed")
 }
 
 func gitCheckout(t *testing.T, dir, branch string) {
 	t.Helper()
-	require.NoError(t, exec.Command("git", "-C", dir, "checkout", branch).Run(), "git checkout failed")
+	require.NoError(t, gittest.Command(t, dir, "checkout", branch).Run(), "git checkout failed")
 }
 
 func createFile(t *testing.T, dir, filename, content string) {
@@ -729,12 +727,12 @@ func createFile(t *testing.T, dir, filename, content string) {
 
 func gitAdd(t *testing.T, dir, file string) {
 	t.Helper()
-	require.NoError(t, exec.Command("git", "-C", dir, "add", file).Run(), "git add failed")
+	require.NoError(t, gittest.Command(t, dir, "add", file).Run(), "git add failed")
 }
 
 func gitCommit(t *testing.T, dir, message string) {
 	t.Helper()
-	require.NoError(t, exec.Command("git", "-C", dir, "commit", "-m", message).Run(), "git commit failed")
+	require.NoError(t, gittest.Command(t, dir, "commit", "-m", message).Run(), "git commit failed")
 }
 
 func writePolicy(t *testing.T, dir, body string) {

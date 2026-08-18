@@ -1,9 +1,9 @@
 # pkg/vroom/supervisor — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-17 -->
 
-**Version**: 1.1
-**Last Updated**: 2026-07-10
+**Version**: 1.2
+**Last Updated**: 2026-07-17
 **Status**: Active
 **Scope**: VROOM supervisor task queues, with emphasis on AGM-backed worker dispatch.
 
@@ -90,9 +90,20 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-27** When a pending task is removed, the system shall clear the vacated backing-array slot before shrinking the queue so removed task data is not retained.
 
+### Canonical Supervisor Topology
+
+**VROOM-SUP-28** The VROOM supervisor topology shall contain exactly the Meta-Orchestrator, Orchestrator, and Overseer canonical members.
+
+**VROOM-SUP-29** When a caller supplies a canonical supervisor ID, compact alias, or role name, the system shall resolve it to the same immutable topology member.
+
+**VROOM-SUP-30** The VROOM supervisor topology shall assign each member distinct canonical Primary and Tertiary peers and shall cover the complete cyclic peer graph defined by ADR-002.
+
+**VROOM-SUP-31** When callers request all topology members, the system shall return a copy that cannot mutate the canonical topology.
+
 ## Test Traceability
 
 - Package tests: `pkg/vroom/supervisor/disk_alert_test.go`
 - Package tests: `pkg/vroom/supervisor/check_test.go`
 - Package tests: `pkg/vroom/supervisor/queue_test.go`
+- Package tests: `pkg/vroom/supervisor/topology_test.go`
 - BDD: `agm/test/bdd/features/vroom_runtime_guardrails.feature`

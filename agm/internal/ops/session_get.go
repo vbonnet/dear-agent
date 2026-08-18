@@ -1,8 +1,10 @@
 package ops
 
 import (
+	"context"
 	"errors"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -15,26 +17,33 @@ type GetSessionRequest struct {
 
 // SessionDetail is the full session output with all fields.
 type SessionDetail struct {
-	ID               string        `json:"id"`
-	Name             string        `json:"name"`
-	Status           string        `json:"status"`
-	State            string        `json:"state"`
-	Harness          string        `json:"harness"`
-	Model            string        `json:"model,omitempty"`
-	Project          string        `json:"project"`
-	Purpose          string        `json:"purpose,omitempty"`
-	Tags             []string      `json:"tags,omitempty"`
-	TmuxSession      string        `json:"tmux_session"`
-	ClaudeUUID       string        `json:"claude_uuid,omitempty"`
-	ParentSessionID  string        `json:"parent_session_id,omitempty"`
-	Workspace        string        `json:"workspace"`
-	WorkingDirectory string        `json:"working_directory,omitempty"`
-	Lifecycle        string        `json:"lifecycle"`
-	CreatedAt        string        `json:"created_at"`
-	UpdatedAt        string        `json:"updated_at"`
-	ContextUsage     *ContextUsage          `json:"context_usage,omitempty"`
-	PermissionMode   string                 `json:"permission_mode,omitempty"`
+	ID               string                   `json:"id"`
+	Name             string                   `json:"name"`
+	Status           string                   `json:"status"`
+	State            string                   `json:"state"`
+	Harness          string                   `json:"harness"`
+	Model            string                   `json:"model,omitempty"`
+	Project          string                   `json:"project"`
+	Purpose          string                   `json:"purpose,omitempty"`
+	Tags             []string                 `json:"tags,omitempty"`
+	TmuxSession      string                   `json:"tmux_session"`
+	ClaudeUUID       string                   `json:"claude_uuid,omitempty"`
+	ParentSessionID  string                   `json:"parent_session_id,omitempty"`
+	Workspace        string                   `json:"workspace"`
+	WorkingDirectory string                   `json:"working_directory,omitempty"`
+	Lifecycle        string                   `json:"lifecycle"`
+	CreatedAt        string                   `json:"created_at"`
+	UpdatedAt        string                   `json:"updated_at"`
+	ContextUsage     *ContextUsage            `json:"context_usage,omitempty"`
+	PermissionMode   string                   `json:"permission_mode,omitempty"`
 	HarnessHistory   []manifest.HarnessSwitch `json:"harness_history,omitempty"`
+	// FinalOutputAt is deliberately the ONLY completion-capture field here:
+	// captured terminal contents can hold prompts, responses, credentials,
+	// and paths, so the output itself stays confined to the explicitly
+	// requested get_session_output operation (metadata surfaces such as
+	// agm_get_session_metadata must never return it). The timestamp tells a
+	// caller that a durable capture exists without exposing its contents.
+	FinalOutputAt string `json:"final_output_at,omitempty"`
 }
 
 // ContextUsage mirrors manifest.ContextUsage for JSON output.
@@ -105,7 +114,17 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 
 // findByName searches for a session by name or tmux session name.
 func findByName(ctx *OpContext, name string) (*manifest.Manifest, error) {
-	manifests, err := ctx.Storage.ListSessions(nil)
+	return findByNameWithFilter(ctx, name, nil)
+}
+
+// findActiveByName excludes retired identities before resolving a reusable
+// manifest or tmux name for a live operation such as message delivery.
+func findActiveByName(ctx *OpContext, name string) (*manifest.Manifest, error) {
+	return findByNameWithFilter(ctx, name, &dolt.SessionFilter{ExcludeArchived: true})
+}
+
+func findByNameWithFilter(ctx *OpContext, name string, filter *dolt.SessionFilter) (*manifest.Manifest, error) {
+	manifests, err := ctx.Storage.ListSessions(filter)
 	if err != nil {
 		return nil, ErrStorageError("find_by_name", err)
 	}
@@ -139,6 +158,9 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 		UpdatedAt:        m.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		PermissionMode:   m.PermissionMode,
 	}
+	if !m.FinalOutputAt.IsZero() {
+		d.FinalOutputAt = m.FinalOutputAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
 
 	if m.ParentSessionID != nil {
 		d.ParentSessionID = *m.ParentSessionID
@@ -153,6 +175,22 @@ func toSessionDetail(m *manifest.Manifest, status string) SessionDetail {
 	}
 
 	return d
+}
+
+// existenceForStatus resolves tmux existence for status reporting, preferring
+// the strict checker. The plain HasSession collapses every tmux ExitError into
+// "absent" with a nil error, so an inaccessible socket or permission failure
+// would report a live worker as "stopped" — the same false-dead verdict the
+// list path now avoids by answering "unknown" (ce-0zng9). The strict checker
+// separates "no such session" from backend failure, so a failure surfaces as
+// an error here and the caller answers "unknown".
+func existenceForStatus(tmux any, plain interface {
+	HasSession(name string) (bool, error)
+}, tmuxName string) (bool, error) {
+	if strict, ok := tmux.(session.StrictSessionExistenceChecker); ok {
+		return strict.HasSessionStrict(context.Background(), tmuxName)
+	}
+	return plain.HasSession(tmuxName)
 }
 
 func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
@@ -176,7 +214,7 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 		tmuxName = m.Name
 	}
 
-	has, err := ti.HasSession(tmuxName)
+	has, err := existenceForStatus(tmux, ti, tmuxName)
 	if err != nil {
 		return "unknown"
 	}

@@ -202,6 +202,7 @@ func (p *OpenRouterProvider) Capabilities() Capabilities {
 			"anthropic/claude-3-5-sonnet",
 			"anthropic/claude-3-5-haiku",
 			"anthropic/claude-opus-4",
+			"anthropic/claude-opus-5",
 			"openai/gpt-4",
 			"openai/gpt-4-turbo",
 			"google/gemini-pro-1.5",

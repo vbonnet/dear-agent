@@ -13,13 +13,15 @@ codebase, that collision is documented in
 [§ Known Terminology Collisions](#known-terminology-collisions) and treated as a
 bug to be paid down, not a fact to live with.
 
-> **Status note (2026-05-17):** This file was created alongside a correction of
+> **Status note (2026-07-19):** This file was created alongside a correction of
 > the VROOM architecture docs. Several pre-existing documents described an
 > earlier, inaccurate VROOM model (a five-role "Verifier/Requester/Orchestrator/
 > Overseer/Meta-Orchestrator" mesh with a lexicographic value evaluator). That
-> model is **superseded**. This file and
-> [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md) are
-> authoritative; anything that disagrees is stale and should be fixed to match.
+> model is **superseded**. This file owns vocabulary,
+> [MISSION.md](docs/alignment/MISSION.md) owns current project purpose and the
+> VROOM/AGM ownership boundary, and
+> [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md) owns the
+> architecture rationale.
 
 ---
 
@@ -106,9 +108,15 @@ under Auto permission mode.) Only after that do they do their own job.
 
 | Supervisor | "C-suite" analogy | Owns | Secondary | Tertiary |
 |------------|-------------------|------|-----------|----------|
-| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, not reinventing the wheel | Overseer | Orchestrator |
+| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Enqueue/dequeue work, monitor active workers, keep steady progress, never sit idle | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO (Reliability) | Resource usage (CPU/disk/memory/quota), leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
+
+The canonical code representation of this table lives in
+`pkg/vroom/supervisor`: it owns the three session identities, compact aliases,
+roles, and peer relationships. Launchers and AGM heartbeat tooling consume that
+topology while retaining their own harness, model, scheduling, and persistence
+policy.
 
 **Roadmap authority:** The **Meta-Orchestrator is the only agent allowed to add
 items to the roadmap.** Every other agent may *propose* work (see
@@ -199,6 +207,11 @@ a Worker" is a VROOM statement; "`agm session new` starts a tmux session" is an
 AGM statement. AGM has no opinion about roadmaps, prioritization, or supervisory
 roles — that is all VROOM.
 
+The exact VROOM/AGM ownership contract lives in the canonical
+[`MISSION.md`](docs/alignment/MISSION.md); this vocabulary guide does not restate
+it. AGM's `session verify` and `batch verify` commands report whether supplied
+assertions pass, and the mission defines how VROOM uses that evidence.
+
 AGM has its own internal ADRs under `agm/docs/adr/` and `agm/cmd/.../adr/`. Those
 are legitimately AGM-scoped. **Cross-cutting / above-AGM architecture (like
 VROOM) belongs in the top-level [`docs/adr/`](docs/adr/), not under `agm/`.**
@@ -262,12 +275,15 @@ These are or were **bugs in the vocabulary**, recorded here per the "call
 conflicts out immediately" rule. Some entries are resolved by ADRs and remain
 listed so older docs and identifiers can be interpreted correctly.
 
-1. **"VROOM" — old five-role model vs. corrected model.**
+1. **"VROOM" — old five-role model vs. corrected model — RESOLVED
+   (2026-07-18).**
    Many pre-2026-05-17 docs describe VROOM as Verifier/Requester/Orchestrator/
    Overseer/Meta-Orchestrator with a lexicographic value evaluator. That model
-   is superseded by the one in this file and
-   [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The
-   superseded ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) are stubbed with redirects.
+   is superseded. Current purpose and ownership live in
+   [MISSION.md](docs/alignment/MISSION.md), vocabulary lives in this file, and
+   architecture rationale lives in
+   [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The superseded
+   AGM ADRs 020–025 were removed; ADR-002 is the retained decision.
 
 2. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
@@ -277,9 +293,9 @@ listed so older docs and identifiers can be interpreted correctly.
      `OnDefine/OnEnforce/OnAudit/OnResolve` callbacks. This is a *code concept*
      with a different "E" and "R"; docs call it "workflow lifecycle hooks", not
      "DEAR hooks". Exported Go names stay unchanged.
-   - **(c) Backlog phase prefix:** `DEAR-X.*` identifiers in
-     `docs/workflow-engine/BACKLOG.md` / ROADMAP are a numbering convention for
-     framework-improvement items, unrelated to either loop.
+   - **(c) Archived backlog prefix:** legacy `DEAR-X.*` identifiers were a
+     numbering convention for framework-improvement items, unrelated to either
+     loop. Current work uses Beads IDs.
    Canonical authority: [ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md).
 
 3. **`pkg/vroom` code encodes the superseded model.**

@@ -10,17 +10,17 @@
 
 **WFR-01** When rewind magnitude is calculated, the system shall use the canonical CHARTER-through-RETRO sequence and reject unknown phase names.
 
-**WFR-02** When a rewind has zero magnitude, the system shall skip retrospective and history writes.
+**WFR-02** When an accepted rewind has zero magnitude, the system shall append the same canonical history event and retrospective block as any other accepted rewind while preserving magnitude zero.
 
-**WFR-03** When a non-zero rewind is logged, the system shall capture reason, learnings, git state, canonical deliverables, and completed waypoint state.
+**WFR-03** When a rewind is logged, the system shall capture reason, learnings, git state, canonical deliverables, and completed waypoint state.
 
-**WFR-04** When rewind context is captured from status, the system shall parse canonical V2 status and preserve project identity as the session identifier.
+**WFR-04** When rewind context is captured from status, the system shall parse the post-reset canonical schema 2.0 status and preserve project identity as the session identifier.
 
 **WFR-05** When a rewind entry is persisted, the system shall append it to `RETRO-retrospective.md` without rewriting existing entries.
 
-**WFR-06** When a rewind entry is persisted, the system shall also append a structured event to `WAYFINDER-HISTORY.md`.
+**WFR-06** When a rewind entry is persisted, the system shall also append a structured event to `WAYFINDER-HISTORY.jsonl`.
 
-**WFR-07** When git or context capture fails, the system shall preserve the rewind operation and record available diagnostic context.
+**WFR-07** When required status, history, or retrospective persistence fails, the system shall return an explicit error without a normal rewind-success claim; context probes may preserve available diagnostic context.
 
 **WFR-08** When concurrent context probes run, the system shall wait for every probe and shall preserve partial successful results.
 

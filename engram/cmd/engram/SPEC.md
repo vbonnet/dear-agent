@@ -346,7 +346,7 @@ Manage Claude Code sub-agents for interactive workflows.
 - `wayfinder <phase>` - Invoke wayfinder-phase sub-agent for SDLC phase execution
 
 **Wayfinder Phases**:
-D1, D2, D3, D4, S4, S5, S6 (CRITICAL), S7, S8, S9, S10 (CRITICAL), S11
+CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO
 
 **Note**: Sub-agents require Claude Code. On other platforms, fallback guidance is provided.
 

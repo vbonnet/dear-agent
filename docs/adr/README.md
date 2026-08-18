@@ -1,49 +1,44 @@
-# Architecture Decision Records
+# Architecture decisions
 
-Decisions about dear-agent's architecture live here. The format is light:
-one short ADR per decision (target: ~200 words), descriptive H1, single
-`Status:` line, no fixed Context/Decision/Alternatives/Consequences scaffold.
-The 2026-05-17 ADR inventory prune (`vbonnet/engram-research` `audits/2026-05-17-adr-inventory-prune.md`)
-captures the audit that produced the current set; this directory was rewritten
-in Pocock-tight form on 2026-05-26.
+<!-- Last audited at: 2026-07-18 -->
 
-**Test for keeping an ADR** ([Matt Pocock's three-question test][pocock]):
-(1) hard to reverse, (2) surprising without context, (3) the result of a real
-trade-off. Vocabulary, conventions, and standard patterns go to
-[/CONTEXT.md](../../CONTEXT.md) instead — that is the domain-language source
-of truth; an ADR loses to it for definitions.
+This directory records current, durable Dear Agent trade-offs. Keep a record
+only when the choice is hard to reverse, surprising without context, and the
+result of a real alternative. `CONTEXT.md` owns vocabulary and conventions;
+Engram Research owns active plans and retrospectives; git history owns deleted
+implementation diaries.
 
-[pocock]: https://github.com/mattpocock/skills/blob/main/skills/engineering/improve-codebase-architecture/SKILL.md
+Each record has one scoped numeric identity, one `Status:` line, and a concise
+Context/Decision/Alternatives/Consequences shape. A superseded record must name
+its live successor. Number gaps are intentional; do not renumber old identities
+to close them.
 
 ## Index
 
-| ADR | Title | Status |
-|-----|-------|--------|
+| ADR | Decision | Status |
+| --- | --- | --- |
 | [001](ADR-001-monorepo-consolidation.md) | Monorepo Consolidation | Accepted |
 | [002](ADR-002-vroom-execution-architecture.md) | VROOM Execution Architecture | Accepted |
-| [009](ADR-009-work-item-as-first-class-substrate.md) | WorkItem as First-Class Substrate | Proposed |
-| [010](ADR-010-workflow-engine-architecture.md) | Workflow Engine as Substrate-Quality Work-Item Layer | Proposed |
-| [011](ADR-011-dear-audit-subsystem.md) | Scheduled Repository Audit Subsystem | Proposed |
-| [012](ADR-012-provider-transport-layer.md) | Provider Transport — Roles → Providers Routing | Proposed |
-| [013](ADR-013-tailscale-api.md) | Tailscale-Integrated HTTP API | Proposed |
-| [014](ADR-014-plugin-system.md) | Plugin System for Composable Extensibility | Proposed |
-| [015](ADR-015-signal-aggregator.md) | Signal Aggregator + Recommendation MCP | Proposed |
-| [016](ADR-016-recommendation-mcp-server.md) | _Recommendation MCP Server_ | **Superseded by [015](ADR-015-signal-aggregator.md)** |
-| [017](ADR-017-gateway-platform-adapters.md) | Gateway and Platform Adapters | Proposed |
+| [010](ADR-010-workflow-engine-architecture.md) | Durable workflow execution substrate | Accepted |
+| [011](ADR-011-dear-audit-subsystem.md) | Scheduled repository audit subsystem | Accepted |
+| [012](ADR-012-provider-transport-layer.md) | Role-based model and provider routing | Accepted |
+| [013](ADR-013-tailscale-api.md) | Tailscale-Integrated HTTP API | Accepted |
+| [014](ADR-014-plugin-system.md) | Plugin System for Composable Extensibility | Accepted |
+| [015](ADR-015-signal-aggregator.md) | Signal aggregator and recommendation MCP | Accepted |
+| [017](ADR-017-gateway-platform-adapters.md) | Transport-neutral gateway handlers | Accepted |
 | [018](ADR-018-graceful-exit-framework-default.md) | Graceful Exit as a Framework Default | Accepted |
-| [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Accepted |
-| [023](ADR-023-friction-reporting-and-session-handoff.md) | Friction Reporting & Session Handoff | Proposed (design) |
-| [029](ADR-029-ralph-wiggum-merge-loop.md) | Ralph Wiggum — host-tick persistent merge loop | Accepted |
-| [030](ADR-030-dependabot-auto-merge.md) | Dependabot Auto-Merge via GitHub Actions | Accepted |
+| [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Deprecated |
+| [024](ADR-024-a2a-protocol-adoption.md) | A2A supervisor protocol | Accepted |
+| [027](ADR-027-bumblebee-endpoint-scanner.md) | Pinned endpoint inventory scanner | Accepted |
+| [028](ADR-028-smart-integration-test-selection.md) | Dependency-aware integration test selection | Accepted |
+| [029](ADR-029-ralph-wiggum-merge-loop.md) | Ralph Wiggum — host-tick merge loop, not GHA/webhook/Monitor | Accepted |
+| [030](ADR-030-dependabot-auto-merge.md) | Auto-merge Dependabot patch/minor PRs via GitHub Actions | Accepted |
+| [031](ADR-031-agent-escalation-path.md) | Audited exceptions and escalation | Accepted |
+| [032](ADR-032-escalate-to-supervisor.md) | Supervisor escalation chain | Accepted |
 | [033](ADR-033-commit-anchored-progress-ledger.md) | Commit-Anchored Progress Ledger for Long-Running Workers | Accepted |
-| [034](ADR-034-squash-only-merge-contract.md) | Squash-only merge contract + auto-merge arming | Accepted |
+| [034](ADR-034-squash-only-merge-contract.md) | Squash-only merge contract; routine auto-arming retired | Accepted |
 | [035](ADR-035-dear-terminology-disambiguation.md) | DEAR Terminology Disambiguation | Accepted |
+| [036](ADR-036-wayfinder-enforcement.md) | Wayfinder trace at the delivery boundary | Accepted |
+| [037](ADR-037-cedar-policy-language.md) | Cedar as the persona/policy-enforcement language | Proposed |
 
-Number gaps (003–008, 019–021, 024+) are intentional — earlier numbers were
-withdrawn, renumbered into `agm/docs/adr/`, or superseded by the 2026-05-17
-prune. Renumbering would break inbound refs and ADR identity.
-
-Numbered ADRs deeper in the tree (`agm/docs/adr/`, `engram/`, `pkg/*/docs/`,
-etc.) follow their own per-subsystem numbering and are not indexed here.
-Follow-up pruning of those clusters is tracked in the audit's FU-1…FU-4,6
-sections.
+Subsystem ADR directories have independent scoped numbering and indexes.

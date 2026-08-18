@@ -11,8 +11,9 @@ import (
 // LintGoCheck wraps `golangci-lint run --out-format=json`. Each
 // reported issue becomes one Finding fingerprinted by (file, line,
 // linter, message). Severity is P2 by default — lint findings are
-// drift, not breakage; auto-fixable rules suggest StrategyAuto so
-// the runner can apply `golangci-lint run --fix`.
+// drift, not breakage; auto-fixable rules record StrategyAuto with a
+// proposed `golangci-lint run --fix` command. The audit package records but
+// never executes the command.
 type LintGoCheck struct{}
 
 // Meta returns the check's identity.

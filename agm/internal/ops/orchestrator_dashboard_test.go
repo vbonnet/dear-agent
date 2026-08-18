@@ -2,7 +2,6 @@ package ops
 
 import (
 	"testing"
-	"time"
 )
 
 func TestExtractTrustSummary_Empty(t *testing.T) {
@@ -67,62 +66,6 @@ func TestExtractTrustSummary_TenEntries(t *testing.T) {
 	// Top should be sorted descending (highest scores first)
 	if summary.Top[0].Score < summary.Top[len(summary.Top)-1].Score {
 		t.Error("Top entries should be sorted by descending score")
-	}
-}
-
-func TestExtractBacklogSummary_Empty(t *testing.T) {
-	backlog := &TaskListResult{Tasks: []Task{}, Total: 0}
-	summary := extractBacklogSummary(backlog)
-
-	if summary.Total != 0 {
-		t.Errorf("expected Total=0, got %d", summary.Total)
-	}
-	if len(summary.Next) != 0 {
-		t.Errorf("expected Next to be empty, got %d tasks", len(summary.Next))
-	}
-}
-
-func TestExtractBacklogSummary_SkipsDoneTasks(t *testing.T) {
-	now := time.Now()
-	tasks := []Task{
-		{ID: "1", Status: "done", Description: "task 1"},
-		{ID: "2", Status: "queued", Description: "task 2"},
-		{ID: "3", Status: "in-progress", Description: "task 3"},
-		{ID: "4", Status: "done", Description: "task 4"},
-	}
-	backlog := &TaskListResult{Tasks: tasks, Total: 4}
-	summary := extractBacklogSummary(backlog)
-
-	if summary.Total != 4 {
-		t.Errorf("expected Total=4, got %d", summary.Total)
-	}
-	if len(summary.Next) != 2 {
-		t.Errorf("expected Next to have 2 non-done tasks, got %d", len(summary.Next))
-	}
-
-	// Check that no "done" tasks are in Next
-	for _, task := range summary.Next {
-		if task.Status == "done" {
-			t.Errorf("Next should not contain done tasks, got %s", task.ID)
-		}
-	}
-
-	_ = now // suppress unused warning
-}
-
-func TestExtractBacklogSummary_LimitThree(t *testing.T) {
-	tasks := []Task{
-		{ID: "1", Status: "queued", Description: "task 1"},
-		{ID: "2", Status: "queued", Description: "task 2"},
-		{ID: "3", Status: "queued", Description: "task 3"},
-		{ID: "4", Status: "queued", Description: "task 4"},
-		{ID: "5", Status: "queued", Description: "task 5"},
-	}
-	backlog := &TaskListResult{Tasks: tasks, Total: 5}
-	summary := extractBacklogSummary(backlog)
-
-	if len(summary.Next) != 3 {
-		t.Errorf("expected Next to have max 3 tasks, got %d", len(summary.Next))
 	}
 }
 

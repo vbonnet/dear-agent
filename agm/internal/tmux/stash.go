@@ -68,6 +68,8 @@ func normalizeStashHarness(h string) string {
 		return "agy"
 	case "opencode", "opencode-cli":
 		return "opencode-cli"
+	case "pi", "pi-cli":
+		return "pi-cli"
 	default:
 		return strings.ToLower(strings.TrimSpace(h))
 	}
@@ -84,7 +86,7 @@ func normalizeStashHarness(h string) string {
 // production data.
 //
 // The key return is C-s for every harness today; the registry is deliberately
-// shaped to return a per-harness key so that, once codex-cli/agy/opencode-cli
+// shaped to return a per-harness key so that, once codex-cli/agy/opencode-cli/pi-cli
 // draft keys are confirmed, non-Claude harnesses return their own key here.
 //
 //nolint:unparam // key intentionally uniform today; registry shape is future-proofing (see doc above).

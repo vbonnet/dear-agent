@@ -25,6 +25,7 @@ func TestDetectCLI(t *testing.T) {
 		{"Gemini", "GEMINI_SESSION_ID", "test-456", CLIGemini},
 		{"OpenCode", "OPENCODE_SESSION_ID", "test-789", CLIOpenCode},
 		{"Codex", "CODEX_SESSION_ID", "test-abc", CLICodex},
+		{"Pi", "PI_SESSION_ID", "test-pi", CLIPi},
 		{"Antigravity", "AGY_CONVERSATION_ID", "test-agy", CLIAgy},
 		{"Unknown", "", "", CLIUnknown},
 	}
@@ -40,6 +41,8 @@ func TestDetectCLI(t *testing.T) {
 			os.Unsetenv("OPENCODE_SESSION_ID")
 			t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
 			os.Unsetenv("CODEX_SESSION_ID")
+			t.Setenv("PI_SESSION_ID", "")
+			os.Unsetenv("PI_SESSION_ID")
 
 			// Set test env var
 			if tt.envVar != "" {
@@ -282,6 +285,19 @@ func TestDetectFromCodexUsesMarkedHeuristic(t *testing.T) {
 	assert.True(t, usage.Estimated)
 }
 
+func TestDetectFromPiUsesMarkedHeuristic(t *testing.T) {
+	registry := createTestRegistry(t)
+	detector := NewDetector(registry)
+
+	t.Setenv("PI_SESSION_ID", "test-pi-session")
+	usage, err := detector.Detect()
+	require.NoError(t, err)
+	assert.Equal(t, "pi-cli", usage.Source)
+	assert.Equal(t, "claude-sonnet-4.6", usage.ModelID)
+	assert.Equal(t, "test-pi-session", usage.SessionID)
+	assert.True(t, usage.Estimated)
+}
+
 func TestDetectFromSessionUnsupportedCLI(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
@@ -350,6 +366,7 @@ func TestDetectFromSession(t *testing.T) {
 		{CLIGemini, "gemini-cli"},
 		{CLIOpenCode, "opencode-cli"},
 		{CLICodex, "codex-cli"},
+		{CLIPi, "pi-cli"},
 		{CLIAgy, "agy"},
 	} {
 		t.Run(string(tt.cli), func(t *testing.T) {
@@ -479,6 +496,17 @@ func TestPortableContextUsagePayloads(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid gemini-cli context usage")
 	})
+
+	t.Run("Pi structured counters", func(t *testing.T) {
+		t.Setenv("PI_CONTEXT_USAGE", `{"context":{"used_tokens":32000,"total_tokens":1000000},"model_id":"claude-sonnet-4.6"}`)
+		usage, err := detector.DetectFromSession("pi-session", CLIPi)
+		require.NoError(t, err)
+		assert.Equal(t, 32000, usage.UsedTokens)
+		assert.Equal(t, 1000000, usage.TotalTokens)
+		assert.Equal(t, "pi-cli", usage.Source)
+		assert.Equal(t, "pi-session", usage.SessionID)
+		assert.False(t, usage.Estimated)
+	})
 }
 
 func TestParseUsageJSONRejectsCountersOutsidePlatformIntRange(t *testing.T) {
@@ -508,6 +536,7 @@ func TestCLIConstants(t *testing.T) {
 	assert.Equal(t, CLI("gemini"), CLIGemini)
 	assert.Equal(t, CLI("opencode"), CLIOpenCode)
 	assert.Equal(t, CLI("codex"), CLICodex)
+	assert.Equal(t, CLI("pi"), CLIPi)
 	assert.Equal(t, CLI("agy"), CLIAgy)
 	assert.Equal(t, CLI("unknown"), CLIUnknown)
 }

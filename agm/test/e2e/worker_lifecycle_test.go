@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // TestE2E_WorkerLifecycle validates the full AGM worker pipeline:
@@ -85,7 +87,7 @@ func TestE2E_WorkerLifecycle(t *testing.T) {
 	helloPath := filepath.Join(repoDir, "hello.txt")
 	if _, err := os.Stat(helloPath); os.IsNotExist(err) {
 		// Switch to main and check
-		run(t, "git", "-C", repoDir, "checkout", "main")
+		gitRun(t, repoDir, "checkout", "main")
 		if _, err := os.Stat(helloPath); os.IsNotExist(err) {
 			t.Fatal("hello.txt not found on main after merge")
 		}
@@ -111,21 +113,22 @@ func TestE2E_WorkerLifecycle(t *testing.T) {
 func initTestRepo(t *testing.T, dir string) {
 	t.Helper()
 	cmds := [][]string{
-		{"git", "-C", dir, "init", "-b", "main"},
-		{"git", "-C", dir, "config", "user.email", "test@example.com"},
-		{"git", "-C", dir, "config", "user.name", "E2E Test"},
+		{"init", "-b", "main"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "E2E Test"},
 	}
 	for _, c := range cmds {
-		run(t, c[0], c[1:]...)
+		gitRun(t, dir, c...)
 	}
+	gittest.HardenRepo(t, dir)
 
 	// Create an initial commit so main exists.
 	readmePath := filepath.Join(dir, "README.md")
 	if err := os.WriteFile(readmePath, []byte("# test repo\n"), 0644); err != nil {
 		t.Fatalf("write README: %v", err)
 	}
-	run(t, "git", "-C", dir, "add", "README.md")
-	run(t, "git", "-C", dir, "commit", "-m", "initial commit")
+	gitRun(t, dir, "add", "README.md")
+	gitRun(t, dir, "commit", "-m", "initial commit")
 }
 
 // spawnWorker calls `agm session new` with --test and --detached.
@@ -323,13 +326,8 @@ func cleanupSession(t *testing.T, name string) {
 	_ = cmd.Run()
 }
 
-// run executes a command, failing the test on error.
-func run(t *testing.T, name string, args ...string) string {
+// gitRun executes Git with the hermetic test configuration.
+func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, out)
-	}
-	return string(out)
+	return gittest.Run(t, dir, args...)
 }

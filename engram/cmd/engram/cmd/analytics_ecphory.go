@@ -37,7 +37,7 @@ EXAMPLES
   $ engram analytics ecphory --format csv > ecphory.csv
 
 TARGET
-  Correctness score ≥99% (D4 acceptance criteria)`,
+  Correctness score ≥99% (acceptance criteria)`,
 	RunE: runEcphoryAnalytics,
 }
 

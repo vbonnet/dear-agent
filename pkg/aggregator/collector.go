@@ -7,8 +7,7 @@ import (
 )
 
 // Collector produces signals of a single Kind. Implementations are
-// independent of the store — the Aggregator owns the persistence
-// step. See ADR-015 §D3.
+// independent of the store — the Aggregator owns the persistence step.
 type Collector interface {
 	// Name returns a stable dot-separated identifier
 	// (e.g. "dear-agent.git"). Used as the key in Report.Collected.

@@ -34,29 +34,30 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Check routing (new files in this PR + whole-tree regression)
         id: check
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -o pipefail
-          git fetch origin "${{ github.base_ref }}" --depth=1
+          git fetch origin "$BASE_REF" --depth=1
           go build -o /tmp/routing-guard ./cmd/routing-guard
 
           : > report.txt
           rc=0
 
           # 1) Block any forbidden file ADDED/renamed in this PR.
-          if ! /tmp/routing-guard --diff "origin/${{ github.base_ref }}" >>report.txt 2>&1; then
+          if ! /tmp/routing-guard --diff "origin/$BASE_REF" >>report.txt 2>&1; then
             rc=1
           fi
 
-          # 2) Whole-tree regression guard: fail if a forbidden file is tracked
-          #    anywhere beyond the documented, shrink-only grandfathered set.
-          if ! /tmp/routing-guard --all --baseline .forbidden-artifacts-baseline.txt >>report.txt 2>&1; then
+          # 2) Whole-tree regression guard: no grandfathered exceptions.
+          if ! /tmp/routing-guard --all >>report.txt 2>&1; then
             rc=1
           fi
 

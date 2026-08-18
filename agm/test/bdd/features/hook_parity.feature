@@ -1,5 +1,6 @@
 # SPEC: internal/hookparity/SPEC.md
 # RELATED-SPEC: .codex/hooks/SPEC.md
+# RELATED-SPEC: .pi/guardrails/SPEC.md
 # RELATED-SPEC: scripts/git-hooks/SPEC.md
 # RELATED-SPEC: agm/internal/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-context-monitor/SPEC.md
@@ -18,6 +19,8 @@
 # RELATED-SPEC: agm/hooks/cmd/stop-session-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-bash-write-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-fs-write-guard/SPEC.md
+# RELATED-SPEC: pkg/version/SPEC.md
+# RELATED-SPEC: tests/buildstamp/SPEC.md
 Feature: Hook harness parity
   Active interactive harnesses should receive the same repository guardrails
   through their native hook configuration surfaces.
@@ -49,6 +52,11 @@ Feature: Hook harness parity
       | opencode-cli | pretool-bypass-guard       |
       | opencode-cli | pretool-pr-guard           |
       | opencode-cli | stop-guardrail-feedback    |
+      | pi-cli       | pretool-spawn-routing      |
+      | pi-cli       | pretool-bead-close-guard   |
+      | pi-cli       | pretool-bypass-guard       |
+      | pi-cli       | pretool-pr-guard           |
+      | pi-cli       | stop-guardrail-feedback    |
 
   Scenario Outline: Non-Claude hook manifests expose Beads lifecycle hooks
     Given hook harness "<harness>" is configured
@@ -69,6 +77,10 @@ Feature: Hook harness parity
       | opencode-cli | UserPromptSubmit |
       | opencode-cli | PreCompact       |
       | opencode-cli | PostCompact      |
+      | pi-cli       | SessionStart     |
+      | pi-cli       | UserPromptSubmit |
+      | pi-cli       | PreCompact       |
+      | pi-cli       | PostCompact      |
 
   Scenario Outline: Repository post-merge hook exposes lifecycle safeguards
     Given the repository post-merge hook is configured
@@ -79,8 +91,18 @@ Feature: Hook harness parity
       | safeguard               |
       | atomic-binary-install   |
       | trunk-build-context     |
+      | agm-companion-coherence |
+      | wayfinder-runtime-deploy |
       | host-artifact-deploy    |
       | deployment-verification |
       | bead-transition         |
       | worktree-sweep          |
       | fail-safe-exit          |
+
+  Scenario: Detached archive companion proves coherent startup
+    When AGM runs detached archive companion startup regressions
+    Then a mixed revision or missing startup acknowledgement should fail before async success
+
+  Scenario: Canonical AGM installation preserves companion coherence
+    When AGM renders the canonical AGM companion install plan
+    Then the root AGM install plan should build and install the companion pair

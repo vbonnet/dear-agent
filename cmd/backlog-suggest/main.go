@@ -1,11 +1,10 @@
-// Command backlog-suggest ranks the declared backlog (BACKLOG.md +
-// ROADMAP.md) and suggests what to pick up next. It is the CLI surface of
-// pkg/backlog and the executable form of the VROOM Orchestrator's
-// deterministic dispatch scan (agm ADR-023). See docs/adr/ADR-022.
+// Command backlog-suggest ranks explicitly supplied Markdown work-item tables.
+// It is a read-only CLI surface over pkg/backlog. Beads owns Dear Agent's live
+// work and VROOM dispatches directly from Beads.
 //
-//	backlog-suggest list                     # every parsed item
-//	backlog-suggest suggest                   # top-N eligible + blocked
-//	backlog-suggest suggest --phase 6 --top 1 --emit-vroom
+//	backlog-suggest list --files ./snapshot.md                    # every parsed item
+//	backlog-suggest suggest --files ./snapshot.md                 # top-N eligible + blocked
+//	backlog-suggest suggest --files ./snapshot.md --phase 6 --top 1
 //
 // Exit codes: 0 success, 1 runtime error, 2 usage error.
 package main
@@ -16,15 +15,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/pkg/backlog"
 )
-
-// defaultFiles is the standard backlog source set, resolved relative to the
-// current working directory.
-var defaultFiles = []string{"docs/workflow-engine/BACKLOG.md", "ROADMAP.md"}
 
 func main() {
 	os.Exit(run())
@@ -57,11 +51,10 @@ Run "%s <subcommand> -h" for subcommand flags.
 `, os.Args[0], os.Args[0])
 }
 
-// parseFiles splits a comma-separated --files value, falling back to the
-// default set when empty.
-func parseFiles(v string) []string {
+// parseFiles splits the required comma-separated --files value.
+func parseFiles(v string) ([]string, error) {
 	if strings.TrimSpace(v) == "" {
-		return defaultFiles
+		return nil, fmt.Errorf("--files is required; Beads owns Dear Agent's live work")
 	}
 	parts := strings.Split(v, ",")
 	out := make([]string, 0, len(parts))
@@ -70,18 +63,26 @@ func parseFiles(v string) []string {
 			out = append(out, p)
 		}
 	}
-	return out
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--files must name at least one Markdown source")
+	}
+	return out, nil
 }
 
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	files := fs.String("files", "", "comma-separated markdown files (default: BACKLOG.md,ROADMAP.md)")
+	files := fs.String("files", "", "required comma-separated Markdown files")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	paths, err := parseFiles(*files)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "list:", err)
+		return 2
+	}
 
-	src := backlog.NewMarkdownSource(parseFiles(*files)...)
+	src := backlog.NewMarkdownSource(paths...)
 	items, err := src.Items(context.Background())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load: %v\n", err)
@@ -100,19 +101,21 @@ func cmdList(args []string) int {
 
 func cmdSuggest(args []string) int {
 	fs := flag.NewFlagSet("suggest", flag.ContinueOnError)
-	files := fs.String("files", "", "comma-separated markdown files (default: BACKLOG.md,ROADMAP.md)")
+	files := fs.String("files", "", "required comma-separated Markdown files")
 	phase := fs.Int("phase", -1, "restrict to one phase (-1 = any)")
 	top := fs.Int("top", backlog.DefaultCapacity, "max suggestions")
 	maxEffort := fs.String("max-effort", "", "drop items larger than this size (S|M|L)")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	emit := fs.Bool("emit-vroom", false, "publish a vroom.decision.dispatched event for the top pick")
-	vroomOut := fs.String("vroom-out", ".dear-agent/vroom-decisions.jsonl", "JSONL file for the VROOM decision event")
-	worker := fs.String("worker", "", "worker hint recorded on the dispatch event")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	paths, err := parseFiles(*files)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "suggest:", err)
+		return 2
+	}
 
-	src := backlog.NewMarkdownSource(parseFiles(*files)...)
+	src := backlog.NewMarkdownSource(paths...)
 	res, err := backlog.NewSuggester(src).Suggest(context.Background(), backlog.Context{
 		Phase:     *phase,
 		Capacity:  *top,
@@ -131,14 +134,6 @@ func cmdSuggest(args []string) int {
 		printResult(src.Name(), res)
 	}
 
-	if *emit && len(res.Suggested) > 0 {
-		if err := emitDispatch(*vroomOut, *worker, res.Suggested[0]); err != nil {
-			fmt.Fprintf(os.Stderr, "emit-vroom: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(os.Stderr, "emitted vroom.decision.dispatched for %s -> %s\n",
-			res.Suggested[0].Item.ID, *vroomOut)
-	}
 	return 0
 }
 
@@ -180,55 +175,4 @@ func encodeJSON(v any) int {
 		return 1
 	}
 	return 0
-}
-
-// emitDispatch writes the dispatch decision through a JSONL-backed VROOM
-// publisher so the pickup is on the append-only decision trail.
-func emitDispatch(outPath, worker string, s backlog.Suggestion) error {
-	pub, err := newJSONLPublisher(outPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = pub.Close() }()
-	return backlog.NewOrchestratorNotifier(pub).WithWorker(worker).Dispatch(s)
-}
-
-// jsonlPublisher implements vroom.EventPublisher by appending one JSON
-// object per event to a file. It mirrors eventbus.JSONLSink's shape but
-// speaks the vroom.EventPublisher (topic, data) contract directly.
-type jsonlPublisher struct {
-	f *os.File
-}
-
-func newJSONLPublisher(path string) (*jsonlPublisher, error) {
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, fmt.Errorf("create dir: %w", err)
-		}
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // operator-supplied CLI flag
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	return &jsonlPublisher{f: f}, nil
-}
-
-// Publish implements vroom.EventPublisher.
-func (p *jsonlPublisher) Publish(topic string, data map[string]interface{}) error {
-	rec := map[string]interface{}{"topic": topic}
-	for k, v := range data {
-		rec[k] = v
-	}
-	line, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("marshal event: %w", err)
-	}
-	if _, err := p.f.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("write event: %w", err)
-	}
-	return nil
-}
-
-func (p *jsonlPublisher) Close() error {
-	return p.f.Close()
 }

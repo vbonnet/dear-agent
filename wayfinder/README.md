@@ -1,85 +1,48 @@
-# Wayfinder Plugin
+# Wayfinder
 
-Structured SDLC workflow management with a 9-phase methodology that guides
-AI-assisted development from charter through retrospective. Wayfinder acts as
-a navigation system, ensuring AI agents complete all critical development
-phases with validation gates between each step.
+Wayfinder is a Go CLI for a gated nine-phase development workflow:
 
-## Phases
+`CHARTER → PROBLEM → RESEARCH → DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO`
 
-| # | Phase | Purpose |
-|---|-------|---------|
-| 1 | CHARTER | Define problem, scope, success criteria |
-| 2 | PROBLEM | Validate problem exists with evidence |
-| 3 | RESEARCH | Search for existing solutions (build/buy/adapt) |
-| 4 | DESIGN | Compare approaches, detailed architecture |
-| 5 | SPEC | Functional and non-functional requirements |
-| 6 | PLAN | Task breakdown, estimates, dependencies |
-| 7 | SETUP | Prototype, proof-of-concept, environment setup |
-| 8 | BUILD | TDD implementation with state machine enforcement |
-| 9 | RETRO | Lessons learned, actual vs estimated effort |
+The executable interface is `wayfinder session`; session state lives in the
+YAML frontmatter of `WAYFINDER-STATUS.md`.
 
-## Commands
+Install the executable before installing or invoking the companion agent skill:
 
-| Command | Purpose |
-|---------|---------|
-| `/wayfinder:start "desc"` | Create new project session |
-| `/wayfinder:next` | Execute next phase |
-| `/wayfinder:run-all-phases` | Autopilot through all remaining phases |
-| `/wayfinder:close` | Complete project (completed/abandoned/blocked) |
-| `/wayfinder:rewind` | Rewind to earlier phase |
-| `/wayfinder:verify` | Validate and sign a phase file |
-
-## Usage
-
-### Start a Project
-
-```
-/wayfinder:start "Implement OAuth authentication"
+```sh
+go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
-Creates project directory with `WAYFINDER-STATUS.md` and begins CHARTER phase.
+All phase validators are compiled into this executable; no separate review
+scripts, Python environment, or Engram checkout is required.
 
-### Execute Phases
+## Quick start
 
+```sh
+wayfinder -C <project-dir> session start <project-name> \
+  --project-type feature --risk-level M
+wayfinder -C <project-dir> session status
+wayfinder -C <project-dir> session start-phase CHARTER
+printf '# Charter\n\n## Objective\nDefine the user-visible outcome.\n\n## Scope\nName included work and explicit exclusions.\n\n## Constraints\nRecord safety, compatibility, and delivery constraints.\n\n## Success\nState measurable acceptance conditions.\n' \
+  > <project-dir>/CHARTER-charter.md
+wayfinder -C <project-dir> session complete-phase CHARTER --outcome success
+wayfinder -C <project-dir> session next-phase
+wayfinder -C <project-dir> session start-phase PROBLEM
+printf '# Problem Statement\n\n## Current behavior\nDescribe the observable user problem and who experiences it.\n\n## Desired outcome\nState the behavior that should replace it.\n\n## Evidence\nRecord the source, reproduction, or constraint that makes this problem real.\n' \
+  > <project-dir>/PROBLEM-statement.md
+wayfinder -C <project-dir> session complete-phase PROBLEM --outcome success
 ```
-/wayfinder:next          # Execute next phase interactively
-/wayfinder:run-all-phases  # Autopilot mode
-```
 
-### Complete Project
+In Git repositories, phase completion commits its canonical marker files and
+`<PHASE>-*.md` artifacts as a scoped commit. Rewinds similarly commit their
+status, history, and retrospective updates before the target is restarted.
 
-```
-/wayfinder:close         # Validates retrospective and session hygiene
-```
+Run `wayfinder session --help` for the current command surface. Do not edit
+the status file manually or rely on retired phase identifiers.
 
-## When to Use Wayfinder
+## Source of truth
 
-**Use when:**
-- Multi-phase project (>1 day effort)
-- Stakeholder alignment needed
-- Build/buy/adapt decision required
-- Complex implementation with validation needs
-
-**Don't use when:**
-- Simple task (<1 hour)
-- Single-file change or obvious bug fix
-- Requirements are already clear
-
-## Key Features
-
-- **Progressive rigor**: Auto-adjusts depth (Minimal/Standard/Thorough/Comprehensive)
-  based on project complexity signals
-- **Multi-persona validation**: Automatic domain expert detection (Security, ML, etc.)
-  for design reviews
-- **Phase isolation**: Validates artifacts contain only phase-appropriate content
-- **Context compression**: Summarizes completed phases to reduce token usage (40-50%)
-- **Filesystem as truth**: All state in YAML frontmatter and phase files, no hidden databases
-
-## Dependencies
-
-- Go >= 1.21 (`wayfinder-session` CLI)
-- Node.js >= 18.0.0 (TypeScript phase orchestrator)
-- Git (validation, archiving)
-- `cobra` (CLI framework)
-- `yaml` (frontmatter parsing)
+- [SKILL.md](SKILL.md): compact agent workflow
+- [PHASES.md](PHASES.md): phase intent and artifact names
+- [ARCHITECTURE.md](ARCHITECTURE.md): current implementation map
+- [SPEC.md](SPEC.md): observable requirements

@@ -7,7 +7,7 @@
 # every repo on GitHub).
 #
 # Instance keys (repo names) are preserved automatically: both the source
-# resources and the module use the same for_each over local.active_repos, so
+# resources and the module use the same for_each over var.active_repos, so
 # OpenTofu matches source instance ["X"] to module.managed_repos["X"] by key.
 #
 # Apply workflow (per README): run `tofu plan` and CONFIRM it shows only moves

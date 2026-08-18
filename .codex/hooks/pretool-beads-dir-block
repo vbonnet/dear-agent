@@ -1,11 +1,5 @@
-#!/usr/bin/env bash
-# PreToolUse hook: block BEADS_DIR usage, redirect to bd --db or bd -C.
-#
-# bd (beads) supports two ways to target a database outside the current
-# directory:
-#
-#   bd --db /path/to/.beads/embeddeddolt <cmd>   # explicit DB path
-#   bd -C /path/to/project <cmd>                  # cd-style directory targeting
+#!/bin/bash
+# PreToolUse hook: block BEADS_DIR usage, redirect to the canonical Beads DB.
 #
 # BEADS_DIR is not a supported bd environment variable and has no effect on bd.
 # Setting or dereferencing it only clutters the environment and misleads readers.
@@ -19,23 +13,22 @@
 
 set -uo pipefail
 
-MESSAGE='Use `bd --db <path>` or `bd -C <dir>` instead of BEADS_DIR.
+if [ -n "${AGM_CODEX_HOOK_ROOT:-}" ]; then
+  [ -x /usr/local/libexec/dear-agent-codex-hook-json ] || exit 0
+  hook_json() { /usr/local/libexec/dear-agent-codex-hook-json "$@"; }
+else
+  command -v jq >/dev/null 2>&1 || exit 0
+  hook_json() { jq "$@"; }
+fi
+
+MESSAGE='Use `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>` instead of BEADS_DIR.
+Use the explicit canonical database command for repository-relative operations too.
 
 BEADS_DIR is not a supported bd environment variable. Setting it has no
 effect on bd and leaves dead weight in the environment.
 
-To target a database outside the current directory, use one of:
-
-  # Explicit DB path (find with `bd where` inside the project):
-  bd --db /path/to/.beads/embeddeddolt list
-  bd --db /path/to/.beads/embeddeddolt show ce-123
-
-  # cd-style targeting (equivalent to running bd from inside the project):
-  bd -C /path/to/project list
-  bd -C /path/to/project show ce-123
-
-bd also auto-discovers databases by walking up the directory tree, so
-if you are already inside the project no flag is needed at all.'
+dear-agent work is tracked in the shared context-engine database. Keep both
+the explicit database path and Dolt auto-commit mode in every invocation.'
 
 # Assignment: BEADS_DIR=... or export BEADS_DIR=... — the leading
 # (^|[^[:alnum:]_]) emulates a negative lookbehind so MY_BEADS_DIR passes.
@@ -70,22 +63,22 @@ patch_touches_shell_file() {
 }
 
 input="$(cat)"
-tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+tool="$(printf '%s' "$input" | hook_json -r '.tool_name // empty' 2>/dev/null || true)"
 [ -n "$tool" ] || exit 0
 
 case "$tool" in
 Bash)
-  cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  cmd="$(printf '%s' "$input" | hook_json -r '.tool_input.command // empty' 2>/dev/null || true)"
   [ -n "$cmd" ] || exit 0
   if uses_beads_dir "$cmd"; then
     block
   fi
   ;;
 Write | Edit | MultiEdit)
-  file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+  file_path="$(printf '%s' "$input" | hook_json -r '.tool_input.file_path // empty' 2>/dev/null || true)"
   [ -n "$file_path" ] || exit 0
   printf '%s' "$file_path" | grep -qE "$SHELL_FILE_RE" || exit 0
-  text="$(printf '%s' "$input" | jq -r '
+  text="$(printf '%s' "$input" | hook_json -r '
     .tool_input as $t |
     [($t.content // empty), ($t.new_string // empty),
      (($t.edits // [])[] | .new_string // empty)] | join("\n")
@@ -96,7 +89,7 @@ Write | Edit | MultiEdit)
   fi
   ;;
 apply_patch)
-  patch_text="$(printf '%s' "$input" | jq -r '
+  patch_text="$(printf '%s' "$input" | hook_json -r '
     if (.tool_input | type) == "string" then .tool_input
     else (.tool_input.patch // .tool_input.input // .tool_input.content // empty)
     end

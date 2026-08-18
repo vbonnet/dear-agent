@@ -27,8 +27,8 @@ type DeployFinding struct {
 	Remediation string
 }
 
-// deployedGate is the Phase-2 "deployed" gate of the bead lifecycle
-// (docs/drift-detection-plan.md). Given the files a bead's *merged* PRs
+// deployedGate is the "deployed" gate of the bead lifecycle documented in
+// cmd/drift-check/README.md. Given the files a bead's *merged* PRs
 // changed, it finds the deploy targets whose source was touched and checks
 // whether each one is current on the host. A stale (drift) or never-installed
 // (missing, required) target is returned as a finding that blocks the close —

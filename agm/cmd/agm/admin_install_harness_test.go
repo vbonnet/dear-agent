@@ -8,39 +8,28 @@ import (
 )
 
 func TestInstallHarnessCmd_InvalidHarness(t *testing.T) {
-	// Reset flags
-	installHarnessJSON = true
-	installHarnessQuiet = false
-
-	cmd := installHarnessCmd
-	cmd.SetArgs([]string{"invalid-harness"})
-
-	err := cmd.Execute()
+	err := executeFreshCommandForTest(t, newInstallHarnessCommand, []string{"invalid-harness"})
 	if err == nil {
 		t.Fatal("Expected error for invalid harness")
 	}
 }
 
 func TestInstallHarnessCmd_ValidHarness(t *testing.T) {
-	// Reset flags
-	installHarnessJSON = true
-	installHarnessQuiet = false
-
-	tests := []string{"codex", "gemini", "opencode"}
+	tests := []string{"codex", "gemini", "opencode", "pi"}
 
 	for _, harness := range tests {
 		t.Run(harness, func(t *testing.T) {
 			// This test just verifies the command structure
 			// Actual installation behavior depends on system state
-			cmd := installHarnessCmd
+			cmd := newInstallHarnessCommand()
 
 			if cmd.Use != "install-harness <harness>" {
 				t.Fatalf("Unexpected command use: %s", cmd.Use)
 			}
 
-			// Verify command accepts the harness argument
-			// (ValidArgs is not required for ExactArgs; command validates at runtime)
-			cmd.SetArgs([]string{harness})
+			if err := cmd.Args(cmd, []string{harness}); err != nil {
+				t.Fatalf("command rejected valid harness argument %q: %v", harness, err)
+			}
 		})
 	}
 }
@@ -48,11 +37,11 @@ func TestInstallHarnessCmd_ValidHarness(t *testing.T) {
 func TestInstallHarnessCmd_JSONOutput(t *testing.T) {
 	// Test that JSON output can be parsed
 	result := &ops.HarnessInstallResult{
-		Success:  true,
-		Harness:  "codex",
-		Message:  "Test message",
-		Version:  "1.0.0",
-		Path:     "/usr/bin/codex",
+		Success: true,
+		Harness: "codex",
+		Message: "Test message",
+		Version: "1.0.0",
+		Path:    "/usr/bin/codex",
 	}
 
 	jsonStr, err := ops.ResultToJSON(result)
@@ -88,7 +77,7 @@ func TestInstallCodexCmd_Exists(t *testing.T) {
 
 func TestInstallHarnessValidateHarnessTypes(t *testing.T) {
 	// Test that all valid harness types are accepted
-	validTypes := []string{"codex", "gemini", "opencode"}
+	validTypes := []string{"codex", "gemini", "opencode", "pi"}
 
 	for _, harness := range validTypes {
 		_, err := ops.ValidateHarness(harness)
@@ -99,21 +88,14 @@ func TestInstallHarnessValidateHarnessTypes(t *testing.T) {
 }
 
 func TestInstallHarnessJSONFlag(t *testing.T) {
-	// Reset flags to defaults
-	oldJSON := installHarnessJSON
-	oldQuiet := installHarnessQuiet
-	defer func() {
-		installHarnessJSON = oldJSON
-		installHarnessQuiet = oldQuiet
-	}()
+	cmd := newInstallHarnessCommand()
 
 	// Test that flags are properly defined
-	if installHarnessCmd.Flags().Lookup("json") == nil {
+	if cmd.Flags().Lookup("json") == nil {
 		t.Fatal("--json flag not found")
 	}
 
-	if installHarnessCmd.Flags().Lookup("quiet") == nil {
+	if cmd.Flags().Lookup("quiet") == nil {
 		t.Fatal("--quiet flag not found")
 	}
 }
-

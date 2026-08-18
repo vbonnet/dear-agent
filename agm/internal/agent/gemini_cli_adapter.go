@@ -15,18 +15,24 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// GeminiCLIAdapter implements Agent interface for Gemini CLI.
+// GeminiCLIAdapter is the concrete compatibility adapter for Gemini CLI.
 //
-// It runs Gemini CLI in tmux (like Claude) and provides the Agent interface
+// It runs Gemini CLI in tmux (like Claude) and provides concrete lifecycle
 // abstraction for Gemini sessions.
 type GeminiCLIAdapter struct {
 	sessionStore SessionStore
 }
 
+var (
+	geminiResumeHasSession       = tmux.HasSession
+	geminiResumeNewSession       = tmux.NewSession
+	geminiResumeIsProcessRunning = tmux.IsProcessRunning
+)
+
 // NewGeminiCLIAdapter creates a new Gemini CLI adapter instance.
 //
 // If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
-func NewGeminiCLIAdapter(sessionStore SessionStore) (Agent, error) {
+func NewGeminiCLIAdapter(sessionStore SessionStore) (*GeminiCLIAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {
@@ -62,6 +68,10 @@ func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) 
 	if tmuxName == "" {
 		tmuxName = fmt.Sprintf("gemini-%s", time.Now().Format("20060102-150405"))
 	}
+	values := append([]string{ctx.WorkingDirectory}, ctx.AuthorizedDirs...)
+	if err := validatePastedShellValues(values...); err != nil {
+		return "", fmt.Errorf("validate Gemini launch: %w", err)
+	}
 
 	// Check if tmux session already exists
 	exists, err := tmux.HasSession(tmuxName)
@@ -78,19 +88,10 @@ func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) 
 
 	// Build Gemini command with directory authorization
 	// Use --include-directories to pre-approve workspace and avoid trust prompt
-	geminiCmd := fmt.Sprintf("gemini --include-directories '%s'", ctx.WorkingDirectory)
-
-	// Add additional authorized directories
-	for _, dir := range ctx.AuthorizedDirs {
-		if dir != ctx.WorkingDirectory {
-			geminiCmd += fmt.Sprintf(" --include-directories '%s'", dir)
-		}
-	}
-
-	geminiCmd += " && exit"
+	geminiCmd := buildGeminiStartCommand(ctx.WorkingDirectory, ctx.AuthorizedDirs)
 
 	// Start Gemini CLI in tmux
-	if err := tmux.SendCommand(tmuxName, geminiCmd); err != nil {
+	if err := sendPastedShellCommand(tmuxName, geminiCmd, values...); err != nil {
 		// Clean up tmux session on error if we created it
 		if !exists {
 			_ = tmux.SendCommand(tmuxName, "exit\r")
@@ -143,21 +144,15 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 	}
 
 	// Check if tmux session exists
-	exists, err := tmux.HasSession(metadata.TmuxName)
+	exists, err := geminiResumeHasSession(metadata.TmuxName)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 
-	sendCommands := false
-	if !exists {
-		// Create new tmux session
-		if err := tmux.NewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-		sendCommands = true
-	} else {
+	sendCommands := !exists
+	if exists {
 		// Check if Gemini is already running
-		geminiRunning, err := tmux.IsProcessRunning(metadata.TmuxName, "gemini")
+		geminiRunning, err := geminiResumeIsProcessRunning(metadata.TmuxName, "gemini")
 		if err != nil {
 			// Detection failed - skip commands for safety
 			sendCommands = false
@@ -167,21 +162,23 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 	}
 
 	if sendCommands {
-		// Build resume command with UUID
-		// If UUID is stored, use it. Otherwise fall back to "latest"
-		var resumeCmd string
-		if metadata.UUID != "" {
-			// Resume specific session by UUID
-			resumeCmd = fmt.Sprintf("cd '%s' && gemini --resume %s && exit",
-				metadata.WorkingDir,
-				metadata.UUID)
-		} else {
-			// No UUID stored - use "latest" as fallback
-			resumeCmd = fmt.Sprintf("cd '%s' && gemini --resume latest && exit",
-				metadata.WorkingDir)
+		if err := validatePastedShellValues(metadata.WorkingDir, metadata.UUID); err != nil {
+			return fmt.Errorf("validate Gemini resume: %w", err)
+		}
+		if !exists {
+			// Validate every value that can reach the terminal before creating
+			// a replacement session. A healthy existing Gemini process needs no
+			// paste and therefore does not reject legacy metadata unnecessarily.
+			if err := geminiResumeNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
+				return fmt.Errorf("failed to create tmux session: %w", err)
+			}
 		}
 
-		if err := tmux.SendCommand(metadata.TmuxName, resumeCmd); err != nil {
+		// Build resume command with UUID.
+		// If UUID is stored, use it. Otherwise fall back to "latest".
+		resumeCmd := buildGeminiResumeCommand(metadata.WorkingDir, metadata.UUID)
+
+		if err := sendPastedShellCommand(metadata.TmuxName, resumeCmd, metadata.WorkingDir, metadata.UUID); err != nil {
 			return fmt.Errorf("failed to resume Gemini: %w", err)
 		}
 
@@ -447,6 +444,9 @@ func (a *GeminiCLIAdapter) cmdRename(cmd Command, sessionIDStr string, metadata 
 	if err != nil {
 		return fmt.Errorf("rename command: %w", err)
 	}
+	if err := ValidateSendKeysText("session name", newName); err != nil {
+		return fmt.Errorf("rename command: %w", err)
+	}
 	if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/chat save %s\r", newName)); err != nil {
 		return fmt.Errorf("failed to send chat save command: %w", err)
 	}
@@ -465,7 +465,7 @@ func (a *GeminiCLIAdapter) cmdSetDir(cmd Command, sessionIDStr string, metadata 
 	if err := ValidateSendDirPath(newPath); err != nil {
 		return fmt.Errorf("setdir command: %w", err)
 	}
-	if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+	if err := sendPastedShellCommand(metadata.TmuxName, buildSetDirCommand(newPath), newPath); err != nil {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 	metadata.WorkingDir = newPath
