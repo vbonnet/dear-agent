@@ -285,18 +285,25 @@ func IsSocketInUse() (bool, error) {
 // Useful after starting a tmux server
 func WaitForSocket(timeout time.Duration) error {
 	socketPath := GetSocketPath()
+	return waitForSocket(timeout, func() bool {
+		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
+		if err != nil {
+			return false
+		}
+		conn.Close()
+		return true
+	}, time.Sleep)
+}
+
+func waitForSocket(timeout time.Duration, probe func() bool, wait func(time.Duration)) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		// Check if socket exists and is accessible
-		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
-		if err == nil {
-			conn.Close()
+		if probe() {
 			return nil // Socket is ready
 		}
 
-		// Wait a bit before retrying
-		time.Sleep(100 * time.Millisecond)
+		wait(100 * time.Millisecond)
 	}
 
 	return fmt.Errorf("timeout waiting for socket to become available")

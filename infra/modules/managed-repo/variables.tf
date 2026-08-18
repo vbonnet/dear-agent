@@ -66,3 +66,21 @@ variable "claude_code_oauth_token" {
   default     = null
   sensitive   = true
 }
+
+variable "strict_required_status_checks" {
+  description = <<-EOT
+    Require a pull-request branch to be up to date with the base branch before
+    merging (GitHub's "strict" status-check policy).
+
+    Defaults to true. With strict = false, two PRs whose checks each passed
+    against an older base can merge seconds apart into a semantic conflict that
+    no gate ever evaluated — that is how dear-agent broke `main` for ~50 minutes
+    (PRs #1264/#1265). Checks are only evidence about the merge result if they
+    ran against the tip they will land on.
+
+    The cost is serialization: each merge invalidates every other open PR's
+    up-to-date status, so a deep queue must rebase between merges.
+  EOT
+  type        = bool
+  default     = true
+}
