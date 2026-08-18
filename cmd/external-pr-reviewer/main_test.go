@@ -57,16 +57,46 @@ func TestMultiFlagRejectsEmptyRepo(t *testing.T) {
 	}
 }
 
+func TestRunRejectsNonPositiveWatchInterval(t *testing.T) {
+	for _, interval := range []string{"0", "-1m"} {
+		args := []string{"--repo", "owner/repo", "--watch", "--interval", interval}
+		if got := run(args); got != 2 {
+			t.Fatalf("run(--interval %s) = %d, want 2", interval, got)
+		}
+	}
+}
+
+func TestRunRejectsUnbalancedProviderCommand(t *testing.T) {
+	if got := run([]string{"--repo", "owner/repo", "--codex-cmd", `codex "exec`}); got != 2 {
+		t.Fatalf("run(unbalanced --codex-cmd) = %d, want 2", got)
+	}
+}
+
 func TestSplitCommandBuildsArgumentVector(t *testing.T) {
 	tests := map[string][]string{
-		"":               nil,
-		"   ":            nil,
-		"codex exec -":   {"codex", "exec", "-"},
-		"  agy   run - ": {"agy", "run", "-"},
+		"":                               nil,
+		"   ":                            nil,
+		"codex exec -":                   {"codex", "exec", "-"},
+		"  agy   run - ":                 {"agy", "run", "-"},
+		`"/opt/my tools/codex" exec -`:   {"/opt/my tools/codex", "exec", "-"},
+		`agy run --prompt 'two words' -`: {"agy", "run", "--prompt", "two words", "-"},
+		`codex --flag=""`:                {"codex", "--flag="},
 	}
 	for input, want := range tests {
-		if got := splitCommand(input); !slices.Equal(got, want) {
+		got, err := splitCommand(input)
+		if err != nil {
+			t.Fatalf("splitCommand(%q) error = %v", input, err)
+		}
+		if !slices.Equal(got, want) {
 			t.Fatalf("splitCommand(%q) = %#v, want %#v", input, got, want)
+		}
+	}
+}
+
+func TestSplitCommandRejectsUnbalancedQuotes(t *testing.T) {
+	for _, input := range []string{`codex "exec`, "agy 'run"} {
+		if _, err := splitCommand(input); err == nil {
+			t.Fatalf("splitCommand(%q) error = nil, want error", input)
 		}
 	}
 }

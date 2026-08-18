@@ -31,15 +31,17 @@ const (
 
 // Config controls one external reviewer polling pass.
 type Config struct {
-	Repos       []string
-	Limit       int
-	DryRun      bool
-	StatePath   string
-	ReviewEvent ReviewEvent
-	CodexCmd    []string
-	GeminiCmd   []string
-	GeminiTries int
-	Now         func() time.Time
+	Repos           []string
+	Limit           int
+	DryRun          bool
+	StatePath       string
+	ReviewEvent     ReviewEvent
+	CodexCmd        []string
+	GeminiCmd       []string
+	GeminiTries     int
+	ProviderTimeout time.Duration
+	RetryDelay      time.Duration
+	Now             func() time.Time
 }
 
 // PR is the subset of gh pull request JSON needed by the reviewer.
@@ -101,26 +103,31 @@ func RunOnce(ctx context.Context, cfg Config, runner Runner, stdout io.Writer) (
 	if err != nil {
 		return nil, err
 	}
+	// Every review that was actually posted must survive a later failure,
+	// otherwise the next pass re-reviews it and posts a duplicate.
+	var posted bool
+	persist := func() error {
+		if cfg.DryRun || !posted {
+			return nil
+		}
+		return saveState(cfg.StatePath, st)
+	}
 	var results []Result
 	for _, repo := range cfg.Repos {
 		prs, err := listPRs(ctx, runner, repo, cfg.Limit)
 		if err != nil {
-			return results, fmt.Errorf("list PRs for %s: %w", repo, err)
+			return results, errors.Join(fmt.Errorf("list PRs for %s: %w", repo, err), persist())
 		}
 		for _, pr := range prs {
 			res, err := handlePR(ctx, cfg, runner, st, repo, pr, stdout)
 			results = append(results, res)
+			posted = posted || res.Posted
 			if err != nil {
-				return results, err
+				return results, errors.Join(err, persist())
 			}
 		}
 	}
-	if !cfg.DryRun {
-		if err := saveState(cfg.StatePath, st); err != nil {
-			return results, err
-		}
-	}
-	return results, nil
+	return results, persist()
 }
 
 func (cfg *Config) setDefaults() error {
@@ -146,6 +153,12 @@ func (cfg *Config) setDefaults() error {
 	}
 	if cfg.GeminiTries <= 0 {
 		cfg.GeminiTries = 2
+	}
+	if cfg.ProviderTimeout <= 0 {
+		cfg.ProviderTimeout = 10 * time.Minute
+	}
+	if cfg.RetryDelay < 0 {
+		cfg.RetryDelay = 0
 	}
 	if cfg.StatePath == "" {
 		home, err := os.UserHomeDir()
@@ -189,15 +202,30 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 		return res, fmt.Errorf("diff for %s: %w", key, err)
 	}
 	prompt := reviewPrompt(repo, pr, diff)
-	codex, err := runProvider(ctx, runner, cfg.CodexCmd, prompt)
+	codex, err := runProvider(ctx, runner, cfg.CodexCmd, prompt, cfg.ProviderTimeout)
 	if err != nil {
 		return res, fmt.Errorf("codex review for %s: %w", key, err)
 	}
-	gemini, geminiErr := runGemini(ctx, runner, cfg.GeminiCmd, prompt, cfg.GeminiTries)
-	body := composeReviewBody(repo, pr, cfg.Now(), codex, gemini, geminiErr)
+	gemini, geminiErr := runGemini(ctx, cfg, runner, prompt)
+	if geminiErr != nil {
+		// Provider stderr can carry credentials or local paths, so the detail
+		// stays in the operator's log and never reaches the public review body.
+		fmt.Fprintf(stdout, "external-pr-reviewer: secondary review unavailable for %s: %v\n", key, geminiErr)
+	}
+	body := composeReviewBody(repo, pr, cfg.Now(), codex, gemini, cfg.GeminiTries)
 	if cfg.DryRun {
 		fmt.Fprintf(stdout, "external-pr-reviewer: dry-run would post %s review to %s PR #%d (%s)\n", cfg.ReviewEvent, repo, pr.Number, pr.HeadRefOID)
 		res.Posted = false
+		return res, nil
+	}
+	// gh pr review always targets the PR's current head, so a head that moved
+	// while the providers were running would attach a review of the old diff.
+	head, err := currentHeadSHA(ctx, runner, repo, pr.Number)
+	if err != nil {
+		return res, fmt.Errorf("confirm head for %s: %w", key, err)
+	}
+	if head != pr.HeadRefOID {
+		res.Skipped, res.Reason = true, "head-changed"
 		return res, nil
 	}
 	if err := postReview(ctx, runner, repo, pr.Number, cfg.ReviewEvent, body); err != nil {
@@ -212,9 +240,31 @@ func prDiff(ctx context.Context, runner Runner, repo string, number int) (string
 	return runner.Run(ctx, "gh", []string{"pr", "diff", strconv.Itoa(number), "--repo", repo}, "")
 }
 
-func runProvider(ctx context.Context, runner Runner, cmd []string, prompt string) (string, error) {
+func currentHeadSHA(ctx context.Context, runner Runner, repo string, number int) (string, error) {
+	out, err := runner.Run(ctx, "gh", []string{"pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefOid"}, "")
+	if err != nil {
+		return "", err
+	}
+	var view struct {
+		HeadRefOID string `json:"headRefOid"`
+	}
+	if err := json.Unmarshal([]byte(out), &view); err != nil {
+		return "", fmt.Errorf("parse gh pr view JSON: %w", err)
+	}
+	if view.HeadRefOID == "" {
+		return "", errors.New("gh pr view returned an empty head SHA")
+	}
+	return view.HeadRefOID, nil
+}
+
+func runProvider(ctx context.Context, runner Runner, cmd []string, prompt string, timeout time.Duration) (string, error) {
 	if len(cmd) == 0 {
 		return "", errors.New("provider command is empty")
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
 	out, err := runner.Run(ctx, cmd[0], cmd[1:], prompt)
 	if err != nil {
@@ -227,10 +277,20 @@ func runProvider(ctx context.Context, runner Runner, cmd []string, prompt string
 	return out, nil
 }
 
-func runGemini(ctx context.Context, runner Runner, cmd []string, prompt string, tries int) (string, error) {
+func runGemini(ctx context.Context, cfg Config, runner Runner, prompt string) (string, error) {
 	var last error
-	for range tries {
-		out, err := runProvider(ctx, runner, cmd, prompt)
+	for attempt := range cfg.GeminiTries {
+		if attempt > 0 && cfg.RetryDelay > 0 {
+			// An immediate retry re-hits the same rate limit or outage.
+			timer := time.NewTimer(cfg.RetryDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", errors.Join(last, ctx.Err())
+			case <-timer.C:
+			}
+		}
+		out, err := runProvider(ctx, runner, cfg.GeminiCmd, prompt, cfg.ProviderTimeout)
 		if err == nil {
 			return out, nil
 		}
@@ -268,7 +328,7 @@ Diff:
 `, repo, pr.Number, pr.Title, pr.HeadRefOID, diff)
 }
 
-func composeReviewBody(repo string, pr PR, now time.Time, codex, gemini string, geminiErr error) string {
+func composeReviewBody(repo string, pr PR, now time.Time, codex, gemini string, geminiTries int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Automated external review for `%s` PR #%d at %s.\n\n", repo, pr.Number, now.UTC().Format(time.RFC3339))
 	b.WriteString("## Codex\n\n")
@@ -277,17 +337,12 @@ func composeReviewBody(repo string, pr PR, now time.Time, codex, gemini string, 
 	if strings.TrimSpace(gemini) != "" {
 		b.WriteString(strings.TrimSpace(gemini))
 	} else {
-		fmt.Fprintf(&b, "Gemini review unavailable after retry; skipped best-effort secondary review.")
-		if geminiErr != nil {
-			fmt.Fprintf(&b, " Last error: `%s`.", sanitizeInline(geminiErr.Error()))
-		}
+		// The provider's own error text is deliberately withheld: it is
+		// attacker- and environment-controlled and this body is public.
+		fmt.Fprintf(&b, "Gemini review unavailable after %d attempt(s); skipped best-effort secondary review. See the reviewer log for the failure detail.", geminiTries)
 	}
 	b.WriteString("\n")
 	return b.String()
-}
-
-func sanitizeInline(s string) string {
-	return strings.ReplaceAll(strings.TrimSpace(s), "`", "'")
 }
 
 func loadState(path string) (state, error) {
@@ -309,7 +364,8 @@ func loadState(path string) (state, error) {
 }
 
 func saveState(path string, st state) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 	raw, err := json.MarshalIndent(st, "", "  ")
@@ -317,5 +373,31 @@ func saveState(path string, st state) error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 	raw = append(raw, '\n')
-	return os.WriteFile(path, raw, 0o600)
+	// Write through a sibling temp file so an interrupted or short write can
+	// never truncate the only record of what has already been reviewed.
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create state temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpName)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("set state permissions: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		return fmt.Errorf("write state: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync state: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close state: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace state: %w", err)
+	}
+	return nil
 }

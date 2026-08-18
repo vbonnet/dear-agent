@@ -19,7 +19,7 @@ handling, loop control, and process exit codes.
 
 **XPR-03** When the `--repo` flag is repeated, the command shall accumulate every target repository in the order supplied, and shall reject an empty repository value.
 
-**XPR-04** When a provider command is supplied as a single string, the command shall split it on whitespace into the argument vector passed to the provider.
+**XPR-04** When a provider command is supplied as a single string, the command shall split it into an argument vector that preserves single- and double-quoted arguments, and shall reject an unbalanced quote with status 2.
 
 **XPR-05** When a review event is supplied, the command shall normalize it to trimmed upper case before configuring the review pass.
 
@@ -27,7 +27,11 @@ handling, loop control, and process exit codes.
 
 **XPR-07** When `--watch` is set, the command shall repeat review passes and wait the configured interval between passes.
 
-**XPR-08** When a review pass returns an error, the command shall report the error on standard error and exit with status 1.
+**XPR-08** When `--watch` is set with a non-positive interval, the command shall reject the configuration with status 2 rather than polling without pause.
+
+**XPR-09** When SIGINT or SIGTERM is received, the command shall cancel the review pass, stop the polling loop, and exit with status 0.
+
+**XPR-10** When a review pass returns an error that is not the shutdown cancellation, the command shall report the error on standard error and exit with status 1.
 
 ## BDD Traceability
 
