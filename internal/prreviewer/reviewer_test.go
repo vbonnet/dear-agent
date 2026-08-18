@@ -74,11 +74,15 @@ func listResponse(t *testing.T, prs ...PR) string {
 }
 
 func viewKey(repo string, number int) string {
-	return fmt.Sprintf("gh pr view %d --repo %s --json headRefOid", number, repo)
+	return fmt.Sprintf("gh pr view %d --repo %s --json headRefOid,baseRefOid", number, repo)
 }
 
 func viewResponse(sha string) string {
 	return fmt.Sprintf(`{"headRefOid":%q}`, sha)
+}
+
+func viewResponseWithBase(head, base string) string {
+	return fmt.Sprintf(`{"headRefOid":%q,"baseRefOid":%q}`, head, base)
 }
 
 var (
@@ -747,7 +751,7 @@ func TestRunOnceReReviewsARetargetedPullRequest(t *testing.T) {
 	responses := map[string]string{
 		listKey("owner/repo"):             listResponse(t, pr),
 		"gh pr diff 71 --repo owner/repo": "diff",
-		viewKey("owner/repo", 71):         viewResponse("sha71"),
+		viewKey("owner/repo", 71):         viewResponseWithBase("sha71", "base1"),
 		"codex exec -":                    "Codex ok",
 		"agy run -":                       "Gemini ok",
 	}
@@ -763,12 +767,43 @@ func TestRunOnceReReviewsARetargetedPullRequest(t *testing.T) {
 	retargeted.BaseRefOID = "base2"
 	r = &fakeRunner{responses: responses, errors: map[string]error{}}
 	r.responses[listKey("owner/repo")] = listResponse(t, retargeted)
+	r.responses[viewKey("owner/repo", 71)] = viewResponseWithBase("sha71", "base2")
 	results, err := RunOnce(context.Background(), cfg, r, &out)
 	if err != nil {
 		t.Fatalf("second RunOnce() error = %v", err)
 	}
 	if len(results) != 1 || !results[0].Posted {
 		t.Fatalf("a retargeted pull request must be reviewed again, got %#v", results)
+	}
+}
+
+func TestRunOnceSkipsWhenTheBaseMovedDuringReview(t *testing.T) {
+	r := &fakeRunner{
+		responses: map[string]string{
+			listKey("owner/repo"):              listResponse(t, PR{Number: 101, Title: "Retarget race", HeadRefOID: "sha101", BaseRefOID: "base1"}),
+			"gh pr diff 101 --repo owner/repo": "diff",
+			viewKey("owner/repo", 101):         viewResponseWithBase("sha101", "base2"),
+			"codex exec -":                     "Codex ok",
+			"agy run -":                        "Gemini ok",
+		},
+		errors: map[string]error{},
+	}
+	var out strings.Builder
+	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd:   testGeminiCmd,
+		CodexCmd:    testCodexCmd,
+		ReviewEvent: ReviewApprove,
+		Repos:       []string{"owner/repo"},
+		StatePath:   filepath.Join(t.TempDir(), "state.json"),
+	}, r, &out)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Skipped || results[0].Reason != "head-changed" {
+		t.Fatalf("a moved base must stop the post, got %#v", results)
+	}
+	if len(r.posted()) != 0 {
+		t.Fatalf("must not approve a patch the providers did not read: %#v", r.calls)
 	}
 }
 

@@ -39,7 +39,7 @@ loop control — and must not restate the requirements below. The split mirrors
 
 **PRV-09** When dry-run mode is enabled, the system shall report the review it would post and shall neither post a review nor persist state.
 
-**PRV-10** When the pull request head no longer matches the inspected head SHA, the system shall skip posting so a review is never attached to a revision it did not read.
+**PRV-10** When the pull request head or base revision no longer matches the inspected revisions, the system shall skip posting so a review is never attached to a patch it did not read.
 
 **PRV-11** When a review is posted successfully, the system shall record the reviewed head SHA so a later pass skips the unchanged pull request.
 

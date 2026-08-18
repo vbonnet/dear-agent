@@ -398,14 +398,15 @@ func handlePR(ctx context.Context, cfg Config, runner Runner, st state, repo str
 	if truncated && cfg.ReviewEvent == ReviewApprove {
 		body += "\nApproval withheld: the diff was truncated before review, so part of this pull request was not inspected.\n"
 	}
-	// A head that moved while the providers ran describes a revision nobody
+	// A head or base that moved while the providers ran describes a patch nobody
 	// reviewed, so the check runs before the dry-run report too: dry-run must
 	// predict exactly what the real path would do.
-	head, err := currentHeadSHA(ctx, runner, repo, pr.Number)
+	current, err := currentRevisions(ctx, runner, repo, pr.Number)
 	if err != nil {
-		return res, fmt.Errorf("confirm head for %s: %w", key, err)
+		return res, fmt.Errorf("confirm revisions for %s: %w", key, err)
 	}
-	if head != pr.HeadRefOID {
+	current.Number = pr.Number
+	if reviewedIdentity(current) != reviewedIdentity(pr) {
 		res.Skipped, res.Reason = true, "head-changed"
 		return res, nil
 	}
@@ -431,21 +432,20 @@ func prDiff(ctx context.Context, runner Runner, repo string, number int) (string
 	return runner.Run(ctx, "gh", []string{"pr", "diff", strconv.Itoa(number), "--repo", repo}, "")
 }
 
-func currentHeadSHA(ctx context.Context, runner Runner, repo string, number int) (string, error) {
-	out, err := runner.Run(ctx, "gh", []string{"pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefOid"}, "")
+// currentRevisions returns the pull request's current head and base revisions.
+func currentRevisions(ctx context.Context, runner Runner, repo string, number int) (PR, error) {
+	out, err := runner.Run(ctx, "gh", []string{"pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefOid,baseRefOid"}, "")
 	if err != nil {
-		return "", err
+		return PR{}, err
 	}
-	var view struct {
-		HeadRefOID string `json:"headRefOid"`
-	}
+	var view PR
 	if err := json.Unmarshal([]byte(out), &view); err != nil {
-		return "", fmt.Errorf("parse gh pr view JSON: %w", err)
+		return PR{}, fmt.Errorf("parse gh pr view JSON: %w", err)
 	}
 	if view.HeadRefOID == "" {
-		return "", errors.New("gh pr view returned an empty head SHA")
+		return PR{}, errors.New("gh pr view returned an empty head SHA")
 	}
-	return view.HeadRefOID, nil
+	return view, nil
 }
 
 // PromptPlaceholder marks the argument a provider command wants the prompt
