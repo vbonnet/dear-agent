@@ -2,15 +2,17 @@ name: Stale Branch Audit
 
 # Weekly branch hygiene pass, powered by cmd/branch-reaper:
 #
-#   1. Auto-deletes branches whose PR already merged and got nothing pushed to
-#      them afterward -- GitHub's own "delete head branches on merge" setting is
-#      on but silently misses ~1.4% of merges for no discernible reason, and
-#      nothing ever retries those. This step is that retry, and it is provably
-#      safe: the branch's content is already in main's history via the squash
-#      commit, so deleting the ref loses nothing.
+#   1. Auto-deletes branches whose tip is still the exact commit their merged
+#      PR carried into main -- GitHub's own "delete head branches on merge"
+#      setting is on but silently misses ~1.4% of merges for no discernible
+#      reason, and nothing ever retries those. This step is that retry, and it
+#      is provably safe: the branch's content is already in main's history via
+#      the squash commit, so deleting the ref loses nothing.
 #   2. Reports (never deletes) branches that never had a PR, had a PR closed
-#      without merging, or got new commits pushed after their PR merged --
-#      those need a human judgment call, not automation.
+#      without merging, or whose tip moved off the merged head -- those need a
+#      human judgment call, not automation. Branches whose PR history could
+#      not even be looked up (gh auth/rate-limit/API error) get their own
+#      report bucket too, rather than being silently misread as "no PR".
 #
 # Cadence mirrors the weekly tier:
 #   daily:   branch-protection-audit.yml
@@ -54,6 +56,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Build branch reaper
+        # Built, not `go run`: `go run` reports a compile failure as exit 1,
+        # which is also the reaper's "review list is non-empty" signal. A
+        # separate build step keeps the two apart, so a broken build fails
+        # here instead of quietly opening a review issue.
+        run: go build -o "${RUNNER_TEMP}/branch-reaper" ./cmd/branch-reaper
+
       - name: Run branch reaper (auto-delete safe set, report the rest)
         id: reaper
         env:
@@ -61,13 +70,28 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          go run ./cmd/branch-reaper --json --execute > reaper-report.json
-          review_rc=$?
+          "${RUNNER_TEMP}/branch-reaper" --json --execute > reaper-report.json
+          reaper_rc=$?
+          # 0 = clean, 1 = review list non-empty, 2 = a PR-history lookup
+          # failed for one or more branches (skipped, see lookup_failed),
+          # 4 = a safe delete was rejected. Only 3 (usage/environment error)
+          # means no report was produced at all -- everything else still has
+          # a valid JSON report on stdout worth surfacing to a human.
+          if [ "$reaper_rc" -eq 3 ]; then
+            echo "::error::branch-reaper exited $reaper_rc (usage/environment error, no report produced)" >&2
+            exit "$reaper_rc"
+          fi
+          if [ "$reaper_rc" -eq 2 ]; then
+            echo "::warning::branch-reaper could not retrieve PR history for one or more branches -- see lookup_failed in the report" >&2
+          fi
+          if [ "$reaper_rc" -eq 4 ]; then
+            echo "::warning::branch-reaper failed to delete one or more safe_delete branches -- see the job logs above" >&2
+          fi
 
           {
             echo "## Branch audit — $(date -u '+%Y-%m-%d')"
             echo
-            echo "### Auto-deleted this run (merged, nothing pushed since)"
+            echo "### Auto-deleted this run (merged, tip still the merged head)"
             jq -r '.safe_delete[]? | "- `\(.)`"' reaper-report.json
             echo
             echo "### Never had a PR — review for abandoned work"
@@ -76,11 +100,14 @@ jobs:
             echo "### PR closed without merging — may be deliberate, review before deleting"
             jq -r '.review_closed_unmerged[]? | "- `\(.)`"' reaper-report.json
             echo
-            echo "### Merged, but new commits pushed after — unmerged follow-up work"
+            echo "### Merged, but tip moved off the merged head — unmerged follow-up work"
             jq -r '.review_new_commits_after_merge[]? | "- `\(.)`"' reaper-report.json
+            echo
+            echo "### Could not check PR history — gh lookup failed, review manually"
+            jq -r '.lookup_failed[]? | "- `\(.)`"' reaper-report.json
           } > stale-branch-report.md
 
-          if [ "$review_rc" -eq 1 ]; then
+          if [ "$reaper_rc" -ge 1 ]; then
             echo "has_review=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_review=false" >> "$GITHUB_OUTPUT"

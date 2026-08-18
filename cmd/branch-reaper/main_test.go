@@ -2,106 +2,157 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
+const (
+	tipSHA   = "1111111111111111111111111111111111111111"
+	otherSHA = "2222222222222222222222222222222222222222"
+)
+
 func TestClassifyBranch(t *testing.T) {
 	tests := []struct {
-		name    string
-		tipDate string
-		prs     []prRecord
-		want    string
+		name   string
+		tipSHA string
+		prs    []prRecord
+		want   string
 	}{
 		{
-			name:    "no PR at all",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     nil,
-			want:    bucketReviewNoPR,
+			name:   "no PR at all",
+			tipSHA: tipSHA,
+			prs:    nil,
+			want:   bucketReviewNoPR,
 		},
 		{
-			name:    "open PR",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "OPEN"}},
-			want:    bucketReviewOpenPR,
+			name:   "open PR",
+			tipSHA: tipSHA,
+			prs:    []prRecord{{Number: 1, State: "OPEN"}},
+			want:   bucketReviewOpenPR,
 		},
 		{
-			name:    "open PR wins over a stale merged one in the same list",
-			tipDate: "2026-06-10T12:00:00Z",
+			name:   "open PR wins over a stale merged one in the same list",
+			tipSHA: tipSHA,
 			prs: []prRecord{
-				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z"},
+				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", HeadRefOid: tipSHA},
 				{Number: 2, State: "OPEN"},
 			},
 			want: bucketReviewOpenPR,
 		},
 		{
-			name:    "merged, tip strictly before merge -> safe",
-			tipDate: "2026-06-10T11:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
-			want:    bucketSafeDelete,
+			name:   "merged, tip still the merged head -> safe",
+			tipSHA: tipSHA,
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", HeadRefOid: tipSHA}},
+			want:   bucketSafeDelete,
 		},
 		{
-			name:    "merged, tip exactly equal to merge -> safe (boundary)",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
-			want:    bucketSafeDelete,
-		},
-		{
-			name:    "merged, tip after merge -> needs review",
-			tipDate: "2026-06-10T13:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
-			want:    bucketReviewNewCommitsAfterMerge,
-		},
-		{
-			name:    "multiple merged PRs: classify against the most recent mergedAt",
-			tipDate: "2026-07-01T00:00:00Z",
-			prs: []prRecord{
-				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z"},
-				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z"},
-			},
-			// tip (07-01) is before the *latest* merge (07-05), so this is
-			// safe even though it's after the earlier PR's merge.
+			name:   "merged head SHA compares case-insensitively",
+			tipSHA: "ABCDEF1234567890abcdef1234567890ABCDEF12",
+			prs: []prRecord{{
+				Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z",
+				HeadRefOid: "abcdef1234567890ABCDEF1234567890abcdef12",
+			}},
 			want: bucketSafeDelete,
 		},
 		{
-			name:    "closed without merging, no merged PR",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "CLOSED"}},
-			want:    bucketReviewClosedUnmerged,
+			name:   "merged, tip moved off the merged head -> needs review",
+			tipSHA: otherSHA,
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", HeadRefOid: tipSHA}},
+			want:   bucketReviewNewCommitsAfterMerge,
 		},
 		{
-			name:    "closed and no-PR mix resolves to closed",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "CLOSED"}, {Number: 2, State: "CLOSED"}},
-			want:    bucketReviewClosedUnmerged,
+			// The regression the SHA check exists for: a force-push after the
+			// merge can leave a tip whose committer date predates mergedAt, so
+			// a timestamp comparison would have called this safe and deleted
+			// unmerged work.
+			name:   "merged, tip force-pushed to an older commit -> needs review",
+			tipSHA: otherSHA,
+			prs: []prRecord{{
+				Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z",
+				HeadRefOid: tipSHA,
+			}},
+			want: bucketReviewNewCommitsAfterMerge,
 		},
 		{
-			name:    "unparseable tip date with a merged PR defaults to needs-review",
-			tipDate: "not-a-date",
-			prs:     []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
-			want:    bucketReviewNewCommitsAfterMerge,
+			name:   "merged with no recorded head SHA -> needs review, never safe",
+			tipSHA: tipSHA,
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
+			want:   bucketReviewNewCommitsAfterMerge,
 		},
 		{
-			name:    "unparseable mergedAt defaults to needs-review",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     []prRecord{{Number: 1, State: "MERGED", MergedAt: "not-a-date"}},
-			want:    bucketReviewNewCommitsAfterMerge,
+			name:   "unknown tip SHA never matches an empty head SHA",
+			tipSHA: "",
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
+			want:   bucketReviewNewCommitsAfterMerge,
 		},
 		{
-			name:    "empty PR list",
-			tipDate: "2026-06-10T12:00:00Z",
-			prs:     []prRecord{},
-			want:    bucketReviewNoPR,
+			name:   "multiple merged PRs: classify against the most recent mergedAt",
+			tipSHA: tipSHA,
+			prs: []prRecord{
+				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", HeadRefOid: otherSHA},
+				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z", HeadRefOid: tipSHA},
+			},
+			want: bucketSafeDelete,
+		},
+		{
+			name:   "most recent merged PR's head is what counts, not an older match",
+			tipSHA: tipSHA,
+			prs: []prRecord{
+				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", HeadRefOid: tipSHA},
+				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z", HeadRefOid: otherSHA},
+			},
+			want: bucketReviewNewCommitsAfterMerge,
+		},
+		{
+			name:   "closed without merging, no merged PR",
+			tipSHA: tipSHA,
+			prs:    []prRecord{{Number: 1, State: "CLOSED"}},
+			want:   bucketReviewClosedUnmerged,
+		},
+		{
+			name:   "closed and no-PR mix resolves to closed",
+			tipSHA: tipSHA,
+			prs:    []prRecord{{Number: 1, State: "CLOSED"}, {Number: 2, State: "CLOSED"}},
+			want:   bucketReviewClosedUnmerged,
+		},
+		{
+			name:   "empty PR list",
+			tipSHA: tipSHA,
+			prs:    []prRecord{},
+			want:   bucketReviewNoPR,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyBranch(tt.tipDate, tt.prs); got != tt.want {
-				t.Errorf("classifyBranch(%q, %v) = %q, want %q", tt.tipDate, tt.prs, got, tt.want)
+			if got := classifyBranch(tt.tipSHA, tt.prs); got != tt.want {
+				t.Errorf("classifyBranch(%q, %v) = %q, want %q", tt.tipSHA, tt.prs, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSameRepoPRs(t *testing.T) {
+	in := []prRecord{
+		{Number: 1, State: "MERGED", IsCrossRepository: true, HeadRefOid: tipSHA},
+		{Number: 2, State: "CLOSED"},
+	}
+	got := sameRepoPRs(in)
+	if len(got) != 1 || got[0].Number != 2 {
+		t.Fatalf("fork PR should be dropped, got %+v", got)
+	}
+
+	// A fork PR that merged must not make this repo's same-named branch
+	// look safe to delete.
+	if b := classifyBranch(tipSHA, sameRepoPRs(in[:1])); b != bucketReviewNoPR {
+		t.Errorf("fork-only history classified as %q, want %q", b, bucketReviewNoPR)
 	}
 }
 
@@ -136,41 +187,119 @@ func TestLastMerged(t *testing.T) {
 }
 
 func TestIsProtected(t *testing.T) {
+	protected := map[string]bool{"main": true, "master": true, "develop": true, "HEAD": true}
 	tests := []struct {
 		branch string
 		want   bool
 	}{
 		{"main", true},
 		{"master", true},
+		{"develop", true},
 		{"HEAD", true},
 		{"feat/branch-reaper-durable-fix", false},
 		{"mainline", false},
+		{"develop-x", false},
 		{"dependabot/go_modules/foo", false},
 	}
 	for _, tt := range tests {
-		if got := isProtected(tt.branch); got != tt.want {
-			t.Errorf("isProtected(%q) = %v, want %v", tt.branch, got, tt.want)
+		if got := isProtected(tt.branch, protected); got != tt.want {
+			t.Errorf("isProtected(%q, %v) = %v, want %v", tt.branch, protected, got, tt.want)
 		}
 	}
 }
 
-func TestParseTimestamp(t *testing.T) {
-	valid := []string{
-		"2026-06-10T12:00:00Z",      // gh mergedAt style
-		"2026-06-10T12:00:00+00:00", // git committerdate:iso-strict style
-		"2026-06-10T05:00:00-07:00", // non-UTC offset
-	}
-	for _, s := range valid {
-		if _, err := parseTimestamp(s); err != nil {
-			t.Errorf("parseTimestamp(%q) unexpected error: %v", s, err)
+func TestBaseProtectedBranches(t *testing.T) {
+	base := baseProtectedBranches()
+	for _, b := range []string{"main", "master", "HEAD"} {
+		if !base[b] {
+			t.Errorf("baseProtectedBranches() missing %q", b)
 		}
 	}
+	if base["develop"] {
+		t.Error("baseProtectedBranches() must not hardcode develop -- that's the bug being fixed, it must come from dynamic detection")
+	}
+}
 
-	invalid := []string{"", "not-a-date", "2026-06-10", "June 10 2026"}
-	for _, s := range invalid {
-		if _, err := parseTimestamp(s); err == nil {
-			t.Errorf("parseTimestamp(%q) expected error, got nil", s)
+func TestExtractTriggerBranches(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want []string
+	}{
+		{
+			name: "push and pull_request branches",
+			yaml: "on:\n  push:\n    branches: [main, develop]\n  pull_request:\n    branches: [main]\n",
+			want: []string{"main", "develop", "main"},
+		},
+		{
+			name: "no on key",
+			yaml: "name: x\njobs:\n  build:\n    runs-on: ubuntu-latest\n",
+			want: nil,
+		},
+		{
+			name: "on with no branches filter (workflow_dispatch only)",
+			yaml: "on:\n  workflow_dispatch:\n",
+			want: nil,
+		},
+		{
+			name: "malformed yaml yields nothing, not an error",
+			yaml: "not: [valid: yaml: at: all",
+			want: nil,
+		},
+		{
+			name: "schedule-only trigger has no branches",
+			yaml: "on:\n  schedule:\n    - cron: \"0 8 * * 5\"\n",
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTriggerBranches([]byte(tt.yaml))
+			if len(got) != len(tt.want) {
+				t.Fatalf("extractTriggerBranches(%q) = %v, want %v", tt.yaml, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("extractTriggerBranches(%q)[%d] = %q, want %q", tt.yaml, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestWorkflowTriggerBranches(t *testing.T) {
+	dir := t.TempDir()
+	writeReaperFixture(t, dir, "ci.yml", "on:\n  push:\n    branches: [main, develop]\n")
+	writeReaperFixture(t, dir, "release.yaml", "on:\n  push:\n    branches: [main, release]\n")
+	writeReaperFixture(t, dir, "notes.txt", "on:\n  push:\n    branches: [ignored-not-yaml]\n")
+
+	got := workflowTriggerBranches(dir)
+	want := map[string]bool{"main": true, "develop": true, "release": true}
+	seen := map[string]bool{}
+	for _, b := range got {
+		seen[b] = true
+		if b == "ignored-not-yaml" {
+			t.Errorf("workflowTriggerBranches must not read non-yaml files, got %q from notes.txt", b)
 		}
+	}
+	for b := range want {
+		if !seen[b] {
+			t.Errorf("workflowTriggerBranches missing %q, got %v", b, got)
+		}
+	}
+}
+
+func TestWorkflowTriggerBranches_MissingDir(t *testing.T) {
+	got := workflowTriggerBranches("/nonexistent/does-not-exist")
+	if got != nil {
+		t.Errorf("workflowTriggerBranches(missing dir) = %v, want nil", got)
+	}
+}
+
+func writeReaperFixture(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture %s: %v", name, err)
 	}
 }
 
@@ -201,9 +330,9 @@ func TestReviewTotal(t *testing.T) {
 
 func TestParseBranchList(t *testing.T) {
 	in := strings.Join([]string{
-		"refs/remotes/origin/HEAD|2026-06-10T12:00:00+00:00",
-		"refs/remotes/origin/main|2026-06-10T12:00:00+00:00",
-		"refs/remotes/origin/feat/x|2026-06-09T08:00:00+00:00",
+		"refs/remotes/origin/HEAD" + branchFieldSep + tipSHA,
+		"refs/remotes/origin/main" + branchFieldSep + tipSHA,
+		"refs/remotes/origin/feat/x" + branchFieldSep + otherSHA,
 		"", // trailing blank line, as real `git for-each-ref` output ends with \n
 	}, "\n")
 
@@ -211,16 +340,35 @@ func TestParseBranchList(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 branches (HEAD symref dropped), got %d: %+v", len(got), got)
 	}
-	if got[0].Name != "main" || got[0].TipDate != "2026-06-10T12:00:00+00:00" {
+	if got[0].Name != "main" || got[0].TipSHA != tipSHA {
 		t.Errorf("branch[0] = %+v", got[0])
 	}
-	if got[1].Name != "feat/x" || got[1].TipDate != "2026-06-09T08:00:00+00:00" {
+	if got[1].Name != "feat/x" || got[1].TipSHA != otherSHA {
 		t.Errorf("branch[1] = %+v", got[1])
 	}
 }
 
+// A branch name may legally contain "|" (git check-ref-format accepts it),
+// which is exactly why the record separator is NUL and not a pipe.
+func TestParseBranchList_PipeInBranchNameSurvives(t *testing.T) {
+	in := "refs/remotes/origin/foo|bar" + branchFieldSep + tipSHA + "\n"
+	got := parseBranchList(in)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 branch, got %+v", got)
+	}
+	if got[0].Name != "foo|bar" || got[0].TipSHA != tipSHA {
+		t.Errorf("pipe-containing branch mangled: %+v", got[0])
+	}
+}
+
 func TestParseBranchList_MalformedLinesSkipped(t *testing.T) {
-	in := "no-pipe-here\nrefs/remotes/origin/ok|2026-01-01T00:00:00Z\n"
+	in := strings.Join([]string{
+		"no-separator-here",
+		"refs/remotes/origin/missing-sha" + branchFieldSep,
+		"refs/heads/not-a-remote" + branchFieldSep + tipSHA,
+		"refs/remotes/origin/ok" + branchFieldSep + tipSHA,
+		"",
+	}, "\n")
 	got := parseBranchList(in)
 	if len(got) != 1 || got[0].Name != "ok" {
 		t.Fatalf("expected only the well-formed line to survive, got %+v", got)
@@ -229,6 +377,8 @@ func TestParseBranchList_MalformedLinesSkipped(t *testing.T) {
 
 func TestReportJSON_EmptyBucketsAreArraysNotNull(t *testing.T) {
 	var buf bytes.Buffer
+	// LookupFailed deliberately left nil -- printJSON must normalize it to
+	// [] just like the other buckets' zero values, never emit null.
 	printJSON(&buf, Report{
 		SafeDelete:                 []string{},
 		ReviewNoPR:                 []string{},
@@ -240,7 +390,7 @@ func TestReportJSON_EmptyBucketsAreArraysNotNull(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	for _, key := range []string{"safe_delete", "review_no_pr", "review_closed_unmerged", "review_new_commits_after_merge"} {
+	for _, key := range []string{"safe_delete", "review_no_pr", "review_closed_unmerged", "review_new_commits_after_merge", "lookup_failed"} {
 		raw, ok := decoded[key]
 		if !ok {
 			t.Errorf("missing key %q", key)
@@ -271,35 +421,154 @@ func TestReportJSON_RoundTrip(t *testing.T) {
 	}
 }
 
+// gh reports an unmerged PR's mergedAt as JSON null; that must decode to the
+// empty string rather than failing the whole branch lookup.
+func TestPRRecord_NullMergedAtDecodes(t *testing.T) {
+	var prs []prRecord
+	raw := `[{"number":1,"state":"OPEN","mergedAt":null,"headRefOid":"` + tipSHA + `","isCrossRepository":false}]`
+	if err := json.Unmarshal([]byte(raw), &prs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(prs) != 1 || prs[0].MergedAt != "" || prs[0].HeadRefOid != tipSHA {
+		t.Fatalf("decoded %+v", prs)
+	}
+}
+
+// A rejected delete must be counted, not swallowed — the workflow turns the
+// non-zero exit into a hard failure instead of reporting the branch as
+// auto-deleted.
+func TestExecuteSafeDeletes_CountsFailuresAndKeepsGoing(t *testing.T) {
+	targets := []branchInfo{
+		{Name: "ok/one", TipSHA: tipSHA},
+		{Name: "bad/two", TipSHA: otherSHA},
+		{Name: "ok/three", TipSHA: tipSHA},
+	}
+	var attempted []string
+	del := func(b branchInfo) error {
+		attempted = append(attempted, b.Name)
+		if b.Name == "bad/two" {
+			return errors.New("stale info")
+		}
+		return nil
+	}
+
+	var stderr bytes.Buffer
+	failed := executeSafeDeletes(targets, del, &stderr)
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1", failed)
+	}
+	if len(attempted) != 3 {
+		t.Errorf("a failure aborted the remaining deletes: %v", attempted)
+	}
+	if !strings.Contains(stderr.String(), "delete bad/two") {
+		t.Errorf("failure not reported; stderr:\n%s", stderr.String())
+	}
+}
+
+func TestExecuteSafeDeletes_LeasesEachDeleteToItsClassifiedSHA(t *testing.T) {
+	targets := []branchInfo{{Name: "ok/one", TipSHA: tipSHA}}
+	var seen branchInfo
+	executeSafeDeletes(targets, func(b branchInfo) error { seen = b; return nil }, io.Discard)
+	if seen.TipSHA != tipSHA {
+		t.Errorf("delete got SHA %q, want the classified %q", seen.TipSHA, tipSHA)
+	}
+}
+
+// A gh failure for one branch (auth, rate limit, transient API error) must
+// not be silently reclassified as "no PR found", and must not abort
+// classification of every other branch in the run -- this tool walks every
+// branch in the repo on a schedule, so one flaky lookup should not deny a
+// report on everything else.
+func TestClassifyBranches_LookupFailureIsBucketedNotFatal(t *testing.T) {
+	installReaperFakeGH(t, `
+head=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--head" ]; then
+    head="$arg"
+  fi
+  prev="$arg"
+done
+case "$head" in
+  "bad/branch") echo "gh: rate limited" >&2; exit 1 ;;
+  "good/branch") printf '%s\n' '[]' ;;
+  *) echo "unexpected head: $head" >&2; exit 2 ;;
+esac
+`)
+	branches := []branchInfo{
+		{Name: "bad/branch", TipSHA: tipSHA},
+		{Name: "good/branch", TipSHA: tipSHA},
+	}
+	var stderr bytes.Buffer
+	rep, targets := classifyBranches(context.Background(), "owner/repo", map[string]bool{}, branches, &stderr)
+
+	if len(targets) != 0 {
+		t.Errorf("targets = %v, want none (neither branch is safe_delete)", targets)
+	}
+	if len(rep.LookupFailed) != 1 || rep.LookupFailed[0] != "bad/branch" {
+		t.Errorf("LookupFailed = %v, want [bad/branch]", rep.LookupFailed)
+	}
+	if len(rep.ReviewNoPR) != 1 || rep.ReviewNoPR[0] != "good/branch" {
+		t.Errorf("ReviewNoPR = %v, want [good/branch] -- a lookup failure for one branch must not stop classification of the next one", rep.ReviewNoPR)
+	}
+	if !strings.Contains(stderr.String(), "bad/branch") {
+		t.Errorf("stderr does not report the failing branch: %s", stderr.String())
+	}
+}
+
+// PR history truncated by the fetch limit is exactly as untrustworthy as an
+// outright lookup failure: BRR-02 requires seeing every open PR to veto a
+// deletion, so a saturated page must land in lookup_failed, never
+// safe_delete.
+func TestFetchPRs_TruncatedAtLimitIsAnError(t *testing.T) {
+	installReaperFakeGH(t, `
+n=`+strconv.Itoa(prFetchLimit)+`
+out="["
+i=0
+while [ "$i" -lt "$n" ]; do
+  [ "$i" -gt 0 ] && out="$out,"
+  out="$out{\"number\":$i,\"state\":\"CLOSED\"}"
+  i=$((i+1))
+done
+out="$out]"
+printf '%s\n' "$out"
+`)
+	_, err := fetchPRs(context.Background(), "owner/repo", "reused/name")
+	if err == nil {
+		t.Fatal("fetchPRs at the truncation limit: want an error, got nil")
+	}
+}
+
+func installReaperFakeGH(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nset -eu\n"+body), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestPrintHuman(t *testing.T) {
 	var buf bytes.Buffer
 	r := Report{
 		SafeDelete: []string{"stale/one"},
 		ReviewNoPR: []string{"orphan/two"},
 	}
-	printHuman(&buf, r, mustParseTime(t, "2026-08-17T00:00:00Z"))
+	printHuman(&buf, r, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	out := buf.String()
 
 	for _, want := range []string{
 		"## Branch reaper — 2026-08-17",
-		"Safe to delete (merged, nothing pushed since): 1",
+		"Safe to delete (merged, tip still the merged head): 1",
 		"  - stale/one",
 		"Review: no PR ever opened: 1",
 		"  - orphan/two",
 		"Review: PR closed without merging: 0",
-		"Review: merged, but new commits pushed after: 0",
+		"Review: merged, but tip moved off the merged head: 0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q; full output:\n%s", want, out)
 		}
 	}
-}
-
-func mustParseTime(t *testing.T, s string) time.Time {
-	t.Helper()
-	tm, err := parseTimestamp(s)
-	if err != nil {
-		t.Fatalf("parseTimestamp(%q): %v", s, err)
-	}
-	return tm
 }
