@@ -59,7 +59,7 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 		return nil, err
 	}
 
-	status := computeSessionStatus(m, ctx.Tmux)
+	status, observeErr := computeSessionStatusObserved(m, ctx.Tmux)
 	result := &GetSessionOutputResult{
 		Operation: "get_session_output",
 		SessionID: m.SessionID,
@@ -71,6 +71,19 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 	// Canonical helper: the raw display name can normalize to a different
 	// target than the pane the session was created with (see CompletionWatcher).
 	tmuxName := session.TmuxSessionName(m)
+
+	// The backend was asked and could not answer, so nothing below can answer
+	// honestly either: status is "unknown", which skips the live capture, and
+	// the durable capture may not stand in for a pane that was never proven
+	// gone. Falling through would have reached the final AGM-005, telling a
+	// programmatic client its well-formed request is permanently invalid when
+	// the truth is a transient outage the same request will survive. An
+	// unobservable backend is 503 whether or not a durable capture exists.
+	if observeErr != nil {
+		return nil, ErrOutputUnavailable(tmuxName,
+			"the tmux backend could not be observed, so neither the live pane nor a durable capture can be served as the session's current output",
+			observeErr)
+	}
 
 	if done, err := captureLiveOutput(ctx, result, status, tmuxName, lines); done {
 		return result, err

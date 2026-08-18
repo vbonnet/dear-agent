@@ -77,6 +77,19 @@ func readinessBlindHarness(harness string) bool {
 	return false
 }
 
+// completionWrite is the durable half of one detected completion: the state to
+// stamp, the tail captured with it, and the instant the transition was
+// observed. Retries replay this exact record instead of rebuilding it. A retry
+// that restamped time.Now() would report an old tail as captured at recovery
+// time, so a consumer ordering on FinalOutputAt would rank stale evidence as
+// the freshest — the detection time is a property of the completion, not of the
+// attempt that finally managed to write it.
+type completionWrite struct {
+	state      string
+	output     string
+	detectedAt time.Time
+}
+
 type sessionObservation struct {
 	// activitySeen is set when the pane content changed between ticks —
 	// harness-agnostic proof the session did work since the last completion.
@@ -92,14 +105,19 @@ type sessionObservation struct {
 	// failed write can be retried on later scans without re-notifying the
 	// operator about the same exit on every tick.
 	exitPersisted bool
+	// exitWrite is the record retried until exitPersisted, preserving the
+	// original detection time and tail across attempts.
+	exitWrite completionWrite
 	// idlePersisted tracks whether the DONE/final-output write for a reported
 	// idle completion actually landed. Separate from reportedIdle so a failed
 	// write is retried on later stable scans without re-emitting the event to
 	// the operator; without it a durable session stayed WORKING with no final
 	// capture until new pane activity or a watcher restart.
 	idlePersisted bool
-	lastTail      string
-	baselined     bool
+	// idleWrite is the record retried until idlePersisted, same contract.
+	idleWrite completionWrite
+	lastTail  string
+	baselined bool
 }
 
 // NewCompletionWatcher creates a watcher with default thresholds.
@@ -193,9 +211,12 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	if obs.reportedIdle {
 		// The completion was already reported. If its durable write failed,
 		// quietly retry it here rather than re-emitting the event, so the
-		// session does not stay WORKING with no final capture.
+		// session does not stay WORKING with no final capture. The retry
+		// replays the original record — same tail, same detection time — and
+		// persistCompletion stands down if a newer state transition landed in
+		// the meantime.
 		if !obs.idlePersisted {
-			obs.idlePersisted = cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
+			obs.idlePersisted = cw.persistCompletion(m.SessionID, obs.idleWrite)
 		}
 		return nil
 	}
@@ -216,15 +237,17 @@ func (cw *CompletionWatcher) observe(ctx context.Context, m *manifest.Manifest) 
 	obs.reportedIdle = true
 	obs.activitySeen = false
 	obs.stableTicks = 0
+	detectedAt := time.Now()
 	event := &CompletionEvent{
 		SessionID:      m.SessionID,
 		SessionName:    m.Name,
 		Harness:        m.Harness,
 		TransitionType: "idle",
 		Output:         obs.lastTail,
-		DetectedAt:     time.Now(),
+		DetectedAt:     detectedAt,
 	}
-	obs.idlePersisted = cw.persistCompletion(m.SessionID, manifest.StateDone, obs.lastTail)
+	obs.idleWrite = completionWrite{state: manifest.StateDone, output: obs.lastTail, detectedAt: detectedAt}
+	obs.idlePersisted = cw.persistCompletion(m.SessionID, obs.idleWrite)
 	return event
 }
 
@@ -282,7 +305,7 @@ func (cw *CompletionWatcher) observeGone(obs *sessionObservation, m *manifest.Ma
 		// transient storage failure leaves the record in WORKING forever with no
 		// final output, even after storage recovers.
 		if !obs.exitPersisted {
-			obs.exitPersisted = cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
+			obs.exitPersisted = cw.persistCompletion(m.SessionID, obs.exitWrite)
 		}
 		return nil
 	}
@@ -290,14 +313,16 @@ func (cw *CompletionWatcher) observeGone(obs *sessionObservation, m *manifest.Ma
 		return nil
 	}
 	obs.reportedGone = true
-	obs.exitPersisted = cw.persistCompletion(m.SessionID, manifest.StateOffline, obs.lastTail)
+	detectedAt := time.Now()
+	obs.exitWrite = completionWrite{state: manifest.StateOffline, output: obs.lastTail, detectedAt: detectedAt}
+	obs.exitPersisted = cw.persistCompletion(m.SessionID, obs.exitWrite)
 	event := &CompletionEvent{
 		SessionID:      m.SessionID,
 		SessionName:    m.Name,
 		Harness:        m.Harness,
 		TransitionType: "exited",
 		Output:         obs.lastTail,
-		DetectedAt:     time.Now(),
+		DetectedAt:     detectedAt,
 	}
 	return event
 }
@@ -373,7 +398,13 @@ func (cw *CompletionWatcher) capturePaneTail(tmuxName string) (string, bool) {
 // still reported for notification (the notification itself carries the output,
 // so the operator never loses the result), but the failure is logged loudly
 // rather than discarded.
-func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, output string) bool {
+//
+// The write is stamped with the completion's own detection time rather than
+// the attempt's, so a retry after a storage outage does not present an old tail
+// as freshly captured. It returns true when the completion is settled — either
+// written, or superseded by a newer state transition — and false only while the
+// write is still owed, which is what drives the retry on later scans.
+func (cw *CompletionWatcher) persistCompletion(sessionID string, write completionWrite) bool {
 	if cw.DryRun {
 		return true
 	}
@@ -383,16 +414,30 @@ func (cw *CompletionWatcher) persistCompletion(sessionID string, state string, o
 			"session_id", sessionID, "error", err)
 		return false
 	}
-	current.State = state
-	current.StateUpdatedAt = time.Now()
+	// A newer state transition wins. Between a failed write and its retry the
+	// session can accept new work and a state hook can persist WORKING; the
+	// pane tail has not changed yet, so this retry still looks due. Replaying
+	// the completion there stamps DONE over an actively running task, which
+	// every durable-state consumer then reads as finished until fresh output
+	// happens to rearm the watcher. The completion is superseded rather than
+	// pending, so the retry stops instead of fighting the newer writer.
+	if current.StateUpdatedAt.After(write.detectedAt) {
+		slog.Info("completion-watcher: durable completion superseded by a newer state transition; not retrying",
+			"session_id", sessionID, "completion_state", write.state,
+			"completion_detected_at", write.detectedAt, "current_state", current.State,
+			"current_state_source", current.StateSource, "current_state_updated_at", current.StateUpdatedAt)
+		return true
+	}
+	current.State = write.state
+	current.StateUpdatedAt = write.detectedAt
 	current.StateSource = "completion-watcher"
-	if output != "" {
-		current.FinalOutput = output
-		current.FinalOutputAt = time.Now()
+	if write.output != "" {
+		current.FinalOutput = write.output
+		current.FinalOutputAt = write.detectedAt
 	}
 	if err := cw.ctx.Storage.UpdateSession(current); err != nil {
 		slog.Warn("completion-watcher: durable completion write failed; notification still carries the output",
-			"session_id", sessionID, "state", state, "error", err)
+			"session_id", sessionID, "state", write.state, "error", err)
 		return false
 	}
 	return true

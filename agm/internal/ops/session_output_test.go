@@ -120,3 +120,56 @@ func TestListSessions_NoTmuxReportsUnknownNotStopped(t *testing.T) {
 		t.Fatalf("status without tmux = %q, want unknown (reporting stopped made live sessions look dead, ce-0zng9)", got)
 	}
 }
+
+// TestGetSessionOutput_UnobservableBackendIsRetryableWithoutDurableCapture pins
+// the classification for a tmux backend that was already unreachable when the
+// request arrived. The status probe fails, so the session computes as "unknown"
+// and the live capture is skipped; with no durable capture to fall back on, the
+// operation used to answer AGM-005/400 — telling a programmatic client its
+// well-formed request was permanently invalid — when the honest answer is the
+// retryable AGM-017/503. "Could not determine" is not "absent".
+func TestGetSessionOutput_UnobservableBackendIsRetryableWithoutDurableCapture(t *testing.T) {
+	m := testManifest("worker-unobservable", "", time.Time{})
+	storage := &mockStorage{sessions: []*manifest.Manifest{m}}
+	tmux := session.NewMockTmux()
+	socketDown := errors.New("error connecting to /tmp/agm.sock (Permission denied)")
+	tmux.HasSessionError = socketDown
+
+	_, err := GetSessionOutput(&OpContext{Storage: storage, Tmux: tmux}, &GetSessionOutputRequest{Identifier: "worker-unobservable"})
+	if err == nil {
+		t.Fatal("expected an error when the tmux backend cannot be observed")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("error is not an OpError: %v", err)
+	}
+	if opErr.Code != ErrCodeOutputUnavailable || opErr.Status != 503 {
+		t.Fatalf("unobservable backend classified as %s/%d, want %s/503 (retryable)", opErr.Code, opErr.Status, ErrCodeOutputUnavailable)
+	}
+	// OPS-92: the typed backend failure stays reachable through the envelope.
+	if !errors.Is(err, socketDown) {
+		t.Fatalf("AGM-017 did not preserve the probe failure as its cause: %v", err)
+	}
+}
+
+// TestLastSession_StrictObservationFailureReportsUnknown pins the shared status
+// helper, which LastSession, SessionHealth and the batch worker view all read
+// through. The plain lister maps a socket or permission failure to an empty
+// list with a nil error, which those surfaces then read as a successful
+// observation of zero sessions and report every live worker as stopped.
+func TestLastSession_StrictObservationFailureReportsUnknown(t *testing.T) {
+	m := testManifest("live-worker", "", time.Time{})
+	storage := &mockStorage{sessions: []*manifest.Manifest{m}}
+	// The mock's plain lister returns an empty list with a nil error — exactly
+	// what production tmux does on an ExitError — while the strict lister
+	// reports the failure it actually is.
+	tmux := &strictListTmux{MockTmux: session.NewMockTmux(), err: errors.New("tmux socket unreachable")}
+
+	result, err := LastSession(&OpContext{Storage: storage, Tmux: tmux}, &LastSessionRequest{})
+	if err != nil {
+		t.Fatalf("LastSession: %v", err)
+	}
+	if got := result.Session.Status; got != "unknown" {
+		t.Fatalf("status on an unobservable tmux = %q, want unknown", got)
+	}
+}

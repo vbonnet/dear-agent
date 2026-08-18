@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	inttmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // OpError implements RFC 7807 Problem Details for HTTP APIs,
@@ -253,7 +255,13 @@ func ErrOutputUnavailable(name, reason string, cause error) *OpError {
 		Instance: "session/get_output",
 		Suggestions: []string{
 			"Retry the same request; no change to the identifier is needed.",
-			"Check that the AGM tmux socket is reachable: `tmux -S ~/.agm/agm.sock list-sessions`.",
+			// The resolved socket, not the default: AGM_TMUX_SOCKET can point
+			// this process at a different server, and probing ~/.agm/agm.sock
+			// then observes a backend that had nothing to do with the failure —
+			// it can be healthy while the configured one is down, or missing
+			// while the configured one is fine. Either answer sends the
+			// operator down the wrong diagnostic path.
+			fmt.Sprintf("Check that the AGM tmux socket is reachable: `tmux -S %s list-sessions`.", inttmux.GetSocketPath()),
 		},
 		cause: cause,
 		Parameters: map[string]string{

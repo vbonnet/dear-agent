@@ -270,34 +270,49 @@ func refineActiveStatusesWithLiveness(manifests []*manifest.Manifest, statuses m
 	}
 }
 
-// computeStatusesWithAttachment computes both status and attachment info in a single tmux call.
-func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interface{}) (map[string]string, map[string]bool) {
+// unobservedStatuses reports every session as "unknown" — the answer for a tmux
+// backend that could not be observed at all. "Not in the observed set" only
+// means "stopped" when there was a successful observation to be absent from;
+// without one, "stopped" is a false-dead verdict on live workers (ce-0zng9).
+func unobservedStatuses(manifests []*manifest.Manifest) map[string]string {
 	statuses := make(map[string]string, len(manifests))
+	for _, m := range manifests {
+		statuses[m.Name] = "unknown"
+	}
+	return statuses
+}
+
+// computeStatusesWithAttachment computes both status and attachment info in a
+// single tmux call.
+//
+// It prefers the strict lister for the same reason ListSessions does: the plain
+// ListSessionsWithInfo maps every tmux ExitError to an empty list with a nil
+// error, so an unreachable or permission-denied socket is indistinguishable
+// from "no sessions running". LastSession, SessionHealth and the batch worker
+// view all read through this helper, so leaving the failure-collapsing lister
+// here kept reporting live sessions as stopped on those surfaces even after the
+// list path was fixed (ce-0zng9).
+func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux any) (map[string]string, map[string]bool) {
 	attached := make(map[string]bool, len(manifests))
 
-	// Try the richer interface first (with attachment info)
+	// Preferred: strict listing, which reports an observation failure as an
+	// error instead of an empty successful observation.
+	if strict, ok := tmux.(tmuxStrictInfoProvider); ok {
+		sessions, err := strict.ListSessionsWithInfoStrict()
+		if err != nil {
+			return unobservedStatuses(manifests), attached
+		}
+		return statusesFromObservation(manifests, sessions, tmux)
+	}
+
+	// Backends without the strict capability (test fakes): their answer is used
+	// as-is, the same accommodation ListSessions makes.
 	if ti, ok := tmux.(tmuxInfoProvider); ok {
 		sessions, err := ti.ListSessionsWithInfo()
 		if err != nil {
-			return statuses, attached
+			return unobservedStatuses(manifests), attached
 		}
-
-		sessionMap := make(map[string]session.SessionInfo, len(sessions))
-		for _, s := range sessions {
-			sessionMap[s.Name] = s
-		}
-
-		for _, m := range manifests {
-			tmuxName := session.TmuxSessionName(m)
-			if info, exists := sessionMap[tmuxName]; exists {
-				statuses[m.Name] = "active"
-				attached[m.Name] = info.AttachedClients > 0
-			} else {
-				statuses[m.Name] = "stopped"
-			}
-		}
-		refineActiveStatusesWithLiveness(manifests, statuses, tmux)
-		return statuses, attached
+		return statusesFromObservation(manifests, sessions, tmux)
 	}
 
 	// Fallback: basic interface without attachment info
@@ -305,14 +320,15 @@ func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interfac
 		ListSessions() ([]string, error)
 	})
 	if !ok {
-		return statuses, attached
+		return unobservedStatuses(manifests), attached
 	}
 
 	tmuxSessions, err := ti.ListSessions()
 	if err != nil {
-		return statuses, attached
+		return unobservedStatuses(manifests), attached
 	}
 
+	statuses := make(map[string]string, len(manifests))
 	tmuxSet := make(map[string]bool, len(tmuxSessions))
 	for _, s := range tmuxSessions {
 		tmuxSet[s] = true
@@ -326,6 +342,15 @@ func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interfac
 			statuses[m.Name] = "stopped"
 		}
 	}
+	return statuses, attached
+}
+
+// statusesFromObservation folds a successful tmux observation into statuses and
+// attachment, then applies the liveness refinement that demotes false-green
+// "active" to "zombie".
+func statusesFromObservation(manifests []*manifest.Manifest, sessions []session.SessionInfo, tmux any) (map[string]string, map[string]bool) {
+	statuses, attached := computeStatusesFromInfo(manifests, sessions)
+	refineActiveStatusesWithLiveness(manifests, statuses, tmux)
 	return statuses, attached
 }
 
