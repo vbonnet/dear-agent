@@ -178,7 +178,7 @@ func TestValidatePluginManifestAssetRejectsSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(pluginRoot, "skills", "research-pipeline")); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 
 	manifestPath := filepath.Join(manifestDir, "plugin.json")

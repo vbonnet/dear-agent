@@ -406,7 +406,10 @@ func readSkillName(path string) (string, error) {
 	var metadata struct {
 		Name string `yaml:"name"`
 	}
-	parts := strings.SplitN(string(data), "\n---", 2)
+	// skilllint.CheckFile above tolerates CRLF frontmatter, so normalize here
+	// too: otherwise a Windows checkout (core.autocrlf=true) passes the lint
+	// gate and then fails catalog validation on a valid skill.
+	parts := strings.SplitN(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n---", 2)
 	if len(parts) != 2 || !strings.HasPrefix(parts[0], "---\n") {
 		return "", fmt.Errorf("no parseable frontmatter")
 	}

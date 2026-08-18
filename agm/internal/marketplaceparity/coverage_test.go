@@ -324,7 +324,7 @@ func TestValidateNativeSkillCoverageRejectsSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, filepath.Join(dir, "SKILL.md")); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	catalog := Catalog{Plugins: []PluginEntry{{Name: "agm", Source: "./plugins/agm", Capabilities: []string{"skills"}}}}
 	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil {
@@ -365,7 +365,7 @@ func TestNativeSkillEntrypointRejectsSkillDirectorySymlinkOutsideRepository(t *t
 				t.Fatal(err)
 			}
 			if err := os.Symlink(outside, filepath.Join(nativeRoot, "example")); err != nil {
-				t.Fatal(err)
+				t.Skipf("symlinks unavailable: %v", err)
 			}
 
 			if _, err := nativeSkillEntrypoint(root, test.surface, "example", "example"); err == nil ||
@@ -687,5 +687,34 @@ func TestHasActionableCanonicalWorkflowRejectsLaterOverride(t *testing.T) {
 		"3. Do not skip the canonical gates\n"
 	if !hasActionableCanonicalWorkflow(clean, "canonical/WORKFLOW.md") {
 		t.Fatal("clean wrapper with a reinforcing directive was rejected")
+	}
+}
+
+// TestReadSkillNameAcceptsCRLFFrontmatter pins parity with skilllint, which
+// tolerates CRLF frontmatter, so a Windows checkout with core.autocrlf=true
+// does not fail catalog validation on otherwise valid skills.
+func TestReadSkillNameAcceptsCRLFFrontmatter(t *testing.T) {
+	const unix = "---\nname: scan-health\ndescription: Use for test health scans.\n---\n# Scan\n\n## Workflow\n\n1. Inspect sessions.\n2. Report health.\n\n## Verification\n\nVerify every session.\n"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(unix, "\n", "\r\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	name, err := readSkillName(path)
+	if err != nil {
+		t.Fatalf("readSkillName() error = %v, want CRLF frontmatter accepted", err)
+	}
+	if name != "scan-health" {
+		t.Fatalf("readSkillName() = %q, want %q", name, "scan-health")
+	}
+}
+
+func TestHasActionableCanonicalWorkflowAcceptsCRLF(t *testing.T) {
+	const clean = "## Workflow\n\n" +
+		"1. Read `canonical/WORKFLOW.md`\n" +
+		"2. Follow the canonical workflow and its gates\n" +
+		"3. Do not skip the canonical gates\n"
+	if !hasActionableCanonicalWorkflow(strings.ReplaceAll(clean, "\n", "\r\n"), "canonical/WORKFLOW.md") {
+		t.Fatal("CRLF wrapper with an actionable canonical handoff was rejected")
 	}
 }
