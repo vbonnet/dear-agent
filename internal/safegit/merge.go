@@ -248,10 +248,13 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
-	// Gate 0: deterministic PR state. Draft, conflicts, and out-of-date-with-
-	// base are visible from one `gh pr view` and each has one exact fix, so
-	// fail fast with that fix instead of arming auto-merge and letting the
-	// completion wait time out 45 minutes later with no cause named.
+	// Gate 0: deterministic PR state. Closed/merged, draft, and conflicts are
+	// visible from one `gh pr view` and each has one exact fix, so fail fast
+	// with that fix instead of arming auto-merge and letting the completion
+	// wait time out 45 minutes later with no cause named. BEHIND is
+	// deliberately NOT a fail here: safe-merge advances behind branches itself
+	// (base-freshness gate, ce-gdy60), so failing early on it would defeat
+	// that remediation; pr-blockers still reports BEHIND for diagnosis.
 	if err := runGate(ctx, "state", func() error {
 		st, err := FetchPRState(ctx, cfg.PRNumber, cfg.Repo)
 		if err != nil {
@@ -260,13 +263,15 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		if s := strings.ToUpper(st.State); s != "OPEN" {
 			return fmt.Errorf("PR #%d is %s; nothing to merge", cfg.PRNumber, s)
 		}
-		blockers := StateBlockers(st, cfg.Repo)
-		if len(blockers) == 0 {
-			return nil
-		}
 		var lines []string
-		for _, b := range blockers {
+		for _, b := range StateBlockers(st, cfg.Repo) {
+			if b.Code == BlockBehind {
+				continue
+			}
 			lines = append(lines, fmt.Sprintf("  • %s: %s\n    fix: %s", b.Code, b.Detail, b.Fix))
+		}
+		if len(lines) == 0 {
+			return nil
 		}
 		return fmt.Errorf("PR state blocks merging:\n%s", strings.Join(lines, "\n"))
 	}); err != nil {
@@ -274,7 +279,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `pr-blockers %d --repo %s` for the full diagnosis\n", cfg.PRNumber, cfg.Repo)
 		return fmt.Errorf("state gate: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ PR state mergeable (open, not draft, no conflicts, up to date)")
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ PR state mergeable (open, not draft, no conflicts)")
 
 	// Gate 1: every provider-effective required CI check must pass.
 	if err := runGate(ctx, "ci", func() error { return checkAllCIContext(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
