@@ -1,4 +1,4 @@
-# dear-agent strategic roadmap
+# dear-agent strategic priorities
 
 ```
 as_of:          2026-08-18
@@ -13,12 +13,13 @@ refines:        engram-research PR #322 (strategy/2026-08-14-dear-agent-strategi
 
 This file is the canonical current prioritization, refined 2026-08-18 from the existing
 roadmap artifacts rather than rewritten. It implements the canonical-store proposal in
-engram-research PR #322 Part 3 (name ROADMAP.md per operator instruction, location
-dear-agent root as proposed). Authority model, unchanged from PR #322: if stores
+engram-research PR #322 Part 3 (location dear-agent root as proposed; named
+STRATEGIC-PRIORITIES.md, the operator's other named option, because the repo's
+Living Documentation Policy forbids a tracked ROADMAP.* here and the routing-guard
+test enforces it). Authority model, unchanged from PR #322: if stores
 disagree, task status comes from Beads and delivery state comes from live receipts;
-this file must be corrected and never overrides either. Bound: 250 lines or 20 active
-initiatives. Every rank change below cites its evidence; the full change log is in
-the section "Changes from the previous roadmap" at the bottom.
+this file must be corrected and never overrides either. Bound: 250 lines or 20
+active initiatives. Every rank change cites its evidence in the changes section.
 
 ## North star (unchanged)
 
@@ -191,8 +192,10 @@ silently re-solved by later sessions, so the system duplicates rather than loses
 1. Canonical file. Was: ROADMAP-FLYWHEEL-2026-06-10.md in engram-research, marked
    canonical, 267-bead baseline, untouched since June. Now: this file at dear-agent
    root, per the never-executed proposal in PR #322 Part 3; supersedence banner owed
-   to the flywheel roadmap (follow-up, engram-research). Evidence: PR #322 verdict
-   "stale, partial"; active queue is 968, 3.6x the baseline.
+   to the flywheel roadmap (follow-up, engram-research). Named per the Living
+   Documentation Policy: ROADMAP.* is a forbidden temporal artifact here, enforced
+   by cmd/routing-guard. Evidence: PR #322 verdict "stale, partial"; active queue
+   is 968, 3.6x the baseline.
 2. Top theme. Was: flywheel wiring first (traces to retros to evals). Now:
    continuous-execution friction removal (N1-N4), flywheel increments gated behind
    it (X8, X9). Evidence: week of 08-11..18: 12/32 spawns wedged, 56 OAuth family
