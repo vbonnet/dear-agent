@@ -35,6 +35,14 @@ review round to discover something a filesystem lookup answers for free.
 
 **DOCREF-07** When findings are reported, the system shall state both remediations: land the promised artifact, or correct the claim.
 
+## BDD Traceability
+
+- Test consequence: Deterministic unit tests in `tools/docref-lint` cover the
+  classifier and resolver directly. No BDD feature is added because this is a
+  developer-facing lint with no user-observable session behaviour for the
+  external BDD harness to drive; its observable contract is an exit status and
+  a finding list, which the unit tests assert exactly.
+
 ## Test Traceability
 
 - Unit package: `tools/docref-lint`
