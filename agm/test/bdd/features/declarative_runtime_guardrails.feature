@@ -13,6 +13,8 @@
 # RELATED-SPEC: agm/schemas/SPEC.md
 # RELATED-SPEC: agm/systemd/SPEC.md
 # RELATED-SPEC: agm/test/e2e/docker/SPEC.md
+# RELATED-SPEC: agm/test/e2e/docker/cmd/mock-claude/SPEC.md
+# RELATED-SPEC: agm/test/e2e/docker/cmd/seed-session/SPEC.md
 # RELATED-SPEC: agm/youtube-plugin/.claude-plugin/SPEC.md
 # RELATED-SPEC: cmd/dear-agent-bumblebee/templates/SPEC.md
 # RELATED-SPEC: config/SPEC.md
@@ -49,6 +51,8 @@ Feature: Declarative runtime guardrails
       | agm/schemas                                                                  |
       | agm/systemd                                                                  |
       | agm/test/e2e/docker                                                          |
+      | agm/test/e2e/docker/cmd/mock-claude                                           |
+      | agm/test/e2e/docker/cmd/seed-session                                          |
       | agm/youtube-plugin/.claude-plugin                                            |
       | cmd/dear-agent-bumblebee/templates                                           |
       | config                                                                       |

@@ -120,9 +120,9 @@ jobs:
 
       - name: Build binaries for compose mount
         # docker-compose.yml under agm/test/e2e/docker mounts
-        # ../../../../bin/{agm,agm-reaper} into the container.
+        # ../../../../bin/{agm,agm-reaper,seed-session} into the container.
         run: |
-          make build-agm
+          make build-reaper-e2e
 
       - name: Run the reaper compose stack
         working-directory: agm/test/e2e/docker
