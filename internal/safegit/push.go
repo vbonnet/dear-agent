@@ -95,26 +95,37 @@ func ForceFlag(args []string) (string, bool) {
 		a := args[i]
 		if !endOfOptions {
 			switch {
-			case a == "-f" || a == "--force" || a == "--force-with-lease" || a == "--mirror":
-				return a, true
-			case strings.HasPrefix(a, "--force-with-lease=") ||
-				strings.HasPrefix(a, "--force-if-includes"):
-				return a, true
 			case a == "--":
 				endOfOptions = true
 				continue
+			case strings.HasPrefix(a, "--force-with-lease=") ||
+				strings.HasPrefix(a, "--force-if-includes"):
+				return a, true
+			case isDestructiveLongOpt(a):
+				return a, true
+			case strings.HasPrefix(a, "--"):
+				continue // some other long option
 			case pushOptsWithValue[a]:
 				i++ // the value is not a positional, so it is not the repository
 				continue
-			case strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") &&
-				strings.ContainsRune(a, 'f'):
-				// Short options cluster: `git push -uf origin main` forces just
-				// as `-f` does, and `-f` is push's only short option spelled
-				// with an 'f', so any single-dash cluster containing one is a
-				// force push.
-				return a, true
 			case strings.HasPrefix(a, "-") && a != "-":
-				continue // any other option
+				// Short-option cluster. Walk it in order: `-f` is push's only
+				// short option spelled with an 'f', so reaching one means a
+				// force push, but an option that takes a value swallows the
+				// remainder of the word (`-ofoo`), and letters after it are
+				// that value rather than further options.
+				for _, c := range a[1:] {
+					if c == 'f' {
+						return a, true
+					}
+					if shortPushOptsWithValue[c] {
+						break
+					}
+				}
+				if len(a) == 2 && shortPushOptsWithValue[rune(a[1])] {
+					i++ // `-o value`: the value is not the repository
+				}
+				continue
 			}
 		}
 		if !sawRepository {
@@ -138,6 +149,33 @@ func ForceFlag(args []string) (string, bool) {
 // rather than under-blocks.
 var pushOptsWithValue = map[string]bool{
 	"-o": true, "--push-option": true,
+}
+
+// shortPushOptsWithValue are the `git push` short options that consume a value,
+// either glued to the letter (`-ofoo`) or as the next token (`-o foo`).
+var shortPushOptsWithValue = map[rune]bool{'o': true}
+
+// destructiveLongOpts are the long options that make a push destructive. Git
+// accepts unambiguous abbreviations — `git push --mir` really does mirror — so
+// any argument that is a prefix of one of these is treated as that option. An
+// ambiguous abbreviation git would itself reject is blocked here too, which
+// over-rejects rather than letting a history-rewriting push through.
+var destructiveLongOpts = []string{
+	"--force", "--force-with-lease", "--force-if-includes", "--mirror",
+}
+
+// isDestructiveLongOpt reports whether a is one of destructiveLongOpts or an
+// abbreviation of one. `--no-force…` is excluded: it disables forcing.
+func isDestructiveLongOpt(a string) bool {
+	if len(a) < 3 || !strings.HasPrefix(a, "--") || strings.HasPrefix(a, "--no-") {
+		return false
+	}
+	for _, opt := range destructiveLongOpts {
+		if strings.HasPrefix(opt, a) {
+			return true
+		}
+	}
+	return false
 }
 
 // PushArgs assembles the full git argv for a safe push: an optional `-C

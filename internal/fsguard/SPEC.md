@@ -87,7 +87,17 @@ state why.
 
 **FSG-51** When a digit is lexically adjacent to a redirection operator (e.g. the `2` of `2>&1`), the system shall treat it as a file descriptor and strip it with the redirection; when whitespace separates them (e.g. `rm 2 > log`), the system shall keep the digit as an ordinary write-target operand.
 
-**FSG-52** When an option value names an auxiliary output location rather than an inert scalar (e.g. `rsync --backup-dir DIR`, `--temp-dir`, `--partial-dir`, `--compare-dest`, `--copy-dest`, `--link-dest`, `--log-file`, `--write-batch`), the system shall classify that value as a write target.
+**FSG-52** When an option value names an auxiliary output location rather than an inert scalar (e.g. `rsync --backup-dir DIR`, `--temp-dir`, `--partial-dir`, `--log-file`, `--write-batch`), the system shall classify that value as a write target *in addition to* the command's positional destination, because such options supplement rather than replace it. Read-only basis directories (`--compare-dest`, `--copy-dest`, `--link-dest`) shall be consumed as ordinary option values and not classified as targets.
+
+**FSG-57** When a short-option cluster contains a letter that consumes a value (e.g. the `-S` of `cp -Stext`), the system shall stop interpreting later letters in that word as options, because they are that option's value; only a `t` reached before any such letter names a target directory.
+
+**FSG-58** When a command contains an input redirection (`<`, `<<`, `<<<`), the system shall exclude the operator and its target from the command's operands without classifying that target as a write target, since input redirections only read.
+
+**FSG-59** When a `chmod` mode is symbolic and begins with an operator (e.g. the `-w` of `chmod -w FILE`), the system shall treat it as the leading spec operand rather than as an option, so the following positional remains a write target.
+
+**FSG-60** When a redirection target consists only of digits, the system shall treat it as a file descriptor only for a descriptor-duplicating operator (e.g. `2>&1`); for a plain `>` or `>>` it shall classify it as the relative filename it is (`echo x > 2`).
+
+**FSG-61** When `mktemp` selects its directory with `-p`/`--tmpdir`, the system shall classify that directory as the write target and shall not classify the template against the current working directory, because the template is created under the selected directory.
 
 **FSG-53** When a `cd` occurs inside a subshell (`( … )`), the system shall restore the enclosing working directory once the subshell closes, because the shell does not carry that `cd` past `)`.
 
@@ -131,7 +141,9 @@ state why.
 
 **FSG-30** When `git push` is invoked within `~/src/` with any destructive form — `--force`/`-f`, `--force-with-lease[=…]`, `--force-if-includes`, `--mirror`, or a leading-plus force refspec (e.g. `+main`) — the system shall block it. Detection reuses the `safegit.ForceFlag` parser so the guard and `safe-push` share one definition of "destructive push" rather than maintaining a weaker copy.
 
-**FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`.
+**FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`. Where a value-taking short option precedes it (e.g. `-ofoo`), the system shall stop scanning at that option, because the remainder of the word is its value.
+
+**FSG-62** When a `git push` long option is an abbreviation of a destructive option (e.g. `--mir` for `--mirror`, `--forc` for `--force`), the system shall treat it as that option, because Git itself accepts unambiguous abbreviations; `--no-`-prefixed forms shall be excluded.
 
 **FSG-49** When a leading-plus token occupies the repository operand position of a `git push` (a remote legitimately named `+prod`, as in `git -C ~/src/<repo> push +prod main`), the system shall allow it rather than reading it as a force refspec, because `git push` is `git push [options] [repository [refspec...]]` and only refspec operands carry force semantics.
 

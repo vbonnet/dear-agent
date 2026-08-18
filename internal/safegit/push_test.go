@@ -66,6 +66,18 @@ func TestForceFlag(t *testing.T) {
 		{"clustered -fu is force", []string{"-fu", "origin", "main"}, "-fu", true},
 		{"clustered -qnv is not force", []string{"-qnv", "origin", "main"}, "", false},
 		{"long --follow-tags is not force", []string{"--follow-tags", "origin", "main"}, "", false},
+
+		// A value-taking short option swallows the rest of its word, so an 'f'
+		// there is part of the value, not a force flag.
+		{"attached push-option value is not force", []string{"-ofoo", "origin", "main"}, "", false},
+		{"attached push-option keeps refspec test", []string{"-ofoo", "origin", "+main"}, "+main", true},
+
+		// Git accepts unambiguous long-option abbreviations, so `--mir` really
+		// does mirror.
+		{"abbreviated --mir is force", []string{"--mir", "origin"}, "--mir", true},
+		{"abbreviated --forc is force", []string{"--forc", "origin", "main"}, "--forc", true},
+		{"--no-force-with-lease is not force", []string{"--no-force-with-lease", "origin", "main"}, "", false},
+		{"--porcelain is not force", []string{"--porcelain", "origin", "main"}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

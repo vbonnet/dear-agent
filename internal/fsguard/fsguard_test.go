@@ -252,6 +252,36 @@ func TestInspectCommand(t *testing.T) {
 		{"whitespace digit is an operand", "rm 2 > /tmp/log", home + "/src/dear-agent", false, "~/src"},
 		{"glued fd is still stripped", "cp /tmp/a ~/src/dear-agent/f 2>&1", wt, false, "~/src"},
 
+		// A value-taking short option swallows the rest of its cluster, so the
+		// `t` in `-Stext` is suffix text and not --target-directory (ce-3knl.3).
+		{"cp -Stext is not a target dir", "cp -Stext /tmp/a ~/src/dear-agent/f", "/tmp", false, "~/src"},
+
+		// Input redirections are read-only but must still leave the operand
+		// list, or their target displaces the destination (ce-3knl.3).
+		{"input redirect does not displace dest", "cp /tmp/a ~/src/dear-agent/f < in", "/tmp", false, "~/src"},
+		{"herestring does not displace dest", "cp /tmp/a ~/src/dear-agent/f <<< x", "/tmp", false, "~/src"},
+
+		// rsync's auxiliary output dirs supplement its positional destination
+		// rather than replacing it; its basis dirs are read-only (ce-3knl.3).
+		{"rsync aux keeps primary dest", "rsync /tmp/a ~/src/dear-agent/d --backup-dir /tmp/bk", "/tmp", false, "~/src"},
+		{"rsync --max-delete value consumed", "rsync /tmp/a ~/src/dear-agent/d --max-delete 1", "/tmp", false, "~/src"},
+		{"rsync --compare-dest is read-only", "rsync --compare-dest ~/src/dear-agent/b /tmp/a /tmp/b", "/tmp", true, ""},
+
+		// A chmod symbolic mode is option-shaped and must not be filtered out as
+		// a flag, or the real target is dropped as the leading spec (ce-3knl.3).
+		{"chmod -w symbolic mode blocked", "chmod -w ~/src/dear-agent/AGENTS.md", wt, false, "~/src"},
+		{"chmod -R is a flag not a mode", "chmod -R 755 ~/src/dear-agent", wt, false, "~/src"},
+		{"chmod -w benign allowed", "chmod -w /tmp/f", wt, true, ""},
+
+		// A digit target is a descriptor only for a dup operator (ce-3knl.3).
+		{"numeric redirect target blocked", "echo x > 2", home + "/src/dear-agent", false, "~/src"},
+		{"fd dup target still skipped", "echo x 2>&1", home + "/src/dear-agent", true, ""},
+
+		// mktemp's -p/--tmpdir relocates the template out of the cwd
+		// (ce-3knl.3).
+		{"mktemp -p escapes protected cwd", "mktemp -p /tmp scratch.XXXXXX", home + "/src/dear-agent", true, ""},
+		{"mktemp bare template still blocked", "mktemp scratch.XXXXXX", home + "/src/dear-agent", false, "~/src"},
+
 		// cd tracking for git.
 		{"cd then git commit blocked", "cd ~/src/dear-agent && git commit -m x", home, false,
 			"git commit` in ~/src"},

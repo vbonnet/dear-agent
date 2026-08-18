@@ -18,6 +18,14 @@ var redirOps = map[string]bool{
 	">": true, ">>": true, "&>": true, "&>>": true, ">&": true, ">>&": true,
 }
 
+// inputRedirOps read from their target instead of writing to it. They are never
+// classified as write targets, but they and their target must still be removed
+// from a command's operands: `cp a ~/src/<repo>/f < in` would otherwise pick
+// `in` as cp's destination and miss the protected write.
+var inputRedirOps = map[string]bool{
+	"<": true, "<<": true, "<<<": true, "|&": true,
+}
+
 // Commands whose destination is the last non-option argument (sources are
 // read-only).
 var destLast = map[string]bool{
@@ -316,20 +324,36 @@ var optsWithValue = map[string]map[string]bool{
 		"--checksum-seed": true, "--compress-level": true,
 		"--skip-compress": true, "--password-file": true,
 		"--remote-option": true, "-M": true,
+		"--max-delete": true, "--max-alloc": true, "--stop-after": true,
+		"--stop-at": true, "--time-limit": true, "--write-devices": true,
+		"--early-input": true, "--copy-as": true, "--iconv-from": true,
+		"--preallocate-size": true, "--append-verify-size": true,
+		// Basis directories are read from, never written to, so they are
+		// consumed as ordinary values rather than classified as destinations.
+		"--compare-dest": true, "--copy-dest": true, "--link-dest": true,
 	},
+	"mktemp": {"--suffix": true},
 }
 
 // destValueOpts lists, per command, the options whose value is itself a write
 // destination rather than an inert scalar. Consuming them like an ordinary
 // option value would silently drop a real target, so they are consumed *and*
-// classified (see optionTargets). rsync's auxiliary output directories are the
-// motivating case: `rsync a b --backup-dir ~/src/dear-agent` writes there.
+// classified (see optionTargets). These *supplement* the command's positional
+// destination rather than replacing it — unlike `-t`, an rsync run with
+// `--backup-dir` still writes to its ordinary DEST as well.
 var destValueOpts = map[string]map[string]bool{
 	"rsync": {
 		"--backup-dir": true, "--temp-dir": true, "-T": true,
-		"--partial-dir": true, "--compare-dest": true, "--copy-dest": true,
-		"--link-dest": true, "--log-file": true, "--write-batch": true,
+		"--partial-dir": true, "--log-file": true, "--write-batch": true,
 	},
+}
+
+// tmpDirOpts lists options that relocate a command's output directory, so the
+// command's bare template is created there rather than in the cwd. Unlike
+// destValueOpts these *replace* the positional target: `mktemp -p /tmp t.XXX`
+// writes under /tmp even when the shell sits in a protected checkout.
+var tmpDirOpts = map[string]map[string]bool{
+	"mktemp": {"-p": true, "--tmpdir": true},
 }
 
 // optionValue reports whether tok names one of opts, either exactly (its value
@@ -360,6 +384,15 @@ var targetDirCmds = map[string]bool{
 	"cp": true, "mv": true, "ln": true, "install": true,
 }
 
+// shortOptsWithValue lists, per command, the short-option letters that consume
+// a value. Within a cluster the first such letter swallows the rest of the word
+// (GNU accepts `-Stext` for `-S text`), so scanning must stop there: without
+// this, the `t` in `cp -Stext` reads as `--target-directory` and the suffix's
+// own text is mistaken for the destination.
+var shortOptsWithValue = map[string]string{
+	"cp": "St", "mv": "St", "ln": "St", "install": "Stmog",
+}
+
 // targetDirOption reports whether tok is cmd's -t/--target-directory option.
 // inline holds a destination glued to the option (`--target-directory=DIR`,
 // `-tDIR`, `-rtDIR`); an empty inline means the destination is the next token.
@@ -379,11 +412,37 @@ func targetDirOption(cmd, tok string) (inline string, ok bool) {
 	// ends the cluster: whatever follows it in the same word is the glued
 	// destination (`-tDIR`, `-atDIR`), and an empty remainder means the
 	// destination is the next token (`-t`, `-rt DIR`).
-	_, afterT, found := strings.Cut(tok[1:], "t")
-	if !found {
-		return "", false
+	// Short-option cluster: walk the letters in order and stop at the first one
+	// that takes a value, because it consumes the remainder of the word. Only a
+	// `t` reached that way is the target directory; anything glued after it is
+	// the destination (`-atDIR`), and an empty remainder means the next token is
+	// (`-t`, `-rt DIR`).
+	body := tok[1:]
+	for i, c := range body {
+		if !strings.ContainsRune(shortOptsWithValue[cmd], c) {
+			continue
+		}
+		if c != 't' {
+			return "", false // e.g. -S swallows the rest as its suffix
+		}
+		return body[i+1:], true
 	}
-	return afterT, true
+	return "", false
+}
+
+// isSymbolicMode reports whether tok is a chmod symbolic mode that begins with
+// an operator (`-w`, `+x`, `=rw`, `u-w,g+r`). Such a mode is option-shaped, so
+// without this test isOption would discard it and the following real target
+// would be dropped as the "leading spec" instead — letting `chmod -w
+// ~/src/<repo>/AGENTS.md` past the guard. chmod's own flags (`-R`, `-v`, `-c`,
+// `-f`) use letters outside the mode alphabet, so they are unaffected.
+func isSymbolicMode(tok string) bool {
+	if len(tok) < 2 || !strings.ContainsRune("-+=", rune(tok[0])) {
+		return false
+	}
+	return strings.IndexFunc(tok[1:], func(r rune) bool {
+		return !strings.ContainsRune("rwxXstugoa,+-=", r)
+	}) < 0
 }
 
 // hasReferenceOption reports whether a chmod/chown/chgrp invocation takes its
@@ -406,7 +465,6 @@ func hasReferenceOption(rest []string) bool {
 // or chown owner). This is what lets `rm AGENTS.md` be classified against cwd
 // without misreading `chmod 755 f`'s 755 or `mkdir -m 755 d`'s 755 as targets.
 func targetOperands(cmd string, rest []string) []string {
-	valueOpts := optsWithValue[cmd]
 	out := make([]string, 0, len(rest))
 	leadingSkipped := !leadingSpecOperand[cmd] || hasReferenceOption(rest)
 	operandsOnly := false
@@ -420,21 +478,16 @@ func targetOperands(cmd string, rest []string) []string {
 				operandsOnly = true
 				continue
 			}
-			if inline, isTargetDir := targetDirOption(cmd, a); isTargetDir {
-				if inline == "" {
-					i++ // destination is the next token; optionTargets classifies it
-				}
+			// A chmod symbolic mode is option-shaped (`chmod -w f`); it is the
+			// leading spec, not a flag, so it must be recognized before the
+			// generic option filter discards it.
+			if !leadingSkipped && cmd == "chmod" && isSymbolicMode(a) {
+				leadingSkipped = true
 				continue
 			}
-			if glued, isDestValue := optionValue(destValueOpts[cmd], a); isDestValue {
-				if glued == "" {
-					i++ // destination is the next token; optionTargets classifies it
-				}
-				continue
-			}
-			if isOption(a) {
-				if valueOpts[a] {
-					i++ // consume the option's value so it is not seen as a target
+			if skipValue, handled := consumeOption(cmd, a); handled {
+				if skipValue {
+					i++ // the value is not an operand
 				}
 				continue
 			}
@@ -448,21 +501,61 @@ func targetOperands(cmd string, rest []string) []string {
 	return out
 }
 
-// optionTargets returns the mutation targets a command names through an option
-// value rather than a positional operand: GNU's `-t`/`--target-directory`
-// destination and the auxiliary output directories in destValueOpts.
-func optionTargets(cmd string, rest []string) []string {
+// consumeOption classifies an option-shaped token for targetOperands: handled
+// reports that the token is an option rather than an operand, and skipValue
+// that the following token is its value and must be skipped too. Options whose
+// value is a path (`-t DIR`, rsync's `--backup-dir DIR`, mktemp's `-p DIR`) are
+// skipped here and classified separately by the optionTargets helpers.
+func consumeOption(cmd, tok string) (skipValue, handled bool) {
+	if inline, ok := targetDirOption(cmd, tok); ok {
+		return inline == "", true
+	}
+	if glued, ok := optionValue(destValueOpts[cmd], tok); ok {
+		return glued == "", true
+	}
+	if glued, ok := optionValue(tmpDirOpts[cmd], tok); ok {
+		return glued == "", true
+	}
+	if isOption(tok) {
+		return optsWithValue[cmd][tok], true
+	}
+	return false, false
+}
+
+// replacingOptionTargets returns targets named by an option that *stands in for*
+// the command's positional destination: GNU's `-t`/`--target-directory` and
+// mktemp's `-p`/`--tmpdir`. When one is present the positional operands are
+// sources or templates, not destinations.
+func replacingOptionTargets(cmd string, rest []string) []string {
+	return scanOptionTargets(rest, func(a string) (string, bool) {
+		if inline, ok := targetDirOption(cmd, a); ok {
+			return inline, true
+		}
+		return optionValue(tmpDirOpts[cmd], a)
+	})
+}
+
+// auxOptionTargets returns targets named by an option that *supplements* the
+// command's positional destination — rsync still writes to its ordinary DEST
+// alongside `--backup-dir`, so both must be classified.
+func auxOptionTargets(cmd string, rest []string) []string {
+	return scanOptionTargets(rest, func(a string) (string, bool) {
+		return optionValue(destValueOpts[cmd], a)
+	})
+}
+
+// scanOptionTargets collects the values of the options match accepts, taking
+// either the value glued to the option or the following token.
+func scanOptionTargets(rest []string, match func(string) (string, bool)) []string {
 	var out []string
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		if a == "--" {
 			break // options end here; the rest are operands
 		}
-		inline, ok := targetDirOption(cmd, a)
+		inline, ok := match(a)
 		if !ok {
-			if inline, ok = optionValue(destValueOpts[cmd], a); !ok {
-				continue
-			}
+			continue
 		}
 		if inline != "" {
 			out = append(out, inline)
@@ -488,7 +581,7 @@ func stripRedirections(segment []string) []string {
 	out := make([]string, 0, len(segment))
 	for i := 0; i < len(segment); i++ {
 		tok := segment[i]
-		if !isRedirOp(tok) {
+		if !isRedirOp(tok) && !inputRedirOps[tok] {
 			out = append(out, tok)
 			continue
 		}
@@ -597,19 +690,26 @@ func isEnvAssignment(tok string) bool {
 func writeTargets(cmd string, rest []string) []string {
 	switch {
 	case destAll[cmd] || cmd == "tee" || permsCmds[cmd]:
-		return append(optionTargets(cmd, rest), targetOperands(cmd, rest)...)
+		relocated := replacingOptionTargets(cmd, rest)
+		out := make([]string, 0, len(relocated)+len(rest))
+		out = append(out, relocated...)
+		out = append(out, auxOptionTargets(cmd, rest)...)
+		if cmd == "mktemp" && len(relocated) > 0 {
+			return out // -p/--tmpdir relocates the template out of the cwd
+		}
+		return append(out, targetOperands(cmd, rest)...)
 	case destLast[cmd]:
-		// cp/rsync/install/ln SRC... DEST -> the destination is last, unless
-		// -t/--target-directory names it, in which case every positional is a
-		// read-only source and the option value is the sole write target.
-		if dirs := optionTargets(cmd, rest); len(dirs) > 0 {
-			return dirs
+		// cp/rsync/install/ln SRC... DEST -> the destination is last. A
+		// -t/--target-directory replaces that positional destination, while
+		// rsync's auxiliary output directories are written in addition to it.
+		out := auxOptionTargets(cmd, rest)
+		if dirs := replacingOptionTargets(cmd, rest); len(dirs) > 0 {
+			return append(out, dirs...)
 		}
-		ops := targetOperands(cmd, rest)
-		if len(ops) == 0 {
-			return nil
+		if ops := targetOperands(cmd, rest); len(ops) > 0 {
+			out = append(out, ops[len(ops)-1])
 		}
-		return ops[len(ops)-1:]
+		return out
 	case cmd == "dd":
 		return ddTargets(rest)
 	case cmd == "sed" || cmd == "gsed":
@@ -783,11 +883,12 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 			continue
 		}
 		target := tokens[idx+1]
-		// Skip fd-dups (`2>&1`, `>&2`) and bare-digit fds; everything else is a
-		// filename target, including a bare relative name like `> README.md`,
-		// which is resolved against cwd by Classify.
+		// Skip fd-dups (`2>&1`, `>&2`); everything else is a filename target,
+		// including a bare relative name like `> README.md`, which Classify
+		// resolves against cwd. An all-digit target counts as a descriptor only
+		// for a dup operator — plain `> 2` creates the relative file `2`.
 		if separators[target] || strings.HasPrefix(target, "&") ||
-			isAllDigits(target) {
+			(isAllDigits(target) && strings.ContainsRune(tok, '&')) {
 			continue
 		}
 		if ok, msg := g.Classify(target, cwd); !ok {
