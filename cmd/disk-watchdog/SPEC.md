@@ -81,6 +81,10 @@ place, so counting either would let a broken reaper suppress its own alarm.
 
 **DW-19** When the sandbox reaper is stale and the sandbox GC recorded an error after its last proof of life, the system shall include that error in the alarm reason.
 
+**DW-25** When a sandbox-GC completion record is rejected as proof of a completed sweep, the system shall record why it was rejected — dry run, deletion errors, or safety-probe failures — as the alarm's error state, so a responder can distinguish a dead schedule from one that runs and fails on every tick.
+
+**DW-26** When scanning the sandbox-GC log, the system shall read at most a bounded tail of the file and shall resume at the first whole record inside that tail, so per-tick work does not grow with total log history and a long-lived host cannot starve later disk samples.
+
 **DW-20** While the reaper-liveness window is zero or the sandbox GC log path is empty, the system shall not evaluate reaper liveness.
 
 **DW-21** When evaluating reaper liveness, the system shall accept only a non-dry-run completion record with zero reap errors and zero probe failures as proof of a completed sweep. It may accept sandbox reap records only from logs that contain no completion records.

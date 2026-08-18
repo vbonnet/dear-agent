@@ -310,6 +310,16 @@ const gcOperationPrefix = "sandbox_gc"
 const gcClockSkewTolerance = 5 * time.Minute
 const maxGCLogRecordBytes = 1024 * 1024
 
+// maxGCLogScanBytes bounds how much of gc.jsonl one tick reads.
+//
+// gc.jsonl is append-only and shared with the session GC, so on a long-lived
+// host it grows without bound. Reading from byte zero every five minutes makes
+// the work per tick grow with total history, and launchd does not overlap
+// instances of the same job — a slow enough scan silently starves every
+// later disk sample and alarm. Only the newest heartbeat and the newest error
+// matter, so read a fixed tail and start at the first whole record inside it.
+const maxGCLogScanBytes = 8 * 1024 * 1024
+
 // healthyHeartbeat reports whether a completion record is evidence the reaper
 // actually did its job. A dry run reclaims nothing, a sweep whose deletion
 // attempts failed leaves the sandboxes in place, and a sweep whose safety
@@ -319,6 +329,28 @@ const maxGCLogRecordBytes = 1024 * 1024
 // own alarm indefinitely.
 func (e gcLogEntry) healthyHeartbeat() bool {
 	return e.Operation == gcCompletedOperation && !e.DryRun && e.Errors == 0 && e.ProbeFailures == 0
+}
+
+// rejectedCompletionReason explains why a completion record was not accepted
+// as a liveness heartbeat, or "" when it was healthy.
+func rejectedCompletionReason(e gcLogEntry) string {
+	if e.Operation != gcCompletedOperation {
+		return ""
+	}
+	var causes []string
+	if e.DryRun {
+		causes = append(causes, "dry run reclaimed nothing")
+	}
+	if e.Errors > 0 {
+		causes = append(causes, fmt.Sprintf("%d deletion error(s)", e.Errors))
+	}
+	if e.ProbeFailures > 0 {
+		causes = append(causes, fmt.Sprintf("%d safety-probe failure(s)", e.ProbeFailures))
+	}
+	if len(causes) == 0 {
+		return ""
+	}
+	return "sweep completed without a healthy heartbeat: " + strings.Join(causes, ", ")
 }
 
 // gcLogSummary is what one pass over the GC log yields.
@@ -355,6 +387,9 @@ func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 	defer f.Close()
 
 	horizon := now.Add(gcClockSkewTolerance)
+	if err := seekGCLogTail(f); err != nil {
+		return s, err
+	}
 	r := bufio.NewReaderSize(f, maxGCLogRecordBytes)
 	for {
 		line, readErr := r.ReadSlice('\n')
@@ -375,6 +410,43 @@ func scanGCLog(path string, now time.Time) (gcLogSummary, error) {
 		}
 		s.observe(line, horizon)
 	}
+}
+
+// seekGCLogTail positions f at the start of the first whole record within the
+// last maxGCLogScanBytes. A file at or below the bound is read in full. The
+// partial record straddling the cut is skipped rather than parsed, so a
+// truncated line is never mistaken for a malformed one.
+func seekGCLogTail(f *os.File) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() <= maxGCLogScanBytes {
+		return nil
+	}
+	if _, err := f.Seek(info.Size()-maxGCLogScanBytes, io.SeekStart); err != nil {
+		return err
+	}
+	// Drop bytes up to and including the next newline: they are the tail of a
+	// record whose head lies before the cut.
+	skip := bufio.NewReaderSize(f, maxGCLogRecordBytes)
+	discarded := 0
+	for {
+		chunk, err := skip.ReadSlice('\n')
+		discarded += len(chunk)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		return err
+	}
+	_, err = f.Seek(info.Size()-maxGCLogScanBytes+int64(discarded), io.SeekStart)
+	return err
 }
 
 func discardOversizedGCLogRecord(r *bufio.Reader) error {
@@ -410,7 +482,16 @@ func (s *gcLogSummary) observe(line []byte, horizon time.Time) {
 			s.LastSuccess = e.Timestamp
 		}
 	case e.Operation == gcCompletedOperation:
+		// A completion that is not a healthy heartbeat proves the reaper ran
+		// and did not do its job. The producer records that as structured
+		// counts with no `error` field, so without promoting them here the
+		// alarm would report only "no proof of life" once the last healthy
+		// heartbeat went stale — leaving a responder unable to tell a dead
+		// schedule from a schedule that runs and fails every time (DW-19).
 		s.HasCompletion = true
+		if reason := rejectedCompletionReason(e); reason != "" && e.Timestamp.After(s.LastErrorAt) {
+			s.LastErrorAt, s.LastError = e.Timestamp, reason
+		}
 	case e.Operation == "sandbox_gc_reap":
 		if e.Timestamp.After(s.LastReap) {
 			s.LastReap = e.Timestamp

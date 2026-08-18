@@ -67,14 +67,21 @@
       supplied. Between 2026-07-05 and 2026-08-07 this job exited non-zero on
       every hourly tick for that reason and ~/.agm/sandboxes reached 239 GB.
 
-      Scope of the port fix, precisely: it lets the inventory resolve. It does
-      NOT make the sweep tolerant of unreachable stores in general. Per
-      sandboxGCLiveSessionIDsFromDolt, only a *recognised missing-database*
-      error degrades to a logged warning and lets the remaining workspaces be
-      swept; any other store-open failure (connection refused, timeout, auth)
-      still aborts the entire sweep, by design. So a Dolt server that is down
-      remains a hard stop, and the sweep will report it rather than reap on
-      partial knowledge.
+      Scope of the port fix, precisely: it lets the inventory resolve for
+      workspaces that live on this port. It does NOT make the sweep tolerant of
+      unreachable stores. Per sandboxGCLiveSessionIDsFromDolt, only a
+      *recognised missing-database* error degrades to a logged warning; any
+      other store-open failure (connection refused, timeout, auth) aborts the
+      entire sweep by design.
+
+      Critically, a degraded workspace no longer permits deletion. A skipped
+      store contributes none of its live session IDs, so its sandboxes would
+      otherwise look unowned and be reaped — deleting a live session's sandbox
+      precisely because the store proving it is live could not be read. The
+      sweep therefore refuses to reap whenever any workspace was skipped
+      (effectiveSandboxGCReap) and downgrades that tick to a scan. Setting this
+      port is consequently not a destructive guess: a wrong or incomplete
+      topology costs a scan-only tick and a loud warning, never a deletion.
     -->
     <key>DOLT_PORT</key>
     <string>3307</string>

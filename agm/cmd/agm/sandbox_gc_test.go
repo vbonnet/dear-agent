@@ -123,3 +123,55 @@ func TestIsMissingDoltDatabaseError(t *testing.T) {
 		})
 	}
 }
+
+// A skipped workspace contributes none of its live session IDs to the
+// inventory, so every sandbox it owns looks unowned and can pass the remaining
+// safety gates. Reaping on that partial knowledge deletes a live session's
+// sandbox because the store proving it is live could not be read.
+func TestEffectiveSandboxGCReapRefusesPartialInventory(t *testing.T) {
+	tests := []struct {
+		name       string
+		requested  bool
+		warnings   []string
+		wantReap   bool
+		wantNotice bool
+	}{
+		{name: "complete inventory reaps", requested: true, wantReap: true},
+		{
+			name:       "one skipped workspace refuses",
+			requested:  true,
+			warnings:   []string{`workspace "personal" skipped`},
+			wantReap:   false,
+			wantNotice: true,
+		},
+		{
+			name:       "several skipped workspaces refuse",
+			requested:  true,
+			warnings:   []string{"a skipped", "b skipped"},
+			wantReap:   false,
+			wantNotice: true,
+		},
+		{
+			name:      "dry run stays a dry run without a notice",
+			requested: false,
+			warnings:  []string{`workspace "personal" skipped`},
+			wantReap:  false,
+		},
+		{name: "dry run with complete inventory", requested: false, wantReap: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reap, notice := effectiveSandboxGCReap(tt.requested, tt.warnings)
+			if reap != tt.wantReap {
+				t.Errorf("reap = %v, want %v", reap, tt.wantReap)
+			}
+			if (notice != "") != tt.wantNotice {
+				t.Errorf("notice = %q, want notice present = %v", notice, tt.wantNotice)
+			}
+			if tt.wantNotice && !strings.Contains(notice, "refusing to reap") {
+				t.Errorf("notice = %q, want it to say why the reap was refused", notice)
+			}
+		})
+	}
+}

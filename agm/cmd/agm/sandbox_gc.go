@@ -120,8 +120,29 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Never reap on partial knowledge. A skipped workspace contributes none of
+	// its live session IDs to the inventory, so every sandbox owned by that
+	// workspace looks unowned and can pass the remaining gates — deleting a
+	// live session's sandbox because we could not read the store that proves
+	// it is live. Downgrade the run to a scan and say so loudly; the operator
+	// fixes the topology, and the next tick reaps normally.
+	reap, notice := effectiveSandboxGCReap(sandboxGCReap, warnings)
+	if notice != "" {
+		logSandboxGCEntry(gclog.Entry{
+			Operation: "sandbox_gc_warning",
+			Reason:    "partial_inventory_reap_refused",
+			Error:     notice,
+			DryRun:    true,
+		})
+		if !sandboxGCJSON {
+			ui.PrintWarning(notice)
+		} else {
+			fmt.Fprintln(os.Stderr, "agm sandbox gc: "+notice)
+		}
+	}
+
 	result, err := ops.SandboxGC(&ops.OpContext{}, &ops.SandboxGCRequest{
-		Reap:           sandboxGCReap,
+		Reap:           reap,
 		MinAge:         minAge,
 		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
 		Warnings:       warnings,
@@ -318,12 +339,39 @@ func isMissingDoltDatabaseError(err error, database string) bool {
 		strings.Contains(msg, "unknown database \""+db+"\"")
 }
 
+// logSandboxGCEntryDefault appends one record to the shared GC log.
+//
+// A write failure is reported on stderr rather than swallowed. The completion
+// record is the watchdog's only proof of life: if it never lands, the command
+// still exits zero while disk-watchdog raises a dead-reaper alarm six hours
+// later, and nothing anywhere says the observation channel itself broke.
+// effectiveSandboxGCReap decides whether a requested reap may actually delete.
+//
+// Never reap on partial knowledge. A skipped workspace contributes none of its
+// live session IDs to the inventory, so every sandbox owned by that workspace
+// looks unowned and can pass the remaining gates — deleting a live session's
+// sandbox because we could not read the store that proves it is live. A
+// partial inventory downgrades the run to a scan and returns the notice
+// explaining why; a complete inventory reaps as requested. A dry run is
+// already non-destructive and needs no notice.
+func effectiveSandboxGCReap(requested bool, warnings []string) (bool, string) {
+	if !requested || len(warnings) == 0 {
+		return requested, ""
+	}
+	return false, fmt.Sprintf(
+		"refusing to reap: live-session inventory is partial (%d workspace store(s) skipped); "+
+			"scanning only. Fix the workspace Dolt endpoints, then re-run.", len(warnings))
+}
+
 func logSandboxGCEntryDefault(entry gclog.Entry) {
 	logger, err := gclog.NewDefault()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "agm sandbox gc: WARNING: cannot open the GC log to record %q: %v\n", entry.Operation, err)
 		return
 	}
-	_ = logger.Log(entry)
+	if err := logger.Log(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "agm sandbox gc: WARNING: cannot record %q in the GC log: %v\n", entry.Operation, err)
+	}
 }
 
 func init() {
