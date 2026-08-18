@@ -1,6 +1,6 @@
 name: Stale Branch Audit
 
-# Weekly branch hygiene pass, powered by scripts/branch-reaper.sh:
+# Weekly branch hygiene pass, powered by cmd/branch-reaper:
 #
 #   1. Auto-deletes branches whose PR already merged and got nothing pushed to
 #      them afterward -- GitHub's own "delete head branches on merge" setting is
@@ -48,6 +48,12 @@ jobs:
         # tip + committer date, so fetch the full refs/heads/* namespace.
         run: git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Run branch reaper (auto-delete safe set, report the rest)
         id: reaper
         env:
@@ -55,7 +61,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          bash scripts/branch-reaper.sh --json --execute > reaper-report.json
+          go run ./cmd/branch-reaper --json --execute > reaper-report.json
           review_rc=$?
 
           {
