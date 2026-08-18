@@ -1,6 +1,6 @@
 # Agent Permission Harness Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -10,7 +10,7 @@
 
 Agent permission parity means AGM resolves one role/profile permission policy
 for every session and carries that policy through all active harnesses. Claude
-Code has a native allowlist file, while Codex CLI, AGY, and OpenCode expose
+Code has a native allowlist file, while Codex CLI, AGY, OpenCode, and Pi expose
 different permission controls. The manifest `permission_policy` field is the
 shared control-plane record; native harness surfaces enforce the subset each
 harness can represent.
@@ -36,6 +36,18 @@ harness can represent.
 **APP-09** When AGM starts OpenCode, the system shall preserve the resolved policy in the manifest and record OpenCode's permission surface as server-policy plus manifest coordination.
 
 **APP-10** When an active harness is added, the system shall require a permission parity surface with non-empty policy, startup, runtime, and native-enforcement descriptions.
+
+**APP-11** When AGM starts Pi, the system shall install its mandatory dependency-free authorization extension in private AGM storage and load it with an explicit `--extension` argument.
+
+**APP-12** When Pi runs in plan mode, the system shall remove mutating tools from the active tool set and block a mutating call even if it appears in the resolved allowlist.
+
+**APP-13** When Pi runs in default mode, the system shall allow matching policy calls, ask for unmatched calls only when an interactive UI exists, and block unmatched non-interactive calls.
+
+**APP-14** When Pi runs in auto mode, the system shall enable native tools while continuing to execute trusted repository guardrails before the authorization outcome.
+
+**APP-15** When AGM approves a Pi working directory, the system shall treat project-resource trust, tool availability, per-call authorization, runtime isolation, and repository guardrails as independent enforcement layers.
+
+**APP-16** When a Pi project hook errors, times out, terminates by signal, or exits nonzero after emitting stderr or advisory context, the system shall fail closed and report the execution failure ahead of partial hook output instead of presenting that output as the rejection reason.
 
 ## BDD Traceability
 

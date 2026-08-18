@@ -1,7 +1,7 @@
 // bead-close-guard enforces Definition of Done before a bead can be closed.
 //
 // It runs two gates, each strictly stronger than the last
-// (docs/drift-detection-plan.md):
+// (see cmd/drift-check/README.md):
 //
 //   - merged: every PR the bead references must be merged to main. This
 //     prevents the DoD violation where beads are marked "closed" while their

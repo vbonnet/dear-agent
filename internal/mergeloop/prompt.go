@@ -29,7 +29,7 @@ func BuildPrompt(repo string, pr PR, kind AgentKind) string {
 
 	b.WriteString("RULES (mandatory):\n")
 	b.WriteString("- Work only in a git worktree under ~/worktrees/**. Never edit ~/src/** directly.\n")
-	b.WriteString("- Use `GIT_TERMINAL_PROMPT=0 gtimeout 30 git ...` for all git/network ops.\n")
+	b.WriteString("- Use `safe-push` for every push. Keep other git/network operations non-interactive and bounded.\n")
 	b.WriteString("- NEVER use --no-verify or --force / --force-with-lease.\n")
 	b.WriteString("- Commit incrementally with conventional messages; uncommitted work is lost work.\n")
 	b.WriteString("- VERIFICATION GATE (mandatory): Run go test / make preflight locally and\n")

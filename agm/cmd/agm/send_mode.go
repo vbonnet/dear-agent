@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"time"
@@ -31,6 +32,7 @@ Harness-specific behavior:
   opencode-cli  Uses Tab to cycle between plan and default
   codex-cli     Reports an explicit restart configuration fallback
   agy           Reports an explicit restart flag fallback
+  pi-cli        Uses the managed /agm-mode command and native tool interception
 
 Examples:
   # Switch to plan mode
@@ -64,6 +66,8 @@ var validModes = map[string]bool{
 	"auto":    true,
 	"default": true,
 }
+
+var sendPiModeCommand = tmux.SendSlashCommandSafeContext
 
 // calculateShiftTabPresses computes how many Shift+Tab presses are needed
 // to cycle from currentMode to targetMode in Claude Code.
@@ -133,23 +137,32 @@ func updateModeManifest(adapter *dolt.Adapter, sessionName, targetMode, source s
 
 // dispatchModeSwitch sends the appropriate key sequence for the given harness.
 func dispatchModeSwitch(harness, sessionName, targetMode, currentMode string) error {
+	return dispatchModeSwitchContext(context.Background(), harness, sessionName, targetMode, currentMode)
+}
+
+func dispatchModeSwitchContext(ctx context.Context, harness, sessionName, targetMode, currentMode string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	switch harness {
 	case "claude-code":
-		return sendModeClaudeCode(sessionName, targetMode, currentMode)
+		return sendModeClaudeCodeContext(ctx, sessionName, targetMode, currentMode)
 	case "gemini-cli":
-		return sendModeGeminiCLI(sessionName, targetMode, currentMode)
+		return sendModeGeminiCLIContext(ctx, sessionName, targetMode, currentMode)
 	case "opencode-cli":
-		return sendModeOpenCode(sessionName, targetMode, currentMode)
+		return sendModeOpenCodeContext(ctx, sessionName, targetMode, currentMode)
 	case "codex-cli":
 		return sendModeRestartFallback("codex-cli", targetMode)
 	case "agy":
 		return sendModeRestartFallback("agy", targetMode)
+	case "pi-cli":
+		return sendModePiContext(ctx, sessionName, targetMode)
 	default:
 		return fmt.Errorf("unsupported harness %q for mode switching", harness)
 	}
 }
 
-func runSendMode(_ *cobra.Command, args []string) error {
+func runSendMode(cmd *cobra.Command, args []string) error {
 	targetMode := args[0]
 	sessionName := args[1]
 
@@ -191,7 +204,7 @@ func runSendMode(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("session '%s' is not at idle prompt (state: %s) — cannot switch mode; wait for session to become idle", sessionName, canReceive)
 	}
 
-	if err := dispatchModeSwitch(info.harness, sessionName, targetMode, info.currentMode); err != nil {
+	if err := dispatchModeSwitchContext(cmd.Context(), info.harness, sessionName, targetMode, info.currentMode); err != nil {
 		return err
 	}
 
@@ -231,16 +244,29 @@ func printDryRunDetails(harness, targetMode, currentMode, sessionName string) {
 		fmt.Printf("  Fallback: %s\n", modeRestartInstruction("codex-cli", targetMode))
 	case "agy":
 		fmt.Printf("  Fallback: %s\n", modeRestartInstruction("agy", targetMode))
+	case "pi-cli":
+		fmt.Printf("  Would send: /agm-mode %s\n", targetMode)
 	}
 }
 
+func sendModePiContext(ctx context.Context, sessionName, targetMode string) error {
+	if err := sendPiModeCommand(ctx, sessionName, "/agm-mode "+targetMode); err != nil {
+		return fmt.Errorf("failed to switch Pi mode: %w", err)
+	}
+	return nil
+}
+
 func sendModeClaudeCode(sessionName, targetMode, currentMode string) error {
+	return sendModeClaudeCodeContext(context.Background(), sessionName, targetMode, currentMode)
+}
+
+func sendModeClaudeCodeContext(ctx context.Context, sessionName, targetMode, currentMode string) error {
 	socketPath := tmux.GetSocketPath()
 	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
 
 	if targetMode == "plan" {
 		// Use /plan slash command - direct and reliable
-		if err := tmux.SendSlashCommandSafe(sessionName, "/plan"); err != nil {
+		if err := tmux.SendSlashCommandSafeContext(ctx, sessionName, "/plan"); err != nil {
 			return fmt.Errorf("failed to send /plan command: %w", err)
 		}
 		return nil
@@ -255,21 +281,31 @@ func sendModeClaudeCode(sessionName, targetMode, currentMode string) error {
 	}
 
 	for i := 0; i < presses; i++ {
-		if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "S-Tab").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "S-Tab").Run(); err != nil {
 			return fmt.Errorf("failed to send Shift+Tab: %w", err)
 		}
-		time.Sleep(300 * time.Millisecond)
+		timer := time.NewTimer(300 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	return nil
 }
 
 func sendModeGeminiCLI(sessionName, targetMode, currentMode string) error {
+	return sendModeGeminiCLIContext(context.Background(), sessionName, targetMode, currentMode)
+}
+
+func sendModeGeminiCLIContext(ctx context.Context, sessionName, targetMode, currentMode string) error {
 	socketPath := tmux.GetSocketPath()
 	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
 
 	if targetMode == "plan" {
-		if err := tmux.SendSlashCommandSafe(sessionName, "/plan"); err != nil {
+		if err := tmux.SendSlashCommandSafeContext(ctx, sessionName, "/plan"); err != nil {
 			return fmt.Errorf("failed to send /plan command: %w", err)
 		}
 		return nil
@@ -277,7 +313,7 @@ func sendModeGeminiCLI(sessionName, targetMode, currentMode string) error {
 
 	// auto toggle via Ctrl+Y
 	if targetMode == "auto" && currentMode != "auto" {
-		if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-y").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-y").Run(); err != nil {
 			return fmt.Errorf("failed to send Ctrl+Y: %w", err)
 		}
 		return nil
@@ -285,7 +321,7 @@ func sendModeGeminiCLI(sessionName, targetMode, currentMode string) error {
 
 	// default: if currently auto, toggle off with Ctrl+Y
 	if targetMode == "default" && currentMode == "auto" {
-		if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-y").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-y").Run(); err != nil {
 			return fmt.Errorf("failed to send Ctrl+Y: %w", err)
 		}
 		return nil
@@ -295,6 +331,10 @@ func sendModeGeminiCLI(sessionName, targetMode, currentMode string) error {
 }
 
 func sendModeOpenCode(sessionName, targetMode, currentMode string) error {
+	return sendModeOpenCodeContext(context.Background(), sessionName, targetMode, currentMode)
+}
+
+func sendModeOpenCodeContext(ctx context.Context, sessionName, targetMode, currentMode string) error {
 	socketPath := tmux.GetSocketPath()
 	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
 
@@ -307,7 +347,7 @@ func sendModeOpenCode(sessionName, targetMode, currentMode string) error {
 	}
 
 	if needsTab {
-		if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "Tab").Run(); err != nil {
+		if err := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "Tab").Run(); err != nil {
 			return fmt.Errorf("failed to send Tab: %w", err)
 		}
 	}

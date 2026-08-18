@@ -55,6 +55,14 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 			StorageSurface:     "Dolt engram_* columns",
 			Degradation:        "retrieval metadata remains available without OpenCode-native memory APIs",
 		}, true
+	case "pi-cli":
+		return HarnessSurface{
+			Harness:            "pi-cli",
+			InjectionSurface:   "startup prompt and native AGENTS.md/SKILL context",
+			PersistenceSurface: "manifest.EngramMetadata",
+			StorageSurface:     "Dolt engram_* columns",
+			Degradation:        "retrieval metadata remains available without Pi-native memory APIs",
+		}, true
 	default:
 		return HarnessSurface{}, false
 	}

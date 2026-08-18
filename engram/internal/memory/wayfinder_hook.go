@@ -153,7 +153,7 @@ Key Learnings:
 // PhaseCompleteEvent represents a completed Wayfinder phase.
 type PhaseCompleteEvent struct {
 	SessionID      string
-	PhaseName      string // "D1", "D2", "I1", etc.
+	PhaseName      string // CHARTER, PROBLEM, ... RETRO
 	Outcome        string // "success", "failure", "skipped"
 	Duration       string // "2h30m"
 	ErrorCount     int

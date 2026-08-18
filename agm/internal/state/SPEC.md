@@ -1,11 +1,11 @@
 # AGM State Detector Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
 `agm/internal/state` detects interactive harness state from tmux pane output.
-It recognizes Claude Code, Codex, and Antigravity ready prompts plus blocked,
+It recognizes Claude Code, Codex, Antigravity, and managed Pi ready prompts plus blocked,
 active, overlay, waiting, looping, stuck, and unknown states.
 
 ## EARS Requirements
@@ -14,7 +14,7 @@ active, overlay, waiting, looping, stuck, and unknown states.
 
 **AGM-STATE-02** When the Claude Code background tasks overlay is visible, the system shall report `background_tasks_view` and classify it as an overlay.
 
-**AGM-STATE-03** When a Claude prompt, Codex composer or footer, or Antigravity bare prompt is visible, the system shall report `ready` with high confidence.
+**AGM-STATE-03** When a Claude prompt, a complete Codex composer (the initial header with its model-change hint and empty `›` or `»` input cursor, or an empty post-turn `›` or `»` input cursor paired with the structured model footer), an Antigravity bare prompt, or the latest managed Pi ready status is visible, the system shall report `ready` with high confidence; standalone Codex model text, a working-status footer, a typed draft, an unsubmitted paste chip, and Pi working or permission status shall not report ready.
 
 **AGM-STATE-04** When a spinner appears with agent markers, the system shall report `waiting_agent`.
 
@@ -28,9 +28,13 @@ active, overlay, waiting, looping, stuck, and unknown states.
 
 **AGM-STATE-09** When no state pattern or stuck condition applies, the system shall report `unknown` with low confidence.
 
-**AGM-STATE-10** When input readiness is checked, the system shall return no for permission dialogs, overlay for background-task overlays, yes for Claude/Codex/Antigravity ready prompts, and queue otherwise.
+**AGM-STATE-10** When input readiness is checked, the system shall return no for permission dialogs, overlay for background-task overlays, yes for complete Claude/Codex/Antigravity ready prompts or the latest managed Pi ready status, and queue for standalone Codex model text, a working-status footer, Pi working or permission status, or any other non-ready output.
 
 **AGM-STATE-11** When state helper methods are used, the system shall classify blocked, overlay, active, idle, and waiting states according to the exported state constants.
+
+**AGM-STATE-12** When AGY pane history contains a feedback-survey marker, the system shall classify it as an active overlay only when no bare AGY composer appears after the final marker; a later composer shall be ready and directly sendable, while a prompt that precedes the marker shall remain blocked by the survey.
+
+**AGM-STATE-13** When Pi pane history contains multiple managed status lines, the system shall classify the latest status and shall not let a stale ready line override a newer working or permission state.
 
 ## BDD Traceability
 

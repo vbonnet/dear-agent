@@ -1,6 +1,6 @@
 # Harness Configuration Directory Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -10,8 +10,8 @@
 
 Configuration directory parity means every active harness has a repo-local
 dot-directory where hooks, settings, skills, or fallback metadata can live.
-These directories are the concrete `.claude/`, `.codex/`, `.agents/`, and
-`.opencode/` equivalents of the model-specific configuration surfaces. Gemini
+These directories are the concrete `.claude/`, `.codex/`, `.agents/`,
+`.opencode/`, and `.pi/` equivalents of the harness-specific configuration surfaces. Gemini
 keeps `.gemini/` as deprecated compatibility.
 
 ## EARS Requirements
@@ -31,6 +31,8 @@ keeps `.gemini/` as deprecated compatibility.
 **CDP-07** When Gemini CLI compatibility is present, the system shall keep `.gemini/` separate from the active harness parity set.
 
 **CDP-08** When a new active harness is added, the system shall require configuration-directory parity tests before the harness is considered supported.
+
+**CDP-09** When Pi is active, the system shall use `.pi/` as its configuration directory while keeping the mandatory authorization extension in AGM-private storage.
 
 ## BDD Traceability
 

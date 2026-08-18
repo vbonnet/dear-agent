@@ -2,6 +2,8 @@ package dolt
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +60,8 @@ func TestDefaultConfig(t *testing.T) {
 		switch key {
 		case "ENGRAM_TEST_MODE":
 			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "config-workspace", true
 		default:
 			return "", false
 		}
@@ -80,6 +84,8 @@ func TestDefaultConfig(t *testing.T) {
 			return "3307", true
 		case "ENGRAM_TEST_MODE":
 			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "test-workspace", true
 		default:
 			return "", false
 		}
@@ -100,6 +106,381 @@ func TestDefaultConfig(t *testing.T) {
 
 	if config2.Host != "127.0.0.1" {
 		t.Errorf("Expected default host '127.0.0.1', got '%s'", config2.Host)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsIncludesEveryEnabledStore(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`version: 1
+default_workspace: personal
+workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+  - name: retired
+    enabled: false
+  - name: dormant
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigs()
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("configured stores = %d, want 2: %#v", len(configs), configs)
+	}
+	for index, want := range []string{"personal", "oss"} {
+		if configs[index].Workspace != want || configs[index].Database != want {
+			t.Errorf("config[%d] = workspace %q database %q, want %q/%q",
+				index, configs[index].Workspace, configs[index].Database, want, want)
+		}
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtUsesCustomRegistry(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+	})
+
+	configPath := t.TempDir() + "/custom-workspaces.yaml"
+	if err := os.WriteFile(configPath, []byte(`version: 1
+default_workspace: custom
+workspaces:
+  - name: custom
+    enabled: true
+  - name: api-only
+    enabled: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		switch key {
+		case "ENGRAM_TEST_MODE":
+			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "custom", true
+		case "DOLT_PORT":
+			return "3307", true
+		default:
+			return "", false
+		}
+	}
+
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigsAt: %v", err)
+	}
+	got := make(map[string]bool, len(configs))
+	for _, config := range configs {
+		got[config.Workspace] = true
+	}
+	for _, workspace := range []string{"custom", "api-only"} {
+		if !got[workspace] {
+			t.Errorf("custom registry omitted %q: %#v", workspace, got)
+		}
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtDoesNotRequireDefaultForEnabledRegistry(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigsAt: %v", err)
+	}
+	if len(configs) != 2 || configs[0].Workspace != "personal" || configs[1].Workspace != "oss" {
+		t.Fatalf("configured stores = %#v, want enabled personal and oss", configs)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsRejectsExplicitDatabaseAcrossWorkspaces(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`default_workspace: personal
+workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_DATABASE":         "agm_test",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	_, err := ConfiguredWorkspaceConfigs()
+	if err == nil || !strings.Contains(err.Error(), "cannot prove a complete cross-workspace") {
+		t.Fatalf("ConfiguredWorkspaceConfigs error = %v, want explicit-database isolation failure", err)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtResolvesPerWorkspaceDoltEndpoints(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+    dolt:
+      host: 127.0.0.1
+      port: "3307"
+  - name: oss
+    enabled: true
+    dolt:
+      host: dolt-oss.internal
+      port: "3308"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 2 || configs[0].Port != "3307" || configs[1].Port != "3308" || configs[1].Host != "dolt-oss.internal" {
+		t.Fatalf("workspace endpoints = %#v", configs)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtComposesSharedEndpointWithWorkspaceOverrides(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+    dolt:
+      database: personal_sessions
+  - name: oss
+    enabled: true
+    dolt:
+      host: dolt-oss.internal
+      database: oss_sessions
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"DOLT_PORT":             "3307",
+			"DOLT_PASSWORD":         "shared-secret",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("workspace endpoints = %#v, want 2", configs)
+	}
+	if got := configs[0]; got.Port != "3307" || got.Database != "personal_sessions" || got.Password != "shared-secret" {
+		t.Errorf("personal endpoint = %#v, want shared port/password plus personal database", got)
+	}
+	if got := configs[1]; got.Host != "dolt-oss.internal" || got.Port != "3307" || got.Database != "oss_sessions" || got.Password != "shared-secret" {
+		t.Errorf("oss endpoint = %#v, want host/database overrides plus shared port/password", got)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAllowsExplicitDatabaseForOneWorkspace(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_DATABASE":         "agm_test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigs()
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
+	}
+	if len(configs) != 1 || configs[0].Workspace != "personal" || configs[0].Database != "agm_test" {
+		t.Fatalf("configured stores = %#v, want personal/agm_test", configs)
+	}
+}
+
+func TestDefaultConfigSelectsExplicitTestWorkspace(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+	agmConfigPath = "/nonexistent/path/config.yaml"
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"WORKSPACE":             "oss",
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	config, err := DefaultConfig()
+	if err != nil {
+		t.Fatalf("DefaultConfig: %v", err)
+	}
+	if config.Workspace != "test" || config.Database != "test" {
+		t.Fatalf("DefaultConfig target = %s/%s, want test/test", config.Workspace, config.Database)
+	}
+}
+
+func TestTestExecutionRecognizesBuiltTestSubprocess(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		executable string
+		mode       string
+		want       bool
+	}{
+		{name: "go test binary", executable: "/tmp/dolt.test", want: true},
+		{name: "built subprocess with explicit mode", executable: "/tmp/agm", mode: "1", want: true},
+		{name: "ordinary binary", executable: "/tmp/agm", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := testExecution(tc.executable, tc.mode); got != tc.want {
+				t.Fatalf("testExecution(%q, %q) = %t, want %t", tc.executable, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateTestTargetUsesPositiveAllowlist(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		workspace     string
+		database      string
+		testWorkspace string
+		wantError     bool
+	}{
+		{name: "workspace database", workspace: "test-e2e", database: "test-e2e", testWorkspace: "test-e2e"},
+		{name: "shared test database", workspace: "test", database: "agm_test", testWorkspace: "test"},
+		{name: "missing selection", workspace: "test", database: "test", wantError: true},
+		{name: "workspace mismatch", workspace: "customer", database: "customer", testWorkspace: "test", wantError: true},
+		{name: "unselected database", workspace: "test", database: "customer", testWorkspace: "test", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTestTarget(tc.workspace, tc.database, tc.testWorkspace)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("validateTestTarget(%q, %q, %q) error = %v, wantError=%t", tc.workspace, tc.database, tc.testWorkspace, err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestSharedDoltTestConfigEstablishesGuardedTarget(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	lookupEnv = os.LookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+
+	config := sharedDoltTestConfig(t)
+	if err := validateTestExecutionTarget(config.Workspace, config.Database); err != nil {
+		t.Fatalf("sharedDoltTestConfig target rejected: %v", err)
+	}
+}
+
+func TestNewRejectsDirectProductionTargetInTests(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	lookupEnv = os.LookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+
+	_, err := New(&Config{
+		Workspace: "oss",
+		Database:  "oss",
+		Host:      "127.0.0.1",
+		Port:      "3307",
+		User:      "root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "TEST POLLUTION BLOCKED") {
+		t.Fatalf("New() error = %v, want direct production target rejection", err)
 	}
 }
 
@@ -129,6 +510,8 @@ func getTestAdapter(t *testing.T) *Adapter {
 	}
 
 	// Set up test environment
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	t.Setenv("WORKSPACE", "test")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name

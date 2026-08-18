@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
@@ -130,11 +132,163 @@ func TestProvider_Create_FailsWithoutRunsc(t *testing.T) {
 	}
 }
 
+func TestGVisorRejectsMatchedNonGitLowerDir(t *testing.T) {
+	base := t.TempDir()
+	gitRepo := filepath.Join(base, "git-repo")
+	requestedRepo := filepath.Join(base, "requested-non-git")
+	mergedDir := filepath.Join(base, "merged")
+	runGVisorGit(t, "", "init", "-q", "-b", "main", gitRepo)
+	if err := os.MkdirAll(requestedRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(mergedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitRepo, "project.txt"), []byte("wrong repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(requestedRepo, "project.txt"), []byte("requested repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProvider()
+	orderedLowerDirs := sandbox.PrioritizeLowerDir([]string{gitRepo, requestedRepo}, requestedRepo)
+	_, err := p.createPrivateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
+	if err == nil {
+		t.Fatal("createPrivateWorktree() error = nil, want isolation failure")
+	}
+	var sbErr *sandbox.Error
+	if !errors.As(err, &sbErr) || sbErr.Code != sandbox.ErrCodeMountFailed {
+		t.Fatalf("error = %v, want structured %v error", err, sandbox.ErrCodeMountFailed)
+	}
+	if !strings.Contains(err.Error(), "refusing host-symlink fallback") {
+		t.Fatalf("error = %v, want host-symlink refusal", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(mergedDir, "project.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed isolation exposed a host repository: stat error = %v", statErr)
+	}
+}
+
+func TestGVisorPreservesGitWorktreeCreationFailure(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	activeWorktree := filepath.Join(base, "active")
+	mergedDir := filepath.Join(base, "merged")
+	runGVisorGit(t, "", "init", "-q", "-b", "main", repo)
+	runGVisorGit(t, repo, "config", "user.name", "gVisor Test")
+	runGVisorGit(t, repo, "config", "user.email", "gvisor@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGVisorGit(t, repo, "add", "README.md")
+	runGVisorGit(t, repo, "commit", "-q", "-m", "initial")
+	runGVisorGit(t, repo, "worktree", "add", "-q", "-b", "agm/worktree-add-failure", activeWorktree)
+	if err := os.MkdirAll(mergedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewProvider().createPrivateWorktree([]string{repo}, "worktree-add-failure", mergedDir, repo)
+	if err == nil {
+		t.Fatal("createPrivateWorktree() error = nil, want Git worktree failure")
+	}
+	var sbErr *sandbox.Error
+	if !errors.As(err, &sbErr) || sbErr.Code != sandbox.ErrCodeMountFailed {
+		t.Fatalf("error = %v, want structured %v error", err, sandbox.ErrCodeMountFailed)
+	}
+	if !strings.Contains(err.Error(), "git worktree add failed") || !strings.Contains(err.Error(), "delete failed") {
+		t.Fatalf("error = %v, want preserved Git worktree failure", err)
+	}
+}
+
 func TestProvider_Destroy_Idempotent(t *testing.T) {
 	p := NewProvider()
 	if err := p.Destroy(context.Background(), "does-not-exist"); err != nil {
 		t.Errorf("Destroy() should be idempotent for unknown id, got %v", err)
 	}
+}
+
+func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {
+	repo, mergedDir, upperDir, workDir := newLockedGVisorWorktree(t)
+	p := NewProvider()
+	const id = "locked-destroy"
+	cleanupState := sandbox.NewWorktreeCleanup(true)
+	p.sandboxes[id] = &sandbox.Sandbox{
+		ID:         id,
+		MergedPath: mergedDir,
+		UpperPath:  upperDir,
+		WorkPath:   workDir,
+		CleanupFunc: func() error {
+			return cleanupState.Run(
+				func() error { return p.removeWorktree(repo, mergedDir) },
+				func() error { return p.cleanup(upperDir, workDir, mergedDir) },
+			)
+		},
+	}
+
+	err := p.Destroy(context.Background(), id)
+	if err == nil || !strings.Contains(err.Error(), "git worktree remove failed") {
+		t.Fatalf("Destroy(locked) = %v, want Git removal refusal", err)
+	}
+	for _, path := range []string{mergedDir, upperDir, workDir} {
+		if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+			t.Fatalf("failed destroy removed retryable provider path %s: %v", path, statErr)
+		}
+	}
+	if err := p.Validate(context.Background(), id); err != nil {
+		t.Fatalf("failed destroy removed provider registry state: %v", err)
+	}
+	out := runGVisorGit(t, repo, "worktree", "list", "--porcelain")
+	if !strings.Contains(out, "locked provider-active-owner") {
+		t.Fatalf("failed destroy changed the exact Git lock reason: %s", out)
+	}
+
+	runGVisorGit(t, repo, "worktree", "unlock", mergedDir)
+	if err := p.Destroy(context.Background(), id); err != nil {
+		t.Fatalf("destroy retry after unlock: %v", err)
+	}
+	for _, path := range []string{mergedDir, upperDir, workDir} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("successful destroy retained %s: %v", path, statErr)
+		}
+	}
+	if err := p.Validate(context.Background(), id); err == nil {
+		t.Fatal("successful destroy retained provider registry state")
+	}
+}
+
+func newLockedGVisorWorktree(t *testing.T) (repo, mergedDir, upperDir, workDir string) {
+	t.Helper()
+	base := t.TempDir()
+	repo = filepath.Join(base, "repo")
+	workspace := filepath.Join(base, "sandbox")
+	mergedDir = filepath.Join(workspace, "merged")
+	upperDir = filepath.Join(workspace, "upper")
+	workDir = filepath.Join(workspace, "work")
+	runGVisorGit(t, base, "init", "-q", "-b", "main", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("locked provider cleanup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGVisorGit(t, repo, "add", "README.md")
+	runGVisorGit(t, repo, "commit", "-q", "-m", "initial")
+	runGVisorGit(t, repo, "worktree", "add", "-q", "-b", "locked-destroy", mergedDir)
+	if err := os.MkdirAll(upperDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGVisorGit(t, repo, "worktree", "lock", "--reason", "provider-active-owner", mergedDir)
+	return repo, mergedDir, upperDir, workDir
+}
+
+func runGVisorGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	commandArgs := slices.Clone(args)
+	out, err := gittest.Output(t, dir, commandArgs...)
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(out))
+	}
+	return out
 }
 
 func TestProvider_Validate_NotFound(t *testing.T) {

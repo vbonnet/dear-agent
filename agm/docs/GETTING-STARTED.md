@@ -324,7 +324,7 @@ agm doctor gemini                # Agent-specific validation
 ### Advanced Commands
 
 ```bash
-agm session send <session> --prompt "text"    # Send message to session
+agm send msg <session> --prompt "text"        # Send message to session
 agm session reject <session> --reason "..."   # Reject permission prompt
 ```
 
@@ -404,7 +404,7 @@ Now that you're up and running:
 
 4. **Contributing:**
    - [Contributing Guide](../CONTRIBUTING.md) - Development setup and testing
-   - [Test Plan](../TEST-PLAN.md) - Comprehensive testing strategy
+   - [BDD Catalog](BDD-CATALOG.md) - Executable behavior and test traceability
 
 ## Getting Help
 

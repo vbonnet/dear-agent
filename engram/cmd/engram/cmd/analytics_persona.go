@@ -19,7 +19,7 @@ var personaCmd = &cobra.Command{
 
 Shows:
   - Issues caught by persona (by severity)
-  - False positive rate (from S11 retrospective validation)
+  - False positive rate (from retrospective validation)
   - Time overhead per review
   - Persona comparison (which personas find more issues)
 
@@ -37,7 +37,7 @@ EXAMPLES
   $ engram analytics persona --format csv > persona.csv
 
 TARGET
-  Classification accuracy ≥90% (D4 acceptance criteria)`,
+  Classification accuracy ≥90% (acceptance criteria)`,
 	RunE: runPersonaAnalytics,
 }
 

@@ -8,7 +8,7 @@ import (
 var TaskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage tasks in the roadmap",
-	Long: `Manage tasks in the WAYFINDER-STATUS.md V2 roadmap.
+	Long: `Manage tasks in the WAYFINDER-STATUS.md roadmap.
 
 Task management commands allow you to:
   - Add new tasks to phases

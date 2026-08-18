@@ -1,7 +1,9 @@
 package safegit
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,6 +101,468 @@ func TestParseCheckRuns_Empty(t *testing.T) {
 	data := marshalJSON([]checkRun{})
 	if err := parseCheckRuns(data); err != nil {
 		t.Fatalf("empty check list should pass, got: %v", err)
+	}
+}
+
+func TestParseAppliedRulesRequiredChecks(t *testing.T) {
+	data := []byte(`[[
+		{"type":"pull_request","parameters":{"required_approving_review_count":0}},
+		{"type":"required_status_checks","parameters":{"required_status_checks":[
+			{"context":"Build"},{"context":"Lint","integration_id":42},{"context":""}
+		]}}
+	],[
+		{"type":"required_status_checks","parameters":{"required_status_checks":[
+			{"context":"Build"},{"context":"Security"}
+		]}}
+	]]`)
+	policy, err := parseAppliedRulesRequiredChecks(data)
+	if err != nil {
+		t.Fatalf("parseAppliedRulesRequiredChecks() error = %v", err)
+	}
+	contexts := policy.contexts()
+	for _, name := range []string{"Build", "Lint", "Security"} {
+		if !contexts[name] {
+			t.Errorf("required check %q missing from %#v", name, policy.Identities)
+		}
+	}
+	if len(contexts) != 3 {
+		t.Fatalf("required check count = %d, want 3: %#v", len(contexts), policy.Identities)
+	}
+	if !policy.Identities[requiredCheckIdentity{Context: "Lint", IntegrationID: 42, Scoped: true}] {
+		t.Fatal("integration-scoped required check identity was discarded")
+	}
+}
+
+func TestParseAppliedRulesRequiredChecksRejectsMalformedJSON(t *testing.T) {
+	if _, err := parseAppliedRulesRequiredChecks([]byte(`{"type":`)); err == nil {
+		t.Fatal("expected malformed applied-rules JSON to fail closed")
+	}
+}
+
+func TestParseAppliedRulesRequiredChecksKnownEmpty(t *testing.T) {
+	policy, err := parseAppliedRulesRequiredChecks([]byte(`[[]]`))
+	if err != nil {
+		t.Fatalf("known-empty applied rules error = %v", err)
+	}
+	if len(policy.Identities) != 0 || policy.HasRequiredWorkflows {
+		t.Fatalf("known-empty policy = %#v", policy)
+	}
+}
+
+func TestParseAppliedRulesRequiredChecksFlagsRequiredWorkflows(t *testing.T) {
+	policy, err := parseAppliedRulesRequiredChecks([]byte(`[[{"type":"workflows","parameters":{}}]]`))
+	if err != nil {
+		t.Fatalf("required workflow parse error = %v", err)
+	}
+	if !policy.HasRequiredWorkflows {
+		t.Fatal("required workflow rule must block until missing runs can be proven")
+	}
+}
+
+func TestParseClassicRequiredChecksPreservesIntegrationScope(t *testing.T) {
+	policy, err := parseClassicRequiredChecks([]byte(`{
+		"contexts":["Legacy", "Build"],
+		"checks":[{"context":"Build","app_id":99}]
+	}`))
+	if err != nil {
+		t.Fatalf("classic required check parse error = %v", err)
+	}
+	contexts := policy.contexts()
+	if !contexts["Legacy"] || !contexts["Build"] {
+		t.Fatalf("classic contexts = %#v", policy.Identities)
+	}
+	if !policy.Identities[requiredCheckIdentity{Context: "Build", IntegrationID: 99, Scoped: true}] {
+		t.Fatal("classic app-scoped identity was discarded")
+	}
+	if policy.Identities[requiredCheckIdentity{Context: "Build"}] {
+		t.Fatal("duplicate unscoped identity should be ignored when a canonical check entry exists")
+	}
+	if ambiguous := policy.ambiguousContexts(); len(ambiguous) > 0 {
+		t.Fatalf("classic API duplicates created ambiguous identities: %v", ambiguous)
+	}
+}
+
+func TestMergeRequiredCheckPoliciesUnionsLayeredSources(t *testing.T) {
+	ruleset := newRequiredCheckPolicy()
+	ruleset.add("Ruleset", nil)
+	classic := newRequiredCheckPolicy()
+	integrationID := int64(7)
+	classic.add("Classic", &integrationID)
+	merged := mergeRequiredCheckPolicies(ruleset, classic)
+	if !merged.contexts()["Ruleset"] || !merged.Identities[requiredCheckIdentity{Context: "Classic", IntegrationID: 7, Scoped: true}] {
+		t.Fatalf("layered policy was not unioned: %#v", merged)
+	}
+}
+
+func TestDiscoverRequiredChecksAcceptsAuthoritativeEmpty(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  *rules/branches*) printf '%s\n' '[[]]' ;;
+  *protection/required_status_checks*) printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  *) printf '%s\n' 'unexpected gh invocation' >&2; exit 2 ;;
+esac
+`)
+	policy, err := discoverRequiredChecks("owner/repo", "feature/base")
+	if err != nil {
+		t.Fatalf("authoritative empty policy error = %v", err)
+	}
+	if len(policy.Identities) != 0 || policy.HasRequiredWorkflows {
+		t.Fatalf("authoritative empty policy = %#v", policy)
+	}
+}
+
+func TestDiscoverRequiredChecksRejectsPartialPolicyOnSourceError(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  *rules/branches*) printf '%s\n' 'gh: provider unavailable (HTTP 500)' >&2; exit 1 ;;
+  *protection/required_status_checks*) printf '%s\n' '{"contexts":["Classic"]}' ;;
+  *) printf '%s\n' 'unexpected gh invocation' >&2; exit 2 ;;
+esac
+`)
+	if _, err := discoverRequiredChecks("owner/repo", "main"); err == nil {
+		t.Fatal("partial classic policy must not be accepted when ruleset discovery fails")
+	}
+}
+
+func installRequiredCheckFakeGH(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gh")
+	script := "#!/bin/sh\nset -eu\n" + body
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestRulesBranchEndpointEscapesSlashBase(t *testing.T) {
+	got := rulesBranchEndpoint("owner/repo", "release/v1")
+	want := "repos/owner/repo/rules/branches/release%2Fv1?per_page=100"
+	if got != want {
+		t.Fatalf("rules endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestProjectRequiredChecksReconcilesEffectivePolicy(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build","integration_id":42}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' '[{"name":"Build","state":"SUCCESS"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+	if err != nil {
+		t.Fatalf("ProjectRequiredChecks() error = %v", err)
+	}
+	if len(checks) != 1 || checks[0].Name != "Build" || checks[0].Status != RequiredCheckPassing {
+		t.Fatalf("effective projection = %#v", checks)
+	}
+}
+
+func TestProjectRequiredChecksSynthesizesMissingContext(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"},{"context":"Lint"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' '[{"name":"Build","state":"SUCCESS"}]' ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+	if err != nil {
+		t.Fatalf("ProjectRequiredChecks() error = %v", err)
+	}
+	status := make(map[string]RequiredCheckStatus, len(checks))
+	for _, check := range checks {
+		status[check.Name] = check.Status
+	}
+	if len(checks) != 2 {
+		t.Fatalf("missing-context projection count = %d, want 2: %#v", len(checks), checks)
+	}
+	buildStatus, hasBuild := status["Build"]
+	lintStatus, hasLint := status["Lint"]
+	if !hasBuild || buildStatus != RequiredCheckPassing || !hasLint || lintStatus != RequiredCheckPending {
+		t.Fatalf("missing-context projection = %#v", checks)
+	}
+}
+
+func TestProjectRequiredChecksAcceptsStatusExits(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    string
+		exitCode int
+		want     RequiredCheckStatus
+	}{
+		{name: "failed", state: "FAILURE", exitCode: 1, want: RequiredCheckFailing},
+		{name: "pending", state: "PENDING", exitCode: 8, want: RequiredCheckPending},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' '[{"name":"Build","state":"%s"}]'; exit %d ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, tc.state, tc.exitCode))
+			checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+			if err != nil {
+				t.Fatalf("ProjectRequiredChecks() error = %v", err)
+			}
+			if len(checks) != 1 || checks[0].Status != tc.want {
+				t.Fatalf("status-exit projection = %#v", checks)
+			}
+		})
+	}
+}
+
+func TestProjectRequiredChecksAcceptsAuthoritativeEmptyProviderError(t *testing.T) {
+	for _, message := range []string{
+		"no checks reported on the 'feature' branch",
+		"no required checks reported on the 'feature' branch",
+	} {
+		t.Run(message, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "%s" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' "no checks reported on the 'feature' branch" >&2; exit 1 ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, message))
+			checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+			if err != nil {
+				t.Fatalf("ProjectRequiredChecks() error = %v", err)
+			}
+			if len(checks) != 0 {
+				t.Fatalf("authoritatively empty projection = %#v", checks)
+			}
+		})
+	}
+}
+
+func TestProjectRequiredChecksPreservesAuthoritativeEmptyFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		exitCode int
+		want     RequiredCheckStatus
+	}{
+		{name: "failed", state: "FAILURE", exitCode: 1, want: RequiredCheckFailing},
+		{name: "pending", state: "PENDING", exitCode: 8, want: RequiredCheckPending},
+		{name: "passing", state: "SUCCESS", exitCode: 0, want: RequiredCheckPassing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' '[{"name":"Advisory","state":"%s"}]'; exit %d ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, tc.state, tc.exitCode))
+			checks, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo")
+			if err != nil {
+				t.Fatalf("ProjectRequiredChecks() error = %v", err)
+			}
+			if len(checks) != 1 || checks[0].Name != "Advisory" || checks[0].Status != tc.want {
+				t.Fatalf("authoritative-empty fallback = %#v", checks)
+			}
+		})
+	}
+}
+
+func TestProjectRequiredChecksRejectsNoChecksWhenPolicyNonempty(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	if _, err := ProjectRequiredChecks(context.Background(), 7, "owner/repo"); err == nil {
+		t.Fatal("nonempty discovered policy must reject an empty provider projection")
+	}
+}
+
+func TestCheckAllCIAcceptsNoChecksWhenPolicyEmpty(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%s\n' "no checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%s\n' "no checks reported on the 'feature' branch" >&2; exit 1 ;;
+  *) printf '%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`)
+	if err := checkAllCI(7, "owner/repo"); err != nil {
+		t.Fatalf("authoritatively checkless PR should pass the all-reported-check gate: %v", err)
+	}
+}
+
+func TestCheckAllCIValidatesAllWhenPolicyEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		state    string
+		exitCode int
+		want     string
+	}{
+		{name: "failed advisory", state: "failure", exitCode: 1, want: "checks failed"},
+		{name: "pending advisory", state: "pending", exitCode: 8, want: "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' "no required checks reported on the 'feature' branch" >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' '[{"name":"Advisory","state":"%s"}]'; exit %d ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+`, tc.state, tc.exitCode))
+			err := checkAllCI(7, "owner/repo")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("empty-policy all-check validation error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverRequiredChecksUsesPaginatedSlurp(t *testing.T) {
+	installRequiredCheckFakeGH(t, `
+if [ "$1" = api ] && [ "$2" = --paginate ] && [ "$3" = --slurp ]; then
+  printf '%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]'
+elif [ "$1" = api ] && printf '%s' "$2" | grep -q 'protection/required_status_checks'; then
+  printf '%s\n' 'gh: Branch not protected (HTTP 404)' >&2
+  exit 1
+else
+  printf '%s\n' "unexpected gh invocation: $*" >&2
+  exit 2
+fi
+`)
+	policy, err := discoverRequiredChecks("owner/repo", "main")
+	if err != nil {
+		t.Fatalf("paginated discovery error = %v", err)
+	}
+	if !policy.contexts()["Build"] {
+		t.Fatalf("paginated discovery policy = %#v", policy)
+	}
+}
+
+func TestProviderRequiredClassificationIgnoresAdvisoryFailure(t *testing.T) {
+	policy := newRequiredCheckPolicy()
+	policy.add("Build", nil)
+	provider := []checkRun{{Name: "Build", State: "success"}}
+	classified, err := classifyProviderRequiredChecks(provider, policy)
+	if err != nil {
+		t.Fatalf("classify provider-required checks: %v", err)
+	}
+	if err := parseCheckRuns(marshalJSON(classified)); err != nil {
+		t.Fatalf("green provider-required check should pass despite an advisory failure outside the provider projection: %v", err)
+	}
+}
+
+func TestProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider []checkRun
+		expected map[string]bool
+		want     string
+	}{
+		{name: "failed", provider: []checkRun{{Name: "Build", State: "failure"}}, expected: map[string]bool{"Build": true}, want: "Build"},
+		{name: "pending", provider: []checkRun{{Name: "Build", State: "pending"}}, expected: map[string]bool{"Build": true}, want: "pending"},
+		{name: "missing", provider: nil, expected: map[string]bool{"Build": true}, want: "pending"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := newRequiredCheckPolicy()
+			for context := range tc.expected {
+				policy.add(context, nil)
+			}
+			classified, classifyErr := classifyProviderRequiredChecks(tc.provider, policy)
+			if classifyErr != nil {
+				t.Fatalf("classification error = %v", classifyErr)
+			}
+			err := parseCheckRuns(marshalJSON(classified))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity(t *testing.T) {
+	policy := newRequiredCheckPolicy()
+	first, second := int64(1), int64(2)
+	policy.add("Build", &first)
+	policy.add("Build", &second)
+	_, err := classifyProviderRequiredChecks([]checkRun{{Name: "Build", State: "success"}}, policy)
+	if err == nil || !strings.Contains(err.Error(), "multiple required integration identities") {
+		t.Fatalf("one present and one missing integration identity error = %v", err)
+	}
+}
+
+func TestProviderRequiredClassificationRejectsDiscoveryDisagreement(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy requiredCheckPolicy
+	}{
+		{name: "configured policy", policy: func() requiredCheckPolicy {
+			policy := newRequiredCheckPolicy()
+			policy.add("Build", nil)
+			return policy
+		}()},
+		{name: "empty policy", policy: newRequiredCheckPolicy()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := classifyProviderRequiredChecks([]checkRun{{Name: "Undiscovered", State: "success"}}, tc.policy)
+			if err == nil || !strings.Contains(err.Error(), "absent from discovered branch policy") {
+				t.Fatalf("discovery disagreement error = %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckAllCIIgnoresNonzeroAdvisoryCheckStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    string
+		exitCode int
+	}{
+		{name: "failed", state: "failure", exitCode: 1},
+		{name: "pending", state: "pending", exitCode: 8},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			installRequiredCheckFakeGH(t, fmt.Sprintf(`
+case "$*" in
+  "pr checks 7 --repo owner/repo --json name,state") printf '%%s\n' '[{"name":"Build","state":"success"},{"name":"Advisory","state":"%s"}]'; exit %d ;;
+  "pr view 7 --repo owner/repo --json baseRefName") printf '%%s\n' '{"baseRefName":"main"}' ;;
+  "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100") printf '%%s\n' '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Build"}]}}]]' ;;
+  "api repos/owner/repo/branches/main/protection/required_status_checks") printf '%%s\n' 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "pr checks 7 --repo owner/repo --required --json name,state") printf '%%s\n' '[{"name":"Build","state":"success"}]' ;;
+  *) printf '%%s\n' "unexpected gh invocation: $*" >&2; exit 2 ;;
+esac
+			`, tc.state, tc.exitCode))
+			if err := checkAllCI(7, "owner/repo"); err != nil {
+				t.Fatalf("green required check with %s advisory check should pass: %v", tc.state, err)
+			}
+		})
 	}
 }
 
@@ -262,6 +726,14 @@ func TestParseReviewThreads_Empty(t *testing.T) {
 	}
 }
 
+func TestReviewThreadsQueryPaginates(t *testing.T) {
+	for _, required := range []string{"$cursor: String", "after: $cursor", "hasNextPage", "endCursor"} {
+		if !strings.Contains(reviewThreadsQuery, required) {
+			t.Fatalf("reviewThreadsQuery must contain %q", required)
+		}
+	}
+}
+
 // --- parseSoak ---
 
 func makeSoakJSON(committedAt time.Time) []byte {
@@ -407,6 +879,7 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 		"pr":                  false,
 		"merge":               false,
 		"--squash":            false,
+		"--auto":              false,
 		"--delete-branch":     false,
 		"--match-head-commit": false,
 	}
@@ -419,6 +892,65 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 		if !found {
 			t.Errorf("BuildMergeArgs missing required element %q", flag)
 		}
+	}
+}
+
+// --- merge completion confirmation ---
+
+func TestMergeResultRequiresExactMergedHead(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    mergeResult
+		expected  string
+		wantError bool
+	}{
+		{name: "merged exact head", result: mergeResult{State: "MERGED", HeadRefOid: "abc123"}, expected: "abc123"},
+		{name: "auto merge only enabled", result: mergeResult{State: "OPEN", HeadRefOid: "abc123"}, expected: "abc123", wantError: true},
+		{name: "head changed", result: mergeResult{State: "MERGED", HeadRefOid: "def456"}, expected: "abc123", wantError: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validateMergeResult(tc.result, tc.expected); (got != nil) != tc.wantError {
+				t.Fatalf("validateMergeResult() error = %v, wantError %v", got, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestMergeResultPendingUsesSentinel(t *testing.T) {
+	err := validateMergeResult(mergeResult{State: "OPEN", HeadRefOid: "abc123"}, "abc123")
+	if !errors.Is(err, errMergePending) {
+		t.Fatalf("validateMergeResult() error = %v, want errMergePending", err)
+	}
+}
+
+func TestWaitForMergeCompletionPollsUntilMerged(t *testing.T) {
+	attempts := 0
+	err := waitForMergeCompletion(context.Background(), time.Second, time.Millisecond, func() error {
+		attempts++
+		if attempts < 3 {
+			return errMergePending
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waitForMergeCompletion() error = %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("waitForMergeCompletion() attempts = %d, want 3", attempts)
+	}
+}
+
+func TestWaitForMergeCompletionTimesOut(t *testing.T) {
+	err := waitForMergeCompletion(context.Background(), time.Millisecond, time.Millisecond, func() error {
+		return errMergePending
+	})
+	if err == nil {
+		t.Fatal("waitForMergeCompletion() error = nil, want timeout")
+	}
+	if !errors.Is(err, errMergePending) {
+		t.Fatalf("waitForMergeCompletion() error = %v, want wrapped errMergePending", err)
 	}
 }
 

@@ -1,7 +1,10 @@
 package ops
 
 import (
+	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,6 +179,54 @@ func TestArchiveSession_ForceBypassesVerification(t *testing.T) {
 
 // --- KillSession tests ---
 
+type stubbornKillTmux struct {
+	*mockTmux
+}
+
+type strictProbeKillTmux struct {
+	*mockTmux
+	strictErr   error
+	strictCalls int
+}
+
+type observingKillStorage struct {
+	dolt.Storage
+	firstRead chan struct{}
+	once      sync.Once
+}
+
+type vanishingKillStorage struct {
+	dolt.Storage
+	reads int
+}
+
+func (s *observingKillStorage) GetSession(sessionID string) (*manifest.Manifest, error) {
+	m, err := s.Storage.GetSession(sessionID)
+	s.once.Do(func() { close(s.firstRead) })
+	return m, err
+}
+
+func (s *vanishingKillStorage) GetSession(sessionID string) (*manifest.Manifest, error) {
+	s.reads++
+	if s.reads > 1 {
+		return nil, nil
+	}
+	return s.Storage.GetSession(sessionID)
+}
+
+func (m *stubbornKillTmux) KillSession(name string) error {
+	m.killed = append(m.killed, name)
+	return nil
+}
+
+func (m *strictProbeKillTmux) HasSessionStrict(context.Context, string) (bool, error) {
+	m.strictCalls++
+	if m.strictErr != nil {
+		return false, m.strictErr
+	}
+	return m.HasSession("my-session")
+}
+
 func TestKillSession_RunningSession(t *testing.T) {
 	sessions := []*manifest.Manifest{
 		newManifest("id-1", "my-session", "~/project"),
@@ -209,6 +260,13 @@ func TestKillSession_RunningSession(t *testing.T) {
 	if !result.WasRunning {
 		t.Error("expected WasRunning=true for session with active tmux")
 	}
+	tm := ctx.Tmux.(*mockTmux)
+	if tm.sessions["my-session"] {
+		t.Error("successful kill left the tmux session present")
+	}
+	if len(tm.killed) != 1 || tm.killed[0] != "my-session" {
+		t.Fatalf("killed targets = %v, want [my-session]", tm.killed)
+	}
 }
 
 func TestKillSession_StoppedSession(t *testing.T) {
@@ -223,6 +281,261 @@ func TestKillSession_StoppedSession(t *testing.T) {
 	}
 	if result.WasRunning {
 		t.Error("expected WasRunning=false for session without active tmux")
+	}
+	if killed := ctx.Tmux.(*mockTmux).killed; len(killed) != 0 {
+		t.Fatalf("absent tmux target triggered kill calls: %v", killed)
+	}
+}
+
+func TestKillSession_RemovesExactTmuxTarget(t *testing.T) {
+	m := newManifest("id-1", "display-name", "~/project")
+	m.Tmux.SessionName = "exact-target"
+	tm := newMockTmux("exact-target", "exact-target-child")
+	ctx := testCtx([]*manifest.Manifest{m})
+	ctx.Tmux = tm
+
+	result, err := KillSession(ctx, &KillSessionRequest{Identifier: "display-name", ConfirmedStuck: true})
+	if err != nil {
+		t.Fatalf("KillSession() error = %v", err)
+	}
+	if result.TmuxSessionName != "exact-target" {
+		t.Fatalf("TmuxSessionName = %q, want exact-target", result.TmuxSessionName)
+	}
+	if len(tm.killed) != 1 || tm.killed[0] != "exact-target" {
+		t.Fatalf("killed targets = %v, want [exact-target]", tm.killed)
+	}
+	if tm.sessions["exact-target"] {
+		t.Error("exact target still exists")
+	}
+	if !tm.sessions["exact-target-child"] {
+		t.Error("prefix-related non-target session was removed")
+	}
+}
+
+func TestKillSession_ReloadsCurrentTargetUnderStableIDLock(t *testing.T) {
+	sessionID := "kill-lock-" + t.Name()
+	initial := newManifest(sessionID, "display-name", "~/project")
+	initial.Tmux.SessionName = "old-target"
+	initial.UpdatedAt = time.Now().Add(-time.Hour)
+	store := dolt.NewMockAdapter()
+	if err := store.CreateSession(initial); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	observed := &observingKillStorage{Storage: store, firstRead: make(chan struct{})}
+	tm := newMockTmux("old-target", "new-target")
+	opCtx := &OpContext{Storage: observed, Tmux: tm}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- WithSessionLockTimeout(sessionID, time.Second, func() error {
+			close(lockHeld)
+			<-releaseLock
+			return nil
+		})
+	}()
+	<-lockHeld
+
+	type killOutcome struct {
+		result *KillSessionResult
+		err    error
+	}
+	killDone := make(chan killOutcome, 1)
+	go func() {
+		result, err := KillSession(opCtx, &KillSessionRequest{Identifier: sessionID, ConfirmedStuck: true})
+		killDone <- killOutcome{result: result, err: err}
+	}()
+	<-observed.firstRead
+
+	current, err := store.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	current.Tmux.SessionName = "new-target"
+	if err := store.UpdateSession(current); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+	close(releaseLock)
+	if err := <-lockDone; err != nil {
+		t.Fatalf("lock owner: %v", err)
+	}
+
+	outcome := <-killDone
+	if outcome.err != nil {
+		t.Fatalf("KillSession: %v", outcome.err)
+	}
+	if outcome.result.TmuxSessionName != "new-target" {
+		t.Fatalf("resolved tmux target = %q, want reloaded new-target", outcome.result.TmuxSessionName)
+	}
+	if tm.sessions["new-target"] {
+		t.Fatal("reloaded target remains after successful kill")
+	}
+	if !tm.sessions["old-target"] {
+		t.Fatal("stale pre-lock target was killed")
+	}
+}
+
+func TestKillSession_ConcurrentDeletionReturnsNotFound(t *testing.T) {
+	store := dolt.NewMockAdapter()
+	if err := store.CreateSession(newManifest("id-1", "my-session", "~/project")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tm := newMockTmux("my-session")
+	opCtx := &OpContext{
+		Storage: &vanishingKillStorage{Storage: store},
+		Tmux:    tm,
+	}
+
+	result, err := KillSession(opCtx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if result != nil {
+		t.Fatalf("result = %#v, want nil after concurrent deletion", result)
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotFound {
+		t.Fatalf("KillSession() error = %v, want %s", err, ErrCodeSessionNotFound)
+	}
+	if len(tm.killed) != 0 {
+		t.Fatalf("concurrent deletion mutated tmux: killed = %v", tm.killed)
+	}
+}
+
+func TestKillSession_CanceledRequestDoesNotMutateTmux(t *testing.T) {
+	tm := newMockTmux("my-session")
+	opCtx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	opCtx.Tmux = tm
+	requestCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	opCtx.Context = requestCtx
+
+	_, err := KillSession(opCtx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("KillSession() error = %v, want context.Canceled", err)
+	}
+	if len(tm.killed) != 0 || !tm.sessions["my-session"] {
+		t.Fatalf("canceled request mutated tmux: killed=%v sessions=%v", tm.killed, tm.sessions)
+	}
+}
+
+func TestKillSession_CancelStopsContendedStableIDLock(t *testing.T) {
+	sessionID := "kill-cancel-lock-" + t.Name()
+	store := dolt.NewMockAdapter()
+	if err := store.CreateSession(newManifest(sessionID, "my-session", "~/project")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	observed := &observingKillStorage{Storage: store, firstRead: make(chan struct{})}
+	tm := newMockTmux("my-session")
+	requestCtx, cancel := context.WithCancel(t.Context())
+	opCtx := &OpContext{Context: requestCtx, Storage: observed, Tmux: tm}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- WithSessionLockTimeout(sessionID, time.Second, func() error {
+			close(lockHeld)
+			<-releaseLock
+			return nil
+		})
+	}()
+	<-lockHeld
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := KillSession(opCtx, &KillSessionRequest{Identifier: sessionID, ConfirmedStuck: true})
+		done <- err
+	}()
+	<-observed.firstRead
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("KillSession() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled KillSession did not stop waiting for the stable-ID lock")
+	}
+	close(releaseLock)
+	if err := <-lockDone; err != nil {
+		t.Fatalf("lock owner: %v", err)
+	}
+	if len(tm.killed) != 0 || !tm.sessions["my-session"] {
+		t.Fatalf("canceled lock wait mutated tmux: killed=%v sessions=%v", tm.killed, tm.sessions)
+	}
+}
+
+func TestKillSession_PropagatesBackendFailure(t *testing.T) {
+	wantErr := errors.New("tmux kill denied")
+	tm := newMockTmux("my-session")
+	tm.killErr = wantErr
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	result, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want backend failure %v", err, wantErr)
+	}
+	if result == nil || result.TmuxSessionName != "my-session" {
+		t.Fatalf("result = %#v, want resolved target for failed mutation", result)
+	}
+}
+
+func TestKillSession_FailsWhenTargetRemains(t *testing.T) {
+	tm := &stubbornKillTmux{mockTmux: newMockTmux("my-session")}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if err == nil {
+		t.Fatal("KillSession() returned success while the exact tmux target remained")
+	}
+	if !tm.sessions["my-session"] {
+		t.Fatal("stubborn backend fixture unexpectedly removed the target")
+	}
+}
+
+func TestKillSession_PropagatesProbeFailure(t *testing.T) {
+	wantErr := errors.New("tmux socket unavailable")
+	tm := newMockTmux("my-session")
+	tm.hasErr = wantErr
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want probe failure %v", err, wantErr)
+	}
+	if len(tm.killed) != 0 {
+		t.Fatalf("probe failure must not mutate tmux, killed = %v", tm.killed)
+	}
+}
+
+func TestKillSession_UsesStrictProductionProbe(t *testing.T) {
+	wantErr := errors.New("tmux socket permission denied")
+	tm := &strictProbeKillTmux{mockTmux: newMockTmux("my-session"), strictErr: wantErr}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want strict probe failure %v", err, wantErr)
+	}
+	if tm.strictCalls == 0 {
+		t.Fatal("KillSession did not use the strict existence capability")
+	}
+	if len(tm.killed) != 0 {
+		t.Fatalf("strict probe failure mutated tmux: killed = %v", tm.killed)
+	}
+}
+
+func TestKillSession_RequiresTmuxBackend(t *testing.T) {
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = nil
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1"})
+	if err == nil {
+		t.Fatal("KillSession() returned success without a tmux backend")
 	}
 }
 
@@ -278,6 +591,10 @@ func TestKillSession_DryRun(t *testing.T) {
 	}
 	if !result.WasRunning {
 		t.Error("expected WasRunning=true")
+	}
+	tm := ctx.Tmux.(*mockTmux)
+	if !tm.sessions["my-session"] || len(tm.killed) != 0 {
+		t.Fatalf("dry run mutated tmux: sessions=%v killed=%v", tm.sessions, tm.killed)
 	}
 }
 
@@ -561,6 +878,9 @@ func TestSendMessage_Success(t *testing.T) {
 	if result.Recipient != "my-session" {
 		t.Errorf("expected recipient my-session, got %s", result.Recipient)
 	}
+	if result.SessionID != "id-1" {
+		t.Errorf("expected stable session ID id-1, got %s", result.SessionID)
+	}
 	if result.MessageLength != 11 {
 		t.Errorf("expected message length 11, got %d", result.MessageLength)
 	}
@@ -569,11 +889,137 @@ func TestSendMessage_Success(t *testing.T) {
 		t.Error("expected Delivered=true via tmux delivery")
 	}
 	mt := ctx.Tmux.(*mockTmux)
+	if len(mt.readinessChecks) != 1 || mt.readinessChecks[0] != "my-session:claude-code" {
+		t.Fatalf("readiness checks = %v, want [my-session:claude-code]", mt.readinessChecks)
+	}
 	if len(mt.sent) != 1 {
 		t.Fatalf("expected 1 send-keys call, got %d", len(mt.sent))
 	}
-	if mt.sent[0].session != "my-session" || mt.sent[0].keys != "hello world" {
+	if mt.sent[0].session != "%1" || mt.sent[0].keys != "hello world" {
 		t.Errorf("unexpected send-keys: %+v", mt.sent[0])
+	}
+}
+
+func TestSendMessageSerializesAndReloadsTmuxDeliveryByStableSessionID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	original := &manifest.Manifest{
+		SessionID: "stable-send-id",
+		Name:      "old-send-name",
+		Harness:   "claude-code",
+		Tmux:      manifest.Tmux{SessionName: "old-send-tmux"},
+	}
+	if err := storage.CreateSession(original); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	tmuxClient := newMockTmux("old-send-tmux", "current-send-tmux")
+
+	type outcome struct {
+		result *SendMessageResult
+		err    error
+	}
+	started := make(chan struct{})
+	done := make(chan outcome, 1)
+	err := WithSessionLockContext(t.Context(), original.SessionID, func() error {
+		go func() {
+			close(started)
+			result, sendErr := SendMessage(&OpContext{
+				Context: t.Context(),
+				Storage: storage,
+				Tmux:    tmuxClient,
+			}, &SendMessageRequest{Recipient: original.Name, Message: "hello"})
+			done <- outcome{result: result, err: sendErr}
+		}()
+		<-started
+		select {
+		case <-done:
+			return errors.New("SendMessage crossed the stable-session lock")
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		current, getErr := storage.GetSession(original.SessionID)
+		if getErr != nil {
+			return getErr
+		}
+		current.Name = "current-send-name"
+		current.Tmux.SessionName = "current-send-tmux"
+		return storage.UpdateSession(current)
+	})
+	if err != nil {
+		t.Fatalf("hold stable-session lock: %v", err)
+	}
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("SendMessage() error: %v", got.err)
+		}
+		if got.result == nil || got.result.SessionID != original.SessionID || got.result.Recipient != "current-send-name" {
+			t.Fatalf("SendMessage() result = %#v, want stable ID and current name", got.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendMessage did not continue after stable-session lock released")
+	}
+	if len(tmuxClient.atomicChecks) != 1 || tmuxClient.atomicChecks[0] != "current-send-tmux:claude-code" {
+		t.Fatalf("atomic input checks = %v, want current-send-tmux:claude-code", tmuxClient.atomicChecks)
+	}
+}
+
+func TestSendMessage_NotReadyReturnsTypedNonDeliveryWithoutInput(t *testing.T) {
+	for _, readiness := range []string{"NO", "QUEUE", "OVERLAY", "NOT_FOUND"} {
+		t.Run(readiness, func(t *testing.T) {
+			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+			tm := ctx.Tmux.(*mockTmux)
+			tm.readiness = session.InputReadiness{Ready: false, State: readiness}
+
+			result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+			if result == nil || result.Delivered {
+				t.Fatalf("result = %#v, want typed non-delivery", result)
+			}
+			opErr := &OpError{}
+			if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
+				t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+			}
+			if len(tm.sent) != 0 {
+				t.Fatalf("not-ready pane received input: %v", tm.sent)
+			}
+		})
+	}
+}
+
+func TestSendMessage_ReadinessProbeFailureDoesNotSend(t *testing.T) {
+	wantErr := errors.New("capture failed")
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	tm := ctx.Tmux.(*mockTmux)
+	tm.readinessErr = wantErr
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+	if result == nil || result.Delivered {
+		t.Fatalf("result = %#v, want non-delivery", result)
+	}
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("error = %v, want readiness probe failure", err)
+	}
+	if len(tm.sent) != 0 {
+		t.Fatalf("failed readiness probe sent input: %v", tm.sent)
+	}
+}
+
+func TestSendMessage_RequiresReadinessCapabilityBeforeTmuxDelivery(t *testing.T) {
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	base := ctx.Tmux.(*mockTmux)
+	ctx.Tmux = &createOnlyTmux{TmuxInterface: base}
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+	if result == nil || result.Delivered {
+		t.Fatalf("result = %#v, want non-delivery", result)
+	}
+	opErr := &OpError{}
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
+		t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+	}
+	if len(base.sent) != 0 {
+		t.Fatalf("unverified pane received input: %v", base.sent)
 	}
 }
 
@@ -626,6 +1072,25 @@ func TestSendMessage_EmptyRecipient(t *testing.T) {
 	}
 }
 
+func TestSendMessage_RequiresOperationContextAndStorage(t *testing.T) {
+	request := &SendMessageRequest{Recipient: "id-1", Message: "hello"}
+	for _, test := range []struct {
+		name string
+		ctx  *OpContext
+	}{
+		{name: "nil context"},
+		{name: "nil storage", ctx: &OpContext{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := SendMessage(test.ctx, request)
+			opErr := &OpError{}
+			if !errors.As(err, &opErr) || opErr.Code != ErrCodeStorageError {
+				t.Fatalf("SendMessage() error = %v, want %s", err, ErrCodeStorageError)
+			}
+		})
+	}
+}
+
 func TestSendMessage_EmptyMessage(t *testing.T) {
 	ctx := testCtx(nil)
 	_, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: ""})
@@ -659,5 +1124,20 @@ func TestSendMessage_ArchivedSession(t *testing.T) {
 	}
 	if opErr.Code != ErrCodeSessionArchived {
 		t.Errorf("expected code %s, got %s", ErrCodeSessionArchived, opErr.Code)
+	}
+}
+
+func TestSendMessage_ByReusedNameExcludesArchivedSession(t *testing.T) {
+	archived := newManifest("id-archived", "reused-session", "~/old-project")
+	archived.Lifecycle = manifest.LifecycleArchived
+	active := newManifest("id-active", "reused-session", "~/current-project")
+	ctx := testCtx([]*manifest.Manifest{archived, active}, "reused-session")
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "reused-session", Message: "hello"})
+	if err != nil {
+		t.Fatalf("SendMessage() error: %v", err)
+	}
+	if !result.Delivered || result.SessionID != active.SessionID {
+		t.Fatalf("SendMessage() result = %#v, want active reused identity", result)
 	}
 }

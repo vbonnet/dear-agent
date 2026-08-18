@@ -55,6 +55,14 @@ func TestGetHistoryPaths_Integration(t *testing.T) {
 			verify:     false,
 			wantErr:    false,
 		},
+		{
+			name:       "AGY agent with native conversation ID",
+			agent:      "agy",
+			uuid:       "117ff898-a964-4a9f-b460-1be4a8a49b17",
+			workingDir: "",
+			verify:     false,
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {

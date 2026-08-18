@@ -37,7 +37,7 @@ import (
 //     UUID is usually NOT yet discoverable — Claude has not written its
 //     conversation to ~/.claude/history.jsonl yet — so this is genuinely
 //     best-effort and a miss is the expected, non-fatal case. The SessionStart
-//     hook (sessionstart-agm-register), which receives Claude's session_id
+//     hook (agm-state-ready), which receives Claude's session_id
 //     directly in its payload, backfills the UUID once Claude emits it. We never
 //     block readiness on UUID detection.
 //
@@ -67,7 +67,7 @@ func associateSpawnedClaudeSession(sessionName string) {
 
 	m, resolvedPath, err := session.ResolveIdentifier(sessionName, getSessionsDir(), adapter)
 	if err != nil {
-		// The manifest is normally created by createAndRegisterManifest before
+		// The manifest is normally created by the shared ops lifecycle before
 		// this runs; if it's somehow missing we still signal readiness so the
 		// spawner doesn't hang, and let `agm sync` reconcile later.
 		debug.Log("Deterministic association: manifest not found for %q (%v); writing ready-file anyway", sessionName, err)

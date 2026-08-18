@@ -7,8 +7,8 @@ import (
 
 // HarnessHealth is a per-harness health summary produced for `agm admin doctor`.
 //
-// AGM officially supports more than one harness (claude-code, gemini-cli,
-// codex-cli, opencode-cli), but the doctor's session checks have historically
+// AGM officially supports more than one harness (claude-code, codex-cli, AGY,
+// opencode-cli, pi-cli, plus deprecated gemini-cli), but the doctor's session checks have historically
 // been Claude-centric. HarnessHealth separates the concerns that can fail
 // independently for any harness — the CLI binary, the auth/config, and the
 // on-disk config directory — so the doctor can render every harness in use in
@@ -32,17 +32,18 @@ func (h HarnessHealth) IsHealthy() bool {
 	return h.BinaryPresent && h.AuthConfigured
 }
 
-// harnessCLIBinary maps a harness to the CLI binary the doctor expects on PATH.
-//
-// This intentionally extends the availability-focused harnessBinaries map
-// (which omits opencode-cli because its availability is server-based, not
-// binary-based) so the doctor can still report whether the opencode binary
-// itself is installed.
-var harnessCLIBinary = map[string]string{
-	"claude-code":  "claude",
-	"gemini-cli":   "gemini",
-	"codex-cli":    "codex",
-	"opencode-cli": "opencode",
+// harnessHealthBinary derives CLI harnesses from the availability registry.
+// OpenCode is the only doctor-specific exception: availability is based on its
+// server, while doctor also reports whether the optional CLI is installed.
+func harnessHealthBinary(harness string) (string, bool) {
+	if harness == "opencode-cli" {
+		return "opencode", true
+	}
+	binaries := harnessBinaries[harness]
+	if len(binaries) == 0 {
+		return "", false
+	}
+	return binaries[0], true
 }
 
 // harnessConfigDir returns the harness's on-disk config/home directory under
@@ -58,6 +59,10 @@ func harnessConfigDir(home, harness string) string {
 		return filepath.Join(home, ".gemini")
 	case "codex-cli":
 		return filepath.Join(home, ".codex")
+	case "agy":
+		return filepath.Join(home, ".gemini", "antigravity-cli")
+	case "pi-cli":
+		return filepath.Join(home, ".pi", "agent")
 	default:
 		// opencode-cli is server-based; unknown harnesses have no known dir.
 		return ""
@@ -72,9 +77,10 @@ func harnessConfigDir(home, harness string) string {
 // PATH as available (the CLI manages its own auth) — keeping the Claude path's
 // behaviour unchanged.
 func CheckHarnessHealth(harness string) HarnessHealth {
+	harness = NormalizeHarnessName(harness)
 	h := HarnessHealth{Harness: harness}
 
-	if bin, ok := harnessCLIBinary[harness]; ok {
+	if bin, ok := harnessHealthBinary(harness); ok {
 		h.Known = true
 		h.BinaryName = bin
 		if _, err := lookPath(bin); err == nil {

@@ -479,7 +479,7 @@ agm doctor
 
 ```bash
 # Send interrupt + diagnosis prompt
-agm session send my-session --prompt "⚠️ Your session was stuck. Please analyze what caused the hang."
+agm send msg my-session --prompt "Please analyze what caused the earlier hang."
 
 # Or reject current operation
 agm session reject my-session --reason "Timeout exceeded, moving on"
@@ -869,7 +869,6 @@ cp ~/.claude/history.jsonl ~/.claude/history.jsonl.backup
 
 **For developers:**
 - [Contributing](../CONTRIBUTING.md) - Development setup
-- [Test Plan](../TEST-PLAN.md) - Testing strategy
 - [Command Translation Design](COMMAND-TRANSLATION-DESIGN.md) - Architecture
 
 ### How do I get support?

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
@@ -105,7 +106,12 @@ func buildBinaries(t *testing.T, dir string) map[string]string {
 	for _, name := range []string{"workflow-status", "workflow-list", "workflow-cancel", "workflow-logs"} {
 		bin := filepath.Join(dir, name)
 		cmd := exec.Command("go", "build", "-o", bin, "./cmd/"+name)
-		cmd.Env = append(os.Environ(), "GOWORK=off")
+		// `go build` stamps VCS information by shelling out to git, so it runs
+		// with the hermetic Git environment. HOME is restored because the Go
+		// toolchain derives GOPATH/GOMODCACHE/GOCACHE from it; Git still cannot
+		// read the host configuration because GIT_CONFIG_GLOBAL and
+		// GIT_CONFIG_NOSYSTEM from the sandbox outrank it.
+		cmd.Env = append(gittest.Env(t), "HOME="+os.Getenv("HOME"), "GOWORK=off")
 		// `go build` runs from the repo root; navigate up from cmd/workflow-status.
 		cmd.Dir = mustRepoRoot(t)
 		if b, err := cmd.CombinedOutput(); err != nil {
@@ -118,7 +124,9 @@ func buildBinaries(t *testing.T, dir string) map[string]string {
 
 func mustRepoRoot(t *testing.T) string {
 	t.Helper()
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	// An empty directory keeps the command in the test's working directory,
+	// which is the package directory inside the repository being located.
+	cmd := gittest.Command(t, "", "rev-parse", "--show-toplevel")
 	b, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git rev-parse: %v", err)

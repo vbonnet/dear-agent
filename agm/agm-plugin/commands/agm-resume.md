@@ -1,57 +1,24 @@
 ---
 model: haiku
 effort: low
-content-hash: 5c1132cc470bc05b974e1fe7da8d2b8f6fa1748b49ab26927e3a997dac1254c5
-description: Resume an existing AGM session
-argument-hint: "<session-name>"
-allowed-tools: Bash(agm session resume *), Bash(agm session list *)
+content-hash: e1811a5da26fec1fc00cd63f18f5c62f9f85f6f6f24bdec798881c5e565457a1
+description: Resume an AGM-managed harness session by name, ID prefix, or project match. Use when the user wants to continue an existing session.
+argument-hint: "<identifier> [--detached]"
+allowed-tools: Bash(agm session resume *), Bash(agm session list *), Write(/tmp/agm-resume-*)
 ---
 
-# AGM Resume Session
+# Resume an AGM session
 
-I'll resume an existing AGM session.
-
-**Step 1: Parse arguments**
-
-- Parse $ARGUMENTS to extract session name
-- If $ARGUMENTS is empty or whitespace only:
-  - Show: "Session name is required. Usage: /agm:resume <session-name>"
-  - Suggest: "Run /agm:list to see available sessions"
-  - Exit gracefully
-- Store the session name as SESSION_NAME
-
-**Step 2: Resume session**
-
-- Run: `agm session resume "{SESSION_NAME}" --output json`
-
-**Step 3: Handle result**
-
-- If exit code is 0:
-  - Parse JSON output
-  - Continue to Step 4
-- If output contains "not found" or "no such session":
-  - Show: "Session not found: {SESSION_NAME}"
-  - Run: `agm session list --output json`
-  - If sessions exist, show available session names as suggestions
-  - If no sessions exist: "No sessions found. Create one with /agm:new <name>"
-  - Exit gracefully
-- If output contains "already active" or "already running":
-  - Show: "Session '{SESSION_NAME}' is already active"
-  - Exit gracefully
-- If any other error:
-  - Show the error output
-  - Suggest: "Try running: agm admin doctor"
-  - Exit gracefully
-
-**Step 4: Show completion message**
-
-```
-Session resumed successfully
-
-Name:    {session_name}
-Status:  active
-```
-
-**Error Handling**:
-- If agm not found: "Install agm from github.com/vbonnet/dear-agent"
-- If session not found: list available sessions as suggestions
+1. Run `agm session resume <identifier> --output json`, adding `--detached` only
+   when requested. Pass the identifier as one argv value.
+2. Require an identifier. If none was provided, run
+   `agm session list --all --output json` and ask the user to choose; AGM does
+   not currently provide an interactive picker.
+3. If the session is not found, run `agm session list --all --output json` and
+   present likely identifiers. Do not guess or rewrite the resume command.
+4. For a recovery prompt, write the prompt to a unique
+	`/tmp/agm-resume-<random>.txt` file and use the typed `--prompt-file` flag;
+	never interpolate prompt text into shell syntax. Also pass
+	`--delete-prompt-file` so AGM removes the disposable file after it passes
+	validation and before attaching. Omit that flag for caller-owned files.
+5. Report the resumed session and harness. On failure, show stderr and stop.

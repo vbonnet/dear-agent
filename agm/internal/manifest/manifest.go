@@ -2,13 +2,6 @@ package manifest
 
 import "time"
 
-// SessionOutcome describes how a session ended, stamped on the record at
-// archive time. It makes the archive pile triage-legible instead of showing
-// rows of identical, indistinguishable archived sessions. Values are defined
-// as constants (OutcomeCompleted, OutcomeCrashed, OutcomeKilled, OutcomeGCStale)
-// in constants.go.
-type SessionOutcome string
-
 // Manifest represents an AGM session manifest (v2 schema)
 type Manifest struct {
 	SchemaVersion           string            `yaml:"schema_version"`
@@ -25,11 +18,13 @@ type Manifest struct {
 	Workspace               string            `yaml:"workspace,omitempty"` // Workspace name (e.g., "oss", "acme")
 	Context                 Context           `yaml:"context"`
 	Claude                  Claude            `yaml:"claude"`
-	Codex                   *Codex            `yaml:"codex,omitempty" json:"codex,omitempty"` // Codex CLI saved-session metadata
-	Agy                     *Agy              `yaml:"agy,omitempty" json:"agy,omitempty"`     // AGY saved-conversation metadata
+	Codex                   *Codex            `yaml:"codex,omitempty" json:"codex,omitempty"`   // Codex CLI saved-session metadata
+	OpenAI                  *OpenAI           `yaml:"openai,omitempty" json:"openai,omitempty"` // Pure OpenAI API session runtime locator and legacy fallback configuration
+	Agy                     *Agy              `yaml:"agy,omitempty" json:"agy,omitempty"`       // AGY saved-conversation metadata
+	Pi                      *Pi               `yaml:"pi,omitempty" json:"pi,omitempty"`         // Pi native session metadata
 	Tmux                    Tmux              `yaml:"tmux"`
 	OpenCode                *OpenCode         `yaml:"opencode,omitempty"`   // OpenCode session metadata
-	Harness                 string            `yaml:"harness,omitempty"`    // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
+	Harness                 string            `yaml:"harness,omitempty"`    // Harness specifies the AI harness (claude-code, codex-cli, agy, opencode-cli, pi-cli; gemini-cli deprecated)
 	Model                   string            `yaml:"model,omitempty"`      // Model specifies the AI model within the harness
 	ModelTier               string            `yaml:"model_tier,omitempty"` // ModelTier is the cost tier assigned by the model router (cheap, mid, expensive)
 	EngramMetadata          *EngramMetadata   `yaml:"engram_metadata,omitempty"`
@@ -51,6 +46,8 @@ type Manifest struct {
 	WorkflowPhaseUpdatedAt  *time.Time        `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
 	CostTracking            *CostTracking     `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
 	Resources               *ResourceManifest `yaml:"resources,omitempty"`                  // Git worktrees and branches created by this session
+	FinalOutput             string            `yaml:"final_output,omitempty"`               // Tail of the session's terminal output, captured at completion so results survive pane teardown
+	FinalOutputAt           time.Time         `yaml:"final_output_at,omitempty"`            // When FinalOutput was captured
 }
 
 // PermissionPolicy records the resolved role/profile permission policy used
@@ -154,6 +151,20 @@ type Codex struct {
 	TranscriptPath string `yaml:"transcript_path,omitempty"` // Resolved rollout JSONL path at import time
 }
 
+// OpenAI records the non-secret information needed to locate and reconstruct a
+// pure OpenAI API session. New sessions persist the authoritative client
+// settings in their own metadata; these fields remain a backward-compatible
+// fallback for sessions created before that metadata existed. API keys are
+// never stored in manifests.
+type OpenAI struct {
+	SessionsDir     string  `yaml:"sessions_dir,omitempty" json:"sessions_dir,omitempty"`
+	BaseURL         string  `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	IsAzure         bool    `yaml:"is_azure,omitempty" json:"is_azure,omitempty"`
+	AzureAPIVersion string  `yaml:"azure_api_version,omitempty" json:"azure_api_version,omitempty"`
+	Temperature     float32 `yaml:"temperature,omitempty" json:"temperature,omitempty"`
+	MaxTokens       int     `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty"`
+}
+
 // Agy represents AGY saved-conversation metadata.
 type Agy struct {
 	ConversationID string `yaml:"conversation_id,omitempty"`      // AGY conversation UUID (required for agy resume)
@@ -162,9 +173,19 @@ type Agy struct {
 	TranscriptPath string `yaml:"transcript_path,omitempty"`      // Resolved AGY transcript JSONL path
 }
 
+// Pi represents Pi native session metadata.
+type Pi struct {
+	SessionID         string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionDir        string `yaml:"session_dir,omitempty" json:"session_dir,omitempty"`
+	TranscriptPath    string `yaml:"transcript_path,omitempty" json:"transcript_path,omitempty"`
+	CodingAgentDir    string `yaml:"coding_agent_dir,omitempty" json:"coding_agent_dir,omitempty"`
+	CodingAgentDirSet bool   `yaml:"coding_agent_dir_set,omitempty" json:"coding_agent_dir_set,omitempty"`
+}
+
 // Tmux represents tmux session metadata
 type Tmux struct {
-	SessionName string `yaml:"session_name"`
+	SessionName     string `yaml:"session_name"`
+	SessionRevision string `yaml:"-" json:"-"` // Internal optimistic-write token; never part of the manifest surface.
 }
 
 // OpenCode represents OpenCode session metadata
@@ -176,11 +197,22 @@ type OpenCode struct {
 
 // SandboxConfig represents sandbox isolation metadata for a session
 type SandboxConfig struct {
-	Enabled    bool      `yaml:"enabled"`               // Whether sandbox is enabled for this session
-	ID         string    `yaml:"id,omitempty"`          // Sandbox ID (usually matches SessionID)
-	Provider   string    `yaml:"provider,omitempty"`    // Provider type (overlayfs, apfs, mock)
-	MergedPath string    `yaml:"merged_path,omitempty"` // Path where agents operate
-	CreatedAt  time.Time `yaml:"created_at,omitempty"`  // When sandbox was created
+	Enabled               bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
+	ID                    string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
+	Provider              string    `yaml:"provider,omitempty" json:"provider,omitempty"`
+	MergedPath            string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
+	WorkingDir            string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
+	CreatedAt             time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
+	ExtraAddDirs          []string  `yaml:"extra_add_dirs,omitempty" json:"extra_add_dirs,omitempty"`
+	BypassCodexHookTrust  bool      `yaml:"bypass_codex_hook_trust,omitempty" json:"bypass_codex_hook_trust,omitempty"`
+	CodexHookSourceRepo   string    `yaml:"codex_hook_source_repo,omitempty" json:"codex_hook_source_repo,omitempty"`
+	CodexHookSourceCommit string    `yaml:"codex_hook_source_commit,omitempty" json:"codex_hook_source_commit,omitempty"`
+	CodexHookDigest       string    `yaml:"codex_hook_digest,omitempty" json:"codex_hook_digest,omitempty"`
+	CodexHookRoot         string    `yaml:"codex_hook_root,omitempty" json:"codex_hook_root,omitempty"`
+	// BypassCodexHookTrustReason is the justification bound into each private
+	// launch handoff. It is persisted so resume can authorize again at its
+	// executable boundary rather than inherit the original decision.
+	BypassCodexHookTrustReason string `yaml:"bypass_codex_hook_trust_reason,omitempty" json:"bypass_codex_hook_trust_reason,omitempty"`
 }
 
 // ResourceManifest records git worktrees and branches created during a session.

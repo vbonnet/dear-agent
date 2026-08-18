@@ -2,9 +2,10 @@ package deploy
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestShortRev(t *testing.T) {
@@ -43,14 +44,11 @@ func gitRepo(t *testing.T) (repo, oldSha, headSha string) {
 	repo = t.TempDir()
 	run := func(args ...string) string {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		out, err := cmd.CombinedOutput()
+		out, err := gittest.Output(t, repo, args...)
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
-		return string(out)
+		return out
 	}
 	run("init", "-q")
 	if err := os.WriteFile(filepath.Join(repo, "f"), []byte("1"), 0o644); err != nil {
@@ -70,7 +68,7 @@ func gitRepo(t *testing.T) (repo, oldSha, headSha string) {
 
 func rev(t *testing.T, repo, ref string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", ref).Output()
+	out, err := gittest.Command(t, repo, "rev-parse", "--verify", ref).Output()
 	if err != nil {
 		t.Fatalf("rev-parse %s: %v", ref, err)
 	}

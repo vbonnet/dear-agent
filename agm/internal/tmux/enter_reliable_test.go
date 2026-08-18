@@ -1,7 +1,11 @@
 package tmux
 
 import (
+	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -92,6 +96,84 @@ func TestVerifyingEnter_SendError(t *testing.T) {
 
 	if err := verifyingEnter(sendEnter, capture, fastConfig()); err == nil {
 		t.Fatal("expected send-keys error to propagate")
+	}
+}
+
+func TestVerifyingEnter_PreservesUncertaintyAcrossLaterDefiniteFailure(t *testing.T) {
+	enters := 0
+	sendEnter := func() error {
+		enters++
+		if enters == 1 {
+			return nil
+		}
+		return errors.New("tmux: explicit rejection")
+	}
+	capture := func() (string, error) {
+		return "", errors.New("capture-pane acknowledgement lost")
+	}
+
+	err := verifyingEnter(sendEnter, capture, fastConfig())
+	if err == nil || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("later failure = %v, want uncertainty from the first accepted Enter", err)
+	}
+}
+
+func TestVerifyingEnter_PreservesUncertaintyAcrossLaterParkedCaptures(t *testing.T) {
+	captures := 0
+	sendEnter := func() error { return nil }
+	capture := func() (string, error) {
+		captures++
+		if captures == 1 {
+			return "", errors.New("capture-pane acknowledgement lost")
+		}
+		return codexParked, nil
+	}
+
+	err := verifyingEnter(sendEnter, capture, fastConfig())
+	if !errors.Is(err, ErrPasteNotSubmitted) || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("final parked state = %v, want parked cause with sticky uncertainty", err)
+	}
+}
+
+func TestPromptEnterCommandHelperProcess(t *testing.T) {
+	if os.Getenv("AGM_PROMPT_ENTER_HELPER") != "1" {
+		return
+	}
+	switch os.Getenv("AGM_PROMPT_ENTER_HELPER_MODE") {
+	case "reject":
+		os.Exit(17)
+	case "block":
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func promptEnterHelperCommand(ctx context.Context, mode string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPromptEnterCommandHelperProcess$")
+	cmd.Env = append(os.Environ(), "AGM_PROMPT_ENTER_HELPER=1", "AGM_PROMPT_ENTER_HELPER_MODE="+mode)
+	return cmd
+}
+
+func TestRunPromptEnterCommandStartFailureIsDefinite(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), filepath.Join(t.TempDir(), "missing-tmux"))
+	err := runPromptEnterCommand(t.Context(), cmd, time.Second)
+	if err == nil || PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("start failure = %v, want definite pre-submission error", err)
+	}
+}
+
+func TestRunPromptEnterCommandExplicitRejectionIsDefinite(t *testing.T) {
+	err := runPromptEnterCommand(t.Context(), promptEnterHelperCommand(t.Context(), "reject"), time.Second)
+	if err == nil || PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("explicit command rejection = %v, want definite pre-submission error", err)
+	}
+}
+
+func TestRunPromptEnterCommandTimeoutAfterStartIsUncertain(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	err := runPromptEnterCommand(ctx, promptEnterHelperCommand(ctx, "block"), 20*time.Millisecond)
+	if err == nil || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("post-start timeout = %v, want submission-uncertain error", err)
 	}
 }
 

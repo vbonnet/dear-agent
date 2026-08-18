@@ -9,11 +9,11 @@ import (
 
 // Validator provides pre-transition validation logic
 type Validator struct {
-	status status.StatusInterface
+	status *status.StatusV2
 }
 
 // NewValidator creates a new Validator with the current status
-func NewValidator(s status.StatusInterface) *Validator {
+func NewValidator(s *status.StatusV2) *Validator {
 	return &Validator{
 		status: s,
 	}
@@ -28,7 +28,7 @@ func NewValidator(s status.StatusInterface) *Validator {
 //
 //nolint:gocyclo // reason: linear phase precondition checker
 func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
-	allPhases := status.AllPhases(v.status.GetVersion())
+	allPhases := status.AllPhases()
 
 	// Validate phase exists
 	phaseIdx := -1
@@ -43,6 +43,13 @@ func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 			"start "+phaseName,
 			"phase does not exist in Wayfinder workflow",
 			"Use a valid phase: "+joinPhases(allPhases),
+		)
+	}
+	if v.status.IsPhaseSkipped(phaseName) {
+		return NewValidationError(
+			"start "+phaseName,
+			"phase is configured to be skipped",
+			"Continue with the next required phase instead",
 		)
 	}
 
@@ -106,11 +113,8 @@ func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 // isPhaseSkippedForStart reports whether the given phase is skipped for the purpose
 // of resolving the previous gating phase. A phase is skipped when the harness profile
 // lists it (ProfileLite skips DESIGN/SPEC/PLAN) or when it is the roadmap phase (SETUP)
-// and skip_roadmap is enabled. Only the V2 schema carries profiles, so V1 never skips.
+// and skip_roadmap is enabled.
 func (v *Validator) isPhaseSkippedForStart(phase string) bool {
-	if v.status.GetVersion() != status.WayfinderV2 {
-		return false
-	}
 	if slices.Contains(v.status.GetSkipPhases(), phase) {
 		return true
 	}
@@ -158,7 +162,7 @@ func (v *Validator) CanCompletePhase(phaseName, projectDir, hashMismatchReason s
 
 // validatePhaseExists checks if phase exists in Wayfinder workflow.
 func (v *Validator) validatePhaseExists(phaseName string) error {
-	allPhases := status.AllPhases(v.status.GetVersion())
+	allPhases := status.AllPhases()
 	for _, phase := range allPhases {
 		if phase == phaseName {
 			return nil
@@ -269,7 +273,7 @@ func (v *Validator) runGateValidations(projectDir, phaseName string) error {
 // - Target phase doesn't exist
 // - Target phase is not completed (can't rewind to pending)
 func (v *Validator) CanRewindTo(targetPhase string) error {
-	allPhases := status.AllPhases(v.status.GetVersion())
+	allPhases := status.AllPhases()
 
 	// Validate target phase exists
 	targetIdx := -1

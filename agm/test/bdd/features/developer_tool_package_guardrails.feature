@@ -1,7 +1,11 @@
 # SPEC: cmd/session-skill-extractor/SPEC.md
+# RELATED-SPEC: pkg/headerlint/SPEC.md
+# RELATED-SPEC: pkg/instructionlint/SPEC.md
 # RELATED-SPEC: tests/githooks/SPEC.md
 # RELATED-SPEC: tools/ci-drift-guard/SPEC.md
 # RELATED-SPEC: tools/dead-links/SPEC.md
+# RELATED-SPEC: tools/instruction-lint/SPEC.md
+# RELATED-SPEC: tools/header-lint/SPEC.md
 # RELATED-SPEC: tools/devlog/cmd/devlog/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/config/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/errors/SPEC.md
@@ -26,9 +30,13 @@ Feature: Developer tool package guardrails
     Examples:
       | package                                            |
       | cmd/session-skill-extractor                        |
+      | pkg/headerlint                                     |
+      | pkg/instructionlint                                |
       | tests/githooks                                     |
       | tools/ci-drift-guard                               |
       | tools/dead-links                                   |
+      | tools/instruction-lint                             |
+      | tools/header-lint                                  |
       | tools/devlog/cmd/devlog                            |
       | tools/devlog/internal/config                       |
       | tools/devlog/internal/errors                       |
@@ -76,3 +84,10 @@ Feature: Developer tool package guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |

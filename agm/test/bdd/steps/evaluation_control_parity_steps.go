@@ -50,7 +50,7 @@ func evaluationHarnessUsesModelFamily(ctx context.Context, harness, family strin
 	if err != nil {
 		return err
 	}
-	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli"}, harness) {
+	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}, harness) {
 		return fmt.Errorf("unsupported evaluation harness %q", harness)
 	}
 	models := map[string]string{

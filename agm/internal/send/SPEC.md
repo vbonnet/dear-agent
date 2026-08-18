@@ -17,7 +17,7 @@ sequential.
 
 **SEND-03** When multiple delivery jobs are supplied, the system shall deliver them sequentially in input order.
 
-**SEND-04** When context cancellation is observed before a job is delivered, the system shall record a cancelled result for that job and continue recording outcomes for remaining jobs.
+**SEND-04** When context cancellation is observed before a job is delivered, the system shall record a cancelled result for that job and continue recording outcomes for remaining jobs; when delivery begins, the system shall pass the same caller context into the delivery function so cancellation can interrupt command-scoped I/O within that job.
 
 **SEND-05** When a delivery function returns an error, the system shall record a failed result with the original recipient, message ID, duration, and error.
 

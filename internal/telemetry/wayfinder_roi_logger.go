@@ -16,7 +16,7 @@ import (
 //	{
 //	  "session_id": "abc123",
 //	  "timestamp": "2024-01-01T12:00:00Z",
-//	  "phase_name": "D3",
+//	  "phase_name": "DESIGN",
 //	  "outcome": "success",
 //	  "duration_ms": 120000,
 //	  "error_count": 0,

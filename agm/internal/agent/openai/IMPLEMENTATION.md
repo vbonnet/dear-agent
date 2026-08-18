@@ -182,7 +182,7 @@ Added to `go.mod` line 28.
 
 The following are **out of scope** for this task but documented for future work:
 
-1. **Agent Adapter** (Task 1.3): Implement `agent.Agent` interface
+1. **Concrete Adapter** (Task 1.3): Implement `agent.OpenAIAdapter` methods
    - Session management
    - Conversation persistence
    - Command translation
@@ -195,7 +195,9 @@ The following are **out of scope** for this task but documented for future work:
    - Request/response logging
    - Metrics collection
 
-3. **Registry Integration**: Register with `agent.Register()`
+3. **Discovery Boundary**: Keep the OpenAI API adapter out of the finite CLI
+   harness constructor catalog; pure API sessions are reconstructed by the
+   operation that owns API delivery.
 
 4. **Testing**:
    - Mock API server for testing
@@ -245,7 +247,7 @@ func main() {
 
 - **Task Context**: Bead oss-hqm8 - Task 1.2
 - **Reference Implementation**: `internal/evaluation/gpt4_judge.go`
-- **Agent Interface**: `internal/agent/interface.go`
+- **Harness Contracts**: `internal/agent/interface.go`
 - **OpenAI SDK**: https://github.com/sashabaranov/go-openai
 
 ## Conclusion

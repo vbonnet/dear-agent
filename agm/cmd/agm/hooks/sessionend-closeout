@@ -14,10 +14,9 @@
 #      unmerged branches, and in-progress tasks are *flagged*, never mutated —
 #      it only makes forgotten resources visible so the next session can decide.
 #
-# This is the "Audit" layer of the worktree/branch cleanup discipline in
-# AGENTS.md (Agent Delegation Enforcement §5). That section is the
-# rule ("clean up after merge"); this hook does not enforce it, it reports
-# what was skipped. Authoritative classification + reaping is the job of
+# This hook is the reporting half of the worktree/branch closeout boundary: it
+# does not mutate outstanding work, it reports what was skipped. Authoritative
+# classification + reaping is the job of
 # `agm worktree sweep` (and the post-merge hook that now triggers it) — this
 # hook deliberately stays local-only and side-effect-free.
 #

@@ -69,8 +69,7 @@ func TestSessionResourceCleanupCmd_ForceFlag(t *testing.T) {
 }
 
 func TestSessionResourceCleanupCmd_FlagParsing_DryRun(t *testing.T) {
-	old := srcDryRun
-	defer func() { srcDryRun = old }()
+	restoreCommandFlagForTest(t, sessionResourceCleanupCmd, "dry-run")
 
 	if err := sessionResourceCleanupCmd.Flags().Set("dry-run", "true"); err != nil {
 		t.Fatal(err)
@@ -78,12 +77,10 @@ func TestSessionResourceCleanupCmd_FlagParsing_DryRun(t *testing.T) {
 	if !srcDryRun {
 		t.Error("Expected srcDryRun to be true after setting flag")
 	}
-	sessionResourceCleanupCmd.Flags().Set("dry-run", "false") //nolint:errcheck
 }
 
 func TestSessionResourceCleanupCmd_FlagParsing_Force(t *testing.T) {
-	old := srcForce
-	defer func() { srcForce = old }()
+	restoreCommandFlagForTest(t, sessionResourceCleanupCmd, "force")
 
 	if err := sessionResourceCleanupCmd.Flags().Set("force", "true"); err != nil {
 		t.Fatal(err)
@@ -91,7 +88,6 @@ func TestSessionResourceCleanupCmd_FlagParsing_Force(t *testing.T) {
 	if !srcForce {
 		t.Error("Expected srcForce to be true after setting flag")
 	}
-	sessionResourceCleanupCmd.Flags().Set("force", "false") //nolint:errcheck
 }
 
 // ---------------------------------------------------------------------------

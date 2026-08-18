@@ -185,6 +185,9 @@ func (a *Adapter) Fetch(ctx context.Context, q source.FetchQuery) ([]source.Sour
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if q.K > source.MaxFetchK {
+		return nil, fmt.Errorf("source/llmwiki: Fetch: K %d exceeds maximum %d", q.K, source.MaxFetchK)
+	}
 	all, err := a.scan(ctx)
 	if err != nil {
 		return nil, err

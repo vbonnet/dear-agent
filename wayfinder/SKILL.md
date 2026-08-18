@@ -1,217 +1,119 @@
 ---
 name: wayfinder
-description: SDLC workflow management with structured 9-phase methodology (CHARTER through RETRO).
+description: Use when a change needs explicit discovery, design, requirements, planning, implementation evidence, and a retrospective across the nine-phase Wayfinder workflow.
 allowed-tools:
-  - "Bash"
-  - "Read"
-  - "Write"
-  - "Edit"
-  - "Glob"
-  - "Grep"
-  - "AskUserQuestion"
-  - "Task"
-metadata:
-  version: 2.0.0
-  author: engram
-  activation_patterns:
-    - "/wayfinder"
-    - "wayfinder project"
-    - "start wayfinder"
-    - "SDLC workflow"
-    - "discovery phases"
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
 ---
 
-# wayfinder Skill
+# Wayfinder
 
-**Purpose**: Guide projects through structured SDLC workflow with 9 phases (V2): CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO.
+Wayfinder is a thin interface to the `wayfinder session` CLI. The CLI and
+`WAYFINDER-STATUS.md` own transition state; this skill owns only the working
+method.
 
-**When to use**: Planning/implementing features, complex projects, multi-phase work requiring validation gates, stakeholder alignment.
+Use Wayfinder for multi-phase or high-risk work where discovery and review
+evidence matter. Skip it for an obvious, contained change that can be verified
+directly.
 
-**Invocation**: `/wayfinder-start "<project-description>"` or `wayfinder-start "<project-description>"`
+## Start
 
----
+1. Choose the project directory that will contain the status and phase
+   artifacts.
+2. Inspect the installed interface:
 
-## Workflow
+   ```sh
+   wayfinder session --help
+   wayfinder session start --help
+   ```
 
-### Phase 1: CHARTER
+3. Start the session:
 
-**Purpose**: Define problem, scope, success criteria, stakeholder questions
+   ```sh
+   wayfinder -C <project-dir> session start <project-name> \
+     --project-type <feature|research|infrastructure|refactor|bugfix> \
+     --risk-level <XS|S|M|L|XL>
+   ```
 
-**Commands**:
-```bash
-wayfinder-start "<concise-project-description>"
+Use `--skip-roadmap` only when SETUP adds no useful task breakdown. Never
+edit `WAYFINDER-STATUS.md` by hand.
+
+## Work one phase at a time
+
+The only phase sequence is:
+
+`CHARTER → PROBLEM → RESEARCH → DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO`
+
+For each phase:
+
+```sh
+wayfinder -C <project-dir> session status
+wayfinder -C <project-dir> session next-phase
+wayfinder -C <project-dir> session start-phase <PHASE>
+# Create or update <PHASE>-<descriptive-name>.md with truthful evidence.
+wayfinder -C <project-dir> session complete-phase <PHASE> --outcome success
 ```
 
-**Creates**: Project directory with W0-charter.md
+In a Git repository, `complete-phase` commits the canonical status, history,
+and phase Markdown artifacts as one scoped commit. It preserves unrelated
+staged and unstaged changes.
 
-**Deliverable**: Charter with problem statement, scope, success criteria, stakeholder alignment questions
+Do not bypass a failed gate. Read the error, repair the artifact or
+implementation, rerun the relevant verification, and complete the phase again.
+Use `--reason` only for the explicit hash-mismatch override described by
+`complete-phase --help`.
 
----
+## Phase intent
 
-### Phase 2: PROBLEM
+| Phase | Required outcome |
+|---|---|
+| CHARTER | Objective, scope, constraints, success conditions |
+| PROBLEM | Evidence that the problem and affected users are understood |
+| RESEARCH | Existing-solution search and build/adapt/reuse decision |
+| DESIGN | Current architecture, seams, invariants, and trade-offs in both `DESIGN-<name>.md` and `ARCHITECTURE.md` |
+| SPEC | Observable requirements and acceptance criteria |
+| PLAN | Ordered implementation and verification steps |
+| SETUP | Ready workspace and task breakdown, unless explicitly skipped |
+| BUILD | Real changes plus reproducible test, review, and delivery evidence |
+| RETRO | Outcomes, deviations, lessons, and remaining work |
 
-- Validate problem exists (evidence, impact, stakeholders)
-- Search for existing solutions in codebase
-- Decision: Real problem vs misunderstanding
-- *Reasoning Mode*: `ultrathink` when auto-escalated to thorough/comprehensive
+`RESEARCH-existing-solutions.md`, `ARCHITECTURE.md`,
+`SPEC-solution-requirements.md`, `PLAN-design.md`, and `SETUP-plan.md` have
+additional deterministic checks.
+Use `wayfinder session complete-phase --help` and the returned errors as the
+authoritative gate contract.
 
-### Phase 3: RESEARCH
+## Rewind and close
 
-- Search for internal solutions (existing code, libraries)
-- Research external solutions (tools, services, libraries)
-- Decision: Build from scratch vs Buy vs Adapt existing (70% overlap threshold)
+When new evidence invalidates earlier work, rewind explicitly and record why:
 
-### Phase 4: DESIGN
+```sh
+wayfinder -C <project-dir> session rewind-to <PHASE> --reason "<reason>"
+```
 
-- Compare viable approaches (pros/cons/tradeoffs)
-- Technical feasibility, timeline, resource assessment
-- Detailed design (architecture, data models, APIs)
-- Design review
-- *Reasoning Mode*: `ultrathink` for architecture decisions and multi-component designs
+In a Git repository, `rewind-to` commits its status, history, and retrospective
+updates before returning, so the target phase can be started immediately.
 
-### Phase 5: SPEC
+End only after the requested outcome is implemented and its required delivery
+state is verified:
 
-- Functional requirements (what system must do)
-- Non-functional requirements (performance, security, scalability)
-- Acceptance criteria (testable outcomes)
+```sh
+wayfinder -C <project-dir> session end --status completed
+```
 
-### Phase 6: PLAN
+If the requested outcome includes a PR, deployment, or runtime check, local
+tests alone are not completion. Record the actual remaining blocker instead of
+claiming success.
 
-- Present approach to stakeholders, get alignment
-- Break down into tasks with estimates
-- Identify dependencies, risks
-- Resource allocation
+This workflow is harness-neutral. When skill activation is unavailable, use
+the same CLI commands and artifacts directly.
 
-### Phase 7: SETUP
+## References
 
-- Deep dive into selected approach
-- Prototype, proof-of-concept, spikes
-- Validate assumptions
-- Set up development environment
-
-### Phase 8: BUILD
-
-- Execute plan with TDD enforcement (ADR-002 BUILD loop)
-- State machine: TEST_FIRST -> CODING -> GREEN -> REFACTOR -> VALIDATION -> DEPLOY
-- JIT linting context injected automatically (`lintcontext` package)
-- Quality telemetry emitted (`telemetry` package — token-quality pipeline)
-- Unit + integration tests
-
-### Phase 9: RETRO
-
-- What worked, what didn't, lessons learned
-- Metrics (estimated vs actual effort)
-- Update methodology based on learnings
-
----
-
-## Phase Context Management
-
-Each phase receives context from its dependencies via a **dependency graph** (not linear loading). The graph is implemented by the Go `phasegraph` package:
-
-- **full**: Load complete prior-phase artifact
-- **summary**: Load 100-200 token summary
-- **(absent)**: Skip entirely
-
-Example: BUILD loads PLAN (full) + CHARTER (summary) + DESIGN (summary). It does NOT load PROBLEM or RESEARCH.
-
-See ADR-005 (revised 2026-03-24) for details.
-
----
-
-## V1 to V2 Phase Name Mapping
-
-| V1 Name | V2 Name | Notes |
-|---------|---------|-------|
-| W0 | CHARTER | |
-| D1 | PROBLEM | |
-| D2 | RESEARCH | |
-| D3 | DESIGN | Merged with S6 |
-| D4 | SPEC | |
-| S4 | PLAN | Merged with S7 |
-| S5 | SETUP | |
-| S6 | DESIGN | Merged with D3 |
-| S7 | PLAN | Merged with S4 |
-| S8 | BUILD | Includes S9/S10 (ADR-002) |
-| S9 | BUILD | Merged into BUILD loop |
-| S10 | BUILD | Merged into BUILD loop |
-| S11 | RETRO | |
-
----
-
-## Commands Reference
-
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `/wayfinder-start` | Create new project | `wayfinder-start "Implement OAuth"` |
-| `/wayfinder-next-phase` | Execute next phase | Auto-progresses through phases |
-| `/wayfinder-run-all-phases` | Autopilot mode | Runs all remaining phases automatically |
-| `/wayfinder-stop` | Complete project | Mark project as completed/abandoned/blocked |
-| `/wayfinder-rewind` | Rewind to earlier phase | Restart from RESEARCH if approach changed |
-
----
-
-## Wayfinder vs Non-Wayfinder
-
-**Use wayfinder when**:
-- Multi-phase project (>1 day effort)
-- Need stakeholder alignment
-- Requires discovery (build/buy/adapt decision)
-- Complex implementation with validation needs
-
-**Don't use wayfinder when**:
-- Simple task (<1 hour)
-- Single-file change
-- Bug fix with obvious solution
-- No discovery needed (requirements clear)
-
----
-
-## Example: OAuth Implementation
-
-**CHARTER**: Problem: Users need Google OAuth login. Scope: Login flow only. Success: Users can login with Google.
-
-**PROBLEM**: Validated problem (user requests, security requirement). Evidence: 45% user survey requested OAuth.
-
-**RESEARCH**: Found Passport.js library (90% overlap, ADAPT decision). Alternative: Auth0 ($2300/month, rejected).
-
-**DESIGN**: Selected Passport.js approach. Designed middleware, routes, session management.
-
-**SPEC**: Requirements: OAuth flow <5s p95, CSRF protection, rate limiting. Tests: Unit + integration + E2E.
-
-**PLAN**: Planned 5 tasks (8hr estimate): middleware (2hr), routes (2hr), UI (1hr), tests (2hr), docs (1hr).
-
-**SETUP**: Prototyped Passport.js integration (validated <3s flow).
-
-**BUILD**: Implemented all 5 tasks with TDD. Actual: 9hr, 12% over. 80% test coverage.
-
-**RETRO**: Worked well, underestimated test time by 1hr.
-
----
-
-## Troubleshooting
-
-**Problem**: Phase stuck, can't proceed
-- **Solution**: Use `/wayfinder-rewind` to restart from earlier phase with new approach
-
-**Problem**: Autopilot makes wrong decision
-- **Solution**: Manual phase execution (`/wayfinder-next-phase`) with oversight between phases
-
-**Problem**: Project scope changed mid-flight
-- **Solution**: Rewind to CHARTER, update charter, restart discovery
-
----
-
-## Related Beads
-
-- oss-b74m.4: Wayfinder phases can spawn sub-agents
-- oss-b74m.5: Wayfinder phases-as-sub-agents (research)
-
----
-
-## Documentation
-
-- Phase dependencies: `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
-- ADRs: `docs/wayfinder/ADR-001-phase-consolidation.md`, `ADR-002-build-loop-tdd-enforcement.md`
-- Go packages: `wayfinder/cmd/wayfinder-session/internal/{phasegraph,lintcontext,telemetry}/`
-- Shell gates: `wayfinder/lib/*-gate-check.sh`
+- Phase contract: `PHASES.md`
+- Current architecture: `ARCHITECTURE.md`
+- Observable requirements: `SPEC.md`

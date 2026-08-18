@@ -7,19 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 	"gopkg.in/yaml.v3"
 )
 
 // WayfinderSession is the minimal summary returned by engram_list_wayfinder_sessions.
 type WayfinderSession struct {
-	ID           string `json:"id"`
-	ProjectName  string `json:"project_name"`
-	Status       string `json:"status"`
-	CurrentPhase string `json:"current_phase"`
-	CreatedAt    string `json:"created_at,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
-	Repository   string `json:"repository,omitempty"`
+	ID              string `json:"id"`
+	ProjectName     string `json:"project_name"`
+	Status          string `json:"status"`
+	CurrentWaypoint string `json:"current_waypoint"`
+	CreatedAt       string `json:"created_at,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
+	Repository      string `json:"repository,omitempty"`
 }
 
 const defaultWayfinderDir = "~/src/engram-research/wf"
@@ -51,17 +53,29 @@ func parseFrontmatter(content []byte) (map[string]any, error) {
 	return fm, nil
 }
 
-// fmString extracts a string field from a parsed frontmatter map, trying
-// multiple key names (newer schema first, then legacy names).
-func fmString(fm map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if v, ok := fm[k]; ok {
-			if s, ok := v.(string); ok {
-				return s
-			}
+// fmString extracts one canonical string field from parsed frontmatter.
+func fmString(fm map[string]any, key string) string {
+	if value, ok := fm[key]; ok {
+		switch typed := value.(type) {
+		case string:
+			return typed
+		case time.Time:
+			return typed.Format(time.RFC3339)
 		}
 	}
 	return ""
+}
+
+func validateWayfinderV2Frontmatter(fm map[string]any) error {
+	if fmString(fm, "schema_version") != "2.0" {
+		return fmt.Errorf("unsupported Wayfinder schema: require schema_version 2.0")
+	}
+	for _, key := range []string{"project_name", "status", "current_waypoint"} {
+		if fmString(fm, key) == "" {
+			return fmt.Errorf("invalid Wayfinder V2 frontmatter: %s is required", key)
+		}
+	}
+	return nil
 }
 
 // readWayfinderSession reads and parses WAYFINDER-STATUS.md from sessionDir.
@@ -73,8 +87,14 @@ func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
 	if err != nil {
 		return id, nil, err
 	}
+	if _, err := statusread.Parse(data); err != nil {
+		return id, nil, fmt.Errorf("invalid canonical status: %w", err)
+	}
 	fm, err := parseFrontmatter(data)
 	if err != nil {
+		return id, nil, err
+	}
+	if err := validateWayfinderV2Frontmatter(fm); err != nil {
 		return id, nil, err
 	}
 	return id, fm, nil
@@ -116,13 +136,13 @@ func listWayfinderSessions(wayfinderDir, statusFilter string, limit int) ([]Wayf
 		}
 
 		sessions = append(sessions, WayfinderSession{
-			ID:           id,
-			ProjectName:  fmString(fm, "project_name", "project"),
-			Status:       status,
-			CurrentPhase: fmString(fm, "current_phase", "current_waypoint"),
-			CreatedAt:    fmString(fm, "created_at", "created"),
-			UpdatedAt:    fmString(fm, "updated_at", "updated"),
-			Repository:   fmString(fm, "repository"),
+			ID:              id,
+			ProjectName:     fmString(fm, "project_name"),
+			Status:          status,
+			CurrentWaypoint: fmString(fm, "current_waypoint"),
+			CreatedAt:       fmString(fm, "created_at"),
+			UpdatedAt:       fmString(fm, "updated_at"),
+			Repository:      fmString(fm, "repository"),
 		})
 	}
 	return sessions, nil

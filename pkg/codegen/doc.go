@@ -1,4 +1,3 @@
-// Package codegen generates CLI and MCP server boilerplate from component
-// definitions. It produces type-safe Go source files that wire up Cobra
-// commands and MCP tool handlers.
+// Package codegen generates CLI, MCP, and skill boilerplate from operation
+// definitions. It produces type-safe Go source and deterministic Markdown.
 package codegen

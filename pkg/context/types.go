@@ -91,7 +91,7 @@ type Usage struct {
 	LastUpdated time.Time
 
 	// Source indicates how usage was detected
-	// Values: "claude-cli", "gemini-cli", "opencode-cli", "codex-cli", "agy", "heuristic"
+	// Values: "claude-cli", "gemini-cli", "opencode-cli", "codex-cli", "pi-cli", "agy", "heuristic"
 	Source string
 
 	// ModelID is the model being used (e.g., "claude-sonnet-4.5")
@@ -181,6 +181,9 @@ const (
 
 	// CLICodex represents Codex CLI
 	CLICodex CLI = "codex"
+
+	// CLIPi represents the Pi coding-agent CLI.
+	CLIPi CLI = "pi"
 
 	// CLIAgy represents the Google Antigravity CLI.
 	CLIAgy CLI = "agy"

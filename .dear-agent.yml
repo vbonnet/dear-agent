@@ -15,6 +15,8 @@
 #     logs               where conversation logs / session transcripts go
 #   pr-policy            informational map of PR verbs -> sanctioned command
 #                        (mirrors the enforcement in .claude/settings.json)
+#   adr-governance       declared ADR directory scopes, self-contained
+#                        aggregates, review budget, and reasoned exclusions
 #   forbidden-paths      directories where new files of a given kind MUST NOT
 #                        be created in THIS repo. Maps kind -> list of globs
 #                        relative to repo root.
@@ -38,40 +40,246 @@ output-dirs:
 
 # PR lifecycle policy (informational mirror of the enforcement in
 # .claude/settings.json + .claude/hooks/pretool-pr-guard; the authoritative
-# rationale lives in .claude/CLAUDE.md §"PR Lifecycle — Wayfinder-Only").
+# rationale lives in AGENTS.md "Guarded delivery" and the canonical policies).
 # Agents read this file at session start: PR open/close in this repo goes
-# through the safe-pr wrapper, which requires an active wayfinder session
-# (WAYFINDER-STATUS.md status: in_progress) and stamps the session trace on
-# the PR. Raw `gh pr create|close|reopen` in Bash is denied with exit 2.
+# through the safe-pr wrapper, which requires an active Wayfinder session
+# (planning or in-progress) and stamps the session trace on
+# the PR. Direct GitHub CLI lifecycle mutations in Bash are denied with exit 2.
 pr-policy:
   create: safe-pr   # safe-pr create --wayfinder <project-dir> --title … --body …
   close: safe-pr    # safe-pr close  --wayfinder <project-dir> <number|url>
-  emergency: "safe-pr <verb> --emergency --reason \"<why>\"  # audited, never silent"
+
+# Active AI instruction surfaces and exact dependency-owned policy debt.
+# Exclusions suppress only the declared rule/excerpt/count tuple; changed,
+# additional, or removed text fails the gate so temporary debt cannot become a
+# silent path exemption.
+instruction-policy:
+  surfaces:
+    - match: .dear-agent.yml
+      owner: repository-policy
+    - match: AGENTS.md
+      owner: repository-policy
+    - match: CLAUDE.md
+      owner: harness-shims
+    - match: CODEX.md
+      owner: harness-shims
+    - match: GEMINI.md
+      owner: harness-shims
+    - match: .gemini/styleguide.md
+      owner: gemini-review
+    - match: AGY.md
+      owner: harness-shims
+    - match: OPENCODE.md
+      owner: harness-shims
+    - match: .claude/CLAUDE.md
+      owner: harness-shims
+    - match: .claude/settings.json
+      owner: harness-policy
+    - match: .claude/hooks/pretool-*
+      owner: harness-hooks
+    - match: .claude/hooks/stop-*
+      owner: harness-hooks
+    - match: .agents/AGENTS.md
+      owner: harness-shims
+    - match: .agents/hooks.json
+      owner: harness-policy
+    - match: .agents/hooks/pretool-*
+      owner: harness-hooks
+    - match: .agents/hooks/stop-*
+      owner: harness-hooks
+    - match: .codex/hooks/pretool-*
+      owner: harness-hooks
+    - match: .codex/hooks.json
+      owner: harness-policy
+    - match: .codex/hooks/stop-*
+      owner: harness-hooks
+    - match: .opencode/hooks/pretool-*
+      owner: harness-hooks
+    - match: .opencode/hooks.json
+      owner: harness-policy
+    - match: .opencode/hooks/stop-*
+      owner: harness-hooks
+    - match: .deepsec/AGENTS.md
+      owner: deepsec
+    - match: .deepsec/data/**/SETUP.md
+      owner: deepsec
+    - match: docs/policies/*.ai.md
+      owner: repository-policy
+    - match: cmd/vroom-dispatch/skills/*.md
+      owner: vroom
+    - match: cmd/vroom-dispatch-direct/main.go
+      owner: vroom-worker-prompts
+    - match: cmd/vroom-prompt-gen/main.go
+      owner: vroom-worker-prompts
+    - match: internal/mergeloop/prompt.go
+      owner: merge-loop-worker-prompts
+    - match: wayfinder/SKILL.md
+      owner: wayfinder
+    - match: wayfinder/skills/wayfinder/SKILL.md
+      owner: wayfinder-plugin
+    - match: spec-governance/skills/write-spec/SKILL.md
+      owner: spec-governance
+    - match: spec-governance/skills/write-spec/references/contract-model.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/write-spec/references/ears-and-bdd.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/references/audit-verdicts.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/references/report-schema.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/SKILL.md
+      owner: spec-governance
+    - match: docs/spec-authoring.md
+      owner: spec-governance
+    - match: docs/templates/SPEC.md.tmpl
+      owner: spec-governance
+    - match: wayfinder/PHASES.md
+      owner: wayfinder
+    - match: wayfinder/SPEC.md
+      owner: wayfinder
+    - match: wayfinder/ARCHITECTURE.md
+      owner: wayfinder
+    - match: .agents/skills/**/SKILL.md
+      owner: repository-skills
+    - match: .agents/skills/**/agents/*.yaml
+      owner: repository-skill-agents
+    - match: agm/**/SKILL.md
+      owner: agm-skills
+    - match: agm/agm-plugin/commands/*.md
+      owner: agm-commands
+    - match: agm/youtube-plugin/commands/*.md
+      owner: agm-commands
+  exclusions-file: .instruction-policy-exclusions.yml
+
+# Architecture decisions have directory-scoped numeric identities. Every
+# numbered scope owns one complete index; aggregate ADR.md files are
+# self-contained. `make lint-adrs` rejects undeclared tracked ADR paths and
+# identity, lifecycle, index, size, supersession, or local-link drift.
+adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+    - path: agm/docs/adr
+      index: README.md
+    - path: agm/cmd/agm
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: agm/cmd/agm-daemon/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/cmd/agm-mcp-server/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/dolt/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/evaluation/ADR
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/tmux
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: engram/cmd/engram
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: engram/retrieval/docs/adrs
+      index: README.md
+      max-lines: 120
+    - path: pkg/engram/docs/adrs
+      index: README.md
+      max-lines: 120
+    - path: pkg/llm/docs
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: tools/dod-enforcer/adr
+      index: README.md
+      max-lines: 120
+    - path: wayfinder/cmd/wayfinder-session/internal/validator
+      index: ADR-INDEX.md
+      max-lines: 120
+  aggregates:
+    - path: engram/ecphory/ADR.md
+      max-lines: 120
+    - path: engram/ecphory/ranking/ADR.md
+      max-lines: 120
+    - path: pkg/hash/ADR.md
+      max-lines: 120
+    - path: pkg/monitoring/ADR.md
+      max-lines: 120
+    - path: pkg/telemetry/ADR.md
+      max-lines: 120
+    - path: tools/devlog/ADR.md
+      max-lines: 120
+  exclusions:
+    - match: "**/testdata/**"
+      reason: generated or parser fixture, not a living architectural decision
+    - match: "**/vendor/**"
+      reason: vendored third-party content is outside repository governance
+    - match: "**/node_modules/**"
+      reason: generated dependency content is outside repository governance
 
 forbidden-paths:
   research:
-    # Research artifacts — analysis docs, transcripts, literature reviews,
-    # findings — belong in ~/src/engram-research, not in this repo.
-    - research/*.md
-    - research/*.txt
-    # TEMPORAL ARTIFACTS — design docs, plans, audits, DEAR retros, research,
-    # and Wayfinder artifacts (W0/problem statements). They capture a moment
-    # of thinking, are NOT maintained with the code, and ALWAYS route to the
-    # knowledge base ~/src/engram-research (projects/<name>/), never this live
-    # coding repo — even when the artifact is about code here.
-    #
-    # LIVING DOCUMENTATION stays in dear-agent, as close to the code as
-    # possible (proximity principle): ARCHITECTURE.md, ADRs (docs/adr/),
-    # inline/API docs, CLAUDE.md — anything kept true as the code changes.
-    # See .claude/CLAUDE.md "Documentation & Artifact Routing" for the full
-    # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
-    #
-    # (Pre-existing specs in docs/design/ that CLAUDE.md and code reference as
-    # authoritative — anti-stall.md, graceful-exit.md, outcomes-framework.md —
-    # behave like living docs and remain in-repo for now; reclassifying vs.
-    # migrating them is tracked separately. New design docs follow this rule.)
+    # Temporal artifacts capture a moment of investigation or intent. Route
+    # them to an engram-research worktree and promote any durable result into
+    # policy, SPEC, architecture, ADR, source, or tests beside the owned code.
+    # Matching is recursive: ** spans path segments and path.Match syntax
+    # applies within each segment. Source-code extensions remain living code.
+    # See AGENTS.md "Living Documentation Policy" for the full policy.
+    - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**"
+    - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
+    - "**/[Rr][Ee][Pp][Oo][Rr][Tt].*"
+    - "**/[Pp][Ll][Aa][Nn].[Mm][Dd]"
+    - "**/*-[Pp][Ll][Aa][Nn].[Mm][Dd]"
+    - "**/[Pp][Ll][Aa][Nn].[Tt][Xx][Tt]"
+    - "**/*-[Pp][Ll][Aa][Nn].[Tt][Xx][Tt]"
+    - "**/[Pp][Ll][Aa][Nn].[Rr][Ss][Tt]"
+    - "**/*-[Pp][Ll][Aa][Nn].[Rr][Ss][Tt]"
+    - "**/[Pp][Ll][Aa][Nn].[Pp][Dd][Ff]"
+    - "**/*-[Pp][Ll][Aa][Nn].[Pp][Dd][Ff]"
+    - "**/[Pp][Ll][Aa][Nn].[Hh][Tt][Mm][Ll]"
+    - "**/*-[Pp][Ll][Aa][Nn].[Hh][Tt][Mm][Ll]"
+    - "**/docs/**/*-[Pp][Ll][Aa][Nn].*"
+    - "**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
+    - "**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
+    - "**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
+    - "**/*-[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
+    - "**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
+    - "**/*-[Rr][Ee][Pp][Oo][Rr][Tt].*"
+    - "**/*_[Tt][Ee][Ss][Tt]_[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]"
+    # Underscore and camelCase variants without treating every substring as a
+    # temporal token. Source-code extensions remain exempt outside explicitly
+    # temporal directories.
+    - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh][_A-Z]*.*"
+    - "**/*_[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
+    - "**/*_[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]_*.*"
+    - "**/*[a-z]Research*.*"
+    - "**/[Rr][Ee][Pp][Oo][Rr][Tt][_A-Z]*.*"
+    - "**/*_[Rr][Ee][Pp][Oo][Rr][Tt].*"
+    - "**/*_[Rr][Ee][Pp][Oo][Rr][Tt]_*.*"
+    - "**/*[a-z]Report*.*"
+    - "**/[Pp][Ll][Aa][Nn][_A-Z]*.*"
+    - "**/*_[Pp][Ll][Aa][Nn].*"
+    - "**/*_[Pp][Ll][Aa][Nn]_*.*"
+    - "**/*[a-z]Plan*.*"
+    - "**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp][_A-Z]*.*"
+    - "**/*_[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
+    - "**/*_[Rr][Oo][Aa][Dd][Mm][Aa][Pp]_*.*"
+    - "**/*[a-z]Roadmap*.*"
+    - "**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg][_A-Z]*.*"
+    - "**/*_[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
+    - "**/*_[Bb][Aa][Cc][Kk][Ll][Oo][Gg]_*.*"
+    - "**/*[a-z]Backlog*.*"
     - docs/retros/**
     - docs/design/**
+    - docs/benchmarks/**
+    - docs/workflow-engine/BACKLOG.md
+    - ROADMAP.md
+    - "**/*-PLAN.md"
+    - "**/*-REPORT.md"
+    - "**/*-SUMMARY.md"
+    - "**/*-BASELINE.md"
     - wf/**
     # Wayfinder SDLC run artifacts (phase outputs). These are temporal: a
     # moment-in-time record of a Wayfinder run, NOT maintained with the code.
@@ -81,6 +289,7 @@ forbidden-paths:
     # retro (engram-research) for why these globs exist.
     - "**/.wayfinder/**"
     - "**/WAYFINDER-STATUS.md"
+    - "**/WAYFINDER-HISTORY.jsonl"
     - "**/WAYFINDER-HISTORY.md"
 
 # Framework-level defaults applied to every task in this repo. These
@@ -111,9 +320,9 @@ acceptance-criteria:
     description: "No previously-passing test is now failing"
 
 # DEAR Audit subsystem configuration. See ADR-011 and pkg/audit/config.
-# This is the dogfood configuration: dear-agent itself runs the daily
-# checks below on every push (via the workflow-audit CLI in CI). The
-# weekly / monthly tiers cost more and run from a scheduled trigger.
+# This block selects audit checks; scheduling is operator-owned per ADR-011.
+# Invoke workflow-audit directly or through configs/workflows wrappers, from
+# cron, CI, or another wrapper. No deployed scheduler is claimed here.
 #
 # Severity policy is the package default; we leave it implicit. Override
 # only when this repo deviates from the recommended P0/P1/P2/P3 actions.
@@ -123,8 +332,7 @@ audits:
       - check: build
       - check: test
         config:
-          # Skip -race in CI to keep the daily under 5 min; the weekly
-          # tier picks it up.
+          # Skip -race in the daily selection; the weekly tier picks it up.
           race: false
           timeout: "3m"
       - check: lint.go
@@ -148,8 +356,8 @@ audits:
     # the schedule lines up with future check additions.
     monthly: []
 
-    # On-demand bucket: the spec.coverage check (Outcomes framework,
-    # docs/design/outcomes-framework.md) lives here because its signal
+    # On-demand bucket: the spec.coverage check (pkg/speccoverage) lives here
+    # because its signal
     # moves slowly and a missing SPEC.md is informational drift, not
     # breakage. Promote to weekly once dear-agent itself reaches
     # full coverage.

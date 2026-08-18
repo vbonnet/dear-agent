@@ -40,6 +40,13 @@ Feature: Context management parity
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
 
   Scenario Outline: Every harness rejects context counters outside the platform integer range
     Given context route harness "<harness>" supplies counters outside the platform integer range
@@ -52,6 +59,7 @@ Feature: Context management parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Every harness selects competing nested context counters deterministically
     Given context route harness "<harness>" supplies competing nested counters
@@ -64,3 +72,4 @@ Feature: Context management parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |

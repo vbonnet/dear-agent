@@ -29,3 +29,58 @@ variable "required_checks" {
   type        = list(string)
   default     = []
 }
+
+variable "default_branch" {
+  description = "Default branch name, used as the target branch for rollout pull requests (e.g. the Claude review workflow)."
+  type        = string
+  default     = "main"
+}
+
+variable "enable_claude_review" {
+  description = "Install the Claude Code OAuth secret on this repo. Set claude_review_rollout temporarily to stage the workflow through a PR. Advisory-only review; never wired into required_checks."
+  type        = bool
+  default     = false
+}
+
+variable "claude_review_rollout" {
+  description = "Transiently stage the Claude review workflow on a rollout branch and open its PR. Set false after that PR merges so GitHub's deleted head branch is not recreated."
+  type        = bool
+  default     = false
+}
+
+variable "claude_review_workflow_content" {
+  description = "Raw content for .github/workflows/claude-code-review.yml. Required when enable_claude_review = true; ignored otherwise."
+  type        = string
+  default     = null
+}
+
+variable "claude_review_rollout_branch" {
+  description = "Unprotected branch OpenTofu uses to stage Claude review workflow updates before opening a PR to default_branch."
+  type        = string
+  default     = "automation/claude-code-review"
+}
+
+variable "claude_code_oauth_token" {
+  description = "Claude Code OAuth token written to the CLAUDE_CODE_OAUTH_TOKEN repo secret. Required when enable_claude_review = true; ignored otherwise."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "strict_required_status_checks" {
+  description = <<-EOT
+    Require a pull-request branch to be up to date with the base branch before
+    merging (GitHub's "strict" status-check policy).
+
+    Defaults to true. With strict = false, two PRs whose checks each passed
+    against an older base can merge seconds apart into a semantic conflict that
+    no gate ever evaluated — that is how dear-agent broke `main` for ~50 minutes
+    (PRs #1264/#1265). Checks are only evidence about the merge result if they
+    ran against the tip they will land on.
+
+    The cost is serialization: each merge invalidates every other open PR's
+    up-to-date status, so a deep queue must rebase between merges.
+  EOT
+  type        = bool
+  default     = true
+}

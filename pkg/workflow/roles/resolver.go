@@ -35,8 +35,7 @@ type CapacityChecker interface {
 	HasCapacity(model string) bool
 }
 
-// Request describes the per-call resolution input. Matches the
-// "Resolution algorithm" pseudocode in ROADMAP.md.
+// Request describes the per-call resolution input defined by SPEC.md.
 type Request struct {
 	// Role is the role name from the AI node. Empty falls back to Model.
 	Role string

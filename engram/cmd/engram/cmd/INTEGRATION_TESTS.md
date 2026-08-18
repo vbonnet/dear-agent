@@ -7,7 +7,7 @@ The integration test suite in `validate_integration_test.go` provides comprehens
 
 ## Test Coverage
 
-### Test Functions (13 Integration Tests)
+### Core test functions
 
 1. **TestIntegration_ValidateRealCorpus**
    - Validates 500+ real files from the engram repository
@@ -27,60 +27,49 @@ The integration test suite in `validate_integration_test.go` provides comprehens
    - Tests auto-detection for core/ directory files
    - **Files**: Real core/*.ai.md files
 
-4. **TestIntegration_WayfinderValidator**
-   - Tests wayfinder validator on wayfinder-artifact.yaml files
-   - Tests explicit `--type=wayfinder` flag
-   - **Files**: Real wayfinder-artifact.yaml files
-
-5. **TestIntegration_LinkChecker**
+4. **TestIntegration_LinkChecker**
    - Tests link checker on real .ai.md files
    - Tests detection of broken links
    - Tests `--type=linkchecker` flag
    - **Files**: Real .ai.md files + synthetic test file
 
-6. **TestIntegration_YAMLTokenCounter**
+5. **TestIntegration_YAMLTokenCounter**
    - Tests YAML token counter on real YAML files
    - Tests `--verbose` flag with token counts
    - Tests `--type=yamltokencounter` flag
    - **Files**: Real YAML config files from repo
 
-7. **TestIntegration_RetrospectiveValidator**
-   - Tests retrospective validator on real retrospective files
-   - Tests auto-detection for *-retrospective.md files
-   - Tests `--type=retrospective` flag
-   - **Files**: Real S11 retrospective files
-
-8. **TestIntegration_JSONOutput**
+6. **TestIntegration_JSONOutput**
    - Tests JSON output format (`--json` flag)
    - Validates JSON structure (ValidationSummary)
    - Tests JSON output with errors
    - **Output**: Structured JSON validation results
 
-9. **TestIntegration_AutoFix**
+7. **TestIntegration_AutoFix**
    - Tests `--fix` flag for auto-fixing issues
    - Tests on copy of real files (non-destructive)
    - Verifies fixes applied reporting
    - **Files**: Copies of real core/*.ai.md files
 
-10. **TestIntegration_PerformanceBenchmark**
+8. **TestIntegration_PerformanceBenchmark**
     - Validates 500+ files in <10 seconds
     - Measures and reports validation time
     - Performance regression detection
     - **Performance Goal**: <10s for full corpus
 
-11. **TestIntegration_BatchProcessing**
+9. **TestIntegration_BatchProcessing**
     - Tests `--all` flag on directory
     - Tests batch validation of multiple file types
     - Verifies all files processed
     - **Files**: Synthetic multi-file test directory
 
-12. **TestIntegration_TypeSelection**
+10. **TestIntegration_TypeSelection**
     - Tests `--type` flag for each validator type
-    - Tests: engram, content, linkchecker, wayfinder, yamltokencounter, retrospective
+    - Tests: engram, content, linkchecker, yamltokencounter
     - Verifies explicit type selection works correctly
     - **Files**: Synthetic test files
 
-13. **TestIntegration_ErrorHandling**
+11. **TestIntegration_ErrorHandling**
     - Tests missing file errors
     - Tests empty file handling
     - Tests malformed file handling
@@ -88,25 +77,25 @@ The integration test suite in `validate_integration_test.go` provides comprehens
     - Tests invalid validator type error
     - **Error Scenarios**: Graceful failure handling
 
-### Additional Test Functions (4)
+### Additional test functions
 
-14. **TestIntegration_VerboseOutput**
+12. **TestIntegration_VerboseOutput**
     - Tests `--verbose` flag output
     - Compares verbose vs normal output
     - **Files**: Real .ai.md files
 
-15. **TestIntegration_MixedFileTypes**
+13. **TestIntegration_MixedFileTypes**
     - Tests validation of mixed file types in one directory
     - Tests that non-validatable files are skipped
     - **Files**: Mixed .ai.md, .yaml, .md files
 
-16. **TestIntegration_ExitCodes**
+14. **TestIntegration_ExitCodes**
     - Tests exit code 0 on success
     - Tests exit code 1 on validation errors
     - Verifies proper exit code handling
     - **Exit Codes**: 0 (success), 1 (errors), 2 (crash)
 
-17. **TestIntegration_DirectoryValidation**
+15. **TestIntegration_DirectoryValidation**
     - Tests validating entire directory (not just `--all`)
     - Tests passing directory path as argument
     - **Files**: Synthetic directory with multiple files
@@ -121,13 +110,12 @@ The `setupValidateTest()` function:
    - .ai.md files (engrams, personas, patterns)
    - YAML files (configs, CI, schemas)
    - core/*.ai.md files (content files)
-   - *-retrospective.md files (S11 retrospectives)
 3. Collects 500+ file corpus for performance testing
 
 ### File Discovery
 
 The `discoverFiles()` function walks the repository tree to find:
-- **Patterns**: `**/*.ai.md`, `**/*.yaml`, `**/*retrospective*.md`
+- **Patterns**: `**/*.ai.md`, `**/*.yaml`
 - **Exclusions**: vendor/, .git/, node_modules/
 - **Limits**: Configurable max files per pattern (for fast tests)
 
@@ -204,7 +192,7 @@ These tests are suitable for CI/CD pipelines:
 The integration tests validate against actual engram repository files:
 
 ### .ai.md Files (100+)
-- `core/cortex/engrams/workflows/*.ai.md` (S11, D1-D4, S4-S10)
+- `core/cortex/engrams/workflows/*.ai.md` (canonical CHARTER-through-RETRO guidance)
 - `core/persona/library/**/*.ai.md` (personas)
 - `engrams/patterns/**/*.ai.md` (patterns)
 - `engrams/references/**/*.ai.md` (references)
@@ -219,8 +207,7 @@ The integration tests validate against actual engram repository files:
 - `core/**/*.ai.md` (content files requiring token counts)
 
 ### Retrospective Files (2+)
-- `core/cortex/engrams/workflows/s11-retrospective.ai.md`
-- `core/cortex/engrams/workflows/s11-enhanced-retrospective.ai.md`
+- RETRO workflow files under `core/cortex/engrams/workflows/`
 
 ## Test Output Examples
 

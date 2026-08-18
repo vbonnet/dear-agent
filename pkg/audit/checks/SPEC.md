@@ -11,8 +11,7 @@
 `pkg/audit/checks` ships the built-in audit checks (build, test, lint,
 govulncheck, complexity, OTel spans, spec coverage/conformance/staleness) and
 the v1 lint-gap refiner. Each check implements `audit.Check`, registers itself
-with `audit.Default` at package init, and ships offline-replayable tests per
-ADR-011 §D9.
+with `audit.Default` at package init, and ships offline-replayable tests.
 
 ## EARS Requirements
 

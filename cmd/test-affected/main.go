@@ -24,7 +24,7 @@
 // Output is newline-separated import paths on stdout, suitable for piping:
 //
 //	pkgs=$(go run ./cmd/test-affected --tags=integration)
-//	[ -n "$pkgs" ] && go test -tags=integration -race -count=1 $pkgs
+//	[ -n "$pkgs" ] && go test -tags=integration -race -count=1 -timeout=20m $pkgs
 //
 // Empty output means "no integration tests are affected by this PR" —
 // that is a valid, fast pass, not an error.
@@ -41,15 +41,21 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
 const (
-	gitCommandTimeout = 30 * time.Second
-	goCommandTimeout  = 20 * time.Minute
+	gitCommandTimeout        = 30 * time.Second
+	goTestTimeout            = 20 * time.Minute
+	goCommandTimeout         = 55 * time.Minute
+	goListCommandTimeout     = 20 * time.Minute
+	goCommandTimeoutExitCode = 124
 )
 
 func main() {
@@ -70,6 +76,44 @@ type options struct {
 	run bool
 }
 
+type signalStatus struct {
+	code atomic.Int32
+}
+
+type signalStatusKey struct{}
+
+func newSignalContext() (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	status := &signalStatus{}
+	ctx = context.WithValue(ctx, signalStatusKey{}, status)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case sig := <-signals:
+			if sig == syscall.SIGTERM {
+				status.code.Store(143)
+			} else {
+				status.code.Store(130)
+			}
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(signals)
+		cancel()
+	}
+}
+
+func signalExitCode(ctx context.Context) int {
+	status, _ := ctx.Value(signalStatusKey{}).(*signalStatus)
+	if status == nil {
+		return 0
+	}
+	return int(status.code.Load())
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	opts, code := parseFlags(args, stderr)
 	if code != 0 {
@@ -78,6 +122,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if code := resolveOptions(&opts, stderr); code != 0 {
 		return code
 	}
+
+	ctx, stopSignals := newSignalContext()
+	defer stopSignals()
 
 	changed, err := changedFiles(opts.root, opts.base, opts.head)
 	if err != nil {
@@ -88,8 +135,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "test-affected: %d changed files between %s and %s\n", len(changed), opts.base, opts.head)
 	}
 
-	pkgs, err := listPackages(opts.root, opts.tags)
+	discoveryCtx, cancelDiscovery := context.WithTimeout(ctx, goListCommandTimeout)
+	defer cancelDiscovery()
+	pkgs, err := listPackagesWithContext(discoveryCtx, opts.root, opts.tags)
 	if err != nil {
+		if code := signalExitCode(ctx); code != 0 {
+			return code
+		}
 		fmt.Fprintf(stderr, "test-affected: go list failed: %v\n", err)
 		return 2
 	}
@@ -106,7 +158,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	sort.Strings(out)
 
 	if opts.run {
-		return runTests(opts, out, stdout, stderr)
+		return runTests(ctx, opts, out, stdout, stderr)
 	}
 
 	w := bufio.NewWriter(stdout)
@@ -176,27 +228,35 @@ func resolveOptions(opts *options, stderr io.Writer) int {
 	return 0
 }
 
-// runTests shells out to `go test -race -count=1` on the selected
+// runTests shells out to `go test -race -count=1 -timeout=<required CI timeout>` on the selected
 // packages. Empty selection is a clean pass — there are no affected
 // tests, and that is a valid CI outcome, not an error.
-func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
+func runTests(parent context.Context, opts options, pkgs []string, stdout, stderr io.Writer) int {
 	if len(pkgs) == 0 {
 		fmt.Fprintf(stderr, "test-affected: no packages affected (base=%s tags=%s)\n", opts.base, opts.tags)
 		return 0
 	}
 	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
-	args := []string{"test", "-race", "-count=1"}
-	if opts.tags != "" {
-		args = append(args, "-tags="+opts.tags)
-	}
-	args = append(args, pkgs...)
-	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	ctx, cancel := context.WithTimeout(parent, goCommandTimeout)
 	defer cancel()
+	return runGoTestCommand(ctx, goCommandTimeout, opts, pkgs, stdout, stderr)
+}
+
+func runGoTestCommand(ctx context.Context, timeout time.Duration, opts options, pkgs []string, stdout, stderr io.Writer) int {
+	args := goTestArgs(opts, pkgs)
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = opts.root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	protectGoCommandProcessTree(cmd)
 	if err := cmd.Run(); err != nil {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			fmt.Fprintf(stderr, "test-affected: go test timed out after %s\n", timeout)
+			return goCommandTimeoutExitCode
+		}
+		if code := signalExitCode(ctx); code != 0 {
+			return code
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
@@ -205,6 +265,29 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return 0
+}
+
+func goTestArgs(opts options, pkgs []string) []string {
+	args := []string{"test", "-race", "-count=1", "-timeout=" + goTestTimeout.String()}
+	if opts.tags != "" {
+		args = append(args, "-tags="+opts.tags)
+	}
+	return append(args, pkgs...)
+}
+
+func protectGoCommandProcessTree(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil || cmd.Process.Pid <= 0 {
+			return nil
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	cmd.WaitDelay = time.Second
 }
 
 // goListPackage mirrors the subset of `go list -json` we use. Fields
@@ -251,18 +334,23 @@ func isMainModulePkg(p *goListPackage) bool {
 // package that is only reachable through an _test.go import would look
 // dependency-free.
 func listPackages(root, tags string) ([]*goListPackage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), goListCommandTimeout)
+	defer cancel()
+	return listPackagesWithContext(ctx, root, tags)
+}
+
+func listPackagesWithContext(ctx context.Context, root, tags string) ([]*goListPackage, error) {
 	args := []string{"list", "-deps", "-test", "-json"}
 	if tags != "" {
 		args = append(args, "-tags", tags)
 	}
 	args = append(args, "./...")
-	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	protectGoCommandProcessTree(cmd)
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
 	}

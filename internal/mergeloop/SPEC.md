@@ -17,7 +17,7 @@ per pass, tracks bounded repair attempts, and records durable audit evidence.
 
 **MLP-04** When a pull request is behind, conflicted, failing CI, green, or policy-blocked, the driver shall choose the corresponding rebase, agent, merge, or escalation action.
 
-**MLP-05** When a failure signature changes, the tracker shall reset the exhausted repair-attempt budget before classification.
+**MLP-05** When a complete failure projection establishes that the failure signature changed, the tracker shall reset the exhausted repair-attempt budget before classification.
 
 **MLP-06** When a repair attempt exceeds the configured maximum for the same failure signature, the driver shall escalate instead of spawning indefinitely.
 
@@ -32,6 +32,14 @@ per pass, tracks bounded repair attempts, and records durable audit evidence.
 **MLP-11** When no harness or model route is supplied, the argument builder shall omit those flags rather than inserting empty values.
 
 **MLP-12** When a pass completes, the system shall report open, merged, rebased, spawned, escalated, stalled, skipped, and per-state action counts.
+
+**MLP-13** When effective required-check projection is unavailable for one pull request, the classifier shall keep that pull request pending without preventing later independent pull requests from being driven.
+
+**MLP-14** When effective required-check projection is unavailable or contains no failing check, the driver shall preserve the existing repair-attempt budget until a failing projection establishes the current failure signature.
+
+**MLP-15** When a passing projection establishes that a prior failure episode concluded, the tracker shall reset the repair-attempt budget and clear the failure signature.
+
+**MLP-16** When effective required-check projection fails deterministically due to policy constraints, the classifier shall block and escalate the pull request rather than leaving it in pending.
 
 ## BDD Traceability
 

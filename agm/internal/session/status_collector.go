@@ -13,17 +13,17 @@ import (
 
 // SessionStatus represents the status of a single session
 type SessionStatus struct {
-	Name            string
-	SessionID       string
-	State           string
-	StateSource     string
-	Branch          string
-	Uncommitted     int
-	WorktreePath    string
-	TestsPassing    bool // Placeholder - implementation deferred
-	Workspace       string
-	LastStateUpdate string
-	Budget          *budget.Status // Context budget status (nil if no usage data)
+	Name            string         `json:"name"`
+	SessionID       string         `json:"session_id"`
+	State           string         `json:"state"`
+	StateSource     string         `json:"state_source"`
+	Branch          string         `json:"branch"`
+	Uncommitted     int            `json:"uncommitted"`
+	WorktreePath    string         `json:"worktree_path"`
+	TestsPassing    bool           `json:"tests_passing"` // Placeholder - implementation deferred
+	Workspace       string         `json:"workspace"`
+	LastStateUpdate string         `json:"last_state_update"`
+	Budget          *budget.Status `json:"budget,omitempty"` // Context budget status (nil if no usage data)
 }
 
 // CollectStatus gathers status information for a single session.
@@ -122,11 +122,11 @@ func IsWorktree(dir string) bool {
 
 // WorkspaceStatus aggregates status across all sessions in a workspace
 type WorkspaceStatus struct {
-	Workspace       string
-	Sessions        []*SessionStatus
-	TotalSessions   int
-	DoneSessions    int
-	WorkingSessions int
+	Workspace       string           `json:"workspace"`
+	Sessions        []*SessionStatus `json:"sessions"`
+	TotalSessions   int              `json:"total_sessions"`
+	DoneSessions    int              `json:"done_sessions"`
+	WorkingSessions int              `json:"working_sessions"`
 }
 
 // AggregateWorkspaceStatus collects status for all sessions in a workspace

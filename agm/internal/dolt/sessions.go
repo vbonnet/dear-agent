@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -30,6 +31,9 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 	if session.WorkingDirectory != "" {
 		metadata["working_directory"] = session.WorkingDirectory
 	}
+	if session.Sandbox != nil {
+		metadata["sandbox"] = session.Sandbox
+	}
 	if session.Codex != nil {
 		if session.Codex.SessionID != "" {
 			metadata["codex_session_id"] = session.Codex.SessionID
@@ -38,6 +42,7 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 			metadata["codex_transcript_path"] = session.Codex.TranscriptPath
 		}
 	}
+	addOpenAISessionMetadata(metadata, session.OpenAI)
 	if session.Agy != nil {
 		if session.Agy.ConversationID != "" {
 			metadata["agy_conversation_id"] = session.Agy.ConversationID
@@ -52,6 +57,21 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 			metadata["agy_transcript_path"] = session.Agy.TranscriptPath
 		}
 	}
+	if session.Pi != nil {
+		if session.Pi.SessionID != "" {
+			metadata["pi_session_id"] = session.Pi.SessionID
+		}
+		if session.Pi.SessionDir != "" {
+			metadata["pi_session_dir"] = session.Pi.SessionDir
+		}
+		if session.Pi.TranscriptPath != "" {
+			metadata["pi_transcript_path"] = session.Pi.TranscriptPath
+		}
+		if session.Pi.CodingAgentDirSet || session.Pi.CodingAgentDir != "" {
+			metadata["pi_coding_agent_dir"] = session.Pi.CodingAgentDir
+			metadata["pi_coding_agent_dir_set"] = true
+		}
+	}
 	if session.EngramMetadata != nil {
 		metadata["engram_enabled"] = session.EngramMetadata.Enabled
 		metadata["engram_query"] = session.EngramMetadata.Query
@@ -62,7 +82,47 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 	if session.Outcome != manifest.OutcomeUnknown {
 		metadata["outcome"] = string(session.Outcome)
 	}
+	// Readiness state lives here for the same no-migration reason as outcome:
+	// without it, every `agm session state set` (hook- or daemon-issued) is
+	// dropped on the write and reads back as "", which silently disables the
+	// stall detector and GC recency guards (ce-0zng9).
+	if session.State != "" {
+		metadata["state"] = session.State
+		if !session.StateUpdatedAt.IsZero() {
+			metadata["state_updated_at"] = session.StateUpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if session.StateSource != "" {
+			metadata["state_source"] = session.StateSource
+		}
+	}
+	if session.FinalOutput != "" {
+		metadata["final_output"] = session.FinalOutput
+		if !session.FinalOutputAt.IsZero() {
+			metadata["final_output_at"] = session.FinalOutputAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	return metadata
+}
+
+func addOpenAISessionMetadata(metadata map[string]any, openAI *manifest.OpenAI) {
+	if openAI != nil {
+		metadata["openai"] = openAI
+	}
+}
+
+// SessionRegistrationCommitUncertainError means the registration commit may
+// have succeeded but a durable re-read could not prove the installed identity.
+// Creation callers must compensate as though the row may exist.
+type SessionRegistrationCommitUncertainError struct {
+	Err error
+}
+
+func (e *SessionRegistrationCommitUncertainError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *SessionRegistrationCommitUncertainError) Unwrap() error {
+	return e.Err
 }
 
 // marshalCreateSessionJSON serializes the JSON-typed fields needed by the
@@ -88,12 +148,15 @@ func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, any, 
 }
 
 // CreateSession inserts a new session into the database
-func (a *Adapter) CreateSession(session *manifest.Manifest) error {
+func (a *Adapter) CreateSession(session *manifest.Manifest) (retErr error) {
 	if session == nil {
 		return fmt.Errorf("session cannot be nil")
 	}
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
+	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
 	}
 
 	// Ensure migrations are applied
@@ -101,14 +164,41 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
+	reservationHeld := session.Name != "" && session.Lifecycle != manifest.LifecycleArchived
+	releaseReservation := false
+	if reservationHeld {
+		reservationCreated, err := a.reserveSessionName(session.SessionID, session.Name)
+		releaseReservation = reservationCreated
+		if releaseReservation {
+			defer func() {
+				if !releaseReservation {
+					return
+				}
+				if err := a.ReleaseSessionNameReservation(session.SessionID); err != nil {
+					retErr = errors.Join(retErr, err)
+				}
+			}()
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if err := a.insertSessionRegistration(session, reservationHeld); err != nil {
+		return err
+	}
+	releaseReservation = false
+	return nil
+}
+
+func (a *Adapter) insertSessionRegistration(session *manifest.Manifest, reservationHeld bool) error {
 	contextTags, metadataJSON, monitorsJSON, err := marshalCreateSessionJSON(session)
 	if err != nil {
 		return err
 	}
 	harness := defaultIfEmpty(session.Harness, "claude-code")
-	status := "active"
-	if session.Lifecycle == manifest.LifecycleArchived {
-		status = "archived"
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
 	}
 	permissionMode := defaultIfEmpty(session.PermissionMode, "default")
 	permissionModeSource := defaultIfEmpty(session.PermissionModeSource, "init")
@@ -140,13 +230,27 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		ctxPercentageUsed = session.ContextUsage.PercentageUsed
 	}
 
-	// Determine model (use session model if set, otherwise default)
+	// Legacy manifests without a harness are Claude Code sessions, so retain the
+	// historical Claude default for that route. Other harnesses use an empty
+	// model to mean that the provider-native selection is unknown and must not be
+	// replaced with an Anthropic model.
 	model := session.Model
-	if model == "" {
+	if model == "" && harness == "claude-code" {
 		model = "claude-sonnet-4-5"
 	}
 
-	_, err = a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
+	if err != nil {
+		return fmt.Errorf("begin session registration: %w", err)
+	}
+	defer tx.Rollback()
+	if reservationHeld {
+		if err := reservationOwnedBy(tx, a.workspace, session.SessionID, session.Name); err != nil {
+			return err
+		}
+	}
+
+	_, err = tx.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.SessionID,
 		session.CreatedAt,
 		session.UpdatedAt,
@@ -177,7 +281,58 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to insert session: %w", err)
 	}
 
+	if reservationHeld {
+		if _, err := tx.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
+			`DELETE FROM agm_session_name_reservations
+			 WHERE workspace = ? AND session_id = ?`,
+			a.workspace,
+			session.SessionID,
+		); err != nil {
+			return fmt.Errorf("finalize session-name reservation: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		commitErr := fmt.Errorf("commit session registration: %w", err)
+		committed, inspectErr := a.sessionRegistrationCommitted(session, status, harness)
+		if inspectErr != nil {
+			return &SessionRegistrationCommitUncertainError{
+				Err: errors.Join(commitErr, inspectErr),
+			}
+		}
+		if committed {
+			return nil
+		}
+		return commitErr
+	}
 	return nil
+}
+
+func (a *Adapter) sessionRegistrationCommitted(session *manifest.Manifest, expectedStatus, expectedHarness string) (bool, error) {
+	var name, status, harness, tmuxSessionName string
+	err := a.conn.QueryRow( //nolint:noctx // commit reconciliation must outlive the transaction response
+		`SELECT name, status, harness, tmux_session_name
+		 FROM agm_sessions
+		 WHERE id = ? AND workspace = ?`,
+		session.SessionID,
+		a.workspace,
+	).Scan(&name, &status, &harness, &tmuxSessionName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect session registration after commit error: %w", err)
+	}
+	if name != session.Name || status != expectedStatus || harness != expectedHarness || tmuxSessionName != session.Tmux.SessionName {
+		return false, fmt.Errorf(
+			"session registration identity after commit error does not match request: id=%s name=%q status=%q harness=%q tmux=%q",
+			session.SessionID,
+			name,
+			status,
+			harness,
+			tmuxSessionName,
+		)
+	}
+	return true, nil
 }
 
 // GetSession retrieves a session by ID
@@ -194,7 +349,7 @@ func (a *Adapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -215,10 +370,16 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id cannot be empty")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Ensure migrations are applied
 	if err := a.ApplyMigrations(); err != nil {
 		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	if err := a.validateStoredSessionLifecycleAndOutcome(session.SessionID); err != nil {
+		return err
 	}
 
 	// Marshal context tags to JSON
@@ -239,10 +400,11 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		harness = "claude-code"
 	}
 
-	// Determine status from lifecycle
-	status := "active"
-	if session.Lifecycle == manifest.LifecycleArchived {
-		status = "archived"
+	// Preserve transitional lifecycle values such as "reaping" so detached
+	// reapers can recover across processes in an isolated SQLite test store.
+	status, err := lifecycleStorageStatus(session.Lifecycle)
+	if err != nil {
+		return err
 	}
 
 	// Update timestamp
@@ -267,11 +429,30 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		monitorsJSON = string(monitorsData)
 	}
 
+	observedTmuxRevision := nullableStringValue(sql.NullString{
+		String: session.Tmux.SessionRevision,
+		Valid:  session.Tmux.SessionRevision != "",
+	})
+	nextTmuxRevision := uuid.NewString()
+	// Full-session writers may have read before a resume installed its
+	// provisional tmux owner. Update their unrelated fields, but change the tmux
+	// identity only when the opaque revision they observed is still current.
+	// Every writer advances the revision, including a writer that loses this
+	// comparison, so any other stale snapshot remains unable to reopen the CAS.
 	query := `
 		UPDATE agm_sessions
-		SET updated_at = ?, status = ?, name = ?, harness = ?,
+		SET updated_at = ?, status = CASE
+			WHEN status = 'archived' AND ? <> 'archived' THEN status ELSE ? END,
+			name = CASE
+				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+				THEN ? ELSE name END,
+			harness = ?, model = ?,
 			context_project = ?, context_purpose = ?, context_tags = ?,
-			context_notes = ?, claude_uuid = ?, tmux_session_name = ?,
+			context_notes = ?, claude_uuid = ?,
+			tmux_session_name = CASE
+				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+				THEN ? ELSE tmux_session_name END,
+			tmux_session_revision = ?,
 			metadata = ?,
 			permission_mode = ?, permission_mode_updated_at = ?, permission_mode_source = ?,
 			is_test = ?,
@@ -283,14 +464,21 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	result, err := a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.UpdatedAt,
 		status,
+		status,
+		observedTmuxRevision,
+		observedTmuxRevision,
 		session.Name,
 		harness,
+		session.Model,
 		session.Context.Project,
 		session.Context.Purpose,
 		contextTags,
 		session.Context.Notes,
 		session.Claude.UUID,
+		observedTmuxRevision,
+		observedTmuxRevision,
 		session.Tmux.SessionName,
+		nextTmuxRevision,
 		metadataJSON,
 		session.PermissionMode,
 		session.PermissionModeUpdatedAt,
@@ -316,8 +504,447 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if rowsAffected == 0 {
 		return fmt.Errorf("session not found: %s", session.SessionID)
 	}
-
 	return nil
+}
+
+// UpdateTmuxSessionName persists only the live tmux identity for a session.
+// Resume readiness can take long enough for hooks or another AGM command to
+// update unrelated metadata, so writing the pre-readiness Manifest snapshot
+// here would lose those concurrent changes.
+func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionName string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if sessionName == "" {
+		return fmt.Errorf("tmux session name cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+	`, time.Now(), sessionName, uuid.NewString(), sessionID, a.workspace)
+	if err != nil {
+		return fmt.Errorf("failed to update tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// TouchSessionActivity updates only the session activity timestamp. It does
+// not rotate the tmux identity revision: a cold-resume transaction keeps that
+// ownership token provisional until every creation-finalization effect has
+// succeeded, allowing an exact rollback after caller cancellation.
+func (a *Adapter) TouchSessionActivity(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?
+		WHERE id = ? AND workspace = ?
+	`, time.Now(), sessionID, a.workspace)
+	if err != nil {
+		return fmt.Errorf("touch session activity: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get touched session rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// RenameSessionIdentityResult tells the caller whether reverting an already
+// moved tmux session is safe when the storage mutation returns an error.
+type RenameSessionIdentityResult struct {
+	TmuxRollbackSafe bool
+	StorageCommitted bool
+}
+
+// RenameSessionIdentity atomically changes both user-visible and tmux names
+// from the exact identity revision observed by the caller. Unlike a broad
+// UpdateSession, an authoritative rename must report a concurrent change
+// instead of silently preserving the old tmux name after the live pane moved.
+func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) (result RenameSessionIdentityResult, retErr error) {
+	if sessionID == "" {
+		return RenameSessionIdentityResult{}, fmt.Errorf("session_id cannot be empty")
+	}
+	if newName == "" {
+		return RenameSessionIdentityResult{}, fmt.Errorf("new session name cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return RenameSessionIdentityResult{}, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	reservationHeld := newName != previousName
+	releaseReservation := false
+	if reservationHeld {
+		reservationCreated, err := a.reserveSessionName(sessionID, newName)
+		releaseReservation = reservationCreated
+		if releaseReservation {
+			defer func() {
+				if !releaseReservation {
+					return
+				}
+				if err := a.ReleaseSessionNameReservation(sessionID); err != nil {
+					retErr = errors.Join(retErr, err)
+				}
+			}()
+		}
+		if err != nil {
+			return RenameSessionIdentityResult{}, err
+		}
+	}
+	reservationName := ""
+	if reservationHeld {
+		reservationName = newName
+	}
+	result, retErr = a.renameSessionIdentityReserved(
+		ctx,
+		sessionID,
+		previousName,
+		previousTmuxName,
+		observedRevision,
+		newName,
+		reservationName,
+	)
+	var uncertain *SessionIdentityMutationCommitUncertainError
+	if errors.As(retErr, &uncertain) {
+		releaseReservation = false
+	}
+	if retErr == nil {
+		result.StorageCommitted = true
+	}
+	return result, retErr
+}
+
+func (a *Adapter) renameSessionIdentityReserved(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName, reservationName string) (RenameSessionIdentityResult, error) {
+	observedRevisionValue := nullableStringValue(sql.NullString{
+		String: observedRevision,
+		Valid:  observedRevision != "",
+	})
+	nextRevision := uuid.NewString()
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, name = ?, tmux_session_name = ?, tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND name = ? AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+		  AND (? = '' OR EXISTS (
+			  SELECT 1 FROM agm_session_name_reservations
+			  WHERE workspace = ? AND name = ? AND session_id = ?
+		  ))
+	`, time.Now(), newName, newName, nextRevision, sessionID, a.workspace,
+		previousName, previousTmuxName, observedRevisionValue, observedRevisionValue,
+		reservationName, a.workspace, reservationName, sessionID)
+	if err == nil {
+		rowsAffected, rowsErr := result.RowsAffected()
+		if rowsErr == nil && rowsAffected == 1 {
+			return RenameSessionIdentityResult{}, nil
+		}
+		if rowsErr != nil {
+			err = fmt.Errorf("get renamed session identity rows affected: %w", rowsErr)
+		} else {
+			err = fmt.Errorf("session identity changed concurrently: %s", sessionID)
+		}
+	} else {
+		err = fmt.Errorf("rename session identity: %w", err)
+	}
+	if reservationName != "" {
+		owned, ownershipErr := a.sessionNameReservationOwned(sessionID, reservationName)
+		if ownershipErr != nil {
+			err = errors.Join(err, ownershipErr)
+		} else if !owned {
+			err = &SessionNameConflictError{Name: reservationName}
+		}
+	}
+
+	// ExecContext can lose its reply before the server finishes autocommit. A
+	// re-read of the unchanged snapshot is not yet proof that the write will not
+	// commit, so first advance the exact observed revision with a competing CAS.
+	// Whichever write reaches the row first fences the other one.
+	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	fenceRevision := uuid.NewString()
+	fenceErr := a.fenceSessionIdentityRename(inspectCtx, sessionID, previousName, previousTmuxName, observedRevisionValue, fenceRevision)
+	if fenceErr != nil {
+		err = errors.Join(err, fenceErr)
+	}
+	currentName, currentTmuxName, currentRevision, inspectErr := a.inspectSessionIdentity(inspectCtx, sessionID)
+	if inspectErr != nil {
+		err = errors.Join(err, inspectErr)
+		return RenameSessionIdentityResult{}, sessionIdentityRenameInspectionError(err, fenceErr)
+	}
+	return classifySessionIdentityRenameAfterError(previousName, previousTmuxName, observedRevision, newName, nextRevision, fenceRevision, currentName, currentTmuxName, currentRevision, err)
+}
+
+func sessionIdentityRenameInspectionError(primaryErr, fenceErr error) error {
+	if fenceErr != nil {
+		return &SessionIdentityMutationCommitUncertainError{Err: primaryErr}
+	}
+	return primaryErr
+}
+
+func (a *Adapter) fenceSessionIdentityRename(ctx context.Context, sessionID, previousName, previousTmuxName string, observedRevisionValue any, fenceRevision string) error {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND name = ? AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, fenceRevision, sessionID, a.workspace, previousName, previousTmuxName, observedRevisionValue, observedRevisionValue)
+	if err != nil {
+		return fmt.Errorf("fence pending session identity rename: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get session identity rename fence rows affected: %w", err)
+	}
+	if rowsAffected > 1 {
+		return fmt.Errorf("session identity rename fence changed %d rows", rowsAffected)
+	}
+	return nil
+}
+
+func classifySessionIdentityRenameAfterError(previousName, previousTmuxName, observedRevision, newName, nextRevision, fenceRevision, currentName, currentTmuxName, currentRevision string, primaryErr error) (RenameSessionIdentityResult, error) {
+	committedIdentity := currentName == newName && currentTmuxName == newName
+	exactCommit := committedIdentity && currentRevision == nextRevision
+	supersededCommit := committedIdentity && currentRevision != nextRevision
+	if exactCommit || supersededCommit {
+		// Exact revision proves our write committed. A different revision with
+		// the same names means a later writer already superseded it while
+		// preserving the intended identity; both outcomes are complete.
+		return RenameSessionIdentityResult{}, nil
+	}
+	previousIdentity := currentName == previousName && currentTmuxName == previousTmuxName
+	// The exact fence revision proves our competing CAS won. Any other revision
+	// advanced away from the observed value also makes the original CAS unable
+	// to commit. The unchanged observed revision remains ambiguous because the
+	// original autocommit may still be in flight.
+	fenced := currentRevision == fenceRevision || currentRevision != observedRevision
+	rollbackSafe := previousIdentity && fenced
+	if previousIdentity && !fenced {
+		return RenameSessionIdentityResult{}, &SessionIdentityMutationCommitUncertainError{
+			Err: primaryErr,
+		}
+	}
+	return RenameSessionIdentityResult{TmuxRollbackSafe: rollbackSafe}, primaryErr
+}
+
+func (a *Adapter) inspectSessionIdentity(ctx context.Context, sessionID string) (string, string, string, error) {
+	var name, tmuxName string
+	var revision sql.NullString
+	err := a.conn.QueryRowContext(ctx, `
+		SELECT name, tmux_session_name, tmux_session_revision
+		FROM agm_sessions
+		WHERE id = ? AND workspace = ?
+	`, sessionID, a.workspace).Scan(&name, &tmuxName, &revision)
+	if err != nil {
+		return "", "", "", fmt.Errorf("inspect session identity after rename error: %w", err)
+	}
+	return name, tmuxName, revision.String, nil
+}
+
+// TmuxSessionNameChange is the exact adapter-owned revision for a provisional
+// tmux-name write. Its opaque token is compared directly by both MySQL/Dolt and
+// SQLite, avoiding dialect-specific timestamp casts and precision differences.
+type TmuxSessionNameChange struct {
+	SessionID         string
+	PreviousName      string
+	PreviousRevision  sql.NullString
+	PreviousUpdatedAt time.Time
+	CurrentName       string
+	CurrentRevision   string
+}
+
+type tmuxSessionNameChangeState uint8
+
+const (
+	tmuxSessionNameChangeUnknown tmuxSessionNameChangeState = iota
+	tmuxSessionNameChangePrevious
+	tmuxSessionNameChangeCurrent
+	tmuxSessionNameChangeSuperseded
+)
+
+// BeginTmuxSessionNameChange persists a provisional canonical tmux name while
+// preserving every unrelated column. The read and compare-and-swap run in one
+// database transaction, so a concurrent session update cannot be overwritten.
+// A nil change means the requested name was already current.
+func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, newName string) (*TmuxSessionNameChange, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id cannot be empty")
+	}
+	if newName == "" {
+		return nil, fmt.Errorf("tmux session name cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	tx, err := a.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tmux session name change: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var previousName string
+	var previousRevision sql.NullString
+	var previousUpdatedAt time.Time
+	if err := tx.QueryRowContext(ctx, `
+		SELECT tmux_session_name, tmux_session_revision, updated_at
+		FROM agm_sessions
+		WHERE id = ? AND workspace = ?
+	`, sessionID, a.workspace).Scan(&previousName, &previousRevision, &previousUpdatedAt); err != nil {
+		return nil, fmt.Errorf("read tmux session name revision: %w", err)
+	}
+	if previousName == newName {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit unchanged tmux session name: %w", err)
+		}
+		return nil, nil
+	}
+	currentRevision := uuid.NewString()
+	previousRevisionValue := nullableStringValue(previousRevision)
+	result, err := tx.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, time.Now(), newName, currentRevision, sessionID, a.workspace, previousName, previousRevisionValue, previousRevisionValue)
+	if err != nil {
+		return nil, fmt.Errorf("write provisional tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("get provisional tmux name rows affected: %w", err)
+	}
+	if rowsAffected != 1 {
+		return nil, fmt.Errorf("session metadata changed concurrently")
+	}
+	change := &TmuxSessionNameChange{
+		SessionID:         sessionID,
+		PreviousName:      previousName,
+		PreviousRevision:  previousRevision,
+		PreviousUpdatedAt: previousUpdatedAt,
+		CurrentName:       newName,
+		CurrentRevision:   currentRevision,
+	}
+	if err := tx.Commit(); err != nil {
+		// Commit can report an error after the database durably accepted the
+		// write. Release any remaining transaction resources, then re-read the
+		// exact ownership revision before deciding whether cleanup is safe.
+		_ = tx.Rollback()
+		inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		state, inspectErr := a.inspectTmuxSessionNameChange(inspectCtx, *change)
+		return resolveTmuxSessionNameChangeCommitError(change, err, state, inspectErr)
+	}
+	return change, nil
+}
+
+func (a *Adapter) inspectTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (tmuxSessionNameChangeState, error) {
+	var currentName string
+	var currentRevision sql.NullString
+	var currentUpdatedAt time.Time
+	if err := a.conn.QueryRowContext(ctx, `
+		SELECT tmux_session_name, tmux_session_revision, updated_at
+		FROM agm_sessions
+		WHERE id = ? AND workspace = ?
+	`, change.SessionID, a.workspace).Scan(&currentName, &currentRevision, &currentUpdatedAt); err != nil {
+		return tmuxSessionNameChangeUnknown, fmt.Errorf("re-read tmux session name after commit error: %w", err)
+	}
+	if currentName == change.CurrentName && currentRevision.Valid && currentRevision.String == change.CurrentRevision {
+		return tmuxSessionNameChangeCurrent, nil
+	}
+	if currentName == change.PreviousName && currentRevision == change.PreviousRevision && currentUpdatedAt.Equal(change.PreviousUpdatedAt) {
+		return tmuxSessionNameChangePrevious, nil
+	}
+	return tmuxSessionNameChangeSuperseded, nil
+}
+
+func resolveTmuxSessionNameChangeCommitError(change *TmuxSessionNameChange, commitErr error, state tmuxSessionNameChangeState, inspectErr error) (*TmuxSessionNameChange, error) {
+	err := fmt.Errorf("commit provisional tmux session name: %w", commitErr)
+	if inspectErr != nil {
+		return change, errors.Join(err, inspectErr)
+	}
+	switch state {
+	case tmuxSessionNameChangePrevious:
+		// The complete previous revision proves the write did not commit.
+		return nil, err
+	case tmuxSessionNameChangeCurrent:
+		// The owned provisional revision committed despite the error. Preserve
+		// it so the caller's rollback can restore metadata before killing tmux.
+		return change, err
+	case tmuxSessionNameChangeUnknown, tmuxSessionNameChangeSuperseded:
+		// A superseding writer (or an unrecognized state) makes ownership
+		// uncertain. Preserve the change; its CAS restore will refuse to erase
+		// newer metadata and therefore prevent unsafe tmux cleanup.
+		return change, errors.Join(err, fmt.Errorf("tmux session metadata state after commit error cannot prove rollback safety"))
+	default:
+		return change, errors.Join(err, fmt.Errorf("unknown tmux session metadata state %d after commit error", state))
+	}
+}
+
+func nullableStringValue(value sql.NullString) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
+}
+
+// RestoreTmuxSessionNameChange compensates only the exact provisional revision
+// returned by BeginTmuxSessionNameChange. If another operation changed the
+// session afterward, it returns false and preserves that newer state.
+func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND tmux_session_name = ? AND tmux_session_revision = ?
+	`, change.PreviousUpdatedAt, change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	if err != nil {
+		return false, fmt.Errorf("restore provisional tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get restored tmux name rows affected: %w", err)
+	}
+	return rowsAffected == 1, nil
+}
+
+// CompleteTmuxSessionNameChange rotates away from the provisional ownership
+// token after the irreversible prompt boundary succeeds. A false result means
+// another writer already superseded the provisional revision.
+func (a *Adapter) CompleteTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND tmux_session_name = ? AND tmux_session_revision = ?
+	`, uuid.NewString(), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	if err != nil {
+		return false, fmt.Errorf("complete provisional tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get completed tmux name rows affected: %w", err)
+	}
+	return rowsAffected == 1, nil
 }
 
 // DeleteSession deletes a session from the database
@@ -356,7 +983,7 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 	if err := a.ApplyMigrations(); err != nil {
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
-	query := `SELECT name FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
+	query := `SELECT name, status FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
 	rows, err := a.conn.QueryContext(ctx, query, a.workspace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active sessions: %w", err)
@@ -365,9 +992,12 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 
 	var names []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, status string
+		if err := rows.Scan(&name, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan session name: %w", err)
+		}
+		if _, err := lifecycleFromStorageStatus(status); err != nil {
+			return nil, fmt.Errorf("validate listed session lifecycle: %w", err)
 		}
 		names = append(names, name)
 	}
@@ -429,7 +1059,7 @@ func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, err
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -441,7 +1071,11 @@ func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, err
 	args := []any{a.workspace}
 
 	query, args = applyListSessionsFilter(query, args, filter)
-	query += " ORDER BY updated_at DESC"
+	if filter != nil && filter.StableOrder {
+		query += " ORDER BY created_at ASC, id ASC"
+	} else {
+		query += " ORDER BY updated_at DESC, id ASC"
+	}
 	query, args = applyListSessionsLimit(query, args, filter)
 
 	rows, err := a.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
@@ -483,7 +1117,7 @@ func (a *Adapter) ResolveIdentifier(identifier string) (*manifest.Manifest, erro
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -531,7 +1165,7 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 	query := fmt.Sprintf(`
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -540,10 +1174,11 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 		WHERE claude_uuid = ?
 		   OR `+jsonValue+` = ?
 		   OR `+jsonValue+` = ?
+		   OR `+jsonValue+` = ?
 		LIMIT 1
-	`, "codex_session_id", "agy_conversation_id")
+	`, "codex_session_id", "agy_conversation_id", "pi_session_id")
 
-	row := a.conn.QueryRow(query, conversationUUID, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
+	row := a.conn.QueryRow(query, conversationUUID, conversationUUID, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
@@ -569,7 +1204,7 @@ func (a *Adapter) GetSessionByName(name string) (*manifest.Manifest, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -611,6 +1246,7 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	var ctxUsedTokens sql.NullInt64
 	var ctxPercentageUsed sql.NullFloat64
 	var monitorsJSON sql.NullString
+	var tmuxSessionRevision sql.NullString
 
 	err := row.Scan(
 		&session.SessionID,
@@ -627,6 +1263,7 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		&session.Context.Notes,
 		&session.Claude.UUID,
 		&session.Tmux.SessionName,
+		&tmuxSessionRevision,
 		&metadataJSON,
 		&permissionMode,
 		&permissionModeUpdatedAt,
@@ -645,16 +1282,21 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}
 
-	// Set lifecycle from status
-	if status == "archived" {
-		session.Lifecycle = manifest.LifecycleArchived
-	} else {
-		session.Lifecycle = "" // Active or stopped
+	// Runtime active/stopped state remains outside the durable lifecycle field.
+	// Decode every stored status through the closed manifest vocabulary so an
+	// unknown nonempty durable value cannot masquerade as an active session.
+	lifecycle, err := lifecycleFromStorageStatus(status)
+	if err != nil {
+		return nil, err
 	}
+	session.Lifecycle = lifecycle
 
 	// Set workspace and model
 	session.Workspace = workspace
 	session.Model = model
+	if tmuxSessionRevision.Valid {
+		session.Tmux.SessionRevision = tmuxSessionRevision.String
+	}
 
 	// Set schema version
 	session.SchemaVersion = "2.0"
@@ -669,10 +1311,82 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	if err := unmarshalMonitors(&session, monitorsJSON); err != nil {
 		return nil, err
 	}
-	if err := unmarshalEngramMetadata(&session, metadataJSON); err != nil {
+	if err := unmarshalSessionMetadata(&session, metadataJSON); err != nil {
 		return nil, err
 	}
 	return &session, nil
+}
+
+func validateSessionLifecycleAndOutcome(session *manifest.Manifest) error {
+	if _, err := manifest.ParseSessionLifecycle(session.Lifecycle); err != nil {
+		return fmt.Errorf("validate persisted lifecycle: %w", err)
+	}
+	if _, err := manifest.ParseSessionOutcome(string(session.Outcome)); err != nil {
+		return fmt.Errorf("validate persisted outcome: %w", err)
+	}
+	return nil
+}
+
+// validateStoredSessionLifecycleAndOutcome prevents a valid caller snapshot
+// from overwriting an invalid durable value that has not been decoded first.
+func (a *Adapter) validateStoredSessionLifecycleAndOutcome(sessionID string) error {
+	var status string
+	var metadataJSON []byte
+	err := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT status, metadata FROM agm_sessions WHERE id = ? AND workspace = ?`,
+		sessionID,
+		a.workspace,
+	).Scan(&status, &metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect stored lifecycle and outcome before update: %w", err)
+	}
+	if _, err := lifecycleFromStorageStatus(status); err != nil {
+		return fmt.Errorf("validate stored lifecycle before update: %w", err)
+	}
+	if len(metadataJSON) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return fmt.Errorf("inspect stored metadata before update: %w", err)
+	}
+	if _, _, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return fmt.Errorf("validate stored metadata outcome before update: %w", err)
+	}
+	return nil
+}
+
+// lifecycleStorageStatus converts the manifest's legacy empty lifecycle into
+// the established Dolt "active" spelling. All nonempty values must be part of
+// the closed manifest vocabulary.
+func lifecycleStorageStatus(lifecycle string) (string, error) {
+	parsed, err := manifest.ParseSessionLifecycle(lifecycle)
+	if err != nil {
+		return "", err
+	}
+	switch parsed {
+	case manifest.LifecycleReaping, manifest.LifecycleArchived:
+		return string(parsed), nil
+	default:
+		return "active", nil
+	}
+}
+
+// lifecycleFromStorageStatus preserves both legacy storage spellings for the
+// empty manifest lifecycle and rejects any unknown nonempty stored status.
+func lifecycleFromStorageStatus(status string) (string, error) {
+	switch status {
+	case "", "active":
+		return "", nil
+	}
+	parsed, err := manifest.ParseSessionLifecycle(status)
+	if err != nil {
+		return "", fmt.Errorf("invalid stored lifecycle status %q: %w", status, err)
+	}
+	return string(parsed), nil
 }
 
 // applyNullableScanFields copies the nullable sql.Null* values from a Scan call
@@ -724,7 +1438,7 @@ func unmarshalMonitors(session *manifest.Manifest, monitorsJSON sql.NullString) 
 	return nil
 }
 
-func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) error {
+func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) error {
 	if len(metadataJSON) == 0 {
 		return nil
 	}
@@ -734,20 +1448,80 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 	}
 	// Outcome lives alongside engram fields but is independent of them — read it
 	// before the engram early-return so it round-trips even when engram is off.
-	if outcome, ok := metadata["outcome"].(string); ok {
-		session.Outcome = manifest.SessionOutcome(outcome)
+	if outcome, present, err := parseSessionMetadataOutcome(metadata); err != nil {
+		return err
+	} else if present {
+		session.Outcome = outcome
 	}
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory
 	}
-	codexSessionID, _ := metadata["codex_session_id"].(string)
-	codexTranscriptPath, _ := metadata["codex_transcript_path"].(string)
-	if codexSessionID != "" || codexTranscriptPath != "" {
-		session.Codex = &manifest.Codex{
-			SessionID:      codexSessionID,
-			TranscriptPath: codexTranscriptPath,
+	applyStateMetadata(session, metadata)
+	if finalOutput, ok := metadata["final_output"].(string); ok {
+		session.FinalOutput = finalOutput
+		if raw, ok := metadata["final_output_at"].(string); ok {
+			if at, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				session.FinalOutputAt = at
+			}
 		}
 	}
+	if err := unmarshalSandboxMetadata(session, metadata); err != nil {
+		return err
+	}
+	applyCodexMetadata(session, metadata)
+	if err := unmarshalOpenAISessionMetadata(session, metadata); err != nil {
+		return err
+	}
+	applyAgyMetadata(session, metadata)
+	applyPiMetadata(session, metadata)
+	applyEngramMetadata(session, metadata)
+	return nil
+}
+
+func applyStateMetadata(session *manifest.Manifest, metadata map[string]any) {
+	state, _ := metadata["state"].(string)
+	if state == "" {
+		return
+	}
+	session.State = state
+	if raw, ok := metadata["state_updated_at"].(string); ok {
+		if at, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			session.StateUpdatedAt = at
+		}
+	}
+	if source, ok := metadata["state_source"].(string); ok {
+		session.StateSource = source
+	}
+}
+
+func parseSessionMetadataOutcome(metadata map[string]any) (manifest.SessionOutcome, bool, error) {
+	rawOutcome, present := metadata["outcome"]
+	if !present {
+		return manifest.OutcomeUnknown, false, nil
+	}
+	outcome, ok := rawOutcome.(string)
+	if !ok {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome type %T", rawOutcome)
+	}
+	parsed, err := manifest.ParseSessionOutcome(outcome)
+	if err != nil {
+		return manifest.OutcomeUnknown, true, fmt.Errorf("invalid metadata outcome: %w", err)
+	}
+	return parsed, true, nil
+}
+
+func applyCodexMetadata(session *manifest.Manifest, metadata map[string]any) {
+	sessionID, _ := metadata["codex_session_id"].(string)
+	transcriptPath, _ := metadata["codex_transcript_path"].(string)
+	if sessionID != "" || transcriptPath != "" {
+		session.Codex = &manifest.Codex{
+			SessionID:      sessionID,
+			TranscriptPath: transcriptPath,
+		}
+	}
+}
+
+func applyAgyMetadata(session *manifest.Manifest, metadata map[string]any) {
 	agyConversationID, _ := metadata["agy_conversation_id"].(string)
 	agyWorkspacePath, _ := metadata["agy_workspace_path"].(string)
 	agyConversationDBPath, _ := metadata["agy_conversation_db_path"].(string)
@@ -760,9 +1534,29 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			TranscriptPath: agyTranscriptPath,
 		}
 	}
+}
+
+func applyPiMetadata(session *manifest.Manifest, metadata map[string]any) {
+	piSessionID, _ := metadata["pi_session_id"].(string)
+	piSessionDir, _ := metadata["pi_session_dir"].(string)
+	piTranscriptPath, _ := metadata["pi_transcript_path"].(string)
+	piCodingAgentDir, _ := metadata["pi_coding_agent_dir"].(string)
+	piCodingAgentDirSet, _ := metadata["pi_coding_agent_dir_set"].(bool)
+	if piSessionID != "" || piSessionDir != "" || piTranscriptPath != "" || piCodingAgentDir != "" || piCodingAgentDirSet {
+		session.Pi = &manifest.Pi{
+			SessionID:         piSessionID,
+			SessionDir:        piSessionDir,
+			TranscriptPath:    piTranscriptPath,
+			CodingAgentDir:    piCodingAgentDir,
+			CodingAgentDirSet: piCodingAgentDirSet,
+		}
+	}
+}
+
+func applyEngramMetadata(session *manifest.Manifest, metadata map[string]any) {
 	enabled, ok := metadata["engram_enabled"].(bool)
 	if !ok || !enabled {
-		return nil
+		return
 	}
 	session.EngramMetadata = &manifest.EngramMetadata{Enabled: enabled}
 	if query, ok := metadata["engram_query"].(string); ok {
@@ -784,6 +1578,45 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			session.EngramMetadata.LoadedAt = loadedAt
 		}
 	}
+}
+
+func unmarshalSandboxMetadata(session *manifest.Manifest, metadata map[string]any) error {
+	sandboxRaw, ok := metadata["sandbox"]
+	if !ok {
+		return nil
+	}
+	sandboxJSON, err := json.Marshal(sandboxRaw)
+	if err != nil {
+		return fmt.Errorf("failed to marshal sandbox metadata: %w", err)
+	}
+	var sandbox manifest.SandboxConfig
+	if err := json.Unmarshal(sandboxJSON, &sandbox); err != nil {
+		return fmt.Errorf("failed to unmarshal sandbox metadata: %w", err)
+	}
+	if manifest.ValidateSandboxOwnership(session.SessionID, &sandbox) != nil {
+		// Partial, legacy, manually repaired, or corrupt metadata is not proof
+		// of ownership. Ignore it so archive can proceed without authorizing
+		// any inferred sandbox cleanup.
+		return nil //nolint:nilerr // invalid ownership is deliberately ignored so cleanup fails closed
+	}
+	session.Sandbox = &sandbox
+	return nil
+}
+
+func unmarshalOpenAISessionMetadata(session *manifest.Manifest, metadata map[string]any) error {
+	openAIRaw, ok := metadata["openai"]
+	if !ok {
+		return nil
+	}
+	openAIJSON, err := json.Marshal(openAIRaw)
+	if err != nil {
+		return fmt.Errorf("failed to marshal OpenAI session metadata: %w", err)
+	}
+	var openAI manifest.OpenAI
+	if err := json.Unmarshal(openAIJSON, &openAI); err != nil {
+		return fmt.Errorf("failed to unmarshal OpenAI session metadata: %w", err)
+	}
+	session.OpenAI = &openAI
 	return nil
 }
 

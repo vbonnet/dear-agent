@@ -3,8 +3,8 @@ package agent
 import "slices"
 
 // activeHarnesses is the canonical parity set. Claude Code is the reference
-// implementation; Codex, AGY, and OpenCode must match its core outcomes.
-var activeHarnesses = []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
+// implementation; Codex, AGY, OpenCode, and Pi must match its core outcomes.
+var activeHarnesses = []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}
 
 // deprecatedHarnesses remain accepted for backward compatibility but are not
 // part of active parity promises or new user-facing defaults.

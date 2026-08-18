@@ -135,7 +135,7 @@ func TestTmuxCommandSequence(t *testing.T) {
 	t.Log("  tmux -S /tmp/csm.sock send-keys -t {name} 'set -s set-clipboard on' C-m")
 	t.Log("")
 	t.Log("Start Claude:")
-	t.Log("  tmux -S /tmp/csm.sock send-keys -t {name} -l \"claude --add-dir '{workdir}'\"")
+	t.Log("  tmux -S /tmp/csm.sock send-keys -t {name} -l \"/absolute/path/to/agm __exec-claude --handoff /absolute/private-launch/launch-id.json --session '{name}' --add-dir '{workdir}'\"")
 	t.Log("  tmux -S /tmp/csm.sock send-keys -t {name} C-m")
 	t.Log("")
 	t.Log("Automation Commands:")

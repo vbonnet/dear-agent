@@ -4,8 +4,9 @@
 # on the repo's DEFAULT branch:
 #
 #   Stage 1 — rebuild affected Go binaries (this repo only).
-#     After a PR lands on main, the `agm` / `vroom-dispatch` binaries in
-#     ~/go/bin are stale until someone remembers to `go install`. This stage
+#     After a PR lands on main, the `agm` / `agm-reaper` / `vroom-dispatch` /
+#     `wayfinder` binaries in ~/go/bin are stale until someone remembers to
+#     `go install`. This stage
 #     closes that gap: it inspects what changed in the merge and reinstalls
 #     ONLY the binaries whose source actually changed. Docs/tests/config-only
 #     merges rebuild nothing (near-instant no-op). Crucially, it ALWAYS builds
@@ -52,7 +53,10 @@
 # else. Sharing the default-branch gate keeps that contract in one place.
 #
 # Scope: this hook is GLOBAL (installed via core.hooksPath / chezmoi), so it
-# runs after every merge in every repo. Each stage therefore self-scopes:
+# runs after every merge in every repo — including throwaway repositories a
+# test suite creates. It therefore refuses outright in any repository outside
+# the managed roots (see the managed-repository gate below), and each stage
+# additionally self-scopes:
 #   • Stage 1 acts only in a repo that actually contains the target binary
 #     packages (today, that is dear-agent). Every other repo is a silent no-op.
 #   • Stage 1.6 acts only in a repo that carries deploy/manifest.yaml (dear-agent).
@@ -78,6 +82,11 @@
 #   AGM_POST_MERGE_SWEEP=0                    skip Stage 2 (worktree sweep)
 #   DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0   skip Stage 3 (bead transition)
 #
+# Scope control:
+#   DEAR_AGENT_MANAGED_REPO_ROOTS   colon-separated roots this hook may act in
+#                                   (default: ~/src:~/worktrees). A repository
+#                                   outside every root is a complete no-op.
+#
 # Test seams: AGM_POST_MERGE_SWEEP_SYNC=1 runs the sweep in the foreground
 # (deterministic for tests; also handy if you want `git pull` to wait).
 # DEAR_AGENT_BEADS_DB overrides the Beads DB path Stage 3 transitions against.
@@ -86,6 +95,85 @@
 # clobbers a chezmoi-managed hooks dir — see cmd/install-post-merge-hook).
 
 set -u
+
+# ── Managed-repository gate ────────────────────────────────────────────────
+#
+# This hook is installed globally (core.hooksPath), so it fires after a merge
+# in EVERY repository on this host — including throwaway repositories created
+# by test suites. On 2026-07-10 that is exactly what happened: two temporary
+# repositories created by a plain `go test ./...` merged a branch, ran this
+# hook, and launched two `agm worktree sweep --execute` processes that deleted
+# two live worktrees (audit finding F-01, bead ce-3knl.1).
+#
+# The default-branch gate below does not catch that case: a temporary repo
+# initialized with `-b main` is sitting on its default branch. Nor do the
+# per-stage self-scoping checks — Stage 2 asks only whether `agm` is on PATH,
+# and a repository-wide sweep does not care which repo triggered it.
+#
+# So every host-mutating stage runs only in a repository this host explicitly
+# manages: a checkout under ~/src or ~/worktrees, or under a root named in
+# DEAR_AGENT_MANAGED_REPO_ROOTS (colon-separated; it REPLACES the defaults
+# rather than extending them, so a test can scope the hook to its own sandbox).
+# Every other repository is a silent, complete no-op.
+#
+# This is opt-in by construction. An opt-out variable would not have prevented
+# the incident: the temp repos did not know to set one.
+
+# path_within <path> <root>: true when <path> is <root> or lies beneath it.
+# Compares whole path components, so ~/src does not match ~/src-scratch.
+path_within() {
+  case "$1" in
+    "$2") return 0 ;;
+    "$2"/*) return 0 ;;
+  esac
+  [ "$2" = / ] && case "$1" in /*) return 0 ;; esac
+  return 1
+}
+
+# real_path <path>: <path> with symlinks resolved, empty when unresolvable.
+# macOS reports $TMPDIR as /var/folders/... while the real path is
+# /private/var/folders/..., so an unresolved prefix comparison would let a
+# temp repo pass a check against a resolved root (or fail one against an
+# unresolved root).
+real_path() {
+  ( cd "$1" 2>/dev/null && pwd -P ) 2>/dev/null || true
+}
+
+is_managed_repo() {
+  _top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "${_top}" ] || return 1
+	_top="$(real_path "${_top}")"
+	[ -n "${_top}" ] || return 1
+	# Every enabled stage below expands HOME. A caller-supplied root scopes the
+	# repository set but cannot make a sanitized hook environment safe.
+	[ -n "${HOME:-}" ] || return 1
+
+	_roots="${DEAR_AGENT_MANAGED_REPO_ROOTS:-}"
+	if [ -z "${_roots}" ]; then
+		# A globally installed hook can run in a sanitized environment. Without
+		# HOME there is no safe default managed-root set, so leave the checkout
+		# alone rather than failing under set -u.
+		_roots="${HOME}/src:${HOME}/worktrees"
+	fi
+  _rest="${_roots}"
+  while [ -n "${_rest}" ]; do
+    case "${_rest}" in
+      *:*) _root="${_rest%%:*}"; _rest="${_rest#*:}" ;;
+      *)   _root="${_rest}";     _rest="" ;;
+    esac
+    [ -n "${_root}" ] || continue
+    _real_root="$(real_path "${_root}")"
+    [ -n "${_real_root}" ] || continue
+    if path_within "${_top}" "${_real_root}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! is_managed_repo; then
+  exit 0
+fi
 
 # ── Resolve the repo's default branch (origin/HEAD, else local main/master) ─
 default_branch=""
@@ -117,8 +205,9 @@ fi
 # only when inputs changed — but we additionally gate on the diff so we don't
 # even invoke `go` on a docs/tests/config-only merge.
 #
-#   agm             ./agm/cmd/agm       ← agm/ pkg/ internal/ go.mod go.sum
+#   agm + reaper    ./agm/cmd/{agm,agm-reaper} ← agm/ pkg/ internal/ go.mod go.sum
 #   vroom-dispatch  ./cmd/vroom-dispatch ← cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+#   wayfinder       ./wayfinder/cmd/wayfinder ← wayfinder/ pkg/ internal/ go.mod go.sum
 
 # is_build_relevant: a changed file that cannot affect a compiled binary
 # (markdown, test files) is ignored even when it sits under a source prefix.
@@ -146,6 +235,27 @@ under_prefix() {
   return 1
 }
 
+# resolve_build_trigger <prefix...>: set _affected/_trigger for the current
+# changed-file set. Keeping this decision in one helper ensures serialized and
+# ordinary rebuild paths classify the same source boundary.
+resolve_build_trigger() {
+  _affected=0
+  _trigger=""
+  if [ "${indeterminate}" = "1" ]; then
+    _affected=1
+    _trigger="could not determine diff — rebuilding to be safe"
+    return 0
+  fi
+  while IFS= read -r _f; do
+    [ -n "${_f}" ] || continue
+    is_build_relevant "${_f}" || continue
+    if under_prefix "${_f}" "$@"; then
+      _affected=1
+      [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
+    fi
+  done < <(printf '%s\n' "${changed}")
+}
+
 # maybe_rebuild <pkg-path> <prefix...>: reinstall the binary built from
 # <pkg-path> iff a build-relevant changed file falls under one of its prefixes
 # (or the diff could not be determined — then rebuild to be safe). Sets
@@ -158,24 +268,7 @@ maybe_rebuild() {
   # Self-scope: only a repo that actually contains this package gets touched.
   [ -d "${repo_root}/${_pkg}" ] || return 0
 
-  _affected=0
-  _trigger=""
-  if [ "${indeterminate}" = "1" ]; then
-    _affected=1
-    _trigger="could not determine diff — rebuilding to be safe"
-  else
-    # Feed the file list via `printf` + process substitution rather than an
-    # unquoted here-doc: the variable is quoted (no expansion of its contents)
-    # and the loop runs in the current shell so _affected/_trigger persist.
-    while IFS= read -r _f; do
-      [ -n "${_f}" ] || continue
-      is_build_relevant "${_f}" || continue
-      if under_prefix "${_f}" "$@"; then
-        _affected=1
-        [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
-      fi
-    done < <(printf '%s\n' "${changed}")
-  fi
+  resolve_build_trigger "$@"
 
   [ "${_affected}" = "1" ] || return 0
 
@@ -217,6 +310,227 @@ maybe_rebuild() {
   fi
 }
 
+# run_install_lock <path> <timeout-seconds> <label> <internal-mode>: run a
+# narrow rebuild subprocess under a shared kernel-released lock. GNU/BSD flock
+# and macOS lockf have different CLIs, so both use their portable
+# file-and-command form rather than pretending macOS lockf accepts an open fd.
+run_install_lock() {
+  _install_lock_path="$1"
+  _install_lock_timeout="$2"
+  _install_lock_label="$3"
+  _install_lock_mode="$4"
+  case "${_install_lock_timeout}" in ''|*[!0-9]*) _install_lock_timeout=300 ;; esac
+  _install_lock_tool="${DEAR_AGENT_INSTALL_LOCK_TOOL:-auto}"
+  _install_command=(env "DEAR_AGENT_POST_MERGE_INTERNAL_MODE=${_install_lock_mode}" DEAR_AGENT_POST_MERGE_REBUILD=1 bash "$0")
+
+  if { [ "${_install_lock_tool}" = "auto" ] || [ "${_install_lock_tool}" = "flock" ]; } && command -v flock >/dev/null 2>&1; then
+    flock -w "${_install_lock_timeout}" "${_install_lock_path}" "${_install_command[@]}"
+    return $?
+  fi
+  if { [ "${_install_lock_tool}" = "auto" ] || [ "${_install_lock_tool}" = "lockf" ]; } && command -v lockf >/dev/null 2>&1; then
+    lockf -t "${_install_lock_timeout}" "${_install_lock_path}" "${_install_command[@]}"
+    return $?
+  fi
+  echo "[post-merge:rebuild] neither compatible flock nor lockf is available for ${_install_lock_label} deployment." >&2
+  return 1
+}
+
+# prepare_agm_pair_lock migrates directories left by the retired PID-directory
+# protocol before the advisory lock opens the same path as a regular file.
+prepare_agm_pair_lock() {
+  _pair_lock_timeout="${AGM_PAIR_LOCK_TIMEOUT_SECONDS:-300}"
+  case "${_pair_lock_timeout}" in ''|*[!0-9]*) _pair_lock_timeout=300 ;; esac
+
+  # Migrate a lock directory left by the previous PID-directory protocol. An
+  # ownerless/malformed directory is safe to remove with rmdir (which fails if
+  # any unexpected entry appears); a live legacy owner gets the same bounded
+  # wait as the advisory lock below. If we remove the directory during the old
+  # mkdir/write gap, that owner fails its PID write and leaves the pair intact.
+  _pair_legacy_wait=0
+  while [ -d "${_pair_lock}" ]; do
+    _pair_legacy_owner="$(cat "${_pair_lock}/pid" 2>/dev/null || true)"
+    case "${_pair_legacy_owner}" in ''|*[!0-9]*) _pair_legacy_owner="" ;; esac
+    if [ -z "${_pair_legacy_owner}" ] || ! kill -0 "${_pair_legacy_owner}" 2>/dev/null; then
+      rm -f "${_pair_lock}/pid" 2>/dev/null || true
+      rmdir "${_pair_lock}" 2>/dev/null || return 1
+      break
+    fi
+    [ "${_pair_legacy_wait}" -lt "${_pair_lock_timeout}" ] || return 1
+    sleep 1
+    _pair_legacy_wait=$((_pair_legacy_wait + 1))
+  done
+
+  return 0
+}
+
+# maybe_rebuild_agm_pair serializes pair deployment across every checkout that
+# shares GOBIN. Every affected contender waits, reacquires, refreshes canonical
+# trunk, and installs that latest revision rather than deferring a newer merge.
+maybe_rebuild_agm_pair() {
+  agm_pair_handled=0
+  [ -d "${repo_root}/agm/cmd/agm" ] || return 0
+  [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
+  resolve_build_trigger agm/ pkg/ internal/ go.mod go.sum
+  [ "${_affected}" = "1" ] || return 0
+  agm_pair_handled=1
+
+  _pair_gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_pair_gobin}" 2>/dev/null || true
+  _pair_lock="${_pair_gobin}/.agm-pair-install.lock"
+  if prepare_agm_pair_lock && run_install_lock "${_pair_lock}" "${_pair_lock_timeout}" "AGM pair" "agm-pair"; then
+    rebuilt_any=1
+  else
+    echo "[post-merge:rebuild] AGM pair locked deployment failed — installed pair unchanged." >&2
+  fi
+
+  # A contender may have waited while trunk advanced. Refresh the parent hook's
+  # build context before it considers the remaining managed binaries.
+  cleanup_build_dir
+  build_dir=""
+  build_worktree=""
+  fetch_trunk_commit
+  return 0
+}
+
+# resolve_agm_pair_provenance derives one complete development profile from the
+# pinned source. It publishes no partial profile when either source fact is
+# unavailable.
+resolve_agm_pair_provenance() {
+  local _resolved_revision _resolved_build_date
+
+  _resolved_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
+  # Git lengthens --short=12 when twelve characters are not unique. Preserve
+  # that signal by rejecting the governed 12-character profile rather than
+  # truncating a unique abbreviation back into ambiguity.
+  [ "${#_resolved_revision}" -eq 12 ] || return 1
+  case "${_resolved_revision}" in *[!0-9a-f]*) return 1 ;; esac
+
+  _resolved_build_date="$(
+    TZ=UTC git -C "${build_dir}" show -s --format=%cd \
+      --date=format-local:%Y-%m-%dT%H:%M:%SZ HEAD 2>/dev/null || true
+  )"
+  [ -n "${_resolved_build_date}" ] || return 1
+
+  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.Version=dev-${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_resolved_revision} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${_resolved_build_date} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=post-merge-hook"
+}
+
+# maybe_rebuild_agm_pair_locked stages the CLI and detached archive companion
+# while the shared install lock is held. Neither installed binary is touched
+# unless both builds succeed.
+maybe_rebuild_agm_pair_locked() {
+  agm_pair_handled=0
+  [ -d "${repo_root}/agm/cmd/agm" ] || return 0
+  [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
+
+  resolve_build_trigger agm/ pkg/ internal/ go.mod go.sum
+
+  [ "${_affected}" = "1" ] || return 0
+  agm_pair_handled=1
+
+  # The hook may have waited behind an older merge. Refresh origin/main only
+  # after acquiring the lock so the last contender cannot reinstall an older
+  # ancestor over a newer coherent pair.
+  fetch_trunk_commit
+  if ! ensure_agm_pair_build_dir; then
+    echo "[post-merge:rebuild] ✗ cannot create an immutable detached AGM pair source — check source HEAD and git worktree availability; installed pair unchanged." >&2
+    return 0
+  fi
+
+  if ! resolve_agm_pair_provenance; then
+    echo "[post-merge:rebuild] ✗ cannot resolve complete AGM pair provenance from pinned source — check its revision and commit timestamp; installed pair unchanged." >&2
+    return 0
+  fi
+
+  _gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_gobin}" 2>/dev/null || true
+  _agm_tmp="${_gobin}/.agm.install.$$.pair"
+  _reaper_tmp="${_gobin}/.agm-reaper.install.$$.pair"
+  _agm_target="${_gobin}/agm"
+  _reaper_target="${_gobin}/agm-reaper"
+  _agm_backup="${_gobin}/.agm.rollback.$$.pair"
+  _reaper_backup="${_gobin}/.agm-reaper.rollback.$$.pair"
+  _had_agm=0
+  _had_reaper=0
+
+  echo "[post-merge:rebuild] Staging agm + agm-reaper (source changed in ${_trigger})..." >&2
+  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_agm_tmp}" ./agm/cmd/agm ); then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm pair staging FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_reaper_tmp}" ./agm/cmd/agm-reaper ); then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm-reaper pair staging FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+
+  if [ -e "${_agm_target}" ]; then
+    _had_agm=1
+    ln "${_agm_target}" "${_agm_backup}" 2>/dev/null || cp -p "${_agm_target}" "${_agm_backup}" 2>/dev/null || {
+      rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ could not stage agm rollback — installed pair unchanged." >&2
+      return 0
+    }
+  fi
+  if [ -e "${_reaper_target}" ]; then
+    _had_reaper=1
+    ln "${_reaper_target}" "${_reaper_backup}" 2>/dev/null || cp -p "${_reaper_target}" "${_reaper_backup}" 2>/dev/null || {
+      rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ could not stage agm-reaper rollback — installed pair unchanged." >&2
+      return 0
+    }
+  fi
+
+  if ! mv -f "${_agm_tmp}" "${_agm_target}"; then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm pair activation FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+  if ! mv -f "${_reaper_tmp}" "${_reaper_target}"; then
+    if [ "${_had_agm}" = "1" ]; then
+      mv -f "${_agm_backup}" "${_agm_target}" 2>/dev/null || true
+    else
+      rm -f "${_agm_target}" 2>/dev/null || true
+    fi
+    if [ "${_had_reaper}" = "1" ]; then
+      mv -f "${_reaper_backup}" "${_reaper_target}" 2>/dev/null || true
+    fi
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm-reaper pair activation FAILED — prior pair restored." >&2
+    return 0
+  fi
+
+  rm -f "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+  rebuilt_any=1
+  echo "[post-merge:rebuild] ✓ installed agm + agm-reaper as one revision-coherent pair (atomic files)" >&2
+}
+
+# maybe_rebuild_wayfinder serializes Wayfinder activation across checkouts that
+# share GOBIN. A contender refreshes canonical trunk only after acquiring the
+# lock, preventing an older, slower build from replacing a newer installation.
+maybe_rebuild_wayfinder() {
+  [ -d "${repo_root}/wayfinder/cmd/wayfinder" ] || return 0
+  resolve_build_trigger wayfinder/ pkg/ internal/ go.mod go.sum
+  [ "${_affected}" = "1" ] || return 0
+
+  _wayfinder_gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_wayfinder_gobin}" 2>/dev/null || true
+  _wayfinder_lock="${_wayfinder_gobin}/.wayfinder-install.lock"
+  _wayfinder_lock_timeout="${WAYFINDER_LOCK_TIMEOUT_SECONDS:-300}"
+  if run_install_lock "${_wayfinder_lock}" "${_wayfinder_lock_timeout}" "Wayfinder" "wayfinder"; then
+    rebuilt_any=1
+  else
+    echo "[post-merge:rebuild] Wayfinder locked deployment failed — installed binary unchanged." >&2
+  fi
+
+  # Keep later targets on a trunk revision no older than the locked install.
+  cleanup_build_dir
+  build_dir=""
+  build_worktree=""
+  fetch_trunk_commit
+  return 0
+}
+
 # _pick_timeout: echo the first available timeout wrapper (gtimeout on macOS
 # coreutils, then GNU timeout), or nothing if neither exists. Used to cap the
 # trunk fetch so a hung network probe can never wedge the merge.
@@ -230,11 +544,11 @@ _pick_timeout() {
 }
 
 # fetch_trunk_commit: best-effort fetch of origin/<default_branch> and resolve
-# its commit into build_commit. The freshly-fetched trunk HEAD is the ONLY
-# legitimate source for the binary that gets run — see the Jun-18 incident
-# (ce-11u3 / retro B2). Never fatal: no origin remote (local-only repos and
-# this hook's tests) or an offline fetch simply leaves build_commit empty, and
-# the build falls back to the working tree in place.
+# its commit into build_commit. Freshly resolved trunk is preferred for every
+# build — see the Jun-18 incident (ce-11u3 / retro B2). Never fatal: no origin
+# remote or unresolved remote ref leaves build_commit empty. Generic targets
+# may then use their historical in-place fallback; the AGM pair separately
+# pins local HEAD into an immutable detached checkout.
 fetch_trunk_commit() {
   build_commit=""
   git -C "${repo_root}" remote get-url origin >/dev/null 2>&1 || return 0
@@ -249,31 +563,58 @@ fetch_trunk_commit() {
   build_commit="$(git -C "${repo_root}" rev-parse --verify --quiet "origin/${default_branch}^{commit}" 2>/dev/null || true)"
 }
 
-# ensure_build_dir: lazily resolve build_dir — the directory `go install` runs
-# in. Preference: a throwaway detached worktree checked out at build_commit
-# (origin/<default_branch>), so the binary's vcs.revision is provably trunk
-# regardless of this checkout's ref. Falls back to the in-place working tree
-# when build_commit is empty or the worktree cannot be created. Idempotent:
-# resolves once, the worktree (if any) is reaped by cleanup_build_dir.
+# create_detached_build_dir checks out build_commit into a disposable worktree.
+# Callers choose whether failure may fall back to mutable source.
+create_detached_build_dir() {
+  local _source_label="$1" _tmp_parent _wt
+
+  [ -n "${build_commit}" ] || return 1
+  _tmp_parent="$(mktemp -d 2>/dev/null || true)"
+  [ -n "${_tmp_parent}" ] || return 1
+  _wt="${_tmp_parent}/build"
+  if ! git -C "${repo_root}" worktree add --quiet --detach "${_wt}" "${build_commit}" 2>/dev/null; then
+    rm -rf "${_tmp_parent}" 2>/dev/null || true
+    return 1
+  fi
+
+  build_dir="${_wt}"
+  build_worktree="${_wt}"
+  echo "[post-merge:rebuild] Building from ${_source_label} @ $(git -C "${repo_root}" rev-parse --short "${build_commit}" 2>/dev/null)" >&2 || true
+  return 0
+}
+
+# ensure_build_dir lazily resolves the directory a generic build runs in.
+# Generic targets retain the historical in-place fallback when canonical trunk
+# is unavailable or a disposable worktree cannot be created.
 ensure_build_dir() {
   [ -n "${build_dir}" ] && return 0
 
   if [ -n "${build_commit}" ]; then
-    _tmp_parent="$(mktemp -d 2>/dev/null || true)"
-    if [ -n "${_tmp_parent}" ]; then
-      _wt="${_tmp_parent}/build"
-      if git -C "${repo_root}" worktree add --quiet --detach "${_wt}" "${build_commit}" 2>/dev/null; then
-        build_dir="${_wt}"
-        build_worktree="${_wt}"
-        echo "[post-merge:rebuild] Building from origin/${default_branch} @ $(git -C "${repo_root}" rev-parse --short "${build_commit}" 2>/dev/null)" >&2
-        return 0
-      fi
-      rm -rf "${_tmp_parent}" 2>/dev/null || true
+    if create_detached_build_dir "origin/${default_branch}"; then
+      return 0
     fi
     echo "[post-merge:rebuild] could not check out origin/${default_branch}; building working tree in place" >&2
   fi
 
   build_dir="${repo_root}"
+}
+
+# ensure_agm_pair_build_dir makes immutability an admission requirement for
+# the coherent pair. Without origin trunk it pins local HEAD once, but it never
+# builds either artifact from the mutable in-place checkout.
+ensure_agm_pair_build_dir() {
+  local _pair_source_label
+
+  [ -n "${build_dir}" ] && [ -n "${build_worktree}" ] && return 0
+  [ -z "${build_dir}" ] || return 1
+
+  _pair_source_label="origin/${default_branch}"
+  if [ -z "${build_commit}" ]; then
+    build_commit="$(git -C "${repo_root}" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null || true)"
+    [ -n "${build_commit}" ] || return 1
+    _pair_source_label="local HEAD"
+  fi
+  create_detached_build_dir "${_pair_source_label}"
 }
 
 # cleanup_build_dir: remove the throwaway build worktree (if one was created).
@@ -294,7 +635,7 @@ rebuild_changed_binaries() {
   # Scope the global hook: if neither binary package exists in this repo, this
   # is not dear-agent — stay completely silent.
   any_target=0
-  for _pkg in agm/cmd/agm cmd/vroom-dispatch; do
+  for _pkg in agm/cmd/agm agm/cmd/agm-reaper cmd/vroom-dispatch wayfinder/cmd/wayfinder; do
     [ -d "${repo_root}/${_pkg}" ] && any_target=1
   done
   [ "${any_target}" = "1" ] || return 0
@@ -331,6 +672,30 @@ rebuild_changed_binaries() {
     indeterminate=1
   fi
 
+  # Lock tools execute a narrow child copy of this hook using their native
+  # file-and-command form. The child recomputes the merge diff, refreshes trunk
+  # while the lock is held, installs exactly one target, and exits before any
+  # deploy, Beads, or sweep side effects.
+  if [ "${DEAR_AGENT_POST_MERGE_INTERNAL_MODE:-}" = "agm-pair" ]; then
+    build_dir=""
+    build_worktree=""
+    rebuilt_any=0
+    maybe_rebuild_agm_pair_locked
+    cleanup_build_dir
+    [ "${rebuilt_any}" = "1" ]
+    return $?
+  fi
+  if [ "${DEAR_AGENT_POST_MERGE_INTERNAL_MODE:-}" = "wayfinder" ]; then
+    build_dir=""
+    build_worktree=""
+    rebuilt_any=0
+    fetch_trunk_commit
+    maybe_rebuild "wayfinder/cmd/wayfinder" wayfinder/ pkg/ internal/ go.mod go.sum
+    cleanup_build_dir
+    [ "${rebuilt_any}" = "1" ]
+    return $?
+  fi
+
   # Fetch the canonical trunk commit up front (once). build_dir/build_worktree
   # are resolved lazily by ensure_build_dir on the first actual rebuild, so a
   # docs/tests/config-only merge never pays the worktree-creation cost.
@@ -339,8 +704,13 @@ rebuild_changed_binaries() {
   fetch_trunk_commit
 
   rebuilt_any=0
-  maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild_agm_pair
+  if [ "${agm_pair_handled}" != "1" ]; then
+    maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+    maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
+  fi
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild_wayfinder
   # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
   # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does
   # not depend on this — it builds dear-deploy from the trunk worktree itself —
@@ -591,6 +961,11 @@ sweep_merged_worktrees() {
 # Order: rebuild the go-install binaries, then deploy the host artifacts (a plist
 # may point at a freshly-rebuilt binary, so binaries go first), then verify the
 # agm deploy, then sweep merged worktrees.
+if [ -n "${DEAR_AGENT_POST_MERGE_INTERNAL_MODE:-}" ]; then
+  rebuild_changed_binaries
+  exit $?
+fi
+
 rebuild_changed_binaries
 deploy_host_artifacts
 verify_deployment_after_rebuild

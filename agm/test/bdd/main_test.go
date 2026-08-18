@@ -16,15 +16,26 @@ import (
 func TestFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeScenario,
-		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    []string{"features"},
-			TestingT: t,
-		},
+		Options:             featureTestOptions(t),
 	}
 
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
+	}
+}
+
+func featureTestOptions(t *testing.T) *godog.Options {
+	return &godog.Options{
+		Format:   "pretty",
+		Paths:    []string{"features"},
+		Strict:   true,
+		TestingT: t,
+	}
+}
+
+func TestFeatureRunnerUsesStrictUndefinedStepPolicy(t *testing.T) {
+	if !featureTestOptions(t).Strict {
+		t.Fatal("BDD runner must fail pending, undefined, and ambiguous steps")
 	}
 }
 
@@ -33,12 +44,14 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	// state, so there is no shared environment to wire here.
 	steps.RegisterAGMControlSurfaceGuardrailSteps(ctx)
 	steps.RegisterAGMConversationDiscoveryGuardrailSteps(ctx)
+	steps.RegisterAGMCapacityPlatformSteps(ctx)
 	steps.RegisterAGMRuntimePackageGuardrailSteps(ctx)
 	steps.RegisterAgentSelectionGuardrailSteps(ctx)
 	steps.RegisterAgentUtilityParitySteps(ctx)
 	steps.RegisterAPIGatewayPackageGuardrailSteps(ctx)
 	steps.RegisterAuditPackageGuardrailSteps(ctx)
 	steps.RegisterCrossLanguageImplementationGuardrailSteps(ctx)
+	steps.RegisterDangerousOverrideGovernanceSteps(ctx)
 	steps.RegisterBDDRootPortabilitySteps(ctx)
 	steps.RegisterAGMDiagnosticsPackageGuardrailSteps(ctx)
 	steps.RegisterDBPersistenceGuardrailSteps(ctx)
@@ -60,14 +73,18 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterScanLoopSteps(ctx)
 	steps.RegisterStallDetectionSteps(ctx)
 	steps.RegisterTestSupportPackageGuardrailSteps(ctx)
+	steps.RegisterAgySavedSessionDiscoverySteps(ctx)
 	steps.RegisterHarnessParitySteps(ctx)
+	steps.RegisterHarnessSpecGuardrailSteps(ctx)
 	steps.RegisterHarnessConfigSurfaceGuardrailSteps(ctx)
 	steps.RegisterInstructionParitySteps(ctx)
 	steps.RegisterContextManagementParitySteps(ctx)
+	steps.RegisterPiCustomContextSteps(ctx)
 	steps.RegisterInternalFoundationGuardrailSteps(ctx)
 	steps.RegisterHookParitySteps(ctx)
 	steps.RegisterLLMRuntimeGuardrailSteps(ctx)
 	steps.RegisterLegacySpecStrictnessGuardrailSteps(ctx)
+	steps.RegisterMarkdownVisibilitySteps(ctx)
 	steps.RegisterLegacyNFREARSGuardrailSteps(ctx)
 	steps.RegisterLegacySpecBDDLinkageGuardrailSteps(ctx)
 	steps.RegisterLocalDevelopmentGuardrailSteps(ctx)
@@ -88,6 +105,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterSessionProtocolGuardrailSteps(ctx)
 	steps.RegisterAGMSupervisionRecoveryGuardrailSteps(ctx)
 	steps.RegisterSpecCoverageSteps(ctx)
+	steps.RegisterSpecGovernanceToolingSteps(ctx)
 	steps.RegisterSourceKnowledgePackageGuardrailSteps(ctx)
 	steps.RegisterWorkflowCommandGuardrailSteps(ctx)
 	steps.RegisterWorkflowPackageGuardrailSteps(ctx)

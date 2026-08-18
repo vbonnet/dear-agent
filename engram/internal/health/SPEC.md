@@ -299,8 +299,7 @@ Marketplace:
 
 ## References
 
-- ADR-001: Hook Extension Fix Strategy
-- ADR-002: Path Correction Mappings
-- ADR-003: Marketplace Source Format
+- Implementation: `checker.go`, `fix.go`, and `types.go`
+- Focused tests: `checker_test.go` and `fix_test.go`
 - `/docs/PRE-COMMIT-HOOKS.md`: Hook deployment guide
 - `/hooks/DEPLOYMENT-CHECKLIST.md`: Hook installation checklist

@@ -44,10 +44,10 @@ func NewListSessionsCmd(newOpCtx OpCtxFunc) *cobra.Command {
 			}
 			// Validate enum for harness
 			switch req.Harness {
-			case "claude-code", "codex-cli", "agy", "opencode-cli", "gemini-cli", "all":
+			case "claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli", "gemini-cli", "all":
 				// valid
 			default:
-				return fmt.Errorf("invalid value for --harness: %q (allowed: claude-code, codex-cli, agy, opencode-cli, all; deprecated: gemini-cli)", req.Harness)
+				return fmt.Errorf("invalid value for --harness: %q (allowed: claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli, all)", req.Harness)
 			}
 
 			result, opErr := ListSessions(opCtx, req)
@@ -62,7 +62,7 @@ func NewListSessionsCmd(newOpCtx OpCtxFunc) *cobra.Command {
 	}
 
 	cmd.Flags().StringP("status", "s", "active", "Filter by session status (allowed: active, archived, all)")
-	cmd.Flags().StringP("harness", "H", "", "Filter by harness (allowed: claude-code, codex-cli, agy, opencode-cli, all; deprecated: gemini-cli)")
+	cmd.Flags().StringP("harness", "H", "", "Filter by harness; gemini-cli is deprecated (allowed: claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli, all)")
 	cmd.Flags().IntP("limit", "n", 100, "Maximum sessions to return (1-1000)")
 	cmd.Flags().Int("offset", 0, "Pagination offset")
 
@@ -232,6 +232,8 @@ func NewKillSessionCmd(newOpCtx OpCtxFunc) *cobra.Command {
 			if len(args) > 0 {
 				req.Identifier = args[0]
 			}
+			req.Force, _ = cmd.Flags().GetBool("force")
+			req.ConfirmedStuck, _ = cmd.Flags().GetBool("confirmed-stuck")
 
 			result, opErr := KillSession(opCtx, req)
 			if opErr != nil {
@@ -243,6 +245,9 @@ func NewKillSessionCmd(newOpCtx OpCtxFunc) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().Bool("force", false, "Bypass the recent-activity safety check")
+	cmd.Flags().Bool("confirmed-stuck", false, "Confirm that a live harness is stuck and may be killed")
 
 	return cmd
 }

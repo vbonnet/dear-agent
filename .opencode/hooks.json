@@ -74,7 +74,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads opencode-hook PostCompact",
+            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on opencode-hook PostCompact",
             "statusMessage": "Scheduling Beads context refresh",
             "type": "command"
           }
@@ -86,7 +86,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads opencode-hook PreCompact",
+            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on opencode-hook PreCompact",
             "statusMessage": "Checking Beads context",
             "type": "command"
           }
@@ -98,7 +98,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads opencode-hook SessionStart",
+            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on opencode-hook SessionStart",
             "statusMessage": "Loading Beads context",
             "type": "command"
           }
@@ -110,7 +110,7 @@
       {
         "hooks": [
           {
-            "command": "bd --db ~/beads/context-engine/.beads opencode-hook UserPromptSubmit",
+            "command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on opencode-hook UserPromptSubmit",
             "statusMessage": "Refreshing Beads context",
             "type": "command"
           }

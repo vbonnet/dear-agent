@@ -12,11 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 // --- engram_retrieve ---
@@ -227,12 +228,6 @@ type WayfinderStatusResult struct {
 	SourceFile string `json:"source_file"`
 }
 
-var (
-	rePhase    = regexp.MustCompile(`Current Phase:\s*\*\*(.+?)\*\*`)
-	reProgress = regexp.MustCompile(`(?m)Progress:\s*(.+?)$`)
-	reStatus   = regexp.MustCompile(`(?m)Status:\s*(.+?)$`)
-)
-
 func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 	if strings.TrimSpace(projectPath) == "" {
 		return nil, errors.New("project_path must be a non-empty string")
@@ -254,19 +249,15 @@ func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 		return nil, fmt.Errorf("WAYFINDER-STATUS.md not found in %s", abs)
 	}
 
-	text := string(data)
+	summary, err := statusread.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", statusFile, err)
+	}
 	return &WayfinderStatusResult{
 		Project:    abs,
-		Phase:      firstMatch(rePhase, text),
-		Progress:   firstMatch(reProgress, text),
-		Status:     firstMatch(reStatus, text),
+		Phase:      summary.CurrentWaypoint,
+		Progress:   fmt.Sprintf("%d%%", summary.Progress),
+		Status:     summary.Status,
 		SourceFile: statusFile,
 	}, nil
-}
-
-func firstMatch(re *regexp.Regexp, text string) string {
-	if m := re.FindStringSubmatch(text); m != nil {
-		return strings.TrimSpace(m[1])
-	}
-	return "Unknown"
 }

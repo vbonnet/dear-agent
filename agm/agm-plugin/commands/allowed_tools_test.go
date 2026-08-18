@@ -94,9 +94,7 @@ func TestAgmExitNoTmuxInAllowedTools(t *testing.T) {
 	}
 }
 
-// TestAgmExitArgumentFirst ensures agm-exit.md checks $ARGUMENTS before any detection command.
-// This is a regression test: if tmux/agm detection runs first, it can trigger permission prompts
-// even when the session name was already provided as an argument.
+// TestAgmExitArgumentFirst ensures agm-exit.md checks $ARGUMENTS before detection.
 func TestAgmExitArgumentFirst(t *testing.T) {
 	testDir, err := os.Getwd()
 	if err != nil {
@@ -108,39 +106,22 @@ func TestAgmExitArgumentFirst(t *testing.T) {
 		t.Fatalf("Failed to read agm-exit.md: %v", err)
 	}
 
-	lines := strings.Split(string(content), "\n")
-
-	// Find the ordered bullet points in Step 1.
-	// The first "- " bullet referencing $ARGUMENTS must come before
-	// any bullet referencing tmux or get-session-name.
-	var argBulletLine, tmuxBulletLine, sessionNameBulletLine int
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "- ") && !strings.HasPrefix(trimmed, "- Else") {
-			continue
-		}
-		if strings.Contains(trimmed, "$ARGUMENTS") && argBulletLine == 0 {
-			argBulletLine = i + 1
-		}
-		if strings.Contains(trimmed, "tmux display-message") && tmuxBulletLine == 0 {
-			tmuxBulletLine = i + 1
-		}
-		if strings.Contains(trimmed, "get-session-name") && sessionNameBulletLine == 0 {
-			sessionNameBulletLine = i + 1
-		}
+	text := string(content)
+	bodyStart := strings.Index(text, "# Archive and exit")
+	if bodyStart < 0 {
+		t.Fatal("agm-exit.md missing command body")
 	}
-
-	if argBulletLine == 0 {
-		t.Fatal("agm-exit.md must have a bullet point referencing $ARGUMENTS in Step 1")
+	body := text[bodyStart:]
+	argumentIndex := strings.Index(body, "$ARGUMENTS")
+	detectionIndex := strings.Index(body, "agm get-session-name")
+	if argumentIndex < 0 {
+		t.Fatal("agm-exit.md must reference $ARGUMENTS")
 	}
-
-	if tmuxBulletLine != 0 && tmuxBulletLine < argBulletLine {
-		t.Errorf("agm-exit.md: tmux bullet (line %d) must come AFTER $ARGUMENTS bullet (line %d)",
-			tmuxBulletLine, argBulletLine)
+	if detectionIndex < 0 {
+		t.Fatal("agm-exit.md must provide typed session-name detection")
 	}
-	if sessionNameBulletLine != 0 && sessionNameBulletLine < argBulletLine {
-		t.Errorf("agm-exit.md: get-session-name bullet (line %d) must come AFTER $ARGUMENTS bullet (line %d)",
-			sessionNameBulletLine, argBulletLine)
+	if detectionIndex < argumentIndex {
+		t.Error("agm-exit.md must inspect $ARGUMENTS before running agm get-session-name")
 	}
 }
 
@@ -188,10 +169,7 @@ func TestAgmExitNoBlockedBashCommands(t *testing.T) {
 	}
 }
 
-// TestAgmExitUsesWriteForMarker ensures agm-exit.md uses the Write tool (not touch)
-// for creating the exit-gate marker file. The touch command is blocked by the
-// pretool-bash-blocker hook, causing the exit flow to stall.
-func TestAgmExitUsesWriteForMarker(t *testing.T) {
+func TestAgmExitDelegatesMechanicsToTypedArchive(t *testing.T) {
 	testDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
@@ -203,23 +181,68 @@ func TestAgmExitUsesWriteForMarker(t *testing.T) {
 	}
 
 	text := string(content)
-
-	// The skill must reference the Write tool for marker creation
-	if !strings.Contains(text, "Write") {
-		t.Error("agm-exit.md must use the Write tool for creating the exit-gate marker file.\n" +
-			"  The touch command is blocked by pretool-bash-blocker.")
+	for _, required := range []string{"agm session get", "agm session archive", "merged", "deployed", "verified"} {
+		if !strings.Contains(text, required) {
+			t.Errorf("agm-exit.md missing required typed delivery contract %q", required)
+		}
 	}
+	for _, forbidden := range []string{"git status", "git log", "exit-gate", "Write(", "archive <session-name> --force"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("agm-exit.md reimplements or bypasses typed archival with %q", forbidden)
+		}
+	}
+}
 
-	// The allowed-tools must include Write permission for ~/.agm/
-	lines := strings.Split(text, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "allowed-tools:") {
-			if !strings.Contains(trimmed, "Write(") {
-				t.Error("agm-exit.md allowed-tools must include Write(~/.agm/*) for exit-gate marker.\n" +
-					"  Bash(touch *) is blocked by pretool-bash-blocker hook.")
+func TestPluginCommandsUseFileInputsForUntrustedText(t *testing.T) {
+	testDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	tests := []struct {
+		file      string
+		required  []string
+		forbidden []string
+	}{
+		{file: "agm-send.md", required: []string{"--prompt-file", "Write(/tmp/agm-send-*", "rm -f -- <path>"}, forbidden: []string{`--prompt "{MESSAGE}"`, "properly escape quotes", "/private/tmp"}},
+		{file: "wiki-query-save.md", required: []string{"--query-file", "--answer-file", "Write(/tmp/agm-wiki-*", "rm -f -- <question-file> <answer-file>"}, forbidden: []string{`--query "{QUESTION}"`, `--answer "{ANSWER}"`, "/private/tmp"}},
+	}
+	for _, test := range tests {
+		content, readErr := os.ReadFile(filepath.Join(testDir, test.file))
+		if readErr != nil {
+			t.Fatalf("read %s: %v", test.file, readErr)
+		}
+		text := string(content)
+		for _, required := range test.required {
+			if !strings.Contains(text, required) {
+				t.Errorf("%s missing safe-input contract %q", test.file, required)
 			}
 		}
+		for _, forbidden := range test.forbidden {
+			if strings.Contains(text, forbidden) {
+				t.Errorf("%s contains unsafe-input contract %q", test.file, forbidden)
+			}
+		}
+	}
+}
+
+func TestPluginCommandsMatchCurrentReadOnlyAndResumeBehavior(t *testing.T) {
+	testDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resume, err := os.ReadFile(filepath.Join(testDir, "agm-resume.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(resume), "interactive selection behavior") || !strings.Contains(string(resume), "Require an identifier") {
+		t.Fatal("agm-resume.md still promises the unimplemented interactive picker")
+	}
+	lint, err := os.ReadFile(filepath.Join(testDir, "wiki-lint.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lint), "agm wiki lint --no-append") {
+		t.Fatal("wiki-lint.md does not preserve its read-only contract")
 	}
 }
 

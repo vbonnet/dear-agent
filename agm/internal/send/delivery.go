@@ -65,7 +65,7 @@ func SequentialDeliver(ctx context.Context, jobs []*DeliveryJob, deliverFunc Del
 
 		// Execute delivery
 		start := time.Now()
-		err := deliverFunc(job)
+		err := deliverFunc(ctx, job)
 		duration := time.Since(start)
 
 		results = append(results, &DeliveryResult{
@@ -83,11 +83,11 @@ func SequentialDeliver(ctx context.Context, jobs []*DeliveryJob, deliverFunc Del
 
 // DeliveryFunc is a function type for delivering a message
 // Allows dependency injection for testing
-type DeliveryFunc func(job *DeliveryJob) error
+type DeliveryFunc func(context.Context, *DeliveryJob) error
 
-// DefaultDeliveryFunc is the default delivery implementation
-// Uses tmux for message delivery (matches existing sendViaTmux behavior)
-var DefaultDeliveryFunc DeliveryFunc = func(job *DeliveryJob) error {
+// DefaultDeliveryFunc is the default delivery implementation. The CLI installs
+// a function that resolves each recipient through storage and shared ops.
+var DefaultDeliveryFunc DeliveryFunc = func(context.Context, *DeliveryJob) error {
 	// Import cycle prevention: this will be set by cmd/agm/send_msg.go
 	// during initialization to avoid circular dependency
 	return fmt.Errorf("delivery function not initialized")

@@ -3,7 +3,7 @@ package agent
 import "testing"
 
 func TestActiveHarnessesCanonicalParitySet(t *testing.T) {
-	want := []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
+	want := []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}
 	got := ActiveHarnesses()
 	if len(got) != len(want) {
 		t.Fatalf("ActiveHarnesses length = %d, want %d: %v", len(got), len(want), got)
@@ -40,6 +40,17 @@ func TestCodexFactoryUsesCLIAdapter(t *testing.T) {
 	}
 	if _, ok := got.(*CodexCLIAdapter); !ok {
 		t.Fatalf("GetHarness(codex-cli) = %T, want *CodexCLIAdapter", got)
+	}
+}
+
+func TestPiFactoryUsesNativeAdapter(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	got, err := GetHarness("pi")
+	if err != nil {
+		t.Fatalf("GetHarness(pi) returned error: %v", err)
+	}
+	if _, ok := got.(*PiAdapter); !ok {
+		t.Fatalf("GetHarness(pi) = %T, want *PiAdapter", got)
 	}
 }
 

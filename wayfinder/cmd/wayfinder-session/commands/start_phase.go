@@ -30,8 +30,8 @@ var StartPhaseCmd = &cobra.Command{
 	Long: `Update WAYFINDER-STATUS.md and publish phase.started event.
 
 Example:
-  wayfinder-session start-phase PROBLEM
-  wayfinder-session start-phase BUILD --allow-dirty`,
+  wayfinder session start-phase PROBLEM
+  wayfinder session start-phase BUILD --allow-dirty`,
 	Args: cobra.ExactArgs(1),
 	RunE: runStartPhase,
 }
@@ -71,19 +71,11 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	version, err := status.DetectSchemaVersionFromDir(projectDir)
-	if err != nil {
-		return fmt.Errorf("failed to inspect STATUS file: %w (run 'wayfinder-session start' first)", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before start-phase")
-	}
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
-	// Initialize history logger
 	hist := history.New(projectDir)
 
 	// Validate phase can be started
@@ -99,24 +91,27 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Update phase status
-	st.UpdatePhase(phaseName, status.PhaseStatusInProgress, "")
-	st.SetCurrentPhase(phaseName)
-
-	// At SETUP — where task breakdown begins — guarantee the session is backed
-	// by a tracking bead so every task has one from the start and its PR can
-	// auto-close it on merge. No-op if a bead already exists (e.g. the caller
-	// passed one in) so re-running SETUP never files duplicates.
-	if strings.EqualFold(phaseName, "SETUP") {
-		ensureSessionBead(cmd.Context(), st)
-	}
-
 	// Initialize tracker
 	tr, err := tracker.New(st.GetSessionID())
 	if err != nil {
 		return fmt.Errorf("failed to initialize tracker: %w", err)
 	}
 	defer func() { _ = tr.Close(context.Background()) }()
+
+	if err := hist.EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for phase transition: %w", err)
+	}
+
+	// Update phase status
+	st.UpdatePhase(phaseName, status.PhaseStatusInProgress, "")
+	st.SetCurrentPhase(phaseName)
+
+	// Guarantee the session is backed by a tracking bead when task execution
+	// begins. SETUP normally owns this transition; --skip-roadmap and explicit
+	// phase profiles may skip SETUP, so BUILD must cover that path as well.
+	if shouldEnsureSessionBead(st, phaseName) {
+		ensureSessionBead(cmd.Context(), st)
+	}
 
 	// Publish phase.started event
 	if err := tr.StartPhase(phaseName); err != nil {
@@ -135,7 +130,7 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Auto-commit the marker files written above so the worktree stays clean.
 	// Without this, the next start-phase call sees WAYFINDER-STATUS.md and
-	// WAYFINDER-HISTORY.md as uncommitted and refuses (ce-fvkz recurrence).
+	// WAYFINDER-HISTORY.jsonl as uncommitted and refuses (ce-fvkz recurrence).
 	// This mirrors the auto-commit that complete-phase already performs.
 	gitIntegrator := git.New(projectDir)
 	if gitIntegrator.IsGitRepo() {
@@ -150,24 +145,27 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	return nil
 }
 
+func shouldEnsureSessionBead(st *status.StatusV2, phaseName string) bool {
+	if strings.EqualFold(phaseName, status.WaypointV2Setup) {
+		return true
+	}
+	return strings.EqualFold(phaseName, status.WaypointV2Build) && st.IsPhaseSkipped(status.WaypointV2Setup)
+}
+
 // ensureSessionBead files a tracking bead for the session if it has none yet,
 // recording the new id on the status so it is persisted by the WriteTo that
-// follows. Bead tracking lives in the V2 schema (StatusV2.Beads); for any other
+// follows. Bead tracking lives in canonical status (StatusV2.Beads); for any other
 // status version this is a no-op. Failures (bd absent, create error) warn and
 // continue — a missing tracker must never block a phase transition.
-func ensureSessionBead(ctx context.Context, st status.StatusInterface) {
-	v2, ok := st.(*status.StatusV2)
-	if !ok {
-		return
-	}
-	if len(v2.Beads) > 0 {
+func ensureSessionBead(ctx context.Context, st *status.StatusV2) {
+	if len(st.Beads) > 0 {
 		return
 	}
 	if !beads.Available() {
 		fmt.Fprintf(os.Stderr, "Warning: bd CLI not available; skipping auto-bead creation\n")
 		return
 	}
-	title := strings.TrimSpace(v2.ProjectName)
+	title := strings.TrimSpace(st.ProjectName)
 	if title == "" {
 		title = "wayfinder session"
 	}
@@ -176,6 +174,6 @@ func ensureSessionBead(ctx context.Context, st status.StatusInterface) {
 		fmt.Fprintf(os.Stderr, "Warning: failed to auto-create bead: %v\n", err)
 		return
 	}
-	v2.Beads = append(v2.Beads, id)
+	st.Beads = append(st.Beads, id)
 	fmt.Printf("🔗 Auto-created bead %s for this task\n", id)
 }

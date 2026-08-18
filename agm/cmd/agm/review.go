@@ -34,7 +34,7 @@ var reviewCmd = &cobra.Command{
 	Long: `Send an artifact to a reviewer model via the role-based LLM router.
 
 The reviewer role is deliberately backed by a different vendor than the
-implementer role (see config/roles.yaml and ADR-023 §H5) so the critique
+implementer role (see config/roles.yaml) so the critique
 is unlikely to share the implementer's blind spots. The router walks the
 role's primary → secondary → tertiary model chain, falling through on
 failure.

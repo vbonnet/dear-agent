@@ -1,16 +1,21 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
-	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 func TestPermissionProfilesExist(t *testing.T) {
@@ -281,6 +286,9 @@ func TestPermissionsAllowFlagRegistered(t *testing.T) {
 	}
 	if flag.Value.Type() != "stringSlice" {
 		t.Errorf("--permissions-allow should be stringSlice type, got %q", flag.Value.Type())
+	}
+	if !strings.Contains(flag.Usage, "shared policy") || strings.Contains(flag.Usage, "written to project .claude") {
+		t.Errorf("--permissions-allow usage is not harness-neutral: %q", flag.Usage)
 	}
 }
 
@@ -570,19 +578,7 @@ func TestResolveSessionPermissionPolicyRecordsProfileAndTargets(t *testing.T) {
 }
 
 func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
-	origPolicy := resolvedSessionPermissionPolicy
-	origHarness := harnessName
-	origModel := modelName
-	origCfg := cfg
-	defer func() {
-		resolvedSessionPermissionPolicy = origPolicy
-		harnessName = origHarness
-		modelName = origModel
-		cfg = origCfg
-	}()
-
-	cfg = &config.Config{Workspace: "test"}
-	resolvedSessionPermissionPolicy = &manifest.PermissionPolicy{
+	policy := &manifest.PermissionPolicy{
 		Profile: "auditor",
 		Sources: []string{"defaults", "profile"},
 		Allow:   []string{"Bash(git status)"},
@@ -594,10 +590,7 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 			NativeEnforcement: "Claude Code allowlist and permission modes",
 		}},
 	}
-	harnessName = "claude-code"
-	modelName = "sonnet"
-
-	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil, nil)
+	m := createPermissionManifest(t, "claude-code", "sonnet", "", policy)
 	if m.PermissionPolicy == nil {
 		t.Fatal("manifest missing permission policy")
 	}
@@ -605,30 +598,17 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 		t.Fatalf("manifest permission profile = %q, want auditor", m.PermissionPolicy.Profile)
 	}
 
-	resolvedSessionPermissionPolicy.Allow[0] = "Bash(mutated)"
+	policy.Allow[0] = "Bash(mutated)"
 	if m.PermissionPolicy.Allow[0] != "Bash(git status)" {
 		t.Fatalf("manifest permission policy was not cloned: %v", m.PermissionPolicy.Allow)
 	}
 }
 
 func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
-	origMode := modeFlagValue
-	origHarness := harnessName
-	origModel := modelName
-	origCfg := cfg
-	defer func() {
-		modeFlagValue = origMode
-		harnessName = origHarness
-		modelName = origModel
-		cfg = origCfg
-	}()
-
-	cfg = &config.Config{Workspace: "test"}
-	harnessName = "agy"
-	modelName = "2.5-flash"
-	modeFlagValue = "auto"
-
-	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil, nil)
+	m := createPermissionManifest(t, "agy", "3.5-flash", "auto", nil)
+	if m.Agy == nil || m.Agy.ConversationID != "test-native-id" {
+		t.Fatalf("AGY identity = %+v, want test-native-id", m.Agy)
+	}
 	if m.PermissionMode != "auto" {
 		t.Fatalf("permission mode = %q, want auto", m.PermissionMode)
 	}
@@ -638,4 +618,62 @@ func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
 	if m.PermissionModeUpdatedAt == nil {
 		t.Fatal("permission mode updated timestamp was not set")
 	}
+}
+
+func createPermissionManifest(t *testing.T, harness, model, permissionMode string, policy *manifest.PermissionPolicy) *manifest.Manifest {
+	t.Helper()
+	var got *manifest.Manifest
+	runtime := &cliCreateSessionRuntime{
+		launch: func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			return ops.CreateSessionLaunchResult{}, nil
+		},
+		bootstrapAgyIdentity: func(context.Context, ops.AgyCreateIdentityBootstrap) error { return nil },
+		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
+			got = completion.Manifest
+			return nil
+		},
+	}
+	opCtx := &ops.OpContext{
+		Tmux: session.NewMockTmux(), Storage: dolt.NewMockAdapter(), CreationRuntime: runtime,
+	}
+	if agent.NormalizeHarnessName(harness) == "agy" {
+		opCtx.AgyCreateIdentityTracker = permissionManifestAgyIdentityTracker{}
+	}
+	_, err := ops.CreateSessionWithContext(context.Background(), opCtx, &ops.CreateSessionRequest{
+		Cwd:                    t.TempDir(),
+		Prompt:                 "fixture startup prompt",
+		Title:                  "session-name",
+		Model:                  model,
+		Harness:                harness,
+		SessionID:              "session-id",
+		Caller:                 ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
+		PermissionMode:         permissionMode,
+		AllowEmptyPrompt:       true,
+		SkipCodexRemoteControl: true,
+		Metadata: ops.CreateSessionMetadata{
+			Workspace:        "test",
+			PermissionPolicy: policy,
+			PermissionMode:   permissionMode,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if got == nil {
+		t.Fatal("creation lifecycle did not expose a manifest")
+	}
+	return got
+}
+
+type permissionManifestAgyIdentityTracker struct{}
+
+func (permissionManifestAgyIdentityTracker) Snapshot(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (permissionManifestAgyIdentityTracker) Discover(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+	return &agysession.Metadata{
+		ConversationID: "test-native-id",
+		WorkspacePath:  workDir,
+	}, nil
 }

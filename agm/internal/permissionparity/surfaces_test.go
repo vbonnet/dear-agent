@@ -55,4 +55,12 @@ func TestPermissionSurfacesDocumentNativeLimits(t *testing.T) {
 	if agy.StartupSurface != "agy --dangerously-skip-permissions for auto mode" {
 		t.Fatalf("agy startup surface = %q, want auto permission flag mapping", agy.StartupSurface)
 	}
+
+	pi, ok := SurfaceForHarness("pi")
+	if !ok {
+		t.Fatal("pi-cli surface missing")
+	}
+	if !slices.Contains([]string{"/agm-mode plan|default|auto"}, pi.RuntimeSurface) || pi.NativeEnforcement == "" {
+		t.Fatalf("Pi permission surface = %+v", pi)
+	}
 }

@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
@@ -144,5 +149,74 @@ func TestPrintSweepReport_OrphanBranch(t *testing.T) {
 	}}, false, true)
 	if !strings.Contains(no.String(), "No orphan branches found.") {
 		t.Errorf("orphan-only with no orphans should report empty:\n%s", no.String())
+	}
+}
+
+// withSweepFlags restores the package-level sweep flags and the live-set seam
+// after a test mutates them, so ordering between tests stays irrelevant.
+func withSweepFlags(t *testing.T, dir string, execute bool, lookup func(context.Context) (map[string]bool, error)) {
+	withSweepLookups(t, dir, execute, lookup, lookup)
+}
+
+func withSweepLookups(t *testing.T, dir string, execute bool,
+	lookup, executableLookup func(context.Context) (map[string]bool, error),
+) {
+	t.Helper()
+	prevDir, prevExecute, prevLookup, prevExecutableLookup :=
+		sweepWorktreesDir, sweepExecute, sweepActiveSessions, sweepExecutableActiveSessions
+	t.Cleanup(func() {
+		sweepWorktreesDir, sweepExecute, sweepActiveSessions, sweepExecutableActiveSessions =
+			prevDir, prevExecute, prevLookup, prevExecutableLookup
+	})
+	sweepWorktreesDir, sweepExecute, sweepActiveSessions, sweepExecutableActiveSessions =
+		dir, execute, lookup, executableLookup
+}
+
+func failingActiveSessions(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, errors.New("dolt unavailable and tmux fallback failed")
+}
+
+// TestWorktreeSweep_ExecuteFailsClosedOnActiveLookupFailure is the ce-3knl.1
+// regression at the command layer. The lookup failure used to be a warning;
+// the sweep then ran with an empty live set, which is precisely the state in
+// which a live worktree at origin/main classifies as reapable.
+func TestWorktreeSweep_ExecuteFailsClosedOnActiveLookupFailure(t *testing.T) {
+	withSweepFlags(t, t.TempDir(), true, failingActiveSessions)
+
+	err := runWorktreeSweep(worktreeSweepCmd, nil)
+	if err == nil {
+		t.Fatal("--execute must fail when the active-session lookup fails")
+	}
+	for _, want := range []string{"active sessions", "refusing to execute"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+func TestWorktreeSweep_ExecuteRejectsTmuxOnlyLiveSet(t *testing.T) {
+	tmuxOnly := func(context.Context) (map[string]bool, error) {
+		return map[string]bool{"tmux-session": true}, nil
+	}
+	withSweepLookups(t, t.TempDir(), true, tmuxOnly, failingActiveSessions)
+
+	err := runWorktreeSweep(worktreeSweepCmd, nil)
+	if err == nil {
+		t.Fatal("--execute must reject a tmux-only live-session lookup")
+	}
+	if !strings.Contains(err.Error(), "refusing to execute") {
+		t.Errorf("error %q does not refuse execution", err)
+	}
+}
+
+// TestWorktreeSweep_DryRunSurvivesActiveLookupFailure keeps the read-only
+// path usable when Dolt and tmux are both unreachable.
+func TestWorktreeSweep_DryRunSurvivesActiveLookupFailure(t *testing.T) {
+	withSweepFlags(t, t.TempDir(), false, failingActiveSessions)
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	if err := runWorktreeSweep(cmd, nil); err != nil {
+		t.Fatalf("dry run must still classify: %v", err)
 	}
 }

@@ -312,6 +312,7 @@ func TestOpenRouterProvider_CapabilitiesIncludePriorityOpenFamilies(t *testing.T
 	}
 	caps := p.Capabilities()
 	for _, want := range []string{
+		"anthropic/claude-opus-5",
 		"z-ai/glm-5.2",
 		"deepseek/deepseek-v4-pro",
 		"nvidia/nemotron-3-ultra-550b-a55b",

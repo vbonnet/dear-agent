@@ -1,50 +1,19 @@
 ---
 model: haiku
 effort: low
-description: Audit backlinks and update index after adding a new page to engram-kb
-argument-hint: "--page <repo-relative-path> [--kb PATH] [--no-index]"
-allowed-tools: Bash(agm wiki ingest *), Bash(agm wiki index *)
+content-hash: 95503bfebd837ca691a66b057eac9e1b02f65bd38fb45740971efdf173478cd3
+description: Audit backlinks and update the engram-kb index after a page is added. Use when the user has already created a wiki page and wants it integrated.
+argument-hint: "--page PATH [--kb PATH] [--no-index]"
+allowed-tools: Bash(agm wiki ingest *), Read, Write
 ---
 
-# Wiki Ingest
+# Ingest a wiki page
 
-I'll audit backlinks for a newly ingested page and update the index.
-
-**Step 1: Parse arguments**
-
-Parse $ARGUMENTS to extract:
-- `--page PATH` — repo-relative path to the new page (required)
-- `--kb PATH` — KB root (default: ~/src/engram-kb)
-- `--no-index` — skip index regeneration
-
-If `--page` is missing, ask the user: "Which page did you just add? (repo-relative path, e.g. 02-research-index/topic-foo.md)"
-
-**Step 2: Run backlink audit**
-
-```
-agm wiki ingest --page "{PAGE}" [--kb PATH] [--no-index]
-```
-
-**Step 3: Interpret backlink suggestions**
-
-For each suggestion the tool outputs:
-```
-📄 <source-page>
-   matched: <terms>
-   suggest adding: [[<target-stem>]]
-```
-
-Present a concise summary:
-- "Found N pages that mention this topic and could link back."
-- List the source pages with the suggested wikilink to add.
-
-**Step 4: Apply links (optional)**
-
-If the user says "apply" or "yes, add the links":
-- For each suggested source page, open it and add `[[target-stem]]` in an
-  appropriate location (e.g. "See Also" section or Related ADRs line).
-- Confirm each edit before writing.
-
-**Error Handling**:
-- If the page is not found: remind the user to write the file first, then re-run
-- If agm is not found: "Install agm from github.com/vbonnet/dear-agent"
+1. Require a repo-relative or absolute page path.
+2. Run `agm wiki ingest --page <path>`, forwarding `--kb` or `--no-index` only
+   when requested. Pass paths as separate argv values; do not construct shell
+   syntax from them.
+3. Present AGM's backlink suggestions and index/log result.
+4. Apply suggested backlinks only after the user authorizes those page edits.
+   Read each target first and make the smallest contextual edit.
+5. On failure, show stderr and stop; do not recreate ingest behavior manually.

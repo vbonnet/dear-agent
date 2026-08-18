@@ -18,10 +18,30 @@
 
 **VERSION-07** While binaries serve any supported harness and model family, the system shall expose identical version and staleness semantics.
 
+**VERSION-08** When exact companion-process compatibility is compared, the system shall shorten the commit hash while preserving any dirty-source marker so clean and modified builds cannot be treated as identical.
+
+**VERSION-09** When a governed Make build receives ordinary effective `GOFLAGS`, the system shall preserve those Go settings while injecting Version, GitCommit, BuildDate, and BuiltBy provenance.
+
+**VERSION-10** When a top-level effective `GOFLAGS` field has the exact flag name `-ldflags` or `--ldflags`, the governed Make build shall fail before invoking the product build and direct linker customization to `EXTRA_GO_LDFLAGS`.
+
+**VERSION-11** When `EXTRA_GO_LDFLAGS` supplies an unpatterned linker argument list beginning with a hyphen, the governed Make build shall treat caller text as opaque data and compose one linker value with protected provenance assignments last; when it supplies Go's package-pattern form, the build shall reject it before invoking Go.
+
+**VERSION-12** When caller provenance contains a Go linker whitespace separator or quote delimiter, the governed Make build shall reject it before invoking Go so metadata cannot reshape or inject linker tokens.
+
+**VERSION-13** When linker-shaped text appears only inside a different quoted GOFLAGS field or a longer flag name, the governed Make build shall preserve it for normal Go toolchain validation.
+
+**VERSION-14** When no caller supplies `GIT_COMMIT`, the governed Make build shall derive a bounded HEAD revision and append `-dirty` when tracked or untracked worktree state exists.
+
+**VERSION-15** When default revision or worktree status evidence is unavailable, the governed Make build shall stamp `unknown` instead of claiming a clean revision.
+
+**VERSION-16** When a caller supplies `GIT_COMMIT`, the governed Make build shall preserve that opaque override without depending on default Git discovery.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/validation_workspace_parity.feature`
+- Feature: `agm/test/bdd/features/hook_parity.feature`
 
 ## Test Traceability
 
 - Unit package: `pkg/version`
+- Integration package: `tests/buildstamp`

@@ -252,7 +252,7 @@ PATH=/tmp:$PATH bash install-commands.sh
 ## References
 
 ### Project Documentation
-- **Roadmap**: `ROADMAP.md`
+- **Current work**: the Beads task graph (`bd list`)
 - **Contracts**: `specs/component-contracts.md`
 - **Workspace Protocol**: `specs/workspace-protocol-cli.md`
 - **Corpus Callosum**: `specs/corpus-callosum-protocol.md`

@@ -119,6 +119,20 @@ func (t *Tracker) ResetAttemptsIfSigChanged(num int, sig string) {
 	}
 }
 
+// ResetAttemptsIfPassing zeroes the agent-attempt counter and clears the failure signature
+// for a PR when CI passes without projection error, establishing that the prior failure
+// episode has concluded.
+func (t *Tracker) ResetAttemptsIfPassing(num int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	r := t.records[num]
+	if r == nil {
+		return
+	}
+	r.AgentAttempts = 0
+	r.LastFailureSig = ""
+}
+
 // RecordAction stamps a PR's last-action time and state (used for stall
 // detection). Call after any mechanical action (rebase, merge attempt).
 func (t *Tracker) RecordAction(num int, state State, now time.Time) {

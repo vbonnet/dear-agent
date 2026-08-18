@@ -13,7 +13,8 @@ import (
 // present in the project directory, its patterns replace the built-in defaults.
 const earsConfigFile = ".earslint.yml"
 
-// validateSpecEARS gates the canonical SPEC phase by validating SPEC.md against the
+// validateSpecEARS gates the canonical SPEC phase by validating the phase
+// deliverable against the
 // EARS (Easy Approach to Requirements Syntax) templates.
 //
 // This is the deterministic replacement for the previous LLM-as-judge rubric
@@ -23,7 +24,7 @@ const earsConfigFile = ".earslint.yml"
 // mode, so any "shall"-style requirement that does not conform to an EARS
 // template fails the gate.
 func validateSpecEARS(projectDir, phaseName string) error {
-	const docFile = "SPEC.md"
+	const docFile = "SPEC-solution-requirements.md"
 	docPath := filepath.Join(projectDir, docFile)
 
 	// Existence check (mirrors the previous gate's contract/message).
@@ -105,7 +106,7 @@ func validateSpecEARS(projectDir, phaseName string) error {
 func formatEARSFix(res earslint.Result, cfg earslint.Config) string {
 	var b strings.Builder
 	if res.ValidRequirements == 0 {
-		b.WriteString("SPEC.md must contain at least one EARS-formatted requirement.\n")
+		b.WriteString("SPEC-solution-requirements.md must contain at least one EARS-formatted requirement.\n")
 	}
 	if res.NonConforming() > 0 {
 		b.WriteString("Rewrite these requirements to match an EARS template:\n")

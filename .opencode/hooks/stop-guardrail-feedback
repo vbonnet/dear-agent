@@ -38,6 +38,29 @@ input="$(cat)"
 # Global opt-out for an interactive session that doesn't want the loop.
 [ "${DEAR_GUARDRAIL_LOOP:-1}" = "0" ] && exit 0
 
+# Never run inside GitHub Actions. The loop is an *authoring*-time guardrail —
+# "delivered on your laptop instead of in GitHub CI", per the WHAT above — and
+# the only agent that loads these hooks in Actions is the read-only PR reviewer
+# (claude-code-action sets settingSources: user,project,local, so this repo's
+# .claude/settings.json applies there too).
+#
+# In that container all three of the anti-wedge brakes above fail at once:
+#   - The tree is *always* dirty: the action restores .claude/, CLAUDE.md &c
+#     from origin/main over the untrusted PR head and drops the PR's copies in
+#     .claude-pr/, so `git status --porcelain` is never empty — the "read-only
+#     turns are never touched" brake cannot engage.
+#   - The bundle is *always* red: the review job installs Node and the Claude
+#     CLI only, so preflight's go vet/build/lint have no toolchain to run.
+#   - So every review run blocks the stop MAX_ITERS times and hands the
+#     reviewer a "go fix the guardrails" prompt. It then burns turns on build
+#     and lint commands the review permission set denies, and the run ends
+#     is_error:true (observed: 13 turns, 87 denials, $4.43, 10min on PR #1149).
+#
+# Gating here rather than via DEAR_GUARDRAIL_LOOP=0 in the workflow is
+# deliberate: the workflow file comes from the untrusted PR head, this file is
+# restored from main, so this is the trustworthy place to put it.
+[ -n "${GITHUB_ACTIONS:-}" ] && exit 0
+
 event="$(printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null || true)"
 case "$event" in
   Stop|SubagentStop) ;;

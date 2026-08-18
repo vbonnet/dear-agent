@@ -78,32 +78,44 @@ AGM: {
     }
   }
 
-  # Layer 3: Adapter Layer (Multi-CLI Support)
+  # Layer 3: Concrete Harness Capabilities (Multi-CLI Support)
   AdapterRegistry: {
-    label: "Adapter Registry"
+    label: "Concrete Harness Capabilities"
     style.fill: "#438dd5"
     style.stroke: "#2e5f8f"
 
     ClaudeAdapter: {
-      label: "Claude Adapter\n[Component: Agent Interface]\n\nCLI integration, UUID detection,\nslash commands, history.jsonl"
+      label: "Claude Capabilities\n[Concrete Adapter]\n\nCLI/tmux launch, native UUID,\nslash commands, history.jsonl"
       shape: rectangle
       style.fill: "#85bbf0"
     }
 
     GeminiAdapter: {
-      label: "Gemini Adapter\n[Component: Agent Interface]\n\nAPI integration, session files,\ncommand translation"
+      label: "Gemini Compatibility\n[Deprecated CLI Adapter]\n\nCLI/tmux launch, session files,\nlegacy command translation"
       shape: rectangle
       style.fill: "#85bbf0"
     }
 
     CodexAdapter: {
-      label: "Codex Adapter\n[Component: Agent Interface]\n\nOpenAI API integration,\nthread management"
+      label: "Codex Capabilities\n[Concrete Adapter]\n\nCodex CLI/tmux launch,\nnative thread identity, resume"
       shape: rectangle
       style.fill: "#85bbf0"
     }
 
     OpenCodeAdapter: {
-      label: "OpenCode Adapter\n[Component: Agent Interface]\n\nSSE event stream, server port,\nreal-time state updates"
+      label: "OpenCode Capabilities\n[Concrete Adapter]\n\nCLI/server launch, SSE stream,\nreal-time state updates"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    AgyAdapter: {
+      label: "AGY Capabilities\n[Concrete Adapter]\n\nAGY CLI/tmux launch,\nconversation identity, readiness"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    PiAdapter: {
+      label: "Pi Capabilities\n[Concrete Adapter]\n\nPi CLI/tmux launch,\nextension readiness, JSONL sessions"
       shape: rectangle
       style.fill: "#85bbf0"
     }
@@ -140,20 +152,14 @@ AGM: {
     }
   }
 
-  # Layer 5: Backend Abstraction
-  BackendAdapter: {
-    label: "Backend Adapter"
+  # Layer 5: Local Runtime Boundary
+  LocalRuntime: {
+    label: "Local Runtime"
     style.fill: "#438dd5"
     style.stroke: "#2e5f8f"
 
-    TmuxBackend: {
-      label: "Tmux Backend\n[Component: Backend Interface]\n\nSession management,\npane control, key sending"
-      shape: rectangle
-      style.fill: "#85bbf0"
-    }
-
-    TemporalBackend: {
-      label: "Temporal Backend\n[Component: Backend Interface]\n\nWorkflow orchestration,\ndurable execution (future)"
+    SessionTmuxRuntime: {
+      label: "Session Tmux Runtime\n[Component: session.RealTmux]\n\nStrict existence, liveness,\nreadiness, exact-pane control"
       shape: rectangle
       style.fill: "#85bbf0"
     }
@@ -198,14 +204,26 @@ GeminiCLI: {
   style.fill: "#999999"
 }
 
-OpenAIAPI: {
-  label: "OpenAI API\n[External System]\n\nChatGPT/Codex API"
+CodexCLI: {
+  label: "Codex CLI\n[External System]\n\nOpenAI Codex CLI"
   shape: rectangle
   style.fill: "#999999"
 }
 
 OpenCodeServer: {
-  label: "OpenCode Server\n[External System]\n\nSSE event stream server"
+  label: "OpenCode CLI / Server\n[External System]\n\nCLI plus SSE event server"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+AgyCLI: {
+  label: "AGY CLI\n[External System]\n\nProvider CLI and conversation state"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+PiCLI: {
+  label: "Pi CLI\n[External System]\n\nPi coding-agent CLI"
   shape: rectangle
   style.fill: "#999999"
 }
@@ -240,15 +258,19 @@ AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.ClaudeAdapter: "Creates/
 AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.GeminiAdapter: "Creates/resumes Gemini sessions"
 AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.CodexAdapter: "Creates/resumes Codex sessions"
 AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.OpenCodeAdapter: "Creates/resumes OpenCode sessions"
+AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.AgyAdapter: "Creates/resumes AGY sessions"
+AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.PiAdapter: "Creates/resumes Pi sessions"
 
-AGM.BusinessLogic.CommandTranslator -> AGM.AdapterRegistry.ClaudeAdapter: "Translates to slash commands"
-AGM.BusinessLogic.CommandTranslator -> AGM.AdapterRegistry.GeminiAdapter: "Translates to API calls"
+AGM.BusinessLogic.CommandTranslator -> AGM.AdapterRegistry.ClaudeAdapter: "Uses slash-command capability"
+AGM.BusinessLogic.CommandTranslator -> AGM.AdapterRegistry.GeminiAdapter: "Uses legacy CLI capability"
 
 # Adapters to External Systems
 AGM.AdapterRegistry.ClaudeAdapter -> ClaudeCLI: "Launches/controls\n[Process + Tmux]"
 AGM.AdapterRegistry.GeminiAdapter -> GeminiCLI: "Launches/controls\n[Process + Tmux]"
-AGM.AdapterRegistry.CodexAdapter -> OpenAIAPI: "Makes API requests\n[HTTPS]"
-AGM.AdapterRegistry.OpenCodeAdapter -> OpenCodeServer: "Subscribes to events\n[SSE]"
+AGM.AdapterRegistry.CodexAdapter -> CodexCLI: "Launches/controls\n[Process + Tmux]"
+AGM.AdapterRegistry.OpenCodeAdapter -> OpenCodeServer: "Launches and subscribes\n[Process + SSE]"
+AGM.AdapterRegistry.AgyAdapter -> AgyCLI: "Launches/controls\n[Process + Tmux]"
+AGM.AdapterRegistry.PiAdapter -> PiCLI: "Launches/controls\n[Process + Tmux]"
 
 # Coordination Layer
 AGM.BusinessLogic.SessionManager -> AGM.CoordinationLayer.ManifestStore: "Reads/writes manifests"
@@ -258,13 +280,12 @@ AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.MessageQueue: 
 AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.StateMonitor: "Detects session state"
 AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.ManifestStore: "Updates state metadata"
 
-AGM.CoordinationLayer.StateMonitor -> AGM.BackendAdapter.TmuxBackend: "Monitors tmux panes"
+AGM.CoordinationLayer.StateMonitor -> AGM.LocalRuntime.SessionTmuxRuntime: "Monitors tmux panes"
 AGM.CoordinationLayer.StateMonitor -> AGM.AdapterRegistry.OpenCodeAdapter: "Receives SSE events"
 
-# Backend Layer
-AGM.BusinessLogic.SessionManager -> AGM.BackendAdapter.TmuxBackend: "Creates/attaches sessions"
-AGM.BackendAdapter.TmuxBackend -> TmuxServer: "Controls sessions\n[tmux commands]"
-AGM.BackendAdapter.TemporalBackend -> AGM.BackendAdapter.TmuxBackend: "Future: orchestration fallback"
+# Local Runtime Layer
+AGM.BusinessLogic.SessionManager -> AGM.LocalRuntime.SessionTmuxRuntime: "Creates/attaches sessions"
+AGM.LocalRuntime.SessionTmuxRuntime -> TmuxServer: "Controls sessions\n[tmux commands]"
 
 # Storage
 AGM.CoordinationLayer.ManifestStore -> FileSystem: "Reads/writes YAML\n[Atomic operations]"
@@ -277,7 +298,7 @@ AGM.CommandLayer.CLI -> AGM.UILayer.ErrorPresentation: "Formats errors"
 
 # Key Data Flows (placed at bottom)
 SessionCreationFlow: {
-  label: "Session Creation Flow:\n1. User: agm new my-session → 2. CLI validates flags →\n3. SessionManager generates UUID → 4. Adapter starts agent CLI →\n5. ManifestStore persists metadata → 6. TmuxBackend attaches session"
+  label: "Session Creation Flow:\n1. User: agm new my-session → 2. CLI validates flags →\n3. SessionManager generates UUID → 4. Adapter starts agent CLI →\n5. ManifestStore persists metadata → 6. session.RealTmux attaches session"
   shape: text
   style.font-size: 11
   style.fill: "#f0f0f0"
@@ -291,7 +312,7 @@ MessageDeliveryFlow: {
 }
 
 AdapterPattern: {
-  label: "Adapter Pattern:\nUnified Agent interface with multiple implementations.\nEnables CLI-agnostic session management and command translation."
+  label: "Capability Pattern:\nShared operation owners depend on only the behavior they invoke.\nConcrete harness adapters are not a universal lifecycle facade."
   shape: text
   style.font-size: 11
   style.fill: "#f0f0f0"

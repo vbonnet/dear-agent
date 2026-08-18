@@ -105,6 +105,9 @@ func TestArchiveSession_UsesPersistentTestStore(t *testing.T) {
 	if stored.Lifecycle != manifest.LifecycleArchived {
 		t.Fatalf("Lifecycle = %q, want %q", stored.Lifecycle, manifest.LifecycleArchived)
 	}
+	if stored.Outcome != manifest.OutcomeCompleted {
+		t.Fatalf("Outcome = %q, want %q", stored.Outcome, manifest.OutcomeCompleted)
+	}
 }
 
 // --- Constants tests ---

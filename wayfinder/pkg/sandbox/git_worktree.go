@@ -117,9 +117,12 @@ func (g *GitWorktreeManager) removeWorktree(sandboxID, repoRoot string, dryRun b
 	worktreePath := filepath.Join(repoRoot, ".worktrees", sandboxID)
 
 	// Check if worktree exists
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		// Already removed
-		return nil
+	if _, err := os.Stat(worktreePath); err != nil {
+		if os.IsNotExist(err) {
+			// Already removed.
+			return nil
+		}
+		return fmt.Errorf("inspect worktree before removal: %w", err)
 	}
 
 	if dryRun {
@@ -132,14 +135,10 @@ func (g *GitWorktreeManager) removeWorktree(sandboxID, repoRoot string, dryRun b
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// If git command fails, try manual cleanup
-		if err := os.RemoveAll(worktreePath); err != nil {
-			return fmt.Errorf("failed to remove worktree directory: %w", err)
-		}
-
-		// Prune worktree references
-		pruneCmd := exec.Command("git", "-C", repoRoot, "worktree", "prune")
-		_ = pruneCmd.Run() // Ignore errors
+		// A single --force deliberately respects `git worktree lock`. Never
+		// bypass that protection with a filesystem fallback: the lock may be
+		// guarding an active safe-pr preflight and GitHub transaction.
+		return fmt.Errorf("git worktree remove failed; preserving %s: %w: %s", worktreePath, err, strings.TrimSpace(stderr.String()))
 	}
 
 	return nil

@@ -1,38 +1,44 @@
-# Wayfinder Session Command Requirements Specification (EARS)
+# Wayfinder command requirements specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-17 -->
 
-**Version**: 1.0
-**Status**: Active
-**Scope**: Operator-facing Wayfinder V2 session commands.
+**Status:** Active
+**Scope:** Operator-facing Cobra commands under `wayfinder session`.
 
-## EARS Requirements
+## EARS requirements
 
-**WFC-SESSION-01** When a session is started, the system shall create and validate canonical V2 status with one of the nine canonical waypoints.
+**WFCMD-01** When the session command tree is built, the system shall register start, status, next-phase, start-phase, complete-phase, rewind-to, end, lifecycle, task, coordination, and sandbox commands.
 
-**WFC-SESSION-02** When `next-phase` reads status, the system shall parse only canonical V2 state and shall direct legacy state to explicit migration.
+**WFCMD-02** When a command receives a phase, the system shall accept only a named canonical phase.
 
-**WFC-SESSION-03** When a phase is started or completed, the system shall enforce canonical transition, git, history, validation, and tracker gates.
+**WFCMD-03** When a command receives an invalid outcome, project type, risk, task state, or lifecycle state, the system shall reject it before persistence.
 
-**WFC-SESSION-04** When a session is ended, the system shall update canonical V2 completion state and publish the session completion event.
+**WFCMD-04** When `start --force` is requested, the system shall require a non-empty reason.
 
-**WFC-SESSION-05** When status is displayed, the system shall render canonical V2 project, waypoint history, and remaining phases.
+**WFCMD-05** When a command changes lifecycle state, the system shall use canonical status parsing and atomic persistence.
 
-**WFC-SESSION-06** When task commands receive a phase, the system shall require a canonical descriptive phase name.
+**WFCMD-06** When help is rendered, the system shall describe only registered commands, flags, and the named phase sequence.
 
-**WFC-SESSION-07** When a rewind targets a phase, the system shall require a canonical prior phase and append the reason and context to the RETRO deliverable and history.
+**WFCMD-07** When AI-facing README or skill shell examples are committed, the repository shall parse each Wayfinder invocation against the active Cobra command and flag tree.
 
-**WFC-SESSION-08** When lifecycle state is changed, the system shall validate the A2A-compatible state and its required diagnostic fields.
+**WFCMD-08** When retired compatibility commands are requested, the system shall report that they are unknown.
 
-**WFC-SESSION-09** When coordination starts multiple projects, the system shall validate project directories and apply concurrency and sandbox policy.
+**WFCMD-09** When SETUP starts, or when BUILD starts after SETUP was skipped, the system shall create a tracking bead if none exists and shall preserve the phase transition when tracker creation is unavailable.
 
-**WFC-SESSION-10** When legacy status must be converted, the system shall expose V1 handling only through explicit `migrate` or `migrate-all` commands.
+**WFCMD-10** When required archive, trace, or Git commit persistence for a rewind fails, the system shall return an explicit error and shall not report the rewind operation as successful.
 
-**WFC-SESSION-11** When a force or destructive option is requested, the system shall require the configured override guard and justification.
+**WFCMD-11** When `session start` receives a project directory outside a Git work tree, the system shall reject the request before creating any lifecycle artifact.
 
-**WFC-SESSION-12** When start, start-phase, complete-phase, or set-lifecycle-state encounters legacy status, the system shall reject normal execution with explicit migration guidance.
+**WFCMD-12** When a deterministic pre-rewind archive input is invalid, the system shall reject the rewind before mutating canonical status or appending rewind trace evidence.
 
-## Test Traceability
+**WFCMD-13** While a rewind transition is in progress for a project, the system shall reject a concurrent rewind before parsing or mutating that project's lifecycle state.
 
-- Package tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`
+**WFCMD-14** When a rewind transition lock is created, the system shall place it in the project's owned internal metadata namespace so home, cache, profile, temporary-directory, symlink, and case aliases cannot select a second lock namespace.
+
+**WFCMD-15** When `.wayfinder`, its lock directory, or its rewind lock file is a symbolic link, reparse point, non-directory parent, non-regular file, or multiply linked file, the system shall reject lock admission rather than open or create a lock outside the owned project namespace.
+
+## Traceability
+
+- Command tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`
+- Registration tests: `wayfinder/cmd/wayfinder/cmd/session_test.go`
 - BDD: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`

@@ -64,7 +64,7 @@ func sharedRuntimeRouteUsesModelFamily(ctx context.Context, harness, family stri
 	if err != nil {
 		return err
 	}
-	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli"}, harness) {
+	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}, harness) {
 		return fmt.Errorf("unsupported shared runtime harness %q", harness)
 	}
 	if !slices.Contains([]string{"anthropic", "openai", "gemini", "glm", "deepseek", "nemotron", "qwen"}, family) {

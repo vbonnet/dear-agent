@@ -2,10 +2,11 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // TestIntegration_WorktreeLifecycle tests the complete worktree workflow:
@@ -81,17 +82,17 @@ status: claimed
 
 	t.Run("step4_work_in_worktree", func(t *testing.T) {
 		// Simulate creating phase deliverables in worktree
-		w0Charter := filepath.Join(projectPath, "W0-charter.md")
+		w0Charter := filepath.Join(projectPath, "CHARTER-charter.md")
 		charterContent := `---
-phase: "W0"
+phase: "CHARTER"
 phase_name: "Project Framing"
 wayfinder_session_id: "test-session-123"
 created_at: "2026-02-10T10:00:00Z"
 phase_engram_hash: "sha256:test-hash"
-phase_engram_path: "~/test/engrams/w0.md"
+phase_engram_path: "~/test/engrams/charter.md"
 ---
 
-# W0: Project Charter
+# CHARTER: Project Charter
 
 Test charter for worktree integration test.
 `
@@ -100,22 +101,22 @@ Test charter for worktree integration test.
 		}
 
 		// Commit to worktree branch
-		runGit(t, worktreePath, "add", filepath.Join("wf", projectID, "W0-charter.md"))
-		runGit(t, worktreePath, "commit", "-m", "wayfinder: complete W0 (Project Framing)")
+		runGit(t, worktreePath, "add", filepath.Join("wf", projectID, "CHARTER-charter.md"))
+		runGit(t, worktreePath, "commit", "-m", "wayfinder: complete CHARTER (Project Framing)")
 
 		// Verify commit on worktree branch
 		assertOnBranch(t, worktreePath, "wayfinder/"+projectID)
 		log := runGitOutput(t, worktreePath, "log", "--oneline", "-n", "1")
-		if !strings.Contains(log, "wayfinder: complete W0") {
+		if !strings.Contains(log, "wayfinder: complete CHARTER") {
 			t.Fatalf("commit not found on worktree branch: %s", log)
 		}
 	})
 
 	t.Run("step5_verify_main_unchanged", func(t *testing.T) {
-		// Main should NOT have W0-charter.md yet
-		w0CharterOnMain := filepath.Join(mainProjectPath, "W0-charter.md")
+		// Main should NOT have CHARTER-charter.md yet
+		w0CharterOnMain := filepath.Join(mainProjectPath, "CHARTER-charter.md")
 		if _, err := os.Stat(w0CharterOnMain); err == nil {
-			t.Fatalf("W0-charter.md should NOT exist on main yet (worktree isolation failed)")
+			t.Fatalf("CHARTER-charter.md should NOT exist on main yet (worktree isolation failed)")
 		}
 
 		// Main should only have placeholder STATUS
@@ -131,7 +132,7 @@ Test charter for worktree integration test.
 
 		// Verify rebase succeeded
 		log := runGitOutput(t, worktreePath, "log", "--oneline", "-n", "1")
-		if !strings.Contains(log, "wayfinder: complete W0") {
+		if !strings.Contains(log, "wayfinder: complete CHARTER") {
 			t.Fatalf("rebase lost commit: %s", log)
 		}
 	})
@@ -143,13 +144,13 @@ Test charter for worktree integration test.
 		// Merge worktree branch (fast-forward)
 		runGit(t, workspaceRoot, "merge", "--ff-only", "wayfinder/"+projectID)
 
-		// Verify W0-charter.md now on main
-		w0CharterOnMain := filepath.Join(mainProjectPath, "W0-charter.md")
-		assertFileExists(t, w0CharterOnMain, "W0-charter.md merged to main")
+		// Verify CHARTER-charter.md now on main
+		w0CharterOnMain := filepath.Join(mainProjectPath, "CHARTER-charter.md")
+		assertFileExists(t, w0CharterOnMain, "CHARTER-charter.md merged to main")
 
 		// Verify merge commit
 		log := runGitOutput(t, workspaceRoot, "log", "--oneline", "-n", "1")
-		if !strings.Contains(log, "wayfinder: complete W0") {
+		if !strings.Contains(log, "wayfinder: complete CHARTER") {
 			t.Fatalf("merge failed, commit not on main: %s", log)
 		}
 	})
@@ -178,7 +179,7 @@ Test charter for worktree integration test.
 	t.Run("step10_verify_final_state", func(t *testing.T) {
 		// Main should have complete project
 		assertFileExists(t, filepath.Join(mainProjectPath, "WAYFINDER-STATUS.md"), "status on main")
-		assertFileExists(t, filepath.Join(mainProjectPath, "W0-charter.md"), "charter on main")
+		assertFileExists(t, filepath.Join(mainProjectPath, "CHARTER-charter.md"), "charter on main")
 
 		// Worktree should be gone
 		if _, err := os.Stat(worktreePath); err == nil {
@@ -321,21 +322,14 @@ func TestIntegration_WorktreeConflictPrevention(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
-	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.name", "Test User")
-	runGit(t, dir, "config", "user.email", "test@example.com")
-
-	// Create initial commit (git requires at least one commit)
-	readmeFile := filepath.Join(dir, "README.md")
-	os.WriteFile(readmeFile, []byte("# Test Repo\n"), 0644)
-	runGit(t, dir, "add", "README.md")
-	runGit(t, dir, "commit", "-m", "initial commit")
+	// The sandbox supplies the identity, the default branch and an empty hooks
+	// path, and seeds the repository with one commit.
+	gittest.InitRepo(t, dir)
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)
@@ -344,8 +338,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 func runGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)

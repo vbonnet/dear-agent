@@ -127,6 +127,13 @@ func (p Policy) Classify(pr PR, attempts int, agentActive bool) Classification {
 		return Classification{StateBehind, "behind base; rebase (re-runs CI)"}
 	}
 
+	if pr.CheckProjectionError != "" {
+		if isPermanentProjectionError(pr.CheckProjectionError) {
+			return Classification{StateBlockedPolicy, "required-check projection blocked: " + pr.CheckProjectionError}
+		}
+		return Classification{StateCIPending, "required-check projection unavailable: " + pr.CheckProjectionError}
+	}
+
 	// CI verdict on an up-to-date head.
 	switch pr.requiredVerdict() {
 	case CheckFail:
@@ -254,4 +261,17 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+func isPermanentProjectionError(errStr string) bool {
+	lower := strings.ToLower(errStr)
+	return strings.Contains(lower, "required workflow") ||
+		strings.Contains(lower, "unsupported") ||
+		strings.Contains(lower, "policy") ||
+		strings.Contains(lower, "disagreement") ||
+		strings.Contains(lower, "ambiguous") ||
+		strings.Contains(lower, "incomplete") ||
+		strings.Contains(lower, "ruleset") ||
+		strings.Contains(lower, "reconciling") ||
+		strings.Contains(lower, "normalizing")
 }

@@ -1,17 +1,18 @@
 # AGM Reaper Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-24 -->
 
-**Version:** 1.0
-**Status:** Baseline
+**Version:** 1.1
+**Status:** Living
 **Scope:** `agm-reaper` archived-session cleanup command.
 
 ## Overview
 
-`agm-reaper` is the command-line wrapper around `agm/internal/reaper`. It archives
-a named session using the configured sessions directory and optional log file.
-The command is intentionally small but remains a runtime surface because launchd,
-manual recovery, and cleanup automation depend on its flags and exit behavior.
+`agm-reaper` is the command-line wrapper around `agm/internal/reaper`. It stops a
+named session and then completes archival through the shared AGM archive
+operation. The command is intentionally small but remains a runtime surface
+because detached archival, launchd, manual recovery, and cleanup automation
+depend on its flags and exit behavior.
 
 ## EARS Requirements
 
@@ -26,6 +27,18 @@ manual recovery, and cleanup automation depend on its flags and exit behavior.
 **AGM-REAPER-05** When the reaper implementation completes successfully, the system shall log successful completion.
 
 **AGM-REAPER-06** When the command returns an error from `main`, the system shall write the error to stderr and exit nonzero.
+
+**AGM-REAPER-07** When `--force`, `--keep-sandbox`, or `--outcome` is provided, the system shall pass the selected archive options to the reaper implementation unchanged.
+
+**AGM-REAPER-08** When no `--outcome` is provided, the system shall allow the shared archive operation to derive the session's terminal outcome from its persisted state.
+
+**AGM-REAPER-09** When AGM supplies an expected VCS revision for asynchronous archive execution, the system shall refuse to run lifecycle code unless the detached `agm-reaper` binary carries the same embedded revision and the same clean or dirty provenance.
+
+**AGM-REAPER-10** When AGM supplies a startup acknowledgement descriptor, the system shall acknowledge readiness only after revision validation and durable log initialization succeed.
+
+**AGM-REAPER-11** When the canonical root AGM install target is invoked, the system shall build and install both `agm` and `agm-reaper` with the same revision identity.
+
+**AGM-REAPER-12** When asynchronous archive execution crosses into `agm-reaper`, the command shall require both `--session-id` with the stable AGM lifecycle identifier and `--session` with the resolved tmux target, and shall pass those identities to storage and pane-control paths without conflating them.
 
 ## BDD Traceability
 

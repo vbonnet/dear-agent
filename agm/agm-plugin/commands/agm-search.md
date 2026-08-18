@@ -1,55 +1,26 @@
 ---
 model: haiku
 effort: low
-content-hash: bfb2721d6374a61dd0d0c1d05d9b19d85b0aec6ff4159f603e7a2a11595f5c6c
-description: Search AGM sessions by name or status
-argument-hint: "<query>"
-allowed-tools: Bash(agm session list *)
+content-hash: c877679811ff323b69d6b951e9d4bf9bfeaab3ce14d7a0cfb68d07ed0913dd36
+description: >-
+  Search archived Claude conversation history semantically. Use for a remembered topic when the Claude and Vertex AI extension is available; otherwise use the harness-neutral list fallback.
+argument-hint: "<query> [--max-results N]"
+allowed-tools: Bash(agm session search *), Bash(agm session list *)
 ---
 
-# AGM Search Sessions
+<!-- Code generated from registered Cobra metadata. DO NOT EDIT. -->
+# Search archived AGM sessions
 
-I'll search AGM sessions matching a query.
+## Run
 
-**Step 1: Parse arguments**
+- Treat user-provided values as separate argv values. Never build shell syntax with concatenation, command substitution, or unquoted interpolation.
+- Run `agm session search <query>`.
+- Forward only requested optional flags: `--max-results`.
+- `agm session search` is a Claude-history and Vertex AI extension. It may prompt before restoring a result.
+- For other harnesses, missing Vertex credentials, or a non-interactive lookup, run the fallback and filter session names, tags, and projects in memory. Run `agm session list --all --output json`.
 
-- Parse $ARGUMENTS to extract the search query
-- If $ARGUMENTS is empty or whitespace only:
-  - Show: "Search query is required. Usage: /agm:search <query>"
-  - Show: "Examples: /agm:search research, /agm:search --status active"
-  - Exit gracefully
-- Check if query starts with `--status` to filter by status
-- Otherwise treat the query as a name pattern
+## Report
 
-**Step 2: Fetch all sessions**
-
-- Run: `agm session list --output json`
-- If exit code is not 0:
-  - Show error and suggest: "Try running: agm admin doctor"
-  - Exit gracefully
-- If output is empty or `[]`:
-  - Show: "No sessions found. Create one with /agm:new <name>"
-  - Exit gracefully
-
-**Step 3: Filter results**
-
-Parse the JSON array and filter:
-- If filtering by `--status <value>`: match sessions where status equals the value (case-insensitive)
-- If filtering by name pattern: match sessions where the name contains the query string (case-insensitive)
-
-**Step 4: Display results**
-
-- If no matches found:
-  - Show: "No sessions matching '{query}'"
-  - Suggest: "Run /agm:list to see all sessions"
-  - Exit gracefully
-- If matches found, display a table:
-
-| Name | Status | Harness | Project |
-|------|--------|---------|---------|
-
-Show: "Found N session(s) matching '{query}'"
-
-**Error Handling**:
-- If agm not found: "Install agm from github.com/vbonnet/dear-agent"
-- If no matches: suggest `/agm:list` to see all sessions
+- If the primary command exits non-zero because its extension or credentials are unavailable, show its stderr and run the documented fallback `agm session list --all --output json`. For any other non-zero exit, show stderr and stop. Do not invent another fallback command.
+- Present AGM's result and any confirmation request without changing its meaning.
+- If no sessions match, say so without treating the empty result as an error.

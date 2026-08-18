@@ -1,5 +1,5 @@
 // Package safepr is the policy core of safe-pr, the one sanctioned path for
-// opening and closing GitHub pull requests from agent sessions.
+// opening, closing, and reopening GitHub pull requests from agent sessions.
 //
 // # Why PRs are wrapped at all
 //
@@ -13,11 +13,11 @@
 //
 // What the wrapper guarantees by construction
 //
-//   - Only the verbs `create` and `close` exist; everything else is refused.
+//   - Only the verbs `create`, `close`, and `reopen` exist; everything else is refused.
 //   - A PR carries a wayfinder session trace: the caller names an active
 //     wayfinder project (--wayfinder flag or WAYFINDER_PROJECT_DIR env) whose
-//     WAYFINDER-STATUS.md is active, and its canonical project name (or legacy
-//     session id) is stamped into the PR body (create) or close comment (close).
+//     WAYFINDER-STATUS.md is active, and its canonical project name is stamped
+//     into the PR body (create) or mutation comment (close/reopen).
 //   - Interactive and unstampable forms (--web, --fill, --body-file, missing
 //     --title) are refused so the run is deterministic and headless-safe.
 package safepr
@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 // DefaultTimeout bounds a gh invocation so a wedged network call or an
@@ -49,16 +49,6 @@ type Session struct {
 	BeadID string
 }
 
-// statusFrontmatter is the subset of WAYFINDER-STATUS.md frontmatter safe-pr
-// consumes. Unknown fields are ignored on purpose: the schema belongs to
-// wayfinder, not to us.
-type statusFrontmatter struct {
-	SessionID   string   `yaml:"session_id"`
-	ProjectName string   `yaml:"project_name"` // V2 schema: fallback when session_id absent
-	Status      string   `yaml:"status"`
-	Beads       []string `yaml:"beads"`
-}
-
 // ResolveSessionDir picks the wayfinder project directory: the --wayfinder
 // flag wins, then the WAYFINDER_PROJECT_DIR environment variable. An empty
 // result is an error that teaches the caller both options.
@@ -71,42 +61,28 @@ func ResolveSessionDir(flagDir string) (string, error) {
 	}
 	return "", fmt.Errorf("no wayfinder session given: pass --wayfinder <project-dir> or set " +
 		"WAYFINDER_PROJECT_DIR to the directory containing WAYFINDER-STATUS.md. Every PR must " +
-		"carry a wayfinder trace. If no approved path exists, escalate via: " +
-		"agm escalate --action \"create PR\" --reason \"<why no session exists>\"")
+		"carry a wayfinder trace. In a current AGM session, escalate via: " +
+		"agm escalate ask --kind blocked-action --context \"<why no session exists>\" \"create PR\". " +
+		"Outside AGM, add --session <registered-session>; if no registered session exists, " +
+		"ask the current user directly")
 }
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
 // describes. It fails unless the file exists, parses, carries a project_name
-// (or legacy session_id), and has an active status. Canonical V2 planning and
-// in-progress sessions are active; completed, abandoned, and blocked sessions
+// and has schema 2.0 plus an active status. Canonical planning and in-progress
+// sessions are active; completed, abandoned, and blocked sessions
 // are not valid attribution targets for new PRs.
 func LoadSession(dir string) (Session, error) {
 	path := filepath.Join(dir, "WAYFINDER-STATUS.md")
-	raw, err := os.ReadFile(path)
+	st, err := statusread.ParseFromDir(dir)
 	if err != nil {
-		return Session{}, fmt.Errorf("cannot read %s: %w — point --wayfinder/WAYFINDER_PROJECT_DIR "+
+		return Session{}, fmt.Errorf("cannot load validated status from %s: %w — point --wayfinder/WAYFINDER_PROJECT_DIR "+
 			"at a wayfinder project directory (the one holding WAYFINDER-STATUS.md)", path, err)
-	}
-	fm, err := frontmatter(string(raw))
-	if err != nil {
-		return Session{}, fmt.Errorf("%s: %w", path, err)
-	}
-	var st statusFrontmatter
-	if err := yaml.Unmarshal([]byte(fm), &st); err != nil {
-		return Session{}, fmt.Errorf("%s: cannot parse YAML frontmatter: %w", path, err)
-	}
-	// V2 sessions carry project_name instead of session_id.
-	sessionID := st.SessionID
-	if sessionID == "" {
-		sessionID = st.ProjectName
-	}
-	if sessionID == "" {
-		return Session{}, fmt.Errorf("%s has no session_id or project_name in its frontmatter", path)
 	}
 	if !isActiveStatus(st.Status) {
 		return Session{}, fmt.Errorf("wayfinder session %s is %q, not active — start or resume "+
-			"a session (wayfinder start / wayfinder session) before opening PRs against it",
-			sessionID, st.Status)
+			"a session with `wayfinder session start <project-name>` before opening PRs against it",
+			st.ProjectName, st.Status)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -116,11 +92,11 @@ func LoadSession(dir string) (Session, error) {
 	if len(st.Beads) > 0 {
 		beadID = strings.TrimSpace(st.Beads[0])
 	}
-	return Session{ID: sessionID, ProjectPath: abs, BeadID: beadID}, nil
+	return Session{ID: st.ProjectName, ProjectPath: abs, BeadID: beadID}, nil
 }
 
 func isActiveStatus(status string) bool {
-	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(status)), "_", "-") {
+	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "planning", "in-progress":
 		return true
 	default:
@@ -128,24 +104,9 @@ func isActiveStatus(status string) bool {
 	}
 }
 
-// frontmatter extracts the YAML between the leading "---" fence pair.
-func frontmatter(content string) (string, error) {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	if !strings.HasPrefix(content, "---\n") {
-		return "", fmt.Errorf("file does not start with YAML frontmatter (---)")
-	}
-	lines := strings.Split(content, "\n")
-	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
-			return strings.Join(lines[1:i], "\n"), nil
-		}
-	}
-	return "", fmt.Errorf("unterminated YAML frontmatter (no closing ---)")
-}
-
 // Request is one validated safe-pr invocation.
 type Request struct {
-	Verb    string   // "create" or "close"
+	Verb    string   // "create", "close", or "reopen"
 	Session *Session // always required; set before calling Validate
 	GhArgs  []string // caller's pass-through gh arguments
 }
@@ -179,9 +140,9 @@ var deniedCreateFlags = map[string]string{
 // say what was attempted, the right way, and why.
 func (r *Request) Validate() error {
 	switch r.Verb {
-	case "create", "close":
+	case "create", "close", "reopen":
 	default:
-		return fmt.Errorf("safe-pr only supports `create` and `close`, not %q — other gh pr verbs "+
+		return fmt.Errorf("safe-pr only supports `create`, `close`, and `reopen`, not %q — other gh pr verbs "+
 			"(view, list, checks, diff) are read-only and need no wrapper; `merge` keeps its existing "+
 			"review-gated path", r.Verb)
 	}
@@ -211,11 +172,11 @@ func (r *Request) Validate() error {
 				"is deterministic and headless-safe — gh would otherwise drop into an interactive prompt")
 		}
 	}
-	if r.Verb == "close" {
+	if r.Verb == "close" || r.Verb == "reopen" {
 		if !hasFlag(r.GhArgs, "--comment", "-c") {
-			return fmt.Errorf("safe-pr close requires an explicit --comment explaining why the PR " +
-				"is being closed — unattributed closures are invisible to reviewers and cannot be audited; " +
-				"use: safe-pr close --wayfinder <dir> --comment \"reason\" <number>")
+			return fmt.Errorf("safe-pr %s requires an explicit --comment explaining why the PR "+
+				"is being mutated — unattributed state changes are invisible to reviewers and cannot be audited; "+
+				"use: safe-pr %s --wayfinder <dir> --comment \"reason\" <number>", r.Verb, r.Verb)
 		}
 	}
 	return nil
@@ -229,14 +190,14 @@ func (r *Request) Trailer() string {
 
 // StampedArgs returns the final gh argv (after "gh"): the verb mapped to
 // `pr <verb>` with the trace trailer folded into --body (create) or
-// --comment (close), appending the flag when the caller did not pass one.
+// --comment (close/reopen), appending the flag when the caller did not pass one.
 //
 // On create, when the session carries a bead, a "Closes <bead>" line is folded
 // in above the trace trailer so the PR auto-closes its bead on merge — unless
 // the caller already referenced the bead in their args (no duplicate line).
 func (r *Request) StampedArgs() []string {
 	target, short := "--body", "-b"
-	if r.Verb == "close" {
+	if r.Verb == "close" || r.Verb == "reopen" {
 		target, short = "--comment", "-c"
 	}
 	trailer := r.Trailer()

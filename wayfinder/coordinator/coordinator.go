@@ -267,8 +267,12 @@ func (c *Coordinator) runProject(ctx context.Context, projectDir string) error {
 		c.mu.Unlock()
 	}
 
-	// Spawn wayfinder-session process
-	cmd := exec.CommandContext(ctx, "wayfinder-session", "start", absDir)
+	sessionDir := absDir
+	if sb != nil && sb.WorktreePath != "" {
+		sessionDir = sb.WorktreePath
+	}
+	// Spawn the canonical Wayfinder CLI surface with an explicit project path.
+	cmd := exec.CommandContext(ctx, "wayfinder", "-C", sessionDir, "session", "start", filepath.Base(absDir))
 
 	// Set environment variables if sandboxed
 	if sb != nil {

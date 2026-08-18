@@ -17,3 +17,23 @@ func TestAgySurveyBlocksReadyPrompt(t *testing.T) {
 		t.Fatalf("CheckCanReceive() = %q, want %q", got, CanReceiveOverlay)
 	}
 }
+
+func TestAgyStaleSurveyAllowsLaterReadyPrompt(t *testing.T) {
+	detector := NewDetector()
+	content := agySurveyPane + "\nTask complete\n>"
+	result := detector.DetectState(content, time.Now())
+	if result.State != StateReady {
+		t.Fatalf("DetectState() = %q, want ready after stale survey", result.State)
+	}
+	if got := detector.CheckCanReceive(content); got != CanReceiveYes {
+		t.Fatalf("CheckCanReceive() = %q, want %q", got, CanReceiveYes)
+	}
+}
+
+func TestAgyPromptBeforeSurveyRemainsOverlay(t *testing.T) {
+	detector := NewDetector()
+	content := "Task complete\n>\n" + agySurveyPane
+	if got := detector.CheckCanReceive(content); got != CanReceiveOverlay {
+		t.Fatalf("CheckCanReceive() = %q, want %q", got, CanReceiveOverlay)
+	}
+}

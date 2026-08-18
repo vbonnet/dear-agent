@@ -11,7 +11,7 @@ func TestAddSignature(t *testing.T) {
 
 	// Create test file
 	content := `---
-phase: D1
+phase: PROBLEM
 title: Test Phase
 ---
 
@@ -57,7 +57,7 @@ It has multiple lines.
 	}
 
 	// Verify original frontmatter preserved
-	if !containsString(updatedStr, "phase: D1") {
+	if !containsString(updatedStr, "phase: PROBLEM") {
 		t.Error("original frontmatter should be preserved")
 	}
 }
@@ -73,7 +73,7 @@ func TestHasSignature(t *testing.T) {
 		{
 			name: "file with signature",
 			content: `---
-phase: D1
+phase: PROBLEM
 validated: true
 validated_at: 2026-01-24T12:00:00Z
 validator_version: 1.0.0
@@ -86,7 +86,7 @@ Content`,
 		{
 			name: "file without signature",
 			content: `---
-phase: D1
+phase: PROBLEM
 ---
 
 Content`,
@@ -95,7 +95,7 @@ Content`,
 		{
 			name: "file with validated=false",
 			content: `---
-phase: D1
+phase: PROBLEM
 validated: false
 ---
 
@@ -105,7 +105,7 @@ Content`,
 		{
 			name: "file with incomplete signature",
 			content: `---
-phase: D1
+phase: PROBLEM
 validated: true
 validated_at: 2026-01-24T12:00:00Z
 ---
@@ -139,7 +139,7 @@ func TestRemoveSignature(t *testing.T) {
 
 	// Create file with signature
 	content := `---
-phase: D1
+phase: PROBLEM
 title: Test
 validated: true
 validated_at: 2026-01-24T12:00:00Z
@@ -182,7 +182,7 @@ Body content`
 	}
 
 	// Verify original frontmatter preserved
-	if !containsString(updatedStr, "phase: D1") {
+	if !containsString(updatedStr, "phase: PROBLEM") {
 		t.Error("original frontmatter should be preserved")
 	}
 	if !containsString(updatedStr, "title: Test") {
@@ -200,7 +200,7 @@ func TestValidateChecksum(t *testing.T) {
 
 	// Create file and add signature
 	content := `---
-phase: D1
+phase: PROBLEM
 ---
 
 Original body content`
@@ -253,7 +253,7 @@ func TestAddRemoveSignature_Roundtrip(t *testing.T) {
 
 	// Original content
 	original := `---
-phase: D1
+phase: PROBLEM
 title: Test Phase
 status: in_progress
 ---
@@ -302,7 +302,7 @@ Multiple lines.
 	}
 
 	finalStr := string(final)
-	if !containsString(finalStr, "phase: D1") {
+	if !containsString(finalStr, "phase: PROBLEM") {
 		t.Error("phase field should be preserved")
 	}
 	if !containsString(finalStr, "title: Test Phase") {
@@ -324,13 +324,13 @@ func TestSplitFrontmatterAndBody(t *testing.T) {
 		{
 			name: "valid frontmatter",
 			content: `---
-phase: D1
+phase: PROBLEM
 title: Test
 ---
 
 Body content here`,
 			expectError:         false,
-			expectedFrontmatter: "phase: D1\ntitle: Test",
+			expectedFrontmatter: "phase: PROBLEM\ntitle: Test",
 			expectedBody:        "\nBody content here",
 		},
 		{
@@ -341,18 +341,18 @@ Body content here`,
 		{
 			name: "no closing delimiter",
 			content: `---
-phase: D1
+phase: PROBLEM
 Body without closing delimiter`,
 			expectError: true,
 		},
 		{
 			name: "empty body",
 			content: `---
-phase: D1
+phase: PROBLEM
 ---
 `,
 			expectError:         false,
-			expectedFrontmatter: "phase: D1",
+			expectedFrontmatter: "phase: PROBLEM",
 			expectedBody:        "",
 		},
 	}

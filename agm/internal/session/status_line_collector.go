@@ -33,11 +33,11 @@ type StatusLineData struct {
 
 // formatTokenCount formats a token count for display: 1000000 → "1M", 200000 → "200k", 5000 → "5k"
 func formatTokenCount(tokens int) string {
-	if tokens >= 1000000 {
-		if tokens%1000000 == 0 {
-			return fmt.Sprintf("%dM", tokens/1000000)
+	if tokens >= extendedContextWindowTokens {
+		if tokens%extendedContextWindowTokens == 0 {
+			return fmt.Sprintf("%dM", tokens/extendedContextWindowTokens)
 		}
-		return fmt.Sprintf("%.1fM", float64(tokens)/1000000.0)
+		return fmt.Sprintf("%.1fM", float64(tokens)/float64(extendedContextWindowTokens))
 	}
 	if tokens >= 1000 {
 		if tokens%1000 == 0 {
@@ -55,6 +55,7 @@ var defaultAgentIcons = map[string]string{
 	"codex-cli":    "🧠",
 	"agy":          "✦",
 	"opencode-cli": "💻",
+	"pi-cli":       "π",
 }
 
 // HookStalenessThreshold is the maximum age of a hook-based state update
@@ -121,7 +122,7 @@ func ResolveSessionState(tmuxName, manifestState, claudeUUID string, stateUpdate
 // blocked states (permission prompts) that hooks don't report. Returns
 // the manifest state string if blocked, or empty string if not blocked.
 func detectTerminalBlockedState(tmuxName string) string {
-	paneContent, err := tmux.CapturePaneOutput(tmuxName, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutput(tmuxName, 30)
 	if err != nil {
 		return "" // can't read pane, trust manifest
 	}
@@ -141,7 +142,7 @@ func detectTerminalBlockedState(tmuxName string) string {
 // states, serving as a complete fallback when hooks are unavailable or stale.
 // Returns empty string if terminal content cannot be read.
 func detectTerminalFullState(tmuxName string) string {
-	paneContent, err := tmux.CapturePaneOutput(tmuxName, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutput(tmuxName, 30)
 	if err != nil {
 		return "" // can't read pane
 	}

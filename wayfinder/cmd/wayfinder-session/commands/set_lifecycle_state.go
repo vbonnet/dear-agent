@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -29,16 +30,19 @@ Optional flags:
   --input-needed     - Description of needed input (for input-required state)
 
 Examples:
-  wayfinder-session set-lifecycle-state working
-  wayfinder-session set-lifecycle-state input-required --input-needed "Design decision needed"
-  wayfinder-session set-lifecycle-state dependency-blocked --blocked-on oss-vnfl
-  wayfinder-session set-lifecycle-state failed --error-message "Compilation failed: undefined variable"
-  wayfinder-session set-lifecycle-state completed
+  wayfinder session set-lifecycle-state working
+  wayfinder session set-lifecycle-state input-required --input-needed "Design decision needed"
+  wayfinder session set-lifecycle-state dependency-blocked --blocked-on oss-vnfl
+  wayfinder session set-lifecycle-state failed --error-message "Compilation failed: undefined variable"
+  wayfinder session set-lifecycle-state completed
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectDir := GetProjectDirectory()
 		lifecycleState := args[0]
+		blockedOn, _ := cmd.Flags().GetString("blocked-on")
+		errorMessage, _ := cmd.Flags().GetString("error-message")
+		inputNeeded, _ := cmd.Flags().GetString("input-needed")
 
 		// Validate lifecycle state
 		validStates := []string{
@@ -54,14 +58,10 @@ Examples:
 		if !slices.Contains(validStates, lifecycleState) {
 			return fmt.Errorf("invalid lifecycle state: %s (valid: working, input-required, dependency-blocked, validating, completed, failed, canceled)", lifecycleState)
 		}
+		if err := validateLifecycleMetadata(lifecycleState, blockedOn, errorMessage, inputNeeded); err != nil {
+			return err
+		}
 
-		version, err := status.DetectSchemaVersionFromDir(projectDir)
-		if err != nil {
-			return fmt.Errorf("failed to inspect status: %w", err)
-		}
-		if version != status.SchemaVersionV2 {
-			return fmt.Errorf("legacy Wayfinder status requires explicit migration before set-lifecycle-state")
-		}
 		st, err := status.ParseV2FromDir(projectDir)
 		if err != nil {
 			return fmt.Errorf("failed to read status: %w", err)
@@ -73,43 +73,13 @@ Examples:
 				return fmt.Errorf("invalid state transition: %w", err)
 			}
 		}
-
-		// Update lifecycle state
-		st.LifecycleState = lifecycleState
-
-		// Update optional metadata fields
-		blockedOn, _ := cmd.Flags().GetString("blocked-on")
-		if blockedOn != "" {
-			st.BlockedOn = blockedOn
+		if err := validateLifecycleCompletion(st, lifecycleState); err != nil {
+			return err
 		}
 
-		errorMessage, _ := cmd.Flags().GetString("error-message")
-		if errorMessage != "" {
-			st.ErrorMessage = errorMessage
-		}
-
-		inputNeeded, _ := cmd.Flags().GetString("input-needed")
-		if inputNeeded != "" {
-			st.InputNeeded = inputNeeded
-		}
-
-		// Clear metadata if transitioning to working/completed/canceled
-		if lifecycleState == status.LifecycleWorking || lifecycleState == status.LifecycleCompleted || lifecycleState == status.LifecycleCanceled {
-			st.BlockedOn = ""
-			st.ErrorMessage = ""
-			st.InputNeeded = ""
-		}
-
-		// Update high-level status field to match lifecycle state
-		switch lifecycleState {
-		case status.LifecycleWorking, status.LifecycleValidating:
-			st.Status = status.StatusV2InProgress
-		case status.LifecycleInputRequired, status.LifecycleDependencyBlocked, status.LifecycleFailed:
-			st.Status = status.StatusV2Blocked
-		case status.LifecycleCompleted:
-			st.Status = status.StatusV2Completed
-		case status.LifecycleCanceled:
-			st.Status = status.StatusV2Abandoned
+		applyLifecycleState(st, lifecycleState, blockedOn, errorMessage, inputNeeded, time.Now())
+		if err := status.ValidateV2(st); err != nil {
+			return fmt.Errorf("invalid lifecycle update: %w", err)
 		}
 
 		// Write updated status
@@ -130,6 +100,66 @@ Examples:
 
 		return nil
 	},
+}
+
+func validateLifecycleCompletion(st *status.StatusV2, lifecycleState string) error {
+	if lifecycleState != status.LifecycleCompleted {
+		return nil
+	}
+	return status.ValidateSessionCompletion(st)
+}
+
+func applyLifecycleState(st *status.StatusV2, lifecycleState, blockedOn, errorMessage, inputNeeded string, now time.Time) {
+	st.LifecycleState = lifecycleState
+	st.BlockedOn = blockedOn
+	st.ErrorMessage = errorMessage
+	st.InputNeeded = inputNeeded
+	st.BlockedReason = ""
+	st.CompletionDate = nil
+	st.UpdatedAt = now
+
+	switch lifecycleState {
+	case status.LifecycleWorking, status.LifecycleValidating:
+		st.Status = status.StatusV2InProgress
+	case status.LifecycleInputRequired:
+		st.Status = status.StatusV2Blocked
+		st.BlockedReason = inputNeeded
+	case status.LifecycleDependencyBlocked:
+		st.Status = status.StatusV2Blocked
+		st.BlockedReason = "blocked on " + blockedOn
+	case status.LifecycleFailed:
+		st.Status = status.StatusV2Blocked
+		st.BlockedReason = errorMessage
+	case status.LifecycleCompleted:
+		st.Status = status.StatusV2Completed
+		st.CompletionDate = &now
+	case status.LifecycleCanceled:
+		st.Status = status.StatusV2Abandoned
+	}
+
+	if lifecycleState == status.LifecycleWorking || lifecycleState == status.LifecycleCompleted || lifecycleState == status.LifecycleCanceled {
+		st.BlockedOn = ""
+		st.ErrorMessage = ""
+		st.InputNeeded = ""
+	}
+}
+
+func validateLifecycleMetadata(state, blockedOn, errorMessage, inputNeeded string) error {
+	switch state {
+	case status.LifecycleInputRequired:
+		if inputNeeded == "" {
+			return fmt.Errorf("input-required requires --input-needed")
+		}
+	case status.LifecycleDependencyBlocked:
+		if blockedOn == "" {
+			return fmt.Errorf("dependency-blocked requires --blocked-on")
+		}
+	case status.LifecycleFailed:
+		if errorMessage == "" {
+			return fmt.Errorf("failed requires --error-message")
+		}
+	}
+	return nil
 }
 
 // GetLifecycleStateCmd returns the lifecycle-state command for registration.

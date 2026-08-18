@@ -318,7 +318,7 @@ func TestWayfinderROILogger_OnEvent_Success(t *testing.T) {
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
 			"session_id":   "test-789",
-			"phase_name":   "D3",
+			"phase_name":   "DESIGN",
 			"outcome":      "success",
 			"duration_ms":  120000,
 			"error_count":  0,
@@ -352,8 +352,8 @@ func TestWayfinderROILogger_OnEvent_Success(t *testing.T) {
 		t.Fatal("data field is not a map")
 	}
 
-	if data["phase_name"] != "D3" {
-		t.Errorf("phase_name = %v, want %v", data["phase_name"], "D3")
+	if data["phase_name"] != "DESIGN" {
+		t.Errorf("phase_name = %v, want %v", data["phase_name"], "DESIGN")
 	}
 }
 

@@ -28,9 +28,9 @@ type ModelFamilySpec struct {
 // DeepSeek, Nemotron, and Qwen are OpenRouter-compatible open-model families
 // prioritized for cost and quota diversity.
 var SupportedModelFamilies = []ModelFamilySpec{
-	{Name: "anthropic", Provider: "Anthropic", Priority: 0, Description: "Claude family used by Claude Code and OpenRouter"},
-	{Name: "openai", Provider: "OpenAI", Priority: 0, Description: "GPT family used by Codex CLI"},
-	{Name: "gemini", Provider: "Google", Priority: 0, Description: "Gemini family used by AGY and legacy Gemini CLI"},
+	{Name: "anthropic", Provider: "Anthropic", Priority: 0, Description: "Claude family used by Claude Code, Pi, and OpenRouter"},
+	{Name: "openai", Provider: "OpenAI", Priority: 0, Description: "GPT family used by Codex CLI and Pi"},
+	{Name: "gemini", Provider: "Google", Priority: 0, Description: "Gemini family used by AGY, Pi, and legacy Gemini CLI"},
 	{Name: "glm", Provider: "Z.ai", Priority: 1, Description: "GLM 5.2 family, first new open-model priority"},
 	{Name: "deepseek", Provider: "DeepSeek", Priority: 2, Description: "DeepSeek V4 family, second new open-model priority"},
 	{Name: "nemotron", Provider: "NVIDIA", Priority: 3, Description: "Nemotron family, third new open-model priority"},
@@ -42,6 +42,7 @@ var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
 		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output (free on Pro/Max/Team through 2026-06-23)"},
 		{Alias: "opus", FullName: "claude-opus-4-8[1m]", Description: "Latest Opus, 1M context"},
+		{Alias: "opus5", FullName: "claude-opus-5", Description: "Claude Opus 5, 1M context (default and only context size, no smaller variant), same price as Opus 4.8 ($5/$25 per Mtok)"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},
 		{Alias: "opus-200k", FullName: "claude-opus-4-8", Description: "Opus with default 200k context"},
@@ -76,9 +77,31 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "5.3-codex-spark", FullName: "gpt-5.3-codex-spark", Description: "Research preview"},
 	},
 	"agy": {
-		{Alias: "2.5-pro", FullName: "gemini-2.5-pro", Description: "Highest-capability Gemini model (opus tier)"},
-		{Alias: "2.5-flash", FullName: "gemini-2.5-flash", Description: "Balanced speed/quality Gemini model (sonnet tier)"},
-		{Alias: "2.0-flash-lite", FullName: "gemini-2.0-flash-lite", Description: "Fastest, cheapest Gemini model (haiku tier)"},
+		{Alias: "3.5-flash", FullName: "Gemini 3.5 Flash (Medium)", Description: "AGY default; balanced Gemini 3.5 Flash reasoning"},
+		{Alias: "3.5-flash-medium", FullName: "Gemini 3.5 Flash (Medium)", Description: "Balanced Gemini 3.5 Flash reasoning"},
+		{Alias: "3.5-flash-high", FullName: "Gemini 3.5 Flash (High)", Description: "Higher-reasoning Gemini 3.5 Flash"},
+		{Alias: "3.5-flash-low", FullName: "Gemini 3.5 Flash (Low)", Description: "Fast, low-reasoning Gemini 3.5 Flash"},
+		{Alias: "3.1-pro-low", FullName: "Gemini 3.1 Pro (Low)", Description: "Gemini 3.1 Pro with lower reasoning"},
+		{Alias: "3.1-pro-high", FullName: "Gemini 3.1 Pro (High)", Description: "Gemini 3.1 Pro with higher reasoning"},
+		{Alias: "claude-sonnet-4.6-thinking", FullName: "Claude Sonnet 4.6 (Thinking)", Description: "Claude Sonnet 4.6 with thinking"},
+		{Alias: "claude-opus-4.6-thinking", FullName: "Claude Opus 4.6 (Thinking)", Description: "Claude Opus 4.6 with thinking"},
+		{Alias: "gpt-oss-120b-medium", FullName: "GPT-OSS 120B (Medium)", Description: "GPT-OSS 120B with medium reasoning"},
+	},
+	"pi-cli": {
+		{Alias: "fable", FullName: "anthropic/claude-fable-5", Description: "Claude Fable 5 through Pi's Anthropic provider"},
+		{Alias: "sonnet", FullName: "anthropic/claude-sonnet-4-6", Description: "Claude Sonnet 4.6 through Pi's Anthropic provider"},
+		{Alias: "opus", FullName: "anthropic/claude-opus-4-8", Description: "Claude Opus 4.8 through Pi's Anthropic provider"},
+		{Alias: "opus5", FullName: "anthropic/claude-opus-5", Description: "Claude Opus 5 through Pi's Anthropic provider"},
+		{Alias: "haiku", FullName: "anthropic/claude-haiku-4-5", Description: "Claude Haiku 4.5 through Pi's Anthropic provider"},
+		{Alias: "gpt-frontier", FullName: "openai/gpt-5.6-sol", Description: "GPT-5.6 Sol through Pi's OpenAI provider"},
+		{Alias: "gpt", FullName: "openai/gpt-5.6-terra", Description: "GPT-5.6 Terra through Pi's OpenAI provider"},
+		{Alias: "gpt-fast", FullName: "openai/gpt-5.6-luna", Description: "GPT-5.6 Luna through Pi's OpenAI provider"},
+		{Alias: "gemini-flash", FullName: "google/gemini-3.5-flash", Description: "Gemini 3.5 Flash through Pi's Google provider"},
+		{Alias: "gemini-flash-lite", FullName: "google/gemini-3.1-flash-lite", Description: "Gemini 3.1 Flash Lite through Pi's Google provider"},
+		{Alias: "glm-5.2", FullName: "openrouter/z-ai/glm-5.2", Description: "GLM 5.2 through Pi's OpenRouter provider"},
+		{Alias: "deepseek-v4", FullName: "openrouter/deepseek/deepseek-v4-pro", Description: "DeepSeek V4 Pro through Pi's OpenRouter provider"},
+		{Alias: "nemotron", FullName: "openrouter/nvidia/nemotron-3-ultra-550b-a55b", Description: "Nemotron 3 Ultra through Pi's OpenRouter provider"},
+		{Alias: "qwen", FullName: "openrouter/qwen/qwen3.6-max-preview", Description: "Qwen 3.6 Max through Pi's OpenRouter provider"},
 	},
 	// openrouter: cheap-tier models accessed via OpenRouter API proxy.
 	// Configure OPENROUTER_API_KEY to enable. These are the default cheap-tier
@@ -95,8 +118,32 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "gemini-flash", FullName: "google/gemini-flash-1.5", Description: "Gemini Flash — fast, cheap, good for extraction"},
 		{Alias: "gemini-pro", FullName: "google/gemini-pro-1.5", Description: "Gemini Pro — mid-tier via OpenRouter"},
 		{Alias: "opus", FullName: "anthropic/claude-opus-4", Description: "Claude Opus via OpenRouter — expensive tier"},
+		{Alias: "opus5", FullName: "anthropic/claude-opus-5", Description: "Claude Opus 5 via OpenRouter — expensive tier"},
 	},
 	// opencode-cli: aggregated from all other harnesses (built dynamically)
+}
+
+// legacyModelAliases preserves resumability for manifests written before a
+// harness replaced its public model catalog. Values point to current aliases
+// so every caller still crosses the normal registry and exact-label boundary.
+var legacyModelAliases = map[string]map[string]string{
+	"codex-cli": {
+		// These provider-style names are accepted by AGM input paths but are
+		// rejected by ChatGPT-account Codex auth. Resolve them to the native
+		// account-supported spellings before the private executor launches codex.
+		// "gpt-5.6" mirrors bare "5.6" below: the worker default (terra), NOT
+		// the frontier tier — callers must opt into "gpt-5.6-sol" explicitly.
+		"gpt-5.6":       "5.6-terra",
+		"gpt-5.5-codex": "5.5",
+	},
+	"agy": {
+		"2.5-flash":             "3.5-flash",
+		"gemini-2.5-flash":      "3.5-flash",
+		"2.5-pro":               "3.1-pro-high",
+		"gemini-2.5-pro":        "3.1-pro-high",
+		"2.0-flash-lite":        "3.5-flash-low",
+		"gemini-2.0-flash-lite": "3.5-flash-low",
+	},
 }
 
 // CrossHarnessAliases maps abstract tier names to harness-specific aliases.
@@ -129,10 +176,10 @@ var CrossHarnessAliases = map[string]map[string]string{
 		"5.4-mini":  "haiku",  // codex alias → claude equivalent
 	},
 	"agy": {
-		"fable":  "2.5-pro",        // mythos-tier → gemini-2.5-pro (best available)
-		"opus":   "2.5-pro",        // highest-tier → gemini-2.5-pro
-		"sonnet": "2.5-flash",      // mid-tier → gemini-2.5-flash
-		"haiku":  "2.0-flash-lite", // fast-tier → gemini-2.0-flash-lite (cheapest)
+		"fable":  "claude-opus-4.6-thinking", // mythos-tier → highest available AGY catalog model
+		"opus":   "claude-opus-4.6-thinking", // highest-tier → Claude Opus 4.6 (Thinking)
+		"sonnet": "3.5-flash",                // mid-tier → Gemini 3.5 Flash (Medium)
+		"haiku":  "3.5-flash-low",            // fast-tier → Gemini 3.5 Flash (Low)
 	},
 }
 
@@ -145,8 +192,9 @@ var CrossHarnessAliases = map[string]map[string]string{
 var HarnessDefaults = map[string]string{
 	"claude-code":  "sonnet",
 	"codex-cli":    "5.5",
-	"agy":          "2.5-flash",
+	"agy":          "3.5-flash",
 	"opencode-cli": "glm-5.2",
+	"pi-cli":       "sonnet",
 }
 
 // HarnessModeDefaults defines the default permission mode for each harness.
@@ -160,8 +208,9 @@ var HarnessModeDefaults = map[string]string{
 var TestModelDefaults = map[string]string{
 	"claude-code":  "haiku",
 	"codex-cli":    "5.4-mini",
-	"agy":          "2.0-flash-lite",
+	"agy":          "3.5-flash-low",
 	"opencode-cli": "haiku", // opencode supports Claude models via providers
+	"pi-cli":       "gemini-flash-lite",
 }
 
 // TestModelForHarness returns the test-specific model for a harness.
@@ -176,6 +225,8 @@ var HarnessModelFlag = map[string]string{
 	"claude-code": "--model",
 	"gemini-cli":  "-m",
 	"codex-cli":   "-m",
+	"agy":         "--model",
+	"pi-cli":      "--model",
 	// opencode-cli uses config/env var, not a CLI flag
 }
 
@@ -209,6 +260,7 @@ func modelCharOK(r rune) bool {
 // reachable from CLI flags, AGM_DEFAULT_MODEL, or any automation that sets
 // these from untrusted input.
 func ValidateModel(harnessName, modelAlias string) error {
+	modelAlias = NormalizeModelInput(harnessName, modelAlias)
 	models := GetModelsForHarness(harnessName)
 	for _, m := range models {
 		if m.Alias == modelAlias || m.FullName == modelAlias {
@@ -218,6 +270,11 @@ func ValidateModel(harnessName, modelAlias string) error {
 	if modelAlias == "" {
 		return fmt.Errorf("model is empty")
 	}
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
+		if _, ok := legacy[modelAlias]; ok {
+			return nil
+		}
+	}
 	for _, r := range modelAlias {
 		if !modelCharOK(r) {
 			return fmt.Errorf("model %q contains disallowed character %q (allowed set: alphanumeric and dot underscore dash slash colon)", modelAlias, r)
@@ -226,6 +283,39 @@ func ValidateModel(harnessName, modelAlias string) error {
 	// Unknown but syntactically safe: warn and allow (forward-compat).
 	fmt.Fprintf(os.Stderr, "Warning: model '%s' not in registry for harness '%s'. Passing through as-is.\n", modelAlias, harnessName)
 	return nil
+}
+
+// NormalizeModelInput canonicalizes registered aliases case-insensitively
+// while preserving exact public labels and unknown forward-compatible model
+// identifiers. Public labels can be case-sensitive and must not be lowercased.
+func NormalizeModelInput(harnessName, input string) string {
+	harnessName = NormalizeHarnessName(harnessName)
+	models := GetModelsForHarness(harnessName)
+	for _, model := range models {
+		if model.FullName == input || model.Alias == input {
+			return input
+		}
+	}
+	for _, model := range models {
+		if strings.EqualFold(model.Alias, input) {
+			return model.Alias
+		}
+	}
+	if crossMap, ok := CrossHarnessAliases[harnessName]; ok {
+		for alias := range crossMap {
+			if strings.EqualFold(alias, input) {
+				return alias
+			}
+		}
+	}
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
+		for old := range legacy {
+			if strings.EqualFold(old, input) {
+				return old
+			}
+		}
+	}
+	return input
 }
 
 // ResolveModelFullName resolves an alias to a full model name.
@@ -240,13 +330,26 @@ func ValidateModel(harnessName, modelAlias string) error {
 // character allowlist here so a caller that forgot to call ValidateModel
 // still can't smuggle a payload through.
 func ResolveModelFullName(harnessName, aliasOrFull string) string {
+	harnessName = NormalizeHarnessName(harnessName)
+	aliasOrFull = NormalizeModelInput(harnessName, aliasOrFull)
 	models := GetModelsForHarness(harnessName)
 	if len(models) == 0 {
 		return safeModelPassthrough(aliasOrFull)
 	}
 	for _, m := range models {
-		if m.Alias == aliasOrFull {
+		if m.Alias == aliasOrFull || m.FullName == aliasOrFull {
 			return m.FullName
+		}
+	}
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
+		if mapped, ok := legacy[aliasOrFull]; ok {
+			fmt.Fprintf(os.Stderr, "Note: mapping legacy model '%s' → '%s' for %s\n", aliasOrFull, mapped, harnessName)
+			for _, model := range models {
+				if model.Alias == mapped {
+					return model.FullName
+				}
+			}
+			return safeModelPassthrough(mapped)
 		}
 	}
 
@@ -314,15 +417,16 @@ func NeedsInteractivePicker(harnessName string) bool {
 	return !hasDefault
 }
 
-// AllModels returns all known models from all harnesses, for use in the
-// opencode-cli interactive picker.
+// AllModels returns a stable aggregated catalog for OpenCode. Pi's
+// provider-qualified routes lead because OpenCode, like Pi, requires an exact
+// provider/model identifier; aggregator-only and harness-native extras follow
+// in explicit order. Never iterate HarnessModels directly here: map order made
+// duplicate aliases resolve to different providers across calls.
 func AllModels() []ModelSpec {
+	order := []string{"pi-cli", "openrouter", "claude-code", "codex-cli", "agy"}
 	var all []ModelSpec
-	for harness, models := range HarnessModels {
-		if IsDeprecatedHarness(harness) {
-			continue
-		}
-		all = append(all, models...)
+	for _, harness := range order {
+		all = append(all, HarnessModels[harness]...)
 	}
 	return all
 }

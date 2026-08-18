@@ -34,7 +34,7 @@ PRECEDENCE ORDER (highest to lowest):
   7. Built-in defaults (hardcoded)
 
 ARGUMENTS
-  section   Optional section to display (platform, plugins, telemetry, wayfinder)
+  section   Optional section to display (platform, plugins, telemetry)
 
 FLAGS
   --json    Output as JSON
@@ -100,7 +100,7 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		section = strings.ToLower(args[0])
 		if !isValidSection(section) {
-			return fmt.Errorf("invalid section: %s (valid: platform, plugins, telemetry, wayfinder)", section)
+			return fmt.Errorf("invalid section: %s (valid: platform, plugins, telemetry)", section)
 		}
 	}
 
@@ -117,7 +117,6 @@ type EffectiveConfig struct {
 	Platform  map[string]SourcedValue `json:"platform"`
 	Plugins   map[string]SourcedValue `json:"plugins"`
 	Telemetry map[string]SourcedValue `json:"telemetry"`
-	Wayfinder map[string]SourcedValue `json:"wayfinder"`
 }
 
 // SourcedValue represents a config value with its source
@@ -132,7 +131,6 @@ func loadEffectiveConfig(_ *config.Loader) (*EffectiveConfig, error) {
 		Platform:  make(map[string]SourcedValue),
 		Plugins:   make(map[string]SourcedValue),
 		Telemetry: make(map[string]SourcedValue),
-		Wayfinder: make(map[string]SourcedValue),
 	}
 
 	// Load each tier and track sources
@@ -156,7 +154,6 @@ func loadEffectiveConfig(_ *config.Loader) (*EffectiveConfig, error) {
 		trackPlatformSources(effective, tierCfg, tier)
 		trackPluginSources(effective, tierCfg, tier)
 		trackTelemetrySources(effective, tierCfg, tier)
-		trackWayfinderSources(effective, tierCfg, tier)
 	}
 
 	// Check for environment variable overrides
@@ -270,51 +267,6 @@ func trackTelemetrySources(eff *EffectiveConfig, cfg *config.Config, tier config
 	}
 }
 
-// trackWayfinderSources records wayfinder setting sources
-func trackWayfinderSources(eff *EffectiveConfig, cfg *config.Config, tier config.ConfigTier) {
-	// W0 enforcement (only Core/Company can set)
-	if cfg.Wayfinder.W0.Enforce && (tier == config.TierCore || tier == config.TierCompany) {
-		eff.Wayfinder["w0.enforce"] = SourcedValue{
-			Value:  true,
-			Source: formatSource(tier),
-		}
-	}
-
-	// W0 enabled (respects enforcement)
-	_, hasEnforce := eff.Wayfinder["w0.enforce"]
-	if hasEnforce {
-		eff.Wayfinder["w0.enabled"] = SourcedValue{
-			Value:  true,
-			Source: "enforced by " + eff.Wayfinder["w0.enforce"].Source,
-		}
-	} else {
-		eff.Wayfinder["w0.enabled"] = SourcedValue{
-			Value:  cfg.Wayfinder.W0.Enabled,
-			Source: formatSource(tier),
-		}
-	}
-
-	// W0 detection settings
-	if cfg.Wayfinder.W0.Detection.MinWordCount > 0 {
-		eff.Wayfinder["w0.detection.min_word_count"] = SourcedValue{
-			Value:  cfg.Wayfinder.W0.Detection.MinWordCount,
-			Source: formatSource(tier),
-		}
-	}
-	if cfg.Wayfinder.W0.Detection.MaxSkipWordCount > 0 {
-		eff.Wayfinder["w0.detection.max_skip_word_count"] = SourcedValue{
-			Value:  cfg.Wayfinder.W0.Detection.MaxSkipWordCount,
-			Source: formatSource(tier),
-		}
-	}
-	if cfg.Wayfinder.W0.Detection.VaguenessThreshold > 0 {
-		eff.Wayfinder["w0.detection.vagueness_threshold"] = SourcedValue{
-			Value:  cfg.Wayfinder.W0.Detection.VaguenessThreshold,
-			Source: formatSource(tier),
-		}
-	}
-}
-
 // checkEnvOverrides checks for environment variable overrides
 func checkEnvOverrides(eff *EffectiveConfig) {
 	// Platform overrides
@@ -382,7 +334,6 @@ func isValidSection(section string) bool {
 		"platform":  true,
 		"plugins":   true,
 		"telemetry": true,
-		"wayfinder": true,
 	}
 	return validSections[section]
 }
@@ -401,8 +352,6 @@ func outputConfigJSON(eff *EffectiveConfig, section string) error {
 			output = eff.Plugins
 		case "telemetry":
 			output = eff.Telemetry
-		case "wayfinder":
-			output = eff.Wayfinder
 		}
 	}
 
@@ -426,10 +375,6 @@ func outputConfigMarkdown(_ *config.Config, eff *EffectiveConfig, section string
 
 	if section == "" || section == "telemetry" {
 		printSection("Telemetry", eff.Telemetry)
-	}
-
-	if section == "" || section == "wayfinder" {
-		printSection("Wayfinder", eff.Wayfinder)
 	}
 
 	return nil

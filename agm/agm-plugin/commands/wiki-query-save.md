@@ -1,73 +1,26 @@
 ---
 model: sonnet
 effort: medium
-description: Synthesise a wiki answer from engram-kb and optionally save it as a new page
+content-hash: 0701307a13b8f3810098ac58583446f14b3184980a38b70b4ad378d156203407
+description: Synthesize an answer from engram-kb and optionally save it as a wiki page. Use when the user wants a source-grounded wiki answer or to persist that answer.
 argument-hint: "<question> [--save] [--category research|decisions]"
-allowed-tools: Bash(agm wiki query-save *), Read, Glob, Grep
+allowed-tools: Bash(agm wiki query-save *), Bash(rm -f -- /tmp/agm-wiki-*), Read, Glob, Grep, Write(/tmp/agm-wiki-*)
 ---
 
-# Wiki Query Save
+# Query and optionally save the wiki
 
-I'll answer your question using engram-kb and optionally persist the answer
-as a new wiki page (the compounding mechanism).
-
-**Step 1: Parse arguments**
-
-Parse $ARGUMENTS:
-- The question/query (everything before any flags)
-- `--save` — persist the answer as a new page after synthesis
-- `--category research|decisions` — where to file the page (default: research)
-- `--kb PATH` — KB root (default: ~/src/engram-kb)
-
-**Step 2: Search the wiki**
-
-Use Glob and Grep to find relevant pages in ~/src/engram-kb:
-
-```
-# Find pages by topic
-Grep("<key terms from query>", "~/src/engram-kb/**/*.md")
-
-# Read the most relevant pages
-Read("<path to relevant page>")
-```
-
-Focus on:
-- `02-research-index/` — topic summaries
-- `01-decisions/` — ADRs (architectural decisions)
-- `05-synthesis/` — periodic reconciliations
-
-**Step 3: Synthesise the answer**
-
-Read the relevant pages and compose a clear, accurate answer. Cite sources
-as wikilinks: e.g. "Per [[ADR-013]], the preferred approach is…"
-
-**Step 4: Present the answer**
-
-Show the synthesised answer to the user.
-
-Then ask: "Would you like me to save this as a wiki page? It will be filed
-under 02-research-index/ and woven into the backlink graph."
-
-**Step 5: Save (if requested)**
-
-If the user confirms, run:
-```
-agm wiki query-save \
-  --query "{QUESTION}" \
-  --answer "{ANSWER}" \
-  [--category decisions] \
-  [--kb PATH]
-```
-
-The tool will:
-1. Write the page
-2. Run a backlink audit
-3. Regenerate index.md
-4. Append to log.md
-
-Report the saved path and any backlink suggestions.
-
-**Error Handling**:
-- If no relevant pages found: answer from general knowledge, clearly flagged as
-  "not from the wiki"
-- If the page already exists: suggest `--output` with a different filename
+1. Search the configured knowledge base with Glob and Grep, read the relevant
+   pages, and answer with wikilink citations. Clearly label any statement that
+   is not supported by the wiki.
+2. Save only when the user requested or confirms persistence.
+3. Write the exact question and synthesized answer to unique, private temporary
+   files under `/tmp/agm-wiki-*`. Never interpolate either value into
+   shell syntax.
+4. Run `agm wiki query-save --query-file <question-file> --answer-file <answer-file> --category <category>`.
+   Add an explicit `--output` only when the user selected a path. Pass every
+   path and category as a separate argv value.
+5. Always run `rm -f -- <question-file> <answer-file>` immediately after AGM
+   exits, before reporting success or failure. Neither temporary file may
+   survive either path.
+6. Report the saved page and backlink/index result. On failure, show stderr and
+   stop; do not write into the knowledge base manually.

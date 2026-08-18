@@ -44,8 +44,7 @@ func (k Kind) Validate() error {
 	return fmt.Errorf("aggregator: unknown signal kind %q", string(k))
 }
 
-// Signal is one observation about a project at a point in time. See
-// ADR-015 §D2 for the field contract.
+// Signal is one observation about a project at a point in time.
 type Signal struct {
 	ID          string    `json:"id"`
 	Kind        Kind      `json:"kind"`

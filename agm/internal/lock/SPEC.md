@@ -30,6 +30,8 @@ inspection, and keep force removal explicit.
 
 **AGM-LOCK-10** When force unlock is requested, the system shall remove the lock file and ignore missing-file errors.
 
+**AGM-LOCK-11** When a non-blocking flock attempt fails, the system shall classify only `EWOULDBLOCK` or `EAGAIN` as retryable contention and shall preserve any other operating-system error for immediate caller-visible failure.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/agm_runtime_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.

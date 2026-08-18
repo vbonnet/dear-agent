@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/telemetry"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -53,7 +54,7 @@ func validateDocQuality(phaseName, projectDir string) error {
 	case "DESIGN":
 		return validateDesignDocuments(projectDir)
 	case "SPEC":
-		// SPEC.md is gated by the deterministic EARS linter (replaces the
+		// The SPEC phase deliverable is gated by the deterministic EARS linter (replaces the
 		// former Python LLM "review-spec" rubric). See spec_ears_gate.go.
 		return validateSpecEARS(projectDir, phaseName)
 	case "PLAN":
@@ -239,15 +240,12 @@ func reviewDocument(docPath, skillName string) (float64, []string, bool, error) 
 		)
 	}
 
-	// Check cache
 	projectDir := filepath.Dir(docPath)
 	docFile := filepath.Base(docPath)
-	cachedScore, cacheHit := checkCache(projectDir, docFile, fileHash)
-	if cacheHit && cachedScore >= minDocQualityScore {
-		return cachedScore, nil, true, nil
-	}
 
-	// Run review skill
+	// Do not consult historical scores here. Earlier builds cached a structural
+	// preflight as a perfect review, so those entries do not carry enough
+	// provenance to satisfy the provider-backed quality gate.
 	score, issues, err := runReviewSkill(skillName, docPath)
 	if err != nil {
 		return 0, nil, false, err
@@ -261,135 +259,158 @@ func reviewDocument(docPath, skillName string) (float64, []string, bool, error) 
 	return score, issues, false, nil
 }
 
-// runReviewSkill executes a review skill and returns the score + issues.
-// Supports: review-spec, review-adr, review-architecture
+// runReviewSkill applies the deterministic semantic rubric bundled in the
+// Wayfinder binary. The rubric is deliberately local so the phase gate remains
+// reachable when no external provider is configured.
 func runReviewSkill(skillName string, docPath string) (float64, []string, error) {
-	// Find review skill script
-	scriptPath, err := findReviewSkillScript(skillName)
+	data, err := os.ReadFile(docPath)
 	if err != nil {
 		return 0, nil, NewValidationError(
 			"complete phase",
-			fmt.Sprintf("review skill not found: %s", skillName),
-			fmt.Sprintf("Ensure engram is installed with review skills.\n\nError: %v", err),
+			fmt.Sprintf("failed to read %s", filepath.Base(docPath)),
+			fmt.Sprintf("Check file permissions and try again.\n\nError: %v", err),
 		)
 	}
-
-	// Create temporary file for JSON output
-	tmpFile, err := os.CreateTemp("", "doc-quality-*.json")
+	issues, err := builtinReviewIssues(skillName, string(data))
 	if err != nil {
-		return 0, nil, NewValidationError(
-			"complete phase",
-			"failed to create temp file for review output",
-			fmt.Sprintf("Error: %v", err),
-		)
+		return 0, nil, err
 	}
-	tmpPath := tmpFile.Name()
-	_ = tmpFile.Close()
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	// Execute Python skill with JSON output
-	args := []string{scriptPath, docPath, "--output-json", tmpPath}
-
-	// Skip LLM validation if ANTHROPIC_API_KEY is not set
-	// This ensures tests run in CI/test environments without requiring API access
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		args = append(args, "--skip-llm")
+	if len(issues) > 0 {
+		return 0, issues, nil
 	}
-
-	cmd := exec.Command("python3", args...)
-
-	// Capture stderr for error messages
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, nil, NewValidationError(
-			"complete phase",
-			fmt.Sprintf("%s skill execution failed", skillName),
-			fmt.Sprintf("Ensure Python 3.9+ is installed and ANTHROPIC_API_KEY is set.\n\nError: %v\n\nOutput: %s", err, string(output)),
-		)
-	}
-
-	// Read JSON output
-	jsonData, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return 0, nil, NewValidationError(
-			"complete phase",
-			"failed to read review output",
-			fmt.Sprintf("Error: %v", err),
-		)
-	}
-
-	// Parse JSON output
-	type ValidationResult struct {
-		OverallScore float64 `json:"overall_score"`
-		Decision     string  `json:"decision"`
-	}
-
-	var result ValidationResult
-	if err := json.Unmarshal(jsonData, &result); err != nil {
-		return 0, nil, NewValidationError(
-			"complete phase",
-			"failed to parse review output",
-			fmt.Sprintf("Parse error: %v\n\nJSON: %s", err, string(jsonData)),
-		)
-	}
-
-	// Extract issues from decision field
-	var issues []string
-	if result.Decision != "PASS" && result.Decision != "WARN" {
-		issues = append(issues, result.Decision)
-	}
-
-	return result.OverallScore, issues, nil
+	return 10, nil, nil
 }
 
-// findReviewSkillScript locates the review skill script by searching common locations.
-func findReviewSkillScript(skillName string) (string, error) {
-	homeDir, err := os.UserHomeDir()
+func builtinReviewIssues(skillName, content string) ([]string, error) {
+	if skillName != "review-adr" && skillName != "review-architecture" {
+		return nil, fmt.Errorf("unknown built-in document review %q", skillName)
+	}
+	body, err := markdownBodyForReview(content)
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return nil, err
+	}
+	trimmed := strings.TrimSpace(body)
+	issues := commonDocumentReviewIssues(trimmed)
+	issues = append(issues, skillDocumentReviewIssues(skillName, trimmed, levelTwoHeadings(trimmed))...)
+	return issues, nil
+}
+
+// markdownBodyForReview returns the Markdown body after one canonical leading
+// YAML frontmatter block. Methodology validation requires phase deliverables
+// such as PLAN-design.md to carry that block, while document quality applies to
+// the authored Markdown beneath it. A leading but unclosed block is malformed
+// input and must not be reviewed as ordinary prose.
+func markdownBodyForReview(content string) (string, error) {
+	yamlContent, body, found, err := splitLeadingFrontmatter(content)
+	if err != nil {
+		return "", fmt.Errorf("document has unclosed YAML frontmatter: %w", err)
+	}
+	if !found {
+		return content, nil
 	}
 
-	// Map skill name to script filename
-	scriptMap := map[string]string{
-		"review-spec":         "review_spec.py",
-		"review-adr":          "review_adr.py",
-		"review-architecture": "review_architecture.py",
+	var metadata map[string]any
+	if err := yaml.Unmarshal([]byte(yamlContent), &metadata); err != nil {
+		return "", fmt.Errorf("document has invalid YAML frontmatter: %w", err)
 	}
+	return body, nil
+}
 
-	scriptFile, ok := scriptMap[skillName]
-	if !ok {
-		return "", fmt.Errorf("unknown skill: %s", skillName)
+func commonDocumentReviewIssues(trimmed string) []string {
+	var issues []string
+	if len(trimmed) < 100 {
+		issues = append(issues, "document must contain at least 100 bytes of substantive content")
 	}
-
-	// Search common skill locations. The CWD-relative `./skills/...` entry
-	// used to be first here, but that allowed an adversarial PR contributor
-	// to land `skills/review-spec/review_spec.py` in any repo and get
-	// arbitrary Python execution (with the reviewer's ambient creds —
-	// ANTHROPIC_API_KEY is intentionally NOT stripped from the env) the
-	// moment the reviewer ran `cd <project> && wayfinder-session
-	// complete-phase DESIGN/SPEC/PLAN`. Skills now resolve only from install-time
-	// locations under the user's home or system prefixes, plus an explicit
-	// opt-in via WAYFINDER_SKILLS_DIR.
-	skillPaths := []string{}
-	if dir := strings.TrimSpace(os.Getenv("WAYFINDER_SKILLS_DIR")); dir != "" {
-		skillPaths = append(skillPaths, filepath.Join(dir, skillName, scriptFile))
+	if !strings.HasPrefix(trimmed, "# ") {
+		issues = append(issues, "document must begin with a level-one heading")
 	}
-	skillPaths = append(skillPaths,
-		filepath.Join(homeDir, "src", "ws", "oss", "repos", "engram", "skills", skillName, scriptFile),
-		filepath.Join(homeDir, "src", "engram", "skills", skillName, scriptFile),
-		filepath.Join(homeDir, "engram", "skills", skillName, scriptFile),
-		filepath.Join(homeDir, ".local/share/engram/skills", skillName, scriptFile),
-		filepath.Join("/usr/local/share/engram/skills", skillName, scriptFile),
-		filepath.Join("/opt/engram/skills", skillName, scriptFile),
-	)
+	if strings.Count("\n"+trimmed, "\n## ") < 2 {
+		issues = append(issues, "document must contain at least two level-two sections")
+	}
+	words, uniqueWords, maxFrequency := documentWordStats(trimmed)
+	if words < 20 || uniqueWords < 12 {
+		issues = append(issues, "document must contain substantive prose with at least 20 words and 12 distinct words")
+	}
+	if words > 0 && maxFrequency*5 > words*2 {
+		issues = append(issues, "document repeats one word too heavily to be substantive")
+	}
+	return issues
+}
 
-	for _, path := range skillPaths {
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+func skillDocumentReviewIssues(skillName, trimmed string, headings []string) []string {
+	var issues []string
+	if skillName == "review-adr" && !strings.HasPrefix(trimmed, "# ADR-") {
+		issues = append(issues, "ADR must begin with a canonical # ADR- heading")
+	}
+	if skillName == "review-adr" && !hasADRStatusLine(trimmed) {
+		issues = append(issues, "ADR must contain a Status line")
+	}
+	if !containsHeading(headings, "context") {
+		issues = append(issues, "document must contain a Context section")
+	}
+	if skillName == "review-adr" && !containsHeading(headings, "decision") {
+		issues = append(issues, "ADR must contain a Decision section")
+	}
+	if skillName == "review-architecture" &&
+		!containsAnyHeading(headings, "design", "architecture", "decision") {
+		issues = append(issues, "architecture document must contain a Design, Architecture, or Decision section")
+	}
+	return issues
+}
+
+func documentWordStats(content string) (total, unique, maxFrequency int) {
+	counts := make(map[string]int)
+	for _, word := range strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len([]rune(word)) < 3 {
+			continue
+		}
+		total++
+		counts[word]++
+		maxFrequency = max(maxFrequency, counts[word])
+	}
+	return total, len(counts), maxFrequency
+}
+
+func levelTwoHeadings(content string) []string {
+	var headings []string
+	for line := range strings.SplitSeq(content, "\n") {
+		line = strings.TrimSpace(line)
+		if heading, found := strings.CutPrefix(line, "## "); found {
+			headings = append(headings, strings.ToLower(strings.TrimSpace(heading)))
 		}
 	}
+	return headings
+}
 
-	return "", fmt.Errorf("%s skill not found in common locations", skillName)
+func containsHeading(headings []string, required string) bool {
+	for _, heading := range headings {
+		if strings.Contains(heading, required) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyHeading(headings []string, required ...string) bool {
+	for _, candidate := range required {
+		if containsHeading(headings, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasADRStatusLine(content string) bool {
+	for line := range strings.SplitSeq(content, "\n") {
+		normalized := strings.TrimSpace(strings.ReplaceAll(line, "**", ""))
+		value, found := strings.CutPrefix(normalized, "Status:")
+		if found && strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // formatDesignValidationError creates a detailed error message for DESIGN validation failures.
@@ -411,13 +432,10 @@ func formatDesignValidationError(allResults, failedDocs []DocumentReviewResult) 
 	msg.WriteString("Fix failing documents and re-run:\n")
 	msg.WriteString("  wayfinder session complete-phase DESIGN\n\n")
 
-	// Show how to review manually
-	if len(failedDocs) > 0 {
-		msg.WriteString("Or review manually to see issues:\n")
-		firstFailed := failedDocs[0]
-		skillPath := filepath.Join("~/src/ws/oss/repos/engram/skills", firstFailed.SkillUsed, strings.ReplaceAll(firstFailed.SkillUsed, "-", "_")+".py")
-		fmt.Fprintf(&msg, "  python3 %s %s --output-json /tmp/review.json\n", skillPath, firstFailed.DocumentName)
-		msg.WriteString("  cat /tmp/review.json\n\n")
+	for _, failed := range failedDocs {
+		if len(failed.Issues) > 0 {
+			fmt.Fprintf(&msg, "%s issues: %s\n", failed.DocumentName, strings.Join(failed.Issues, "; "))
+		}
 	}
 
 	return NewValidationError(

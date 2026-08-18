@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,24 +19,28 @@ import (
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/reaper"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
 
 var (
-	asyncArchive       bool // Spawn background reaper for async archival
-	archiveAll         bool
-	olderThan          string
-	dryRun             bool
-	cleanupWorktrees   bool
-	forceArchive       bool   // Skip pre-archive verification checks
-	archiveReason      string // Justification for --force, recorded in override audit log
-	keepSandbox        bool   // Preserve sandbox directory for debugging
-	includeSupervisors bool   // Include supervisor sessions in bulk archive
-	archiveOutcome     string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
-	archiveTestEnv     string // Named isolated test environment used for cross-process archive validation
+	asyncArchive        bool // Spawn background reaper for async archival
+	archiveAll          bool
+	olderThan           string
+	dryRun              bool
+	cleanupWorktrees    bool
+	forceArchive        bool   // Skip pre-archive verification checks
+	archiveReason       string // Justification for --force, recorded in override audit log
+	keepSandbox         bool   // Preserve sandbox directory for debugging
+	includeSupervisors  bool   // Include supervisor sessions in bulk archive
+	allowSupervisorReap bool   // Dispatcher-inherited internal recovery capability
+	archiveOutcome      string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
+	archiveTestEnv      string // Named isolated test environment used for cross-process archive validation
+	spawnReaperFn       = spawnReaper
 )
 
 // validArchiveOutcomes lists the outcome values accepted by --outcome. Kept in
@@ -99,6 +104,9 @@ Examples:
   # Archive an active session (--async required)
   agm session archive --async my-active-session
 
+  # Preview archiving one stopped session without changing it
+  agm session archive my-old-session --dry-run
+
   # Archive all inactive sessions older than 30 days (preview only)
   agm session archive --all --older-than=30d --dry-run
 
@@ -161,8 +169,12 @@ Examples:
 }
 
 func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
+	operationCtx := archiveCommandContext(cmd)
 	if archiveTestEnv != "" {
-		tc := testcontext.LoadNamed(archiveTestEnv)
+		tc, err := testcontext.LoadNamed(archiveTestEnv)
+		if err != nil {
+			return fmt.Errorf("invalid test environment %q: %w", archiveTestEnv, err)
+		}
 		if err := tc.SetEnv(); err != nil {
 			return fmt.Errorf("failed to activate test environment %q: %w", archiveTestEnv, err)
 		}
@@ -196,7 +208,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		if asyncArchive {
 			return fmt.Errorf("--async flag is not compatible with --all")
 		}
-		return archiveBulk()
+		return archiveBulk(operationCtx)
 	}
 
 	// Single session archive mode
@@ -216,6 +228,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to connect to Dolt: %w", err)
 	}
 	defer cleanup()
+	opCtx.Context = operationCtx
 
 	getResult, getErr := ops.GetSession(opCtx, &ops.GetSessionRequest{
 		Identifier: sessionName,
@@ -225,7 +238,11 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return getErr
 	}
 
-	if handled, err := handleAlreadyArchivedOrAsync(opCtx, sessionName, getResult); handled {
+	if dryRun {
+		return previewSingleSessionArchive(opCtx, sessionName, getResult, outcome)
+	}
+
+	if handled, err := handleAlreadyArchivedOrAsync(opCtx, sessionName, getResult, outcome); handled {
 		return err
 	}
 
@@ -236,28 +253,26 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Printf("  Project: %s\n", getResult.Session.Project)
 	}
 
-	archiveResult, archiveErr := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{
-		Identifier:  sessionName,
-		Force:       forceArchive,
-		KeepSandbox: keepSandbox,
-		Outcome:     outcome,
-	})
+	archiveResult, archiveErr := ops.ArchiveSession(
+		opCtx,
+		newSingleSessionArchiveRequest(getResult.Session.ID, outcome, false),
+	)
 	if archiveErr != nil {
 		return handleError(archiveErr)
 	}
 	reportExternalArchives(archiveResult.ExternalArchives)
 
-	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
+	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", archiveResult.Name))
 	fmt.Printf("\nThe session is now hidden from 'agm session list'.\n")
 	fmt.Printf("Use 'agm session list --all' to see archived sessions.\n")
-	fmt.Printf("\nTo restore: agm session unarchive %s\n", sessionName)
+	fmt.Printf("\nTo restore: agm session unarchive %s\n", archiveResult.Name)
 
 	// Telemetry: agm.session.complete span + terminal metrics (active -1,
 	// completed +1{status=archived}).
 	telemetry.SessionCompleted(context.Background(), getResult.Session.ID, getResult.Session.Model, getResult.Session.Harness, "archived")
 
 	reportPostCleanup(archiveResult.PostCleanup)
-	reportSessionCleanup(runSessionCleanup(sessionName, opCtx))
+	reportSessionCleanup(archiveResult.SessionCleanup)
 
 	// Best-effort cleanup of stale additionalDirectories in Claude settings
 	runSettingsCleanup()
@@ -268,6 +283,13 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	return nil
+}
+
+func archiveCommandContext(cmd *cobra.Command) context.Context {
+	if cmd == nil {
+		return context.Background()
+	}
+	return cmd.Context()
 }
 
 // archiveAuditArgs builds the audit arg map for the archive command from the
@@ -282,18 +304,54 @@ func archiveAuditArgs() map[string]string {
 		if olderThan != "" {
 			auditArgs["older_than"] = olderThan
 		}
-		if dryRun {
-			auditArgs["dry_run"] = "true"
-		}
+	}
+	if dryRun {
+		auditArgs["dry_run"] = "true"
 	}
 	return auditArgs
+}
+
+// previewSingleSessionArchive runs the same shared guards as a real archive,
+// but returns before provider archival, lifecycle writes, cleanup, telemetry,
+// settings changes, or detached reaper startup.
+func previewSingleSessionArchive(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult, outcome manifest.SessionOutcome) error {
+	isActive := getResult.Session.Status == "active"
+	if err := validateSingleSessionArchiveMode(sessionName, isActive, asyncArchive); err != nil {
+		return err
+	}
+
+	dryRunCtx := *opCtx
+	dryRunCtx.DryRun = true
+	result, err := ops.ArchiveSession(
+		&dryRunCtx,
+		newSingleSessionArchiveRequest(getResult.Session.ID, outcome, asyncArchive),
+	)
+	if err != nil {
+		return handleError(err)
+	}
+
+	preview := ops.NewDryRunPreview(
+		"session/archive",
+		fmt.Sprintf("Would archive session %q.", result.Name),
+		map[string]string{
+			"session_id":   result.SessionID,
+			"session_name": result.Name,
+		},
+	)
+	if isJSONOutput() {
+		return printJSON(preview)
+	}
+
+	ui.PrintSuccess(fmt.Sprintf("%s: %s", preview.Title, preview.Detail))
+	fmt.Println("No changes were made.")
+	return nil
 }
 
 // handleAlreadyArchivedOrAsync handles three early-exit cases for archive:
 // session is already archived (no-op), session is active without --async
 // (error), or --async is set (spawn reaper). Returns (handled, err) — when
 // handled is true the caller should propagate err immediately.
-func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult) (bool, error) {
+func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult, outcome manifest.SessionOutcome) (bool, error) {
 	if getResult.Session.Lifecycle == "archived" {
 		outcomes, err := archiveExternalSavedSession(opCtx, getResult.Session.ID)
 		if err != nil {
@@ -309,16 +367,46 @@ func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getR
 		return true, nil
 	}
 	isActive := getResult.Session.Status == "active"
-	if isActive && !asyncArchive {
-		return true, fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
-	}
-	if !isActive && asyncArchive {
-		return true, fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	if err := validateSingleSessionArchiveMode(sessionName, isActive, asyncArchive); err != nil {
+		return true, err
 	}
 	if asyncArchive {
-		return true, spawnReaper(sessionName, getResult.Session.Harness)
+		preflightCtx := *opCtx
+		preflightCtx.DryRun = true
+		if _, err := ops.ArchiveSession(
+			&preflightCtx,
+			newSingleSessionArchiveRequest(getResult.Session.ID, outcome, true),
+		); err != nil {
+			return true, handleError(err)
+		}
+		tmuxSession := getResult.Session.TmuxSession
+		if tmuxSession == "" {
+			tmuxSession = getResult.Session.Name
+		}
+		return true, spawnReaperFn(getResult.Session.ID, tmuxSession, getResult.Session.Harness, outcome, allowSupervisorReap)
 	}
 	return false, nil
+}
+
+func validateSingleSessionArchiveMode(sessionName string, isActive, async bool) error {
+	if isActive && !async {
+		return fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
+	}
+	if !isActive && async {
+		return fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	}
+	return nil
+}
+
+func newSingleSessionArchiveRequest(sessionID string, outcome manifest.SessionOutcome, allowActiveTmux bool) *ops.ArchiveSessionRequest {
+	return &ops.ArchiveSessionRequest{
+		Identifier:          sessionID,
+		Force:               forceArchive,
+		KeepSandbox:         keepSandbox,
+		Outcome:             outcome,
+		AllowSupervisorReap: allowSupervisorReap,
+		AllowActiveTmux:     allowActiveTmux,
+	}
 }
 
 // reportPostCleanup prints the per-step cleanup results from ops.ArchiveSession.
@@ -406,7 +494,7 @@ func parseDuration(s string) (time.Duration, error) {
 }
 
 // archiveBulk archives multiple sessions based on filters
-func archiveBulk() error {
+func archiveBulk(operationCtx context.Context) error {
 	// Validate --outcome up front so a bad value fails before any work.
 	bulkOutcome, err := parseArchiveOutcome(archiveOutcome)
 	if err != nil {
@@ -480,13 +568,23 @@ func archiveBulk() error {
 
 	// Build OpContext for cleanup operations
 	opCtx := &ops.OpContext{
+		Context: operationCtx,
 		Storage: adapter,
 		Tmux:    tmuxClient,
 	}
 
-	successCount, failCount := bulkArchiveCandidates(adapter, candidates, opCtx, bulkOutcome)
+	successCount, failCount := bulkArchiveCandidates(candidates, opCtx, ops.ArchiveSessionRequest{
+		Force:               forceArchive,
+		KeepSandbox:         keepSandbox,
+		Outcome:             bulkOutcome,
+		AllowSupervisorReap: includeSupervisors,
+	})
 
-	// Report results
+	reportBulkArchiveResult(successCount, failCount)
+	return nil
+}
+
+func reportBulkArchiveResult(successCount, failCount int) {
 	fmt.Println()
 	if successCount > 0 {
 		ui.PrintSuccess(fmt.Sprintf("Archived %d session(s)", successCount))
@@ -495,11 +593,8 @@ func archiveBulk() error {
 	if failCount > 0 {
 		ui.PrintWarning(fmt.Sprintf("Failed to archive %d session(s)", failCount))
 	}
-
 	fmt.Printf("\nUse 'agm session list --all' to see archived sessions.\n")
 	fmt.Printf("To restore: edit manifest.yaml and change lifecycle from 'archived' to ''\n")
-
-	return nil
 }
 
 // printArchivePreview prints the per-candidate preview block and the skipped
@@ -598,49 +693,22 @@ func selectArchiveCandidates(allManifests []*manifest.Manifest, activeSessions m
 	return candidates, skipped
 }
 
-// bulkArchiveCandidates writes the lifecycle update for each candidate session
-// and runs best-effort cleanup. Returns (successCount, failCount).
-func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifest, opCtx *ops.OpContext, outcome manifest.SessionOutcome) (int, int) {
+// bulkArchiveCandidates routes each selected manifest through the same shared
+// ArchiveSession operation used by single-session and reaper callers. Returns
+// (successCount, failCount) to preserve the CLI's aggregate result semantics.
+func bulkArchiveCandidates(candidates []*manifest.Manifest, opCtx *ops.OpContext, request ops.ArchiveSessionRequest) (int, int) {
 	var successCount, failCount int
 	for _, m := range candidates {
-		m.Lifecycle = manifest.LifecycleArchived
-		m.Outcome = outcome
-		m.UpdatedAt = time.Now()
-
-		if err := adapter.UpdateSession(m); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to update session in Dolt for %s: %v", m.Name, err))
+		request.Identifier = m.SessionID
+		result, err := ops.ArchiveSession(opCtx, &request)
+		if err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to archive %s: %v", m.Name, err))
 			failCount++
 			continue
 		}
-		externalArchives := ops.ArchiveExternalSession(context.Background(), m)
-		reportExternalArchives(externalArchives)
-
-		sandboxPath := ""
-		if m.Sandbox != nil {
-			sandboxPath = m.Sandbox.MergedPath
-		}
-		repoPath := m.Context.Project
-		postCleanup := ops.CleanupAfterArchive(
-			m.SessionID, m.Name,
-			m.WorkingDirectory, repoPath, sandboxPath, m.Name,
-			false,
-		)
-		if postCleanup.BranchDeleted {
-			fmt.Printf("  Deleted branch: %s\n", m.Name)
-		}
-		if postCleanup.SandboxBranchDeleted {
-			fmt.Printf("  Deleted sandbox branch: agm/%s\n", m.SessionID)
-		}
-
-		cleanupResult := runSessionCleanup(m.Name, opCtx)
-		if cleanupResult != nil {
-			if cleanupResult.WorktreesRemoved > 0 {
-				fmt.Printf("  Cleaned up %d worktree(s)\n", cleanupResult.WorktreesRemoved)
-			}
-			if cleanupResult.BranchesDeleted > 0 {
-				fmt.Printf("  Deleted %d branch(es)\n", cleanupResult.BranchesDeleted)
-			}
-		}
+		reportExternalArchives(result.ExternalArchives)
+		reportPostCleanup(result.PostCleanup)
+		reportSessionCleanup(result.SessionCleanup)
 		successCount++
 	}
 	return successCount, failCount
@@ -675,8 +743,9 @@ func reportExternalArchives(outcomes []ops.ExternalArchiveOutcome) {
 }
 
 // spawnReaper spawns a detached agm-reaper process for async archival.
-// The reaper waits for the harness prompt, sends /exit, and archives the session.
-func spawnReaper(sessionName, harness string) error {
+// The reaper waits for the harness prompt, sends its native graceful-exit
+// command, and archives the session.
+func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.SessionOutcome, allowSupervisorReap bool) error {
 	// Find agm-reaper binary (should be in same directory as agm)
 	agmPath, err := os.Executable()
 	if err != nil {
@@ -685,21 +754,7 @@ func spawnReaper(sessionName, harness string) error {
 
 	reaperPath := filepath.Join(filepath.Dir(agmPath), "agm-reaper")
 
-	// Create log file path with sanitized session name to prevent path traversal
-	// This must happen before binary check so error messages include sanitized path
-	// Handle both forward slashes and backslashes for cross-platform security
-	sanitized := sessionName
-	// Remove directory components with forward slashes
-	if idx := strings.LastIndex(sanitized, "/"); idx != -1 {
-		sanitized = sanitized[idx+1:]
-	}
-	// Remove directory components with backslashes (Windows-style paths)
-	if idx := strings.LastIndex(sanitized, "\\"); idx != -1 {
-		sanitized = sanitized[idx+1:]
-	}
-	// Use filepath.Base as final cleanup for any platform-specific separators
-	sanitized = filepath.Base(sanitized)
-	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", sanitized))
+	logFile := reaperLogPath(tmuxSession)
 
 	// Check if reaper binary exists
 	if _, err := os.Stat(reaperPath); err != nil {
@@ -707,18 +762,48 @@ func spawnReaper(sessionName, harness string) error {
 			"agm-reaper binary not found",
 			fmt.Sprintf("  • Expected location: %s\n"+
 				"  • Log file: %s\n"+
-				"  • Build reaper: make build\n"+
-				"  • Or install: make install\n"+
+				"  • Reinstall the coherent pair: make install-agm\n"+
+				"  • Or from agm/: make install\n"+
 				"  • Or use synchronous archive: agm session archive %s (without --async)",
-				reaperPath, logFile, sessionName))
+				reaperPath, logFile, sessionID))
 		return fmt.Errorf("agm-reaper binary not found (log: %s): %w", logFile, err)
+	}
+
+	// The CLI and detached reaper share lifecycle serialization code. Refuse to
+	// cross the process boundary unless the exact binary at reaperPath proves it
+	// was built from the same VCS revision. The reaper repeats this check after
+	// exec so a post-merge rename between this probe and cmd.Start still fails
+	// closed instead of running mixed lifecycle schemas.
+	expectedRevision := pkgversion.RevisionIdentity(GitCommit)
+	if expectedRevision == "" || expectedRevision == "unknown" || expectedRevision == "unknown-dirty" {
+		return fmt.Errorf("cannot verify agm-reaper revision: agm has no embedded VCS revision")
+	}
+	check := exec.Command(reaperPath, "--check-revision", expectedRevision)
+	if out, err := check.CombinedOutput(); err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("agm-reaper revision mismatch: %s", detail)
 	}
 
 	// Get sessions directory from config
 	sessionsDir := cfg.SessionsDir
+	startupRead, startupWrite, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create agm-reaper startup acknowledgement pipe: %w", err)
+	}
+	defer func() { _ = startupRead.Close() }()
+
+	reaperLog, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		_ = startupWrite.Close()
+		return fmt.Errorf("open agm-reaper log %s: %w", logFile, err)
+	}
 
 	// Build command with detachment
-	cmd := exec.Command(reaperPath, "--session", sessionName, "--log-file", logFile, "--sessions-dir", sessionsDir)
+	reaperArgs := buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision, forceArchive, keepSandbox, allowSupervisorReap, outcome)
+	cmd := exec.Command(reaperPath, reaperArgs...)
 
 	// Detach process from parent using setsid
 	// This ensures the reaper survives even if the parent shell exits
@@ -726,21 +811,33 @@ func spawnReaper(sessionName, harness string) error {
 		Setsid: true, // Create new session (detach from terminal)
 	}
 
-	// Redirect stdout/stderr to /dev/null (all logging goes to file)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// The first inherited descriptor is fd 3. The child writes one readiness
+	// record only after validating its revision and opening the durable log.
+	cmd.ExtraFiles = []*os.File{startupWrite}
+	cmd.Stdout = reaperLog
+	cmd.Stderr = reaperLog
 	cmd.Stdin = nil
 
-	// Start process without waiting
+	// Start the detached process, then wait only for its bounded startup
+	// acknowledgement. Lifecycle work continues asynchronously after that gate.
 	if err := cmd.Start(); err != nil {
+		_ = startupWrite.Close()
+		_ = reaperLog.Close()
 		ui.PrintError(err,
 			"Failed to spawn reaper process",
 			fmt.Sprintf("  • Command: %s --session %s --log-file %s --sessions-dir %s\n"+
 				"  • Check permissions: ls -l %s\n"+
 				"  • Verify binary is executable: chmod +x %s\n"+
 				"  • Test manually: %s --help",
-				reaperPath, sessionName, logFile, sessionsDir, reaperPath, reaperPath, reaperPath))
+				reaperPath, tmuxSession, logFile, sessionsDir, reaperPath, reaperPath, reaperPath))
 		return fmt.Errorf("failed to start reaper: %w", err)
+	}
+	_ = startupWrite.Close()
+	_ = reaperLog.Close()
+	if err := awaitReaperStartup(startupRead, 5*time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("agm-reaper startup failed (log: %s): %w", logFile, err)
 	}
 
 	// Don't wait for process - it's detached
@@ -757,16 +854,70 @@ func spawnReaper(sessionName, harness string) error {
 	ui.PrintSuccess("Async archive started")
 	fmt.Printf("\nReaper process spawned:\n")
 	fmt.Printf("  PID: %d\n", pid)
-	fmt.Printf("  Session: %s\n", sessionName)
+	fmt.Printf("  Session ID: %s\n", sessionID)
+	fmt.Printf("  Tmux session: %s\n", tmuxSession)
 	fmt.Printf("  Log file: %s\n", logFile)
 	fmt.Printf("\nThe reaper will:\n")
 	fmt.Printf("  1. Wait for %s to return to prompt (smart detection, not fixed interval)\n", archiveHarnessDisplayName(harness))
-	fmt.Printf("  2. Send /exit command\n")
+	fmt.Printf("  2. Send %s command\n", reaper.GracefulExitCommand(harness))
 	fmt.Printf("  3. Wait for pane to close\n")
 	fmt.Printf("  4. Archive the session\n")
 	fmt.Printf("\nMonitor progress: tail -f %s\n", logFile)
 
 	return nil
+}
+
+// reaperLogPath confines the detached reaper log to the system temp directory
+// even if a malformed tmux identity contains Unix or Windows path separators.
+func reaperLogPath(tmuxSession string) string {
+	sanitized := tmuxSession
+	if idx := strings.LastIndex(sanitized, "/"); idx != -1 {
+		sanitized = sanitized[idx+1:]
+	}
+	if idx := strings.LastIndex(sanitized, "\\"); idx != -1 {
+		sanitized = sanitized[idx+1:]
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", filepath.Base(sanitized)))
+}
+
+func buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision string, force, keepSandbox, allowSupervisorReap bool, outcome manifest.SessionOutcome) []string {
+	args := []string{"--session-id", sessionID, "--session", tmuxSession, "--log-file", logFile, "--sessions-dir", sessionsDir, "--expected-revision", expectedRevision, "--startup-fd", "3"}
+	if force {
+		args = append(args, "--force")
+	}
+	if keepSandbox {
+		args = append(args, "--keep-sandbox")
+	}
+	if allowSupervisorReap {
+		args = append(args, "--allow-supervisor-reap")
+	}
+	if outcome != manifest.OutcomeUnknown {
+		args = append(args, "--outcome", string(outcome))
+	}
+	return args
+}
+
+func awaitReaperStartup(reader *os.File, timeout time.Duration) error {
+	result := make(chan error, 1)
+	go func() {
+		line, err := bufio.NewReader(reader).ReadString('\n')
+		if err != nil {
+			result <- fmt.Errorf("startup acknowledgement closed before readiness: %w", err)
+			return
+		}
+		if line != "ready\n" {
+			result <- fmt.Errorf("invalid startup acknowledgement %q", strings.TrimSpace(line))
+			return
+		}
+		result <- nil
+	}()
+
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("startup acknowledgement timed out after %s", timeout)
+	}
 }
 
 func archiveHarnessDisplayName(harness string) string {
@@ -779,29 +930,13 @@ func archiveHarnessDisplayName(harness string) string {
 		return "Gemini"
 	case "opencode-cli":
 		return "OpenCode"
+	case "pi-cli":
+		return "Pi"
 	case "":
 		return "the agent"
 	default:
 		return harness
 	}
-}
-
-// runSessionCleanup performs best-effort cleanup of session resources.
-// Returns nil if the storage backend doesn't support worktree tracking.
-func runSessionCleanup(sessionName string, opCtx *ops.OpContext) *cleanup.Result {
-	// Type-assert to get concrete dolt.Adapter for worktree operations
-	adapter, ok := opCtx.Storage.(*dolt.Adapter)
-	if !ok || adapter == nil || adapter.IsTestStore() {
-		return nil
-	}
-	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
-	return cleanup.SessionResources(
-		context.Background(),
-		sessionName,
-		store,
-		cleanup.RealGitOps{},
-		slog.Default(),
-	)
 }
 
 // runSettingsCleanup runs configure-claude-settings cleanup-dirs as best-effort
@@ -832,7 +967,7 @@ func init() {
 	archiveCmd.Flags().StringVar(&olderThan, "older-than", "",
 		"Archive sessions inactive for N days (e.g., 30d, 7d, 1w, 24h)")
 	archiveCmd.Flags().BoolVar(&dryRun, "dry-run", false,
-		"Preview sessions to be archived without executing")
+		"Preview the session or sessions to be archived without executing")
 	archiveCmd.Flags().BoolVar(&cleanupWorktrees, "cleanup-worktrees", false,
 		"Clean up merged git worktrees after archiving")
 	archiveCmd.Flags().BoolVarP(&forceArchive, "force", "f", false,
@@ -842,8 +977,23 @@ func init() {
 		"Preserve sandbox directory for debugging instead of removing it")
 	archiveCmd.Flags().BoolVar(&includeSupervisors, "include-supervisors", false,
 		"Include supervisor sessions (orchestrator, overseer, meta-*) in bulk archive")
+	// Keep the protected-session bypass out of the public CLI. Only the
+	// dispatcher-owned recovery child receives this inherited capability.
+	allowSupervisorReap = os.Getenv("AGM_DISPATCHER_SUPERVISOR_REAP") == "1" && dispatcherParentAuthenticated()
 	archiveCmd.Flags().StringVar(&archiveOutcome, "outcome", "",
 		"Outcome to stamp on the archived record: completed (default), crashed, killed, gc-stale")
 	archiveCmd.Flags().StringVar(&archiveTestEnv, "test-env", "", "Use named test environment created via agm test-env create")
 	sessionCmd.AddCommand(archiveCmd)
+}
+
+// dispatcherParentAuthenticated keeps the protected-session bypass scoped to
+// the dispatcher process boundary. The environment marker alone is not an
+// authorization because any local caller can set it.
+func dispatcherParentAuthenticated() bool {
+	parent := exec.Command("ps", "-p", strconv.Itoa(os.Getppid()), "-o", "comm=")
+	out, err := parent.Output()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(strings.TrimSpace(string(out))) == "vroom-dispatch"
 }

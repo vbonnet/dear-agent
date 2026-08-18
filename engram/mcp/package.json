@@ -1,7 +1,7 @@
 {
   "name": "engram-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for Engram integration with Claude Code",
+  "description": "MCP server for Engram integration",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -23,7 +23,8 @@
   "author": "Engram Contributors",
   "license": "Apache-2.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -31,6 +32,9 @@
     "typescript": "^6.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
+  },
+  "overrides": {
+    "@hono/node-server": "^2.0.5"
   }
 }

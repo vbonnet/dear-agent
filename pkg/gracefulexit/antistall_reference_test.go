@@ -1,8 +1,8 @@
 package gracefulexit
 
 // This test guards the link between the behavioural anti-stall contract and
-// the place agents actually read. The anti-stall spec
-// (docs/design/anti-stall.md) only works if AGENTS.md keeps pointing at it
+// the place agents actually read. The anti-stall policy
+// (docs/policies/anti-stall.ai.md) only works if AGENTS.md keeps pointing at it
 // and the spec keeps stating its directives — a dangling reference or a
 // gutted spec is a silent regression of an instruction-tier rule. The repo's
 // recurring failure mode is exactly this: a doc lands but the wiring that
@@ -41,14 +41,14 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// TestAntiStallSpecExists asserts the consolidated anti-stall specification is
-// present and still carries its five behavioural directives plus the boundary
+// TestAntiStallSpecExists asserts the consolidated anti-stall policy is present
+// and still carries its five behavioral directives plus the boundary
 // section that reconciles it with Agent Delegation Enforcement. If any
 // directive heading is removed the spec has been gutted and the test fails
 // loudly.
 func TestAntiStallSpecExists(t *testing.T) {
 	root := repoRoot(t)
-	specPath := filepath.Join(root, "docs", "design", "anti-stall.md")
+	specPath := filepath.Join(root, "docs", "policies", "anti-stall.ai.md")
 	raw, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("anti-stall spec missing at %s: %v", specPath, err)
@@ -56,13 +56,13 @@ func TestAntiStallSpecExists(t *testing.T) {
 	spec := string(raw)
 
 	wantMarkers := []string{
-		"Continue through backlogs without asking",  // directive 1
-		`"Nothing found" is always a valid outcome`, // directive 2
-		"Present decisions, not questions",          // directive 3
-		"Minimize blocking on human input",          // directive 4
-		"If genuinely blocked, file it and move on", // directive 5
-		"The boundary",     // stop-side reconciliation
-		"graceful-exit.md", // reuses, not duplicates, this pkg's guardrail
+		"Continue through known work",              // directive 1
+		"Treat an empty result as valid",           // directive 2
+		"Make reversible implementation decisions", // directive 3
+		"Minimize human blocking",                  // directive 4
+		"Track a local blocker and move on",        // directive 5
+		"Stop boundaries",                          // stop-side reconciliation
+		"pkg/gracefulexit/SPEC.md",                 // executable no-overfit owner
 	}
 	for _, m := range wantMarkers {
 		if !strings.Contains(spec, m) {
@@ -71,10 +71,9 @@ func TestAntiStallSpecExists(t *testing.T) {
 	}
 }
 
-// TestAgentsMdReferencesAntiStallSpec asserts AGENTS.md still points agents at
-// the spec. A dangling or deleted reference means agents stop inheriting the
-// contract even though the spec file still exists — the precise rot this test
-// exists to catch.
+// TestAgentsMdReferencesAntiStallSpec asserts the root router still points
+// agents at the spec and preserves its keep-working default. The detailed
+// directives stay in the spec so AGENTS.md does not become a second copy.
 func TestAgentsMdReferencesAntiStallSpec(t *testing.T) {
 	root := repoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
@@ -82,11 +81,12 @@ func TestAgentsMdReferencesAntiStallSpec(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	agents := string(raw)
+	normalized := strings.Join(strings.Fields(agents), " ")
 
-	if !strings.Contains(agents, "docs/design/anti-stall.md") {
-		t.Error("AGENTS.md no longer references docs/design/anti-stall.md — agents will not inherit the anti-stall contract")
+	if !strings.Contains(agents, "docs/policies/anti-stall.ai.md") {
+		t.Error("AGENTS.md no longer references docs/policies/anti-stall.ai.md — agents will not inherit the anti-stall contract")
 	}
-	if !strings.Contains(agents, "Anti-Stall — Continuous Execution") {
-		t.Error("AGENTS.md is missing the Anti-Stall — Continuous Execution section heading")
+	if !strings.Contains(normalized, "continue through known work") {
+		t.Error("AGENTS.md no longer states the anti-stall keep-working default")
 	}
 }

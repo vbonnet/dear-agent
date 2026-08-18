@@ -65,7 +65,8 @@ go build -o ~/go/bin/agm ./cmd/agm
 go test ./internal/dolt/... -v
 
 # Run integration tests
-DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration
+go test -race -count=1 -timeout=20m \
+  -tags=integration ./agm/test/integration/...
 
 # Run linter
 golangci-lint run ./...

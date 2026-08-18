@@ -4,7 +4,11 @@
 # RELATED-SPEC: cmd/bead-close-guard/SPEC.md
 # RELATED-SPEC: cmd/bead-pr-guard/SPEC.md
 # RELATED-SPEC: cmd/bead-pr-sync/SPEC.md
+# RELATED-SPEC: cmd/branch-reaper/SPEC.md
+# RELATED-SPEC: cmd/external-pr-reviewer/SPEC.md
 # RELATED-SPEC: cmd/merge-audit/SPEC.md
+# RELATED-SPEC: cmd/ai-review/SPEC.md
+# RELATED-SPEC: internal/prreviewer/SPEC.md
 Feature: Root lifecycle command guardrails
   Repository lifecycle commands should keep executable SPEC traceability, and
   repair-agent routing should remain neutral across active harnesses and model
@@ -16,14 +20,18 @@ Feature: Root lifecycle command guardrails
     Then lifecycle command package "<package>" should have a co-located SPEC
 
     Examples:
-      | package                |
-      | cmd/babysit-prs        |
-      | cmd/bead-close-guard   |
-      | cmd/bead-pr-guard      |
-      | cmd/bead-pr-sync       |
-      | cmd/merge-audit        |
-      | cmd/mergeloop          |
-      | internal/mergeloop     |
+      | package                  |
+      | cmd/ai-review            |
+      | cmd/babysit-prs          |
+      | cmd/bead-close-guard     |
+      | cmd/bead-pr-guard        |
+      | cmd/bead-pr-sync         |
+      | cmd/branch-reaper        |
+      | cmd/external-pr-reviewer |
+      | cmd/merge-audit          |
+      | cmd/mergeloop            |
+      | internal/mergeloop       |
+      | internal/prreviewer      |
 
   Scenario Outline: Merge repair agents preserve active harness routes
     Given merge repair harness "<harness>" uses model "<model>"
@@ -34,8 +42,9 @@ Feature: Root lifecycle command guardrails
       | harness      | model     |
       | claude-code  | sonnet    |
       | codex-cli    | 5.5       |
-      | agy          | 2.5-pro   |
+      | agy          | 3.1-pro-high |
       | opencode-cli | glm-5.2   |
+      | pi-cli       | sonnet    |
 
   Scenario Outline: Merge repair agents preserve model-family routes
     Given merge repair model family "<family>" uses model "<model>"

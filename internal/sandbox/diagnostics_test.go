@@ -86,8 +86,8 @@ func TestDiagnoseSandbox_EmptyUpperPath(t *testing.T) {
 	sb := &Sandbox{
 		ID:         "test-sandbox",
 		MergedPath: mergedDir,
-		UpperPath:  "", // No upper path (e.g., claudecode-worktree)
-		Type:       "claudecode-worktree",
+		UpperPath:  "", // Providers may not expose a separate upper path.
+		Type:       "mock",
 	}
 
 	health, err := DiagnoseSandbox(sb)

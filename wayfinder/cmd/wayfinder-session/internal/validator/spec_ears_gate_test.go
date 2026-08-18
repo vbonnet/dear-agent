@@ -9,12 +9,12 @@ import (
 
 func writeSpecFile(t *testing.T, dir, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte(body), 0o644); err != nil {
-		t.Fatalf("write SPEC.md: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "SPEC-solution-requirements.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write SPEC-solution-requirements.md: %v", err)
 	}
 }
 
-// TestValidateSpecEARS_Valid confirms a SPEC.md with conforming EARS
+// TestValidateSpecEARS_Valid confirms the SPEC deliverable with conforming EARS
 // requirements passes the SPEC/SPEC gate deterministically (no API key needed).
 func TestValidateSpecEARS_Valid(t *testing.T) {
 	dir := t.TempDir()
@@ -31,13 +31,13 @@ func TestValidateSpecEARS_Valid(t *testing.T) {
 	}
 }
 
-// TestValidateSpecEARS_ZeroRequirements confirms a prose-only SPEC.md fails.
+// TestValidateSpecEARS_ZeroRequirements confirms a prose-only deliverable fails.
 func TestValidateSpecEARS_ZeroRequirements(t *testing.T) {
 	dir := t.TempDir()
 	writeSpecFile(t, dir, "# SPEC\n\nThis is just prose with no requirements.\n")
 	err := validateDocQuality("SPEC", dir)
 	if err == nil {
-		t.Fatal("expected error for SPEC.md with zero requirements")
+		t.Fatal("expected error for the SPEC deliverable with zero requirements")
 	}
 	verr := &ValidationError{}
 	if !errors.As(err, &verr) {
@@ -71,19 +71,19 @@ func TestValidateSpecEARS_NonConformingStrict(t *testing.T) {
 	}
 }
 
-// TestValidateSpecEARS_Missing confirms a missing SPEC.md is reported.
+// TestValidateSpecEARS_Missing confirms a missing SPEC deliverable is reported.
 func TestValidateSpecEARS_Missing(t *testing.T) {
 	dir := t.TempDir()
 	err := validateDocQuality("SPEC", dir)
 	if err == nil {
-		t.Fatal("expected error for missing SPEC.md")
+		t.Fatal("expected error for missing SPEC-solution-requirements.md")
 	}
 	verr := &ValidationError{}
 	if !errors.As(err, &verr) {
 		t.Fatalf("expected ValidationError, got %T", err)
 	}
-	if !containsString(verr.Reason, "SPEC.md does not exist") {
-		t.Errorf("expected Reason to mention missing SPEC.md, got: %s", verr.Reason)
+	if !containsString(verr.Reason, "SPEC-solution-requirements.md does not exist") {
+		t.Errorf("expected Reason to mention the missing SPEC deliverable, got: %s", verr.Reason)
 	}
 }
 

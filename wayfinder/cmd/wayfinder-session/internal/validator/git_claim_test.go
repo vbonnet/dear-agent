@@ -2,10 +2,11 @@ package validator
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestValidateGitCommitStatus(t *testing.T) {
@@ -25,12 +26,12 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:        "BUILD - deliverable untracked (VIOLATION - oss-55e)",
+			name:        "BUILD - current deliverable allowed but code untracked",
 			phaseName:   "BUILD",
 			files:       []string{"BUILD-implementation.md", "main.go"},
 			gitCommit:   false,
 			wantErr:     true,
-			errContains: "deliverable files exist but are not committed to git",
+			errContains: "main.go",
 		},
 		{
 			name:      "RETRO - deliverables committed",
@@ -40,12 +41,11 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:        "RETRO - retro doc untracked (VIOLATION - Instance 1 from today)",
-			phaseName:   "RETRO",
-			files:       []string{"RETRO-retrospective.md"},
-			gitCommit:   false,
-			wantErr:     true,
-			errContains: "RETRO-retrospective.md",
+			name:      "RETRO - current deliverable remains reachable for scoped commit",
+			phaseName: "RETRO",
+			files:     []string{"RETRO-retrospective.md"},
+			gitCommit: false,
+			wantErr:   false,
 		},
 		{
 			name:      "RETRO - all phase deliverables committed",
@@ -55,12 +55,12 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:        "RETRO - retrospective untracked (VIOLATION - Instance 2 from today)",
+			name:        "RETRO - earlier deliverable untracked",
 			phaseName:   "RETRO",
-			files:       []string{"RETRO-retrospective.md"},
+			files:       []string{"BUILD-implementation.md", "RETRO-retrospective.md"},
 			gitCommit:   false,
 			wantErr:     true,
-			errContains: "RETRO-retrospective.md",
+			errContains: "BUILD-implementation.md",
 		},
 		{
 			name:      "PROBLEM - planning phase (no git validation)",
@@ -85,12 +85,19 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			errContains: "server.py",
 		},
 		{
-			name:        "BUILD - wayfinder internal files ignored",
+			name:        "BUILD - nested code file untracked (VIOLATION)",
 			phaseName:   "BUILD",
-			files:       []string{"BUILD-implementation.md", ".wayfinder/session.json"},
-			gitCommit:   false, // .wayfinder/session.json is untracked but should be ignored
-			wantErr:     true,  // Only BUILD-implementation.md causes error
-			errContains: "BUILD-implementation.md",
+			files:       []string{"BUILD-implementation.md", "src/foo.go"},
+			gitCommit:   false,
+			wantErr:     true,
+			errContains: "src/foo.go",
+		},
+		{
+			name:      "BUILD - current deliverable and wayfinder internal files allowed",
+			phaseName: "BUILD",
+			files:     []string{"BUILD-implementation.md", ".wayfinder/session.json"},
+			gitCommit: false,
+			wantErr:   false,
 		},
 	}
 
@@ -99,14 +106,10 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			// Create temp directory as git repo
 			tmpDir := t.TempDir()
 
-			// Initialize git repo
-			if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+			// Initialize git repo (the sandbox also supplies the commit identity)
+			if err := gittest.Command(t, tmpDir, "init", tmpDir).Run(); err != nil {
 				t.Fatalf("failed to init git repo: %v", err)
 			}
-
-			// Configure git user for commits
-			exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-			exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
 
 			// Create files
 			for _, fileName := range tt.files {
@@ -127,8 +130,8 @@ func TestValidateGitCommitStatus(t *testing.T) {
 
 			// Commit files if requested
 			if tt.gitCommit {
-				exec.Command("git", "-C", tmpDir, "add", ".").Run()
-				exec.Command("git", "-C", tmpDir, "commit", "-m", "test commit").Run()
+				gittest.Command(t, tmpDir, "add", ".").Run()
+				gittest.Command(t, tmpDir, "commit", "-m", "test commit").Run()
 			}
 
 			// Run validation
@@ -171,16 +174,14 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	// Test the exact scenario from Instance 2: some files committed, some not
 	tmpDir := t.TempDir()
 
-	// Initialize git repo
-	exec.Command("git", "init", tmpDir).Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+	// Initialize git repo (the sandbox also supplies the commit identity)
+	gittest.Command(t, tmpDir, "init", tmpDir).Run()
 
 	// Create and commit WAYFINDER-STATUS.md
 	statusPath := filepath.Join(tmpDir, "WAYFINDER-STATUS.md")
 	os.WriteFile(statusPath, []byte("status"), 0644)
-	exec.Command("git", "-C", tmpDir, "add", "WAYFINDER-STATUS.md").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "commit status").Run()
+	gittest.Command(t, tmpDir, "add", "WAYFINDER-STATUS.md").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "commit status").Run()
 
 	// Create phase deliverables but DON'T commit
 	phaseDocs := []string{
@@ -198,30 +199,78 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	// This simulates Instance 2: CLI committed WAYFINDER-STATUS.md
 	// but left ~76 phase deliverables uncommitted
 
-	// Validation should FAIL for RETRO
+	// Validation should fail for the uncommitted earlier-phase deliverables;
+	// RETRO-retrospective.md itself remains reachable for the scoped commit.
 	err := validateGitCommitStatus(tmpDir, "RETRO")
 	if err == nil {
 		t.Fatalf("expected error for partially committed files, got nil")
 		return
 	}
-	if !strings.Contains(err.Error(), "RETRO-retrospective.md") {
-		t.Errorf("error should mention RETRO-retrospective.md, got: %v", err)
+	if !strings.Contains(err.Error(), "BUILD-implementation.md") {
+		t.Errorf("error should mention BUILD-implementation.md, got: %v", err)
 	}
 }
 
-func TestGetUntrackedFilesInProjectDir(t *testing.T) {
+func TestValidateGitCommitStatus_ModifiedTrackedSource(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Initialize git repo
-	exec.Command("git", "init", tmpDir).Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+	gittest.Run(t, filepath.Dir(tmpDir), "init", tmpDir)
+
+	sourcePath := filepath.Join(tmpDir, "src", "foo.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Command(t, tmpDir, "add", "src/foo.go").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "initial source").Run()
+
+	if err := os.WriteFile(sourcePath, []byte("package src\n\nconst changed = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateGitCommitStatus(tmpDir, "BUILD")
+	if err == nil || !strings.Contains(err.Error(), "src/foo.go") {
+		t.Fatalf("expected modified tracked source violation for src/foo.go, got %v", err)
+	}
+}
+
+func TestValidateGitCommitStatus_RenamedTrackedSource(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	gittest.Run(t, filepath.Dir(tmpDir), "init", tmpDir)
+
+	sourcePath := filepath.Join(tmpDir, "src", "foo.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Command(t, tmpDir, "add", "src/foo.go").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "initial source").Run()
+	if output, err := gittest.Command(t, tmpDir, "mv", "src/foo.go", "README.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git mv failed: %v: %s", err, output)
+	}
+
+	err := validateGitCommitStatus(tmpDir, "BUILD")
+	if err == nil || !strings.Contains(err.Error(), "src/foo.go") {
+		t.Fatalf("expected renamed tracked source violation for src/foo.go, got %v", err)
+	}
+}
+
+func TestGetUncommittedFilesInProjectDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Initialize git repo (the sandbox also supplies the commit identity)
+	gittest.Command(t, tmpDir, "init", tmpDir).Run()
 
 	// Create committed file
 	committedPath := filepath.Join(tmpDir, "committed.txt")
 	os.WriteFile(committedPath, []byte("committed"), 0644)
-	exec.Command("git", "-C", tmpDir, "add", "committed.txt").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "initial").Run()
+	gittest.Command(t, tmpDir, "add", "committed.txt").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "initial").Run()
 
 	// Create untracked files
 	untrackedPath := filepath.Join(tmpDir, "untracked.txt")
@@ -234,9 +283,9 @@ func TestGetUntrackedFilesInProjectDir(t *testing.T) {
 	os.WriteFile(wayfinderFile, []byte("internal"), 0644)
 
 	// Get untracked files
-	untracked, err := getUntrackedFilesInProjectDir(tmpDir)
+	untracked, err := getUncommittedFilesInProjectDir(tmpDir)
 	if err != nil {
-		t.Fatalf("getUntrackedFilesInProjectDir failed: %v", err)
+		t.Fatalf("getUncommittedFilesInProjectDir failed: %v", err)
 	}
 
 	// Should only include untracked.txt, not .wayfinder/session.json
@@ -249,7 +298,7 @@ func TestGetUntrackedFilesInProjectDir(t *testing.T) {
 	}
 }
 
-func TestIsFileUntracked(t *testing.T) {
+func TestIsFileUncommitted(t *testing.T) {
 	tests := []struct {
 		name           string
 		fileName       string
@@ -284,9 +333,9 @@ func TestIsFileUntracked(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isFileUntracked(tt.fileName, tt.untrackedFiles)
+			got := isFileUncommitted(tt.fileName, tt.untrackedFiles)
 			if got != tt.want {
-				t.Errorf("isFileUntracked() = %v, want %v", got, tt.want)
+				t.Errorf("isFileUncommitted() = %v, want %v", got, tt.want)
 			}
 		})
 	}

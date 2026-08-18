@@ -2,6 +2,7 @@ package safepr
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +16,33 @@ func writeStatus(t *testing.T, dir, content string) {
 	}
 }
 
-const inProgressStatus = `---
+func canonicalTestStatus(project, status, extra string) string {
+	currentWaypoint := "CHARTER"
+	history := ""
+	if status == "completed" {
+		currentWaypoint = "RETRO"
+		var entries strings.Builder
+		for _, waypoint := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+			fmt.Fprintf(&entries, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", waypoint)
+		}
+		history = "waypoint_history:\n" + entries.String()
+	}
+	return fmt.Sprintf(`---
 schema_version: "2.0"
-session_id: 87a5378c-2398-412c-af48-094287b11b79
-status: in_progress
+project_name: %s
+project_type: feature
+risk_level: S
+current_waypoint: %s
+status: %s
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+%s
+%s
 ---
+`, project, currentWaypoint, status, extra, history)
+}
 
-# Wayfinder Session
-`
+var inProgressStatus = canonicalTestStatus("safepr-test", "in-progress", "")
 
 func TestLoadSession_InProgress(t *testing.T) {
 	dir := t.TempDir()
@@ -31,7 +51,7 @@ func TestLoadSession_InProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
-	if s.ID != "87a5378c-2398-412c-af48-094287b11b79" {
+	if s.ID != "safepr-test" {
 		t.Errorf("session id = %q", s.ID)
 	}
 	if s.ProjectPath == "" || !filepath.IsAbs(s.ProjectPath) {
@@ -40,16 +60,19 @@ func TestLoadSession_InProgress(t *testing.T) {
 }
 
 func TestLoadSession_Failures(t *testing.T) {
+	missingSchema := strings.Replace(canonicalTestStatus("foo", "in-progress", ""), "schema_version: \"2.0\"\n", "", 1)
 	cases := []struct {
 		name, content, wantErr string
 	}{
-		{"missing file", "", "cannot read"},
-		{"completed session", "---\nsession_id: x\nstatus: completed\n---\n", "not active"},
-		{"no session id", "---\nstatus: in_progress\n---\n", "no session_id or project_name"},
-		{"v2 abandoned", "---\nproject_name: foo\nstatus: abandoned\n---\n", "not active"},
-		{"v2 blocked", "---\nproject_name: foo\nstatus: blocked\n---\n", "not active"},
+		{"missing file", "", "cannot load"},
+		{"partial canonical status", "---\nschema_version: \"2.0\"\nproject_name: x\nstatus: in-progress\n---\n", "project_type is required"},
+		{"completed session", canonicalTestStatus("x", "completed", "completion_date: 2026-07-20T00:00:00Z"), "wayfinder session start <project-name>"},
+		{"no project name", canonicalTestStatus("", "in-progress", ""), "project_name is required"},
+		{"abandoned", canonicalTestStatus("foo", "abandoned", ""), "not active"},
+		{"blocked", canonicalTestStatus("foo", "blocked", "blocked_reason: waiting"), "not active"},
+		{"missing schema", missingSchema, "schema_version is required"},
 		{"no frontmatter", "# just markdown\n", "frontmatter"},
-		{"unterminated frontmatter", "---\nsession_id: x\n", "unterminated"},
+		{"unterminated frontmatter", "---\nschema_version: \"2.0\"\nproject_name: x\n", "unterminated"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,8 +98,13 @@ func TestResolveSessionDir(t *testing.T) {
 	}
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	_, err := ResolveSessionDir("")
-	if err == nil || !strings.Contains(err.Error(), "agm escalate") {
-		t.Errorf("want teaching error mentioning agm escalate, got %v", err)
+	if err == nil {
+		t.Fatal("want teaching error, got nil")
+	}
+	for _, want := range []string{"agm escalate ask", "--session <registered-session>", "ask the current user directly"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("teaching error = %q, want substring %q", err, want)
+		}
 	}
 }
 
@@ -96,8 +124,11 @@ func TestValidate(t *testing.T) {
 			GhArgs: []string{"123"}}, "--comment"},
 		{"close delete-branch refused", Request{Verb: "close", Session: sess(),
 			GhArgs: []string{"123", "--comment", "done", "--delete-branch"}}, "irreversible"},
+		{"reopen ok", Request{Verb: "reopen", Session: sess(),
+			GhArgs: []string{"123", "--comment", "CI event delivery recovery"}}, ""},
+		{"reopen needs comment", Request{Verb: "reopen", Session: sess(),
+			GhArgs: []string{"123"}}, "--comment"},
 		{"merge refused", Request{Verb: "merge", Session: sess()}, "only supports"},
-		{"reopen refused", Request{Verb: "reopen", Session: sess()}, "only supports"},
 		{"web refused", Request{Verb: "create", Session: sess(),
 			GhArgs: []string{"--title", "t", "--web"}}, "browser"},
 		{"fill refused", Request{Verb: "create", Session: sess(),
@@ -180,19 +211,24 @@ func TestStampedArgs(t *testing.T) {
 			t.Errorf("comment not appended: %q", joined)
 		}
 	})
+	t.Run("reopen stamps existing comment", func(t *testing.T) {
+		r := Request{Verb: "reopen", Session: sess(),
+			GhArgs: []string{"42", "--comment", "retry CI delivery"}}
+		got := r.StampedArgs()
+		joined := strings.Join(got, "\x00")
+		if got[0] != "pr" || got[1] != "reopen" {
+			t.Fatalf("argv prefix = %v", got[:2])
+		}
+		if !strings.Contains(joined, "retry CI delivery\n\n---\nWayfinder-Session: abc-123") {
+			t.Errorf("comment not stamped: %q", joined)
+		}
+	})
 }
 
-const beadStatus = `---
-schema_version: "2.0"
-session_id: 87a5378c-2398-412c-af48-094287b11b79
-status: in_progress
-beads:
+var beadStatus = canonicalTestStatus("safepr-bead-test", "in-progress", `beads:
   - ce-5vje
   - ce-9999
----
-
-# Wayfinder Session
-`
+`)
 
 func TestLoadSession_Bead(t *testing.T) {
 	t.Run("first bead populates BeadID", func(t *testing.T) {
@@ -265,7 +301,7 @@ func TestLoadSession_V2Planning(t *testing.T) {
 
 func TestIsActiveStatus(t *testing.T) {
 	cases := map[string]bool{
-		"planning": true, "in-progress": true, "in_progress": true,
+		"planning": true, "in-progress": true, "in_progress": false,
 		"blocked": false, "completed": false, "abandoned": false, "": false,
 	}
 	for status, want := range cases {

@@ -3,6 +3,7 @@ package dolt
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,18 +21,23 @@ func init() {
 	lookupEnv = os.LookupEnv
 }
 
-// isRunningInTest detects if code is executing within a test context
-// This is determined by checking if the executable name contains ".test"
-// which is characteristic of binaries compiled by `go test`
+// isRunningInTest detects both go test binaries and built subprocesses whose
+// caller explicitly enables the test protocol.
 func isRunningInTest() bool {
-	// Get the executable path
+	testMode := getEnv("ENGRAM_TEST_MODE", "")
 	executable, err := os.Executable()
 	if err != nil {
-		return false
+		executable = ""
 	}
+	return testExecution(executable, testMode)
+}
 
-	// Check if executable name contains ".test" (characteristic of go test binaries)
-	return strings.Contains(executable, ".test")
+func testExecution(executable, testMode string) bool {
+	return testModeEnabled(testMode) || strings.Contains(executable, ".test")
+}
+
+func testModeEnabled(value string) bool {
+	return value == "1" || value == "true"
 }
 
 // Adapter provides Dolt-based storage for AGM sessions
@@ -59,6 +65,11 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite session store: %w", err)
 	}
+	// The SQLite adapter is a test-environment stand-in for Dolt. Keep its
+	// writes on one connection so concurrent callers queue in database/sql
+	// instead of racing separate SQLite writers into SQLITE_BUSY. The durable
+	// name reservation still arbitrates interleaved create lifecycles.
+	conn.SetMaxOpenConns(1)
 	if err := conn.Ping(); err != nil { //nolint:noctx // connection validation
 		_ = conn.Close()
 		return nil, fmt.Errorf("ping SQLite session store: %w", err)
@@ -68,6 +79,10 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("initialize SQLite session store: %w", err)
 	}
+	if err := upgradeSQLiteSessionSchema(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 
 	return &Adapter{
 		conn:              conn,
@@ -75,6 +90,54 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 		migrationsApplied: true,
 		testStore:         true,
 	}, nil
+}
+
+func upgradeSQLiteSessionSchema(conn *sql.DB) error {
+	hasRevision, err := sqliteSessionColumnExists(conn, "tmux_session_revision")
+	if err != nil {
+		return fmt.Errorf("inspect SQLite session store schema: %w", err)
+	}
+	if hasRevision {
+		return nil
+	}
+	if _, err := conn.Exec(`ALTER TABLE agm_sessions ADD COLUMN tmux_session_revision TEXT`); err != nil { //nolint:noctx // startup schema upgrade
+		// Another opener may have completed the idempotent upgrade after the
+		// first inspection. Verify the postcondition before reporting failure.
+		upgraded, verifyErr := sqliteSessionColumnExists(conn, "tmux_session_revision")
+		if verifyErr == nil && upgraded {
+			return nil
+		}
+		return fmt.Errorf("upgrade SQLite session store with tmux ownership revision: %w", err)
+	}
+	return nil
+}
+
+func sqliteSessionColumnExists(conn *sql.DB, column string) (bool, error) {
+	rows, err := conn.Query(`PRAGMA table_info(agm_sessions)`) //nolint:noctx // startup schema inspection
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			columnID     int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue sql.NullString
+			primaryKey   int
+		)
+		if err := rows.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // IsTestStore reports whether this adapter backs an isolated AGM test
@@ -97,6 +160,7 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
   context_notes TEXT,
   claude_uuid TEXT,
   tmux_session_name TEXT,
+  tmux_session_revision TEXT,
   metadata TEXT,
   permission_mode TEXT,
   permission_mode_updated_at TIMESTAMP,
@@ -112,6 +176,17 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_agm_sessions_workspace_updated
   ON agm_sessions(workspace, updated_at DESC);
+CREATE TABLE IF NOT EXISTS agm_session_name_reservations (
+  workspace TEXT NOT NULL,
+  name TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (workspace, name),
+  UNIQUE (workspace, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agm_session_name_reservation_expiry
+  ON agm_session_name_reservations(expires_at);
 CREATE TABLE IF NOT EXISTS agm_harness_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
@@ -138,7 +213,10 @@ var agmConfigPath = "~/.agm/config.yaml"
 // readDefaultWorkspaceFromConfig reads default_workspace from the AGM config file.
 // Returns empty string on any error (file missing, malformed YAML, etc.).
 func readDefaultWorkspaceFromConfig() string {
-	path := agmConfigPath
+	return readDefaultWorkspaceFromConfigAt(agmConfigPath)
+}
+
+func readDefaultWorkspaceFromConfigAt(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -161,13 +239,36 @@ func readDefaultWorkspaceFromConfig() string {
 
 // DefaultConfig returns default configuration from environment
 func DefaultConfig() (*Config, error) {
+	return defaultConfigAt(agmConfigPath)
+}
+
+func defaultConfigAt(workspaceConfigPath string) (*Config, error) {
+	workspace := selectedWorkspaceAt(workspaceConfigPath)
+	if workspace == "" {
+		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
+			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
+	}
+	return configForWorkspace(workspace)
+}
+
+func selectedWorkspaceAt(workspaceConfigPath string) string {
 	workspace := getEnv("WORKSPACE", "")
+	if testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
+		if testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", ""); testWorkspace != "" {
+			workspace = testWorkspace
+		}
+	}
 	if workspace == "" {
 		// Fall back to default_workspace from ~/.agm/config.yaml so the MCP
 		// server works when invoked outside a workspace context (e.g. Dispatch
 		// or Cowork where WORKSPACE is not set in the environment).
-		workspace = readDefaultWorkspaceFromConfig()
+		workspace = readDefaultWorkspaceFromConfigAt(workspaceConfigPath)
 	}
+	return workspace
+}
+
+func configForWorkspace(workspace string) (*Config, error) {
+	database := getEnv("DOLT_DATABASE", workspace)
 	if workspace == "" {
 		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
 			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
@@ -176,42 +277,8 @@ func DefaultConfig() (*Config, error) {
 	// CRITICAL: Fail-fast enforcement to prevent test pollution
 	// Tests MUST set ENGRAM_TEST_MODE=1 and use a test-specific workspace
 	if isRunningInTest() {
-		testMode := getEnv("ENGRAM_TEST_MODE", "")
-		testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", "")
-
-		// Require explicit test mode
-		if testMode != "1" && testMode != "true" {
-			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
-				"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
-				"Fix: Run tests with proper isolation:\n"+
-				"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
-				"Or use testutil.SetupTestEnvironment(t) in your test setup function.\n\n"+
-				"Current workspace: %s (attempted during test)", workspace)
-		}
-
-		// Block production workspace names during tests
-		// Production workspaces include: oss, acme, prod, production, main, etc.
-		isProductionWorkspace := workspace == "oss" ||
-			workspace == "acme" ||
-			workspace == "prod" ||
-			workspace == "production" ||
-			workspace == "main"
-
-		if isProductionWorkspace {
-			//nolint:staticcheck // multi-line CLI-facing help text
-			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests cannot write to production workspace '%s'\n\n"+
-				"Why: Production workspaces contain real data that tests would corrupt.\n\n"+
-				"Fix: Set ENGRAM_TEST_WORKSPACE to a test-specific value:\n"+
-				"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
-				"Or use testutil.SetupTestEnvironment(t) which auto-sets workspace='test'.\n\n"+
-				"Note: WORKSPACE env var is set to '%s' - this is a production workspace.\n"+
-				"      Tests detected production name, blocking to prevent pollution.", workspace, workspace)
-		}
-
-		// Warn if ENGRAM_TEST_WORKSPACE is not set (using inherited WORKSPACE)
-		if testWorkspace == "" {
-			fmt.Fprintf(os.Stderr, "WARNING: ENGRAM_TEST_WORKSPACE not set, using WORKSPACE=%s\n", workspace)
-			fmt.Fprintf(os.Stderr, "         Set ENGRAM_TEST_WORKSPACE=test for explicit test isolation\n")
+		if err := validateTestExecutionTarget(workspace, database); err != nil {
+			return nil, err
 		}
 	}
 
@@ -220,7 +287,6 @@ func DefaultConfig() (*Config, error) {
 	// Default database name to workspace name for proper workspace isolation
 	// In production: oss → database "oss", acme → database "acme"
 	// In tests: test → database "test"
-	database := getEnv("DOLT_DATABASE", workspace)
 	user := getEnv("DOLT_USER", "root")
 	password := getEnv("DOLT_PASSWORD", "")
 
@@ -246,6 +312,256 @@ func DefaultConfig() (*Config, error) {
 	}, nil
 }
 
+// ConfiguredWorkspaceConfigs returns every enabled workspace store that
+// destructive cross-repository maintenance must query before it can treat its
+// active-session set as complete. An explicit DOLT_DATABASE is accepted only
+// when it describes a single workspace; applying one database name to multiple
+// workspace configs would silently invent a cross-workspace mapping. Without
+// that override, each workspace uses its conventional same-name database.
+func ConfiguredWorkspaceConfigs() ([]*Config, error) {
+	return ConfiguredWorkspaceConfigsAt(agmConfigPath)
+}
+
+// ConfiguredWorkspaceConfigsAt is the explicit-path variant used by AGM
+// commands after loading their configured workspace registry. Destructive
+// inventory must query the same registry that session creation uses.
+func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error) {
+	path := expandTilde(workspaceConfigPath)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read AGM workspace config: %w", err)
+	}
+	enabled, hasRegistryEntries, err := parseEnabledWorkspaceNames(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(enabled) == 0 {
+		if hasRegistryEntries {
+			return nil, fmt.Errorf("AGM workspace config has no enabled workspaces")
+		}
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	return configuredWorkspaceConfigsFromRegistry(enabled, data)
+}
+
+// ConfiguredWorkspaceConfigsIncludingDisabledAt returns every workspace named
+// in the registry, including disabled entries. Destructive inventory must not
+// omit a disabled store that can still contain an unarchived session.
+func ConfiguredWorkspaceConfigsIncludingDisabledAt(workspaceConfigPath string) ([]*Config, error) {
+	path := expandTilde(workspaceConfigPath)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read AGM workspace config: %w", err)
+	}
+	all, hasRegistryEntries, err := parseAllWorkspaceNames(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) == 0 {
+		if hasRegistryEntries {
+			return nil, fmt.Errorf("AGM workspace config has no named workspaces")
+		}
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	return configuredWorkspaceConfigsFromRegistry(all, data)
+}
+
+func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*Config, error) {
+	base, err := configForWorkspace(enabled[0])
+	if err != nil {
+		return nil, err
+	}
+	endpoints, err := parseWorkspaceDoltEndpoints(data)
+	if err != nil {
+		return nil, err
+	}
+	_, sharedPortExplicit := lookupEnv("DOLT_PORT")
+	explicitDatabase, databaseIsExplicit := lookupEnv("DOLT_DATABASE")
+	databaseIsExplicit = databaseIsExplicit && explicitDatabase != ""
+	seen := make(map[string]bool, len(enabled))
+	configs := make([]*Config, 0, len(enabled))
+	add := func(workspace string) {
+		if workspace == "" || seen[workspace] {
+			return
+		}
+		seen[workspace] = true
+		workspaceConfig := *base
+		workspaceConfig.Workspace = workspace
+		endpoint := endpoints[workspace]
+		applyWorkspaceDoltEndpoint(&workspaceConfig, endpoint)
+		if endpoint.Port == "" && len(enabled) > 1 && !sharedPortExplicit {
+			return
+		}
+		if databaseIsExplicit {
+			workspaceConfig.Database = explicitDatabase
+		} else if endpoints[workspace].Database == "" {
+			workspaceConfig.Database = workspace
+		}
+		configs = append(configs, &workspaceConfig)
+	}
+	for _, workspace := range enabled {
+		add(workspace)
+	}
+	if len(configs) != len(enabled) {
+		return nil, fmt.Errorf("multiple enabled workspaces require either an explicit shared DOLT_PORT or a per-workspace dolt.port in the AGM registry")
+	}
+	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
+}
+
+func applyWorkspaceDoltEndpoint(config *Config, endpoint workspaceDoltEndpoint) {
+	if endpoint.Port != "" {
+		config.Port = endpoint.Port
+	}
+	if endpoint.Host != "" {
+		config.Host = endpoint.Host
+	}
+	if endpoint.User != "" {
+		config.User = endpoint.User
+	}
+	if endpoint.Password != "" {
+		config.Password = endpoint.Password
+	}
+	if endpoint.StartScript != "" {
+		config.StartScript = expandTilde(endpoint.StartScript)
+	}
+	if endpoint.Database != "" {
+		config.Database = endpoint.Database
+	}
+}
+
+type workspaceDoltEndpoint struct {
+	Host        string `yaml:"host"`
+	Port        string `yaml:"port"`
+	User        string `yaml:"user"`
+	Password    string `yaml:"password"`
+	StartScript string `yaml:"start_script"`
+	Database    string `yaml:"database"`
+}
+
+func parseWorkspaceDoltEndpoints(data []byte) (map[string]workspaceDoltEndpoint, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name string                `yaml:"name"`
+			Dolt workspaceDoltEndpoint `yaml:"dolt"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse AGM workspace Dolt endpoints: %w", err)
+	}
+	endpoints := make(map[string]workspaceDoltEndpoint, len(cfg.Workspaces))
+	for _, workspace := range cfg.Workspaces {
+		if name := strings.TrimSpace(workspace.Name); name != "" {
+			endpoints[name] = workspace.Dolt
+		}
+	}
+	return endpoints, nil
+}
+
+func parseEnabledWorkspaceNames(data []byte) ([]string, bool, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name    string `yaml:"name"`
+			Enabled *bool  `yaml:"enabled"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+	enabled := make([]string, 0, len(cfg.Workspaces))
+	for index, workspace := range cfg.Workspaces {
+		if workspace.Enabled == nil || !*workspace.Enabled {
+			continue
+		}
+		name := strings.TrimSpace(workspace.Name)
+		if name == "" {
+			return nil, true, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		}
+		enabled = append(enabled, name)
+	}
+	return enabled, len(cfg.Workspaces) > 0, nil
+}
+
+func parseAllWorkspaceNames(data []byte) ([]string, bool, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name string `yaml:"name"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+	names := make([]string, 0, len(cfg.Workspaces))
+	for index, workspace := range cfg.Workspaces {
+		name := strings.TrimSpace(workspace.Name)
+		if name == "" {
+			return nil, true, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		}
+		names = append(names, name)
+	}
+	return names, len(cfg.Workspaces) > 0, nil
+}
+
+func validateConfiguredWorkspaceConfigs(configs []*Config, base *Config, explicitDatabase string, databaseIsExplicit bool) ([]*Config, error) {
+	if len(configs) == 0 {
+		return []*Config{base}, nil
+	}
+	if databaseIsExplicit && len(configs) > 1 {
+		return nil, fmt.Errorf(
+			"DOLT_DATABASE=%q scopes one store but %d enabled workspaces are configured; cannot prove a complete cross-workspace active-session inventory",
+			explicitDatabase,
+			len(configs),
+		)
+	}
+	return configs, nil
+}
+
+func validateTestExecutionTarget(workspace, database string) error {
+	if !testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
+			"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
+			"Fix: Run tests with proper isolation:\n"+
+			"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
+			"Or use testutil.SetupTestEnvironment(t) in your test setup function.\n\n"+
+			"Current workspace: %s (attempted during test)", workspace)
+	}
+	return validateTestTarget(workspace, database, getEnv("ENGRAM_TEST_WORKSPACE", ""))
+}
+
+func validateTestTarget(workspace, database, testWorkspace string) error {
+	if testWorkspace == "" {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: ENGRAM_TEST_WORKSPACE must explicitly select the isolated test workspace")
+	}
+	if workspace != testWorkspace {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: resolved workspace %q does not match ENGRAM_TEST_WORKSPACE %q", workspace, testWorkspace)
+	}
+	if database != testWorkspace && database != "agm_test" {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: resolved database %q is not the selected test workspace %q or the shared agm_test database", database, testWorkspace)
+	}
+	return nil
+}
+
 // New creates a new Dolt adapter with the given configuration
 func New(config *Config) (*Adapter, error) {
 	if config == nil {
@@ -256,6 +572,11 @@ func New(config *Config) (*Adapter, error) {
 	}
 	if config.Port == "" {
 		return nil, fmt.Errorf("port cannot be empty")
+	}
+	if isRunningInTest() {
+		if err := validateTestExecutionTarget(config.Workspace, config.Database); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build MySQL DSN for Dolt connection
@@ -313,6 +634,18 @@ func New(config *Config) (*Adapter, error) {
 	}
 
 	return adapter, nil
+}
+
+// NewWithoutAutoStart opens a Dolt adapter without invoking a configured
+// startup script or retrying after the initial connection failure. It is used
+// by read-only inventory probes where a missing database is expected.
+func NewWithoutAutoStart(config *Config) (*Adapter, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	withoutStart := *config
+	withoutStart.StartScript = ""
+	return New(&withoutStart)
 }
 
 // expandTilde expands ~ prefix to user home directory
@@ -427,6 +760,7 @@ type SessionFilter struct {
 	ExcludeArchived bool     // Exclude archived sessions (status != 'archived')
 	ExcludeTest     bool     // Exclude test sessions (is_test != true)
 	Tags            []string // Filter by context tags (all must match)
+	StableOrder     bool     // Order by immutable creation key for offset pagination
 	Limit           int      // Max number of results (0 = no limit)
 	Offset          int      // Number of results to skip
 }

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Root-owned system LaunchDaemon for the recurring dangerous-override audit.
+
+  Runs `agm override audit --notify` daily. The audit reads the root-owned
+  /var/log/dear-agent-overrides.jsonl ledger and reports every dangerous override
+  — the Codex hook-trust bypass and the admission-brake override — grouped by
+  the reason its caller gave.
+
+  WHY it recurs: an override is meant to be an exception. The failure mode is
+  that it quietly becomes routine, and the control it disables is then dead
+  without anyone deciding that. A reason that keeps repeating in this report is
+  the signal to act on: fix the root cause that forces the override, or close
+  the loophole that makes it reachable. Renewing the approval instead is how a
+  safety control decays into a formality.
+
+  It sends a Notification Center alert and writes the breach to the unified
+  system log before exiting 3. A generic non-zero exit would be indistinguishable
+  from a broken job, so 3 is reserved for "used too often".
+
+  `make install-override-audit-launchdaemon` uses fresh interactive operator
+  authentication to install both this plist and a reviewed AGM copy into
+  root-owned system locations. An unattended same-user agent therefore cannot
+  replace the executable, edit the schedule, or disable it through the GUI
+  launchd domain. The system manager runs the fixed command as the named
+  unprivileged operator.
+
+  Activate (ask-gated host action):
+    sudo launchctl bootstrap system \
+      /Library/LaunchDaemons/com.dear-agent.override-audit.plist
+
+  Trigger an immediate run outside the schedule:
+    sudo launchctl kickstart system/com.dear-agent.override-audit
+
+  Remove:
+    make uninstall-override-audit-launchdaemon
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.override-audit</string>
+
+  <key>UserName</key>
+  <string>__OPERATOR_USER__</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/libexec/dear-agent-override-audit</string>
+    <string>--config</string>
+    <string>/dev/null</string>
+    <string>override</string>
+    <string>audit</string>
+    <string>--window</string>
+    <string>168h</string>
+    <string>--threshold</string>
+    <string>5</string>
+    <string>--notify</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/var/empty</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- Daily, mid-morning: a review is only useful if a human is around to read
+       it and decide whether the root cause is worth fixing. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>10</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/var/log/dear-agent-override-audit.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/dear-agent-override-audit.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- The audit has no project-relative inputs. Keep its cwd outside every
+       agent-controlled workspace. -->
+  <key>WorkingDirectory</key>
+  <string>/var/empty</string>
+</dict>
+</plist>

@@ -262,8 +262,10 @@ func TestInitSequence_DetachedMode(t *testing.T) {
 	setupTestSocket(t)
 	setupTestState(t)
 
-	// This test requires full AGM integration, so we'll verify
-	// that the timeout behavior is correct in detached mode
+	// This test requires full AGM integration, so verify that detached mode
+	// fails with the actionable startup diagnosis rather than submitting
+	// initialization commands to a bare shell.
+	withFastFailThresholds(t, 3, 4, 6)
 
 	sessionName := "test-detached-" + time.Now().Format("20060102-150405")
 	defer killTestSession(sessionName)
@@ -275,18 +277,19 @@ func TestInitSequence_DetachedMode(t *testing.T) {
 
 	seq := NewInitSequence(sessionName)
 
-	// In detached mode, Run() should timeout gracefully
-	// (bash prompt != Claude prompt)
+	// In detached mode, Run() should reject the bare shell promptly
+	// (bash prompt != Claude prompt).
 	start := time.Now()
 	err = seq.Run()
 	elapsed := time.Since(start)
 
-	// Should timeout after 30 seconds (WaitForClaudePrompt timeout)
-	assert.Error(t, err, "Should timeout when Claude not ready")
-	assert.GreaterOrEqual(t, elapsed.Seconds(), 30.0,
-		"Should wait full timeout period before failing")
-	assert.Contains(t, err.Error(), "Claude not ready",
-		"Error should mention Claude not being ready")
+	require.Error(t, err, "should fail when Claude never starts")
+	assert.Contains(t, err.Error(), "claude not ready for rename",
+		"error should retain the initialization-step context")
+	assert.Contains(t, err.Error(), "harness process never started",
+		"error should explain that the pane stayed at a shell")
+	assert.Less(t, elapsed, 10*time.Second,
+		"dead startup should fail before the 30-second prompt budget (took %v)", elapsed)
 }
 
 // Benchmark to ensure InitSequence performance hasn't regressed

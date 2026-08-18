@@ -134,6 +134,82 @@ func TestCalculatePhaseEngramHash(t *testing.T) {
 	}
 }
 
+func TestResolvePhaseEngramPath(t *testing.T) {
+	projectDir := t.TempDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir() error = %v", err)
+	}
+	absolute := filepath.Join(t.TempDir(), "method.md")
+
+	tests := []struct {
+		name    string
+		path    string
+		want    string
+		wantErr bool
+	}{
+		{name: "project relative", path: filepath.Join("methods", "problem.md"), want: filepath.Join(projectDir, "methods", "problem.md")},
+		{name: "absolute", path: absolute, want: absolute},
+		{name: "home root", path: "~", want: filepath.Clean(homeDir)},
+		{name: "home relative", path: filepath.Join("~", "methods", "problem.md"), want: filepath.Join(homeDir, "methods", "problem.md")},
+		{name: "leading tilde directory", path: "~methods/problem.md", want: filepath.Join(projectDir, "~methods/problem.md")},
+		{name: "named-home-like directory", path: "~other/method.md", want: filepath.Join(projectDir, "~other/method.md")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolvePhaseEngramPath(projectDir, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolvePhaseEngramPath() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolvePhaseEngramPath() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolvePhaseEngramPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateMethodologyFreshnessProjectRelativeEngramPath(t *testing.T) {
+	projectDir := t.TempDir()
+	relativeEngramPath := filepath.Join("methods", "problem.md")
+	engramPath := filepath.Join(projectDir, relativeEngramPath)
+	if err := os.MkdirAll(filepath.Dir(engramPath), 0o755); err != nil {
+		t.Fatalf("create methodology directory: %v", err)
+	}
+	if err := os.WriteFile(engramPath, []byte("# Problem methodology\n"), 0o600); err != nil {
+		t.Fatalf("write methodology: %v", err)
+	}
+	expectedHash, err := calculatePhaseEngramHash(engramPath)
+	if err != nil {
+		t.Fatalf("calculate methodology hash: %v", err)
+	}
+
+	deliverable := `---
+phase: "PROBLEM"
+phase_name: "Problem Validation"
+wayfinder_session_id: "relative-engram"
+created_at: "2026-08-01T00:00:00Z"
+phase_engram_hash: "` + expectedHash + `"
+phase_engram_path: "` + relativeEngramPath + `"
+---
+
+# Problem
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "PROBLEM-problem-validation.md"), []byte(deliverable), 0o600); err != nil {
+		t.Fatalf("write deliverable: %v", err)
+	}
+
+	if err := validateMethodologyFreshness(projectDir, "PROBLEM", ""); err != nil {
+		t.Fatalf("validateMethodologyFreshness() error = %v", err)
+	}
+}
+
 func TestCalculatePhaseEngramHash_TildeExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -215,8 +291,8 @@ func TestCalculatePhaseEngramHash_Consistency(t *testing.T) {
 func TestValidateMethodologyFreshness(t *testing.T) {
 	// Create engram file
 	tmpDir := t.TempDir()
-	engramFile := filepath.Join(tmpDir, "d1-problem-validation.ai.md")
-	engramContent := "# D1 Phase Methodology\n\nSome methodology content.\n"
+	engramFile := filepath.Join(tmpDir, "problem-validation.ai.md")
+	engramContent := "# PROBLEM Phase Methodology\n\nSome methodology content.\n"
 	if err := os.WriteFile(engramFile, []byte(engramContent), 0600); err != nil {
 		t.Fatalf("failed to create engram file: %v", err)
 	}
@@ -237,7 +313,7 @@ func TestValidateMethodologyFreshness(t *testing.T) {
 		{
 			name: "matching hash - validation passes",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -245,7 +321,7 @@ phase_engram_hash: "` + expectedHash + `"
 phase_engram_path: "` + engramFile + `"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
@@ -255,7 +331,7 @@ Content here.
 		{
 			name: "hash mismatch - no reason - blocks",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -263,7 +339,7 @@ phase_engram_hash: "sha256:outdatedhash123"
 phase_engram_path: "` + engramFile + `"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
@@ -274,7 +350,7 @@ Content here.
 		{
 			name: "hash mismatch - with reason - allows",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -282,7 +358,7 @@ phase_engram_hash: "sha256:outdatedhash123"
 phase_engram_path: "` + engramFile + `"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
@@ -291,7 +367,7 @@ Content here.
 		},
 		{
 			name: "missing frontmatter - blocks",
-			deliverableContent: `# D1: Problem Validation
+			deliverableContent: `# PROBLEM: Problem Validation
 
 No frontmatter here.
 `,
@@ -302,7 +378,7 @@ No frontmatter here.
 		{
 			name: "invalid engram path - blocks",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -324,13 +400,13 @@ Content
 			projectDir := t.TempDir()
 
 			// Create deliverable file
-			deliverableFile := filepath.Join(projectDir, "D1-problem-validation.md")
+			deliverableFile := filepath.Join(projectDir, "PROBLEM-problem-validation.md")
 			if err := os.WriteFile(deliverableFile, []byte(tt.deliverableContent), 0600); err != nil {
 				t.Fatalf("failed to create deliverable file: %v", err)
 			}
 
 			// Validate
-			err := validateMethodologyFreshness(projectDir, "D1", tt.hashMismatchReason)
+			err := validateMethodologyFreshness(projectDir, "PROBLEM", tt.hashMismatchReason)
 
 			if tt.wantErr {
 				if err == nil {
@@ -353,7 +429,7 @@ func TestValidateMethodologyFreshness_NoDeliverable(t *testing.T) {
 	// No deliverable file created
 
 	// Should not error (validateDeliverableExists catches this case)
-	err := validateMethodologyFreshness(tmpDir, "D1", "")
+	err := validateMethodologyFreshness(tmpDir, "PROBLEM", "")
 	if err != nil {
 		t.Errorf("validateMethodologyFreshness() with no deliverable should return nil, got %v", err)
 	}

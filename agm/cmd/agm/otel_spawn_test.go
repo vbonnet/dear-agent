@@ -1,88 +1,105 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
+func telemetryLaunchCommand(sessionID string) string {
+	return testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "claude-code", Model: "sonnet", SessionName: "telemetry",
+		SessionID: sessionID, WorkDir: "/tmp/work", ForwardTelemetry: true,
+	})
+}
+
+func telemetryChildEnvironment(parent []string, sessionID string) []string {
+	return harnessexec.ClaudeEnvironment(parent, harnessexec.ClaudeLaunch{
+		SessionName: "telemetry", SessionID: sessionID, Model: "claude-test",
+		ForwardTelemetry: true,
+	}, "")
+}
+
 func TestOtelEnvArgs_NoEndpointNoSession(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	spawnSessionID = ""
-	got := otelEnvArgs()
-	if got != "" {
-		t.Errorf("expected empty string when no OTel config, got %q", got)
+	got := telemetryChildEnvironment(nil, "")
+	if containsEnvPrefix(got, "OTEL_") || containsEnvPrefix(got, "ENGRAM_SESSION_ID=") {
+		t.Errorf("expected no telemetry env when no OTel config, got %q", got)
 	}
 }
 
-func TestOtelEnvArgs_EndpointForwarded(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-	spawnSessionID = ""
-	got := otelEnvArgs()
-	if !strings.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT='localhost:4317'") {
-		t.Errorf("expected shell-quoted OTEL_EXPORTER_OTLP_ENDPOINT in args, got %q", got)
+func TestOtelEnvArgs_EndpointForwardedOutOfBand(t *testing.T) {
+	const endpoint = "localhost:4317"
+	got := telemetryChildEnvironment([]string{"OTEL_EXPORTER_OTLP_ENDPOINT=" + endpoint}, "")
+	if !slices.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT="+endpoint) {
+		t.Errorf("expected OTEL endpoint in child environment, got %q", got)
+	}
+	if strings.Contains(telemetryLaunchCommand(""), endpoint) {
+		t.Errorf("OTEL endpoint appeared in tmux command: %q", telemetryLaunchCommand(""))
 	}
 }
 
-// The endpoint is interpolated into a shell command run via tmux, so a value
-// with shell metacharacters must be shell-quoted to prevent command injection.
-func TestOtelEnvArgs_EndpointShellQuoted(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "evil:4317; rm -rf /")
-	spawnSessionID = ""
-	got := otelEnvArgs()
-	if !strings.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT='evil:4317; rm -rf /'") {
-		t.Errorf("expected metacharacters to be shell-quoted, got %q", got)
+func TestOtelEnvArgs_EndpointMetacharactersNeverReachCommand(t *testing.T) {
+	const endpoint = "evil:4317; rm -rf /"
+	got := telemetryChildEnvironment([]string{"OTEL_EXPORTER_OTLP_ENDPOINT=" + endpoint}, "")
+	if !slices.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT="+endpoint) {
+		t.Errorf("expected exact endpoint in child environment, got %q", got)
+	}
+	if strings.Contains(telemetryLaunchCommand(""), endpoint) {
+		t.Errorf("endpoint metacharacters appeared in shell command: %q", telemetryLaunchCommand(""))
 	}
 }
 
-// When an endpoint is present the spawn seam must also enable the Claude Code
-// CLI's own telemetry — forwarding the endpoint alone is inert (ce-ph5x).
+// When an endpoint is present the private executor must also enable the Claude
+// CLI's own telemetry; forwarding the endpoint alone is inert (ce-ph5x).
 func TestOtelEnvArgs_ClaudeTelemetryEnabled(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-	spawnSessionID = ""
-	got := otelEnvArgs()
+	got := telemetryChildEnvironment([]string{"OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317"}, "")
 	for _, want := range []string{
 		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
 		"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1",
 		"OTEL_TRACES_EXPORTER=otlp",
 		"OTEL_EXPORTER_OTLP_PROTOCOL=grpc",
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("expected %q in args, got %q", want, got)
+		if !slices.Contains(got, want) {
+			t.Errorf("expected %q in child environment, got %q", want, got)
 		}
 	}
 }
 
-// Without an endpoint the CLI telemetry vars must NOT be injected — enabling
-// telemetry with no collector would have the CLI retry-spamming localhost.
 func TestOtelEnvArgs_NoEndpointNoClaudeTelemetry(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	spawnSessionID = "only-session"
-	defer func() { spawnSessionID = "" }()
-	got := otelEnvArgs()
-	if strings.Contains(got, "CLAUDE_CODE_ENABLE_TELEMETRY") {
-		t.Errorf("did not expect CLAUDE_CODE_ENABLE_TELEMETRY without endpoint, got %q", got)
+	got := telemetryChildEnvironment(nil, "only-session")
+	if containsEnvPrefix(got, "CLAUDE_CODE_ENABLE_TELEMETRY=") {
+		t.Errorf("did not expect Claude telemetry without endpoint, got %q", got)
 	}
 }
 
-func TestOtelEnvArgs_SessionIDInjected(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	spawnSessionID = "test-uuid-1234"
-	defer func() { spawnSessionID = "" }()
-	got := otelEnvArgs()
-	if !strings.Contains(got, "ENGRAM_SESSION_ID='test-uuid-1234'") {
-		t.Errorf("expected shell-quoted ENGRAM_SESSION_ID in args, got %q", got)
+func TestOtelEnvArgs_SessionIDInjectedOutOfBand(t *testing.T) {
+	got := telemetryChildEnvironment(nil, "test-uuid-1234")
+	if !slices.Contains(got, "ENGRAM_SESSION_ID=test-uuid-1234") {
+		t.Errorf("expected ENGRAM_SESSION_ID in child environment, got %q", got)
+	}
+	command := telemetryLaunchCommand("test-uuid-1234")
+	if !strings.Contains(command, "--session-id 'test-uuid-1234'") {
+		t.Errorf("expected non-secret session id in private protocol, got %q", command)
 	}
 }
 
 func TestOtelEnvArgs_BothPresent(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "tempo:4317")
-	spawnSessionID = "abc-def"
-	defer func() { spawnSessionID = "" }()
-	got := otelEnvArgs()
-	if !strings.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT='tempo:4317'") {
-		t.Errorf("missing endpoint in %q", got)
+	got := telemetryChildEnvironment([]string{"OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317"}, "abc-def")
+	for _, want := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317", "ENGRAM_SESSION_ID=abc-def"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
 	}
-	if !strings.Contains(got, "ENGRAM_SESSION_ID='abc-def'") {
-		t.Errorf("missing session ID in %q", got)
+}
+
+func containsEnvPrefix(environment []string, prefix string) bool {
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
 	}
+	return false
 }

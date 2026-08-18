@@ -20,6 +20,39 @@ import (
 // (ce-mjk9) fails loud instead of hanging forever.
 var ErrPasteNotSubmitted = errors.New("prompt pasted but submission not confirmed after retries")
 
+// PromptSubmissionUncertainError means tmux was asked to submit the composer
+// but its command acknowledgement was lost. The harness may already be
+// processing the prompt, so transactional callers must not compensate or
+// report a retryable failure unless they can positively prove it stayed
+// unsubmitted.
+type PromptSubmissionUncertainError struct {
+	err error
+}
+
+func (e *PromptSubmissionUncertainError) Error() string {
+	return fmt.Sprintf("prompt submission acknowledgement is uncertain: %v", e.err)
+}
+
+func (e *PromptSubmissionUncertainError) Unwrap() error {
+	return e.err
+}
+
+// MarkPromptSubmissionUncertain preserves the original error while exposing
+// the irreversible submission boundary to callers.
+func MarkPromptSubmissionUncertain(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &PromptSubmissionUncertainError{err: err}
+}
+
+// PromptSubmissionMayHaveOccurred reports whether a delivery failure happened
+// after tmux was asked to submit the composer.
+func PromptSubmissionMayHaveOccurred(err error) bool {
+	var uncertain *PromptSubmissionUncertainError
+	return errors.As(err, &uncertain)
+}
+
 // enterVerifyConfig controls the submit-verify backoff loop.
 type enterVerifyConfig struct {
 	initialSettle time.Duration   // wait before the first Enter (let the paste land)
@@ -57,21 +90,32 @@ func defaultEnterVerifyConfig() enterVerifyConfig {
 //     every backoff (fail loud);
 //   - a capture that itself errors is treated as "cannot verify" — best-effort,
 //     never a hard failure on its own (infra flakiness must not fail a send that
-//     may well have succeeded); only a confirmed-stuck final state fails.
+//     may well have succeeded); once this happens after an accepted Enter, later
+//     retry errors retain that submission uncertainty across the entire loop;
+//   - only a confirmed-stuck final state fails definitively, unless an earlier
+//     accepted Enter could not be observed, in which case the failure remains
+//     submission-uncertain.
 func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg enterVerifyConfig) error {
 	time.Sleep(cfg.initialSettle)
 
 	lastStuck := false
+	submissionMayHaveOccurred := false
 	for i := 0; i < len(cfg.backoffs); i++ {
 		if err := sendEnter(); err != nil {
-			return fmt.Errorf("failed to send Enter (-H 0d): %w", err)
+			sendErr := fmt.Errorf("failed to send Enter (-H 0d): %w", err)
+			if submissionMayHaveOccurred {
+				return MarkPromptSubmissionUncertain(sendErr)
+			}
+			return sendErr
 		}
 		time.Sleep(cfg.backoffs[i])
 
 		content, err := capture()
 		if err != nil {
-			// Cannot verify this round — keep retrying, but remember we couldn't
-			// confirm a stuck state so we don't fail loud purely on capture infra.
+			// Cannot verify whether this accepted Enter started the prompt. Keep
+			// that uncertainty sticky: a later retry cannot undo work that may
+			// already have crossed the submission boundary.
+			submissionMayHaveOccurred = true
 			lastStuck = false
 			continue
 		}
@@ -86,6 +130,9 @@ func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg 
 	}
 
 	if lastStuck {
+		if submissionMayHaveOccurred {
+			return MarkPromptSubmissionUncertain(ErrPasteNotSubmitted)
+		}
 		return ErrPasteNotSubmitted
 	}
 	// Never positively confirmed stuck (all captures failed) — best-effort success.
@@ -101,14 +148,21 @@ func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg 
 // (SendCommand, etc.) call this directly; SendEnterReliable is the exported,
 // lock-acquiring entry point.
 func sendEnterReliable(socketPath, normalizedName string) error {
+	return sendEnterReliableContext(context.Background(), socketPath, normalizedName)
+}
+
+func sendEnterReliableContext(parent context.Context, socketPath, target string) error {
+	if parent == nil {
+		parent = context.Background()
+	}
 	// sendEnter runs `tmux send-keys` under the repo subprocess-safety contract:
 	// timeout context, isolated process group, and a bounded WaitDelay with a
 	// Cancel that SIGKILLs the whole group — a hung tmux can never wedge the loop.
 	sendEnter := func() error {
 		timeout := getAdaptiveTimeout()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
+		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", target, "-H", "0d")
 		cmd.SysProcAttr = procguard.ProcessGroupAttr()
 		cmd.Cancel = func() error {
 			if cmd.Process == nil {
@@ -117,24 +171,46 @@ func sendEnterReliable(socketPath, normalizedName string) error {
 			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
 		cmd.WaitDelay = time.Second
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux send-keys (Enter) timed out after %v (server may be hung)", timeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: timeout,
-				}
-			}
-			return err
-		}
-		return nil
+		return runPromptEnterCommand(ctx, cmd, timeout)
 	}
 	// capture reuses the exported, policy-compliant pane capture (isolated process
 	// group + bounded WaitDelay per CapturePanePolicy).
 	capture := func() (string, error) {
-		return CapturePaneOutput(normalizedName, 5)
+		return CapturePaneLogicalANSIOutputContext(parent, target, 5)
 	}
 	return verifyingEnter(sendEnter, capture, defaultEnterVerifyConfig())
+}
+
+// runPromptEnterCommand distinguishes definite failures from a lost reply
+// after the tmux client process started. Failure to start and an ordinary
+// non-zero exit are explicit rejection before submission. A timeout,
+// cancellation, signal, or other indeterminate wait failure may occur after
+// the tmux server accepted the Enter and therefore crosses the irreversible
+// prompt-submission boundary.
+func runPromptEnterCommand(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	waitErr := cmd.Wait()
+	if waitErr == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		cause := errors.Join(waitErr, ctxErr)
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			cause = &TimeoutError{
+				Problem:  fmt.Sprintf("tmux send-keys (Enter) timed out after %v (server may be hung)", timeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
+				Duration: timeout,
+			}
+		}
+		return MarkPromptSubmissionUncertain(cause)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) && exitErr.ExitCode() >= 0 {
+		return waitErr
+	}
+	return MarkPromptSubmissionUncertain(waitErr)
 }
 
 // SendEnterReliable is the exported entry point for code outside the tmux

@@ -35,12 +35,21 @@ type CircuitBreakerConfig struct {
 	FailureThreshold int           // Consecutive failures to trip (default 3)
 	CooldownPeriod   time.Duration // Time in open state before half-open (default 30s)
 	FallbackProvider Provider      // Optional provider to use when circuit is open
+	FallbackModel    string        // Model to request from the fallback provider
+}
+
+// GenerationSource identifies the provider and model that handled a request.
+type GenerationSource struct {
+	Provider string
+	Model    string
+	Fallback bool
 }
 
 // CircuitBreaker wraps a Provider with circuit breaker protection.
 type CircuitBreaker struct {
-	primary  Provider
-	fallback Provider
+	primary       Provider
+	fallback      Provider
+	fallbackModel string
 
 	mu               sync.Mutex
 	state            CBState
@@ -61,6 +70,7 @@ func NewCircuitBreaker(primary Provider, cfg CircuitBreakerConfig) *CircuitBreak
 	return &CircuitBreaker{
 		primary:          primary,
 		fallback:         cfg.FallbackProvider,
+		fallbackModel:    cfg.FallbackModel,
 		state:            CBClosed,
 		failureThreshold: cfg.FailureThreshold,
 		cooldown:         cfg.CooldownPeriod,
@@ -79,27 +89,66 @@ func (cb *CircuitBreaker) Capabilities() Capabilities {
 
 // Generate routes requests based on circuit state.
 func (cb *CircuitBreaker) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
+	response, _, err := cb.GenerateWithSource(ctx, req)
+	return response, err
+}
+
+// GenerateWithSource routes a request and reports which provider and model
+// produced the response. Callers that expose routing attribution should use
+// this method so circuit-breaker fallbacks are not credited to the primary.
+func (cb *CircuitBreaker) GenerateWithSource(ctx context.Context, req *GenerateRequest) (*GenerateResponse, GenerationSource, error) {
 	if cb.canProceed() {
-		resp, err := cb.primary.Generate(ctx, req)
+		resp, source, err := cb.generateFrom(ctx, cb.primary, req, false)
 		if err != nil {
 			cb.recordFailure()
 			// If circuit just opened and we have a fallback, try it
 			if cb.fallback != nil && cb.State() == CBOpen {
-				return cb.fallback.Generate(ctx, req)
+				return cb.generateFrom(ctx, cb.fallback, req, true)
 			}
-			return nil, err
+			return nil, source, err
 		}
 		cb.recordSuccess()
-		return resp, nil
+		return resp, source, nil
 	}
 
 	// Circuit is open
 	if cb.fallback != nil {
-		return cb.fallback.Generate(ctx, req)
+		return cb.generateFrom(ctx, cb.fallback, req, true)
 	}
 
-	return nil, fmt.Errorf("circuit breaker open for provider %q: %d consecutive failures, cooldown %s",
+	return nil, GenerationSource{Provider: cb.primary.Name()}, fmt.Errorf(
+		"circuit breaker open for provider %q: %d consecutive failures, cooldown %s",
 		cb.primary.Name(), cb.failureThreshold, cb.cooldown)
+}
+
+func (cb *CircuitBreaker) generateFrom(ctx context.Context, p Provider, req *GenerateRequest, fallback bool) (*GenerateResponse, GenerationSource, error) {
+	callReq := req
+	if fallback && cb.fallbackModel != "" && req != nil {
+		clone := *req
+		clone.Model = cb.fallbackModel
+		callReq = &clone
+	}
+	response, err := generateNonNil(ctx, p, callReq)
+	model := cb.fallbackModel
+	if !fallback && callReq != nil {
+		model = callReq.Model
+	}
+	if response != nil && response.Model != "" {
+		model = response.Model
+	}
+	return response, GenerationSource{
+		Provider: p.Name(),
+		Model:    model,
+		Fallback: fallback,
+	}, err
+}
+
+func generateNonNil(ctx context.Context, provider Provider, req *GenerateRequest) (*GenerateResponse, error) {
+	response, err := provider.Generate(ctx, req)
+	if err == nil && response == nil {
+		return nil, fmt.Errorf("provider %q returned a nil response", provider.Name())
+	}
+	return response, err
 }
 
 func (cb *CircuitBreaker) canProceed() bool {

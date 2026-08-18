@@ -1,0 +1,159 @@
+name: Infra Repo Reconciliation
+
+# Enforces the standing policy that EVERY vbonnet/* and dear-labs/* repo is
+# managed by infra/ IaC. Creating a repo (`gh repo create`, the web UI) does
+# not auto-add it to the fleet, so unmanaged repos accumulate with no
+# IaC-enforced protection and untracked existence. This job lists all live
+# repos and diffs them against the managed inventory; any repo missing from the
+# IaC (or any IaC entry with no live repo) fails the run and opens an alert.
+#
+# Managed set is parsed from the HCL repo-name keys across infra/*.tf and
+# infra/*.tfvars, UNIONED with the TF_VAR_active_repos / TF_VAR_archived_repos
+# JSON secrets (see repos.auto.tfvars.example's CI note). The real inventory
+# lives in the gitignored infra/repos.auto.tfvars, which a public-runner
+# checkout never has — without the secrets, the HCL grep only ever sees the
+# example file's placeholder names, so every live repo would misreport as
+# unmanaged. The secrets are the source of truth once configured; the grep
+# stays as a fallback for a private runner that does have the real file.
+#
+# REQUIRED SECRETS:
+#   INFRA_GITHUB_TOKEN     PAT that can LIST private repos for vbonnet +
+#                          dear-labs (the default GITHUB_TOKEN only sees this
+#                          repo).
+#   TF_VAR_active_repos,
+#   TF_VAR_archived_repos  the real inventory as JSON (same shape as
+#                          repos.auto.tfvars), so the managed set can be
+#                          computed without the gitignored file being present.
+
+on:
+  schedule:
+    - cron: "37 8 * * *" # daily, offset from the drift job
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "infra/**"
+
+concurrency:
+  group: infra-reconcile-${{ github.event.pull_request.number || 'scheduled' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reconcile:
+    name: Infra Repo Reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Preflight — token + inventory present
+        id: preflight
+        env:
+          INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          TF_VAR_active_repos: ${{ secrets.TF_VAR_active_repos }}
+        run: |
+          missing=""
+          [ -z "${INFRA_GITHUB_TOKEN}" ] && missing="${missing}INFRA_GITHUB_TOKEN "
+          # The real inventory lives in the gitignored infra/repos.auto.tfvars,
+          # which this (public-runner) checkout never has. Accept either the
+          # file (private runner / local run) or the TF_VAR_active_repos JSON
+          # secret — without one of the two, the HCL grep below only ever sees
+          # repos.auto.tfvars.example's placeholder names and every live repo
+          # would misreport as unmanaged.
+          if [ ! -f infra/repos.auto.tfvars ] && [ -z "${TF_VAR_active_repos}" ]; then
+            missing="${missing}TF_VAR_active_repos "
+          fi
+
+          if [ -z "${missing}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # Don't block PRs before the secrets are configured — skip neutrally.
+            echo "::notice::missing ${missing}— skipping reconciliation on this PR (configure to enable enforcement)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::missing ${missing}(needed to reconcile against the real inventory)"; exit 1
+          fi
+
+      - name: Reconcile live repos against IaC
+        if: steps.preflight.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          TF_VAR_active_repos: ${{ secrets.TF_VAR_active_repos }}
+          TF_VAR_archived_repos: ${{ secrets.TF_VAR_archived_repos }}
+        run: |
+          set -euo pipefail
+
+          # Live repos (personal + org), excluding forks. One name per line.
+          gh repo list vbonnet   --no-archived --limit 300 --json name,isFork \
+            --jq '.[] | select(.isFork|not) | .name' > /tmp/live.txt
+          if ! dear_labs="$(gh repo list dear-labs --no-archived --limit 300 --json name,isFork \
+            --jq '.[] | select(.isFork|not) | .name' 2>/tmp/dear-labs.err)"; then
+            echo "::warning::gh repo list dear-labs failed, continuing with vbonnet repos only: $(cat /tmp/dear-labs.err)"
+          else
+            echo "${dear_labs}" >> /tmp/live.txt
+          fi
+          sort -u -o /tmp/live.txt /tmp/live.txt
+
+          # Managed set: HCL keys `"<repo>" = {` across tracked infra/*.tf(vars)
+          # — catches locals.tf, a private repos.auto.tfvars if physically
+          # present (private runner), or a local run — UNIONED with the real
+          # inventory from the TF_VAR_active_repos / TF_VAR_archived_repos JSON
+          # secrets, which is the only source of truth on a public GH-hosted
+          # runner (see the file-header comment).
+          grep -rhoE '^[[:space:]]*"[a-z0-9][a-z0-9._-]+"[[:space:]]*=[[:space:]]*\{' infra/ \
+            | sed -E 's/.*"([a-z0-9][a-z0-9._-]+)".*/\1/' > /tmp/managed.txt
+          [ -n "${TF_VAR_active_repos}" ] && jq -r 'keys[]' <<<"${TF_VAR_active_repos}" >> /tmp/managed.txt
+          [ -n "${TF_VAR_archived_repos}" ] && jq -r 'keys[]' <<<"${TF_VAR_archived_repos}" >> /tmp/managed.txt
+          sort -u -o /tmp/managed.txt /tmp/managed.txt
+
+          echo "live (non-archived): $(wc -l < /tmp/live.txt) | managed: $(wc -l < /tmp/managed.txt)"
+
+          # (a) live repos absent from the IaC = the real gap.
+          unmanaged="$(comm -23 /tmp/live.txt /tmp/managed.txt || true)"
+          # (b) managed entries with no live non-archived repo = stale/renamed
+          #     (may be an archived_repos entry, which is fine — informational).
+          orphaned="$(comm -13 /tmp/live.txt /tmp/managed.txt || true)"
+
+          {
+            echo "## Infra repo reconciliation"
+            echo ""
+            if [ -n "${unmanaged}" ]; then
+              echo "### ❌ UNMANAGED live repos (not in infra/ IaC):"
+              echo '```'; echo "${unmanaged}"; echo '```'
+            else
+              echo "### ✅ every live repo is in the IaC"
+            fi
+            if [ -n "${orphaned}" ]; then
+              echo ""
+              echo "### ℹ️ IaC entries with no live active repo (archived or renamed — verify):"
+              echo '```'; echo "${orphaned}"; echo '```'
+            fi
+          } > /tmp/report.md
+          cat /tmp/report.md
+
+          if [ -n "${unmanaged}" ]; then
+            if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+              existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --label infra-unmanaged-repo --json number --jq '.[0].number' 2>/dev/null || true)"
+              if [ -n "${existing}" ]; then
+                gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/report.md
+              else
+                gh issue create --repo "${GITHUB_REPOSITORY}" --title "Unmanaged repos not in IaC" \
+                  --label infra-unmanaged-repo --body-file /tmp/report.md || \
+                gh issue create --repo "${GITHUB_REPOSITORY}" --title "Unmanaged repos not in IaC" --body-file /tmp/report.md
+              fi
+            fi
+            echo "::error::unmanaged repos found — add them to infra/ (active_repos or archived_repos)"
+            exit 1
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always() && steps.preflight.outputs.skip != 'true'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: infra-reconcile
+          path: /tmp/report.md

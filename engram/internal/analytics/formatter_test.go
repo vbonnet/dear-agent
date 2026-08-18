@@ -71,13 +71,13 @@ func TestMarkdownFormatter_FormatSession(t *testing.T) {
 		Status:      "success",
 		Phases: []Phase{
 			{
-				Name:      "D1",
+				Name:      "PROBLEM",
 				StartTime: parseTime("2025-12-09T10:00:05Z"),
 				EndTime:   parseTime("2025-12-09T10:15:00Z"),
 				Duration:  14*time.Minute + 55*time.Second,
 			},
 			{
-				Name:      "D2",
+				Name:      "RESEARCH",
 				StartTime: parseTime("2025-12-09T10:15:05Z"),
 				EndTime:   parseTime("2025-12-09T10:30:00Z"),
 				Duration:  14*time.Minute + 55*time.Second,
@@ -108,7 +108,7 @@ func TestMarkdownFormatter_FormatSession(t *testing.T) {
 		t.Error("Expected phase timeline section not found")
 	}
 
-	if !strings.Contains(output, "D1") || !strings.Contains(output, "D2") {
+	if !strings.Contains(output, "PROBLEM") || !strings.Contains(output, "RESEARCH") {
 		t.Error("Expected phase names not found")
 	}
 

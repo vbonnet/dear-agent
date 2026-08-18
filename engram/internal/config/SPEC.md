@@ -21,15 +21,13 @@ configuration tiers with security-sensitive precedence and cache invalidation.
 
 **ECF-06** When core or company configuration enforces telemetry, the system shall keep telemetry enabled despite team or user attempts to disable or enforce it.
 
-**ECF-07** When core or company configuration enforces Wayfinder W0, the system shall keep W0 enabled despite lower-tier attempts to disable or enforce it.
+**ECF-07** When paths begin with a home-directory marker, the system shall expand them for Engram storage, telemetry, VCS, and plugin search paths.
 
-**ECF-08** When paths begin with a home-directory marker, the system shall expand them for Engram storage, telemetry, VCS, and plugin search paths.
+**ECF-08** When loaded configuration files remain unchanged, the system shall return the cached configuration safely under concurrent access.
 
-**ECF-09** When loaded configuration files remain unchanged, the system shall return the cached configuration safely under concurrent access.
+**ECF-09** When a loaded tier's modification time changes or an optional tier appears or disappears, the system shall invalidate the cache and reload configuration.
 
-**ECF-10** When a loaded tier's modification time changes or an optional tier appears or disappears, the system shall invalidate the cache and reload configuration.
-
-**ECF-11** When harness-effort settings are supplied by multiple tiers, the system shall merge aliases, task types, tiers, and subagent preference without discarding unrelated entries.
+**ECF-10** When harness-effort settings are supplied by multiple tiers, the system shall merge aliases, task types, tiers, and subagent preference without discarding unrelated entries.
 
 ## BDD Traceability
 

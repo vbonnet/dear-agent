@@ -1,6 +1,6 @@
 # Git Hook Lifecycle Specification
 
-<!-- Last audited at: 2026-07-07 -->
+<!-- Last audited at: 2026-07-22 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -27,7 +27,7 @@ that triggered it.
 
 **GITHOOK-05** When rebuilding a managed Go binary after a merge, the system shall build from freshly resolved `origin/<default_branch>` when that trunk ref is available.
 
-**GITHOOK-06** When no origin trunk ref is available during a rebuild, the system shall fall back to building the local working tree.
+**GITHOOK-06** When no origin trunk ref is available during a non-pair rebuild, the system shall fall back to building the local working tree, while a locked AGM pair rebuild shall instead pin local HEAD and require a detached worktree at that commit.
 
 **GITHOOK-07** When installing a rebuilt Go binary, the system shall build to a temporary file and atomically rename that file over the target binary.
 
@@ -46,6 +46,16 @@ that triggered it.
 **GITHOOK-14** When any post-merge maintenance stage fails, the system shall preserve a zero exit status for the git operation.
 
 **GITHOOK-15** When a post-merge maintenance stage has an opt-out environment variable set to `0`, the system shall skip that stage.
+
+**GITHOOK-16** When build-relevant AGM source changes, the system shall serialize deployment with a kernel-released lock across checkouts sharing the install directory, use each platform lock tool's file-and-command form, safely recover ownerless or malformed legacy lock directories, make every contender reacquire the lock and refresh trunk, stage both `agm` and the separately installed `agm-reaper` from the same resolved revision, preserve the installed pair if either build fails, and activate the pair only after both builds succeed.
+
+**GITHOOK-17** When build-relevant Wayfinder source changes on the default branch, the system shall serialize activation across checkouts sharing the install directory using the platform lock tool's file-and-command form, make every contender acquire the shared lock before refreshing canonical trunk, and atomically install the Wayfinder binary from that freshly resolved revision.
+
+**GITHOOK-18** If a post-merge hook runs in a repository outside every managed root, then the system shall perform no maintenance stage, because a globally installed hook otherwise acts in throwaway repositories a test suite created.
+
+**GITHOOK-19** When the system decides whether a repository is managed, the system shall resolve symlinks and compare whole path components, so that a temporary directory reached through a symlinked parent and a sibling sharing a textual prefix are both treated as unmanaged.
+
+**GITHOOK-20** When build-relevant AGM source triggers a pair rebuild, the system shall require an immutable detached checkout at freshly resolved origin trunk or pinned local HEAD, derive Version as `dev-<revision>`, GitCommit as the pinned exact 12-character lowercase hexadecimal revision without truncating an overlength uniqueness abbreviation, BuildDate as the pinned commit time in UTC RFC3339 form, and BuiltBy as `post-merge-hook` before either build, pass the same complete profile as one argument following `-ldflags` to both builds, and preserve the installed pair if the checkout, revision, or commit time cannot be resolved.
 
 ## BDD Traceability
 

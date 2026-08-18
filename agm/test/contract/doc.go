@@ -1,22 +1,16 @@
 //go:build contract
 // +build contract
 
-// Package contract contains contract tests for AGM with real AI CLIs.
+// Package contract contains portable registry contracts and optional live
+// provider probes for AGM harnesses.
 //
-// Contract tests verify end-to-end workflows with real APIs:
-//   - Real Claude CLI integration (requires ANTHROPIC_API_KEY)
-//   - Real Gemini CLI integration (requires GOOGLE_API_KEY)
-//   - Quota-limited execution (max 20 API calls per run)
-//   - Slower execution (<30 seconds total)
+// The active-harness registry contract always runs without credentials. Live
+// Claude, OpenCode, and deprecated Gemini compatibility probes skip only when
+// their own prerequisite is unavailable. Codex lifecycle behavior is covered
+// by the integration-tagged isolated source-binary test because Codex is a CLI
+// harness, not an OpenAI API adapter.
 //
 // Run contract tests:
 //
-//	ANTHROPIC_API_KEY=sk-... go test -tags=contract ./test/contract/...
-//
-// Contract tests use:
-//   - helpers.GetAPIQuota() for rate limiting
-//   - Graceful skip on API key missing or rate limit
-//   - Snapshot testing for JSON responses
-//
-// Contract tests run only on main branch in CI (not every PR).
+//	go test -tags=contract ./agm/test/contract/...
 package contract

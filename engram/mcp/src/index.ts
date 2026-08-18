@@ -20,6 +20,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { TTLCache } from './cache.js';
+import { parseWayfinderStatus } from './wayfinder_status.js';
 
 /**
  * Configuration
@@ -28,7 +29,10 @@ const ENGRAM_ROOT = process.env.ENGRAM_ROOT || join(homedir(), '.engram');
 const ENGRAM_CLI = process.env.ENGRAM_CLI || 'engram';
 
 /** Cache TTL in ms. Override via MCP_CACHE_TTL_MS env var. */
-const CACHE_TTL_MS = parseInt(process.env.MCP_CACHE_TTL_MS || '30000', 10);
+const configuredCacheTTL = Number.parseInt(process.env.MCP_CACHE_TTL_MS || '', 10);
+const CACHE_TTL_MS = Number.isFinite(configuredCacheTTL) && configuredCacheTTL > 0
+  ? configuredCacheTTL
+  : 30000;
 
 /**
  * Tool result cache — invalidated by TTL or file watches.
@@ -251,16 +255,13 @@ async function handleWayfinderPhaseStatus(args: any): Promise<string> {
   try {
     const content = readFileSync(statusFile, 'utf-8');
 
-    // Parse current phase from status file
-    const phaseMatch = content.match(/Current Phase:\s*\*\*([^*]+)\*\*/);
-    const progressMatch = content.match(/Progress:\s*([^\n]+)/);
-    const statusMatch = content.match(/Status:\s*([^\n]+)/);
+    const canonical = parseWayfinderStatus(content);
 
     const result = {
       project: projectPath,
-      phase: phaseMatch ? phaseMatch[1].trim() : 'Unknown',
-      progress: progressMatch ? progressMatch[1].trim() : 'Unknown',
-      status: statusMatch ? statusMatch[1].trim() : 'Unknown',
+      phase: canonical.phase,
+      progress: canonical.progress,
+      status: canonical.status,
     };
 
     const output = JSON.stringify(result, null, 2);

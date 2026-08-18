@@ -37,7 +37,7 @@ silently report misleading scores.
 Examples:
   agm benchmark run --suite swe-bench-lite --mode dear-agent
   agm benchmark run --suite swe-bench-lite --mode raw --model claude-opus-4-7
-  agm benchmark run --suite vibe-bench --limit 5 --results-dir docs/benchmarks/
+  agm benchmark run --suite vibe-bench --limit 5 --results-dir .dear-agent/benchmarks/
   agm benchmark run --suite swe-bench-lite --tasks-file ./swe-bench-lite-tasks.json`,
 	Args: cobra.NoArgs,
 	RunE: runBenchmarkRun,
@@ -53,7 +53,7 @@ func init() {
 	benchmarkRunCmd.Flags().IntVar(&benchRunLimitFlag, "limit", 0, "Maximum number of tasks to run (0 = all)")
 	benchmarkRunCmd.Flags().Float64Var(&benchRunBudgetFlag, "budget", 0, "Spending cap in USD (0 = unbounded)")
 	benchmarkRunCmd.Flags().StringVar(&benchRunResultsDirFlag, "results-dir", "",
-		"Directory to write the JSON results file (e.g. docs/benchmarks/)")
+		"Directory to write the JSON results file (e.g. .dear-agent/benchmarks/)")
 	benchmarkRunCmd.Flags().StringVar(&benchRunTasksFileFlag, "tasks-file", "",
 		"Path to a JSON or NDJSON file of TaskSpecs (overrides the suite's built-in fixture loader)")
 	benchmarkRunCmd.Flags().BoolVar(&benchRunFilterBySuiteFlag, "filter-by-suite", false,

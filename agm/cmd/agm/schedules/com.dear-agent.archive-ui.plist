@@ -17,8 +17,8 @@
   first-party way to clear them is the per-row UI archive action. They
   accumulated into the hundreds (ADR-026). `agm session archive-ui` flips the
   local isArchived flag for sessions that have been idle past a threshold; this
-  launchd job is what makes that automatic instead of a manual chore — it is
-  Phase 3 ("wrappers + cron") of ADR-026.
+  launchd job is the scheduled caller described by ADR-026 and makes archival
+  automatic instead of a manual chore.
 
   Safety: the job runs the conservative default set —
     --older-than 7d --status idle --apply

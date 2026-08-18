@@ -8,15 +8,38 @@
 
 **DOLTR-03** When an isolated SQLite test store resolves a session by harness conversation UUID, the isolated SQLite test store shall use SQLite-compatible JSON extraction and return the same matching manifest semantics as production Dolt.
 
+**DOLTR-04** When AGM updates a session after a runtime model change, the storage adapter shall persist the manifest model field, including an intentional empty value that represents unknown model provenance.
+
+**DOLTR-05** When AGM creates a session with no model, the storage adapter shall apply the historical default only to Claude Code sessions and shall preserve unknown model provenance for every non-Claude harness.
+
+**DOLTR-06** When a resume transaction provisionally changes a tmux session name, the storage adapter shall use an opaque cross-dialect ownership revision to compare-and-swap only the name, preserve unrelated columns, restore only that same provisional revision and its prior activity timestamp after failure, and rotate the revision after success so a newer concurrent update is never overwritten. An activity-only write during creation finalization shall preserve that provisional revision until finalization succeeds. If commit reports an error, the adapter shall re-read the exact prior and provisional revisions; it shall permit tmux cleanup without a pending metadata change only when the complete prior state proves the write did not commit, and otherwise shall preserve the provisional change for compare-and-swap compensation. A full-session update shall carry the revision observed by its read; it shall change the display and tmux names only if that revision is current, shall otherwise preserve both current identity names while applying unrelated fields, and shall always advance the revision so any number of older snapshots remain unable to reopen the identity compare-and-swap. An authoritative session rename shall atomically compare the prior user-visible name, tmux name, and observed revision before changing both names and advancing a generated revision. After an autocommit or result error it shall use a cancellation-independent competing compare-and-swap to advance the exact observed revision before re-reading: intended names under the generated or a later revision are success, while both prior names authorize tmux rollback only after their revision differs from the observed value and therefore fences the original write. An unchanged observed revision, failed fence, failed inspection, or different identity shall preserve tmux. Superseded rollback shall preserve the canonical tmux session without relying on timestamp precision.
+
+**DOLTR-07** When AGM opens a persistent SQLite test store created before tmux ownership revisions existed, the adapter shall idempotently add the nullable revision column before lifecycle queries run and shall preserve every existing session row.
+
+**DOLTR-08** When an administrative hierarchy repair assigns a parent and optionally inherits its display name, the storage adapter shall atomically persist both changes only against the exact identity revision observed by the caller, advance that revision on success, preserve the tmux name and unrelated fields, and return an explicit conflict instead of silently accepting a stale identity writer.
+
+**DOLTR-09** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall select `ENGRAM_TEST_WORKSPACE` as its workspace and shall require its database to equal that workspace or the shared `agm_test` target before connecting.
+
+**DOLTR-10** When AGM persists and reloads a pure OpenAI API session, the storage adapter shall round-trip its non-secret session-store locator and client fallback configuration through the shared session metadata column.
+
+**DOLTR-11** When AGM stores Pi native metadata in the session metadata document, the Dolt adapter shall round-trip the session ID, session directory, transcript path, coding-agent directory, and its explicit presence marker, including an intentional empty native-default value, without a harness-specific schema migration.
+
+**DOLTR-12** When AGM stores a sandboxed session, the storage adapter shall round-trip the complete non-secret sandbox ownership record across create, read, and update so a later archive reload retains the exact sandbox ID, provider, cleanup boundary, mapped working directory, enabled state, and creation time required for owned cleanup; if any ownership field or boundary invariant is invalid, the adapter shall not install the record as cleanup authority.
+
+**DOLTR-13** When AGM admits a new session name, renames a non-archived session, restores an archived session to the non-archived set through any route including administrative reconciliation, or links a non-archived child to a parent while inheriting a new name, the operation shall use the dedicated reservation table as the sole workspace-scoped collision owner before any launch, live tmux move, or identity-write side effect; reservation and registration commits shall re-read their exact durable owner or identity after an ambiguous commit response, and failed reservation inspection shall propagate uncertain ownership so direct registration compensates only a lease that call created or may have created; registration shall consume its creation lease in the durable transaction; rename, restore, and inherited-name parent linking shall retain their leases through the durable update, predicate the identity write on the reservation's current exact owner so expiration or reclamation cannot authorize a stale operation, and fence the exact observed identity revision before releasing a lease after an ambiguous write response, retaining that lease through its TTL when neither the write nor its fence can be proved; restore shall compare-and-swap the exact archived identity so an archived parent link fences stale reactivation, and shall distinguish a committed lifecycle update from a later reservation-cleanup failure; a nested storage mutation shall not release a caller-owned rename lease; every completed operation and every failure whose write or fence is proved shall release any remaining operation-owned lease, while unresolved mutation uncertainty shall retain it through TTL or explicit recovery; unavailable reservation storage shall fail closed; and installing this mechanism shall preserve every legacy duplicate session row unchanged.
+
+**DOLTR-14** When AGM creates or updates a session, the Dolt adapter shall reject lifecycle and outcome values outside the manifest-owned closed vocabulary. When it decodes a persisted session status or metadata outcome, it shall accept legacy empty status and `active` as the empty lifecycle, but shall return an error for every other unknown nonempty status or outcome instead of coercing or erasing it.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version**: 2.0
 **Status**: Phase 6 Complete - Dolt-Only Architecture (YAML Backend Removed)
-**Last Updated**: 2026-03-18
+**Last Updated**: 2026-08-01
 
 ## Overview
 
@@ -309,6 +332,7 @@ stats, err := adapter.GetToolCallStats(sessionID)
 - Session count matches: `find ~/.agm/sessions -name manifest.yaml | wc -l`
 - All sessions have workspace: `SELECT COUNT(*) FROM agm_sessions WHERE workspace IS NULL` = 0
 - No duplicate IDs: `SELECT id, COUNT(*) FROM agm_sessions GROUP BY id HAVING COUNT(*) > 1` = 0
+- Baseline legacy duplicate non-archived names with `SELECT workspace, name, COUNT(*) FROM agm_sessions WHERE status != 'archived' GROUP BY workspace, name HAVING COUNT(*) > 1`; migration 019 preserves those rows, so report the baseline and require that it does not increase rather than requiring zero. Every post-adoption name mutation must reject a new duplicate.
 - Timestamps preserved: Spot-check 5-10 random sessions
 
 ## Testing Strategy

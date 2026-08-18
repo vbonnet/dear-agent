@@ -17,7 +17,11 @@ import (
 
 // ---- gh-backed PR lister ----
 
-type ghLister struct{}
+type requiredCheckProjector func(context.Context, int, string) ([]safegit.RequiredCheck, error)
+
+type ghLister struct {
+	project requiredCheckProjector
+}
 
 // ghPR mirrors the gh pr list --json schema we request.
 type ghPR struct {
@@ -35,22 +39,12 @@ type ghPR struct {
 	Files []struct {
 		Path string `json:"path"`
 	} `json:"files"`
-	StatusCheckRollup []struct {
-		Typename   string `json:"__typename"`
-		Name       string `json:"name"`       // CheckRun
-		Status     string `json:"status"`     // CheckRun: QUEUED|IN_PROGRESS|COMPLETED
-		Conclusion string `json:"conclusion"` // CheckRun: SUCCESS|FAILURE|...
-		Context    string `json:"context"`    // StatusContext
-		State      string `json:"state"`      // StatusContext: SUCCESS|PENDING|FAILURE|ERROR
-	} `json:"statusCheckRollup"`
 }
 
 func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]mergeloop.PR, error) {
-	required := fetchRequiredChecks(ctx, repo) // empty → treat all checks as required (conservative)
-
 	args := []string{
 		"pr", "list", "--state", "open",
-		"--json", "number,title,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,labels,files,statusCheckRollup",
+		"--json", "number,title,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,labels,files",
 		"--limit", strconv.Itoa(maxOpen + 1),
 	}
 	if repo != "" {
@@ -65,13 +59,42 @@ func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]me
 		return nil, fmt.Errorf("parsing gh pr list: %w", err)
 	}
 	prs := make([]mergeloop.PR, 0, len(raw))
+	if len(raw) > maxOpen {
+		for _, r := range raw {
+			prs = append(prs, toPR(r, nil))
+		}
+		return prs, nil
+	}
+	project := g.project
+	if project == nil {
+		project = safegit.ProjectRequiredChecks
+	}
 	for _, r := range raw {
-		prs = append(prs, toPR(r, required))
+		pr := toPR(r, nil)
+		projectionCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		required, err := project(projectionCtx, r.Number, repo)
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("resolving effective required checks for PR #%d: %w", r.Number, ctx.Err())
+			}
+			pr.CheckProjectionError = fmt.Sprintf("resolving effective required checks: %v", err)
+			prs = append(prs, pr)
+			continue
+		}
+		checks, err := mergeLoopChecks(required)
+		if err != nil {
+			pr.CheckProjectionError = fmt.Sprintf("normalizing effective required checks: %v", err)
+			prs = append(prs, pr)
+			continue
+		}
+		pr.Checks = checks
+		prs = append(prs, pr)
 	}
 	return prs, nil
 }
 
-func toPR(r ghPR, required map[string]bool) mergeloop.PR {
+func toPR(r ghPR, required []mergeloop.Check) mergeloop.PR {
 	pr := mergeloop.PR{
 		Number:           r.Number,
 		Title:            r.Title,
@@ -81,6 +104,7 @@ func toPR(r ghPR, required map[string]bool) mergeloop.PR {
 		Mergeable:        r.Mergeable,
 		MergeStateStatus: r.MergeStateStatus,
 		ReviewDecision:   r.ReviewDecision,
+		Checks:           append([]mergeloop.Check(nil), required...),
 	}
 	for _, l := range r.Labels {
 		pr.Labels = append(pr.Labels, l.Name)
@@ -88,65 +112,26 @@ func toPR(r ghPR, required map[string]bool) mergeloop.PR {
 	for _, f := range r.Files {
 		pr.ChangedFiles = append(pr.ChangedFiles, f.Path)
 	}
-	allRequired := len(required) == 0
-	for _, c := range r.StatusCheckRollup {
-		name := c.Name
-		if name == "" {
-			name = c.Context
-		}
-		pr.Checks = append(pr.Checks, mergeloop.Check{
-			Name:     name,
-			Verdict:  rollupVerdict(c.Typename, c.Status, c.Conclusion, c.State),
-			Required: allRequired || required[name],
-		})
-	}
 	return pr
 }
 
-func rollupVerdict(typename, status, conclusion, state string) mergeloop.CheckVerdict {
-	if typename == "StatusContext" {
-		switch state {
-		case "SUCCESS":
-			return mergeloop.CheckPass
-		case "PENDING", "EXPECTED", "":
-			return mergeloop.CheckPending
+func mergeLoopChecks(effective []safegit.RequiredCheck) ([]mergeloop.Check, error) {
+	checks := make([]mergeloop.Check, 0, len(effective))
+	for _, check := range effective {
+		var verdict mergeloop.CheckVerdict
+		switch check.Status {
+		case safegit.RequiredCheckPassing:
+			verdict = mergeloop.CheckPass
+		case safegit.RequiredCheckPending:
+			verdict = mergeloop.CheckPending
+		case safegit.RequiredCheckFailing:
+			verdict = mergeloop.CheckFail
 		default:
-			return mergeloop.CheckFail
+			return nil, fmt.Errorf("unknown safegit required-check status %d for %q", check.Status, check.Name)
 		}
+		checks = append(checks, mergeloop.Check{Name: check.Name, Verdict: verdict, Required: true})
 	}
-	// CheckRun (default).
-	if status != "COMPLETED" {
-		return mergeloop.CheckPending
-	}
-	switch conclusion {
-	case "SUCCESS", "NEUTRAL", "SKIPPED":
-		return mergeloop.CheckPass
-	default:
-		return mergeloop.CheckFail
-	}
-}
-
-// fetchRequiredChecks returns the set of branch-protection required check names.
-// On any error it returns an empty map, which callers treat as "all checks
-// required" — conservative, so a real red is never silently ignored.
-func fetchRequiredChecks(ctx context.Context, repo string) map[string]bool {
-	if repo == "" {
-		return nil
-	}
-	path := fmt.Sprintf("repos/%s/branches/main/protection/required_status_checks", repo)
-	out, err := ghJSON(ctx, 20*time.Second, []string{"api", path, "--jq", ".contexts"})
-	if err != nil {
-		return nil
-	}
-	var contexts []string
-	if err := json.Unmarshal(out, &contexts); err != nil {
-		return nil
-	}
-	set := make(map[string]bool, len(contexts))
-	for _, c := range contexts {
-		set[c] = true
-	}
-	return set
+	return checks, nil
 }
 
 func ghJSON(ctx context.Context, timeout time.Duration, args []string) ([]byte, error) {

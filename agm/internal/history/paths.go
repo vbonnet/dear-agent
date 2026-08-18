@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 )
 
 // HistoryLocation represents conversation history file paths for a session
@@ -69,11 +71,19 @@ func GetHistoryPaths(harness, uuid, workingDir string, verify bool) (*HistoryLoc
 		paths, metadata, err = getOpenCodePaths(uuid)
 	case "codex-cli", "codex", "openai":
 		paths, metadata, err = getCodexPaths(uuid)
+	case "agy", "agy-cli", "antigravity":
+		paths, metadata, err = getAgyPaths(uuid)
+	case "pi-cli", "pi":
+		root, rootErr := defaultPiSessionDir()
+		if rootErr != nil {
+			return nil, rootErr
+		}
+		return GetPiHistoryPaths(root, uuid, "", verify)
 	default:
 		return nil, &LocationError{
 			Code:       "HARNESS_UNKNOWN",
 			Message:    fmt.Sprintf("Unknown harness type: %s", harness),
-			Suggestion: "Supported harnesses: claude-code, gemini-cli, opencode-cli, codex-cli",
+			Suggestion: "Active harnesses: claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated compatibility: gemini-cli",
 		}
 	}
 
@@ -93,6 +103,69 @@ func GetHistoryPaths(harness, uuid, workingDir string, verify bool) (*HistoryLoc
 		Exists:   exists,
 		Metadata: metadata,
 	}, nil
+}
+
+func defaultPiSessionDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, ".agm", "pi", "sessions"), nil
+}
+
+// GetPiHistoryPaths resolves the exact native transcript by its JSONL header.
+// recordedPath is an optional manifest assertion; it is never trusted when it
+// disagrees with the transcript discovered from the caller-owned native ID.
+func GetPiHistoryPaths(sessionDir, sessionID, recordedPath string, verify bool) (*HistoryLocation, error) {
+	if sessionID == "" {
+		return nil, &LocationError{Code: "UUID_MISSING", Message: "Pi native session ID not provided"}
+	}
+	transcript, err := pisession.FindTranscript(sessionDir, sessionID)
+	if err != nil {
+		return nil, &LocationError{
+			Code: "PI_TRANSCRIPT_NOT_FOUND", Message: err.Error(),
+			Suggestion: "Complete at least one successful Pi assistant response; Pi defers creating its native JSONL transcript until an assistant message is produced",
+		}
+	}
+	if recordedPath != "" {
+		recordedAbs, absErr := filepath.Abs(recordedPath)
+		if absErr != nil || filepath.Clean(recordedAbs) != filepath.Clean(transcript) {
+			return nil, &LocationError{
+				Code: "PI_TRANSCRIPT_MISMATCH", Message: "manifest transcript path does not match the exact Pi native session ID",
+				Suggestion: "Reassociate or repair the Pi session metadata before using its history",
+			}
+		}
+	}
+	exists := true
+	if verify {
+		exists = verifyPathsExist([]string{transcript})
+	}
+	return &HistoryLocation{
+		Harness: "pi-cli", UUID: sessionID, Paths: []string{transcript}, Exists: exists,
+		Metadata: map[string]string{"harness": "pi-cli", "session_dir": sessionDir, "native_session_id": sessionID},
+	}, nil
+}
+
+// getAgyPaths returns native Antigravity conversation storage paths. AGY uses
+// the conversation ID directly for its SQLite database and brain transcripts.
+func getAgyPaths(conversationID string) ([]string, map[string]string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	transcriptDir := filepath.Join(appDir, "brain", conversationID, ".system_generated", "logs")
+	paths := []string{
+		filepath.Join(appDir, "conversations", conversationID+".db"),
+		filepath.Join(transcriptDir, "transcript.jsonl"),
+		filepath.Join(transcriptDir, "transcript_full.jsonl"),
+	}
+	metadata := map[string]string{
+		"harness":         "agy",
+		"app_dir":         appDir,
+		"conversation_id": conversationID,
+	}
+	return paths, metadata, nil
 }
 
 // getClaudeCodePaths returns paths for Claude Code harness

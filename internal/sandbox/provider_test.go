@@ -57,6 +57,7 @@ func testCreateAndDestroy(t *testing.T, provider sandbox.Provider) {
 	// Verify sandbox structure
 	assert.Equal(t, req.SessionID, sb.ID, "ID should match request")
 	assert.NotEmpty(t, sb.MergedPath, "MergedPath should not be empty")
+	assert.NotEmpty(t, sb.WorkingDir, "WorkingDir should not be empty")
 	assert.NotEmpty(t, sb.UpperPath, "UpperPath should not be empty")
 	assert.NotEmpty(t, sb.WorkPath, "WorkPath should not be empty")
 	assert.NotEmpty(t, sb.Type, "Type should not be empty")

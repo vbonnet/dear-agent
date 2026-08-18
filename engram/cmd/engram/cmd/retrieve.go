@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/engram/cmd/engram/internal/cli"
 	contextdetect "github.com/vbonnet/dear-agent/engram/internal/context"
-	"github.com/vbonnet/dear-agent/pkg/cliframe"
 	"github.com/vbonnet/dear-agent/engram/retrieval"
+	"github.com/vbonnet/dear-agent/pkg/cliframe"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -189,7 +189,7 @@ func getRetrieveQuery(args []string) (string, error) {
 // buildSearchOptions constructs SearchOptions from config and query
 func buildSearchOptions(query string) retrieval.SearchOptions {
 	sessionID := uuid.New().String()
-	transcript := query // V1: use query as transcript
+	transcript := query // Initial behavior uses the query as the transcript.
 
 	tags := []string{}
 	if retrieveCfg.Tag != "" {

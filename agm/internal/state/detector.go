@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // State represents Claude Code session states
@@ -60,7 +62,6 @@ type Detector struct {
 	blockedInputPattern      *regexp.Regexp
 	blockedPermissionPattern *regexp.Regexp
 	readyPattern             *regexp.Regexp
-	codexReadyPattern        *regexp.Regexp
 	agyReadyPattern          *regexp.Regexp
 	agySurveyPattern         *regexp.Regexp
 	waitingAgentPattern      *regexp.Regexp
@@ -104,6 +105,8 @@ func NewDetector() *Detector {
 				`Do you want to proceed\?` + // Claude Code permission question
 				`|` +
 				`❯\s+\d+\.\s+(?:Yes|No|Allow|Deny|Approve|Reject)` + // ❯ selector on Yes/No option
+				`|` +
+				`AGM permission required` + // Pi managed extension confirmation
 				`)`,
 		),
 
@@ -112,14 +115,6 @@ func NewDetector() *Detector {
 		// Includes \x{00a0} (NBSP) because Claude Code renders ❯ followed by NBSP.
 		// The pane may have a status bar (━━━) and trailing blank lines after the prompt.
 		readyPattern: regexp.MustCompile(`(?m)❯[\s\x{00a0}]*$`),
-
-		// Codex Ready: Codex CLI composer/footer chrome. Keep this specific to
-		// Codex text so generic box-drawing UI or menu selectors do not become
-		// sendable prompts.
-		// After the first exchange the bordered composer box ("OpenAI Codex" /
-		// "/model to change") scrolls off; only the footer "gpt-X.Y quality ·
-		// /path" remains. "gpt-\d" covers both the initial and post-exchange state.
-		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change|gpt-\d)`),
 
 		// AGY Ready: the live AGY interactive prompt is a bare ">" line after
 		// the last response. Keep it line-anchored so trust/menu lines like
@@ -172,6 +167,8 @@ func NewDetector() *Detector {
 // DetectState analyzes pane output to determine current state
 func (d *Detector) DetectState(output string, lastOutputTime time.Time) DetectionResult {
 	now := time.Now()
+	styledOutput := output
+	output = tmux.PlainPaneText(output)
 
 	// Priority order: Permission > Ready > Thinking > Blocked > Stuck > Unknown
 	//
@@ -206,9 +203,16 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 
 	// AGY's feedback footer owns input focus even when a bare ">" prompt is
 	// still visible. Treat it as a dismissible overlay before readiness checks.
-	if d.agySurveyPattern.MatchString(output) {
+	if d.agySurveyOverlayActive(output) {
 		evidence := d.extractEvidence(output, d.agySurveyPattern, 80)
 		return DetectionResult{State: StateBackgroundTasksView, Timestamp: now, Evidence: evidence, Confidence: "high"}
+	}
+
+	if piState := latestPiManagedState(output); piState != "" {
+		if piState == "ready" {
+			return DetectionResult{State: StateReady, Timestamp: now, Evidence: "managed Pi ready status", Confidence: "high"}
+		}
+		return DetectionResult{State: StateThinking, Timestamp: now, Evidence: "managed Pi working status", Confidence: "high"}
 	}
 
 	// 2. Check for ready (Claude prompt at end — highest priority after permission)
@@ -221,7 +225,7 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 		}
 	}
 
-	if d.codexReadyPattern.MatchString(output) {
+	if tmux.IsCodexComposerReady(styledOutput) {
 		return DetectionResult{
 			State:      StateReady,
 			Timestamp:  now,
@@ -389,6 +393,9 @@ func (s State) IsWaiting() bool {
 //
 // Note: Alive status (Stopped/Archived/NotFound) is checked at the session level.
 func (d *Detector) CheckCanReceive(output string) CanReceive {
+	styledOutput := output
+	output = tmux.PlainPaneText(output)
+
 	// Permission dialog blocks input — ❯ appears as selector, not prompt
 	if d.blockedPermissionPattern.MatchString(output) {
 		return CanReceiveNo
@@ -398,8 +405,14 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 	if d.backgroundTasksPattern.MatchString(output) {
 		return CanReceiveOverlay
 	}
-	if d.agySurveyPattern.MatchString(output) {
+	if d.agySurveyOverlayActive(output) {
 		return CanReceiveOverlay
+	}
+	if piState := latestPiManagedState(output); piState != "" {
+		if piState == "ready" {
+			return CanReceiveYes
+		}
+		return CanReceiveQueue
 	}
 
 	// Prompt chevron at end of output = session is at idle prompt, can receive
@@ -407,8 +420,8 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 		return CanReceiveYes
 	}
 
-	// Codex composer/footer visible = session is at idle prompt, can receive.
-	if d.codexReadyPattern.MatchString(output) {
+	// Complete Codex composer visible = session is at idle prompt, can receive.
+	if tmux.IsCodexComposerReady(styledOutput) {
 		return CanReceiveYes
 	}
 
@@ -419,6 +432,40 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// No prompt visible = session is busy, queue for later
 	return CanReceiveQueue
+}
+
+func latestPiManagedState(output string) string {
+	index := strings.LastIndex(output, "AGM ")
+	if index < 0 {
+		return ""
+	}
+	fields := strings.Fields(output[index:])
+	if len(fields) < 2 {
+		return ""
+	}
+	parts := strings.SplitN(fields[1], "/", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	if parts[0] != "plan" && parts[0] != "default" && parts[0] != "auto" {
+		return ""
+	}
+	if parts[1] != "ready" && parts[1] != "working" {
+		return ""
+	}
+	return parts[1]
+}
+
+// agySurveyOverlayActive distinguishes a live survey from stale survey text
+// retained in scrollback. A bare AGY composer after the final survey marker is
+// current and sendable; a prompt before the marker still belongs to history.
+func (d *Detector) agySurveyOverlayActive(output string) bool {
+	matches := d.agySurveyPattern.FindAllStringIndex(output, -1)
+	if len(matches) == 0 {
+		return false
+	}
+	lastSurveyEnd := matches[len(matches)-1][1]
+	return !d.agyReadyPattern.MatchString(output[lastSurveyEnd:])
 }
 
 // CanReceive represents whether a session can accept input right now.

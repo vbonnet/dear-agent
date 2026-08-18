@@ -4,7 +4,7 @@
 # Each active repo is governed by the ./modules/managed-repo module, which
 # encapsulates the github_repository (security + merge hygiene), Dependabot
 # security updates, and the branch-protection ruleset. This for_each over
-# local.active_repos is the single instantiation point; changing fleet-wide
+# var.active_repos is the single instantiation point; changing fleet-wide
 # policy means editing the module once, and the inventory lives in locals.tf.
 #
 # The module is provider-agnostic. It is instantiated here with the default
@@ -16,11 +16,16 @@
 
 module "managed_repos" {
   source   = "./modules/managed-repo"
-  for_each = local.active_repos
+  for_each = var.active_repos
 
-  name            = each.key
-  visibility      = each.value.visibility
-  required_checks = try(each.value.required_checks, [])
+  name                           = each.key
+  visibility                     = each.value.visibility
+  default_branch                 = try(each.value.default_branch, "main")
+  required_checks                = try(each.value.required_checks, [])
+  enable_claude_review           = try(each.value.enable_claude_review, false)
+  claude_review_rollout          = try(each.value.claude_review_rollout, false)
+  claude_review_workflow_content = local.claude_review_workflow_content
+  claude_code_oauth_token        = var.claude_code_oauth_token
 
   providers = {
     github = github

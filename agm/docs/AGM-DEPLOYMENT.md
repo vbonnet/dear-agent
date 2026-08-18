@@ -42,9 +42,11 @@ go build -o agm ./cmd/agm
 # Install to $GOPATH/bin
 go install ./cmd/agm
 
-# Or install to custom location
-cp agm /usr/local/bin/
-chmod +x /usr/local/bin/agm
+# Or install to custom location. Stage and rename: copying over an
+# already-executed binary can leave a stale code-signing cache entry that
+# macOS kills on next exec (ce-77ip.8).
+stage=$(mktemp /usr/local/bin/agm.XXXXXX) && cp agm "$stage" \
+  && chmod 755 "$stage" && mv -f "$stage" /usr/local/bin/agm
 ```
 
 ### Binary Release (Coming Soon)
@@ -193,8 +195,9 @@ git clone https://github.com/vbonnet/dear-agent.git
 cd ai-tools/agm
 go build -o agm ./cmd/agm
 
-# 2. Install system-wide
-sudo install -m 755 agm /usr/local/bin/agm
+# 2. Install system-wide (staged rename; see ce-77ip.8)
+stage=$(sudo mktemp /usr/local/bin/agm.XXXXXX) && sudo cp agm "$stage" \
+  && sudo chmod 755 "$stage" && sudo mv -f "$stage" /usr/local/bin/agm
 
 # 3. Verify
 agm --version

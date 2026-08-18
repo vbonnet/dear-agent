@@ -19,7 +19,7 @@ func TestEndToEndReviewWorkflow(t *testing.T) {
 	st := &status.StatusV2{
 		ProjectName:     "test-project",
 		RiskLevel:       "M",
-		CurrentWaypoint: "S8",
+		CurrentWaypoint: "BUILD",
 	}
 
 	engine := NewReviewEngine(tmpDir, st)

@@ -115,8 +115,8 @@ criteria in frontmatter form:
 ```yaml
 verification_criteria:
   - "WAYFINDER-STATUS.md exists in the designated wayfinder session directory"
-  - "status field in WAYFINDER-STATUS.md is 'complete' or 'in_progress' (not 'unknown')"
-  - "At least one phase artifact (W0-charter.md or later) exists in the session dir"
+  - "status in WAYFINDER-STATUS.md is a canonical value such as 'in-progress' or 'completed'"
+  - "At least one canonical phase artifact (for example, CHARTER-charter.md) exists in the session dir"
   - "No '{{TODO}}' or '[[fill me in]]' placeholders remain in any phase artifact"
   - "Session directory is non-empty (at least one .md file present)"
 ```
@@ -148,9 +148,9 @@ framework). Enforcement tiers today:
 
 | State | Behavior |
 |-------|----------|
-| Criteria absent | Advisory warning (no CI failure today; future: hard gate) |
-| Criteria present, vague item | Lint warning |
-| Criteria present, well-formed | No finding |
+| Criteria absent | Accepted; the Markdown verification section remains required for portable skills |
+| Criteria present, not a nonempty string list | Hard lint failure |
+| Criteria present, structurally valid | No finding; reviewers assess whether each statement is falsifiable |
 
 Future: `cmd/bead-close-guard` may gate bead closure on the Auditor having
 checked each declared criterion. This doc will be updated when that gate lands.
@@ -160,6 +160,7 @@ checked each declared criterion. This doc will be updated when that gate lands.
 ## See also
 
 - `docs/skill-tiers.md` — `model:` / `effort:` frontmatter requirements (CI-enforced today)
+- `docs/skill-placement.md` — which repo owns a skill, and how it reaches a session
 - `pkg/skilllint/` — skill frontmatter linter
 - `CONTEXT.md §DEAR` — canonical Process DEAR definition
 - `docs/adr/ADR-035-dear-terminology-disambiguation.md` — Process DEAR vs workflow lifecycle hooks

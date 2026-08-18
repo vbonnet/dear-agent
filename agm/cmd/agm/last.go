@@ -58,26 +58,7 @@ Examples:
 				return fmt.Errorf("failed to resolve session: %w", err)
 			}
 
-			m, err := adapter.GetSession(sessionID)
-			if err != nil {
-				return fmt.Errorf("failed to get session: %w", err)
-			}
-
-			harnessName := m.Harness
-			if harnessName == "" {
-				harnessName = "claude-code"
-			}
-
-			health, err := checkSessionHealth(adapter, sessionID, manifestPath)
-			if err != nil {
-				return fmt.Errorf("session health check failed: %w", err)
-			}
-
-			if !health.CanResume {
-				return fmt.Errorf("session cannot be resumed - critical health issues detected")
-			}
-
-			return resumeSession(adapter, sessionID, manifestPath, harnessName, health)
+			return resumeResolvedSession(cmd.Context(), adapter, sessionID, manifestPath)
 		}
 
 		// Default: print session details

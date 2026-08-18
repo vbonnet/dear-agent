@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -227,6 +228,51 @@ func TestMigration011_SQLContainsCreateTable(t *testing.T) {
 		}
 	}
 	t.Error("Migration 011 not found")
+}
+
+func TestMigration018AddsTmuxSessionRevision(t *testing.T) {
+	for _, migration := range AllMigrations() {
+		if migration.Version != 18 {
+			continue
+		}
+		if migration.Name != "add_tmux_session_revision" {
+			t.Fatalf("migration 018 name = %q, want add_tmux_session_revision", migration.Name)
+		}
+		if !strings.Contains(migration.SQL, "ADD COLUMN tmux_session_revision VARCHAR(64) NULL") {
+			t.Fatalf("migration 018 SQL does not add the nullable ownership revision: %q", migration.SQL)
+		}
+		if !strings.Contains(migration.PreConditionSQL, "COLUMN_NAME = 'tmux_session_revision'") {
+			t.Fatalf("migration 018 precondition does not guard the ownership revision: %q", migration.PreConditionSQL)
+		}
+		if migration.Checksum == "" {
+			t.Fatal("migration 018 checksum is empty")
+		}
+		return
+	}
+	t.Fatal("migration 018 not found")
+}
+
+func TestMigration019AddsSessionNameReservations(t *testing.T) {
+	var found Migration
+	for _, migration := range AllMigrations() {
+		if migration.Version == 19 {
+			found = migration
+			break
+		}
+	}
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS agm_session_name_reservations",
+		"PRIMARY KEY (workspace, name)",
+		"UNIQUE KEY uq_agm_session_name_reservation_owner",
+		"expires_at",
+	} {
+		if !strings.Contains(found.SQL, required) {
+			t.Fatalf("migration 019 lacks %q", required)
+		}
+	}
+	if !strings.Contains(found.PreConditionSQL, "TABLE_NAME = 'agm_session_name_reservations'") {
+		t.Fatalf("migration 019 precondition does not guard the reservation table: %q", found.PreConditionSQL)
+	}
 }
 
 // ---------------------------------------------------------------------------

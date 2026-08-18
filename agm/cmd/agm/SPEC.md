@@ -3,12 +3,15 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/agm_control_surface_guardrails.feature`
+- Feature: `agm/test/bdd/features/local_development_guardrails.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-08-08 -->
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
-**Last Updated:** 2026-03-18
+**Last Updated:** 2026-08-08
 
 ## Overview
 
@@ -55,6 +58,88 @@ Provide a production-ready CLI that:
 **CLI-14** When `agm supervisor run` launches Claude Code, the system shall pass startup auto-mode flags so the persistent supervisor can execute boot and tick-loop setup without a plan-exit approval prompt.
 
 **CLI-15** When `agm supervisor run` launches Claude Code by default, the system shall not pass development-channel flags; it shall load development channels only when the caller explicitly opts in because the Claude Code development-channel confirmation prompt blocks unattended supervisor boot.
+
+**CLI-16** When `agm supervisor heartbeat` receives a canonical VROOM supervisor ID, compact alias, or role name, the system shall normalize it to the canonical identity, derive omitted Primary/Tertiary peers from `pkg/vroom/supervisor`, and reject explicit peer values that contradict that topology.
+
+**CLI-17** When AGM mirrors a canonical supervisor heartbeat into the flat VROOM heartbeat directory, the system shall use the compact alias and role from `pkg/vroom/supervisor` rather than maintaining an AGM-local alias table.
+
+**CLI-18** When `agm session new` starts a session inside or outside tmux, the system shall declare caller provenance and delegate the creation lifecycle to `internal/ops`, while adapting interactive launch and post-registration completion through one `CreateSessionRuntime` implementation.
+
+**CLI-19** When the CLI launches a new session or a resume fallback starts a fresh harness, the system shall obtain the shell command from the shared ops command builder so model resolution, permission flags, persistence, telemetry, and credential forwarding do not drift between creation paths.
+
+**CLI-20** When current-tmux session creation cannot commit its manifest, the system shall record the commit failure in the CLI debug log instead of silently discarding it.
+
+**CLI-21** When `agm sessions resume-all` successfully resumes a session, the system shall write `.agm/resume-timestamp` for supervisor coordination; failure to write that advisory timestamp shall warn without failing the resumed session.
+
+**CLI-22** When AGM registers its Cobra tree, the system shall reject duplicate active sibling command paths before generating plugin command guidance.
+
+**CLI-23** When `agm wiki query-save` receives user-controlled question or answer text, the system shall accept file-backed inputs, reject conflicting inline and file values, and preserve file content without shell evaluation.
+
+**CLI-56** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
+
+**CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
+
+**CLI-25** When `agm new` runs inside tmux without `--detached` for Claude Code, Codex, OpenCode, Pi, or deprecated Gemini compatibility, the system shall route into current-pane creation, require the harness's canonical executable, queue the canonical launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns; Pi shall use its managed canonical launch contract, and Claude's SessionStart hook shall persist the resulting conversation UUID.
+
+**CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
+
+**CLI-27** When AGM creates or cold-resumes an AGY session, the system shall resolve and pass the selected AGY model rather than silently launching AGY's default model.
+
+**CLI-28** When AGM launches AGY and a startup prompt must be delivered, the system shall wait through first-run trust and feedback-survey prompts until AGY is ready before sending that prompt, and shall propagate readiness failure.
+
+**CLI-29** When a command-scoped create, model-change, mode-change, or compaction flow waits to deliver or verify a prompt or slash command, the system shall derive that wait from the Cobra command context and shall stop before later delivery, retry, persistence, liveness validation, or attach work when the context is canceled.
+
+**CLI-30** When the AGM root owns SIGINT and SIGTERM handling, continuous scan, watchdog, event-watch, stalled-session watch, and bounded compaction-monitor loops shall consume the root Cobra context and return promptly on cancellation; subcommands shall not install competing process-global signal handlers.
+
+**CLI-31** When `agm send verify`, `agm send work-request`, or `agm send wake-loop` performs structured multiline delivery, the system shall pass the Cobra command context through composer readiness and delivery so cancellation cannot later send the payload.
+
+**CLI-32** When session resume metadata lookup returns after the Cobra command context has been canceled, the system shall stop before creating, commanding, updating, or attaching to a tmux session.
+
+**CLI-33** When final creation liveness validation runs, the system shall derive the scan from the Cobra command context and recheck cancellation before title update, attach, or detached-success reporting.
+
+**CLI-34** When current-pane creation selects AGY, the system shall fail before harness launch or session registration and direct the user to create a detached session with a different name, because the provider-native conversation identity cannot be safely correlated until the foreground AGM command exits.
+
+**CLI-35** When the CLI asks the shared resume operation to resume a stopped `codex-cli` session, it shall report success, render activity or prompt outcomes, or attach only after the operation has observed both the Codex process (including its Node wrapper) and interactive composer as ready, allowing up to 60 seconds for each readiness phase so a healthy cold startup is not rejected at the former advisory threshold.
+
+**CLI-36** If AGM creates a tmux session for a resume attempt and creation finalization, command dispatch, harness readiness, ordinary or caller-canceled prompt delivery, or canonical-name persistence fails, the system shall route every production resume entry, including last-session and bulk resume, through the stable session-ID operation lock before resume reads, serialize the resolved transaction through finalization, release that lock before interactive attachment, compensate only the creation-specific tmux identity created by that attempt, and return the primary failure together with any cleanup failure. The identity shall include the server-local session ID and a random per-creation token represented by a provisional creation name until stored on the session, so every partial command boundary is cleanable; when ID output is lost, the exact random provisional name shall remain cleanable, and a replacement after a server restart shall be preserved. After successful readiness, canonical-name persistence shall use an opaque cross-dialect ownership revision before optional Codex prompt submission; a prompt failure proven to occur before submission or while the paste remains positively parked shall restore only that exact provisional metadata revision and its prior activity timestamp before removing the created tmux identity. A successful restore compare-and-swap shall be sufficient proof for tmux cleanup and shall not depend on a fallible follow-up metadata read. If commit reports an error, storage shall re-read the exact revision and retain the pending ownership change unless the complete prior state proves the write did not commit. If the post-write metadata reload fails, the system shall retain the exact pending ownership revision through rollback unless an immediate compensation was proven successful. If a newer writer superseded metadata ownership or restoration otherwise cannot be proven, the system shall preserve the ready tmux session so canonical metadata never points at a resource the failed transaction destroyed. Every full-session writer shall advance the tmux identity revision, including after a lost compare-and-swap, so any number of older snapshots remain unable to restore a stale tmux name. Confirmed prompt delivery or a lost acknowledgement after the final Enter shall rotate away from the provisional revision, shall become an irreversible success boundary, and shall not be reported as a retryable failure because of later caller cancellation or attachment failure; the latter shall warn that work may have started and preserve the pane. A failed prompt delivery on a pre-existing session shall not suppress a later attachment failure. A same-named replacement tmux session or a tmux session that existed before the attempt shall not be removed.
+
+**CLI-37** When `agm session rename` moves a live tmux session, the system shall resolve its stable session ID, hold the same per-session lifecycle lock as resume while reloading current state and completing every rename effect, first claim that exact tmux creation with its server-local ID plus a random marker, then persist the user-visible and tmux names together through a narrow compare-and-swap against the exact storage revision read before the move. If either the tmux client or storage loses its success response, the command shall use bounded cancellation-independent ownership checks before deciding whether forward progress completed or compensation is safe: tmux shall still carry the claimed identity at the expected name, and storage shall first fence the observed revision with a competing compare-and-swap before re-reading it. If another writer advanced to a different identity, the claimed tmux identity is lost or replaced, or the caller is canceled after the move and storage is fenced as unchanged, the command shall report the primary failure, compensate only the claimed live tmux session, join any fencing, probe, or rollback failure, and never report rename success with metadata pointing at a nonexistent or unrelated tmux session.
+
+**CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
+
+**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; a single-recipient `--force`, `--autonomous`, `AGM_AUTONOMOUS=1`, or autonomous-role send shall reach that shared atomic route before preliminary queue dispatch only for a manifest-confirmed supported CLI harness. Pure API harnesses intentionally have no tmux pane: single-recipient preflight shall resolve the registered harness before any tmux probe, successful delivery shall not invoke tmux state resolution or persist `OFFLINE`, and both single-recipient and fan-out delivery shall reconstruct the adapter from only the requested session's persisted non-secret runtime configuration without enumerating unrelated sessions and shall obtain credentials only at runtime. Fan-out shall derive a fresh finite delivery deadline for every sequential recipient while inheriting caller cancellation, so one valid slow completion cannot consume a later recipient's provider budget. A provider-appropriate stable session-ID mutation boundary shall serialize adapter construction, a locked lifecycle reload, active-or-idle readiness, bounded context-aware provider completion, and completed-turn history persistence across AGM processes while sharing that boundary with archive; every non-active lifecycle, including reaping and archived, shall fail before adapter construction or paid provider work. Adapter-level delivery shall independently serialize callers that bypass the CLI and bound its own provider work. Adapter errors, non-active lifecycle, caller cancellation, provider timeout, and suspended or terminated status shall not enter the tmux-only daemon queue and shall create neither pending-file nor delegation state. For every supported CLI harness the shared route may replace input only when the latest queued-input marker and a syntactically complete generated AGM message header are bound inside that same current composer after exact foreground-harness and pane ownership are proved from the complete style-preserving logical composer with terminal-wrapped rows joined, with visible pasted-text line counts and terminal idle or managed chrome excluding later active output; once a measured pasted-content marker owns the tail, prompt-like glyphs inside that measured payload shall remain payload rather than replace its composer anchor. Replacement shall first clear the verified queue without submitting it and re-prove the expected foreground harness plus an empty composer on the same exact pane; a failed clear or recheck, changed pane, historical or partial header, opaque Codex pasted-content chip without an observable bound header, human draft, generic busy composer, active work, an unregistered tmux session, missing storage, wrong or dead harness, permission, overlay, onboarding, missing target, missing atomic delivery capability, or failed readiness check shall return non-delivery without pasting replacement input or creating a pending-file bypass.
+
+**CLI-40** When CLI session creation has registered a supported harness and must deliver `--prompt` or `--prompt-file`, the completion boundary shall atomically revalidate that the expected harness owns the foreground terminal and an empty composer, then send to the exact verified pane under the same mutation boundary; an unready, background, suspended, wrong, or missing harness, a focus change, an invalid pane proof, or caller cancellation shall not deliver the startup prompt.
+
+**CLI-41** When `agm session new` provisions a sandbox for any harness, the system shall start the shared harness lifecycle from the provider-mapped counterpart of the requested project directory and shall persist both that directory and the sandbox workspace root.
+
+**CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path while writing the generated instructions to the harness working directory's project-scoped configuration.
+
+**CLI-43** When automatic workspace discovery finds repositories that do not contain the requested project directory, the system shall retain those repositories, prepend the nearest Git repository containing the requested directory, and reject sandbox creation if the requested directory has no safe containing Git repository.
+
+**CLI-44** When direct, fan-out, structured, daemon-queued, fresh-startup, or post-resume delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
+
+**CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; after initial ID, name, tmux-name, or conversation-UUID resolution, preview and execution shall address the same stable AGM session ID so aliases and concurrent renames cannot redirect or invalidate the operation; active asynchronous execution shall carry that stable ID separately from the resolved tmux identity across the detached reaper boundary; active and stopped `--async` validation shall remain enforced, both text and JSON output shall name the exact resolved target, successful archive and restore guidance shall use the resolved session identity rather than the original alias, and JSON previews shall honor the global `--fields` projection contract.
+
+**CLI-46** If `agm worktree sweep --execute` cannot query the complete active-session set, then the system shall fail the command without removing any worktree and shall name the failed lookup and the dry-run alternative.
+
+**CLI-47** When `agm worktree sweep` runs without `--execute` and the complete active-session lookup fails, the system shall classify and report normally and shall warn that `--execute` would refuse to run.
+
+**CLI-48** When destructive worktree maintenance scans repositories across the shared worktree base, the system shall aggregate active lifecycle records from every enabled configured workspace store and shall refuse execution if any configured store cannot be queried.
+
+**CLI-49** When any production CLI entry resumes a session, the CLI shall resolve human-facing identifiers and prompt-file input, invoke `internal/ops.ResumeSession` exactly once with the stable session ID, render only returned lifecycle facts, and perform optional interactive attachment only after the operation returns; it shall not own health, tmux creation, harness dispatch, readiness, rollback, canonical-name persistence, permission restoration, prompt submission, or activity ordering.
+
+**CLI-50** When a trusted host launches or resumes a Codex worker with a session-bound add-directory and managed-guard handoff, the AGM CLI shall validate every path, consume and unset the authority-bearing handoff before harness startup, reject incomplete, cross-session, or non-worker use, and pass only the derived worker write roots to Codex.
+
+**CLI-51** When a cold Codex resume becomes ready with newly trusted add directories, the shared resume operation shall persist the deduplicated union with the prior sandbox policy so later resumes retain the repaired grants; a failed launch shall not rewrite the policy.
+
+**CLI-52** When AGM launches a Codex worker, the AGM CLI shall fail closed before harness startup unless the host-authenticated system-managed worker write-boundary guard is an executable regular file, while non-worker and non-Codex sessions shall remain unaffected.
+
+**CLI-55** The `agm sandbox gc` command shall implement the canonical sandbox-inventory contract defined by SGC-14, aggregating non-archived sessions from every configured workspace store and preserving its warning and fail-closed behavior.
+
+**CLI-53** When `agm supervisor run --skip-oauth-check` is requested, the CLI shall reserve the shared supervisor OAuth-check override after preflight, repeat final live admission, commit the privileged use immediately before process launch, and refuse without launching when any authorization gate fails.
+
+**CLI-54** When `agm supervisor run` reaches its launch boundary, the CLI shall repeat final live admission, seal any supervisor OAuth-check and admission-brake reservations plus the spawn-recording obligation into a one-shot private Claude executor, re-resolve the configured Claude executable there, and commit those effects immediately before exec so a confirmed executor-start or executable-resolution failure consumes neither quota nor spawn stagger.
 
 ## Requirements
 
@@ -128,6 +213,7 @@ Provide a production-ready CLI that:
   - `agm search [query]` - Search sessions by name/project path
   - `agm session list --all` - Include archived sessions
   - `agm session list --json` - Machine-readable output
+  - `agm session list --limit <n> --offset <n>` - Deterministic pagination for large inventories
   - `agm admin get-uuid [identifier]` - Get session UUID
   - `agm admin get-session-name [identifier]` - Get session name
 - **Search Features:**
@@ -234,16 +320,17 @@ Provide a production-ready CLI that:
 - **Priority:** P0 (Critical)
 - **Description:** CLI MUST support non-disruptive message sending to running sessions
 - **Commands:**
-  - `agm session send [session-name] --prompt "message"` - Send message (queued by default)
-  - `agm session send [session-name] --prompt-file /path/to/file` - Send from file
-  - `agm session send [session-name] --interrupt --prompt "urgent"` - Interrupt immediately
-  - `agm session send [session-name] --sender [name] --prompt "msg"` - Specify sender
-  - `agm session send [session-name] --reply-to [message-id] --prompt "reply"` - Thread messages
+  - `agm send msg [session-name] --prompt "message"` - Send or queue by verified readiness
+  - `agm send msg [session-name] --prompt-file /path/to/file` - Send from file
+  - `agm send msg [session-name] --force --prompt "recovery"` - Replace only positively identified queued AGM input
+  - `agm send msg [session-name] --autonomous --prompt "msg"` - Mark the recipient unattended for the same narrow queued-AGM recovery
+  - `agm send msg [session-name] --sender [name] --prompt "msg"` - Specify sender
+  - `agm send msg [session-name] --reply-to [message-id] --prompt "reply"` - Thread messages
 - **Behavior:**
-  - **Default (non-interrupt):** Queue messages for later delivery when session becomes READY
-  - **Interrupt mode:** Send immediately via tmux, interrupting ongoing work (legacy behavior)
+  - **Default:** Deliver through shared atomic readiness when the registered harness owns an idle composer; queue a busy composer for later delivery
+  - **Force/autonomous recovery:** For manifest-confirmed supported CLI harnesses only, bypass preliminary queue routing so the shared atomic operation can replace the latest queued-input artifact when a syntactically complete generated AGM message header is observably bound inside that same current composer; pure API harnesses bypass irrelevant tmux state but require adapter status active or idle at the final common single-recipient or fan-out delivery boundary and reject adapter errors, suspended status, or terminated status without entering the tmux-only daemon queue, and no path may infer AGM ownership from a historical or partial header or an opaque Codex pasted-content chip, replace a human draft, or bypass generic busy, active-work, permission, overlay, onboarding, wrong-harness, missing-target, or backend-error states
   - **State-based routing:**
-    - READY state → Queue message (non-disruptive)
+    - READY state → Deliver to the exact verified pane
     - THINKING state → Queue message (wait for READY)
     - PERMISSION_PROMPT state → Queue message (wait for READY)
     - COMPACTING state → Reject with error (never interrupt compaction)
@@ -293,7 +380,7 @@ Provide a production-ready CLI that:
   - **Workspace Isolation:** `agm sessions resume-all --workspace-filter=alpha` resumes only alpha workspace sessions
   - **Preview Changes:** `agm sessions resume-all --dry-run` shows which sessions would be resumed
 - **Integration:**
-  - **Orchestrator Coordination:** Writes `.agm/resume-timestamp` file for orchestrator v2 detection (see ADR-010)
+  - **Orchestrator Coordination:** Writes `.agm/resume-timestamp` for supervisor detection
   - **Boot Automation:** Works with systemd service (`agm-resume-boot.service`) for automatic boot recovery
   - **Admin Commands:** Future `agm admin enable-auto-resume` and `disable-auto-resume` for opt-in boot automation
 - **Performance:**
@@ -312,11 +399,10 @@ Provide a production-ready CLI that:
   - Tmux unavailable → Clear error message with remediation steps
 - **Test Coverage:**
   - Unit tests: `cmd/agm/resume_all_test.go` - filterNonArchived(), filterByWorkspace(), edge cases
-  - Integration tests: `test/integration/lifecycle/resume_all_test.go` - basic functionality, workspace filtering, archived handling, error scenarios, large scale (50 sessions)
+  - Command tests: `cmd/agm/resume_all_test.go` - workspace filtering, archived handling, and edge cases through production filtering logic
   - BDD scenarios: (future) End-to-end resume-all flows
 - **References:**
   - Implementation: `cmd/agm/resume_all.go`
-  - Architecture Decision: `docs/adr/ADR-010-orchestrator-resume-detection.md`
   - Systemd Service: `systemd/agm-resume-boot.service`
 
 #### FR13: Send Command Reorganization
@@ -327,10 +413,9 @@ Provide a production-ready CLI that:
   - `agm send msg [recipient] --prompt "..."` - Send messages (replaces `agm session send`)
   - `agm send reject [session] --reason "..."` - Reject permission prompts (replaces `agm session reject`)
   - `agm send approve [session] --reason "..."` - Approve permission prompts (NEW)
-- **Backward Compatibility:**
-  - Old commands still work: `agm session send`, `agm session reject`
-  - Gradual migration path for users
-  - Deprecation warnings in help text (future)
+- **Migration:**
+  - Use `agm send msg` and `agm send reject`; the retired `agm session send` and `agm session reject` paths are not registered
+  - Generated command guidance and examples use the active command tree
 - **Benefits:**
   - Logical grouping of communication commands
   - Improved command discoverability
@@ -339,22 +424,21 @@ Provide a production-ready CLI that:
 #### FR14: Multi-Recipient Support
 - **ID:** FR14
 - **Priority:** P1 (High)
-- **Description:** CLI MUST support sending messages to multiple recipients simultaneously
+- **Description:** CLI MUST support sending messages to multiple recipients in one invocation
 - **Syntax:**
   - Positional: `agm send msg session1,session2,session3 --prompt "..."`
   - Explicit flag: `agm send msg --to session1,session2 --prompt "..."`
   - Glob patterns: `agm send msg "*research*" --prompt "..."`
   - Workspace filtering: `agm send msg --workspace oss --prompt "..."`
 - **Features:**
-  - **Parallel delivery:** Worker pool with max 5 concurrent deliveries
+  - **Sequential delivery:** Recipients are delivered one at a time because tmux mutation is serialized and each send owns one atomic readiness-and-input boundary
   - **Recipient resolution:** Comma-separated lists, glob pattern expansion, workspace filtering
   - **Result aggregation:** Color-coded success/failure report for each recipient
   - **Error isolation:** One recipient failure doesn't block others
   - **Rate limiting:** Per-sender (not per-recipient), 10 messages/minute
-- **Performance:**
-  - 2.5x faster than sequential delivery (measured with 5 recipients)
-  - Worker pool prevents tmux server overload
-  - Buffered channels for efficient job distribution
+- **Safety:**
+  - One recipient's readiness proof and exact-pane send complete before the next begins
+  - A failed recipient is reported without preventing later recipients from being attempted
 - **Flags:**
   - `--to <recipients>` - Explicit recipient list (alternative to positional)
   - `--workspace <name>` - Filter sessions by workspace
@@ -421,27 +505,15 @@ Provide a production-ready CLI that:
   - **Automation:** Parse structured output in scripts
   - **Multi-session coordination:** Capture responses from multiple sessions
 
-#### FR17: Claude Code Skills
+#### FR17: Claude Code Commands
 - **ID:** FR17
 - **Priority:** P2 (Medium)
-- **Description:** CLI MUST provide Claude Code skills for workflow automation
+- **Description:** CLI MUST provide verified global Claude Code command files for the tracked AGM plugin command inventory
 - **Installation:**
-  - `make install-skills` - Install to `~/.claude/skills/agm/`
-- **Skills:**
-  - `/agm:new [name] [--agent TYPE] [--project PATH]` - Smart session creation
-  - `/agm:send <session> --prompt "..." [--capture-response]` - Message sending with capture
-  - `/agm:status [session] [--all] [--watch]` - Health monitoring
-  - `/agm:resume <session> [--fuzzy] [--last]` - Intelligent resume
-- **Features:**
-  - **Auto-generated names:** Format `agm-YYYYMMDD-HHMMSS` if not provided
-  - **Response capture:** `--capture-response` flag captures and returns output
-  - **Watch mode:** Continuous status monitoring (refreshes every 2s)
-  - **Fuzzy matching:** Typo-tolerant session name resolution
-  - **Last session:** Resume most recently active session
+  - `make install-skills` - Compatibility alias that installs Markdown commands to `~/.claude/commands/`
 - **Implementation:**
-  - Simple bash scripts wrapping AGM CLI commands
-  - Easy to maintain and extend
-  - Well-documented with examples in `skills/README.md`
+  - `agm/agm-plugin/commands/*.md` defines the complete command and argument contracts
+  - Per-file `content-hash` fields and inventory tests detect stale or missing command surfaces
 
 #### FR18: Test Session Isolation and Management
 - **ID:** FR18
@@ -495,13 +567,13 @@ Provide a production-ready CLI that:
   - Hook tests: 18 sub-tests covering all patterns and edge cases
 - **Documentation:**
   - **User guide:** `docs/TEST-SESSION-GUIDE.md` (comprehensive examples, comparison table)
-  - **ADR:** `cmd/agm/ADR-007-test-session-isolation.md` (architectural decisions)
+  - **ADR:** `cmd/agm/ADR-006-test-isolation-enforcement.md` (isolation boundary)
   - **Retrospective:** `vbonnet/engram-research` `retrospectives/RETROSPECTIVE-TEST-SESSION-CLEANUP.md` (implementation learnings)
   - **README:** Updated with test session quick start section
   - **CHANGELOG:** v2.4 release notes with feature details
 - **Related:**
   - **ADR-006:** Test Isolation Enforcement (original PreToolUse hook rationale)
-  - **ADR-012:** Test Infrastructure Dolt Migration (test isolation patterns)
+  - **Dolt test isolation:** `agm/internal/dolt/testing.go`
   - **NFR4:** Testability requirements (original `--test` flag purpose)
 
 ### Non-Functional Requirements
@@ -776,11 +848,10 @@ ERROR HANDLING:
   - User can run `agm sync` to fix
 
 TECHNICAL IMPLEMENTATION:
-- Uses capture-pane polling (not control mode) - See ADR-0001
+- Uses capture-pane polling (not control mode)
 - Both code paths (detached and in-tmux) use identical InitSequence
 - Fixed bug (2026-02-17): startClaudeInCurrentTmux now uses InitSequence.Run()
 - Proven approach from prompt_detector.go:WaitForClaudePrompt()
-- See ADR-0001 for architectural decision rationale
 ```
 
 **Expected Behavior** (from BDD scenarios):
@@ -794,50 +865,67 @@ TECHNICAL IMPLEMENTATION:
 **Reference**:
 - BDD Tests: `test/bdd/features/session_initialization.feature`
 - Implementation: `internal/tmux/init_sequence.go`
-- Architecture Decision: `docs/adr/0001-init-sequence-capture-pane.md`
+- Architecture owner: `internal/tmux/init_sequence.go`
 
 ### Resume Session Flow (agm resume [identifier])
 
 ```
-1. Resolve identifier:
+CLI adapter:
+1. Resolve the human identifier to one stable session ID:
    - Exact session name match
    - UUID prefix match
    - Tmux session name match
    - Fuzzy name match
    - Interactive picker (if no identifier)
-2. Read manifest
-3. Check lifecycle (error if archived)
-4. Validate agent availability (warn if unavailable)
-5. Check session health:
+2. Validate direct or file-backed prompt input.
+3. Call internal/ops.ResumeSession exactly once.
+
+Shared operation, under the stable session-ID lock:
+4. Reload the current session and reject archived state.
+5. Validate harness availability and classify health:
    - Worktree exists
-   - Agent directories present
-   - Tmux session state
-6. Create/attach tmux session
-7. Send cd command to worktree
-8. Send agent resume command (with UUID/conversation_id)
-9. Update manifest timestamp
-10. Attach to tmux session
+   - Tmux state is known
+6. Preserve an existing runtime or create one exact tmux identity.
+7. Build and submit the native resume command, then wait for native readiness.
+8. Persist canonical tmux ownership, restore saved mode, submit an optional
+   harness-aware prompt, and update activity.
+9. Return typed lifecycle and uncertainty facts; release the lock.
+
+CLI adapter:
+10. Render returned facts and optionally attach to the exact tmux result.
 ```
 
 ### Archive Session Flow (agm session archive [session-name])
 
-**Storage Backend**: Dolt database (dual-write mode during migration)
+**Storage Backend**: AGM lifecycle storage (`Dolt` in production; isolated
+SQLite when `AGM_DB_PATH` is set by a named test environment)
 
 ```
 1. Connect to Dolt storage adapter
-2. Resolve session identifier (by ID, tmux name, or manifest name)
-   - Uses adapter.ResolveIdentifier() - excludes archived sessions
-3. Check if already archived (error if yes)
-4. Check if session is active in tmux
+2. Resolve session identifier through the shared ops storage contract
+3. Enforce active/stopped `--async` validation
+4. Run shared supervisor, active-pane, completion-verification, and pending-
+   delegation guards
    - Active sessions MUST use --async flag (error if omitted)
    - Stopped sessions do NOT use --async (error if included)
-5. For stopped sessions: archive immediately (no confirmation prompt)
-   For active sessions with --async: spawn background reaper process
-6. Update session lifecycle to "archived" in Dolt
-   - Uses adapter.UpdateSession() - single database write
-7. Also update YAML manifest (backward compatibility during migration)
-   - Dolt is source of truth; YAML failures are warnings only
-8. Print success message with restore instructions
+5. With `--dry-run`, call `ops.ArchiveSession` with dry-run context and return
+   an AGM-100 preview naming the resolved session before provider reconciliation,
+   lifecycle writes, cleanup, telemetry, settings mutation, or reaper startup
+6. Without `--dry-run`, check if already archived and reconcile its external
+   provider representation without repeating AGM lifecycle mutation
+7. For stopped sessions, call ops.ArchiveSession immediately
+8. For active sessions with --async:
+   - preflight through ops.ArchiveSession with the resolved stable AGM ID without mutating
+   - require the detached agm-reaper binary to prove the same embedded VCS revision and clean or dirty provenance as agm
+   - wait for the exact detached child to acknowledge revision validation and durable log initialization before reporting success
+   - spawn agm-reaper with the stable AGM ID for lifecycle storage, the separately resolved tmux session for pane control, and force/keep-sandbox/outcome options preserved
+   - mark lifecycle=reaping before stopping the pane
+   - after pane death, call ops.ArchiveSession for the final transition
+9. For --all, select inactive candidates and call ops.ArchiveSession once per
+   candidate; aggregate success/failure counts without direct storage updates
+10. The shared operation stamps the outcome, updates lifecycle storage, reports
+   external provider archive outcomes, and performs cleanup
+11. Print success message with restore instructions
 ```
 
 ### Cross-Harness Association Flow (agm session associate [session-name])
@@ -847,7 +935,7 @@ TECHNICAL IMPLEMENTATION:
 2. Determine target harness:
    - Existing manifest harness wins.
    - `--harness auto` infers from live tmux pane commands.
-   - Explicit `--harness claude-code|codex-cli|agy|opencode-cli|gemini-cli` is accepted.
+   - Explicit `--harness claude-code|codex-cli|agy|opencode-cli|pi-cli|gemini-cli` is accepted.
    - Omitted harness defaults to `claude-code` for backward compatibility.
 3. For Claude Code:
    - Detect or accept the Claude UUID.
@@ -863,15 +951,9 @@ TECHNICAL IMPLEMENTATION:
 `agm session associate ... --harness auto`; Codex/AGY/Gemini/OpenCode association
 must not fail only because no Claude UUID exists.
 
-**Migration Status** (v1.3 - March 2026):
-- ✅ Phase 1-2 Complete: Dual-write mode (YAML + Dolt)
-- ✅ `agm session new` writes to both YAML and Dolt
-- ✅ `agm session list` reads from Dolt only
-- ✅ `agm session archive` reads/writes Dolt, writes YAML (backward compat)
-- 🚧 Phase 3-6: Command layer migration, YAML removal (in progress)
-
-Historical migration notes are archived in `engram-research`; this spec
-describes the current behavior.
+`agm session archive-ui` is intentionally outside this flow: it reconciles
+Claude desktop/UI records through `ops.ArchiveUISessions` per ADR-026 and never
+mutates AGM session lifecycle storage.
 
 ### Doctor Health Check Flow (agm admin doctor)
 
@@ -1055,7 +1137,7 @@ agm 3.0.0 (/usr/local/bin/agm)
 ## References
 
 - [AGM Architecture](ARCHITECTURE.md)
-- [Agent Interface](../../internal/agent/interface.go)
+- [Harness metadata and consumer capabilities](../../internal/agent/interface.go)
 - [Manifest Schema](../../internal/manifest/manifest.go)
 - [Cobra CLI Framework](https://github.com/spf13/cobra)
 - [Huh TUI Library](https://github.com/charmbracelet/huh)

@@ -63,21 +63,19 @@ func TestCheckWorktreesCmd_SessionFlag(t *testing.T) {
 }
 
 func TestCheckWorktreesCmd_SessionFlagParsing(t *testing.T) {
-	// Reset flag state
-	oldVal := checkWorktreesSession
-	defer func() { checkWorktreesSession = oldVal }()
+	restoreCommandFlagForTest(t, checkWorktreesCmd, "session")
 
 	cmd := &cobra.Command{Use: "test"}
 	cmd.AddCommand(checkWorktreesCmd)
 
 	// Test flag parsing
-	checkWorktreesCmd.Flags().Set("session", "my-session")
+	if err := checkWorktreesCmd.Flags().Set("session", "my-session"); err != nil {
+		t.Fatal(err)
+	}
 	if checkWorktreesSession != "my-session" {
 		t.Errorf("Expected session flag 'my-session', got %q", checkWorktreesSession)
 	}
 
-	// Reset
-	checkWorktreesCmd.Flags().Set("session", "")
 }
 
 func TestCheckWorktreesCmd_LongDescriptionMentionsExitCodes(t *testing.T) {

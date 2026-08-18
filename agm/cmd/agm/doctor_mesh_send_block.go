@@ -21,22 +21,30 @@ const (
 	meshSendBlockThreshold = 2
 )
 
-// guardNameRe extracts the guard violation name from a "safety guard blocked"
-// error message. CheckResult.Error() formats each violation as "  <guard>: ...".
-var guardNameRe = regexp.MustCompile(`\n\s+([a-z_]+):`)
+var (
+	// guardNameRe retains compatibility with historical safety-guard audit
+	// entries. CheckResult.Error() formatted each violation as "  <guard>: ...".
+	guardNameRe = regexp.MustCompile(`\n\s+([a-z_]+):`)
+	// readinessNameRe extracts the authoritative state from the shared
+	// operation's stable AGM-016 detail.
+	readinessNameRe = regexp.MustCompile(`readiness:\s*([A-Z][A-Z0-9_]*)`)
+)
 
-// parseSendBlockGuard extracts the guard violation name from a send.msg error
-// string produced by ensureRecipientReady. Returns "" when the error is not a
-// guard-block failure or the guard name cannot be parsed.
+// parseSendBlockGuard extracts a stable mesh-block cause from current AGM-016
+// operation errors or historical safety-guard audit entries.
 func parseSendBlockGuard(errMsg string) string {
+	if strings.Contains(errMsg, "["+ops.ErrCodeSessionNotReady+"]") {
+		if match := readinessNameRe.FindStringSubmatch(errMsg); len(match) == 2 {
+			return "readiness_" + strings.ToLower(match[1])
+		}
+	}
 	if !strings.Contains(errMsg, "safety guard blocked") {
 		return ""
 	}
-	m := guardNameRe.FindStringSubmatch(errMsg)
-	if len(m) < 2 {
-		return ""
+	if match := guardNameRe.FindStringSubmatch(errMsg); len(match) == 2 {
+		return match[1]
 	}
-	return m[1]
+	return ""
 }
 
 // meshSendBlockAnalysis is the output of analyzeMeshWideSendBlock.
@@ -46,7 +54,7 @@ type meshSendBlockAnalysis struct {
 }
 
 // analyzeMeshWideSendBlock reads the audit log and groups recent send.msg guard
-// failures by guard name and distinct recipient session.
+// failures by stable block cause and distinct recipient session.
 //
 //nolint:unparam // window is constant in production but varied in tests.
 func analyzeMeshWideSendBlock(auditLogPath string, window time.Duration) (*meshSendBlockAnalysis, error) {

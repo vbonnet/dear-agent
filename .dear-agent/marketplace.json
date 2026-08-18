@@ -18,8 +18,8 @@
       "name": "wayfinder",
       "source": "./wayfinder",
       "description": "Wayfinder SDLC workflow management: 9-phase methodology (CHARTER through RETRO) with phase-gate validation",
-      "version": "0.2.0",
-      "capabilities": ["commands", "skills"]
+      "version": "0.3.0",
+      "capabilities": ["skills"]
     },
     {
       "name": "youtube",
@@ -47,6 +47,11 @@
     },
     {
       "name": "opencode-cli",
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
+    },
+    {
+      "name": "pi-cli",
       "mode": "agents-md-skill-fallback",
       "catalog": ".dear-agent/marketplace.json"
     }

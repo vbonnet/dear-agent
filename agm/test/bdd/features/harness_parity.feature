@@ -5,10 +5,14 @@
 # RELATED-SPEC: agm/internal/agysession/SPEC.md
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
 # RELATED-SPEC: agm/internal/agent/openai/SPEC.md
+# RELATED-SPEC: agm/internal/harnessexec/SPEC.md
+# RELATED-SPEC: agm/internal/codexhooks/SPEC.md
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-mcp-server/SPEC.md
+# RELATED-SPEC: agm/cmd/agm/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
@@ -25,18 +29,16 @@
 # RELATED-SPEC: agm/internal/eventbus/SPEC.md
 # RELATED-SPEC: agm/internal/interrupt/SPEC.md
 # RELATED-SPEC: agm/internal/lifecycle/SPEC.md
-# RELATED-SPEC: agm/internal/backend/SPEC.md
-# RELATED-SPEC: agm/internal/backend/restbackend/SPEC.md
-# RELATED-SPEC: agm/internal/manager/SPEC.md
-# RELATED-SPEC: agm/internal/manager/tmuxbackend/SPEC.md
-# RELATED-SPEC: agm/internal/manager/dockerbackend/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/internal/statusline/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-bus/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-aware-reaper/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-reaper/SPEC.md
+# RELATED-SPEC: agm/internal/reaper/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-statusline/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-statusline-capture/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/SPEC.md
@@ -55,7 +57,7 @@
 Feature: Harness parity
   AGM should use one harness-neutral delivery contract for interactive CLI
   harnesses. Claude Code is the reference implementation. Codex CLI, AGY, and
-  OpenCode have different terminal chrome and control surfaces than Claude
+  OpenCode and Pi have different terminal chrome and control surfaces than Claude
   Code, but their idle prompts must still be sendable and their trust/menu
   prompts must not be treated as ready. Gemini CLI is deprecated compatibility
   and is not part of active parity enforcement.
@@ -77,16 +79,67 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Gemini CLI is deprecated compatibility
     Given harness "gemini-cli" is configured
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
 
+  Scenario Outline: Reaper uses each harness native graceful-exit command
+    Given harness "<harness>" is configured
+    When AGM selects the graceful reaper exit command
+    Then the graceful reaper exit command should be "<command>"
+
+    Examples:
+      | harness      | command |
+      | claude-code  | /exit   |
+      | codex-cli    | /exit   |
+      | agy          | /exit   |
+      | opencode-cli | /exit   |
+      | pi-cli       | /quit   |
+
+  Scenario: AGY doctor health uses the native installation surfaces
+    Given harness "agy" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+  Scenario Outline: AGY doctor health normalizes legacy manifest spellings
+    Given harness "<harness>" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+    Examples:
+      | harness     |
+      | agy-cli     |
+      | antigravity |
+
   Scenario: Active harness adapters satisfy shared conformance
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
+
+  Scenario: Codex CLI and the OpenAI API adapter remain separate
+    Given AGM Codex and OpenAI adapter sources
+    When AGM validates Codex adapter routing
+    Then Codex factory should use the Codex CLI adapter
+    And OpenAI API status should not inspect Codex tmux state
+
+  Scenario: Harness contracts stay capability-sized
+    Given AGM harness adapter contract sources
+    When AGM validates harness capability ownership
+    Then harness discovery should expose metadata without a universal lifecycle facade
+    And pure API delivery should require only context-aware readiness and message delivery
+    And adapter constructors should return concrete types from one finite discovery catalog
+
+  Scenario: Harness lifecycle ownership is explicit and requirement identifiers are unique
+    Given AGM harness parity specification and lifecycle surfaces
+    When AGM validates harness requirement identifiers and lifecycle ownership
+    Then harness requirement identifiers should be unique
+    And CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations
+    And CLI resume should delegate its transaction to shared operations
 
   Scenario Outline: Active harness launch commands preserve startup mode and persistence
     Given active harness "<harness>" uses startup mode "<mode>"
@@ -100,6 +153,14 @@ Feature: Harness parity
       | codex-cli    | auto |
       | agy          | auto |
       | opencode-cli | plan |
+      | pi-cli       | plan |
+
+  Scenario: Pi custom configuration survives tmux create and cold resume
+    Given a validated Pi custom coding-agent directory
+    When AGM builds Pi create and cold-resume commands from native metadata
+    Then both Pi commands should forward the safely quoted coding-agent directory
+    And Pi native metadata should preserve the coding-agent directory
+    And default Pi launch should leave native configuration discovery unchanged
 
   Scenario Outline: Active harness startup is transactional
     Given active harness "<harness>" uses startup mode "default"
@@ -112,6 +173,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Active harness recovery requires process-state evidence
     Given harness "<harness>" is configured
@@ -126,6 +188,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Active harness capture uses the canonical AGM socket
     Given harness "<harness>" is configured
@@ -140,6 +203,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Every tmux-facing AGM command declares active harness parity
     Given AGM tmux-facing command sources
@@ -175,16 +239,13 @@ Feature: Harness parity
       | agm-statusline         |
       | agm-statusline-capture |
 
-  Scenario Outline: AGM backend implementations declare SPEC coverage
-    Given AGM backend implementation "<backend>" is configured
-    When AGM validates backend implementation coverage
-    Then backend implementation "<backend>" should have a co-located SPEC
-
-    Examples:
-      | backend                         |
-      | backend/restbackend             |
-      | manager/tmuxbackend             |
-      | manager/dockerbackend           |
+  Scenario: AGM has one earned local runtime owner
+    Given AGM production local runtime sources
+    When AGM validates single runtime ownership
+    Then production should use only the direct session tmux runtime type
+    And shared operations should expose no parallel manager runtime
+    And the direct tmux runtime should prove its safety capabilities
+    And retired generalized runtimes and selection setting should be absent
 
   Scenario Outline: AGM cleanup and process support packages declare SPEC coverage
     Given AGM cleanup support package "<package>" is configured
@@ -197,6 +258,29 @@ Feature: Harness parity
       | procguard  |
       | procreaper |
       | sweeper    |
+
+  Scenario: AGM archive cleanup preserves a repository primary checkout
+    Given AGM archive cleanup targets a repository checkout
+    When AGM validates primary checkout cleanup safety
+    Then the primary checkout and session-named branch should remain
+    And a linked session worktree should still be removed
+    And linked worktree cleanup should continue through the surviving checkout
+    And an unclassified worktree should not authorize branch deletion
+    And a context-only checkout should not authorize branch deletion
+    And branch deletion should require attributed worktree ownership
+
+  Scenario: Single-session archive dry run is side-effect-free
+    Given AGM has a single-session archive dry-run contract
+    When AGM validates single-session archive dry-run safety
+    Then durable and provider archive state should remain unchanged
+    And archive preview should return stable AGM-100 output
+    And archive preview should retain the resolved stable session identity
+    And archive completion guidance should use the resolved stable session identity
+    And active async archive should separate stable and tmux identities
+    And archive preview should honor global JSON field masks
+    And active async preview should not start a detached reaper
+    And dry-run preview should preserve async state validation
+    And validated persisted sandbox ownership should control archive cleanup after reload
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured
@@ -224,11 +308,18 @@ Feature: Harness parity
       | harness      | model     |
       | claude-code  | sonnet    |
       | codex-cli    | 5.4-mini  |
-      | agy          | 2.5-flash |
+      | agy          | 3.5-flash |
       | opencode-cli | glm-5.2   |
       | opencode-cli | deepseek-v4 |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | sonnet    |
+      | pi-cli       | gpt       |
+      | pi-cli       | gemini-flash |
+      | pi-cli       | glm-5.2   |
+      | pi-cli       | deepseek-v4 |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
 
   Scenario: Codex composer is ready to receive input
     Given a Codex CLI composer pane
@@ -238,6 +329,11 @@ Feature: Harness parity
 
   Scenario: Codex trust prompt is not treated as ready
     Given a Codex CLI trust prompt
+    When AGM checks whether the session can receive input
+    Then delivery should be queued
+
+  Scenario: Stale Codex composer above shell output is not treated as ready
+    Given a stale Codex CLI composer followed by shell output
     When AGM checks whether the session can receive input
     Then delivery should be queued
 
@@ -263,6 +359,24 @@ Feature: Harness parity
     Then AGM should wait for the Codex composer
     And AGM should deliver the startup prompt even though the session is detached
 
+  Scenario: Runtime-backed shared Codex creation rolls back when the composer is absent
+    Given shared Codex creation cannot observe the composer
+    When AGM creates Codex through a surface runtime
+    Then shared creation should fail before registration and prompt delivery
+    And shared creation should remove its newly created tmux session
+
+  Scenario: Shared readiness requires current process and composer ownership
+    When AGM validates slow harness startup readiness
+    Then shared startup readiness should honor the total deadline
+    And shared input readiness should serialize exact-pane delivery and preserve rendered composer ownership without treating resolved prompts as live
+    And CLI message and startup prompt sends should use shared atomic readiness for exact-pane delivery
+    And forced CLI message sends should preserve the measured queued AGM anchor across prompt-like payload lines
+    And autonomous CLI message sends should preserve only positively identified queued AGM recovery
+    And API delivery should restore persisted configuration without scanning unrelated sessions, linearize archive and deletion with bounded completed turns, renew fan-out deadlines with separate preflight and full provider budgets, honor request cancellation during reconstruction and readiness, preserve large JSONL records, batch imports, require adapter readiness without tmux, and document its compatibility-only control plane
+    And shared Gemini readiness should advance first-run trust on the verified pane
+    And legacy AGY names should reach canonical shared send readiness
+    And the Pi alias should reach canonical shared send readiness
+
   Scenario: Codex detached startup clears first-run trust before delivery
     Given Codex CLI is available
     And a Codex CLI trust prompt
@@ -270,11 +384,74 @@ Feature: Harness parity
     Then AGM should auto-accept the Codex trust prompt before prompt delivery
     And AGM should wait for the Codex composer
 
+  Scenario Outline: Codex hook review requires explicit operator action
+    Given Codex hooks require explicit review in the "<surface>" surface
+    When AGM evaluates Codex hook review startup
+    Then Codex startup should fail fast with explicit review guidance
+    And Codex hook review should receive no automated input
+
+    Examples:
+      | surface           |
+      | numbered selector |
+      | hooks dashboard   |
+
+  Scenario: Codex current-tmux creation launches before registration
+    Given current-tmux creation selects Codex CLI
+    When AGM validates current-tmux Codex launch wiring
+    Then Codex credential validation should precede the canonical launcher
+    And the top-level new command should route into current tmux
+    And Codex current-tmux launch should require the executable without waiting behind its own AGM process
+    And every queued current-tmux harness should defer readiness until AGM exits
+    And queued private handoffs should carry producer-exit liveness
+    And current-tmux Claude should associate its UUID on SessionStart
+    And Codex queue failures should propagate to shared creation rollback
+
+  Scenario: AGY current-tmux creation refuses unsafe deferred identity
+    Given current-tmux creation selects AGY
+    When AGM validates current-tmux AGY safety
+    Then current-tmux AGY creation should fail before launch with detached guidance
+
   Scenario: Codex send safety is harness-specific
     Given Codex CLI is available
     And a Codex CLI composer pane
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
+
+  Scenario Outline: Shared send gates delivery on pane readiness
+    Given a shared Codex send target with readiness "<readiness>"
+    When AGM sends a message through shared operations
+    Then the shared send result should be "<outcome>"
+    And shared send should emit <commands> tmux commands
+
+    Examples:
+      | readiness | outcome       | commands |
+      | YES       | delivered     | 1        |
+      | NO        | not_delivered | 0        |
+      | QUEUE     | not_delivered | 0        |
+      | OVERLAY   | not_delivered | 0        |
+      | NOT_FOUND | not_delivered | 0        |
+      | WRONG_HARNESS | not_delivered | 0     |
+      | ONBOARDING    | not_delivered | 0     |
+      | PERMISSION    | not_delivered | 0     |
+
+  Scenario: Cancelled shared send emits no input
+    Given a shared Codex send target with readiness "YES"
+    And the shared send request is cancelled
+    When AGM sends a message through shared operations
+    Then the shared send result should be "cancelled"
+    And shared send should emit 0 tmux commands
+
+  Scenario: Private launches preserve caller state without exposing credentials
+    Given synthetic ambient credentials from multiple harnesses
+    When AGM builds the Codex private launch boundary
+    Then the launch command should contain no credential values
+    And the Codex child should receive only allowlisted credentials
+    And caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor
+    And the Codex child should preserve target-pane terminal capabilities
+    And private launches should normalize the target working directory and require a verified executor
+    And an unconsumed credential handoff should expire independently of later launches
+    And deferred and rejected handoffs should preserve bounded one-shot cleanup
+    And uncertain submission across private launch surfaces should preserve the handoff
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available
@@ -295,6 +472,27 @@ Feature: Harness parity
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
 
+  Scenario: AGY attributed multiline delivery remains one native request
+    Given AGY is available
+    When AGM validates AGY multiline delivery
+    Then every AGY message surface should preserve one bracketed multiline submission
+
+  Scenario Outline: Pi and OpenCode send safety is harness-specific
+    Given harness "<harness>" is configured
+    When AGM runs send safety for the configured harness
+    Then send safety should not require a Claude process
+
+    Examples:
+      | harness      |
+      | opencode-cli |
+      | pi-cli       |
+
+  Scenario: AGY adapter uses safe concurrent native lifecycle truth
+    Given AGY is available
+    When AGM validates the AGY adapter lifecycle
+    Then the AGY adapter should preserve canonical launch and resume policy
+    And the AGY adapter should require AGY process and transcript truth
+
   Scenario: Current harness session can be associated with AGM
     Given an existing tmux session running Codex CLI
     When /agm:agm-assoc runs in that session
@@ -314,6 +512,18 @@ Feature: Harness parity
     And the record should preserve the Codex session UUID
     And AGM should launch a tmux pane that resumes the Codex conversation
 
+  Scenario: Failed Codex resume is rolled back before success effects
+    Given a stopped Codex CLI session without a tmux pane
+    When AGM validates the shared Codex resume operation
+    Then Codex resume, state, and prompt waits should preserve process and styled composer readiness
+    And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
+    And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
+    And administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision
+    And successful Codex prompt delivery should remain successful after later caller cancellation
+    And ambiguous final Codex prompt submission should preserve work that may have started
+    And failed Codex prompt delivery should not suppress a later attach failure
+    And Codex activity updates should follow resume readiness
+
   Scenario: Orphaned AGY conversation can be imported and resumed
     Given an AGY saved conversation exists outside AGM
     When AGM imports the AGY conversation ID with harness "agy"
@@ -323,9 +533,36 @@ Feature: Harness parity
 
   Scenario: AGY auto permission mode is preserved on resume
     Given an imported AGY session with permission mode "auto"
-    When AGM resumes the session
+    When AGM resumes the AGY session
     Then AGM should launch a tmux pane that resumes the AGY conversation
-    And the AGY resume command should include "--dangerously-skip-permissions"
+    And the AGY resume command should include "--permission 'auto'"
+
+  Scenario: AGY model compatibility survives catalog migrations
+    Given AGY is available
+    When AGM validates AGY model compatibility
+    Then retired AGY manifest models should map to current public labels
+    And exact AGY public labels should remain unchanged
+    And cross-harness AGY aliases should normalize case-insensitively
+    And imported AGY conversations should preserve unknown model provenance
+    And AGY runtime model switches should not leave a stale resume override
+
+  Scenario: MCP waits for AGY before delivering its startup prompt
+    Given AGY is available
+    When AGM validates AGY MCP creation readiness
+    Then MCP creation should wait for the AGY composer before prompt delivery
+    And shared creation should persist the new AGY identity before registration
+
+  Scenario: AGY startup prompt bootstraps lazy provider identity exactly once
+    Given AGY is available
+    When AGM validates AGY lazy identity bootstrap
+    Then shared creation should deliver the AGY startup prompt before identity discovery
+    And every AGY creation surface should avoid duplicate prompt delivery
+    And AGY bootstrap failures should preserve transactional rollback
+
+  Scenario: Active-harness creation signals preserve rollback
+    Given AGY is available
+    When AGM validates AGY root cancellation plumbing
+    Then root signal cancellation should reach every command-scoped readiness wait
 
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt
@@ -334,11 +571,10 @@ Feature: Harness parity
     And each session row should include the requested fields
     And the output should not collapse to an empty object
 
-  Scenario: Codex lifecycle commands work end to end
+  Scenario: Codex shared lifecycle operations use production state transitions
     Given a Codex CLI session created by AGM
     When AGM sends a message to the session
-    And AGM resumes the session
     And AGM kills the session
     And AGM archives the stopped session
-    Then Dolt should reflect the expected lifecycle transitions
+    Then the durable AGM store should reflect the expected lifecycle transitions
     And the matching Codex saved session should be archived

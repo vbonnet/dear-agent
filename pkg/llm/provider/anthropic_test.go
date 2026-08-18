@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 func TestNewAnthropicProvider(t *testing.T) {
@@ -85,6 +87,18 @@ func TestNewAnthropicProvider(t *testing.T) {
 	})
 }
 
+func TestCalculateUsageUsesRequestSelectedModel(t *testing.T) {
+	usage := calculateUsage("claude-opus-5", &anthropic.Message{
+		Usage: anthropic.Usage{
+			InputTokens:  1_000_000,
+			OutputTokens: 1_000_000,
+		},
+	})
+	if usage.CostUSD != 30 {
+		t.Fatalf("CostUSD = %v, want 30 for a 1M input + 1M output Opus 5 request", usage.CostUSD)
+	}
+}
+
 func TestAnthropicProvider_Name(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test123")
 
@@ -135,6 +149,7 @@ func TestAnthropicProvider_Capabilities(t *testing.T) {
 
 	t.Run("Supported models", func(t *testing.T) {
 		expectedModels := []string{
+			"claude-opus-5",
 			"claude-opus-4-8",
 			"claude-opus-4-6",
 			"claude-3-5-sonnet-20241022",
@@ -156,6 +171,19 @@ func TestAnthropicProvider_Capabilities(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestAnthropicProvider_Capabilities_Opus5ContextWindow(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test123")
+
+	provider, err := NewAnthropicProvider(AnthropicConfig{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	if got := provider.Capabilities().MaxTokensPerRequest; got != 1_000_000 {
+		t.Errorf("MaxTokensPerRequest = %d, want 1000000", got)
+	}
 }
 
 func TestAnthropicProvider_Generate(t *testing.T) {

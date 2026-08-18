@@ -17,7 +17,7 @@ func TestSequentialDeliver_SingleJob(t *testing.T) {
 	}
 
 	deliveryCalled := false
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		deliveryCalled = true
 		if j.Recipient != "session1" {
 			t.Errorf("expected recipient 'session1', got '%s'", j.Recipient)
@@ -57,7 +57,7 @@ func TestSequentialDeliver_MultipleJobs(t *testing.T) {
 
 	deliveryCount := 0
 
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		deliveryCount++
 		return nil
 	}
@@ -95,7 +95,7 @@ func TestSequentialDeliver_PartialFailures(t *testing.T) {
 		{Recipient: "session3", Sender: "sender1", MessageID: "msg-003"},
 	}
 
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		// Fail session2
 		if j.Recipient == "session2" {
 			return fmt.Errorf("delivery failed")
@@ -134,7 +134,7 @@ func TestSequentialDeliver_PartialFailures(t *testing.T) {
 }
 
 func TestSequentialDeliver_EmptyJobs(t *testing.T) {
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		t.Error("delivery function should not be called for empty jobs")
 		return nil
 	}
@@ -153,7 +153,7 @@ func TestSequentialDeliver_DurationTracking(t *testing.T) {
 		MessageID: "msg-001",
 	}
 
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		time.Sleep(50 * time.Millisecond)
 		return nil
 	}
@@ -182,7 +182,7 @@ func TestSequentialDeliver_MessageIDPreserved(t *testing.T) {
 		{Recipient: "session3", MessageID: "msg-003"},
 	}
 
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		return nil
 	}
 
@@ -230,7 +230,7 @@ func TestSequentialDeliver_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	deliveryCount := 0
-	deliveryFunc := func(j *DeliveryJob) error {
+	deliveryFunc := func(_ context.Context, j *DeliveryJob) error {
 		deliveryCount++
 		if deliveryCount == 1 {
 			// Cancel after first delivery
@@ -263,20 +263,36 @@ func TestSequentialDeliver_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestSequentialDeliverPassesCallerContext(t *testing.T) {
+	type callerContextKey struct{}
+	callerCtx := context.WithValue(t.Context(), callerContextKey{}, "fan-out")
+	seen := false
+	results := SequentialDeliver(callerCtx, []*DeliveryJob{{Recipient: "session1", MessageID: "msg-001"}}, func(ctx context.Context, _ *DeliveryJob) error {
+		seen = true
+		if ctx != callerCtx {
+			t.Fatal("delivery function did not receive the caller context")
+		}
+		return nil
+	})
+	if !seen || len(results) != 1 || !results[0].Success {
+		t.Fatalf("context-aware delivery result = seen:%t results:%+v", seen, results)
+	}
+}
+
 func TestSetDefaultDeliveryFunc(t *testing.T) {
 	// Save original
 	original := DefaultDeliveryFunc
 
 	// Set new function
 	called := false
-	SetDefaultDeliveryFunc(func(j *DeliveryJob) error {
+	SetDefaultDeliveryFunc(func(_ context.Context, j *DeliveryJob) error {
 		called = true
 		return nil
 	})
 
 	// Test it was set
 	job := &DeliveryJob{Recipient: "test"}
-	_ = DefaultDeliveryFunc(job)
+	_ = DefaultDeliveryFunc(context.Background(), job)
 
 	if !called {
 		t.Error("custom delivery function was not called")

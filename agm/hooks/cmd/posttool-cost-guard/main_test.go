@@ -25,6 +25,13 @@ func TestTraceContextFromHook_WithTraceparent(t *testing.T) {
 }
 
 func TestTraceContextFromHook_WithoutTraceparent(t *testing.T) {
+	// traceContextFromHook falls back to TRACEPARENT (see the FallbackToEnv
+	// case below), so this test only means "no traceparent anywhere" if the
+	// ambient one is cleared. Any agent session running under a tracing
+	// harness exports it, which fails this test on a developer host while CI
+	// stays green.
+	t.Setenv("TRACEPARENT", "")
+
 	ctx := traceContextFromHook("")
 	sc := trace.SpanContextFromContext(ctx)
 	if sc.HasTraceID() {

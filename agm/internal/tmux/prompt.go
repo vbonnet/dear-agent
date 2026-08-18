@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/messages"
 )
 
 const maxPromptFileSize = 10 * 1024 // 10KB
@@ -172,8 +174,10 @@ func isGreyRGB(r, g, b int) bool {
 
 // hasQueuedInput checks if the session has queued pasted text or user input
 func hasQueuedInput(paneContent string) bool {
-	// Look for "[Pasted text" pattern which indicates queued input
-	if strings.Contains(paneContent, "[Pasted text") {
+	// Claude and older harnesses use "[Pasted text"; current Codex collapses
+	// large unsubmitted input into a "[Pasted Content N chars]" chip.
+	if strings.Contains(paneContent, "[Pasted text") ||
+		strings.Contains(paneContent, "[Pasted Content") {
 		return true
 	}
 
@@ -185,6 +189,11 @@ func hasQueuedInput(paneContent string) bool {
 	return false
 }
 
+var (
+	agmMessageHeaderPattern = regexp.MustCompile(`^\[From: ([A-Za-z0-9_-]{1,64}) \| ID: ([^ |\]]+) \| Sent: ([^|\]]+?)(?: \| Reply-To: ([^ |\]]+))?\]$`)
+	agmMessageIDPattern     = regexp.MustCompile(`^(\d{13})-([A-Za-z0-9_-]{1,8})-(\d{3,})$`)
+)
+
 // ClassifyQueuedInput inspects pane content to determine whether queued input
 // is a stuck AGM message or human-typed text. Returns the classification and
 // a user-facing error message.
@@ -193,17 +202,69 @@ func ClassifyQueuedInput(paneContent string) (QueuedInputType, string) {
 		return QueuedInputNone, ""
 	}
 
-	// Look for AGM message header pattern: [From: sender | ID: ... | Sent: ...]
+	// Bind identity to the most recent queued marker. A historical AGM header
+	// elsewhere in the capture must not turn a newer human paste into AGM-owned
+	// input. The generated header is always the first non-empty line after its
+	// marker; any other intervening content makes the association unprovable.
 	lines := strings.Split(paneContent, "\n")
-	for _, line := range lines {
+	marker := -1
+	for i, line := range lines {
+		if hasQueuedInputMarker(line) {
+			marker = i
+		}
+	}
+	for _, line := range lines[marker+1:] {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[From:") && strings.Contains(trimmed, "| ID:") {
-			sender := extractSender(trimmed)
+		if trimmed == "" {
+			continue
+		}
+		if sender, ok := parseCompleteAGMHeader(trimmed); ok {
 			return QueuedInputAGM, fmt.Sprintf("session has queued AGM message (stuck paste-buffer from %s). Use agm send clear-input SESSION or retry with --force", sender)
 		}
+		break
 	}
 
 	return QueuedInputHuman, "session has human input in progress - not sending. Retry later"
+}
+
+func hasQueuedInputMarker(line string) bool {
+	return strings.Contains(line, "[Pasted text") ||
+		strings.Contains(line, "[Pasted Content") ||
+		strings.Contains(line, "Press up to edit queued messages")
+}
+
+func parseCompleteAGMHeader(line string) (string, bool) {
+	matches := agmMessageHeaderPattern.FindStringSubmatch(line)
+	if matches == nil || !validGeneratedMessageID(matches[2], matches[1]) {
+		return "", false
+	}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(matches[3])); err != nil {
+		return "", false
+	}
+	// Reply-To is caller-supplied and follows the public message-ID contract,
+	// which intentionally accepts legacy IDs that are not generator-shaped.
+	if matches[4] != "" && !messages.ValidateMessageID(matches[4]) {
+		return "", false
+	}
+	return matches[1], true
+}
+
+func validGeneratedMessageID(messageID, sender string) bool {
+	matches := agmMessageIDPattern.FindStringSubmatch(messageID)
+	if matches == nil {
+		return false
+	}
+	if _, err := strconv.ParseInt(matches[1], 10, 64); err != nil {
+		return false
+	}
+	if sender == "" {
+		return true
+	}
+	senderShort := sender
+	if len(senderShort) > 8 {
+		senderShort = senderShort[:8]
+	}
+	return matches[2] == senderShort
 }
 
 // extractSender pulls the sender name from an AGM message header line.
@@ -232,9 +293,20 @@ func extractSender(headerLine string) string {
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to make ESC sending conditional.
 // ESC interrupts Claude's thinking state, which should only happen when explicitly requested.
 // When shouldInterrupt=false, prompts are queued instead of interrupting.
-//
-//nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
 func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
+	return sendPromptLiteral(target, prompt, shouldInterrupt, "")
+}
+
+// SendPromptLiteralForHarness sends prompt text using the terminal paste
+// semantics required by harness. AGY's composer enables bracketed paste and
+// treats carriage returns as submissions, so tmux must preserve embedded line
+// feeds (-r) and wrap the paste when requested by the application (-p).
+func SendPromptLiteralForHarness(target, prompt string, shouldInterrupt bool, harness string) error {
+	return sendPromptLiteral(target, prompt, shouldInterrupt, harness)
+}
+
+//nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
+func sendPromptLiteral(target, prompt string, shouldInterrupt bool, harness string) error {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
 
@@ -344,8 +416,10 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 		bufferLoaded = true
 
-		// Paste buffer to session (atomic operation, -d deletes buffer after paste)
-		cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", normalizedTarget, "-d")
+		// Paste buffer to session atomically. AGY needs raw bracketed paste: tmux's
+		// default LF-to-CR conversion submits the attribution header as a complete
+		// request and leaves the message body behind in the composer.
+		cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", pasteBufferArgs(socketPath, normalizedTarget, harness)...)
 		defer cancel2()
 		if err := cmdPaste.Run(); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
@@ -376,6 +450,14 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 
 		return nil
 	})
+}
+
+func pasteBufferArgs(socketPath, target, harness string) []string {
+	deleteFlag := "-d"
+	if harness == "agy" {
+		deleteFlag = "-dpr"
+	}
+	return []string{"-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", target, deleteFlag}
 }
 
 // checkPaneForQueuedInput examines an ANSI pane capture and returns an error if
@@ -411,13 +493,13 @@ func checkPaneForQueuedInput(ansiContent string, shouldInterrupt bool) error {
 func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 	for retry := 0; retry < 5; retry++ {
 		time.Sleep(500 * time.Millisecond)
-		cmdCheck := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
+		cmdCheck := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e", "-J", "-S", "-5")
 		checkOutput, err := cmdCheck.Output()
 		if err != nil {
 			return
 		}
 		checkContent := string(checkOutput)
-		if !hasQueuedInput(checkContent) {
+		if !hasQueuedInput(stripANSI(checkContent)) {
 			return
 		}
 		if !containsAnyHarnessPromptPattern(checkContent) {
@@ -429,9 +511,9 @@ func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "-H", "0d")
 		_ = cmdResubmit.Run()
 		time.Sleep(300 * time.Millisecond)
-		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
+		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e", "-J", "-S", "-5")
 		verifyOutput, err := cmdVerify.Output()
-		if err == nil && !hasQueuedInput(string(verifyOutput)) {
+		if err == nil && !hasQueuedInput(stripANSI(string(verifyOutput))) {
 			return
 		}
 	}

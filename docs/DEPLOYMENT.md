@@ -21,11 +21,8 @@
 - [x] Remote repository updated
 
 ### Documentation ✅
-- [x] SPEC.md - Sandbox specification (225 lines)
-- [x] ARCHITECTURE.md - System architecture (392 lines)
-- [x] ADR-001 - Provider registry pattern (156 lines)
-- [x] ADR-002 - Platform detection strategy (274 lines)
-- [x] ADR-003 - Secrets injection design (320 lines)
+- [x] SPEC.md - Sandbox behavioral contract
+- [x] ARCHITECTURE.md - Current providers, selection, and guarantees
 - [x] SCALING.md - Load testing & resource limits
 - [x] RECOVERY.md - Cleanup procedures
 - [x] CI_GATES.md - Enhanced CI/CD gates

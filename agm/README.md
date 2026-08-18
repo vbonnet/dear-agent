@@ -1,32 +1,36 @@
 # AI/Agent Session Manager (AGM)
 
-Smart session management for AI agents (Claude, Gemini, Codex) with interactive TUI, multi-agent support, and automatic session tracking.
+Smart session management for AI coding harnesses (Claude Code, Codex CLI,
+Antigravity, OpenCode, and Pi) with interactive TUI, multi-agent support, and
+automatic session tracking.
 
 ## Architecture
 
-### C4 Component Diagram
-
-![AGM Component Diagram](diagrams/rendered/c4-component-agm.png)
+### C4 Component Model
 
 **Component Architecture** showing the multi-CLI session coordination system:
 
 - **CommandTranslator**: Translates AGM commands to CLI-specific syntax
-- **AdapterRegistry**: Manages adapters for Claude, Gemini, Codex, and OpenCode
+- **AdapterRegistry**: Manages active adapters for Claude Code, Codex CLI, Antigravity, OpenCode, and Pi
 - **Dolt Storage**: Persists session metadata in versioned SQL database (Git-like commits)
 - **CoordinationDaemon**: Background process for session lifecycle management
 - **MessageQueue**: Inter-session communication and event routing
 - **SessionManager**: Central orchestration of session operations
+- **SessionTmuxRuntime**: The single local runtime adapter for strict
+  existence, liveness, readiness, and exact-pane control
 
-**Diagram Source**: `diagrams/c4-component-agm.d2`
+See the code-native [D2 source](diagrams/c4-component-agm.d2). Generated
+renders are intentionally not checked in so they cannot drift from the source.
 
 ## Multi-Agent Quick Start
 
 ```bash
 # Create session with specific harness
 agm new --harness claude-code my-coding-session   # Claude Code: code, reasoning
-agm new --harness gemini-cli research-task        # Gemini CLI: research, 1M context
-agm new --harness codex-cli chat-session          # Codex CLI: OpenAI API (GPT-4, GPT-3.5)
+agm new --harness agy --prompt "Start the research task" research-task  # Antigravity: prompt creates native identity
+agm new --harness codex-cli chat-session          # Codex CLI: native interactive CLI and OAuth
 agm new --harness opencode-cli dev-session        # OpenCode CLI: native SSE monitoring
+agm new --harness pi-cli pi-session               # Pi: native JSONL sessions and managed tool authorization
 
 # Resume any session (agent auto-detected)
 agm resume my-coding-session
@@ -36,6 +40,9 @@ agm list
 ```
 
 **Session Naming:** Use alphanumeric, dashes, and underscores only. Avoid dots (`.`), colons (`:`), and spaces - they cause lookup failures. See [Session Naming Guide](docs/SESSION-NAMING-GUIDE.md).
+
+Pi setup, native session identity, permissions, hooks, and known telemetry
+boundaries are documented in [Pi Harness](docs/PI-HARNESS.md).
 
 ## Test Sessions
 
@@ -428,7 +435,7 @@ agm session get-history-path --verify
 ```
 
 **Features:**
-- Works across all CLI harnesses (Claude Code, Gemini CLI, OpenCode, Codex)
+- Works across active CLI harnesses (Claude Code, Codex CLI, Antigravity, and OpenCode) plus deprecated Gemini CLI compatibility
 - Auto-detects harness type and constructs correct paths
 - JSON output for automation and scripting
 - File existence verification with `--verify` flag
@@ -437,7 +444,7 @@ agm session get-history-path --verify
 **Output (JSON):**
 ```json
 {
-  "agent": "claude",
+  "harness": "claude-code",
   "uuid": "54790b4a-5342-4a60-a25f-5b260e319b5a",
   "paths": [
     "~/.claude/projects/-home-user-src/54790b4a.jsonl",
@@ -510,7 +517,8 @@ AGM provides a unified `agm send` command group for all session communication op
 
 ### `agm send msg <recipient> [flags]`
 
-Send messages to one or more AGM sessions with multi-recipient support and parallel delivery.
+Send messages to one or more registered AGM sessions with harness-aware,
+exact-pane delivery.
 
 **Single recipient:**
 ```bash
@@ -520,11 +528,11 @@ agm send msg my-session --prompt "Please review the code"
 # Send prompt from file (for large multi-line prompts)
 agm send msg my-session --prompt-file /path/to/prompt.txt
 
-# Backward compatible (still works)
-agm session send my-session --prompt "Please review the code"
+# Current command path
+agm send msg my-session --prompt "Please review the code"
 ```
 
-**Multi-recipient (2.5x faster with parallel delivery):**
+**Multi-recipient:**
 ```bash
 # Comma-separated list
 agm send msg session1,session2,session3 --prompt "Status check"
@@ -540,10 +548,11 @@ agm send msg --workspace oss --prompt "OSS update available"
 ```
 
 **Features:**
-- **Multi-recipient**: Send to multiple sessions simultaneously
-- **Parallel delivery**: Worker pool with max 5 concurrent deliveries (2.5x speedup)
+- **Multi-recipient**: Send to multiple sessions in one invocation
+- **Serialized delivery**: Complete each atomic readiness-and-send boundary before processing the next recipient
 - **Flexible targeting**: Comma-separated lists, glob patterns, workspace filtering
-- **Auto-interrupt**: Sends ESC to interrupt thinking before sending prompt
+- **Harness-aware readiness**: Require the registered harness process and its current composer before sending
+- **Exact-pane input**: Deliver to the pane that passed readiness while holding one tmux mutation boundary
 - **Literal mode**: Uses tmux `-l` flag to prevent special character interpretation
 - **Per-recipient error isolation**: One failure doesn't block others
 - **Color-coded reporting**: Success/failure status for each recipient
@@ -731,148 +740,30 @@ count: 2
 - Automation: Parse structured output in scripts
 - Multi-session coordination: Capture responses from multiple sessions
 
-## Claude Code Skills
+## Claude Code Commands
 
-AGM provides Claude Code skills for common workflow automation. Skills are installed to `~/.claude/skills/agm/` and invoked using slash commands.
+AGM provides legacy global Claude Code command files for common workflow
+automation. They are installed to `~/.claude/commands/` and invoked as slash
+commands. The tracked plugin surfaces remain canonical.
 
 ### Installation
 
 ```bash
-# Install AGM skills
+# Install AGM global commands (compatibility alias)
 cd ~/path/to/agm
 make install-skills
 ```
 
-This copies skill scripts to `~/.claude/skills/agm/` and makes them executable.
+This copies command Markdown to `~/.claude/commands/`. `make install-skills` is
+a compatibility alias for `make install-commands`; it does not create portable
+`SKILL.md` directories.
 
-### Available Skills
+### Available commands
 
-#### `/agm:new` - Smart Session Creation
-
-Create a new AGM session with auto-generated name and optional agent/project selection.
-
-```bash
-# Create with auto-generated name
-/agm:new
-
-# Create with specific name
-/agm:new my-session
-
-# Create with specific agent
-/agm:new research-task --harness gemini-cli
-
-# Create with project path
-/agm:new coding-session --project ~/src/myapp
-```
-
-**Features:**
-- Auto-generates session names if not provided (format: `agm-YYYYMMDD-HHMMSS`)
-- Harness selection via `--harness` flag (claude-code, gemini-cli, codex-cli, opencode-cli)
-- Project context via `--project` flag
-- Returns session name for chaining with other commands
-
-#### `/agm:send` - Message Sending with Response Capture
-
-Send messages to AGM sessions with optional response capture.
-
-```bash
-# Send message
-/agm:send my-session --prompt "What's the current status?"
-
-# Send and capture response
-/agm:send my-session --prompt "Run tests" --capture-response
-```
-
-**Features:**
-- Sends prompt to specified session
-- Optional `--capture-response` flag to capture and return output
-- Useful for multi-agent coordination workflows
-- Returns captured response for further processing
-
-**Flags:**
-- `--prompt <text>` - Message to send (required)
-- `--capture-response` - Capture and return session output
-
-#### `/agm:status` - Session Health Monitoring
-
-Check session status with optional watch mode for continuous monitoring.
-
-```bash
-# Check single session status
-/agm:status my-session
-
-# Check all sessions
-/agm:status --all
-
-# Watch mode (continuous monitoring)
-/agm:status my-session --watch
-```
-
-**Features:**
-- Shows session state (READY, THINKING, PERMISSION_PROMPT, OFFLINE)
-- Optional `--all` flag to show all sessions
-- Optional `--watch` flag for continuous monitoring (refreshes every 2s)
-- Color-coded status indicators
-
-**Flags:**
-- `--all` - Show status for all sessions
-- `--watch` - Continuous monitoring mode
-
-#### `/agm:resume` - Intelligent Session Resume
-
-Resume AGM sessions with fuzzy matching and last-active support.
-
-```bash
-# Resume specific session
-/agm:resume my-session
-
-# Fuzzy matching
-/agm:resume --fuzzy my-ses
-
-# Resume last active session
-/agm:resume --last
-```
-
-**Features:**
-- Fuzzy matching for typo-tolerant session names
-- `--last` flag to resume most recently active session
-- Interactive picker if multiple matches found
-- Validates session exists before attempting resume
-
-**Flags:**
-- `--fuzzy` - Enable fuzzy matching for session names
-- `--last` - Resume last active session
-
-### Skill Usage Examples
-
-**Multi-agent workflow coordination:**
-```bash
-# Create research session
-/agm:new research --harness gemini-cli
-
-# Send research request
-/agm:send research --prompt "Analyze latest AI papers on reinforcement learning"
-
-# Monitor status
-/agm:status research --watch
-
-# Capture results
-/agm:send research --prompt "Summarize findings" --capture-response
-```
-
-**Automated testing workflow:**
-```bash
-# Check all test sessions
-/agm:status --all
-
-# Send test command to all test sessions
-(Requires iterating over session list and using /agm:send for each)
-
-# Resume last test session
-/agm:resume --last
-```
-
-**For detailed skill documentation**, see `skills/README.md` in the repository.
+The installed command names and argument contracts are the tracked files in
+[`agm-plugin/commands/`](agm-plugin/commands/). Treat each file's frontmatter
+and procedure as authoritative; the compatibility installer does not add
+flags or workflows beyond those contracts.
 
 ## Workspace Management
 

@@ -13,7 +13,7 @@ type RewindEventData struct {
 	// ToPhase is the target phase being rewound to (e.g., "PLAN")
 	ToPhase string `json:"to_phase"`
 
-	// Magnitude is the number of phases between from and to (0 = no-op, 1+ = rewind)
+	// Magnitude is the number of phases between from and to (0 = same-phase replay)
 	// Calculated as |phaseIndex(from) - phaseIndex(to)|
 	Magnitude int `json:"magnitude"`
 
@@ -30,11 +30,11 @@ type RewindEventData struct {
 	// Learnings captures what was learned that triggered the rewind (user-provided or empty)
 	Learnings string `json:"learnings,omitempty"`
 
-	// Context snapshot of project state at rewind time
+	// Context snapshot of project state after the target phase is reset
 	Context ContextSnapshot `json:"context"`
 }
 
-// ContextSnapshot captures project state at rewind time
+// ContextSnapshot captures project state after the target phase is reset.
 type ContextSnapshot struct {
 	// Git state (branch, commit, uncommitted changes)
 	Git GitContext `json:"git"`
@@ -63,10 +63,10 @@ type GitContext struct {
 
 // PhaseContext captures Wayfinder phase state
 type PhaseContext struct {
-	// CurrentPhase before rewind (e.g., "BUILD")
+	// CurrentPhase after the rewind target has been reset (e.g., "DESIGN")
 	CurrentPhase string `json:"current_phase"`
 
-	// CompletedPhases list (e.g., ["CHARTER", "PROBLEM", "RESEARCH", ...])
+	// CompletedPhases after the rewind target has been reset
 	CompletedPhases []string `json:"completed_phases"`
 
 	// SessionID from WAYFINDER-STATUS.md

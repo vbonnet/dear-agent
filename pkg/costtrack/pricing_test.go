@@ -132,6 +132,11 @@ func TestGetPricingOrDefault(t *testing.T) {
 			wantInput: 0.000001,
 		},
 		{
+			name:      "provider-qualified opus 5",
+			model:     "anthropic/claude-opus-5",
+			wantInput: 0.000005,
+		},
+		{
 			name:      "unknown model returns zero",
 			model:     "unknown-model-xyz",
 			wantInput: 0,
@@ -144,6 +149,15 @@ func TestGetPricingOrDefault(t *testing.T) {
 			assert.InDelta(t, tt.wantInput, pricing.Input, 0.000000001)
 		})
 	}
+}
+
+func TestProviderQualifiedOpus5PricingMatchesCanonical(t *testing.T) {
+	canonical, found := GetPricing("claude-opus-5")
+	assert.True(t, found)
+
+	qualified, found := GetPricing("anthropic/claude-opus-5")
+	assert.True(t, found)
+	assert.Equal(t, canonical, qualified)
 }
 
 func TestPricingTableCompleteness(t *testing.T) {

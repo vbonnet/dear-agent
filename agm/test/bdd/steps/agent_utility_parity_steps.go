@@ -52,7 +52,7 @@ func agentUtilityHarnessUsesModelFamily(ctx context.Context, harness, family str
 	if err != nil {
 		return err
 	}
-	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli"}, harness) {
+	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}, harness) {
 		return fmt.Errorf("unsupported agent utility harness %q", harness)
 	}
 	families := map[string]promptcache.ModelFamily{

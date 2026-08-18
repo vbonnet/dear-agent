@@ -52,6 +52,23 @@ func TestShortStripsTrailingDirty(t *testing.T) {
 	}
 }
 
+func TestRevisionIdentityPreservesDirtyProvenance(t *testing.T) {
+	tests := []struct {
+		commit string
+		want   string
+	}{
+		{commit: "0123456789abcdef", want: "0123456789ab"},
+		{commit: "0123456789abcdef-dirty", want: "0123456789ab-dirty"},
+		{commit: "0123456789ab-dirty", want: "0123456789ab-dirty"},
+		{commit: "unknown", want: "unknown"},
+	}
+	for _, tc := range tests {
+		if got := version.RevisionIdentity(tc.commit); got != tc.want {
+			t.Errorf("RevisionIdentity(%q) = %q, want %q", tc.commit, got, tc.want)
+		}
+	}
+}
+
 func TestIsStaleUnknownCommit(t *testing.T) {
 	orig := version.GitCommit
 	t.Cleanup(func() { version.GitCommit = orig })

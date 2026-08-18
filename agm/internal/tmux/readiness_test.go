@@ -1,0 +1,973 @@
+package tmux
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+)
+
+func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
+	t.Parallel()
+
+	observedHarness := false
+	advanced := make(map[string]bool)
+	for attempt := range 12 {
+		ready, err := handleHarnessStartupState(context.Background(), "slow", "codex-cli", HarnessInputReadiness{State: HarnessInputWrongHarness}, &observedHarness, advanced)
+		if err != nil || ready {
+			t.Fatalf("pre-start attempt %d = ready:%t err:%v, want continued wait", attempt, ready, err)
+		}
+	}
+	ready, err := handleHarnessStartupState(context.Background(), "slow", "codex-cli", HarnessInputReadiness{State: HarnessInputBusy}, &observedHarness, advanced)
+	if err != nil || ready || !observedHarness {
+		t.Fatalf("observed busy harness = ready:%t observed:%t err:%v", ready, observedHarness, err)
+	}
+	_, err = handleHarnessStartupState(context.Background(), "slow", "codex-cli", HarnessInputReadiness{State: HarnessInputWrongHarness}, &observedHarness, advanced)
+	if err == nil || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("post-start wrong harness error = %v, want stopped-process failure", err)
+	}
+}
+
+func TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing(t *testing.T) {
+	t.Parallel()
+
+	observedHarness := false
+	advanced := make(map[string]bool)
+	ready, err := handleHarnessStartupState(context.Background(), "hooks", "codex-cli", HarnessInputReadiness{
+		State:   HarnessInputReviewRequired,
+		Content: "Hooks need review",
+	}, &observedHarness, advanced)
+	if ready {
+		t.Fatal("hook review startup reported ready")
+	}
+	if !errors.Is(err, ErrCodexHookReviewRequired) {
+		t.Fatalf("hook review startup error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if !observedHarness {
+		t.Fatal("hook review did not record the observed Codex harness")
+	}
+	if len(advanced) != 0 {
+		t.Fatalf("hook review advanced transitions = %v, want none", advanced)
+	}
+}
+
+func TestHandleClaudeStartupReprovesTrustBeforeAdvancing(t *testing.T) {
+	t.Parallel()
+
+	readiness := HarnessInputReadiness{
+		State:   HarnessInputOnboarding,
+		Content: "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit",
+	}
+	t.Run("selector moved to No before atomic probe", func(t *testing.T) {
+		t.Parallel()
+		observed := false
+		advanced := make(map[string]bool)
+		calls := 0
+		ready, err := handleHarnessStartupStateWithProbe(t.Context(), "session", "claude-code", readiness, &observed, advanced,
+			func(_ context.Context, session string, autoAnswer bool) (ClaudeInputProbe, error) {
+				calls++
+				if session != "session" || !autoAnswer {
+					t.Fatalf("probe arguments = %q, %t", session, autoAnswer)
+				}
+				return ClaudeInputProbe{DialogOwnsInput: true}, nil
+			})
+		if err != nil || ready {
+			t.Fatalf("result = ready:%t err:%v", ready, err)
+		}
+		if calls != 1 || !observed || len(advanced) != 0 {
+			t.Fatalf("calls=%d observed=%t advanced=%v", calls, observed, advanced)
+		}
+	})
+
+	t.Run("atomic probe alone records a completed trust transition", func(t *testing.T) {
+		t.Parallel()
+		observed := false
+		advanced := make(map[string]bool)
+		_, err := handleHarnessStartupStateWithProbe(t.Context(), "session", "claude-code", readiness, &observed, advanced,
+			func(context.Context, string, bool) (ClaudeInputProbe, error) {
+				return ClaudeInputProbe{DialogOwnsInput: true, TrustAnswered: true}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !advanced[HarnessInputOnboarding+":trust"] {
+			t.Fatalf("advanced transitions = %v", advanced)
+		}
+	})
+}
+
+func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		ready   bool
+		state   string
+	}{
+		{
+			name:    "structural Codex composer",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.5 /model to change │\n›",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "current Codex welcome ghost composer",
+			harness: "codex-cli",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\nTo get started, describe a task or try /review\n\n\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "current Codex welcome human draft",
+			harness: "codex-cli",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m Run /review on my current changes\n\ngpt-5.5 high · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "current Codex post-turn composer",
+			harness: "codex-cli",
+			content: "»\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "current Codex post-turn human draft",
+			harness: "codex-cli",
+			content: "» preserve this human draft\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex update selector owns input",
+			harness: "codex-cli",
+			content: "✨ Update available! 0.145.0 -> 0.146.0\n› 1. Update now (runs `brew upgrade --cask codex`)\n  2. Skip\n  3. Skip until next version\nPress enter to continue",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Codex model footer without input owner",
+			harness: "codex-cli",
+			content: "Working (12s)\ngpt-5.5 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale Codex header without input owner",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.5 /model to change │\nWorking (12s)",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex trust owns input",
+			harness: "codex-cli",
+			content: "Do you trust the contents of this directory?\n› 1. Yes, continue",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Codex hook review requires operator",
+			harness: "codex-cli",
+			content: "Hooks need review\n4 hooks are new or changed.\nHooks can run outside the sandbox after you trust them.\n› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\nPress enter to confirm or esc to go back" + strings.Repeat("\n", 18),
+			state:   HarnessInputReviewRequired,
+		},
+		{
+			name:    "Codex active hooks dashboard overrides retained composer",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 high /model to change │\n›\ngpt-5.6 high · ~/src/project\nHooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close",
+			state:   HarnessInputReviewRequired,
+		},
+		{
+			name:    "Codex closed hooks dashboard yields to newer composer",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 high /model to change │\n›\ngpt-5.6 high · ~/src/project",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Codex closed hooks dashboard yields to occupied composer",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n› preserve this human draft\ngpt-5.6 high · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex closed hooks dashboard yields to working turn",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n› inspect the release\n• Working (3s • esc to interrupt)\ngpt-5.6 high · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "resolved Codex onboarding before live composer",
+			harness: "codex-cli",
+			content: "Do you trust the contents of this directory?\n› 1. Yes, continue\napproved\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.5 /model to change │\n›",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude trust owns input before generic permission choices",
+			harness: "claude-code",
+			content: "Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			// ce-wn4qe: current Claude Code (2.x) trust wording. The classifier
+			// must report Onboarding (not a false ready and not a hang) so the
+			// shared readiness path auto-answers it with Enter.
+			name:    "Claude current-wording trust owns input",
+			harness: "claude-code",
+			content: " Quick safety check: Is this a project you created or one you trust?\n\n ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n Read, Bash(git status)\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			// A paired composer draft is not trust authority without the question;
+			// generic confirmation chrome still keeps it fail-closed as permission.
+			name:    "Claude unanchored paired trust-looking rows are not onboarding",
+			harness: "claude-code",
+			content: " ⚠ This folder pre-approves 20 tool permissions in .claude/settings.local.json:\n These will apply without asking. Only proceed if you trust this configuration.\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel",
+			state:   HarnessInputPermission,
+		},
+		{
+			name:    "Claude selected negative still owns onboarding input",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n❯ 2. No, exit\n\nEnter to confirm",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude ANSI selected negative still owns onboarding input",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n\x1b[1m❯\x1b[0m 2. \x1b[38;5;105mNo, exit\x1b[0m\n\nEnter to confirm",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude partially rendered trust question and bare cursor own onboarding input",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n❯ ",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude long known partial trust body cannot push question outside classifier",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n" +
+				"This folder pre-approves project permissions:\n" + strings.Repeat("Read\n", 14) + "❯ ",
+			state: HarnessInputOnboarding,
+		},
+		{
+			name:    "Claude historical question and arbitrary response expose current composer",
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n" +
+				strings.Repeat("model response complete\n", 14) + "❯ ",
+			ready: true,
+			state: HarnessInputReady,
+		},
+		{
+			// ce-wn4qe: current Claude Code idle composer with the multi-line
+			// status footer (cwd@host, mode, auth, effort) below the ❯ box.
+			// The prior chrome whitelist rejected the cwd/login/effort lines and
+			// timed out every spawn; the composer must classify as ready.
+			name:    "Claude current idle composer with status footer",
+			harness: "claude-code",
+			content: "────────────────────────────────────────\n❯ \n────────────────────────────────────────\n  vbonnet@mac:/private/tmp/wd\n  ⏸ plan mode on (shift+tab to cycle) · ← for agents\n                    Not logged in · Run /login\n                    ● high · /effort",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			// A ❯ with an active-work signal below it is a running turn, not a
+			// ready composer.
+			name:    "Claude composer running a turn is not ready",
+			harness: "claude-code",
+			content: "❯ \n  ✻ Working… (12s · esc to interrupt)\n  vbonnet@mac:/private/tmp/wd",
+			state:   HarnessInputBusy,
+		},
+		{
+			// Active output beneath an empty ❯ that merely contains a slash token
+			// like "/model" must not be mistaken for idle footer chrome.
+			name:    "Claude output mentioning a slash token is not ready",
+			harness: "claude-code",
+			content: "❯ \nRunning /model migration\nApplying changes…",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude permission wins over prompt glyph",
+			harness: "claude-code",
+			content: "Do you want to proceed?\n❯ 1. Yes\n  2. No",
+			state:   HarnessInputPermission,
+		},
+		{
+			name:    "selector-only permission choices own tail",
+			harness: "claude-code",
+			content: "command preview\n❯ 1. Allow\n  2. Deny\nEsc to cancel",
+			state:   HarnessInputPermission,
+		},
+		{
+			name:    "resolved Claude permission inside live tail",
+			harness: "claude-code",
+			content: "Do you want to proceed?\n❯ 1. Allow\n  2. Deny\napproved\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "ordinary Allow and Deny output is not permission",
+			harness: "claude-code",
+			content: "The policy maps Deny before Allow.\noperation complete\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "permission question followed by work does not own input",
+			harness: "claude-code",
+			content: "Do you want to proceed?\nrequest already approved\n✻ Working…",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "resolved Claude permission above live composer",
+			harness: "claude-code",
+			content: "Do you want to proceed?\n❯ 1. Allow\n  2. Deny\napproved\n" + strings.Repeat("historical output\n", 12) + "❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "resolved Claude trust before live composer",
+			harness: "claude-code",
+			content: "Do you trust the files in this folder?\n❯ 1. Yes\napproved\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "wrong harness composer",
+			harness: "codex-cli",
+			content: "❯",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude tail-owned composer",
+			harness: "claude-code",
+			content: "response\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude dim ghost text is an empty composer",
+			harness: "claude-code",
+			content: "response\n❯ \x1b[2mstart the loop\x1b[0m\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude grey ghost text is an empty composer",
+			harness: "claude-code",
+			content: "response\n❯ \x1b[38;5;241mstart the loop\x1b[0m\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude human draft is not an empty composer",
+			harness: "claude-code",
+			content: "response\n❯ start the loop\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude human queued paste remains generic busy",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\nplease fix the bug in auth.go\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude queued AGM paste is positively identified",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n────────────────\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "long Claude queued AGM paste is classified beyond the display tail",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +14 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\n" + strings.Repeat("payload line\n", 13) + "────────────────\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "historical AGM paste cannot occupy current empty Claude composer",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "historical AGM header cannot own current human Claude paste",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n❯ [Pasted text #2 +1 lines]\nplease preserve my draft\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "partial AGM header cannot authorize Claude recovery",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +1 lines]\n[From: notes | ID:\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "opaque Codex pasted-content chip remains protected",
+			harness: "codex-cli",
+			content: "response\n› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "post-turn Codex queue without empty cursor remains protected",
+			harness: "codex-cli",
+			content: "response\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\ngpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "active Codex turn with queued AGM paste remains protected",
+			harness: "codex-cli",
+			content: "response\n• Working on tests\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\ngpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "initial Codex composer can own observable queued AGM paste",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "initial Codex queue preserves payload-ending newline in extent",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 91 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\n\n",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active output after initial Codex queue suppresses recovery",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale initial Codex header cannot own newer queued input",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\nold response\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical Codex paste cannot occupy current empty composer",
+			harness: "codex-cli",
+			content: "› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n›\ngpt-5.6 xhigh · /repo",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "active work suppresses stale queued AGM recovery",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n✻ Working…\nRunning tests",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "active output after stale Claude footer suppresses recovery",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n────────────────\n? for shortcuts\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale Claude composer before working view",
+			harness: "claude-code",
+			content: "response\n❯\n✻ Working…\nRunning tests",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini structural composer owns tail",
+			harness: "gemini-cli",
+			content: "response\n╭────────────────╮\n│ >   Type your message or @path/to/file │\n╰────────────────╯\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Gemini generic border is not a composer",
+			harness: "gemini-cli",
+			content: "tool output\n╭────────────────╮\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale Gemini composer before working view",
+			harness: "gemini-cli",
+			content: ">   Type your message or @path/to/file\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini queued AGM paste is positively identified",
+			harness: "gemini-cli",
+			content: "│ > [Pasted text #1 +2 lines] │\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-07-21T12:00:00Z]\nrecover\n╰────────────────╯\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active output after stale Gemini footer suppresses recovery",
+			harness: "gemini-cli",
+			content: "│ > [Pasted text #1 +2 lines] │\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-07-21T12:00:00Z]\nrecover\n? for shortcuts\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini trust owns input",
+			harness: "gemini-cli",
+			content: "Do you trust the files in this folder?\n● 1. Trust folder\n  2. Do not trust",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "resolved Gemini trust before live composer",
+			harness: "gemini-cli",
+			content: "Do you trust the files in this folder?\n● 1. Trust folder\napproved\n│ >   Type your message or @path/to/file │\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "OpenCode structural composer owns tail",
+			harness: "opencode-cli",
+			content: "response\n> Type your message",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "OpenCode output containing angle marker is not a composer",
+			harness: "opencode-cli",
+			content: "build > ready\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale OpenCode composer before working view",
+			harness: "opencode-cli",
+			content: "> Type your message\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "OpenCode queued AGM paste is positively identified",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "historical OpenCode paste followed by output suppresses recovery",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical OpenCode paste cannot occupy current empty composer",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n>",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Pi managed ready status owns tail",
+			harness: "pi-cli",
+			content: "/work • pi-worker\nAGM plan/ready launch-current",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Pi managed permission prompt wins over ready status",
+			harness: "pi-cli",
+			content: "AGM permission required\nAllow bash?\nAGM default/ready",
+			state:   HarnessInputPermission,
+		},
+		{
+			name:    "stale Pi ready status before working status",
+			harness: "pi-cli",
+			content: "AGM plan/ready launch-old\nAGM plan/working launch-current",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Pi queued AGM paste is positively identified",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\n/work • pi-worker\n0.0%/0 (auto) AGM plan/ready launch-current",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "Pi queued human paste remains generic busy",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +1 line]\nplease preserve my draft\nAGM plan/ready launch-current",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical Pi paste cannot occupy current managed ready state",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\nAGM plan/ready launch-current",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "historical Pi paste followed by output suppresses recovery",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\nAGM plan/ready launch-current\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "AGY survey wins over bare prompt",
+			harness: "agy",
+			content: ">\nHow's the CLI experience so far?\n[1] Good [2] Fine [3] Bad [0] Skip",
+			state:   HarnessInputOverlay,
+		},
+		{
+			name:    "resolved AGY survey before live composer",
+			harness: "agy",
+			content: "How's the CLI experience so far?\n[1] Good [2] Fine [3] Bad [0] Skip\nthanks\n>",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "stale AGY composer before working output",
+			harness: "agy",
+			content: ">\nprocessing request\nresponse chunk",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "AGY queued AGM paste is positively identified",
+			harness: "agy",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-006 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "AGY queued human paste remains generic busy",
+			harness: "agy",
+			content: "> [Pasted text #1 +1 line]\nplease preserve my draft",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical AGY paste followed by output suppresses recovery",
+			harness: "agy",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-006 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ready, state, err := ClassifyHarnessInput(tt.content, tt.harness)
+			if err != nil {
+				t.Fatalf("ClassifyHarnessInput() error = %v", err)
+			}
+			if ready != tt.ready || state != tt.state {
+				t.Fatalf("ClassifyHarnessInput() = (%v, %q), want (%v, %q)", ready, state, tt.ready, tt.state)
+			}
+		})
+	}
+}
+
+func TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor(t *testing.T) {
+	codexPayload := "[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\n› explain this glyph without moving the anchor"
+	tests := []struct {
+		name    string
+		harness string
+		content string
+	}{
+		{
+			name:    "Claude",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\n❯ explain this glyph without moving the anchor\n────────────────\n? for shortcuts",
+		},
+		{
+			name:    "Codex",
+			harness: "codex-cli",
+			content: fmt.Sprintf("│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content %d chars]\n%s", utf8.RuneCountInString(codexPayload), codexPayload),
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			ready, state, err := ClassifyHarnessInput(testCase.content, testCase.harness)
+			if err != nil {
+				t.Fatalf("ClassifyHarnessInput() error = %v", err)
+			}
+			if ready || state != HarnessInputQueuedAGM {
+				t.Fatalf("ClassifyHarnessInput() = (%t, %q), want (false, %q)", ready, state, HarnessInputQueuedAGM)
+			}
+		})
+	}
+}
+
+func TestHarnessStartupAdvanceKeys(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		want    []string
+	}{
+		{name: "Gemini trust selection", harness: "gemini-cli", content: "Do you trust the files in this folder?", want: []string{"1", "Enter"}},
+		{name: "Codex model upgrade", harness: "codex-cli", content: "Choose how you'd like Codex to proceed", want: []string{"Down", "Enter"}},
+		{name: "Codex update selector", harness: "codex-cli", content: "Update available!\nUpdate now\nSkip until next version", want: []string{"Down", "Enter"}},
+		{name: "AGY survey", harness: "agy", content: "How's the CLI experience so far?\n[0] Skip", want: []string{"0"}},
+		{name: "default trust selection", harness: "claude-code", content: "Do you trust the files in this folder?", want: []string{"Enter"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := harnessStartupAdvanceKeys(tt.harness, tt.content); !slices.Equal(got, tt.want) {
+				t.Fatalf("harnessStartupAdvanceKeys(%q) = %#v, want %#v", tt.harness, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCanAdvanceHarnessStartup(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		state   string
+		harness string
+		content string
+		want    bool
+	}{
+		{
+			name:    "Claude selected affirmative may advance",
+			state:   HarnessInputOnboarding,
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit\nEnter to confirm",
+			want:    true,
+		},
+		{
+			name:    "Claude selected negative may not advance",
+			state:   HarnessInputOnboarding,
+			harness: "claude-code",
+			content: "Quick safety check: Is this a project you created or one you trust?\n  1. Yes, I trust this folder\n❯ 2. No, exit\nEnter to confirm",
+			want:    false,
+		},
+		{
+			name:    "other onboarding keeps existing advancement",
+			state:   HarnessInputOnboarding,
+			harness: "codex-cli",
+			content: "Do you trust the contents of this directory?",
+			want:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canAdvanceHarnessStartup(tt.state, tt.harness, tt.content); got != tt.want {
+				t.Fatalf("canAdvanceHarnessStartup(%q, %q) = %t, want %t", tt.state, tt.harness, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyHarnessInputRejectsStalePromptOutsideTail(t *testing.T) {
+	content := "❯\n" + strings.Repeat("historical output\n", 13)
+	ready, state, err := ClassifyHarnessInput(content, "claude-code")
+	if err != nil {
+		t.Fatalf("ClassifyHarnessInput() error = %v", err)
+	}
+	if ready || state != HarnessInputBusy {
+		t.Fatalf("stale prompt = (%v, %q), want busy", ready, state)
+	}
+}
+
+func TestExpectedHarnessMatcherRejectsWrongProcess(t *testing.T) {
+	procs := []ProcEntry{
+		{PID: 10, PPID: 1, Comm: "zsh"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "agy"},
+	}
+	codex := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("codex-cli"))
+	if codex.HarnessAlive {
+		t.Fatalf("AGY process classified as Codex: %#v", codex)
+	}
+	agy := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("agy"))
+	if !agy.HarnessAlive {
+		t.Fatalf("AGY process not detected: %#v", agy)
+	}
+	piProcs := []ProcEntry{
+		{PID: 10, PPID: 1, Comm: "zsh"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "agy"},
+		{PID: 12, PPID: 10, PGID: 12, TPGID: 12, State: "S+", Comm: "pi", Args: "pi --session-id native"},
+	}
+	pi := classifyPaneLivenessProcesses([]int{10}, piProcs, expectedHarnessProcessMatcher("pi-cli"))
+	if !pi.HarnessAlive {
+		t.Fatalf("Pi process not detected: %#v", pi)
+	}
+}
+
+func TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		harness string
+		args    string
+	}{
+		{harness: "claude-code", args: "env NODE_ENV=production /usr/local/bin/node /opt/node_modules/@anthropic-ai/claude-code/cli.js"},
+		{harness: "codex-cli", args: "/usr/local/bin/node --enable-source-maps /opt/node_modules/@openai/codex/bin/codex.js --quiet"},
+		{harness: "gemini-cli", args: `/usr/local/bin/node "/opt/My Tools/node_modules/@google/gemini-cli/dist/index.js"`},
+		{harness: "opencode-cli", args: "/usr/local/bin/node /opt/node_modules/opencode-ai/bin/opencode.js"},
+		{harness: "pi-cli", args: "/usr/local/bin/node /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
+	}
+	for _, tt := range tests {
+		procs := []ProcEntry{
+			{PID: 10, PPID: 1, Comm: "zsh"},
+			{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread", Args: tt.args},
+		}
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(tt.harness))
+		if !got.HarnessAlive {
+			t.Errorf("identified Node-backed %s liveness = %#v, want alive", tt.harness, got)
+		}
+	}
+}
+
+func TestExpectedHarnessMatcherRejectsUnrelatedNodeProcess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		harness string
+		args    string
+	}{
+		{harness: "claude-code", args: "/usr/local/bin/node /srv/worker.js /tmp/@anthropic-ai/claude-code/cli.js"},
+		{harness: "codex-cli", args: "/usr/local/bin/node /srv/worker.js /tmp/codex.js"},
+		{harness: "gemini-cli", args: "/usr/local/bin/node --require /tmp/@google/gemini-cli.js /srv/worker.js"},
+		{harness: "opencode-cli", args: "/usr/local/bin/node --trace-warnings /srv/worker.js /tmp/opencode.js"},
+		{harness: "pi-cli", args: "/usr/local/bin/node /srv/worker.js /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
+	}
+	for _, tt := range tests {
+		procs := []ProcEntry{
+			{PID: 10, PPID: 1, Comm: "zsh", Args: "zsh"},
+			{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread", Args: tt.args},
+		}
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(tt.harness))
+		if got.HarnessAlive {
+			t.Errorf("unrelated Node process %q classified as %s: %#v", tt.args, tt.harness, got)
+		}
+	}
+}
+
+func TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership(t *testing.T) {
+	t.Parallel()
+
+	for _, process := range []ProcEntry{
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 10, State: "S", Comm: "claude"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "T+", Comm: "claude"},
+	} {
+		procs := []ProcEntry{{PID: 10, PPID: 1, PGID: 10, TPGID: 10, State: "S+", Comm: "zsh"}, process}
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("claude-code"))
+		if got.HarnessAlive {
+			t.Errorf("non-foreground Claude process classified alive: %#v", process)
+		}
+	}
+}
+
+func TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		readiness HarnessInputReadiness
+		force     bool
+		allowed   bool
+		forced    bool
+	}{
+		{name: "ready", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, allowed: true},
+		{name: "ready with force", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, force: true, allowed: true},
+		{name: "generic busy without policy", readiness: HarnessInputReadiness{State: HarnessInputBusy}},
+		{name: "generic busy with policy", readiness: HarnessInputReadiness{State: HarnessInputBusy}, force: true},
+		{name: "queued AGM without policy", readiness: HarnessInputReadiness{State: HarnessInputQueuedAGM}},
+		{name: "queued AGM with policy", readiness: HarnessInputReadiness{State: HarnessInputQueuedAGM}, force: true, allowed: true, forced: true},
+		{name: "permission with force", readiness: HarnessInputReadiness{State: HarnessInputPermission}, force: true},
+		{name: "overlay with force", readiness: HarnessInputReadiness{State: HarnessInputOverlay}, force: true},
+		{name: "onboarding with force", readiness: HarnessInputReadiness{State: HarnessInputOnboarding}, force: true},
+		{name: "wrong harness with force", readiness: HarnessInputReadiness{State: HarnessInputWrongHarness}, force: true},
+		{name: "missing with force", readiness: HarnessInputReadiness{State: HarnessInputNotFound}, force: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			allowed, forced := inputDeliveryAllowed(tt.readiness, InputDeliveryOptions{AllowQueuedAGM: tt.force})
+			if allowed != tt.allowed || forced != tt.forced {
+				t.Fatalf("inputDeliveryAllowed() = (%t, %t), want (%t, %t)", allowed, forced, tt.allowed, tt.forced)
+			}
+		})
+	}
+}
+
+func TestQueuedAGMRecoveryClearsBeforeReplacement(t *testing.T) {
+	t.Parallel()
+
+	var events []string
+	runtime := queuedAGMRecoveryRuntime{
+		sendKey: func(_ context.Context, pane, key string) error {
+			events = append(events, "key:"+pane+":"+key)
+			return nil
+		},
+		wait: func(_ context.Context, delay time.Duration) error {
+			events = append(events, "wait:"+delay.String())
+			return nil
+		},
+		recheck: func() (HarnessInputReadiness, error) {
+			events = append(events, "recheck")
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", Content: "empty composer"}, nil
+		},
+		deliver: func(_ context.Context, pane, command string) error {
+			events = append(events, "deliver:"+pane+":"+command)
+			return nil
+		},
+	}
+
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	if err != nil {
+		t.Fatalf("replaceQueuedAGMInputLocked() error = %v", err)
+	}
+	want := []string{
+		"key:%7:C-c", "wait:200ms", "key:%7:C-u", "wait:100ms",
+		"key:%7:C-a", "key:%7:C-k", "wait:300ms", "recheck",
+		"deliver:%7:replacement",
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("replacement events = %#v, want %#v", events, want)
+	}
+	if !got.Ready || got.State != HarnessInputReady || !got.Forced || got.TargetPane != "%7" {
+		t.Fatalf("replacement readiness = %#v, want forced ready on %%7", got)
+	}
+}
+
+func TestQueuedAGMRecoveryDoesNotReplaceUntilExactPaneIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		recheck HarnessInputReadiness
+	}{
+		{name: "queue remains", recheck: HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: "%7"}},
+		{name: "human input appears", recheck: HarnessInputReadiness{State: HarnessInputBusy, TargetPane: "%7"}},
+		{name: "active pane changes", recheck: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%8"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delivered := false
+			runtime := queuedAGMRecoveryRuntime{
+				sendKey: func(context.Context, string, string) error { return nil },
+				wait:    func(context.Context, time.Duration) error { return nil },
+				recheck: func() (HarnessInputReadiness, error) { return tt.recheck, nil },
+				deliver: func(context.Context, string, string) error {
+					delivered = true
+					return nil
+				},
+			}
+			got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+			if err == nil {
+				t.Fatal("replaceQueuedAGMInputLocked() error = nil, want failed closed")
+			}
+			if delivered {
+				t.Fatal("replacement was delivered before exact empty-composer proof")
+			}
+			if got.Ready {
+				t.Fatalf("failed recovery readiness = %#v, want Ready=false", got)
+			}
+		})
+	}
+}
+
+func TestQueuedAGMRecoveryDoesNotReportReadyWhenReplacementFails(t *testing.T) {
+	t.Parallel()
+
+	runtime := queuedAGMRecoveryRuntime{
+		sendKey: func(context.Context, string, string) error { return nil },
+		wait:    func(context.Context, time.Duration) error { return nil },
+		recheck: func() (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7"}, nil
+		},
+		deliver: func(context.Context, string, string) error { return errors.New("paste failed") },
+	}
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	if err == nil || !strings.Contains(err.Error(), "paste failed") {
+		t.Fatalf("replaceQueuedAGMInputLocked() error = %v, want paste failure", err)
+	}
+	if got.Ready {
+		t.Fatalf("failed replacement readiness = %#v, want Ready=false", got)
+	}
+}

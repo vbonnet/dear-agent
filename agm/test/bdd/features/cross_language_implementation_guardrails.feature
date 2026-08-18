@@ -13,6 +13,8 @@
 # RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/migrations/SPEC.md
 # RELATED-SPEC: agm/scripts/hooks/SPEC.md
+# RELATED-SPEC: agm/test/bdd/steps/SPEC.md
+# RELATED-SPEC: agm/test/e2e/SPEC.md
 # RELATED-SPEC: agm/test/e2e/docker/scripts/SPEC.md
 # RELATED-SPEC: agm/test/e2e/lib/SPEC.md
 # RELATED-SPEC: agm/test/e2e/suites/SPEC.md
@@ -20,6 +22,7 @@
 # RELATED-SPEC: engram/ecphory/diagrams/SPEC.md
 # RELATED-SPEC: engram/hooks-bin/SPEC.md
 # RELATED-SPEC: engram/hooks-bin/lib/SPEC.md
+# RELATED-SPEC: engram/mcp/SPEC.md
 # RELATED-SPEC: engram/mcp/src/SPEC.md
 # RELATED-SPEC: infra/SPEC.md
 # RELATED-SPEC: infra/modules/managed-repo/SPEC.md
@@ -28,9 +31,6 @@
 # RELATED-SPEC: tests/bats/SPEC.md
 # RELATED-SPEC: tools/devlog/diagrams/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/migrations/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/scripts/SPEC.md
-# RELATED-SPEC: wayfinder/lib/SPEC.md
 Feature: Cross-language implementation guardrails
   Executable behavior outside Go packages is part of the same product and
   governance boundary. Its contracts must remain strict, executable, and
@@ -73,9 +73,6 @@ Feature: Cross-language implementation guardrails
       | tests/bats                                                                   |
       | tools/devlog/diagrams                                                        |
       | wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat    |
-      | wayfinder/cmd/wayfinder-session/migrations                                   |
-      | wayfinder/cmd/wayfinder-session/scripts                                      |
-      | wayfinder/lib                                                                |
 
   Scenario Outline: Cross-language contracts are invariant across active routes
     Given cross-language coverage runs through "<harness>" with "<family>"
@@ -112,3 +109,15 @@ Feature: Cross-language implementation guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
+
+  Scenario: End-to-end harness lookup supports the platform system shell
+    Given the AGM end-to-end harness detection helper is configured
+    When AGM validates portable harness command lookup
+    Then the exact harness mapping should run under macOS system Bash

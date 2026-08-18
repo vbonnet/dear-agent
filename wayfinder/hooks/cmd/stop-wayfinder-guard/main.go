@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,21 +13,13 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/stophook"
-	"gopkg.in/yaml.v3"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 const (
 	statusCompleted = "completed"
 	statusAbandoned = "abandoned"
 )
-
-var errLegacyStatus = errors.New("legacy Wayfinder status requires explicit migration")
-
-type wayfinderStatus struct {
-	SchemaVersion   string `yaml:"schema_version"`
-	Status          string `yaml:"status"`
-	CurrentWaypoint string `yaml:"current_waypoint"`
-}
 
 func main() {
 	os.Exit(stophook.RunWithTimeout(10*time.Second, run))
@@ -54,8 +47,6 @@ func run() int {
 	checkBeads(result, dir)
 	checkRetrospective(result, dir)
 	checkPhase(result, dir)
-	checkArtifacts(result, dir)
-
 	result.Report()
 	return result.ExitCode()
 }
@@ -107,14 +98,11 @@ func checkRetrospective(r *stophook.Result, dir string) {
 	// Parse WAYFINDER-STATUS.md to detect project completion.
 	s, err := readCanonicalStatus(dir)
 	if err != nil {
-		if errors.Is(err, errLegacyStatus) {
-			r.Block("retrospective",
-				"legacy Wayfinder status detected",
-				"run 'wayfinder session migrate' to upgrade to V2")
+		if errors.Is(err, fs.ErrNotExist) {
+			r.Pass("retrospective", "no WAYFINDER-STATUS.md, skipped")
 			return
 		}
-		// No parseable status — skip gracefully.
-		r.Pass("retrospective", "no parseable WAYFINDER-STATUS.md, skipped")
+		r.Block("retrospective", "invalid WAYFINDER-STATUS.md", err.Error())
 		return
 	}
 	if s.Status == statusCompleted || s.CurrentWaypoint == "RETRO" {
@@ -129,13 +117,11 @@ func checkRetrospective(r *stophook.Result, dir string) {
 func checkPhase(r *stophook.Result, dir string) {
 	s, err := readCanonicalStatus(dir)
 	if err != nil {
-		if errors.Is(err, errLegacyStatus) {
-			r.Block("phase",
-				"legacy Wayfinder status detected",
-				"run 'wayfinder session migrate' to upgrade to V2")
+		if errors.Is(err, fs.ErrNotExist) {
+			r.Pass("phase", "no WAYFINDER-STATUS.md, skipped")
 			return
 		}
-		r.Pass("phase", "no parseable WAYFINDER-STATUS.md, skipped")
+		r.Block("phase", "invalid WAYFINDER-STATUS.md", err.Error())
 		return
 	}
 
@@ -153,38 +139,6 @@ func checkPhase(r *stophook.Result, dir string) {
 	}
 }
 
-func readCanonicalStatus(dir string) (*wayfinderStatus, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "WAYFINDER-STATUS.md"))
-	if err != nil {
-		return nil, err
-	}
-	parts := strings.SplitN(string(data), "---", 3)
-	if len(parts) != 3 || strings.TrimSpace(parts[0]) != "" {
-		return nil, fmt.Errorf("invalid WAYFINDER-STATUS.md frontmatter")
-	}
-	var parsed wayfinderStatus
-	if err := yaml.Unmarshal([]byte(parts[1]), &parsed); err != nil {
-		return nil, fmt.Errorf("parse WAYFINDER-STATUS.md: %w", err)
-	}
-	if parsed.SchemaVersion != "2.0" {
-		return nil, errLegacyStatus
-	}
-	return &parsed, nil
-}
-
-func checkArtifacts(r *stophook.Result, dir string) {
-	// Check for misplaced Wayfinder artifacts in root
-	patterns := []string{"D[0-9]*.md", "S[0-9]*.md", "W[0-9]*.md"}
-	misplaced := 0
-	for _, p := range patterns {
-		matches, _ := filepath.Glob(filepath.Join(dir, p))
-		misplaced += len(matches)
-	}
-	if misplaced > 0 {
-		r.Warn("artifacts",
-			fmt.Sprintf("%d misplaced Wayfinder artifact(s) in project root", misplaced),
-			"move artifacts to wf/ directory")
-		return
-	}
-	r.Pass("artifacts", "no misplaced artifacts")
+func readCanonicalStatus(dir string) (*statusread.Summary, error) {
+	return statusread.ParseFromDir(dir)
 }

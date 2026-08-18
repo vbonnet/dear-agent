@@ -3,6 +3,7 @@ package wayfinder
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/a2a/protocol"
@@ -10,15 +11,15 @@ import (
 
 // Status represents Wayfinder session status data
 type Status struct {
-	SessionID    string
-	ProjectPath  string
-	Status       string
-	CurrentPhase string
-	Phases       []Phase
+	ProjectName     string
+	ProjectPath     string
+	Status          string
+	CurrentWaypoint string
+	Waypoints       []Waypoint
 }
 
-// Phase represents a Wayfinder phase
-type Phase struct {
+// Waypoint represents a Wayfinder waypoint.
+type Waypoint struct {
 	Name      string
 	Status    string
 	StartedAt time.Time
@@ -29,7 +30,7 @@ type TaskUpdate struct {
 	TaskID      string
 	Description string
 	Status      string
-	Phase       string
+	Waypoint    string
 }
 
 // Handoff represents a task handoff between agents
@@ -54,25 +55,25 @@ type Blocker struct {
 func StatusToMessage(status Status, agentID string) *protocol.Message {
 	msg := protocol.NewMessage(agentID, protocol.StatusPending)
 
-	msg.Context = fmt.Sprintf("Wayfinder session %s in phase %s (status: %s)",
-		status.SessionID, status.CurrentPhase, status.Status)
+	msg.Context = fmt.Sprintf("Wayfinder project %s at waypoint %s (status: %s)",
+		status.ProjectName, status.CurrentWaypoint, status.Status)
 
-	msg.Proposal = fmt.Sprintf("Current phase: %s\n\nPhase progress:\n%s",
-		status.CurrentPhase, formatPhases(status.Phases))
+	msg.Proposal = fmt.Sprintf("Current waypoint: %s\n\nWaypoint progress:\n%s",
+		status.CurrentWaypoint, formatWaypoints(status.Waypoints))
 
 	msg.Questions = []string{}
 	msg.Blockers = []string{}
 
 	switch status.Status {
-	case "in_progress":
+	case "in-progress":
 		msg.NextSteps = []string{
-			fmt.Sprintf("Continue %s phase", status.CurrentPhase),
-			"Report progress when phase completes",
+			fmt.Sprintf("Continue %s waypoint", status.CurrentWaypoint),
+			"Report progress when the waypoint completes",
 		}
 	case "completed":
 		msg.NextSteps = []string{
 			"Review deliverables",
-			"Transition to next phase",
+			"Transition to the next waypoint",
 		}
 		msg.Status = protocol.StatusConsensusReached
 	}
@@ -80,25 +81,25 @@ func StatusToMessage(status Status, agentID string) *protocol.Message {
 	return msg
 }
 
-// PhaseTransitionMessage creates A2A message for phase transitions
-func PhaseTransitionMessage(status Status, oldPhase, newPhase, agentID string) *protocol.Message {
+// WaypointTransitionMessage creates an A2A message for waypoint transitions.
+func WaypointTransitionMessage(status Status, oldWaypoint, newWaypoint, agentID string) *protocol.Message {
 	msg := protocol.NewMessage(agentID, protocol.StatusAwaitingResponse)
 
-	msg.Context = fmt.Sprintf("Wayfinder session %s transitioning from %s to %s",
-		status.SessionID, oldPhase, newPhase)
+	msg.Context = fmt.Sprintf("Wayfinder project %s transitioning from %s to %s",
+		status.ProjectName, oldWaypoint, newWaypoint)
 
-	msg.Proposal = fmt.Sprintf("Phase %s completed successfully.\n\nReady to start phase %s.\n\nProject: %s",
-		oldPhase, newPhase, status.ProjectPath)
+	msg.Proposal = fmt.Sprintf("Waypoint %s completed successfully.\n\nReady to start waypoint %s.\n\nProject: %s",
+		oldWaypoint, newWaypoint, status.ProjectPath)
 
 	msg.Questions = []string{
-		fmt.Sprintf("Approved to proceed to phase %s?", newPhase),
+		fmt.Sprintf("Approved to proceed to waypoint %s?", newWaypoint),
 		"Any concerns or blockers?",
 	}
 
 	msg.Blockers = []string{}
 
 	msg.NextSteps = []string{
-		fmt.Sprintf("Start phase %s tasks", newPhase),
+		fmt.Sprintf("Start waypoint %s tasks", newWaypoint),
 		"Report progress at next checkpoint",
 	}
 
@@ -111,7 +112,7 @@ func TaskToMessage(task TaskUpdate, agentID, context string) *protocol.Message {
 
 	msg.Context = context
 	if msg.Context == "" {
-		msg.Context = fmt.Sprintf("Working on task %s in phase %s", task.TaskID, task.Phase)
+		msg.Context = fmt.Sprintf("Working on task %s at waypoint %s", task.TaskID, task.Waypoint)
 	}
 
 	msg.Proposal = fmt.Sprintf("Task: %s\n\nDescription: %s\n\nStatus: %s",
@@ -185,25 +186,25 @@ func BlockerToMessage(blocker Blocker, agentID string) *protocol.Message {
 	return msg
 }
 
-func formatPhases(phases []Phase) string {
-	if len(phases) == 0 {
-		return "No phases defined"
+func formatWaypoints(waypoints []Waypoint) string {
+	if len(waypoints) == 0 {
+		return "No waypoints defined"
 	}
 
-	result := ""
-	for _, phase := range phases {
+	var result strings.Builder
+	for _, waypoint := range waypoints {
 		statusIcon := "P"
-		switch phase.Status {
+		switch waypoint.Status {
 		case "completed":
 			statusIcon = "V"
-		case "in_progress":
+		case "in-progress":
 			statusIcon = ">"
 		}
 
-		result += fmt.Sprintf("- %s %s: %s\n", statusIcon, phase.Name, phase.Status)
+		fmt.Fprintf(&result, "- %s %s: %s\n", statusIcon, waypoint.Name, waypoint.Status)
 	}
 
-	return result
+	return result.String()
 }
 
 func formatList(items []string) string {

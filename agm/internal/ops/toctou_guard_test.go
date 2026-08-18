@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,7 +10,20 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 )
+
+func TestAPISessionLockUsesProviderAppropriateWaitPolicy(t *testing.T) {
+	ordinaryTimeout := contracts.Load().SessionLifecycle.LockTimeout.Duration
+	if apiSessionMutationLockTimeout <= ordinaryTimeout {
+		t.Fatalf("API mutation lock timeout = %s, must exceed ordinary lifecycle timeout %s", apiSessionMutationLockTimeout, ordinaryTimeout)
+	}
+	if apiSessionMutationLockTimeout <= agent.OpenAICompletionTimeout {
+		t.Fatalf("API mutation lock timeout = %s, must exceed provider completion ceiling %s", apiSessionMutationLockTimeout, agent.OpenAICompletionTimeout)
+	}
+}
 
 func TestWithSessionLock_ExecutesFn(t *testing.T) {
 	called := false
@@ -54,10 +68,10 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 	session := "test-mutex-" + t.Name()
 
 	var (
-		mu        sync.Mutex
-		maxConc   int32
-		curConc   int32
-		wg        sync.WaitGroup
+		mu         sync.Mutex
+		maxConc    int32
+		curConc    atomic.Int32
+		wg         sync.WaitGroup
 		goroutines = 5
 	)
 
@@ -66,7 +80,7 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := WithSessionLock(session, func() error {
-				c := atomic.AddInt32(&curConc, 1)
+				c := curConc.Add(1)
 				mu.Lock()
 				if c > maxConc {
 					maxConc = c
@@ -76,7 +90,7 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 				// Hold lock briefly to allow overlap attempts.
 				time.Sleep(10 * time.Millisecond)
 
-				atomic.AddInt32(&curConc, -1)
+				curConc.Add(-1)
 				return nil
 			})
 			if err != nil {
@@ -135,6 +149,45 @@ func TestWithSessionLockTimeout_TimesOut(t *testing.T) {
 	// Should have waited at least the timeout duration.
 	if elapsed < 150*time.Millisecond {
 		t.Errorf("elapsed = %v; expected >= 150ms", elapsed)
+	}
+}
+
+func TestWithSessionLockContext_CancelStopsContendedWait(t *testing.T) {
+	session := "test-cancel-" + t.Name()
+	dir := lockDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("create lock directory: %v", err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, session+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("acquire external lock: %v", err)
+	}
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		done <- WithSessionLockContext(ctx, session, func() error {
+			t.Error("callback ran after cancellation")
+			return nil
+		})
+	}()
+	<-started
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("WithSessionLockContext() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled lock acquisition did not return promptly")
 	}
 }
 

@@ -28,17 +28,6 @@ for harness in claude-code codex-cli agy opencode-cli; do
         test_fail "session creation failed for $harness" "$AGM_LAST_OUTPUT"
     fi
 
-    # Test: message delivery
-    # NOTE: --test sessions aren't in Dolt, so send msg may fail to find them.
-    # Use --interrupt to force delivery via tmux even without Dolt lookup.
-    test_start "[$harness] send msg"
-    agm_run send msg "$session_name" --sender e2e-test --interrupt --prompt "harness parity test"
-    if [[ "$AGM_LAST_EXIT" -eq 0 ]]; then
-        test_pass
-    else
-        test_pass "send msg to --test session (Dolt lookup may fail — known limitation)"
-    fi
-
     # Test: Dolt harness field
     test_start "[$harness] Dolt harness field"
     dolt_assert_session_field "$session_name" "harness" "$harness"

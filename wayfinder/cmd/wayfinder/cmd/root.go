@@ -32,7 +32,7 @@ The canonical Wayfinder model is 9 phases:
   CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO
 
 Commands:
-  session                 Manage the V2 session lifecycle and tasks
+  session                 Manage the session lifecycle and tasks
 
 Examples:
 	wayfinder session start my-project

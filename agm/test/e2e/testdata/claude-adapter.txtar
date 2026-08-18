@@ -5,7 +5,7 @@
 # - Claude adapter initializes correctly during session creation
 # - No errors occur during adapter operations
 # - Adapter supports basic session lifecycle (create, resume, list, archive)
-# - Phase 0 refactoring to Agent interface doesn't break behavior
+# - Consumer-owned harness capability contracts don't break behavior
 
 [!can-create-tmux-session] skip 'cannot create tmux sessions in this environment'
 

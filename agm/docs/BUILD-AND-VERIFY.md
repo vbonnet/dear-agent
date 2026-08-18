@@ -121,18 +121,17 @@ go test ./internal/dolt/... -v
 # ok      github.com/vbonnet/dear-agent/agm/internal/dolt
 ```
 
-### 3.2 Integration Tests (Optional)
+### 3.2 Archive and Lifecycle Tests
 
 ```bash
-# Enable integration tests
-export DOLT_TEST_INTEGRATION=1
+# Run archive-focused production and regression tests
+go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression \
+  -run 'Archive|ResolveIdentifier'
 
-# Run archive integration tests
-go test ./test/integration/lifecycle/... -tags=integration -v -run Archive
-
-# Expected: All tests pass
-# PASS
-# ok      github.com/vbonnet/dear-agent/agm/test/integration/lifecycle
+# Run the isolated source-built Codex lifecycle
+go test -race -count=1 -tags=integration \
+  ./agm/test/integration/isolated \
+  -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
 ```
 
 ### 3.3 Check for Errors
@@ -240,7 +239,7 @@ Complete this checklist to confirm the fix is working:
 ### Build & Tests
 - [ ] AGM builds without errors: `go build ./...`
 - [ ] Unit tests pass: `go test ./internal/dolt/... -v`
-- [ ] Integration tests pass (if enabled): `DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration`
+- [ ] Archive production and regression tests pass: `go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression -run 'Archive|ResolveIdentifier'`
 - [ ] No lint errors: `golangci-lint run ./...`
 
 ### Functionality
@@ -378,8 +377,11 @@ git checkout HEAD~1
 # 3. Rebuild
 go build -o ~/go/bin/agm ./cmd/agm
 
-# 4. Or restore from backup (if you made one)
-cp ~/go/bin/agm.backup ~/go/bin/agm
+# 4. Or restore from backup (if you made one).
+# Use the install target, not cp: copying over an already-executed binary can
+# leave a stale code-signing cache entry and macOS then kills it before main()
+# runs (ce-77ip.8). make install stages, signs and renames instead.
+stage=$(mktemp ~/go/bin/agm.XXXXXX) && cp ~/go/bin/agm.backup "$stage" && chmod 755 "$stage" && mv -f "$stage" ~/go/bin/agm
 ```
 
 ---
@@ -390,7 +392,7 @@ The fix is successfully deployed when:
 
 ✅ **All tests pass**
 - Unit tests: `go test ./internal/dolt/... -v`
-- Integration tests: `DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration`
+- Archive production and regression tests: `go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression -run 'Archive|ResolveIdentifier'`
 
 ✅ **Manual verification complete**
 - Can archive by session ID
@@ -414,8 +416,10 @@ After successful verification:
 
 1. **Deploy to Production**
    ```bash
-   # Copy binary to production path
-   sudo cp ~/go/bin/agm /usr/local/bin/agm
+   # Copy binary to production path. Stage and rename rather than copying
+   # straight over it: overwriting an already-executed binary can leave a
+   # stale code-signing cache entry that macOS kills on next exec (ce-77ip.8).
+   stage=$(sudo mktemp /usr/local/bin/agm.XXXXXX) && sudo cp ~/go/bin/agm "$stage" && sudo chmod 755 "$stage" && sudo mv -f "$stage" /usr/local/bin/agm
 
    # Or install system-wide
    cd main/agm

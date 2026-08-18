@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var supportedHarnesses = []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
+var supportedHarnesses = []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}
 
 // SupportedHarnesses returns the canonical harness identifiers supported by
 // Hippocampus transcript discovery.
@@ -30,6 +30,8 @@ func NewHarnessAdapter(name, dataDir string) (HarnessAdapter, error) {
 		return NewAgyAdapter(dataDir), nil
 	case "opencode-cli":
 		return NewOpenCodeAdapter(dataDir), nil
+	case "pi-cli":
+		return NewPiAdapter(dataDir), nil
 	default:
 		return nil, fmt.Errorf("unsupported hippocampus harness %q", name)
 	}
@@ -45,6 +47,8 @@ func normalizeHarnessName(name string) string {
 		return "agy"
 	case "opencode", "opencode-cli":
 		return "opencode-cli"
+	case "pi", "pi-cli":
+		return "pi-cli"
 	default:
 		return ""
 	}

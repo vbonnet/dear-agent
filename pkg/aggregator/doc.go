@@ -7,8 +7,8 @@
 // recommendation engine consumes.
 //
 // The package name is "aggregator" rather than "signals" because pkg/signals
-// is already taken by the Hybrid Progressive Rigor detector — see
-// ADR-015 §D1.
+// is already taken by the Hybrid Progressive Rigor detector; ADR-015 records
+// the domain separation.
 //
 // Subject conventions for first-party collectors:
 //

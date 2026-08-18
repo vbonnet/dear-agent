@@ -1,26 +1,30 @@
 # Skill Lint Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-18 -->
 
 ## Overview
 
-`tools/skill-lint` is the command-line entry point for `pkg/skilllint`. It
-checks one skill file or one or more directories and exits nonzero when skill
-frontmatter violates model or effort policy.
+`tools/skill-lint` is the thin command adapter for `pkg/skilllint`. It checks a
+tracked repository, one recognized file, or one or more directories and keeps
+usage, content, and operational outcomes distinct.
 
-## Requirements
+## EARS Requirements
 
-**SKILL-LINT-CMD-01** When neither `-file` nor directory arguments are provided, the system shall print usage and exit with code 2.
+**SKILL-LINT-CMD-01** When no validation mode is selected, the system shall print usage and exit with code 2.
 
-**SKILL-LINT-CMD-02** When `-file <path>` is provided, the system shall lint only that file.
+**SKILL-LINT-CMD-02** When more than one of repository, file, or directory mode is selected, the system shall print usage and exit with code 2.
 
-**SKILL-LINT-CMD-03** When directory arguments are provided, the system shall lint each directory recursively with `pkg/skilllint`.
+**SKILL-LINT-CMD-03** When `-repo <root>` is provided, the system shall call `pkg/skilllint.CheckRepository` with the signal-aware command context for that root.
 
-**SKILL-LINT-CMD-04** When file or directory analysis returns an operational error, the system shall print the error to stderr and exit with code 2.
+**SKILL-LINT-CMD-04** When `-file <path>` is provided, the system shall call `pkg/skilllint.CheckFile` only for that path.
 
-**SKILL-LINT-CMD-05** When violations are found, the system shall print each violation to stderr and exit with code 1.
+**SKILL-LINT-CMD-05** When directory arguments are provided, the system shall call `pkg/skilllint.CheckDir` for each directory.
 
-**SKILL-LINT-CMD-06** When no violations are found, the system shall exit with code 0.
+**SKILL-LINT-CMD-06** When validation returns an operational error, the system shall print the error to stderr and exit with code 2.
+
+**SKILL-LINT-CMD-07** When validation returns content violations, the system shall print each violation to stderr and exit with code 1.
+
+**SKILL-LINT-CMD-08** When validation returns no violations, the system shall exit with code 0.
 
 ## BDD Traceability
 

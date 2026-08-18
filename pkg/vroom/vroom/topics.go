@@ -11,7 +11,7 @@ package vroom
 //
 // The richer append-only persistence lives in pkg/vroom/decisiontrail; these
 // topics remain for the in-memory event bus surfaced via Emitter so existing
-// consumers (pkg/backlog, pkg/selfimprove) keep working unchanged.
+// consumers such as pkg/selfimprove keep working unchanged.
 const (
 	// TopicDecisionDispatched is emitted when the Orchestrator dispatches a task to a worker.
 	TopicDecisionDispatched = "vroom.decision.dispatched"

@@ -35,9 +35,9 @@ var coordStartCmd = &cobra.Command{
 	Long: `Start multiple wayfinder projects concurrently with automatic sandbox isolation.
 
 Examples:
-  wayfinder-session coord start oss-wp12/ oss-wp13/
-  wayfinder-session coord start --max-concurrent=2 project1/ project2/ project3/
-  wayfinder-session coord start --no-sandbox project1/ project2/`,
+  wayfinder session coord start oss-wp12/ oss-wp13/
+  wayfinder session coord start --max-concurrent=2 project1/ project2/ project3/
+  wayfinder session coord start --no-sandbox project1/ project2/`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runCoordStart,
 }

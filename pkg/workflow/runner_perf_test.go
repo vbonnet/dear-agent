@@ -25,7 +25,7 @@ func skipUnreliablePerfEnvironment(t *testing.T) {
 	}
 }
 
-// Performance targets (ADR-010 §6):
+// Performance regression targets for the default local SQLite backend:
 //
 //	Read run status (with all nodes) for 100-node DAG  : P95 < 5  ms
 //	Append audit event                                  : P95 < 1  ms

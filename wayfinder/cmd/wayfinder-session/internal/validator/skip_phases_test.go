@@ -14,7 +14,7 @@ var liteSkips = []string{status.PhaseV2Design, status.PhaseV2Spec, status.PhaseV
 // skipped DESIGN/SPEC/PLAN phases to find RESEARCH as the gating phase (ce-12pl).
 func TestCanStartPhase_LiteSkipsToSetup(t *testing.T) {
 	st := &status.StatusV2{
-		SchemaVersion:   status.SchemaVersionV2,
+		SchemaVersion:   status.SchemaVersion,
 		CurrentWaypoint: status.PhaseV2Research,
 		SkipPhases:      liteSkips,
 		WaypointHistory: []status.WaypointHistory{
@@ -33,7 +33,7 @@ func TestCanStartPhase_LiteSkipsToSetup(t *testing.T) {
 // SETUP is still blocked.
 func TestCanStartPhase_LiteStillGatesOnResearch(t *testing.T) {
 	st := &status.StatusV2{
-		SchemaVersion:   status.SchemaVersionV2,
+		SchemaVersion:   status.SchemaVersion,
 		CurrentWaypoint: status.PhaseV2Research,
 		SkipPhases:      liteSkips,
 		WaypointHistory: []status.WaypointHistory{
@@ -51,11 +51,38 @@ func TestCanStartPhase_LiteStillGatesOnResearch(t *testing.T) {
 	}
 }
 
+func TestCanStartPhaseRejectsConfiguredSkippedPhase(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase string
+		st    *status.StatusV2
+	}{
+		{
+			name:  "profile skipped phase",
+			phase: status.PhaseV2Design,
+			st:    &status.StatusV2{SkipPhases: liteSkips},
+		},
+		{
+			name:  "roadmap skipped phase",
+			phase: status.PhaseV2Setup,
+			st:    &status.StatusV2{SkipRoadmap: true},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := NewValidator(test.st).CanStartPhase(test.phase, t.TempDir())
+			if err == nil || !contains(err.Error(), "phase is configured to be skipped") {
+				t.Fatalf("CanStartPhase(%s) error = %v, want configured-skip rejection", test.phase, err)
+			}
+		})
+	}
+}
+
 // TestCanStartPhase_StandardStillGatesDesign verifies the default (no skip) behavior
 // is unchanged: starting SETUP requires PLAN, not RESEARCH.
 func TestCanStartPhase_StandardStillGatesDesign(t *testing.T) {
 	st := &status.StatusV2{
-		SchemaVersion:   status.SchemaVersionV2,
+		SchemaVersion:   status.SchemaVersion,
 		CurrentWaypoint: status.PhaseV2Research,
 		WaypointHistory: []status.WaypointHistory{
 			{Name: status.PhaseV2Research, Status: status.WaypointStatusV2Completed},
@@ -77,7 +104,7 @@ func TestCanStartPhase_StandardStillGatesDesign(t *testing.T) {
 // BUILD can start once PLAN completes (SETUP skipped).
 func TestCanStartPhase_SkipRoadmapPreserved(t *testing.T) {
 	st := &status.StatusV2{
-		SchemaVersion:   status.SchemaVersionV2,
+		SchemaVersion:   status.SchemaVersion,
 		CurrentWaypoint: status.PhaseV2Plan,
 		SkipRoadmap:     true,
 		WaypointHistory: []status.WaypointHistory{

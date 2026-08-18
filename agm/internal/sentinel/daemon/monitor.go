@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +17,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/sweeper"
 	"github.com/vbonnet/dear-agent/pkg/enforcement"
 )
+
+const monitorShutdownTimeout = 5 * time.Second
 
 // MonitorConfig contains configuration for session monitoring.
 type MonitorConfig struct {
@@ -38,7 +39,9 @@ type SessionMonitor struct {
 	gitDetector   *enforcement.ViolationDetector
 
 	// Configuration
-	config *config.Config
+	config     *config.Config
+	agmBinary  string
+	runCommand combinedOutputRunner
 
 	// State
 	recoveryHistories       map[string]*RecoveryHistory
@@ -58,6 +61,9 @@ type SessionMonitor struct {
 	logger                  *slog.Logger // Structured logger
 	running                 bool
 	stopChan                chan struct{}
+	doneChan                chan struct{}
+	stopOnce                sync.Once
+	shutdownTimeout         time.Duration
 	mu                      sync.Mutex // Protects running field
 
 	// CrossSessionThreshold is the number of distinct sessions that must
@@ -97,8 +103,15 @@ func loadViolationDetectors(cfg *config.Config) (*enforcement.ViolationDetector,
 
 // NewSessionMonitor creates a new session monitor with given configuration.
 func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
-	// Create tmux client
-	tmuxClient := tmux.NewClient()
+	// Respect an explicit socket as an isolation boundary. Auto-discovery is
+	// appropriate only when no socket was configured; otherwise the sentinel
+	// could inspect or recover sessions outside the caller-owned tmux server.
+	var tmuxClient *tmux.Client
+	if cfg.Tmux.Socket != "" {
+		tmuxClient = tmux.NewClientWithSocket(cfg.Tmux.Socket)
+	} else {
+		tmuxClient = tmux.NewClient()
+	}
 
 	// Create stuck session detector
 	detector := NewStuckSessionDetector()
@@ -124,7 +137,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 	logger := logging.DefaultLogger()
 
 	// Create escalation pipeline
-	escalationExecutor := &ExecCommandExecutor{}
+	commandRunner := newSocketCommandRunner(cfg.Tmux.Socket)
+	escalationExecutor := &ExecCommandExecutor{socketPath: cfg.Tmux.Socket}
 	escalationLogger := logging.DefaultLogger()
 	agmBinary := "agm"
 	maxPerHour := 5
@@ -172,6 +186,9 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		logger.Warn("Failed to create session heartbeat monitor", "error", err)
 	}
 	if sessionHBMonitor != nil {
+		sessionHBMonitor.agmBinary = agmBinary
+		sessionHBMonitor.runCommand = commandRunner
+		sessionHBMonitor.SetTmuxSessionLister(tmuxClient.ListSessions)
 		sessionHBMonitor.SetExemptSessions(cfg.Recovery.ExemptSessions)
 	}
 
@@ -181,6 +198,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		logger.Warn("Failed to create loop monitor", "error", err)
 	}
 	if loopMon != nil {
+		loopMon.agmBinary = agmBinary
+		loopMon.runCommand = commandRunner
 		loopMon.SetExemptSessions(cfg.Recovery.ExemptSessions)
 		if cfg.LoopMonitoring.EscalationCommand != "" {
 			loopMon.SetEscalationCommand(cfg.LoopMonitoring.EscalationCommand)
@@ -206,6 +225,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		beadsDetector:           beadsDetector,
 		gitDetector:             gitDetector,
 		config:                  cfg,
+		agmBinary:               agmBinary,
+		runCommand:              commandRunner,
 		recoveryHistories:       make(map[string]*RecoveryHistory),
 		incidentLogger:          incidentLogger,
 		dedup:                   NewIncidentDeduplicator(dedupCooldown),
@@ -221,9 +242,25 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		loopMonitor:             loopMon,
 		sessionSweeper:          sessionSweeper,
 		logger:                  logger,
-		stopChan:                make(chan struct{}),
+		shutdownTimeout:         monitorShutdownTimeout,
 		CrossSessionThreshold:   3,
 	}, nil
+}
+
+func (m *SessionMonitor) executeAGM(args ...string) ([]byte, error) {
+	binary := m.agmBinary
+	if binary == "" {
+		binary = "agm"
+	}
+	runner := m.runCommand
+	if runner == nil {
+		runner = newSocketCommandRunner("")
+	}
+	return runner(binary, args...)
+}
+
+func (m *SessionMonitor) humanPresent(sessionName string) bool {
+	return isHumanPresentWithRunner(sessionName, m.executeAGM)
 }
 
 // StartMonitoring begins the main daemon monitoring loop.
@@ -236,7 +273,18 @@ func (m *SessionMonitor) StartMonitoring() error {
 		return fmt.Errorf("monitor is already running")
 	}
 	m.running = true
+	m.stopChan = make(chan struct{})
+	m.doneChan = make(chan struct{})
+	m.stopOnce = sync.Once{}
+	stopChan := m.stopChan
+	doneChan := m.doneChan
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.running = false
+		close(doneChan)
+		m.mu.Unlock()
+	}()
 
 	m.logger.Info("Starting Astrocyte session monitor",
 		"interval", m.config.Monitoring.IntervalDuration,
@@ -253,24 +301,34 @@ func (m *SessionMonitor) StartMonitoring() error {
 				m.logger.Error("Error checking sessions", "error", err)
 			}
 
-		case <-m.stopChan:
+		case <-stopChan:
 			m.logger.Info("Stopping session monitor")
-			m.mu.Lock()
-			m.running = false
-			m.mu.Unlock()
 			return nil
 		}
 	}
 }
 
-// StopMonitoring stops the monitoring loop gracefully.
+// StopMonitoring stops the monitoring loop gracefully and waits up to the
+// configured shutdown bound for it to exit. It is safe to call concurrently
+// or more than once.
 func (m *SessionMonitor) StopMonitoring() {
 	m.mu.Lock()
-	if m.running {
+	if !m.running {
 		m.mu.Unlock()
-		close(m.stopChan)
-	} else {
-		m.mu.Unlock()
+		return
+	}
+	stopChan := m.stopChan
+	doneChan := m.doneChan
+	m.stopOnce.Do(func() { close(stopChan) })
+	m.mu.Unlock()
+
+	timer := time.NewTimer(m.shutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-doneChan:
+	case <-timer.C:
+		m.logger.Warn("Timed out waiting for session monitor shutdown",
+			"timeout", m.shutdownTimeout)
 	}
 }
 
@@ -445,8 +503,7 @@ func (m *SessionMonitor) autoDenyPermissionPrompt(sessionName string) error {
 
 	// Auto-reject via agm send reject
 	reason := fmt.Sprintf("[sentinel] denied: %s. Logged for investigation. Use agm escape-ui or agm send msg instead of raw tmux commands.", command)
-	rejectCmd := exec.Command("agm", "send", "reject", sessionName, "--reason", reason)
-	output, rejectErr := rejectCmd.CombinedOutput()
+	output, rejectErr := m.executeAGM("send", "reject", sessionName, "--reason", reason)
 	if rejectErr != nil {
 		m.logger.Error("[sentinel] auto-deny failed",
 			"session", sessionName,
@@ -653,7 +710,7 @@ func (m *SessionMonitor) RecoverSession(sessionName string, stuckInfo *SessionSt
 	}
 
 	// Safety check: don't inject messages or apply recovery if a human is present
-	if isHumanPresent(sessionName) {
+	if m.humanPresent(sessionName) {
 		m.logger.Info("Safety guard: human detected, skipping automated recovery",
 			"session", sessionName, "symptom", stuckInfo.Reason)
 		return nil
@@ -668,7 +725,7 @@ func (m *SessionMonitor) RecoverSession(sessionName string, stuckInfo *SessionSt
 		rejectionMessage = enforcement.GenerateRejectionMessage(pattern, command)
 
 		// Send rejection message to session
-		if err := SendRejectionMessage(sessionName, rejectionMessage, pattern); err != nil {
+		if err := SendRejectionMessage(sessionName, rejectionMessage, pattern, m.tmuxClient); err != nil {
 			m.logger.Error("Failed to send rejection message", "error", err)
 		}
 
@@ -713,7 +770,7 @@ func (m *SessionMonitor) RecoverSession(sessionName string, stuckInfo *SessionSt
 	var recoveryResult *RecoveryResult
 	if m.config.Recovery.Enabled {
 		var err error
-		recoveryResult, err = ApplyRecovery(sessionName, strategy, m.tmuxClient)
+		recoveryResult, err = applyRecoveryWithRunner(sessionName, strategy, m.tmuxClient, m.executeAGM)
 		if err != nil {
 			m.logger.Error("Recovery failed for session", "session", sessionName, "error", err)
 		}

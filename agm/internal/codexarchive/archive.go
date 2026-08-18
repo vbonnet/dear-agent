@@ -15,29 +15,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 const (
-	defaultTimeout = 30 * time.Second
-	envRemote      = "AGM_CODEX_REMOTE"
+	defaultTimeout        = 30 * time.Second
+	defaultRemoteEndpoint = "unix://"
+	envRemote             = "AGM_CODEX_REMOTE"
 	// #nosec G101 -- this is the name of an environment variable, not a credential.
 	envRemoteToken = "AGM_CODEX_REMOTE_AUTH_TOKEN_ENV"
 )
 
 var (
-	archiveCodexThreadFn = archiveCodexThread
-	newThreadArchiver    = func() codexThreadArchiver { return codexcontrol.New() }
-	runCodexArchiveFn    = runCodexArchive
+	runCodexRemoteArchiveFn = runCodexRemoteArchive
+	runCodexLocalArchiveFn  = runCodexLocalArchive
 )
-
-// codexThreadArchiver deliberately exposes only the session-scoped archive
-// operation. In particular, it excludes device-global remote-control methods
-// so archival cannot accidentally enable or disable another session's relay.
-type codexThreadArchiver interface {
-	ArchiveThread(context.Context, string) error
-}
 
 // Result describes the Codex-side archive operation paired with AGM archive.
 type Result struct {
@@ -89,7 +81,7 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	if req.CodexSessionID != "" {
-		if err := archiveCodexThreadFn(ctx, req.CodexSessionID); err != nil {
+		if err := archivePersistedCodexSession(ctx, req.CodexSessionID); err != nil {
 			return nil, err
 		}
 		return &Result{Target: req.CodexSessionID}, nil
@@ -113,11 +105,24 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 	return &Result{Target: target, TranscriptPath: match.path}, nil
 }
 
-func archiveCodexThread(ctx context.Context, threadID string) error {
-	if err := newThreadArchiver().ArchiveThread(ctx, threadID); err == nil {
+func archivePersistedCodexSession(ctx context.Context, target string) error {
+	remoteErr := runCodexRemoteArchiveFn(ctx, target)
+	if remoteErr == nil {
 		return nil
 	}
-	return runCodexArchiveFn(ctx, threadID)
+	if ctx.Err() != nil {
+		return remoteErr
+	}
+
+	localErr := runCodexLocalArchiveFn(ctx, target)
+	if localErr == nil {
+		return nil
+	}
+	return fmt.Errorf("codex archive %q failed through both supported paths: %w", target, errors.Join(
+		fmt.Errorf("remote control: %w", remoteErr),
+		fmt.Errorf("local saved-session fallback: %w", localErr),
+	),
+	)
 }
 
 func (r Request) candidateDirs() []string {
@@ -129,11 +134,23 @@ func (r Request) candidateDirs() []string {
 }
 
 func runCodexArchive(ctx context.Context, target string) error {
+	return runCodexArchiveWithRemote(ctx, target, os.Getenv(envRemote))
+}
+
+func runCodexLocalArchive(ctx context.Context, target string) error {
+	return runCodexArchiveWithRemote(ctx, target, "")
+}
+
+func runCodexRemoteArchive(ctx context.Context, target string) error {
+	return runCodexArchiveWithRemote(ctx, target, firstNonEmpty(os.Getenv(envRemote), defaultRemoteEndpoint))
+}
+
+func runCodexArchiveWithRemote(ctx context.Context, target, remote string) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	args := []string{"archive"}
-	if remote := os.Getenv(envRemote); remote != "" {
+	if remote != "" {
 		args = append(args, "--remote", remote)
 		if tokenEnv := os.Getenv(envRemoteToken); tokenEnv != "" {
 			args = append(args, "--remote-auth-token-env", tokenEnv)
@@ -143,7 +160,10 @@ func runCodexArchive(ctx context.Context, target string) error {
 
 	cmd := exec.CommandContext(timeoutCtx, "codex", args...) // #nosec G702 -- fixed executable; args are passed without a shell.
 	output, err := cmd.CombinedOutput()
-	if timeoutCtx.Err() != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("codex archive %q interrupted: %w", target, ctxErr)
+	}
+	if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("codex archive timed out after %s", defaultTimeout)
 	}
 	if err != nil {

@@ -49,7 +49,8 @@ func TestDetector_DetectState_CodexReady(t *testing.T) {
 │ >_ OpenAI Codex (v0.43.0)                          │
 │                                                    │
 │  /model to change model   /help for commands       │
-╰────────────────────────────────────────────────────╯`
+╰────────────────────────────────────────────────────╯
+›`
 
 	result := detector.DetectState(output, time.Now())
 
@@ -59,6 +60,96 @@ func TestDetector_DetectState_CodexReady(t *testing.T) {
 
 	if result.Confidence != "high" {
 		t.Errorf("Expected high confidence, got %s", result.Confidence)
+	}
+}
+
+func TestDetector_CodexReadinessRequiresStructuredComposer(t *testing.T) {
+	detector := NewDetector()
+	tests := []struct {
+		name        string
+		output      string
+		wantState   State
+		wantReceive CanReceive
+	}{
+		{
+			name:        "post-turn cursor and footer are ready",
+			output:      "›\n\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateReady,
+			wantReceive: CanReceiveYes,
+		},
+		{
+			name: "styled welcome suggestion is an empty composer",
+			output: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+				"\x1b[2m│ model: \x1b[0mgpt-5.6 high\x1b[2m \x1b[0m/model to change │\n" +
+				"To get started, describe a task or try /review\n\n" +
+				"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+				"gpt-5.6 high · ~/src/project",
+			wantState:   StateReady,
+			wantReceive: CanReceiveYes,
+		},
+		{
+			name: "identical unstyled welcome text is a human draft",
+			output: "│ >_ OpenAI Codex (v0.145.0) │\n" +
+				"│ model: gpt-5.6 high /model to change │\n" +
+				"To get started, describe a task or try /review\n\n" +
+				"› Run /review on my current changes\n\n" +
+				"gpt-5.6 high · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "typed post-turn draft and footer are not ready",
+			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "working status and footer are not ready",
+			output:      "• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "latest working footer overrides stale initial composer",
+			output:      "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "shell output after post-turn composer is not ready",
+			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project\nuser@host:~/src/project$",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "shell output after initial composer is not ready",
+			output:      "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n╰──────────────────────────────╯\nuser@host:~/src/project$",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "unsubmitted paste and footer are not ready",
+			output:      "› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "echoed launch model is not ready",
+			output:      "user@host$ codex resume abc -m 'gpt-5.6'",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detector.DetectState(tt.output, time.Now()).State; got != tt.wantState {
+				t.Errorf("DetectState() = %v, want %v", got, tt.wantState)
+			}
+			if got := detector.CheckCanReceive(tt.output); got != tt.wantReceive {
+				t.Errorf("CheckCanReceive() = %v, want %v", got, tt.wantReceive)
+			}
+		})
 	}
 }
 
@@ -699,8 +790,24 @@ func TestDetector_CheckCanReceive(t *testing.T) {
 			output: `╭────────────────────────────────────────────────────╮
 │ >_ OpenAI Codex                                    │
 │  /model to change model                            │
-╰────────────────────────────────────────────────────╯`,
+╰────────────────────────────────────────────────────╯
+›`,
 			expected: CanReceiveYes,
+		},
+		{
+			name:     "Codex styled ghost composer = YES",
+			output:   "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\ngpt-5.5 high · ~/src/project",
+			expected: CanReceiveYes,
+		},
+		{
+			name:     "Codex styled paste chip = QUEUE",
+			output:   "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m \x1b[2m[Pasted Content 2172 chars]\x1b[0m\n\ngpt-5.5 high · ~/src/project",
+			expected: CanReceiveQueue,
+		},
+		{
+			name:     "Codex human draft with later dim token = QUEUE",
+			output:   "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m Review \x1b[2mthis\x1b[0m change\n\ngpt-5.5 high · ~/src/project",
+			expected: CanReceiveQueue,
 		},
 	}
 

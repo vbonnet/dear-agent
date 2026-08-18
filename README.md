@@ -29,6 +29,16 @@ something breaks you open a terminal, not a dashboard.
 | **Engram** | `engram/` | Persistent memory with cue-based retrieval |
 | **Wayfinder** | `wayfinder/` | 9-phase SDLC workflow plugin with validation gates |
 
+## Writing specifications
+
+Behavioral `SPEC.md` contracts are authored through the canonical
+[`write-spec` workflow](spec-governance/skills/write-spec/SKILL.md). Start with
+[the repository router](docs/spec-authoring.md): shared observable behavior has
+one harness- and implementation-neutral owner, while real member differences
+are applicability-scoped in that same contract. The repository authors each
+SPEC-governance workflow once under `spec-governance/skills/`; it does not
+maintain harness-specific policy copies or claim runtime discovery.
+
 ## Quick Start
 
 ### Prerequisites
@@ -42,13 +52,14 @@ something breaks you open a terminal, not a dashboard.
 ```bash
 go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
 go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
+go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
-### Install the Claude Code plugins (`/agm:*`, `/wayfinder:*`, `/youtube`)
+### Install the Claude Code plugins (`/agm:*`, Wayfinder skill, `/youtube`)
 
-This repo also ships as a Claude Code plugin marketplace. To install the
-namespaced slash commands and skills (`/agm:agm-assoc`, `/wayfinder:validate-phase`,
-etc.), run:
+This repo also ships as a Claude Code plugin marketplace. The Wayfinder skill
+delegates to the `wayfinder` binary installed above. To install the namespaced
+AGM/YouTube commands and the Wayfinder skill, run:
 
 ```bash
 ./scripts/install-claude-plugins.sh             # from a local clone (default)
@@ -160,8 +171,8 @@ not a dashboard.
 │  Claude  │  Gemini   │  Codex    │  OpenCode         │
 │  Adapter │  Adapter  │  Adapter  │  Adapter          │
 ├──────────┴───────────┴───────────┴───────────────────┤
-│              Backend Abstraction                      │
-│  Tmux (current)  ·  Temporal (planned)               │
+│              Local Runtime Boundary                   │
+│  session.RealTmux (strict existence/readiness/input)  │
 ├──────────────────────────────────────────────────────┤
 │              Storage & Coordination                   │
 │  loops.db  ·  runs.db  ·  Manifests  ·  Sandbox     │

@@ -2,6 +2,7 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/history"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -62,8 +64,104 @@ func ImportOrphanedSessionWithOptions(conversationUUID, sessionName, workspace s
 		return importCodexOrphanedSession(conversationUUID, sessionName, workspace, adapter)
 	case "agy":
 		return importAgyOrphanedSession(conversationUUID, sessionName, workspace, adapter)
+	case "pi-cli":
+		return importPiOrphanedSession(conversationUUID, sessionName, workspace, adapter)
 	default:
 		return "", fmt.Errorf("unsupported import harness %q", harness)
+	}
+}
+
+func importPiOrphanedSession(nativeID, sessionName, workspace string, adapter *dolt.Adapter) (string, error) {
+	if err := pisession.ValidateID(nativeID); err != nil {
+		return "", err
+	}
+	if sessionName == "" {
+		return "", fmt.Errorf("session name cannot be empty")
+	}
+	if adapter == nil {
+		return "", fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
+	}
+	if err := ValidateNotDuplicate(nativeID, adapter); err != nil {
+		return "", err
+	}
+	codingAgentDir, err := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	if err != nil {
+		return "", err
+	}
+	privateRoot, err := pisession.EnsureRoot("")
+	if err != nil {
+		return "", err
+	}
+	native, transcript, createdCopy, err := resolvePiImport(nativeID, privateRoot, codingAgentDir)
+	if err != nil {
+		return "", err
+	}
+	modifiedAt, err := pisession.TranscriptModTime(privateRoot, transcript)
+	if err != nil {
+		return "", rollbackPiImport(privateRoot, transcript, createdCopy, err)
+	}
+	model, modelErr := pisession.ReadModel(transcript)
+	if modelErr != nil {
+		return "", rollbackPiImport(privateRoot, transcript, createdCopy, fmt.Errorf("read Pi native model: %w", modelErr))
+	}
+	sessionID := uuid.New().String()
+	m := buildPiImportedManifest(native, transcript, privateRoot, codingAgentDir, model, sessionName, workspace, sessionID, modifiedAt, time.Now())
+	if err := adapter.CreateSession(m); err != nil {
+		return "", rollbackPiImport(privateRoot, transcript, createdCopy, fmt.Errorf("failed to create session in Dolt: %w", err))
+	}
+	return sessionID, nil
+}
+
+func resolvePiImport(nativeID, privateRoot, codingAgentDir string) (pisession.Metadata, string, bool, error) {
+	transcript, findErr := pisession.FindTranscript(privateRoot, nativeID)
+	switch {
+	case findErr == nil:
+		native, err := pisession.ReadMetadata(transcript)
+		return native, transcript, false, err
+	case !errors.Is(findErr, pisession.ErrTranscriptNotFound):
+		return pisession.Metadata{}, "", false, findErr
+	}
+
+	agentDir := codingAgentDir
+	if agentDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return pisession.Metadata{}, "", false, fmt.Errorf("failed to determine Pi agent directory: %w", err)
+		}
+		agentDir = filepath.Join(home, ".pi", "agent")
+	}
+	source, err := pisession.FindTranscriptTree(filepath.Join(agentDir, "sessions"), nativeID)
+	if err != nil {
+		return pisession.Metadata{}, "", false, fmt.Errorf("failed to find Pi saved session: %w", err)
+	}
+	native, path, err := pisession.ImportNativeFile(privateRoot, source)
+	return native, path, err == nil, err
+}
+
+func rollbackPiImport(privateRoot, transcript string, created bool, primary error) error {
+	if !created {
+		return primary
+	}
+	if err := pisession.RemoveTranscript(privateRoot, transcript); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(primary, fmt.Errorf("roll back imported Pi transcript: %w", err))
+	}
+	return primary
+}
+
+func buildPiImportedManifest(native pisession.Metadata, transcript, sessionDir, codingAgentDir, model, sessionName, workspace, sessionID string, createdAt, now time.Time) *manifest.Manifest {
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	return &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion, SessionID: sessionID, Name: sessionName,
+		CreatedAt: createdAt, UpdatedAt: now, Workspace: workspace, Harness: "pi-cli",
+		Model: model, WorkingDirectory: native.CWD,
+		Context: manifest.Context{Project: native.CWD},
+		Pi: &manifest.Pi{
+			SessionID: native.ID, SessionDir: sessionDir, TranscriptPath: transcript,
+			CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
+		},
+		Tmux: manifest.Tmux{SessionName: tmux.SanitizeSessionName(sessionName)},
 	}
 }
 
@@ -226,22 +324,28 @@ func importAgyOrphanedSession(conversationUUID, sessionName, workspace string, a
 		return "", fmt.Errorf("failed to determine AGY workspace path for conversation %s", conversationUUID)
 	}
 
+	sessionID := uuid.New().String()
+	m := buildAgyImportedManifest(agyMeta, sessionName, workspace, sessionID, time.Now())
+	if err := adapter.CreateSession(m); err != nil {
+		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
+	}
+	return sessionID, nil
+}
+
+func buildAgyImportedManifest(agyMeta *agysession.Metadata, sessionName, workspace, sessionID string, now time.Time) *manifest.Manifest {
 	createdAt := agyMeta.ModTime
 	if createdAt.IsZero() {
-		createdAt = time.Now()
+		createdAt = now
 	}
-	sessionID := uuid.New().String()
-	tmuxName := tmux.SanitizeSessionName(sessionName)
-	m := &manifest.Manifest{
+	return &manifest.Manifest{
 		SchemaVersion:    manifest.SchemaVersion,
 		SessionID:        sessionID,
 		Name:             sessionName,
 		CreatedAt:        createdAt,
-		UpdatedAt:        time.Now(),
+		UpdatedAt:        now,
 		Lifecycle:        "",
 		Workspace:        workspace,
 		Harness:          "agy",
-		Model:            agent.HarnessDefaults["agy"],
 		WorkingDirectory: agyMeta.WorkspacePath,
 		Context: manifest.Context{
 			Project: agyMeta.WorkspacePath,
@@ -253,13 +357,9 @@ func importAgyOrphanedSession(conversationUUID, sessionName, workspace string, a
 			TranscriptPath: agyMeta.TranscriptPath,
 		},
 		Tmux: manifest.Tmux{
-			SessionName: tmuxName,
+			SessionName: tmux.SanitizeSessionName(sessionName),
 		},
 	}
-	if err := adapter.CreateSession(m); err != nil {
-		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
-	}
-	return sessionID, nil
 }
 
 // RegisterResult describes the outcome of a RegisterSession call.
@@ -546,7 +646,8 @@ func ValidateNotDuplicateWithAdapter(conversationUUID string, adapter dolt.Stora
 	for _, m := range manifests {
 		if m.Claude.UUID == conversationUUID ||
 			(m.Codex != nil && m.Codex.SessionID == conversationUUID) ||
-			(m.Agy != nil && m.Agy.ConversationID == conversationUUID) {
+			(m.Agy != nil && m.Agy.ConversationID == conversationUUID) ||
+			(m.Pi != nil && m.Pi.SessionID == conversationUUID) {
 			return fmt.Errorf("conversation UUID %s already has manifest (session: %s)", conversationUUID, m.Name)
 		}
 	}

@@ -3,7 +3,7 @@
 `ears-lint` validates requirements written in [EARS](https://alistairmavin.com/ears/)
 (Easy Approach to Requirements Syntax) inside `SPEC.md` files. It is a fast,
 deterministic, regex-based check — the replacement for the previous LLM
-"quality rubric" used by the wayfinder `D4`/`SPEC` phase gate.
+"quality rubric" used by the Wayfinder `SPEC` phase gate.
 
 ## Usage
 

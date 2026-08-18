@@ -2,37 +2,18 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // initTestRepo creates a git repo in tmpDir with an initial commit.
 func initTestRepo(t *testing.T, tmpDir string) {
 	t.Helper()
 
-	if err := exec.Command("git", "init", "-b", "main", tmpDir).Run(); err != nil {
-		t.Fatalf("Failed to init git repo: %v", err)
-	}
-	if err := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test").Run(); err != nil {
-		t.Fatalf("Failed to config git user: %v", err)
-	}
-	if err := exec.Command("git", "-C", tmpDir, "config", "user.email", "test@test.com").Run(); err != nil {
-		t.Fatalf("Failed to config git email: %v", err)
-	}
-
-	// Create initial commit so we have a branch
-	readmePath := filepath.Join(tmpDir, "README.md")
-	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0600); err != nil {
-		t.Fatalf("Failed to create README: %v", err)
-	}
-	if err := exec.Command("git", "-C", tmpDir, "add", "README.md").Run(); err != nil {
-		t.Fatalf("Failed to add README: %v", err)
-	}
-	if err := exec.Command("git", "-C", tmpDir, "commit", "-m", "Initial commit").Run(); err != nil {
-		t.Fatalf("Failed to create initial commit: %v", err)
-	}
+	gittest.InitRepo(t, tmpDir)
 }
 
 // TestListWorktrees_NoExtraWorktrees verifies that listing worktrees with only
@@ -74,10 +55,10 @@ func TestListWorktrees_MultipleWorktrees(t *testing.T) {
 	wt1Path := filepath.Join(t.TempDir(), "wt1")
 	wt2Path := filepath.Join(t.TempDir(), "wt2")
 
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", wt1Path, "-b", "feature-1").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", wt1Path, "-b", "feature-1").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add worktree 1: %v\nOutput: %s", err, output)
 	}
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", wt2Path, "-b", "feature-2").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", wt2Path, "-b", "feature-2").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add worktree 2: %v\nOutput: %s", err, output)
 	}
 
@@ -119,7 +100,7 @@ func TestRemoveMergedWorktrees_MergedBranch(t *testing.T) {
 
 	// Create a worktree with a new branch
 	wtPath := filepath.Join(t.TempDir(), "feature-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", wtPath, "-b", "feature-merged").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", wtPath, "-b", "feature-merged").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add worktree: %v\nOutput: %s", err, output)
 	}
 
@@ -162,7 +143,7 @@ func TestRemoveMergedWorktrees_UnmergedBranch(t *testing.T) {
 
 	// Create a worktree with a new branch
 	wtPath := filepath.Join(t.TempDir(), "unmerged-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", wtPath, "-b", "feature-unmerged").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", wtPath, "-b", "feature-unmerged").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add worktree: %v\nOutput: %s", err, output)
 	}
 
@@ -171,10 +152,10 @@ func TestRemoveMergedWorktrees_UnmergedBranch(t *testing.T) {
 	if err := os.WriteFile(unmergedFile, []byte("unmerged content\n"), 0600); err != nil {
 		t.Fatalf("Failed to create unmerged file: %v", err)
 	}
-	if err := exec.Command("git", "-C", wtPath, "add", "unmerged.txt").Run(); err != nil {
+	if err := gittest.Command(t, wtPath, "add", "unmerged.txt").Run(); err != nil {
 		t.Fatalf("Failed to add unmerged file: %v", err)
 	}
-	if err := exec.Command("git", "-C", wtPath, "commit", "-m", "Unmerged commit").Run(); err != nil {
+	if err := gittest.Command(t, wtPath, "commit", "-m", "Unmerged commit").Run(); err != nil {
 		t.Fatalf("Failed to commit unmerged file: %v", err)
 	}
 
@@ -214,23 +195,23 @@ func TestRemoveMergedWorktrees_MixedBranches(t *testing.T) {
 
 	// Create a worktree with a merged branch (same commit as main = merged)
 	mergedPath := filepath.Join(t.TempDir(), "merged-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", mergedPath, "-b", "feature-merged-mix").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", mergedPath, "-b", "feature-merged-mix").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add merged worktree: %v\nOutput: %s", err, output)
 	}
 
 	// Create a worktree with an unmerged branch (has extra commit)
 	unmergedPath := filepath.Join(t.TempDir(), "unmerged-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", unmergedPath, "-b", "feature-unmerged-mix").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", unmergedPath, "-b", "feature-unmerged-mix").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add unmerged worktree: %v\nOutput: %s", err, output)
 	}
 	unmergedFile := filepath.Join(unmergedPath, "extra.txt")
 	if err := os.WriteFile(unmergedFile, []byte("extra\n"), 0600); err != nil {
 		t.Fatalf("Failed to write file: %v", err)
 	}
-	if err := exec.Command("git", "-C", unmergedPath, "add", "extra.txt").Run(); err != nil {
+	if err := gittest.Command(t, unmergedPath, "add", "extra.txt").Run(); err != nil {
 		t.Fatalf("Failed to add file: %v", err)
 	}
-	if err := exec.Command("git", "-C", unmergedPath, "commit", "-m", "Extra commit").Run(); err != nil {
+	if err := gittest.Command(t, unmergedPath, "commit", "-m", "Extra commit").Run(); err != nil {
 		t.Fatalf("Failed to commit: %v", err)
 	}
 
@@ -275,7 +256,7 @@ func TestListWorktrees_DetachedHead(t *testing.T) {
 	initTestRepo(t, tmpDir)
 
 	// Get the HEAD commit hash
-	hashOut, err := exec.Command("git", "-C", tmpDir, "rev-parse", "HEAD").CombinedOutput()
+	hashOut, err := gittest.Command(t, tmpDir, "rev-parse", "HEAD").CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to get HEAD hash: %v", err)
 	}
@@ -283,7 +264,7 @@ func TestListWorktrees_DetachedHead(t *testing.T) {
 
 	// Create a worktree in detached HEAD state (checkout a commit directly)
 	detachedPath := filepath.Join(t.TempDir(), "detached-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", "--detach", detachedPath, commitHash).CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", "--detach", detachedPath, commitHash).CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add detached worktree: %v\nOutput: %s", err, output)
 	}
 
@@ -368,7 +349,7 @@ func TestRemoveMergedWorktrees_RemoveFailure(t *testing.T) {
 
 	// Create a merged worktree (same commit as main)
 	wtPath := filepath.Join(t.TempDir(), "dirty-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", wtPath, "-b", "feature-dirty").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", wtPath, "-b", "feature-dirty").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add worktree: %v\nOutput: %s", err, output)
 	}
 
@@ -377,7 +358,7 @@ func TestRemoveMergedWorktrees_RemoveFailure(t *testing.T) {
 	if err := os.WriteFile(dirtyFile, []byte("dirty\n"), 0600); err != nil {
 		t.Fatalf("Failed to write dirty file: %v", err)
 	}
-	if err := exec.Command("git", "-C", wtPath, "add", "dirty.txt").Run(); err != nil {
+	if err := gittest.Command(t, wtPath, "add", "dirty.txt").Run(); err != nil {
 		t.Fatalf("Failed to stage dirty file: %v", err)
 	}
 
@@ -422,7 +403,7 @@ func TestRemoveWorktree(t *testing.T) {
 	initTestRepo(t, tmpDir)
 
 	wtPath := filepath.Join(t.TempDir(), "removable-wt")
-	if output, err := exec.Command("git", "-C", tmpDir, "worktree", "add", wtPath, "-b", "removable").CombinedOutput(); err != nil {
+	if output, err := gittest.Command(t, tmpDir, "worktree", "add", wtPath, "-b", "removable").CombinedOutput(); err != nil {
 		t.Fatalf("Failed to add worktree: %v\nOutput: %s", err, output)
 	}
 
@@ -456,7 +437,7 @@ func TestDeleteBranch(t *testing.T) {
 	initTestRepo(t, tmpDir)
 
 	// Create a branch at the same commit (effectively merged)
-	if err := exec.Command("git", "-C", tmpDir, "branch", "deletable-branch").Run(); err != nil {
+	if err := gittest.Command(t, tmpDir, "branch", "deletable-branch").Run(); err != nil {
 		t.Fatalf("Failed to create branch: %v", err)
 	}
 
@@ -466,7 +447,7 @@ func TestDeleteBranch(t *testing.T) {
 	}
 
 	// Verify branch is gone
-	out, _ := exec.Command("git", "-C", tmpDir, "branch").CombinedOutput()
+	out, _ := gittest.Command(t, tmpDir, "branch").CombinedOutput()
 	if strings.Contains(string(out), "deletable-branch") {
 		t.Error("Branch should have been deleted")
 	}

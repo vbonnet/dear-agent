@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -8,6 +9,32 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+func TestFinalizeCLICreateSessionStopsCancellationAfterLiveness(t *testing.T) {
+	t.Setenv("AGM_TEST_RUN_ID", "")
+	t.Setenv("AGM_TEST_ENV", "")
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	completed := false
+
+	err := finalizeCLICreateSession(ctx, "agy-create", cliCreateFinalizationRuntime{
+		checkLiveness: func(got context.Context, _, _ string) (tmux.PaneLiveness, error) {
+			if got != ctx {
+				t.Fatal("liveness scan did not receive the caller context")
+			}
+			cancel()
+			return tmux.PaneLiveness{SessionExists: true, HarnessAlive: true}, nil
+		},
+		updateTitle: func(string) { completed = true },
+		attach:      func(string) { completed = true },
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("finalizeCLICreateSession() error = %v, want context.Canceled", err)
+	}
+	if completed {
+		t.Fatal("creation completed or attached after liveness scan canceled its caller")
+	}
+}
 
 func TestValidateFinalStartupLiveness(t *testing.T) {
 	tests := []struct {

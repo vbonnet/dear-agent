@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,8 +16,8 @@ import (
 type DecisionRecord struct {
 	Timestamp      string `json:"timestamp"`
 	SessionName    string `json:"session_name"`
-	Action         string `json:"action"`          // approve, notify, rate_limited
-	Classification string `json:"classification"`  // safe, dangerous, unknown
+	Action         string `json:"action"`         // approve, notify, rate_limited
+	Classification string `json:"classification"` // safe, dangerous, unknown
 	Command        string `json:"command,omitempty"`
 	Symptom        string `json:"symptom"`
 	Reason         string `json:"reason"`
@@ -55,11 +54,13 @@ type CommandExecutor interface {
 }
 
 // ExecCommandExecutor runs real OS commands.
-type ExecCommandExecutor struct{}
+type ExecCommandExecutor struct {
+	socketPath string
+}
 
 // Execute runs the command and returns combined output.
 func (e *ExecCommandExecutor) Execute(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).CombinedOutput()
+	return newSocketCommandRunner(e.socketPath)(name, args...)
 }
 
 // EscalationAction defines what to do when circuit breaker fires.
@@ -370,7 +371,6 @@ func (ep *EscalationPipeline) approve(sessionName, command string) (*EscalationR
 		Timestamp: time.Now(),
 	}, nil
 }
-
 
 func (ep *EscalationPipeline) notifyUser(sessionName, message string) (*EscalationResult, error) {
 	ep.logger.Info("Notifying user", "session", sessionName, "message", message)

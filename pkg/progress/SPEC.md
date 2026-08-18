@@ -49,9 +49,9 @@ When switching from TTY to non-TTY environments (e.g., piping to a file), no pan
 
 ### 4. Wayfinder Phase Support
 
-Provide first-class support for multi-phase workflows like Wayfinder (W0-S11), with clear phase tracking and progress display.
+Provide first-class support for multi-phase workflows like canonical Wayfinder (CHARTER through RETRO), with clear phase tracking and progress display.
 
-**Success Metric**: `UpdatePhase()` method formats phase information consistently (e.g., "Phase 3/11: D2 - Existing Solutions") and integrates seamlessly with progress bars.
+**Success Metric**: `UpdatePhase()` method formats phase information consistently (e.g., "Phase 3/9: RESEARCH - Existing Solutions") and integrates seamlessly with progress bars.
 
 ---
 
@@ -138,17 +138,17 @@ The package uses a **strategy pattern** to switch between two backends (spinner 
 
 ### Key Design Decisions
 
-- **Decision: Strategy Pattern for Mode Selection** (See ADR-001)
+- **Decision: Strategy Pattern for Mode Selection**
   - Single `Indicator` type with two backend implementations
   - Mode selected at initialization based on `Options.Total`
   - Avoids exposing separate Spinner/ProgressBar types to users
 
-- **Decision: Automatic TTY Detection** (See ADR-002)
+- **Decision: Automatic TTY Detection**
   - Use `golang.org/x/term.IsTerminal()` instead of environment variables
   - Detects pipes, file redirects, and CI/CD environments automatically
   - No manual configuration required from users
 
-- **Decision: Idempotent Operations** (See ADR-003)
+- **Decision: Idempotent Operations**
   - Multiple calls to `Start()` are safe (no-op if already started)
   - `Complete()`/`Fail()` without `Start()` are safe (no-op)
   - Prevents panics from incorrect usage patterns

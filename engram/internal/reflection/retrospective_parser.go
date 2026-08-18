@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// RetrospectiveParser extracts failure learnings from S11 retrospective files
+// RetrospectiveParser extracts failure learnings from RETRO artifacts.
 // (Task 1.2.1: Parse "What Went Wrong" section)
 type RetrospectiveParser struct {
 	// Section headers to look for

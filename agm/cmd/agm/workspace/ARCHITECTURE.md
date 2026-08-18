@@ -392,8 +392,6 @@ Cross-workspace discovery is enabled when ANY of these conditions are true:
 - Warnings logged to stderr
 - Default SessionsDir used on error
 
-**See**: ADR-001-non-fatal-workspace-detection.md
-
 ---
 
 #### 5.2 Atomic Config Updates
@@ -410,8 +408,6 @@ Cross-workspace discovery is enabled when ANY of these conditions are true:
 - New config written to temp file
 - `os.Rename()` (atomic) swaps temp to config
 - Rollback on error
-
-**See**: ADR-002-atomic-config-updates.md
 
 ---
 
@@ -430,8 +426,6 @@ Cross-workspace discovery is enabled when ANY of these conditions are true:
 - No match: Use default (no workspace)
 
 **Pattern**: Follows existing `--agent` flag UX
-
-**See**: ADR-003-interactive-workspace-selection.md
 
 ---
 
