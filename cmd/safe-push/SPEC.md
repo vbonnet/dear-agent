@@ -1,6 +1,6 @@
 # safe-push Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-08-18 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -23,6 +23,8 @@ rejects malformed timeout arguments before invoking git.
 **SAFE-PUSH-04** When `--timeout` is not a valid duration, the system shall reject the command.
 
 **SAFE-PUSH-05** When arguments are valid, the system shall call the safe push policy with the selected repository, push arguments, and timeout.
+
+**SAFE-PUSH-06** When forwarded push arguments contain a force flag in any spelling git accepts — including a bundled short-option cluster such as `-uf` — the system shall reject the invocation before running git, per SAFEGIT-01 and SAFEGIT-25.
 
 ## BDD Traceability
 
