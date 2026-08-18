@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -135,6 +137,124 @@ func TestRunOnceDryRunDoesNotPostOrPersist(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "dry-run would post COMMENT review") {
 		t.Fatalf("missing dry-run output: %q", out.String())
+	}
+}
+
+func TestRunOnceSkipsDraftPullRequests(t *testing.T) {
+	prs := []PR{{Number: 11, Title: "WIP", HeadRefOID: "draft1", IsDraft: true}}
+	prJSON, _ := json.Marshal(prs)
+	r := &fakeRunner{
+		responses: map[string]string{
+			"gh pr list --repo owner/repo --state open --limit 50 --json number,title,headRefOid,updatedAt,isDraft": string(prJSON),
+		},
+		errors: map[string]error{},
+	}
+	var out strings.Builder
+	results, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: t.TempDir() + "/state.json"}, r, &out)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Skipped || results[0].Reason != "draft" {
+		t.Fatalf("expected draft skip, got %#v", results)
+	}
+	if len(r.calls) != 1 {
+		t.Fatalf("draft PR must not be diffed or reviewed: %#v", r.calls)
+	}
+}
+
+func TestRunOnceRejectsInvalidConfig(t *testing.T) {
+	tests := map[string]Config{
+		"no repo":       {StatePath: t.TempDir() + "/state.json"},
+		"unknown event": {Repos: []string{"owner/repo"}, ReviewEvent: ReviewEvent("MERGE"), StatePath: t.TempDir() + "/state.json"},
+	}
+	for name, cfg := range tests {
+		r := &fakeRunner{responses: map[string]string{}, errors: map[string]error{}}
+		var out strings.Builder
+		if _, err := RunOnce(context.Background(), cfg, r, &out); err == nil {
+			t.Fatalf("%s: RunOnce() error = nil, want error", name)
+		}
+		if len(r.calls) != 0 {
+			t.Fatalf("%s: invalid config must not run commands: %#v", name, r.calls)
+		}
+	}
+}
+
+func TestRunOnceDoesNotPostWhenPrimaryProviderFails(t *testing.T) {
+	prs := []PR{{Number: 13, Title: "Risky", HeadRefOID: "sha13"}}
+	prJSON, _ := json.Marshal(prs)
+	state := t.TempDir() + "/state.json"
+	r := &fakeRunner{
+		responses: map[string]string{
+			"gh pr list --repo owner/repo --state open --limit 50 --json number,title,headRefOid,updatedAt,isDraft": string(prJSON),
+			"gh pr diff 13 --repo owner/repo": "diff",
+		},
+		errors: map[string]error{"codex exec -": fmt.Errorf("codex unavailable")},
+	}
+	var out strings.Builder
+	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
+		t.Fatal("RunOnce() error = nil, want primary provider error")
+	}
+	for _, c := range r.calls {
+		if c.name == "gh" && len(c.args) >= 2 && c.args[0] == "pr" && c.args[1] == "review" {
+			t.Fatalf("must not post a review without a primary review: %#v", r.calls)
+		}
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("state should not be written after a failed pass: %v", err)
+	}
+}
+
+func TestRunOncePersistsStateWithOwnerOnlyPermissions(t *testing.T) {
+	prs := []PR{{Number: 21, Title: "Ship", HeadRefOID: "sha21"}}
+	prJSON, _ := json.Marshal(prs)
+	r := &fakeRunner{
+		responses: map[string]string{
+			"gh pr list --repo owner/repo --state open --limit 50 --json number,title,headRefOid,updatedAt,isDraft": string(prJSON),
+			"gh pr diff 21 --repo owner/repo": "diff",
+			"codex exec -":                    "Codex ok",
+			"agy run -":                       "Gemini ok",
+		},
+		errors: map[string]error{},
+	}
+	state := filepath.Join(t.TempDir(), "nested", "state.json")
+	var out strings.Builder
+	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	info, err := os.Stat(state)
+	if err != nil {
+		t.Fatalf("stat state: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("state permissions = %o, want 600", perm)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(state))
+	if err != nil {
+		t.Fatalf("stat state dir: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("state dir permissions = %o, want 700", perm)
+	}
+	raw, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("parse state: %v", err)
+	}
+	if got["owner/repo#21"] != "sha21" {
+		t.Fatalf("state = %#v, want reviewed head sha21", got)
+	}
+}
+
+func TestLoadStateTreatsMissingFileAsEmpty(t *testing.T) {
+	st, err := loadState(filepath.Join(t.TempDir(), "absent.json"))
+	if err != nil {
+		t.Fatalf("loadState() error = %v", err)
+	}
+	if len(st) != 0 {
+		t.Fatalf("loadState() = %#v, want empty state", st)
 	}
 }
 
