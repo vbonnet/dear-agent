@@ -158,7 +158,7 @@ jobs:
 
             Your job, in order:
             1. Fix the actual failure so main goes green. That is the priority.
-            2. Then act on the retro's classification, and ONLY on it:
+            2. Then act on the brief's classification, and ONLY on it:
                - `never-ran`: the producing workflow's own `on.pull_request.paths`
                  filter excluded the change. Widen it there, or move the filter to a
                  job-level `if:` so a skip is visible instead of silent.
@@ -170,17 +170,21 @@ jobs:
                - `inconclusive`: the pre-merge run never concluded. Establish why
                  (superseded push, timeout, malformed workflow) before anything else.
                - `scope-gap`: the diff-scoping is working as designed. Only widen the
-                 pre-merge scope if the retro's ROI ratio cleared 10:1 AND was not
+                 pre-merge scope if the brief's ROI ratio cleared 10:1 AND was not
                  marked PROVISIONAL.
                - `post-merge-only`: not an escape. Fix the finding, change no filters.
                - `gating-gap` or `bypassed`: this is a ruleset/branch-protection
                  question, not a CI-filtering one. Write up what should change and
                  stop — ruleset edits are a control surface and need a human.
 
-            3. Complete the brief into a DEAR retro: fill in `Execute` with what you
-               changed and the PR link, and `Audit` with whether main went green and
-               whether the prevention actually landed. The issue is only a
-               retrospective once those two sections are real.
+            3. Complete the brief: fill in `Execute` with what you changed and the
+               PR link, and `Audit` with whether main went green and whether the
+               prevention actually landed.
+            4. If the defect was systemic, write the DEAR retro itself into the
+               configured research repository (`.dear-agent.yml` > `research`, i.e.
+               engram-research) per the DEAR retrospectives policy. This issue is an
+               incident alert and lives in the code repo; the durable retro does not
+               belong here, and `forbidden-paths` blocks committing one.
 
             Open one focused PR for this one incident. Do not modify the repository
             ruleset. Do not self-merge. If the fix is not obvious within your budget,
