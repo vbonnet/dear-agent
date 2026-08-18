@@ -70,12 +70,8 @@ dotted bead id can never brick a dispatch run (ce-b1zw).
 
 **VDD-27** When an operator supplies `-prepare-worker`, the dispatcher shall prepare that bead's same production workspace without dispatching and print the session name, add directories, and applicable managed guard path as JSON for recovery of an existing session.
 
-**VDD-28** When `-max-dispatch` is set to a positive N, the system shall dispatch at most N candidates in that run, counting only successful dispatches toward N so a deterministically-skipped bead cannot consume the budget, and shall leave the remaining eligible candidates for a later run.
+**VDD-28** When `-max-dispatch` is set to a positive N, the system shall dispatch at most N candidates in that run, counting only successful dispatches toward N so a deterministically-skipped bead cannot consume the budget, shall leave the remaining eligible candidates for a later run, and shall report the total eligible count rather than the capped count in the run summary.
 
-**VDD-29** When `-max-dispatch` is 0 or unset, the system shall preserve unlimited dispatch (dispatch every eligible candidate, bounded only by spawn backpressure).
+**VDD-29** When `-max-dispatch` is 0 or unset, the system shall preserve unlimited dispatch (every eligible candidate, bounded only by spawn backpressure), and when it is negative the system shall exit with an error rather than treating the misconfigured cap as unlimited.
 
-**VDD-30** When `-max-dispatch` is negative, the system shall exit with an error rather than treating the misconfigured cap as unlimited.
-
-**VDD-31** When a run summary is reported, the system shall report the total eligible candidate count rather than the capped dispatch count.
-
-**VDD-32** While determining whether a bead is human-gated, the system shall consult the shared `internal/vroomgate` list rather than a command-local copy.
+**VDD-30** While determining whether a bead is human-gated, the system shall consult the shared `internal/vroomgate` list rather than a command-local copy.
