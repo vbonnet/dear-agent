@@ -137,6 +137,9 @@ func checkBranchFreshness(prNum int, repo, headSHA string, dryRun bool) error {
 		}
 		return ErrBranchUpdated
 
+	case freshnessProceed:
+		return nil
+
 	default:
 		return nil
 	}
