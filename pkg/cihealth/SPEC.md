@@ -52,31 +52,25 @@ unresolved fact can never be dressed up as a finding about selection.
 
 ### Classification output
 
-**CIHEALTH-11** When the system classifies a failure, the system shall mark `FilterRefinable` true only for `never-ran` and `selection-gap`, because those are the only classes path-filter refinement can fix.
+**CIHEALTH-11** When the system classifies a failure, the system shall emit a summary and at least one suggested action naming the mechanism that addresses that class; every mechanism named shall exist in this repository, and `FilterRefinable` shall be true for no class other than `never-ran` and `selection-gap`.
 
-**CIHEALTH-12** When the system classifies a failure, the system shall emit a summary and at least one suggested action naming the mechanism that addresses that class, and every mechanism named shall exist in this repository.
-
-**CIHEALTH-13** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
+**CIHEALTH-12** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
 
 ### ROI pricing
 
-**CIHEALTH-14** When prevention cost or the escape count has not been measured, the system shall return a zero ratio and an insufficient-data verdict rather than inferring a placement, so neither a check with no pre-merge runs nor a failed history query is scored as worth blocking.
+**CIHEALTH-13** When prevention cost or the escape count has not been measured, the system shall return a zero ratio and an insufficient-data verdict rather than inferring a placement; when prevention cost is measured as zero, the system shall treat the ratio as unbounded if the cure-times-frequency product is non-zero and as zero otherwise, because a free check should always run but a free check that has caught nothing is no evidence.
 
-**CIHEALTH-15** When prevention cost is measured as zero, the system shall treat the ratio as unbounded if the cure-times-frequency product is non-zero and as zero otherwise, because a free check should always run but a free check that has caught nothing is no evidence.
+**CIHEALTH-14** When prevention cost and the escape count are both measured, the system shall compute the ratio as cure minutes multiplied by escapes divided by prevention minutes, and shall return an always-prevent verdict above ten to one, usually-prevent above three to one, case-by-case above zero, and no-signal at zero.
 
-**CIHEALTH-16** When prevention cost and the escape count are both measured, the system shall compute the ratio as cure minutes multiplied by escapes divided by prevention minutes, and shall return an always-prevent verdict above ten to one, usually-prevent above three to one, case-by-case above zero, and no-signal at zero.
-
-**CIHEALTH-17** When the system explains a ratio, the system shall render the arithmetic, shall state each term's provenance as measured, assumed, unmeasured, or a lower bound, and shall state the scope each term was measured over, so a threshold crossing can be attributed to evidence rather than to an assumption.
-
-**CIHEALTH-18** When any term of the ratio is not evidence, the system shall mark the verdict provisional and name every such term, rather than rendering a prescriptive band.
+**CIHEALTH-15** When the system explains a ratio, the system shall render the arithmetic, shall state each term's provenance as measured, assumed, unmeasured, or a lower bound, shall state the scope each term was measured over, and shall mark the verdict provisional naming every term that is not evidence rather than rendering a prescriptive band.
 
 ### Rendering
 
-**CIHEALTH-19** When a brief is rendered, the system shall identify the failing check, the main SHA, and the class; shall list required contexts in a deterministic sorted order labelled as the ruleset read at analysis time; and shall report required contexts as not established when the ruleset could not be read.
+**CIHEALTH-16** When a brief is rendered, the system shall identify the failing check, the main SHA, and the class; shall list required contexts in a deterministic sorted order labelled as the ruleset read at analysis time; and shall report required contexts as not established when the ruleset could not be read.
 
-**CIHEALTH-20** When a brief is rendered, the system shall state that it is not a completed retrospective and shall emit empty `Execute` and `Audit` sections for the fixer to complete, because DEAR requires an executed fix and an audited outcome.
+**CIHEALTH-17** When a brief is rendered, the system shall state that it is not a completed retrospective and shall emit empty `Execute` and `Audit` sections for the fixer to complete, because DEAR requires an executed fix and an audited outcome.
 
-**CIHEALTH-21** When the class's remedy is not to move or widen the check pre-merge, the system shall omit the prevention-versus-cure verdict and shall state in that class's own terms why placement is not the decision, because a placement verdict would contradict the finding it accompanies.
+**CIHEALTH-18** When the class's remedy is not to move or widen the check pre-merge, the system shall omit the prevention-versus-cure verdict and shall state in that class's own terms why placement is not the decision, because a placement verdict would contradict the finding it accompanies.
 
 ## BDD Traceability
 

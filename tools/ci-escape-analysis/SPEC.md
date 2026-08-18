@@ -44,23 +44,21 @@ pair that drifts the first time a class or a threshold moves.
 
 ### Invocation
 
-**CI-ESCAPE-12** When invoked without `-sweep`, the system shall render one brief to standard output as a pure function of its flags and the facts it looks up, shall mutate nothing, and shall accept pre-merge capability and scheduled-detection as explicit inputs.
+**CI-ESCAPE-12** When invoked without `-sweep`, the system shall render one brief to standard output as a pure function of its flags and the facts it looks up, shall mutate nothing, shall accept pre-merge capability and scheduled-detection as explicit inputs, and shall mark any cost term not supplied on the command line as assumed rather than measured.
 
-**CI-ESCAPE-13** When a cost term is not supplied on the command line, the system shall mark that term as assumed rather than measured.
-
-**CI-ESCAPE-14** When invoked in dry-run mode, the system shall render what it would file and shall not create, comment on, reopen, or close any issue.
+**CI-ESCAPE-13** When invoked in dry-run mode, the system shall render what it would file and shall not create, comment on, reopen, or close any issue.
 
 ### Issue mutation
 
-**CI-ESCAPE-15** When the system files briefs, the system shall label them with a label owned by this command alone, so no other workflow closes or annotates them.
+**CI-ESCAPE-14** When the system files briefs, the system shall label them with a label owned by this command alone, so no other workflow closes or annotates them.
 
-**CI-ESCAPE-16** When sweeping, the system shall file one brief per red workflow, shall comment on an existing open brief rather than opening a duplicate, and shall reopen and requeue a closed brief when the same check fails again.
+**CI-ESCAPE-15** When sweeping, the system shall file one brief per red workflow, shall comment on an existing open brief rather than opening a duplicate, and shall reopen and requeue a closed brief when the same check fails again.
 
-**CI-ESCAPE-17** When sweeping, the system shall close a brief only when a later run of the same failing job succeeded, and shall skip reconciliation entirely when any workflow's run lookup failed, so a transient API failure cannot be read as recovery.
+**CI-ESCAPE-16** When sweeping, the system shall close a brief only when a later run of the same failing job succeeded, and shall skip reconciliation entirely when any workflow's run lookup failed, so a transient API failure cannot be read as recovery.
 
-**CI-ESCAPE-18** When the system files a brief, the system shall mark it queued; when a sweep completes with every mutation successful, the system shall hand off at most one queued brief and remove its queue label, so simultaneous incidents are worked one at a time and a handoff is never recorded for a dispatch the caller will skip.
+**CI-ESCAPE-17** When the system files a brief, the system shall mark it queued; when a sweep completes with every mutation successful, the system shall hand off at most one queued brief and remove its queue label, so simultaneous incidents are worked one at a time and a handoff is never recorded for a dispatch the caller will skip.
 
-**CI-ESCAPE-19** When any brief mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
+**CI-ESCAPE-18** When any brief mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
 
 ## Test Traceability
 
