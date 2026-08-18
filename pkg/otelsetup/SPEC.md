@@ -39,3 +39,4 @@ to local Engram JSONL files when a session ID is present.
 ## BDD Traceability
 
 - `agm/test/bdd/features/observability_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Test consequence: deterministic unit coverage in `pkg/otelsetup/tracer_test.go` proves the export budget and retry contract — `TestInitTracer_ShutdownBoundedWhenCollectorBlackHoles` bounds shutdown against a collector that accepts and never answers, and `TestOTLPRetryBudget` proves retry stays enabled and fits inside that budget. The exporter option wiring is a private seam with no user-facing command surface, so it has no Gherkin scenario.
