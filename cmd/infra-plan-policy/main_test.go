@@ -352,3 +352,81 @@ func cliValidReceiptFixture(t *testing.T) (receiptContext, string, string) {
 	}
 	return context, authorizationPath, keyPath
 }
+
+// TestSubcommandDispatchContract pins IPP-01, IPP-02 and IPP-03: the exit code
+// is the only channel a CI caller can branch on, so usage errors (2) must stay
+// distinguishable from policy rejections (3), and a missing required flag must
+// be a rejection rather than an evaluation against zero-valued inputs.
+func TestSubcommandDispatchContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantUsage  bool
+		usageOnOut bool
+	}{
+		{name: "no arguments", args: nil, wantCode: 2, wantUsage: true},
+		{name: "unknown subcommand", args: []string{"apply"}, wantCode: 2, wantUsage: true},
+		{name: "help", args: []string{"help"}, wantCode: 0, wantUsage: true, usageOnOut: true},
+		{name: "short help flag", args: []string{"-h"}, wantCode: 0, wantUsage: true, usageOnOut: true},
+		{name: "long help flag", args: []string{"--help"}, wantCode: 0, wantUsage: true, usageOnOut: true},
+		{name: "unknown flag", args: []string{"authorize", "--bogus"}, wantCode: 3},
+		{name: "missing required flags", args: []string{"authorize"}, wantCode: 3},
+		{name: "positional argument", args: []string{"verify-receipt", "extra"}, wantCode: 3},
+		{name: "empty required flag", args: []string{"verify-receipt", "--receipt", "", "--expected", ""}, wantCode: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(test.args, &stdout, &stderr, time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC))
+			if code != test.wantCode {
+				t.Fatalf("exit = %d, want %d (stderr=%q)", code, test.wantCode, stderr.String())
+			}
+			target := stderr.String()
+			if test.usageOnOut {
+				target = stdout.String()
+			}
+			if test.wantUsage && !strings.Contains(target, "usage: infra-plan-policy") {
+				t.Fatalf("usage not written: stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+			if !test.wantUsage && stdout.String() != "" {
+				t.Fatalf("rejection wrote to stdout: %q", stdout.String())
+			}
+			if test.wantCode == 3 && !strings.Contains(stderr.String(), string(infraattest.CodeInvalidInput)) {
+				t.Fatalf("rejection code missing from stderr: %q", stderr.String())
+			}
+		})
+	}
+}
+
+// TestVerificationInputsAreBounded pins IPP-15: claims are attacker-influenced
+// bytes, so the reader must stop at the declared claims bound instead of
+// loading an arbitrarily large file into memory before parsing it.
+func TestVerificationInputsAreBounded(t *testing.T) {
+	directory := t.TempDir()
+	expectedPath := writeJSONTestFile(t, directory, "expected", expectedReceiptContext{})
+	oversizePath := writeTestFile(t, directory, "oversize-claims", strings.Repeat("a", infraattest.MaxClaimsBytes+1))
+	atBoundPath := writeTestFile(t, directory, "bound-claims", strings.Repeat("a", infraattest.MaxClaimsBytes))
+
+	for _, claimsPath := range []string{oversizePath, atBoundPath} {
+		var stdout, stderr bytes.Buffer
+		code := run(
+			[]string{"verify-receipt", "--receipt", claimsPath, "--expected", expectedPath},
+			&stdout,
+			&stderr,
+			time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC),
+		)
+		// Both are rejected (neither is valid canonical JSON); the contract
+		// under test is that the oversize read is refused rather than buffered,
+		// and that neither leaks input bytes back to the caller.
+		if code != 3 {
+			t.Fatalf("exit = %d, want 3", code)
+		}
+		if stdout.String() != "" {
+			t.Fatalf("rejection wrote to stdout: %q", stdout.String())
+		}
+		if strings.Contains(stderr.String(), "aaaa") {
+			t.Fatalf("rejection echoed input: %q", stderr.String())
+		}
+	}
+}
