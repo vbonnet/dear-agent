@@ -7,6 +7,12 @@
 // so gating one entry point left the other wide open. A gate that only some of the
 // pipeline honours is not a gate. Everything on the VROOM dispatch path consults
 // this package instead of a local map.
+//
+// This is a private in-process seam with no contract of its own: its governing
+// requirement is VDD-30 in cmd/vroom-dispatch-direct/SPEC.md ("shall consult the
+// shared internal/vroomgate list rather than a command-local copy"), and the
+// consuming commands' tests enumerate IDs() to prove no gated bead survives
+// their candidate selection.
 package vroomgate
 
 import "sort"
