@@ -55,7 +55,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open lifecycle storage at %s: %w", dbPath, err)
 	}
-	defer func() { _ = adapter.Close() }()
+	defer adapter.Close()
 	if err := adapter.ApplyMigrations(); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
