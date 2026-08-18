@@ -14,6 +14,7 @@
 package safegit
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,8 +83,8 @@ func parseMergeStateStatus(out []byte) (string, error) {
 }
 
 // prMergeStateStatus reads the provider's mergeability verdict for a PR.
-func prMergeStateStatus(prNum int, repo string) (string, error) {
-	out, err := runCommand(exec.Command("gh", "pr", "view",
+func prMergeStateStatus(ctx context.Context, prNum int, repo string) (string, error) {
+	out, err := runCommand(exec.CommandContext(ctx, "gh", "pr", "view",
 		strconv.Itoa(prNum), "--repo", repo, "--json", "mergeStateStatus"))
 	if err != nil {
 		return "", err
@@ -99,11 +100,11 @@ func prMergeStateStatus(prNum int, repo string) (string, error) {
 // expectedHeadSHA so a branch that moved under us since the gates ran is
 // rejected by the provider (422) rather than silently rewritten — the same
 // TOCTOU anchor BuildMergeArgs uses for the merge itself.
-func updatePRBranch(prNum int, repo, expectedHeadSHA string) error {
+func updatePRBranch(ctx context.Context, prNum int, repo, expectedHeadSHA string) error {
 	if expectedHeadSHA == "" {
 		return fmt.Errorf("updatePRBranch: expectedHeadSHA must not be empty — TOCTOU anchor required")
 	}
-	_, err := runCommand(exec.Command("gh", "api", "-X", "PUT",
+	_, err := runCommand(exec.CommandContext(ctx, "gh", "api", "-X", "PUT",
 		fmt.Sprintf("repos/%s/pulls/%d/update-branch", repo, prNum),
 		"-f", "expected_head_sha="+expectedHeadSHA))
 	return err
@@ -115,8 +116,8 @@ func updatePRBranch(prNum int, repo, expectedHeadSHA string) error {
 // A DIRTY branch is never touched: conflict resolution changes content, which
 // is a decision the gates cannot make. A BEHIND branch is advanced, because
 // that is a mechanical fast-forward of the base with no content decision.
-func checkBranchFreshness(prNum int, repo, headSHA string, dryRun bool) error {
-	state, err := prMergeStateStatus(prNum, repo)
+func checkBranchFreshness(ctx context.Context, prNum int, repo, headSHA string, dryRun bool) error {
+	state, err := prMergeStateStatus(ctx, prNum, repo)
 	if err != nil {
 		return fmt.Errorf("cannot read merge state (needed to prove the head is on the base tip): %w", err)
 	}
@@ -131,7 +132,7 @@ func checkBranchFreshness(prNum int, repo, headSHA string, dryRun bool) error {
 			return fmt.Errorf("PR #%d is behind its base branch; a real run would advance it to the base tip "+
 				"and wait for the re-run", prNum)
 		}
-		if err := updatePRBranch(prNum, repo, headSHA); err != nil {
+		if err := updatePRBranch(ctx, prNum, repo, headSHA); err != nil {
 			return fmt.Errorf("PR #%d is behind its base branch and the branch update failed "+
 				"(head may have moved since the gates ran): %w", prNum, err)
 		}

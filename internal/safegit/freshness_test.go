@@ -65,7 +65,7 @@ func TestParseMergeStateStatusRejectsMalformedJSON(t *testing.T) {
 // The update is anchored to the SHA the gates ran against. Without an anchor a
 // branch that moved mid-run would be advanced on stale evidence.
 func TestUpdatePRBranchRequiresTOCTOUAnchor(t *testing.T) {
-	err := updatePRBranch(1, "owner/repo", "")
+	err := updatePRBranch(t.Context(), 1, "owner/repo", "")
 	if err == nil {
 		t.Fatal("expected error when expectedHeadSHA is empty")
 	}
@@ -106,7 +106,7 @@ func fakeGhForFreshness(t *testing.T, mergeState string) (callLog string) {
 func TestCheckBranchFreshnessAdvancesBehindBranch(t *testing.T) {
 	callLog := fakeGhForFreshness(t, "BEHIND")
 
-	err := checkBranchFreshness(42, "owner/repo", "abc123", false)
+	err := checkBranchFreshness(t.Context(), 42, "owner/repo", "abc123", false)
 	if !errors.Is(err, ErrBranchUpdated) {
 		t.Fatalf("got %v, want ErrBranchUpdated", err)
 	}
@@ -127,7 +127,7 @@ func TestCheckBranchFreshnessAdvancesBehindBranch(t *testing.T) {
 // merge run against checks that the update is about to invalidate.
 func TestCheckBranchFreshnessBlocksRatherThanMerging(t *testing.T) {
 	fakeGhForFreshness(t, "BEHIND")
-	if err := checkBranchFreshness(42, "owner/repo", "abc123", false); err == nil {
+	if err := checkBranchFreshness(t.Context(), 42, "owner/repo", "abc123", false); err == nil {
 		t.Fatal("gate returned nil for a behind branch; the merge would proceed on stale checks")
 	}
 }
@@ -137,7 +137,7 @@ func TestCheckBranchFreshnessBlocksRatherThanMerging(t *testing.T) {
 func TestCheckBranchFreshnessDryRunDoesNotPush(t *testing.T) {
 	callLog := fakeGhForFreshness(t, "BEHIND")
 
-	err := checkBranchFreshness(42, "owner/repo", "abc123", true)
+	err := checkBranchFreshness(t.Context(), 42, "owner/repo", "abc123", true)
 	if err == nil {
 		t.Fatal("dry-run reported a behind branch as mergeable")
 	}
@@ -155,7 +155,7 @@ func TestCheckBranchFreshnessDryRunDoesNotPush(t *testing.T) {
 func TestCheckBranchFreshnessRefusesConflicts(t *testing.T) {
 	callLog := fakeGhForFreshness(t, "DIRTY")
 
-	err := checkBranchFreshness(42, "owner/repo", "abc123", false)
+	err := checkBranchFreshness(t.Context(), 42, "owner/repo", "abc123", false)
 	if err == nil || errors.Is(err, ErrBranchUpdated) {
 		t.Fatalf("got %v, want a blocking conflict error", err)
 	}
@@ -167,7 +167,7 @@ func TestCheckBranchFreshnessRefusesConflicts(t *testing.T) {
 
 func TestCheckBranchFreshnessPassesUpToDateBranch(t *testing.T) {
 	fakeGhForFreshness(t, "CLEAN")
-	if err := checkBranchFreshness(42, "owner/repo", "abc123", false); err != nil {
+	if err := checkBranchFreshness(t.Context(), 42, "owner/repo", "abc123", false); err != nil {
 		t.Fatalf("up-to-date branch blocked by freshness gate: %v", err)
 	}
 }

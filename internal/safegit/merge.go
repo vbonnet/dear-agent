@@ -321,7 +321,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	// this gate an out-of-date PR stays queued forever. Running it last means a
 	// CI cycle is only ever spent on a PR that already cleared every other gate.
 	if err := runGate(ctx, "freshness", func() error {
-		return checkBranchFreshness(cfg.PRNumber, cfg.Repo, headInfo.SHA, cfg.DryRun)
+		return checkBranchFreshness(ctx, cfg.PRNumber, cfg.Repo, headInfo.SHA, cfg.DryRun)
 	}); err != nil {
 		if errors.Is(err, ErrBranchUpdated) {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "branch_updated",
