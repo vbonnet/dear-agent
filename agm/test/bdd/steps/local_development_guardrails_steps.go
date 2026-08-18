@@ -23,49 +23,46 @@ import (
 )
 
 type localDevGuardrailState struct {
-	command               string
-	commandSpec           string
-	library               string
-	librarySpec           string
-	traceDir              string
-	trace                 safepr.Session
-	harness               string
-	family                string
-	preflightMinutes      int
-	localTestTimeout      string
-	affectedTestTimeout   string
-	ciTestTimeout         string
-	affectedPackageMins   int
-	affectedListMins      int
-	affectedStartupMins   int
-	affectedCommandMins   int
-	affectedJobMins       int
-	localVulnAllowlist    []string
-	ciVulnAllowlist       []string
-	worktreeBase          string
-	worktreeRepo          string
-	worktreePath          string
-	initialLockReason     string
-	transactionOutcome    string
-	transactionErr        error
-	lockedInPreflight     bool
-	lockedInPRCreate      bool
-	wayfinderCleanupErr   error
-	worktreePreserved     bool
-	cleanupRegression     string
-	cleanupRegressionErr  error
-	childRegression       string
-	childRegressionErr    error
-	auditRegression       string
-	auditRegressionErr    error
-	noMergeRegression     string
-	noMergeRegressionErr  error
-	treeRegression        string
-	treeRegressionErr     error
-	requiredCIRegression  string
-	requiredCIError       error
-	mergeLoopCIRegression string
-	mergeLoopCIError      error
+	command                string
+	commandSpec            string
+	library                string
+	librarySpec            string
+	traceDir               string
+	trace                  safepr.Session
+	harness                string
+	family                 string
+	preflightMinutes       int
+	localTestTimeout       string
+	affectedTestTimeout    string
+	ciTestTimeout          string
+	localVulnAllowlist     []string
+	ciVulnAllowlist        []string
+	worktreeBase           string
+	worktreeRepo           string
+	worktreePath           string
+	initialLockReason      string
+	transactionOutcome     string
+	transactionErr         error
+	lockedInPreflight      bool
+	lockedInPRCreate       bool
+	wayfinderCleanupErr    error
+	worktreePreserved      bool
+	cleanupRegression      string
+	cleanupRegressionErr   error
+	childRegression        string
+	childRegressionErr     error
+	auditRegression        string
+	auditRegressionErr     error
+	noMergeRegression      string
+	noMergeRegressionErr   error
+	treeRegression         string
+	treeRegressionErr      error
+	cleanupWTRegression    string
+	cleanupWTRegressionErr error
+	requiredCIRegression   string
+	requiredCIError        error
+	mergeLoopCIRegression  string
+	mergeLoopCIError       error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -110,6 +107,8 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder should preserve the protected worktree and reject cleanup$`, wayfinderShouldPreserveProtectedWorktree)
 	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
 	ctx.Step(`^AGM runs the protected cleanup regressions$`, agmRunsProtectedCleanupRegressions)
+	ctx.Step(`^AGM runs the cleanup-worktrees classification regressions$`, agmRunsCleanupWorktreesRegressions)
+	ctx.Step(`^stale-worktree cleanup should classify, preserve, and remove as specified$`, cleanupWorktreesShouldClassifyPreserveAndRemove)
 	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
 	registerSafePRRegressionGuardrailSteps(ctx)
 	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
@@ -237,6 +236,34 @@ func cleanupShouldPreserveGitLockedCheckouts(ctx context.Context) error {
 	}
 	if state.cleanupRegressionErr != nil {
 		return fmt.Errorf("protected cleanup regressions: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
+	}
+	return nil
+}
+
+func agmRunsCleanupWorktreesRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.cleanupWTRegression, state.cleanupWTRegressionErr = runLocalGuardrailNamedGoTests(ctx,
+		"./cmd/cleanup-worktrees",
+		"TestParse",
+		"TestInspectClassification",
+		"TestInspectFixRemovesStaleWorktreeAndBranch",
+		"TestListWorktreesParsesPorcelain",
+		"TestTargetRefPrefersOriginMain",
+		"TestRunRejectsNonGitDirectory",
+	)
+	return nil
+}
+
+func cleanupWorktreesShouldClassifyPreserveAndRemove(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.cleanupWTRegressionErr != nil {
+		return fmt.Errorf("cleanup-worktrees classification regressions: %w: %s", state.cleanupWTRegressionErr, state.cleanupWTRegression)
 	}
 	return nil
 }
