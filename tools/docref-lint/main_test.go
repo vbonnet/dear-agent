@@ -78,7 +78,10 @@ func TestScanDocReportsOnlyMissingKnownPrefixRefs(t *testing.T) {
 	if err := os.WriteFile(doc, []byte(body), 0o600); err != nil {
 		t.Fatalf("write sample: %v", err)
 	}
-	got := scanDoc(doc, map[string]bool{"cmd/agm/main.go": true})
+	got, err := scanDoc(doc, map[string]bool{"cmd/agm/main.go": true})
+	if err != nil {
+		t.Fatalf("scanDoc: %v", err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 finding, got %d: %+v", len(got), got)
 	}
@@ -87,5 +90,19 @@ func TestScanDocReportsOnlyMissingKnownPrefixRefs(t *testing.T) {
 	}
 	if got[0].line != 3 {
 		t.Errorf("line = %d, want 3", got[0].line)
+	}
+}
+
+// A document that cannot be read must surface as an error, never as "no
+// findings" — a guardrail that silently passes on the files it failed to
+// inspect is worse than no guardrail.
+func TestScanDocSurfacesUnreadableDocumentAsError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.md")
+	got, err := scanDoc(missing, map[string]bool{})
+	if err == nil {
+		t.Fatalf("expected an error for an unreadable document, got findings=%v", got)
+	}
+	if got != nil {
+		t.Errorf("expected no findings alongside the error, got %v", got)
 	}
 }

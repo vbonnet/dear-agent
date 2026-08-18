@@ -78,7 +78,15 @@ func main() {
 
 	var findings []finding
 	for _, doc := range docs {
-		findings = append(findings, scanDoc(doc, trackedSet)...)
+		docFindings, err := scanDoc(doc, trackedSet)
+		if err != nil {
+			// A document we cannot read is not a document with no findings.
+			// Reporting "clean" here would turn this guardrail into exactly
+			// the defect it exists to catch.
+			fmt.Fprintf(os.Stderr, "docref-lint: scan %s: %v\n", doc, err)
+			os.Exit(2)
+		}
+		findings = append(findings, docFindings...)
 	}
 	if len(findings) == 0 {
 		fmt.Printf("docref-lint: %d document(s) checked, every referenced path exists\n", len(docs))
@@ -132,12 +140,21 @@ func selectDocs(all bool, base string, tracked []string) []string {
 }
 
 // scanDoc reports every referenced path in doc that resolves nowhere.
-func scanDoc(doc string, tracked map[string]bool) []finding {
+//
+// It returns an error rather than an empty result when the document cannot be
+// read or scanned. An unreadable file is "could not determine", not "no
+// findings", and collapsing the two would let this check pass silently on the
+// documents it failed to inspect.
+func scanDoc(doc string, tracked map[string]bool) (_ []finding, err error) {
 	f, err := os.Open(doc)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("open: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close: %w", cerr)
+		}
+	}()
 
 	var out []finding
 	scanner := bufio.NewScanner(f)
@@ -151,7 +168,10 @@ func scanDoc(doc string, tracked map[string]bool) []finding {
 			out = append(out, finding{doc: doc, line: n, ref: ref})
 		}
 	}
-	return out
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	return out, nil
 }
 
 func hasKnownPrefix(ref string) bool {
