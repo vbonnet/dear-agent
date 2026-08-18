@@ -918,32 +918,7 @@ func ListSessionsWithInfo() ([]SessionInfo, error) {
 		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	sessions := make([]SessionInfo, 0, len(lines))
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		// Parse "name:count:attached_list" format
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 2 {
-			continue
-		}
-		var attachedCount int
-		fmt.Sscanf(parts[1], "%d", &attachedCount)
-
-		attachedList := ""
-		if len(parts) >= 3 {
-			attachedList = parts[2]
-		}
-
-		sessions = append(sessions, SessionInfo{
-			Name:            parts[0],
-			AttachedClients: attachedCount,
-			AttachedList:    attachedList,
-		})
-	}
-	return sessions, nil
+	return parseSessionInfoLines(string(output)), nil
 }
 
 // ClientInfo holds information about a tmux client
