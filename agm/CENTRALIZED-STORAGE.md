@@ -366,13 +366,18 @@ storage:
   relative_path: .agm-work
 ```
 
-**Solution 2** - Use absolute paths:
+**Solution 2** - Use absolute paths. These are two separate config files, not
+one: a single file with two `storage:` keys is a duplicate-key error and fails
+config load outright.
+
+Work (`~/work/engram-research/.config/agm/config.yaml`):
 ```yaml
-# Work
 storage:
   workspace: ~/work/engram-research
+```
 
-# Personal
+Personal (`~/.config/agm/config.yaml`):
+```yaml
 storage:
   workspace: ~/personal/engram-research
 ```
