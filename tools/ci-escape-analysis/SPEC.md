@@ -31,3 +31,7 @@
 - Package tests: `pkg/cihealth/escape_test.go`
 - Command tests: `tools/ci-escape-analysis/triggers_test.go`
 - Design: `docs/adr/ADR-038-ci-path-scoping-and-gateway.md`
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/ci_health_escape_analysis.feature`

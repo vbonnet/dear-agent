@@ -66,7 +66,7 @@ func workflowTriggers() map[string]bool {
 // on.
 func parseWorkflow(content string) (name string, preMerge bool, ok bool) {
 	inTriggers := false
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue

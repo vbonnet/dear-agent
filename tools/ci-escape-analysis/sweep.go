@@ -193,7 +193,7 @@ func firstFailingCheck(repo, sha string, stderr io.Writer) string {
 	if !ok {
 		return ""
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			return line
 		}
@@ -240,14 +240,16 @@ func closeRetro(repo, workflow string, stdout, stderr io.Writer) {
 	if !ok {
 		return
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		fmt.Fprintf(stdout, "Closing recovered retro #%s (%s is green)\n", line, workflow)
-		_ = runGH("closing retro", stderr, "issue", "close", line, "--repo", repo,
-			"--comment", fmt.Sprintf("`%s` is green on `main` again; auto-closing. Reopen if the underlying prevention was never landed.", workflow))
+		if err := runGH("closing retro", stderr, "issue", "close", line, "--repo", repo,
+			"--comment", fmt.Sprintf("`%s` is green on `main` again; auto-closing. Reopen if the underlying prevention was never landed.", workflow)); err != nil {
+			fmt.Fprintf(stderr, "could not auto-close retro #%s: %v\n", line, err)
+		}
 	}
 }
 

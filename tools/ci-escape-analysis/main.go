@@ -191,7 +191,7 @@ func lookupRequiredContexts(repo string, stderr io.Writer) []string {
 		return nil
 	}
 	var contexts []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			contexts = append(contexts, line)
 		}

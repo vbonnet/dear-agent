@@ -9,6 +9,7 @@ package cihealth
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -278,12 +279,7 @@ func findCheck(runs []CheckRun, name string) (CheckRun, bool) {
 }
 
 func isRequired(required []string, name string) bool {
-	for _, context := range required {
-		if context == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(required, name)
 }
 
 func shortSHA(sha string) string {
