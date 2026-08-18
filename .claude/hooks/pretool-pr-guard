@@ -13,12 +13,14 @@
 # demonstrably did not stop it; this is the deterministic tier. The message
 # below follows principle 2: what you tried, the right way, and why.
 #
-# SCOPE (principle 1, no creep): only the three mutating pr verbs. Read-only
-# `gh pr view|list|checks|diff|status`, `gh pr merge` (already governed by
-# required checks + review gates), `safe-pr` itself, and every other tool are
-# untouched. safe-pr execs gh directly (not via the Bash tool), so the
-# sanctioned path can never recurse into this hook. Fails OPEN on unparseable
-# input so it can never wedge a session.
+# SCOPE (principle 1, no creep): only the four mutating pr verbs
+# (create|close|reopen|merge). `merge` redirects to pr-blockers + safe-merge:
+# cmd/safe-merge's contract has always claimed raw `gh pr merge` is denied
+# here; as of the 2026-08-18 merge-blocker retro that is actually true.
+# Read-only `gh pr view|list|checks|diff|status`, `safe-pr` itself, and every
+# other tool are untouched. safe-pr and safe-merge exec gh directly (not via
+# the Bash tool), so the sanctioned paths can never recurse into this hook.
+# Fails OPEN on unparseable input so it can never wedge a session.
 #
 # HONEST LIMITATION: this matches the literal command forms a cooperative
 # agent types (including launcher prefixes like gtimeout/env/sudo and
@@ -63,11 +65,31 @@ verb="$(printf '%s' "$cmd" | tr ';|&\n' '\n\n\n\n' | awk '
         if ($i=="pr") { sub_seen=1; continue }
         break
       }
-      if ($i ~ /^(create|close|reopen)$/) { print $i; exit }
+      if ($i ~ /^(create|close|reopen|merge)$/) { print $i; exit }
       break
     }
   }')"
 [ -n "$verb" ] || exit 0
+
+if [ "$verb" = "merge" ]; then
+  cat >&2 <<'EOF'
+You're trying to run a raw gh merge command directly. Merging goes through the
+vetted wrapper, and merge DIAGNOSIS goes through the deterministic classifier:
+
+  pr-blockers <number>      # exact blocker(s) + exact fix, from GitHub's own
+                            # merge state (mergeStateStatus, required checks,
+                            # review threads INCLUDING outdated ones)
+  safe-merge --pr <number>  # the sanctioned, gated, audited merge path
+
+Never infer a merge blocker from code reading or CI re-runs; pr-blockers is
+exhaustive over GitHub's merge state (.claude/skills/pr-merge-blockers).
+Install once with `make install-pr-blockers install-safe-merge` if not on PATH.
+
+If you need this permission to complete your task, escalate by reporting:
+'PERMISSION_ESCALATION: I need [specific permission] because [reason]'.
+EOF
+  exit 2
+fi
 
 if [ "$verb" = "reopen" ]; then
   guidance='Reopening a closed PR has no sanctioned automated path — it is a human

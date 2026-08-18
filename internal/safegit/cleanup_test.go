@@ -620,6 +620,8 @@ func runAttemptMergeCleanupHelper(
 	script := `#!/bin/sh
 set -eu
 case "$*" in
+  "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid")
+    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"abc123"}' ;;
   "pr view 42 --repo owner/repo --json baseRefName")
     printf '%s\n' '{"baseRefName":"main"}' ;;
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100")
