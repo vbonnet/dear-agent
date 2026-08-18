@@ -852,6 +852,33 @@ analytics dashboard SPEC coverage.
 across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen routes
 rather than a Claude-only accounting path.
 
+### Living-Document Reference Linting
+
+**File:** [`docref_lint.feature`](../test/bdd/features/docref_lint.feature)
+
+**Drives:** the backtick-reference classifier and path resolver in
+`tools/docref-lint`, run as a `run_step` in `scripts/guardrail-bundle.sh`.
+
+**Key scenarios:**
+- Only backticked repository paths are read as claims.
+- A claim about a missing artifact is reported as a finding.
+
+### CI Health Escape Analysis
+
+**File:** [`ci_health_escape_analysis.feature`](../test/bdd/features/ci_health_escape_analysis.feature)
+
+**Drives:** escape classification and prevention-versus-cure pricing in
+`pkg/cihealth`, consumed by `tools/ci-escape-analysis` and the main-health
+watchdog.
+
+**Key scenarios:**
+- Escape classification separates selection, gating, and scope.
+- Prevention-versus-cure pricing refuses to guess without measurement.
+
+**Why this matters:** A failure on main should be diagnosed by the mechanism
+that let it through, and any move of a check pre-merge should be priced rather
+than assumed.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)

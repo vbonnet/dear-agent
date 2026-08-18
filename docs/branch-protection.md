@@ -93,6 +93,26 @@ gh api repos/vbonnet/dear-agent/rulesets/<RULESET_ID> \
   | jq '{enforcement, bypass_actors, rules: [.rules[].type]}'
 ```
 
+## Out-of-date churn and the merge-queue question
+
+Strict required checks ("branch must be up to date") mean every merge to
+`main` flips every sibling PR to `mergeStateStatus: BEHIND`. This is expected
+churn, not a defect: the fix is always `gh pr update-branch <n>` (which
+`pr-blockers <n>` will tell you), followed by the bot re-review cycle on the
+new push. `babysit-prs` and `mergeloop` automate exactly this loop.
+
+The structural absorber for this churn would be a **GitHub merge queue**
+(`merge_queue` ruleset rule): PRs enter a queue, GitHub builds each candidate
+against the queued state of `main`, and nobody manually re-syncs branches.
+**It is not available here today**: merge queues require an
+organization-owned repository, and `vbonnet/dear-agent` is user-owned. The
+recommendation stands as a trigger condition: if update-branch churn (or
+serial merge latency) becomes the dominant merge cost, transferring the repo
+to an organization and enabling the merge queue is the correct fix, and
+`safe-merge` is already compatible (it merges via `--auto`, which composes
+with a queue). Until then, `--auto` plus `update-branch` is the sanctioned
+path.
+
 ## Retiring classic branch protection
 
 Once the ruleset is active and verified, remove the legacy classic protection
