@@ -57,6 +57,33 @@ func (c *Config) RuntimeAuthority() (RuntimeAuthority, error) {
 	return c.runtimeAuthority, nil
 }
 
+// RebindRuntimeAuthorityToIsolatedHome recaptures the runtime authority of an
+// already loaded snapshot below an isolated HOME. It exists for the single
+// supported case where HOME legitimately moves after Load: activation of a
+// per-run test environment. Configuration is loaded before that activation, so
+// without this the isolated run keeps provisioning against the host roots.
+//
+// Isolation always projects the dotfile layout below the isolated HOME. A test
+// run must never be routed back into centralized production storage by the
+// shared configuration it inherited, which is exactly what recapturing the
+// configured storage mode under a fresh HOME would do.
+//
+// It refuses a Config that never held authority, so a failed or bypassed Load
+// can never be laundered into a usable snapshot through this entry point.
+func (c *Config) RebindRuntimeAuthorityToIsolatedHome(homeDir string) error {
+	if _, err := c.RuntimeAuthority(); err != nil {
+		return err
+	}
+	isolated := *c
+	isolated.Storage.Mode = "dotfile"
+	authority, err := captureRuntimeAuthority(&isolated, homeDir)
+	if err != nil {
+		return err
+	}
+	c.runtimeAuthority = authority
+	return nil
+}
+
 // Home returns the retained physical HOME root.
 func (a RuntimeAuthority) Home() (HomeRoot, error) {
 	if !a.valid() {
