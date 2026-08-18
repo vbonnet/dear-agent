@@ -50,6 +50,8 @@
     <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>HOME</key>
     <string>__HOME__</string>
+    <key>DOLT_PORT</key>
+    <string>3307</string>
   </dict>
 
   <!-- One tick every 5 minutes. launchd never starts a second instance of the
