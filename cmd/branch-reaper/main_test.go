@@ -44,7 +44,7 @@ func TestClassifyBranch(t *testing.T) {
 			name:   "open PR wins over a stale merged one in the same list",
 			tipSHA: tipSHA,
 			prs: []prRecord{
-				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", HeadRefOid: tipSHA},
+				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", BaseRefName: "main", HeadRefOid: tipSHA},
 				{Number: 2, State: "OPEN"},
 			},
 			want: bucketReviewOpenPR,
@@ -52,14 +52,14 @@ func TestClassifyBranch(t *testing.T) {
 		{
 			name:   "merged, tip still the merged head -> safe",
 			tipSHA: tipSHA,
-			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", HeadRefOid: tipSHA}},
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main", HeadRefOid: tipSHA}},
 			want:   bucketSafeDelete,
 		},
 		{
 			name:   "merged head SHA compares case-insensitively",
 			tipSHA: "ABCDEF1234567890abcdef1234567890ABCDEF12",
 			prs: []prRecord{{
-				Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z",
+				Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main",
 				HeadRefOid: "abcdef1234567890ABCDEF1234567890abcdef12",
 			}},
 			want: bucketSafeDelete,
@@ -67,7 +67,7 @@ func TestClassifyBranch(t *testing.T) {
 		{
 			name:   "merged, tip moved off the merged head -> needs review",
 			tipSHA: otherSHA,
-			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", HeadRefOid: tipSHA}},
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main", HeadRefOid: tipSHA}},
 			want:   bucketReviewNewCommitsAfterMerge,
 		},
 		{
@@ -78,7 +78,7 @@ func TestClassifyBranch(t *testing.T) {
 			name:   "merged, tip force-pushed to an older commit -> needs review",
 			tipSHA: otherSHA,
 			prs: []prRecord{{
-				Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z",
+				Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main",
 				HeadRefOid: tipSHA,
 			}},
 			want: bucketReviewNewCommitsAfterMerge,
@@ -86,21 +86,21 @@ func TestClassifyBranch(t *testing.T) {
 		{
 			name:   "merged with no recorded head SHA -> needs review, never safe",
 			tipSHA: tipSHA,
-			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main"}},
 			want:   bucketReviewNewCommitsAfterMerge,
 		},
 		{
 			name:   "unknown tip SHA never matches an empty head SHA",
 			tipSHA: "",
-			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z"}},
+			prs:    []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main"}},
 			want:   bucketReviewNewCommitsAfterMerge,
 		},
 		{
 			name:   "multiple merged PRs: classify against the most recent mergedAt",
 			tipSHA: tipSHA,
 			prs: []prRecord{
-				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", HeadRefOid: otherSHA},
-				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z", HeadRefOid: tipSHA},
+				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", BaseRefName: "main", HeadRefOid: otherSHA},
+				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z", BaseRefName: "main", HeadRefOid: tipSHA},
 			},
 			want: bucketSafeDelete,
 		},
@@ -108,8 +108,8 @@ func TestClassifyBranch(t *testing.T) {
 			name:   "most recent merged PR's head is what counts, not an older match",
 			tipSHA: tipSHA,
 			prs: []prRecord{
-				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", HeadRefOid: tipSHA},
-				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z", HeadRefOid: otherSHA},
+				{Number: 1, State: "MERGED", MergedAt: "2026-05-01T00:00:00Z", BaseRefName: "main", HeadRefOid: tipSHA},
+				{Number: 2, State: "MERGED", MergedAt: "2026-07-05T00:00:00Z", BaseRefName: "main", HeadRefOid: otherSHA},
 			},
 			want: bucketReviewNewCommitsAfterMerge,
 		},
@@ -134,16 +134,41 @@ func TestClassifyBranch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyBranch(tt.tipSHA, tt.prs, 0); got != tt.want {
+			if got := classifyBranch(tt.tipSHA, tt.prs, 0, []string{"main"}); got != tt.want {
 				t.Errorf("classifyBranch(%q, %v) = %q, want %q", tt.tipSHA, tt.prs, got, tt.want)
 			}
 		})
 	}
 }
 
+// A merge only proves losslessness when it landed somewhere durable. A
+// stacked PR merged into its ephemeral parent proves nothing: close that
+// parent unmerged, reap it, and the child's content is gone with it.
+func TestClassifyBranch_MergeIntoEphemeralBaseIsNotSafe(t *testing.T) {
+	protected := []string{"main", "release/**"}
+	tests := []struct {
+		base string
+		want string
+	}{
+		{"main", bucketSafeDelete},
+		{"release/v2", bucketSafeDelete},
+		{"feat/parent-of-a-stack", bucketReviewNewCommitsAfterMerge},
+		{"", bucketReviewNewCommitsAfterMerge},
+	}
+	for _, tt := range tests {
+		prs := []prRecord{{
+			Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z",
+			HeadRefOid: tipSHA, BaseRefName: tt.base,
+		}}
+		if got := classifyBranch(tipSHA, prs, 0, protected); got != tt.want {
+			t.Errorf("merged into %q = %q, want %q", tt.base, got, tt.want)
+		}
+	}
+}
+
 func TestSameRepoPRs(t *testing.T) {
 	in := []prRecord{
-		{Number: 1, State: "MERGED", IsCrossRepository: true, HeadRefOid: tipSHA},
+		{Number: 1, State: "MERGED", IsCrossRepository: true, BaseRefName: "main", HeadRefOid: tipSHA},
 		{Number: 2, State: "CLOSED"},
 	}
 	got := sameRepoPRs(in)
@@ -153,7 +178,7 @@ func TestSameRepoPRs(t *testing.T) {
 
 	// A fork PR that merged must not make this repo's same-named branch
 	// look safe to delete.
-	if b := classifyBranch(tipSHA, sameRepoPRs(in[:1]), 0); b != bucketReviewNoPR {
+	if b := classifyBranch(tipSHA, sameRepoPRs(in[:1]), 0, []string{"main"}); b != bucketReviewNoPR {
 		t.Errorf("fork-only history classified as %q, want %q", b, bucketReviewNoPR)
 	}
 }
@@ -167,7 +192,7 @@ func TestLastMerged(t *testing.T) {
 	})
 
 	t.Run("single merged PR", func(t *testing.T) {
-		got, ok := lastMerged([]prRecord{{Number: 5, State: "MERGED", MergedAt: "2026-01-01T00:00:00Z"}})
+		got, ok := lastMerged([]prRecord{{Number: 5, State: "MERGED", MergedAt: "2026-01-01T00:00:00Z", BaseRefName: "main"}})
 		if !ok || got.Number != 5 {
 			t.Fatalf("got %v, %v", got, ok)
 		}
@@ -175,9 +200,9 @@ func TestLastMerged(t *testing.T) {
 
 	t.Run("picks latest mergedAt among several", func(t *testing.T) {
 		prs := []prRecord{
-			{Number: 1, State: "MERGED", MergedAt: "2026-03-01T00:00:00Z"},
-			{Number: 2, State: "MERGED", MergedAt: "2026-06-01T00:00:00Z"},
-			{Number: 3, State: "MERGED", MergedAt: "2026-04-01T00:00:00Z"},
+			{Number: 1, State: "MERGED", MergedAt: "2026-03-01T00:00:00Z", BaseRefName: "main"},
+			{Number: 2, State: "MERGED", MergedAt: "2026-06-01T00:00:00Z", BaseRefName: "main"},
+			{Number: 3, State: "MERGED", MergedAt: "2026-04-01T00:00:00Z", BaseRefName: "main"},
 			{Number: 4, State: "OPEN"},
 			{Number: 5, State: "CLOSED"},
 		}
@@ -229,8 +254,14 @@ func TestMatchBranchFilter(t *testing.T) {
 		{"release/**", "release/v2/hotfix", true},
 		{"release/*", "release/v2/hotfix", false},
 		{"release/*", "release/v2", true},
-		{"feat?", "feat1", true},
-		{"feat?", "feat12", false},
+		// `?` is zero-or-one of the PRECEDING character, GitHub's semantics,
+		// not "any one character".
+		{"feat?", "fea", true},
+		{"feat?", "feat", true},
+		{"feat?", "feat1", false},
+		{"release/v1?", "release/v1", true},
+		{"release/v1?", "release/v", true},
+		{"release/v1?", "release/v1x", false},
 		// Regex metacharacters in a branch name are literal, not syntax.
 		{"v1.0", "v1.0", true},
 		{"v1.0", "v1x0", false},
@@ -601,11 +632,11 @@ func TestGHHost(t *testing.T) {
 // reaped: `gh pr list --head` cannot see the child, so the base count is a
 // separate veto.
 func TestClassifyBranch_OpenBasePRVetoesDeletion(t *testing.T) {
-	merged := []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", HeadRefOid: tipSHA}}
-	if got := classifyBranch(tipSHA, merged, 0); got != bucketSafeDelete {
+	merged := []prRecord{{Number: 1, State: "MERGED", MergedAt: "2026-06-10T12:00:00Z", BaseRefName: "main", HeadRefOid: tipSHA}}
+	if got := classifyBranch(tipSHA, merged, 0, []string{"main"}); got != bucketSafeDelete {
 		t.Fatalf("precondition: want %q with no child PRs, got %q", bucketSafeDelete, got)
 	}
-	if got := classifyBranch(tipSHA, merged, 1); got != bucketReviewOpenPR {
+	if got := classifyBranch(tipSHA, merged, 1, []string{"main"}); got != bucketReviewOpenPR {
 		t.Errorf("classifyBranch with an open child PR = %q, want %q", got, bucketReviewOpenPR)
 	}
 }

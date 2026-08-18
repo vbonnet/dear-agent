@@ -18,18 +18,21 @@
 // # What it does
 //
 //  1. SAFE-DELETE (auto, on --execute): a branch with no open PR whose
-//     most-recently-merged PR's recorded head commit is byte-for-byte the
-//     branch's current tip. Identity of the SHA -- not a timestamp
-//     comparison -- is what proves the branch holds no commit that is not
-//     already in main's history via the squash commit. A timestamp cannot
-//     prove that: a force-push after the merge can land an older commit
-//     whose committer date predates mergedAt, which would read as "nothing
-//     pushed since" while actually discarding unmerged work.
+//     most-recently-merged PR merged INTO A PROTECTED BRANCH and recorded a
+//     head commit byte-for-byte identical to the branch's current tip.
+//     Identity of the SHA -- not a timestamp comparison -- is what proves
+//     the branch holds no commit that is not already in that branch's
+//     history via the squash commit. A timestamp cannot prove that: a
+//     force-push after the merge can land an older commit whose committer
+//     date predates mergedAt, which would read as "nothing pushed since"
+//     while actually discarding unmerged work. Nor does merging into an
+//     ephemeral parent prove it: that parent can itself be closed unmerged
+//     and reaped, taking the content with it.
 //  2. REVIEW (report only, never deleted): branches with no PR at all, PRs
 //     that were closed without merging, or "merged" branches whose tip no
-//     longer matches the merged PR head (real unmerged work). These need a
-//     human judgment call, so this tool only ever lists them -- it never
-//     deletes them.
+//     longer matches the merged PR head or whose merge landed somewhere
+//     ephemeral (real unmerged work). These need a human judgment call, so
+//     this tool only ever lists them -- it never deletes them.
 //
 // Deletion itself is leased: every delete carries
 // --force-with-lease=<branch>:<sha> pinned to the exact SHA that was
@@ -267,15 +270,19 @@ func resolveRepo(ctx context.Context, stderr io.Writer) (string, bool) {
 // part of that identity, so an origin on another forge with a coincidentally
 // identical owner/repo path is refused too.
 func originIsRepo(ctx context.Context, repo string, stderr io.Writer) bool {
-	host, ownerRepo, err := originRemote(ctx)
+	urls, err := originPushURLs(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "branch-reaper: --execute needs origin's URL to confirm it is %s: %v\n", repo, err)
+		fmt.Fprintf(stderr, "branch-reaper: --execute needs origin's push URL to confirm it is %s: %v\n", repo, err)
 		return false
 	}
-	if !sameRepository(host, ownerRepo, repo) {
-		fmt.Fprintf(stderr, "branch-reaper: refusing --execute: PR history is read from %s on %s but origin is %q on %q; "+
-			"deletions would target a different repository\n", repo, ghHost(), ownerRepo, host)
-		return false
+	// EVERY push URL has to check out: a delete goes to all of them.
+	for _, u := range urls {
+		host, ownerRepo := parseRemote(u)
+		if !sameRepository(host, ownerRepo, repo) {
+			fmt.Fprintf(stderr, "branch-reaper: refusing --execute: PR history is read from %s on %s but origin pushes to %q on %q; "+
+				"deletions would target a different repository\n", repo, ghHost(), ownerRepo, host)
+			return false
+		}
 	}
 	return true
 }
@@ -324,7 +331,7 @@ func classifyBranches(ctx context.Context, repo string, protected []string, bran
 			rep.LookupFailed = append(rep.LookupFailed, b.Name)
 			continue
 		}
-		switch classifyBranch(b.TipSHA, prs, basePRs) {
+		switch classifyBranch(b.TipSHA, prs, basePRs, protected) {
 		case bucketSafeDelete:
 			rep.SafeDelete = append(rep.SafeDelete, b.Name)
 			targets = append(targets, b)

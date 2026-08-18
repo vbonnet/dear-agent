@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,12 +71,12 @@ func parseBranchList(out string) []branchInfo {
 // classified. If anything landed on the branch since, git rejects the push
 // with "stale info" rather than destroying the unseen commits.
 func deleteBranch(ctx context.Context, b branchInfo) error {
-	ctx, cancel := context.WithTimeout(ctx, deleteTimeout)
+	pushCtx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
 	// #nosec G204,G702 -- fixed "git" binary; branch comes from a prior
 	// `git for-each-ref` listing of this repo's own remote refs, not
 	// external input.
-	cmd := exec.CommandContext(ctx, "git", "push", "origin",
+	cmd := exec.CommandContext(pushCtx, "git", "push", "origin",
 		"--force-with-lease="+b.Name+":"+b.TipSHA, "--delete", b.Name)
 	if _, err := runCombined(cmd); err != nil {
 		// The requested end state may already hold: GitHub's own
@@ -83,6 +84,11 @@ func deleteBranch(ctx context.Context, b branchInfo) error {
 		// enumeration and this push, and git then errors because there is
 		// nothing to delete. Reporting that as a failure would claim the
 		// branch is still on the remote when it is not.
+		//
+		// Confirm under the CALLER's context, not pushCtx: one way to reach
+		// this branch is the push blowing its own deadline after the remote
+		// already applied the delete, and an expired context would make the
+		// confirmation fail instantly and mislabel the outcome.
 		if gone, checkErr := remoteBranchAbsent(ctx, b.Name); checkErr == nil && gone {
 			return nil
 		}
@@ -147,7 +153,7 @@ func fetchPRs(ctx context.Context, repo, branch string) ([]prRecord, error) {
 	// shell input.
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
 		"--repo", repo, "--head", branch, "--state", "all",
-		"--json", "number,state,mergedAt,headRefOid,isCrossRepository",
+		"--json", "number,state,mergedAt,headRefOid,isCrossRepository,baseRefName",
 		"--limit", fmt.Sprint(prFetchLimit))
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
@@ -245,17 +251,30 @@ func defaultBranch(ctx context.Context, repo string) (string, error) {
 }
 
 // originRemote returns the `origin` remote's host and owner/repo.
-func originRemote(ctx context.Context) (host, ownerRepo string, err error) {
+func originPushURLs(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, repoQueryTimeout)
 	defer cancel()
+	// --push --all: `remote.origin.pushurl` overrides the fetch URL for
+	// pushes, and there can be several. Since deletion is a push, the push
+	// URLs are the ones that decide where a ref actually dies -- validating
+	// the fetch URL alone would confirm one repository while reaping
+	// another.
 	// #nosec G204,G702 -- fixed "git" binary, no user-controlled arguments.
-	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "--push", "--all", "origin")
 	out, err := runCombined(cmd)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
-	host, ownerRepo = parseRemote(strings.TrimSpace(out))
-	return host, ownerRepo, nil
+	var urls []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			urls = append(urls, line)
+		}
+	}
+	if len(urls) == 0 {
+		return nil, errors.New("origin has no push URL")
+	}
+	return urls, nil
 }
 
 // parseRemote splits a git remote URL into its host and its owner/repo,

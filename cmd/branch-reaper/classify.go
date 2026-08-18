@@ -27,6 +27,10 @@ type prRecord struct {
 	// nothing about the same-named branch in this repository, so it is
 	// filtered out before classification.
 	IsCrossRepository bool `json:"isCrossRepository"`
+	// BaseRefName is the branch this PR merged into. Only a merge into a
+	// durable (protected) branch proves the content survives the head
+	// branch's deletion.
+	BaseRefName string `json:"baseRefName"`
 }
 
 // isProtected reports whether branch must never be classified or deleted,
@@ -49,8 +53,9 @@ const branchFilterMeta = `*?+[]\`
 // matchBranchFilter reports whether name matches a GitHub Actions branch
 // filter, implementing GitHub's filter grammar: `*` matches a run of
 // characters within one path segment, `**` matches across `/`, `?` matches
-// one character within a segment, `+` matches one or more of the preceding
-// character, `[]` is a character class, and `\` escapes the next character.
+// zero or one of the PRECEDING character, `+` matches one or more of the
+// preceding character, `[]` is a character class, and `\` escapes the next
+// character.
 //
 // Negated filters (`!foo`) are exclusions in a workflow trigger, so they
 // assert nothing about what CI protects and never protect anything here.
@@ -92,15 +97,15 @@ func branchFilterRegexp(pattern string) (string, bool) {
 				continue
 			}
 			b.WriteString(`[^/]*`)
-		case '?':
-			b.WriteString(`[^/]`)
-		case '+':
-			// "one or more of the preceding character" -- only meaningful
-			// after something to repeat.
+		case '?', '+':
+			// In GitHub's filter grammar these are QUANTIFIERS on the
+			// preceding character, not standalone wildcards: `?` is zero or
+			// one of it, `+` is one or more. `v1?` therefore matches `v` and
+			// `v1`, not `v1x`. Either is meaningless with nothing to repeat.
 			if b.Len() == len(`\A`) {
 				return "", false
 			}
-			b.WriteString(`+`)
+			b.WriteByte(c)
 		case '[':
 			class, next, ok := branchFilterClass(pattern, i)
 			if !ok {
@@ -251,18 +256,26 @@ func workflowTriggerBranches(dir string) []string {
 }
 
 // classifyBranch buckets one branch given its tip commit SHA, the PR
-// history whose head it is, and the count of open PRs based ON it:
+// history whose head it is, the count of open PRs based ON it, and the
+// protected-branch set:
 //
 //  1. any OPEN PR from this branch, or any open PR based on it ->
 //     review_open_pr (skip, no action, never reported)
 //  2. else the most-recently-merged PR (by mergedAt), if any:
-//     its headRefOid == tip SHA -> safe_delete (branch content is already
-//     in main via the squash commit)
-//     anything else (tip moved, or no head SHA recorded) ->
-//     review_new_commits_after_merge
+//     its headRefOid == tip SHA AND it merged into a protected base ->
+//     safe_delete (branch content is already in that durable branch's
+//     history via the squash commit)
+//     anything else (tip moved, no head SHA recorded, or the merge landed
+//     in an ephemeral branch) -> review_new_commits_after_merge
 //  3. else any CLOSED PR -> review_closed_unmerged
 //  4. else -> review_no_pr
-func classifyBranch(tipSHA string, prs []prRecord, openBasePRs int) string {
+//
+// The protected-base requirement is what keeps "merged" meaning "reached a
+// branch that will still be there tomorrow". A stacked PR merged into its
+// ephemeral parent proves nothing: if that parent is later closed unmerged
+// and reaped, deleting the child destroys the only remaining ref for work
+// that never reached the default branch.
+func classifyBranch(tipSHA string, prs []prRecord, openBasePRs int, protected []string) string {
 	if openBasePRs > 0 {
 		return bucketReviewOpenPR
 	}
@@ -273,7 +286,8 @@ func classifyBranch(tipSHA string, prs []prRecord, openBasePRs int) string {
 	}
 
 	if merged, ok := lastMerged(prs); ok {
-		if tipSHA != "" && merged.HeadRefOid != "" && strings.EqualFold(merged.HeadRefOid, tipSHA) {
+		tipMatches := tipSHA != "" && merged.HeadRefOid != "" && strings.EqualFold(merged.HeadRefOid, tipSHA)
+		if tipMatches && isProtected(merged.BaseRefName, protected) {
 			return bucketSafeDelete
 		}
 		return bucketReviewNewCommitsAfterMerge
