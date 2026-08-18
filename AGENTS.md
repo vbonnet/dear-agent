@@ -124,8 +124,10 @@ example, `agm --help`, `agm session --help`, `agm acceptance show`,
 - Create or close PRs with `safe-pr` and an active Wayfinder project. If no
   approved project exists, escalate with `agm escalate`; there is no bypass
   mode.
-- Read PR state and checks with the read-only GitHub commands. Resolve review
-  threads with `resolve-review-threads` after addressing the underlying issue.
+- Read PR state and checks with the read-only GitHub commands. Diagnose any
+  non-merging PR with `pr-blockers <number>` before other investigation; never
+  guess at a merge blocker. Resolve review threads with
+  `resolve-review-threads` after addressing the underlying issue.
 - Merge eligible routine PRs with `safe-merge`. Create the human-required
   categories named by the autonomous-merge policy with `safe-pr create --draft`;
   do not mark them ready or arm auto-merge. A human owns that transition and
