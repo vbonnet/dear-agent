@@ -167,12 +167,23 @@ Two ways to stay honest about this:
   git rebase --onto main <old-parent-tip> <descendant-branch>
   ```
 
-  Note that `safe-rebase` does **not** do this for you: it runs a plain
-  `git rebase <base>` (`internal/safegit/rebase.go`, `attemptRebase`) and has
-  no `--onto` mode, so a squash-merged parent is exactly the case it handles
-  badly. Restack by hand, then wait for that PR's own exact-head review before
-  merging, and don't rely on `safe-merge`'s fallback "validate all reported
-  checks" path as a substitute for it.
+  **This second option is not currently supported end to end — prefer the
+  first.** Two gaps, both real:
+
+  - `safe-rebase` has no `--onto` mode. It runs a plain `git rebase <base>`
+    (`internal/safegit/rebase.go`, `attemptRebase`), so a squash-merged parent
+    is exactly the case it handles badly. Restacking by hand therefore skips
+    its latest-`origin/main` fetch, protected-branch check, automatic conflict
+    abort, and audit trail.
+  - A restack rewrites the branch, so landing it needs a force-push — and
+    `safe-push` never force-pushes, by design. There is no sanctioned command
+    that completes this workflow.
+
+  Tracked as `ce-x2ekc`. Until it lands, stack only when you are prepared to
+  land each predecessor first, or get a maintainer to complete the restack.
+  Either way, wait for that PR's own exact-head review before merging, and
+  don't rely on `safe-merge`'s fallback "validate all reported checks" path as
+  a substitute for it.
 
 **Bead tracking:** `safe-pr create` defaults every PR in a session to the
 same first bead and stamps `Closes <bead>` — unless the PR body you pass
