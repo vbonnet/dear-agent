@@ -283,25 +283,32 @@ func TestWaitForSocket_Success(t *testing.T) {
 		t.Skip("Skipping live socket test in CI")
 	}
 
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "wait.sock")
+	socketPath := filepath.Join(socketDir(t), "wait.sock")
 
 	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
-	// Start socket server in background
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		listener, err := net.Listen("unix", socketPath)
-		if err != nil {
-			return
-		}
-		defer listener.Close()
-		time.Sleep(200 * time.Millisecond)
-	}()
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, listener.Close()) })
 
-	err := WaitForSocket(500 * time.Millisecond)
-	assert.NoError(t, err, "should not timeout")
+	require.NoError(t, WaitForSocket(5*time.Second), "should not timeout")
+}
+
+func TestWaitForSocket_RetriesBeforeSuccess(t *testing.T) {
+	attempts := 0
+	var waits []time.Duration
+	err := waitForSocket(time.Second, func() bool {
+		attempts++
+		return attempts == 2
+	}, func(delay time.Duration) {
+		waits = append(waits, delay)
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+	require.Len(t, waits, 1)
+	require.Positive(t, waits[0])
 }
 
 func TestGetSocketOwner(t *testing.T) {
