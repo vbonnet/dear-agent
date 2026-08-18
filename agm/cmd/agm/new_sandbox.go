@@ -17,6 +17,12 @@ import (
 // maybeProvisionSandbox provisions a sandbox if enabled, returning the new
 // SandboxConfig and the (possibly rewritten) workDir.
 func maybeProvisionSandbox(ctx context.Context, sessionID, workDir string) (*manifest.SandboxConfig, string, error) {
+	// Guard the whole sandbox decision, not just one of its readers: the very
+	// first thing this path does is consult cfg.Sandbox, so a missing snapshot
+	// has to be refused here rather than deeper in path resolution.
+	if cfg == nil {
+		return nil, workDir, errors.New("sandbox provisioning requires a loaded configuration")
+	}
 	if !shouldEnableSandbox(enableSandbox, noSandbox) {
 		return nil, workDir, nil
 	}

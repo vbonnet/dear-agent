@@ -852,3 +852,45 @@ func TestResolveSandboxLowerDirs_IncludesRequestedRepoAlongsideWorkspaceScan(t *
 		t.Fatalf("resolveSandboxLowerDirs() = %v, want %v", dirs, want)
 	}
 }
+
+// A missing configuration snapshot must be refused where the sandbox decision
+// starts, not panic inside it. maybeProvisionSandbox reads cfg.Sandbox before
+// any path resolution runs, so a guard placed on a later reader is unreachable.
+func TestMaybeProvisionSandboxRefusesMissingConfiguration(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	cfg = nil
+
+	sandboxInfo, workDir, err := maybeProvisionSandbox(context.Background(), "session-id", "/tmp/work")
+	if err == nil {
+		t.Fatal("maybeProvisionSandbox() error = nil, want a refusal without a loaded configuration")
+	}
+	if !strings.Contains(err.Error(), "loaded configuration") {
+		t.Fatalf("maybeProvisionSandbox() error = %v, want it to name the missing configuration", err)
+	}
+	if sandboxInfo != nil {
+		t.Fatalf("maybeProvisionSandbox() sandbox = %#v, want nil", sandboxInfo)
+	}
+	if workDir != "/tmp/work" {
+		t.Fatalf("maybeProvisionSandbox() workDir = %q, want the request preserved", workDir)
+	}
+}
+
+// An unloaded snapshot must not provision either: authority is captured by
+// Load, so a directly constructed Config has none and fails closed.
+func TestMaybeProvisionSandboxRefusesConfigWithoutRuntimeAuthority(t *testing.T) {
+	originalCfg, originalNoSandbox := cfg, noSandbox
+	t.Cleanup(func() {
+		cfg = originalCfg
+		noSandbox = originalNoSandbox
+	})
+	cfg = config.Default()
+	cfg.Sandbox.Enabled = true
+	noSandbox = false
+
+	if _, _, err := maybeProvisionSandbox(context.Background(), "session-id", "/tmp/work"); err == nil {
+		t.Fatal("maybeProvisionSandbox() error = nil, want a runtime-authority refusal")
+	} else if !errors.Is(err, config.ErrRuntimeAuthorityUnavailable) {
+		t.Fatalf("maybeProvisionSandbox() error = %v, want %v", err, config.ErrRuntimeAuthorityUnavailable)
+	}
+}
