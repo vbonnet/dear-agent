@@ -3,6 +3,8 @@ package fsguard
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/safegit"
 )
 
 // Shell control operators that separate one simple command from the next.
@@ -429,13 +431,15 @@ func parseGit(args []string) (cFlag, sub string, subArgs []string) {
 	return cFlag, "", nil
 }
 
+// isForcePush reports whether a `git push` argument list forces the push.
+//
+// The classification is delegated to safegit.ForceFlag so this guard and
+// safe-push share one definition of "force push". A local exact-token match
+// missed bundled short-option clusters (`-uf` is `-u -f`), which is exactly
+// the shape an agent reaches for when a plain `-u` push is rejected.
 func isForcePush(subArgs []string) bool {
-	for _, o := range subArgs {
-		if o == "--force" || o == "-f" || strings.HasPrefix(o, "--force-with-lease") {
-			return true
-		}
-	}
-	return false
+	_, ok := safegit.ForceFlag(subArgs)
+	return ok
 }
 
 // checkGit applies the ~/src-specific git rules to a git invocation's
