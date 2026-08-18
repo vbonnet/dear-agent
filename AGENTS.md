@@ -132,12 +132,13 @@ example, `agm --help`, `agm session --help`, `agm acceptance show`,
 - Merge eligible routine PRs with `safe-merge`. For an ordinary draft you
   opened, you may mark it ready for review yourself once it is otherwise
   mergeable — the draft→ready transition is agent-owned for routine PRs, not
-  human-only. Create the human-required categories named by the
-  autonomous-merge policy (security, product behavior, money/billing, agent
-  governance, and agent control surfaces such as auth, quota, notification,
-  and merge-policy) with `safe-pr create --draft`; for those, do not mark them
-  ready or arm auto-merge. A human owns that transition and the merge for the
-  carve-out categories only.
+  human-only. Create the human-required categories with `safe-pr create
+  --draft`; for those, do not mark them ready or arm auto-merge. A human owns
+  that transition and the merge for the carve-out categories only.
+  [autonomous-merge](docs/policies/autonomous-merge.ai.md) is the single
+  normative list of those categories — do not restate it here, or the two
+  copies will drift and agents reading this entrypoint will act on the stale
+  one. `internal/mergeloop.DefaultSensitiveGlobs` is its executable form.
 - Keep the Bead `in_progress` while its PR is open. Close it only after the
   merged commit is deployed where applicable and verified against the real
   surface.

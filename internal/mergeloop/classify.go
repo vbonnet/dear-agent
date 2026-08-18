@@ -48,17 +48,48 @@ var DefaultBlockLabels = []string{
 var DefaultAbandonLabels = []string{"abandoned", "wontfix"}
 
 // DefaultSensitiveGlobs are changed-path patterns that force human review even
-// without a label — money, auth, secrets, and infra surfaces. Patterns support
-// "*" (within a segment) and "**" (any number of segments).
+// without a label. Patterns support "*" (within a segment) and "**" (any
+// number of segments).
+//
+// These must stay in step with the carve-out categories named by
+// docs/policies/autonomous-merge.ai.md. A category declared in the policy but
+// absent here is not enforced: Classify still returns StateGreen and hands the
+// PR to safe-merge, so the human-only boundary exists only on paper.
 var DefaultSensitiveGlobs = []string{
+	// Money.
 	"**/billing/**",
 	"**/payment/**",
 	"**/payments/**",
+	"**/quota/**",
+
+	// Security.
 	"**/auth/**",
 	"**/secrets/**",
 	"**/secret/**",
+
+	// Infrastructure.
 	"infra/**",
 	"**/*.tf",
+	".github/rulesets/**",
+
+	// Agent governance: the documents that define agent behavior.
+	"AGENTS.md",
+	"**/AGENTS.md",
+	"CLAUDE.md",
+	"**/CLAUDE.md",
+	"docs/policies/**",
+
+	// Agent control surfaces: the machinery that decides what an agent may
+	// merge, push, or be told about.
+	"**/mergeloop/**",
+	"**/safegit/**",
+	"**/fsguard/**",
+	"cmd/safe-merge/**",
+	"cmd/safe-pr/**",
+	"cmd/safe-push/**",
+	"cmd/safe-rebase/**",
+	"**/notification/**",
+	"**/notifications/**",
 }
 
 // DefaultMaxAgentAttempts caps agent code-fix attempts per PR against the same

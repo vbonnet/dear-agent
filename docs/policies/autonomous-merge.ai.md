@@ -28,6 +28,10 @@ boundary that keeps consequential changes in front of a human.
   an explicit human emergency action.
 - Merge a PR with unresolved review threads.
 
+These categories are enforced in code by `internal/mergeloop.DefaultSensitiveGlobs`
+(`Classify` returns `blocked-policy`). A category added here without a matching
+glob is not enforced — the PR still classifies green and reaches `safe-merge`.
+
 ## ALWAYS
 
 - Diagnose a non-merging or unclear PR with `pr-blockers <number>` BEFORE any
