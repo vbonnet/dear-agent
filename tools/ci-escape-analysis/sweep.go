@@ -15,16 +15,16 @@ import (
 // .github/workflows/ci-health-monitor.yml already claims that label, comments
 // on the first issue carrying it, and closes every one of them once its own
 // streak check goes green. Sharing the label would let that monitor close a
-// watchdog retro for a workflow that is still red, after which the fix agent
-// reads no brief at all.
+// watchdog retro for a workflow that is still red, after which the triage
+// agent reads no brief at all.
 const retroLabel = "main-health-watchdog"
 
 // queuedLabel marks an incident that has been filed but not yet handed to the
-// fix agent. It is what makes "one incident per dispatch" a queue rather than a
-// drop: when a sweep opens several incidents at once, all of them are queued,
+// triage agent. It is what makes "one incident per dispatch" a queue rather
+// than a drop: when a sweep opens several incidents at once, all of them are queued,
 // one is announced and dispatched, and the rest wait for later sweeps. The
-// label survives the announcement and is cleared by the fix job once the agent
-// has actually run, so a dispatch that never happened leaves the incident
+// label survives the announcement and is cleared by the triage job once the
+// agent has actually run, so a dispatch that never happened leaves the incident
 // queued rather than stranded. Gating on "newly created" alone silently
 // abandoned every incident after the first, because a later sweep only comments
 // on an issue that already exists and so never reports it as new again.
@@ -117,7 +117,7 @@ func (r mainRun) scheduledDetection() bool {
 //
 // Returns non-zero if any retro could not be filed. A sweep that could not
 // deliver its alert must not report success: the workflow would go on to
-// dispatch a fix agent whose entire brief is an issue that does not exist.
+// dispatch a triage agent whose entire brief is an issue that does not exist.
 func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
 	runs, complete, err := latestRunPerWorkflowOnMain(opts, stderr)
 	if err != nil {
@@ -203,7 +203,7 @@ func reconcile(repo string, live map[string]bool, complete bool, stdout, stderr 
 	}
 	// Covers both a workflow going green and a workflow whose failing check
 	// changed — the old check's incident is just as stale as a recovered one,
-	// and leaving it open puts a solved failure in the fix agent's brief.
+	// and leaving it open puts a solved failure in the triage agent's brief.
 	if err := closeStaleRetros(repo, live, stdout, stderr); err != nil {
 		return []error{err}
 	}
@@ -229,7 +229,7 @@ type sweepOptions struct {
 func ensureLabel(repo string, stderr io.Writer) {
 	for _, label := range []struct{ name, colour, description string }{
 		{retroLabel, "B60205", "main is red; incident brief filed by main-health-watchdog"},
-		{queuedLabel, "FBCA04", "incident brief awaiting a fix agent"},
+		{queuedLabel, "FBCA04", "incident brief awaiting a triage agent"},
 	} {
 		if err := runGH("creating label", io.Discard, "label", "create", label.name,
 			"--repo", repo,
@@ -290,22 +290,22 @@ func latestRunPerWorkflowOnMain(opts sweepOptions, stderr io.Writer) (map[string
 	return latest, complete, nil
 }
 
-// announceQueuedIncident hands the oldest queued incident to the fix agent by
+// announceQueuedIncident hands the oldest queued incident to the triage agent by
 // printing it and its number. At most one per sweep: an agent told to triage
 // several unrelated workflows must either conflate them or abandon some.
 //
 // It deliberately does NOT drop the queue label. The label is the record that
 // this incident still needs an agent, and the only event that can honestly
 // clear it is a dispatch that actually completed — which this process cannot
-// observe, because it exits before the fix job starts. Dropping it here made
+// observe, because it exits before the triage job starts. Dropping it here made
 // every way that job can end without running (its own `timeout-minutes`, a
 // cancelled run, a dead runner) strand the incident open and unqueued forever,
 // since later sweeps only comment on an incident they have already filed. The
-// fix job removes the label itself once the agent has run; nothing else can,
-// so any other ending leaves the incident queued for the next sweep.
+// triage job removes the label itself once the agent has run; nothing else
+// can, so any other ending leaves the incident queued for the next sweep.
 //
 // Safe against double dispatch because the workflow's concurrency group covers
-// the whole run: no later sweep starts while the fix job is still going.
+// the whole run: no later sweep starts while the triage job is still going.
 func announceQueuedIncident(repo string, stdout, stderr io.Writer) error {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
 		"--label", retroLabel, "--label", queuedLabel, "--state", "open",
@@ -420,7 +420,7 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 		// Filing under the workflow name as a stand-in would key the incident
 		// on an identity that changes the moment the lookup succeeds: the next
 		// sweep produces the real job name, opens a second issue, and queues a
-		// second fix agent for one failure.
+		// second triage agent for one failure.
 		return cihealth.Retro{}, false
 	}
 	// A run that failed before producing any job has no check to name. Using
@@ -634,7 +634,7 @@ func findRetro(repo, title string, stderr io.Writer) (number int, open, known bo
 	if !ok {
 		// A failed read is not proof of absence. Treating it as absence has
 		// upsertRetro open a second issue with the same title and queue label,
-		// so one transient error dispatches a duplicate fix agent.
+		// so one transient error dispatches a duplicate triage agent.
 		return 0, false, false
 	}
 	numberText, state, found := strings.Cut(strings.TrimSpace(string(out)), " ")
@@ -653,7 +653,8 @@ func findRetro(repo, title string, stderr io.Writer) (number int, open, known bo
 // Reconciling against the live set rather than against "did this workflow go
 // green" is what handles the awkward case: a workflow that first fails check A
 // and then fails check B is still red, so a recovery test never fires, and the
-// obsolete A retro would sit in the fix agent's brief pointing it at a failure
+// obsolete A retro would sit in the triage agent's brief pointing it at a
+// failure
 // that already passes.
 func closeStaleRetros(repo string, live map[string]bool, stdout, stderr io.Writer) error {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
