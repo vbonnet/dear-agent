@@ -279,7 +279,7 @@ func latestRunOnMain(repo, workflow string, stderr io.Writer) (mainRun, bool) {
 	return mainRun{}, false
 }
 
-func buildRetro(opts sweepOptions, run mainRun, required []string, requiredKnown bool, stderr io.Writer) cihealth.Retro {
+func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredContext, requiredKnown bool, stderr io.Writer) cihealth.Retro {
 	failing := failingCheckForRun(opts.Repo, run, stderr)
 	if failing == "" {
 		failing = run.WorkflowName

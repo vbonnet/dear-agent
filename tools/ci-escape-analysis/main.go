@@ -226,34 +226,75 @@ func lookupPR(repo, sha string, stderr io.Writer) int {
 	return number
 }
 
+// lookupPRChecks returns the checks as they stood when the pull request merged.
+//
+// "As they stood" is the whole point. Re-running a workflow after a merge
+// replaces the check run attached to the head, so reading the present state can
+// turn a green merge into a fabricated bypass, or hide a real gating bypass
+// behind a success that did not exist at merge time. Attempts that completed
+// after the merge are therefore discarded, and the latest attempt that had
+// completed before it wins.
 func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
-	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, pr), "--jq", ".head.sha")
+	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/pulls/%d", repo, pr),
+		"--jq", `"\(.head.sha) \(.merged_at // "")"`)
 	if !ok {
 		return nil
 	}
-	head := strings.TrimSpace(string(out))
+	head, mergedAtRaw, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
 	if head == "" {
 		return nil
+	}
+	// An open pull request has no merge time; everything currently attached is
+	// the current truth for it.
+	mergedAt, mergedKnown := time.Time{}, false
+	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(mergedAtRaw)); err == nil {
+		mergedAt, mergedKnown = parsed, true
 	}
 
 	out, ok = gh(stderr, "api", "--paginate",
 		fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, head),
-		"--jq", ".check_runs[] | {name: .name, conclusion: .conclusion}")
+		"--jq", ".check_runs[] | {name: .name, conclusion: .conclusion, appId: .app.id, completedAt: .completed_at}")
 	if !ok {
 		return nil
 	}
 
-	var runs []cihealth.CheckRun
+	type attempt struct {
+		run       cihealth.CheckRun
+		completed time.Time
+	}
+	latest := map[string]attempt{}
+
 	decoder := json.NewDecoder(strings.NewReader(string(out)))
 	for {
 		var raw struct {
-			Name       string `json:"name"`
-			Conclusion string `json:"conclusion"`
+			Name        string `json:"name"`
+			Conclusion  string `json:"conclusion"`
+			AppID       int64  `json:"appId"`
+			CompletedAt string `json:"completedAt"`
 		}
 		if err := decoder.Decode(&raw); err != nil {
 			break
 		}
-		runs = append(runs, cihealth.CheckRun{Name: raw.Name, Conclusion: raw.Conclusion})
+		completed, err := time.Parse(time.RFC3339, raw.CompletedAt)
+		if err != nil {
+			// Never concluded; carries no evidence about the merge gate.
+			continue
+		}
+		if mergedKnown && completed.After(mergedAt) {
+			continue // a re-run after the merge; not what the gate saw
+		}
+		if seen, ok := latest[raw.Name]; ok && seen.completed.After(completed) {
+			continue
+		}
+		latest[raw.Name] = attempt{
+			run:       cihealth.CheckRun{Name: raw.Name, Conclusion: raw.Conclusion, AppID: raw.AppID},
+			completed: completed,
+		}
+	}
+
+	runs := make([]cihealth.CheckRun, 0, len(latest))
+	for _, a := range latest {
+		runs = append(runs, a.run)
 	}
 	return runs
 }
@@ -264,16 +305,29 @@ func lookupPRChecks(repo string, pr int, stderr io.Writer) []cihealth.CheckRun {
 // nothing — indistinguishable from a repository that requires no checks. Every
 // gating verdict turns on that distinction, so it is carried rather than
 // flattened.
-func lookupRequiredContexts(repo string, stderr io.Writer) ([]string, bool) {
+// Keeps the ruleset's `integration_id` alongside the context name: a ruleset
+// pins a context to a producing App, and dropping that lets any App's
+// same-named check be mistaken for the required one.
+func lookupRequiredContexts(repo string, stderr io.Writer) ([]cihealth.RequiredContext, bool) {
 	out, ok := gh(stderr, "api", fmt.Sprintf("repos/%s/rules/branches/main", repo),
-		"--jq", ".[] | select(.type == \"required_status_checks\") | .parameters.required_status_checks[].context")
+		"--jq", `.[] | select(.type == "required_status_checks")
+		           | .parameters.required_status_checks[]
+		           | {name: .context, integrationId: (.integration_id // 0)}`)
 	if !ok {
 		return nil, false
 	}
-	var contexts []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			contexts = append(contexts, line)
+	var contexts []cihealth.RequiredContext
+	decoder := json.NewDecoder(strings.NewReader(string(out)))
+	for {
+		var raw struct {
+			Name          string `json:"name"`
+			IntegrationID int64  `json:"integrationId"`
+		}
+		if err := decoder.Decode(&raw); err != nil {
+			break
+		}
+		if raw.Name != "" {
+			contexts = append(contexts, cihealth.RequiredContext{Name: raw.Name, IntegrationID: raw.IntegrationID})
 		}
 	}
 	return contexts, true

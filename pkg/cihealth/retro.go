@@ -5,9 +5,17 @@ import (
 	"strings"
 )
 
-// Retro is the DEAR retrospective the watchdog files when main goes red.
-// Define the defect, Execute the fix, Audit the outcome, Retro the prevention —
-// see docs/policies/dear-retro.ai.md.
+// Retro is the incident brief the watchdog files when main goes red.
+//
+// It is NOT a completed DEAR retrospective, and calling it one would be a lie
+// the policy can check. DEAR is Define the defect, Execute the fix, Audit the
+// outcome, Retro the prevention (docs/policies/dear-retro.ai.md). At detection
+// time only Define is knowable: nothing has been executed, so there is no
+// outcome to audit, and prevention proposed before a fix exists is a
+// hypothesis. The brief therefore renders Define in full, states the
+// prevention analysis as provisional, and leaves Execute and Audit as sections
+// for whoever fixes the failure to append — at which point the issue becomes
+// the retrospective.
 type Retro struct {
 	Repo         string
 	FailingCheck string
@@ -16,7 +24,7 @@ type Retro struct {
 	RunURL       string
 	Finding      Finding
 	ROI          ROI
-	Required     []string
+	Required     []RequiredContext
 	// RequiredKnown is false when the ruleset could not be read, so an empty
 	// Required list means "not established" rather than "nothing is required".
 	RequiredKnown bool
@@ -28,14 +36,18 @@ type Retro struct {
 // of scattering duplicates — the policy wants repeat incidents to read as a
 // frequency signal, not as noise.
 func (r Retro) Title() string {
-	return fmt.Sprintf("DEAR retro: main red — %s", r.FailingCheck)
+	return fmt.Sprintf("main red — %s", r.FailingCheck)
 }
 
-// Body renders the retro. It leads with how the failure got past pre-merge,
-// because that is the question the retro exists to answer; the fix for the
+// Body renders the brief. It leads with how the failure got past pre-merge,
+// because that is the question the brief exists to answer; the fix for the
 // individual failure is secondary and usually obvious.
 func (r Retro) Body() string {
 	var b strings.Builder
+
+	fmt.Fprintf(&b, "> **Incident brief — not yet a DEAR retrospective.** `Define` below is complete. ")
+	fmt.Fprintf(&b, "`Execute` and `Audit` are empty because nothing has been fixed yet, and `Retro` is provisional until it has. ")
+	fmt.Fprintf(&b, "Whoever fixes this completes the remaining sections; the issue becomes the retrospective at that point.\n\n")
 
 	fmt.Fprintf(&b, "## Define — what broke\n\n")
 	fmt.Fprintf(&b, "`%s` is failing on `main` at [`%s`](%s).\n\n", r.FailingCheck, shortSHA(r.MainSHA), r.RunURL)
@@ -43,7 +55,7 @@ func (r Retro) Body() string {
 		fmt.Fprintf(&b, "Workflow: **%s**\n\n", r.WorkflowName)
 	}
 
-	fmt.Fprintf(&b, "## Audit — how it got through pre-merge\n\n")
+	fmt.Fprintf(&b, "### How it got past pre-merge\n\n")
 	fmt.Fprintf(&b, "**Classification: `%s`**\n\n", r.Finding.Class)
 	fmt.Fprintf(&b, "%s\n\n", r.Finding.Summary)
 
@@ -54,7 +66,13 @@ func (r Retro) Body() string {
 		fmt.Fprintf(&b, "**No.** Refining path filters will not prevent this class. Selection did what it was told; the gap is elsewhere. Editing filters in response to this would add cost without removing risk.\n\n")
 	}
 
-	fmt.Fprintf(&b, "## Retro — prevention\n\n")
+	fmt.Fprintf(&b, "## Execute — the fix\n\n")
+	fmt.Fprintf(&b, "_Not started. Record what was changed and link the PR._\n\n")
+
+	fmt.Fprintf(&b, "## Audit — did the fix hold?\n\n")
+	fmt.Fprintf(&b, "_Nothing to audit yet. Record whether `main` went green and whether the prevention below was actually landed._\n\n")
+
+	fmt.Fprintf(&b, "## Retro — prevention (provisional)\n\n")
 	for _, action := range r.Finding.SuggestedActions {
 		fmt.Fprintf(&b, "- %s\n", action)
 	}

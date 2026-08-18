@@ -9,7 +9,6 @@ package cihealth
 import (
 	"fmt"
 	"math"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -34,6 +33,23 @@ const (
 type CheckRun struct {
 	Name       string
 	Conclusion string
+	// AppID is the GitHub App that produced the check. Zero means the producer
+	// could not be determined.
+	AppID int64
+}
+
+// RequiredContext is one required status check from the repository ruleset.
+//
+// Carries the app as well as the name because a ruleset pins them together:
+// this repository requires every context from GitHub Actions specifically
+// (.github/rulesets/main.json). Matching on the name alone lets any App
+// publish a check called "Build & Test (ubuntu-latest)" and be mistaken for
+// the required one.
+type RequiredContext struct {
+	Name string
+	// IntegrationID is the App the ruleset pins the context to. Zero means the
+	// ruleset accepts the context from any producer.
+	IntegrationID int64
 }
 
 // Escape is everything known about one red check on main and the pull request
@@ -50,7 +66,7 @@ type Escape struct {
 	// PRChecks is every check that reported on the pull request head.
 	PRChecks []CheckRun
 	// RequiredContexts is the repository ruleset's required status checks.
-	RequiredContexts []string
+	RequiredContexts []RequiredContext
 	// RequiredKnown records whether the ruleset lookup actually succeeded.
 	// Reading the branch rules needs Administration (read), which the
 	// workflow's GITHUB_TOKEN does not have; without this flag an empty list
@@ -211,7 +227,7 @@ func Classify(e Escape) Finding {
 				},
 			}
 		}
-		if !isRequired(e.RequiredContexts, e.FailingCheck) {
+		if !isRequired(e.RequiredContexts, run) {
 			return Finding{
 				Class:   ClassGatingGap,
 				Summary: fmt.Sprintf("%q FAILED on PR #%d and the merge went through anyway, because it is not a required status check. Selection worked; enforcement did not.", e.FailingCheck, e.PRNumber),
@@ -423,8 +439,22 @@ func findCheck(runs []CheckRun, name string) (CheckRun, bool) {
 	return CheckRun{}, false
 }
 
-func isRequired(required []string, name string) bool {
-	return slices.Contains(required, name)
+// isRequired reports whether this exact check — name and producing app —
+// is what the ruleset requires.
+//
+// An unknown producer (AppID zero) is allowed to match, because refusing would
+// turn every failed identity lookup into a false "not required" and flip the
+// gating verdict on evidence we do not have.
+func isRequired(required []RequiredContext, run CheckRun) bool {
+	for _, want := range required {
+		if want.Name != run.Name {
+			continue
+		}
+		if want.IntegrationID == 0 || run.AppID == 0 || want.IntegrationID == run.AppID {
+			return true
+		}
+	}
+	return false
 }
 
 func shortSHA(sha string) string {
@@ -434,9 +464,13 @@ func shortSHA(sha string) string {
 	return sha
 }
 
-// SortedContexts returns required contexts in a stable order for rendering.
-func SortedContexts(required []string) []string {
-	out := append([]string(nil), required...)
+// SortedContexts returns required context names in a stable order for
+// rendering, so retro bodies do not churn between runs.
+func SortedContexts(required []RequiredContext) []string {
+	out := make([]string, 0, len(required))
+	for _, context := range required {
+		out = append(out, context.Name)
+	}
 	sort.Strings(out)
 	return out
 }

@@ -52,6 +52,8 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestRetroNamesOnlyMechanismsThatExist",
 		"TestPostMergeOnlyRetroDoesNotPricePlacement",
 		"TestEscapeClassesStillPricePlacement",
+		"TestRequiredContextMatchesOnProducingApp",
+		"TestBriefDoesNotClaimToBeACompletedRetro",
 	)
 	return nil
 }

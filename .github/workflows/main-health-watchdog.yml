@@ -7,8 +7,11 @@ name: Main Health Watchdog
 # Relationship to ci-health-monitor.yml: that job alarms on a SUSTAINED red
 # streak (3 of the last 5 CI runs, every 8 hours) and only watches the CI
 # workflow. This one fires on the FIRST red, covers every workflow that gates
-# main, and files a DEAR retro with an escape classification and a
-# prevention-vs-cure calculation. They overlap on "main is red" and are
+# main, and files an incident brief with an escape classification and a
+# prevention-vs-cure calculation. The brief becomes a DEAR retro once whoever
+# fixes the failure appends the Execute and Audit sections — at detection time
+# only Define is knowable, so claiming a completed retrospective would be a
+# claim the policy can check. They overlap on "main is red" and are
 # deliberately left separate for now — consolidating them is ce-xulg.13.
 #
 # Why a GitHub scheduled workflow rather than launchd: the facts it needs
@@ -85,7 +88,7 @@ jobs:
       # The sweep is idempotent: it files a retro per red workflow, comments on
       # the existing one if it is already open, and closes retros whose
       # workflow has recovered.
-      - name: Sweep main, file or update DEAR retros
+      - name: Sweep main, file or update incident briefs
         id: sweep
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -139,16 +142,16 @@ jobs:
             actions: read
           prompt: |
             `main` is red on ${{ github.repository }}. The Main Health Watchdog has
-            filed exactly one new DEAR retro, and it is the only incident you are to
-            work on:
+            filed exactly one new incident brief, and it is the only incident you are
+            to work on:
 
                 ${{ needs.sweep.outputs.incident }}
 
             Find it with `gh issue list --label main-health-watchdog --state open`.
-            Other retros carrying that label are separate incidents already being
+            Other issues carrying that label are separate incidents already being
             worked; leave them alone.
 
-            The retro already contains an escape classification and a
+            The brief already contains an escape classification and a
             prevention-vs-cure ROI calculation. Do not redo that analysis — act on it.
             Terms it marks ASSUMED or LOWER BOUND are not evidence, and a verdict
             marked PROVISIONAL is not an instruction.
@@ -174,6 +177,11 @@ jobs:
                  question, not a CI-filtering one. Write up what should change and
                  stop — ruleset edits are a control surface and need a human.
 
+            3. Complete the brief into a DEAR retro: fill in `Execute` with what you
+               changed and the PR link, and `Audit` with whether main went green and
+               whether the prevention actually landed. The issue is only a
+               retrospective once those two sections are real.
+
             Open one focused PR for this one incident. Do not modify the repository
             ruleset. Do not self-merge. If the fix is not obvious within your budget,
-            comment your findings on the retro issue and stop rather than guessing.
+            comment your findings on the brief and stop rather than guessing.

@@ -19,8 +19,9 @@ paying for. Both answers are pure functions over plain structs — fetching the
 facts from GitHub lives in `tools/ci-escape-analysis`, so every judgement this
 package makes is reachable from a table test.
 
-The package also renders the DEAR retro document that the main-health watchdog
-files when an escape is detected.
+The package also renders the incident brief the main-health watchdog files when
+an escape is detected. The brief is not a completed DEAR retrospective: at
+detection time nothing has been executed and there is no outcome to audit.
 
 ## EARS Requirements
 
@@ -77,6 +78,12 @@ files when an escape is detected.
 **CIHEALTH-17** When a retro is rendered, the system shall produce a title and a body identifying the failing check, the main SHA, the class, and the ROI arithmetic.
 
 **CIHEALTH-18** When required contexts are listed, the system shall return them in a deterministic sorted order so retro bodies do not churn between runs.
+
+**CIHEALTH-25** When the system renders the incident brief, the system shall state that it is not a completed retrospective and shall emit empty `Execute` and `Audit` sections for the fixer to complete, because DEAR requires an executed fix and an audited outcome.
+
+**CIHEALTH-26** When a finding is not an escape, the system shall omit the prevention-versus-cure verdict, because there is no placement decision to price.
+
+**CIHEALTH-27** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
 
 ## BDD Traceability
 

@@ -39,6 +39,10 @@ talk to GitHub, and mutate issues.
 
 **CI-ESCAPE-08** When the system measures prevention cost, the system shall report whether any qualifying pre-merge run was observed and whether the query reached the API page limit.
 
+**CI-ESCAPE-18** When the system reads the checks that reported on a merged pull request, the system shall select the latest attempt that completed at or before the merge, so a post-merge re-run cannot rewrite what the merge gate saw.
+
+**CI-ESCAPE-19** When the system reads the repository ruleset, the system shall retain the app each required context is pinned to alongside its name.
+
 ### Invocation
 
 **CI-ESCAPE-09** When invoked without `-sweep`, the system shall render one retrospective to standard output as a pure function of its flags and the facts it looks up, and shall mutate nothing.

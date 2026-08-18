@@ -9,7 +9,7 @@ import (
 const buildCheck = "Build & Test (ubuntu-latest)"
 
 func TestClassify(t *testing.T) {
-	required := []string{buildCheck, "govulncheck", "Vulnerability Scan"}
+	required := []RequiredContext{{Name: buildCheck}, {Name: "govulncheck"}, {Name: "Vulnerability Scan"}}
 
 	tests := []struct {
 		name            string
@@ -138,7 +138,7 @@ func TestClassify(t *testing.T) {
 // filters will help. Saying so for a flake or a gating gap sends the next
 // person to edit the wrong file.
 func TestFilterRefinableOnlyForSelectionClasses(t *testing.T) {
-	required := []string{buildCheck}
+	required := []RequiredContext{{Name: buildCheck}}
 	cases := map[Class]Escape{
 		ClassBypassed:  {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 0},
 		ClassGatingGap: {PreMergeCapable: true, FailingCheck: buildCheck, PRNumber: 1, PRChecks: []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}, RequiredContexts: required, RequiredKnown: true},
@@ -234,7 +234,7 @@ func TestROIExplainShowsItsWork(t *testing.T) {
 }
 
 func TestSortedContexts(t *testing.T) {
-	got := SortedContexts([]string{"govulncheck", "Build & Test (macos-latest)", "Vulnerability Scan"})
+	got := SortedContexts([]RequiredContext{{Name: "govulncheck"}, {Name: "Build & Test (macos-latest)"}, {Name: "Vulnerability Scan"}})
 	want := []string{"Build & Test (macos-latest)", "Vulnerability Scan", "govulncheck"}
 	for i := range want {
 		if got[i] != want[i] {
@@ -464,6 +464,78 @@ func TestEscapeClassesStillPricePlacement(t *testing.T) {
 	for _, class := range []Class{ClassNeverRan, ClassSelectionGap, ClassScopeGap, ClassMergeSkew, ClassGatingGap} {
 		if !(Finding{Class: class}).PricesPlacement() {
 			t.Errorf("PricesPlacement() = false for %q", class)
+		}
+	}
+}
+
+// A ruleset pins a required context to a producing App. Matching on the name
+// alone lets any other App publish a check called "Build & Test
+// (ubuntu-latest)" and be mistaken for the required one, which turns an
+// ordinary merge into a reported administrative bypass.
+func TestRequiredContextMatchesOnProducingApp(t *testing.T) {
+	const (
+		githubActions int64 = 15368
+		someOtherApp  int64 = 99999
+	)
+	required := []RequiredContext{{Name: buildCheck, IntegrationID: githubActions}}
+
+	base := Escape{
+		PreMergeCapable:  true,
+		FailingCheck:     buildCheck,
+		MainSHA:          "abc1234def",
+		PRNumber:         5,
+		RequiredContexts: required,
+		RequiredKnown:    true,
+	}
+
+	// A foreign App's same-named failing check is not the required context, so
+	// the merge is a gating gap on an advisory check, not a bypass.
+	foreign := base
+	foreign.PRChecks = []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure, AppID: someOtherApp}}
+	if got := Classify(foreign); strings.Contains(got.Summary, "administrative bypass") {
+		t.Errorf("a foreign app's check was treated as the required one: %q", got.Summary)
+	}
+
+	// The pinned App's failing check is the required context.
+	genuine := base
+	genuine.PRChecks = []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure, AppID: githubActions}}
+	if got := Classify(genuine); !strings.Contains(got.Summary, "administrative bypass") {
+		t.Errorf("the pinned app's check should be required, got %q", got.Summary)
+	}
+
+	// An unknown producer still matches: refusing would turn every failed
+	// identity lookup into a false "not required".
+	unknown := base
+	unknown.PRChecks = []CheckRun{{Name: buildCheck, Conclusion: ConclusionFailure}}
+	if got := Classify(unknown); !strings.Contains(got.Summary, "administrative bypass") {
+		t.Errorf("an unknown producer should not flip the gating verdict, got %q", got.Summary)
+	}
+}
+
+// The watchdog files this at detection time, when nothing has been fixed. DEAR
+// is Define, Execute, Audit, Retro; calling a document with no execution and no
+// outcome a completed retrospective is a claim the policy can check.
+func TestBriefDoesNotClaimToBeACompletedRetro(t *testing.T) {
+	r := Retro{
+		FailingCheck:  "Build & Test (ubuntu-latest)",
+		Finding:       Classify(Escape{PreMergeCapable: true, FailingCheck: "Build & Test (ubuntu-latest)", PRNumber: 1, RequiredKnown: true}),
+		RequiredKnown: true,
+	}
+
+	if strings.Contains(r.Title(), "DEAR retro") {
+		t.Errorf("Title() = %q claims to be a completed retrospective", r.Title())
+	}
+
+	body := r.Body()
+	for _, want := range []string{
+		"Incident brief",
+		"## Define",
+		"## Execute",
+		"## Audit",
+		"## Retro — prevention (provisional)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
 		}
 	}
 }
