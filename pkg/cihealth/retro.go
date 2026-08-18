@@ -35,8 +35,16 @@ type Retro struct {
 // Title is stable per failing check so repeat escapes update one issue instead
 // of scattering duplicates — the policy wants repeat incidents to read as a
 // frequency signal, not as noise.
+// Keyed by workflow AND check. A job name is not unique across workflows —
+// `govulncheck` is a job in both CI and Security Audit — so keying on the check
+// alone coalesces two workflows' incidents into one issue. The sweep promises
+// one brief per red workflow, and the second workflow would silently inherit
+// the first's issue: already open, already dequeued, never dispatched.
 func (r Retro) Title() string {
-	return fmt.Sprintf("main red — %s", r.FailingCheck)
+	if r.WorkflowName == "" {
+		return fmt.Sprintf("main red — %s", r.FailingCheck)
+	}
+	return fmt.Sprintf("main red — %s / %s", r.WorkflowName, r.FailingCheck)
 }
 
 // Body renders the brief. It leads with how the failure got past pre-merge,

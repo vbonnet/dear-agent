@@ -722,3 +722,23 @@ func TestFailedPRLookupIsNotABypass(t *testing.T) {
 		t.Errorf("Summary alleges a bypass it never established: %q", got.Summary)
 	}
 }
+
+// A job name is not unique across workflows — `govulncheck` is a job in both CI
+// and Security Audit — so keying an incident on the check alone coalesces two
+// workflows into one issue, and the second never reaches a fixer.
+func TestTitleDistinguishesWorkflowsSharingAJobName(t *testing.T) {
+	ci := Retro{WorkflowName: "CI", FailingCheck: "govulncheck"}.Title()
+	audit := Retro{WorkflowName: "Security Audit", FailingCheck: "govulncheck"}.Title()
+
+	if ci == audit {
+		t.Fatalf("both workflows produce the same incident title %q", ci)
+	}
+	for _, title := range []string{ci, audit} {
+		if !strings.Contains(title, "govulncheck") {
+			t.Errorf("title %q lost the failing check", title)
+		}
+	}
+	if !strings.Contains(ci, "CI") || !strings.Contains(audit, "Security Audit") {
+		t.Errorf("titles lost the workflow: %q / %q", ci, audit)
+	}
+}

@@ -142,10 +142,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		escapeScope = fmt.Sprintf("distinct failing commits for workflow %q over %d days", *workflow, *windowDays)
 	}
 
-	// An explicitly supplied prevention cost is a measurement by definition;
-	// otherwise fall back to run history, which reports for itself whether it
-	// observed anything.
-	prevention, preventionMeasured, truncated := *preventMins, set["prevention-minutes"], false
+	// An explicitly supplied POSITIVE prevention cost is a measurement by
+	// definition. Zero is the documented sentinel for "measure it from run
+	// history", so honour it as such: treating a supplied zero as measured
+	// makes the ratio unbounded and returns ALWAYS PREVENT, which is the
+	// opposite of what the flag help promises.
+	prevention, preventionMeasured, truncated := *preventMins, set["prevention-minutes"] && *preventMins > 0, false
 	if !preventionMeasured {
 		prevention, preventionMeasured, truncated = estimatePrevention(*repo, *workflow, *windowDays, stderr)
 	}

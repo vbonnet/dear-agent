@@ -59,6 +59,7 @@ func agmRunsCIEscapeClassificationRegressions(ctx context.Context) error {
 		"TestWorkflowLevelFailureIsNotAMissingCheck",
 		"TestPendingAtMergeIsNotNeverRan",
 		"TestBriefDoesNotClaimToBeACompletedRetro",
+		"TestTitleDistinguishesWorkflowsSharingAJobName",
 	)
 	return nil
 }

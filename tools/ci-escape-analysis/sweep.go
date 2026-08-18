@@ -550,12 +550,18 @@ func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Write
 		// Recurrence of a check whose incident was closed. Reopen and requeue
 		// rather than opening a duplicate: the point of a stable title is that
 		// one issue carries the whole history of this check going red.
-		if err := runGH("reopening retro", stderr, "issue", "reopen", fmt.Sprint(existing),
-			"--repo", repo); err != nil {
-			return err
-		}
+		// Label first, THEN reopen. The other order leaves a window where the
+		// issue is open but unqueued if the label edit fails: every later
+		// sweep takes the already-open branch and only comments, while
+		// dequeueIncident cannot see it, so the recurrence is permanently
+		// denied a fixer. A closed-but-queued issue is harmless by contrast —
+		// dequeueIncident only considers open ones.
 		if err := runGH("requeuing retro", stderr, "issue", "edit", fmt.Sprint(existing),
 			"--repo", repo, "--add-label", queuedLabel); err != nil {
+			return err
+		}
+		if err := runGH("reopening retro", stderr, "issue", "reopen", fmt.Sprint(existing),
+			"--repo", repo); err != nil {
 			return err
 		}
 		body := fmt.Sprintf("Red again at [`%s`](%s) after this incident was closed.\n\n%s", shortSHA(run.HeadSHA), run.URL, retro.Body())
@@ -625,7 +631,12 @@ func closeStaleRetros(repo string, live map[string]bool, stdout, stderr io.Write
 		// job this incident is about — CI's schedule-only `AGM Tagged Sweep`
 		// is the standing example — and closing on that would retire an
 		// incident no successful run ever addressed.
+		// Title is "main red — <workflow> / <check>"; the body carries the
+		// workflow too, and is the more reliable of the two.
 		check := strings.TrimPrefix(title, "main red — ")
+		if _, after, found := strings.Cut(check, " / "); found {
+			check = after
+		}
 		workflow := workflowFromBody(body)
 		if !checkRecovered(repo, workflow, check, stderr) {
 			fmt.Fprintf(stdout, "Keeping retro #%s open: no successful run of %q observed yet\n", number, check)
