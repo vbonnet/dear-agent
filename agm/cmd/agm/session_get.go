@@ -118,6 +118,7 @@ var getSessionFields = map[string]bool{
 	"lifecycle":         true,
 	"created_at":        true,
 	"updated_at":        true,
+	"final_output_at":   true,
 	"context_usage":     true,
 	"permission_mode":   true,
 	"harness_history":   true,

@@ -26,6 +26,11 @@ boundary that keeps consequential changes in front of a human.
 
 ## ALWAYS
 
+- Diagnose a non-merging or unclear PR with `pr-blockers <number>` BEFORE any
+  other investigation. It names the exact blocker and exact fix from GitHub's
+  merge state (mergeStateStatus, required checks, review threads including
+  outdated ones). Guessing at a merge blocker is a defect
+  (`.claude/skills/pr-merge-blockers`).
 - For routine changes, review and merge your own PR once checks are green and
   threads are resolved — `safe-merge --pr <number>`, via the normal gate.
 - Route every PR through Wayfinder V2 + `safe-pr`.

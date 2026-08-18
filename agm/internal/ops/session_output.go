@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 		return nil, err
 	}
 
-	status := computeSessionStatus(m, ctx.Tmux)
+	status, observeErr := computeSessionStatusObserved(m, ctx.Tmux)
 	result := &GetSessionOutputResult{
 		Operation: "get_session_output",
 		SessionID: m.SessionID,
@@ -67,9 +68,21 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 		State:     m.State,
 	}
 
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
+	// Canonical helper: the raw display name can normalize to a different
+	// target than the pane the session was created with (see CompletionWatcher).
+	tmuxName := session.TmuxSessionName(m)
+
+	// The backend was asked and could not answer, so nothing below can answer
+	// honestly either: status is "unknown", which skips the live capture, and
+	// the durable capture may not stand in for a pane that was never proven
+	// gone. Falling through would have reached the final AGM-005, telling a
+	// programmatic client its well-formed request is permanently invalid when
+	// the truth is a transient outage the same request will survive. An
+	// unobservable backend is 503 whether or not a durable capture exists.
+	if observeErr != nil {
+		return nil, ErrOutputUnavailable(tmuxName,
+			"the tmux backend could not be observed, so neither the live pane nor a durable capture can be served as the session's current output",
+			observeErr)
 	}
 
 	if done, err := captureLiveOutput(ctx, result, status, tmuxName, lines); done {
@@ -105,18 +118,17 @@ func GetSessionOutput(ctx *OpContext, req *GetSessionOutputRequest) (*GetSession
 // like a finished session. When only the plain checker exists (test fakes),
 // its answer is used as-is.
 func requireProvenPaneAbsence(ctx *OpContext, tmuxName string) error {
-	retry := ErrInvalidInput("identifier",
-		"Session liveness could not be confirmed, so the durable final capture (which describes an earlier completion) was not served; retry.")
+	reason := "session liveness could not be confirmed, so the durable final capture (which describes an earlier completion) was not served"
 	if strict, ok := ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
 		exists, err := strict.HasSessionStrict(requestContext(ctx), tmuxName)
 		if err != nil || exists {
-			return retry
+			return ErrOutputUnavailable(tmuxName, reason, err)
 		}
 		return nil
 	}
 	exists, err := ctx.Tmux.HasSession(tmuxName)
 	if err != nil || exists {
-		return retry
+		return ErrOutputUnavailable(tmuxName, reason, err)
 	}
 	return nil
 }
@@ -142,9 +154,25 @@ func captureLiveOutput(ctx *OpContext, result *GetSessionOutputResult, status, t
 	// Serve the durable capture only when the pane is PROVEN gone: a liveness
 	// probe failure (socket outage, permission) cannot distinguish a dead
 	// session from an unreachable one, and answering with an earlier task's
-	// capture would misrepresent the current one.
-	if stillExists, existsErr := ctx.Tmux.HasSession(tmuxName); existsErr != nil || stillExists {
-		return false, ErrInvalidInput("identifier", "Live output capture failed for a running session; retry. (A durable final capture, if any, describes an earlier completion, not the current task.)")
+	// capture would misrepresent the current one. Prefer the strict checker
+	// for the same reason requireProvenPaneAbsence does: the plain HasSession
+	// collapses socket/permission errors into (false, nil), which would
+	// misclassify a backend outage as a proven-absent pane.
+	var stillExists bool
+	var existsErr error
+	if strict, ok := ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
+		stillExists, existsErr = strict.HasSessionStrict(requestContext(ctx), tmuxName)
+	} else {
+		stillExists, existsErr = ctx.Tmux.HasSession(tmuxName)
+	}
+	if existsErr != nil || stillExists {
+		// Carry the capture failure, joined with the probe failure when both
+		// exist. Passing existsErr alone meant that a successful liveness
+		// probe on a live pane produced an AGM-017 unwrapping to nil, so
+		// in-process callers could not identify what actually failed (OPS-92).
+		return false, ErrOutputUnavailable(tmuxName,
+			"live capture failed for a running session (a durable final capture, if any, describes an earlier completion, not the current task)",
+			errors.Join(captureErr, existsErr))
 	}
 	return false, nil
 }
