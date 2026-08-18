@@ -56,11 +56,17 @@ var DefaultAbandonLabels = []string{"abandoned", "wontfix"}
 // absent here is not enforced: Classify still returns StateGreen and hands the
 // PR to safe-merge, so the human-only boundary exists only on paper.
 var DefaultSensitiveGlobs = []string{
-	// Money.
+	// Money: the budget, quota, and rate-limit controls that decide what the
+	// fleet is allowed to spend. Named against real paths in this tree — a
+	// glob that matches nothing enforces nothing.
 	"**/billing/**",
 	"**/payment/**",
 	"**/payments/**",
+	"**/budget/**",
 	"**/quota/**",
+	"**/quotaparity/**",
+	"**/ratelimiter*.go",
+	"**/budget_breaker*.go",
 
 	// Security.
 	"**/auth/**",
@@ -72,12 +78,21 @@ var DefaultSensitiveGlobs = []string{
 	"**/*.tf",
 	".github/rulesets/**",
 
-	// Agent governance: the documents that define agent behavior.
+	// Agent governance: every harness instruction entrypoint, not just the
+	// one this repository's own agent reads. Each of these is loaded as
+	// standing instructions by some harness, so a change to any of them
+	// redefines agent behavior.
 	"AGENTS.md",
 	"**/AGENTS.md",
 	"CLAUDE.md",
 	"**/CLAUDE.md",
+	"AGY.md",
+	"CODEX.md",
+	"GEMINI.md",
+	"CONTEXT.md",
 	"docs/policies/**",
+	".claude/**",
+	".agents/**",
 
 	// Agent control surfaces: the machinery that decides what an agent may
 	// merge, push, or be told about.
@@ -90,6 +105,8 @@ var DefaultSensitiveGlobs = []string{
 	"cmd/safe-rebase/**",
 	"**/notification/**",
 	"**/notifications/**",
+	"**/completion_watcher*.go",
+	"**/alert_router*.go",
 }
 
 // DefaultMaxAgentAttempts caps agent code-fix attempts per PR against the same
@@ -197,6 +214,10 @@ func (p Policy) policyBlock(pr PR) (Classification, bool) {
 		if pr.hasLabel(l) {
 			return Classification{StateBlockedPolicy, "labeled " + l + " (human review required)"}, true
 		}
+	}
+	if pr.ChangedFilesTruncated {
+		return Classification{StateBlockedPolicy,
+			"changed-file list was truncated by the provider, so sensitive paths cannot be ruled out (human review required)"}, true
 	}
 	for _, f := range pr.ChangedFiles {
 		for _, g := range p.SensitiveGlobs {
