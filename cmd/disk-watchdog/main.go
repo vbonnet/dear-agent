@@ -34,6 +34,24 @@
 //	disk-watchdog --inode-critical 0.92  # override the inode CRITICAL ceiling
 //	disk-watchdog --brake /path/brake.json  # admission-brake location
 //	disk-watchdog --brake-ttl 45m        # how long an engaged brake blocks spawns
+//	disk-watchdog --gc-max-age 2h        # reaper-staleness window (0 disables)
+//	disk-watchdog --gc-log /path/gc.jsonl   # sandbox-GC log to read liveness from
+//
+// # Reaper liveness
+//
+// Free space is a lagging indicator of a leaked-sandbox problem: by the time it
+// crosses the 20 GiB floor, hundreds of GB have already accumulated. So the
+// watchdog also alarms when the hourly sandbox GC has stopped completing sweeps
+// (--gc-max-age, default 6h), independently of how much space is free.
+//
+// This generalises ce-93lw.18. That fix made *this* watchdog's failed
+// remediation consume-able by latching the admission brake. The same reasoning
+// was never applied to the sandbox GC, so when that job started exiting
+// non-zero on 2026-07-05 it wrote one line an hour to a log with no reader —
+// for a month — while ~/.agm/sandboxes grew to 239 GB across 119 dirs and every
+// tick here still printed "Status: OK". A stale reaper alarms and exits 1 but
+// deliberately does not latch the brake: halting every spawn because a GC is
+// behind would be a worse outage than the leak it warns about.
 //
 // Beyond alarming and remediating, the watchdog drives the cross-process
 // admission brake (pkg/vroom/admission): when its own remediation fails, or
@@ -56,6 +74,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
@@ -90,6 +109,8 @@ type config struct {
 	trailPath  string
 	brakePath  string
 	brakeTTL   time.Duration
+	gcLogPath  string
+	gcMaxAge   time.Duration
 	thresholds supervisor.DiskAlertThresholds
 
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
@@ -111,6 +132,10 @@ func run(args []string, out io.Writer) (int, error) {
 		"admission-brake path; engaged when remediation fails, released on a healthy tick")
 	fs.DurationVar(&cfg.brakeTTL, "brake-ttl", admission.DefaultTTL,
 		"how long an engaged admission brake blocks spawns before expiring on its own")
+	fs.StringVar(&cfg.gcLogPath, "gc-log", defaultGCLogPath(),
+		"sandbox-GC JSONL log consulted for reaper liveness; empty disables the check")
+	fs.DurationVar(&cfg.gcMaxAge, "gc-max-age", defaultGCMaxAge,
+		"alarm when the sandbox GC has not completed a sweep within this window (0 disables)")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -124,6 +149,13 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 	cfg.thresholds.FreeWarnBytes = uint64(freeWarnGB * supervisor.GiB)
 	cfg.thresholds.FreeCriticalBytes = uint64(freeCriticalGB * supervisor.GiB)
+	// Only zero disables the liveness check (DW-20). A negative duration parses
+	// happily, and silently disabling on it would let one typo in a launchd
+	// plist leave a dead reaper unmonitored while every tick still reports OK —
+	// the monitoring gap this watchdog exists to close. Refuse it out loud.
+	if cfg.gcMaxAge < 0 {
+		return 2, fmt.Errorf("invalid -gc-max-age %s: the reaper-liveness window cannot be negative (use 0 to disable the check)", cfg.gcMaxAge)
+	}
 
 	snap, err := takeSnapshot(cfg.path)
 	if err != nil {
@@ -136,10 +168,22 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	level, reasons := cfg.thresholds.Classify(snap)
-	breached := level != supervisor.PressureNone
+	// Disk pressure alone drives remediation and the admission brake. The
+	// worktree sweep shells out to gh per worktree and costs minutes, so it must
+	// stay tied to actual space pressure — a stale reaper on a host with 200 GiB
+	// free is a bug to report, not a reason to re-sweep every five minutes.
+	diskBreached := level != supervisor.PressureNone
+
+	// Read reaper liveness BEFORE remediating. Remediation runs the sandbox
+	// sweep itself, which appends a completion record; evaluating afterwards
+	// would grade the schedule on a heartbeat this tick just produced. The
+	// producer tag (gcSelfSource) keeps later ticks from counting it too, and
+	// this ordering keeps the current tick honest even against an older `agm`
+	// that does not stamp the tag.
+	gc := checkGCHealth(cfg, time.Now())
 
 	var remediation *sweepResult
-	if breached && !cfg.dryRun {
+	if diskBreached && !cfg.dryRun {
 		r, rerr := sweepMergedWorktrees(context.Background(), cfg)
 		if rerr != nil {
 			// Remediation failure must not hide the alarm; record it and keep going.
@@ -148,7 +192,21 @@ func run(args []string, out io.Writer) (int, error) {
 		remediation = r
 	}
 
-	updateAdmissionBrake(cfg, breached, remediation)
+	updateAdmissionBrake(cfg, diskBreached, remediation)
+
+	// A dead reaper is an alarm in its own right, at whatever free space happens
+	// to be. Folding it into the same level/reasons the disk thresholds produce
+	// routes it through the existing trail and exit-code paths instead of adding
+	// a parallel notification channel to keep in sync. It deliberately does not
+	// touch the brake: blocking every spawn because a GC is behind would be a
+	// worse outage than the leak it warns about.
+	if gc != nil && gc.Stale {
+		if level == supervisor.PressureNone {
+			level = supervisor.PressureWarn
+		}
+		reasons = append(reasons, gc.Reason)
+	}
+	breached := level != supervisor.PressureNone
 
 	// Logging the alarm to the trail is best-effort: a trail write failure is a
 	// warning, never a reason to suppress the breach exit code — and on a truly
@@ -156,7 +214,7 @@ func run(args []string, out io.Writer) (int, error) {
 	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
 		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
-		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation, gc)
 		logCancel()
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
@@ -164,11 +222,11 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	if cfg.jsonOutput {
-		if err := emitJSON(out, snap, level, reasons, remediation, cfg); err != nil {
+		if err := emitJSON(out, snap, level, reasons, remediation, cfg, gc); err != nil {
 			return 2, err
 		}
 	} else {
-		emitReport(out, snap, level, reasons, remediation, cfg)
+		emitReport(out, snap, level, reasons, remediation, cfg, gc)
 	}
 
 	if breached {
@@ -195,6 +253,19 @@ func defaultTrailPath() string {
 	return filepath.Join(home, ".agm", "vroom", "trail.jsonl")
 }
 
+// defaultGCMaxAge tolerates several missed hourly sweeps before alarming, so a
+// transient Dolt restart does not page, but a genuinely dead reaper surfaces
+// the same day rather than a month later.
+const defaultGCMaxAge = 6 * time.Hour
+
+func defaultGCLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".agm/logs/gc.jsonl"
+	}
+	return filepath.Join(home, ".agm", "logs", "gc.jsonl")
+}
+
 // sweepResult is the parsed JSON contract of `agm worktree sweep -o json`
 // (a subset; field names mirror agm/internal/ops.SweepResult).
 type sweepResult struct {
@@ -210,6 +281,49 @@ type sandboxGCSummary struct {
 	Kept    int    `json:"kept"`
 	Errors  int    `json:"errors"`
 	Error   string `json:"error,omitempty"`
+	// DryRun and ReapRefused are how a refused reap reaches this consumer.
+	// This watchdog always passes --reap, so `dry_run: true` in the reply means
+	// the sweep declined to delete anything (today: a partial live-session
+	// inventory). In that state `Reaped` counts would-reaps, not deletions —
+	// reading it as reclaimed space would report remediation that never
+	// happened and leave the admission brake open on a host that is still
+	// filling up. ReapRefused carries the reason from a sweep new enough to
+	// state it; DryRun is the signal from one that is not.
+	DryRun      bool   `json:"dry_run,omitempty"`
+	ReapRefused string `json:"reap_refused,omitempty"`
+}
+
+// refusalError renders a refused reap as a remediation failure, or "" when the
+// sweep did what it was asked. A refusal is not an ordinary outcome here: the
+// watchdog only invokes the sweep under disk pressure, so a tick that deletes
+// nothing has not remediated, and saying so is what latches the brake.
+func (s *sandboxGCSummary) refusalError() string {
+	if s == nil || s.Error != "" {
+		return ""
+	}
+	switch {
+	case s.ReapRefused != "":
+		return "requested reap was refused: " + s.ReapRefused
+	case s.DryRun:
+		return "requested reap was downgraded to a scan; no sandbox was deleted " +
+			"(reaped=" + strconv.Itoa(s.Reaped) + " counts would-reaps)"
+	default:
+		return ""
+	}
+}
+
+// remediationEnv is the environment overlay for every command this watchdog
+// shells out to.
+//
+// GIT_TERMINAL_PROMPT: the sweep shells out to git/gh; with no TTY a credential
+// prompt would hang the launchd job until the timeout.
+//
+// AGM_GC_SOURCE: the sandbox sweep stamps this on every record it writes, so
+// the liveness check below can tell the hourly schedule's heartbeats from the
+// ones this watchdog's own remediation just produced. Without it, remediation
+// forges proof of life for the very schedule it is meant to be watching.
+func remediationEnv() []string {
+	return []string{"GIT_TERMINAL_PROMPT=0", "AGM_GC_SOURCE=" + gcSelfSource}
 }
 
 // sweepMergedWorktrees delegates remediation to the canonical worktree sweep,
@@ -225,9 +339,7 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 	if run == nil {
 		run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			cmd := exec.CommandContext(ctx, name, args...)
-			// The sweep shells out to git/gh; with no TTY a credential prompt
-			// would hang the launchd job until the timeout, so forbid prompts.
-			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+			cmd.Env = append(os.Environ(), remediationEnv()...)
 			// Capture stdout only; the sweep logs progress to stderr, which we
 			// intentionally drop so JSON parsing sees clean output.
 			return cmd.Output()
@@ -236,10 +348,15 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 
 	result := &sweepResult{}
 	gcOut, gcErr := run(ctx, cfg.agmBin, "sandbox", "gc", "--reap", "--json")
-	if gcErr != nil {
+	switch {
+	case gcErr != nil:
 		result.SandboxGC = &sandboxGCSummary{Error: gcErr.Error()}
-	} else if err := json.Unmarshal(gcOut, &result.SandboxGC); err != nil {
-		result.SandboxGC = &sandboxGCSummary{Error: fmt.Sprintf("parse sandbox gc output: %v", err)}
+	default:
+		if err := json.Unmarshal(gcOut, &result.SandboxGC); err != nil {
+			result.SandboxGC = &sandboxGCSummary{Error: fmt.Sprintf("parse sandbox gc output: %v", err)}
+		} else if refusal := result.SandboxGC.refusalError(); refusal != "" {
+			result.SandboxGC.Error = refusal
+		}
 	}
 
 	out, err := run(ctx, cfg.agmBin, "worktree", "sweep", "--execute", "-o", "json")
@@ -337,7 +454,7 @@ func applyBrake(cfg config, engage bool, reason string) {
 
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.
 func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult) error {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, gc *gcHealth) error {
 	trail, err := decisiontrail.OpenJSONL(cfg.trailPath)
 	if err != nil {
 		return err
@@ -376,6 +493,17 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 		}
 		payload["remediation"] = remediation
 	}
+	if gc != nil {
+		sandboxGC := map[string]any{"stale": gc.Stale}
+		if !gc.LastSuccess.IsZero() {
+			sandboxGC["last_success"] = gc.LastSuccess.UTC().Format(time.RFC3339)
+			sandboxGC["age_seconds"] = int64(gc.Age.Seconds())
+		}
+		if gc.LastError != "" {
+			sandboxGC["last_error"] = gc.LastError
+		}
+		payload["sandbox_gc"] = sandboxGC
+	}
 
 	return trail.Append(ctx, decisiontrail.Record{
 		Role:    "watchdog",
@@ -385,7 +513,18 @@ func logAlarm(ctx context.Context, cfg config, snap supervisor.ResourceSnapshot,
 }
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config) error {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth) error {
+	type gcReport struct {
+		Stale       bool   `json:"stale"`
+		LastSuccess string `json:"last_success,omitempty"`
+		AgeSeconds  int64  `json:"age_seconds,omitempty"`
+		LastError   string `json:"last_error,omitempty"`
+		// Undetermined distinguishes "the scan could not tell" from "no sweep
+		// was ever recorded" for a machine reader, the same way Reason does
+		// for a human one.
+		Undetermined bool   `json:"undetermined,omitempty"`
+		Reason       string `json:"reason,omitempty"`
+	}
 	type report struct {
 		Level             string                         `json:"level"`
 		DiskFreeBytes     uint64                         `json:"disk_free_bytes"`
@@ -395,7 +534,16 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Thresholds        supervisor.DiskAlertThresholds `json:"thresholds"`
 		Reasons           []string                       `json:"reasons"`
 		Remediation       *sweepResult                   `json:"remediation,omitempty"`
+		SandboxGC         *gcReport                      `json:"sandbox_gc,omitempty"`
 		OK                bool                           `json:"ok"`
+	}
+	var gcr *gcReport
+	if gc != nil {
+		gcr = &gcReport{Stale: gc.Stale, LastError: gc.LastError, Undetermined: gc.Indeterminate, Reason: gc.Reason}
+		if !gc.LastSuccess.IsZero() {
+			gcr.LastSuccess = gc.LastSuccess.UTC().Format(time.RFC3339)
+			gcr.AgeSeconds = int64(gc.Age.Seconds())
+		}
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
@@ -408,12 +556,13 @@ func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot,
 		Thresholds:        cfg.thresholds,
 		Reasons:           reasons,
 		Remediation:       rem,
+		SandboxGC:         gcr,
 		OK:                level == supervisor.PressureNone,
 	})
 }
 
 func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
-	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config) {
+	level supervisor.PressureLevel, reasons []string, rem *sweepResult, cfg config, gc *gcHealth) {
 	fmt.Fprintln(out, "disk-watchdog report")
 	fmt.Fprintf(out, "  path        : %s\n", cfg.path)
 	fmt.Fprintf(out, "  disk free   : %.1f GiB  [warn < %.0f GiB, critical < %.0f GiB]\n",
@@ -423,6 +572,21 @@ func emitReport(out io.Writer, snap supervisor.ResourceSnapshot,
 	fmt.Fprintf(out, "  disk used   : %.1f%%\n", snap.DiskUsedFraction*100)
 	fmt.Fprintf(out, "  inode usage : %.1f%%  [warn > %.0f%%, critical > %.0f%%]\n",
 		snap.InodeUsedFraction*100, cfg.thresholds.InodeWarn*100, cfg.thresholds.InodeCritical*100)
+	if gc != nil {
+		switch {
+		case gc.Indeterminate:
+			fmt.Fprintf(out, "  sandbox GC  : UNDETERMINED (log too large to scan back)  [max age %s]\n", cfg.gcMaxAge)
+		case gc.LastSuccess.IsZero():
+			fmt.Fprintf(out, "  sandbox GC  : NEVER completed a sweep  [max age %s]\n", cfg.gcMaxAge)
+		default:
+			state := "ok"
+			if gc.Stale {
+				state = "STALE"
+			}
+			fmt.Fprintf(out, "  sandbox GC  : %s, last sweep %s ago  [max age %s]\n",
+				state, gc.Age.Round(time.Minute), cfg.gcMaxAge)
+		}
+	}
 	fmt.Fprintln(out)
 
 	if level == supervisor.PressureNone {

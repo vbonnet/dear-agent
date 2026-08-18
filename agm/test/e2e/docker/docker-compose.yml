@@ -9,12 +9,21 @@ services:
       - SESSIONS_DIR=/home/testuser/sessions
       - AGM_TEST_MODE=true
       - HOME=/home/testuser
+      # The reaper resolves its target through the lifecycle store, so every
+      # process in the container — agm, agm-reaper, and the fixture seeder —
+      # must agree on one isolated database.
+      - AGM_DB_PATH=/home/testuser/agm.db
+      # tmux socket the tests create their panes on. Without this the reaper
+      # would look on the default $HOME/.agm/agm.sock and never find the pane.
+      - AGM_TMUX_SOCKET=/tmp/agm.sock
     volumes:
       # Mount test scripts
       - ./scripts:/home/testuser/tests:ro
       # Mount built binaries (will be built before docker-compose up)
       - ../../../../bin/agm:/home/testuser/bin/agm:ro
       - ../../../../bin/agm-reaper:/home/testuser/bin/agm-reaper:ro
+      - ../../../../bin/seed-session:/home/testuser/bin/seed-session:ro
+      - ../../../../bin/claude:/home/testuser/bin/claude:ro
       # Mount test results output
       - ./test-results:/home/testuser/test-results:rw
     working_dir: /home/testuser
