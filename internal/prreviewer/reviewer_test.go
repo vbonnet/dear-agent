@@ -81,6 +81,8 @@ func viewResponse(sha string) string {
 	return fmt.Sprintf(`{"headRefOid":%q}`, sha)
 }
 
+var testGeminiCmd = []string{"agy", "run", "-"}
+
 func fixedClock() func() time.Time {
 	return func() time.Time { return time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC) }
 }
@@ -99,6 +101,7 @@ func TestRunOnceReviewsOnlyNewHeadAndPostsComment(t *testing.T) {
 	dir := t.TempDir()
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
 		Repos:     []string{"owner/repo"},
 		StatePath: dir + "/state.json",
 		Now:       fixedClock(),
@@ -132,7 +135,7 @@ func TestRunOnceReviewsOnlyNewHeadAndPostsComment(t *testing.T) {
 	}
 
 	r.calls = nil
-	results, err = RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: dir + "/state.json"}, r, &out)
+	results, err = RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: dir + "/state.json"}, r, &out)
 	if err != nil {
 		t.Fatalf("second RunOnce() error = %v", err)
 	}
@@ -158,6 +161,7 @@ func TestRunOnceToleratesGeminiFailureWithoutLeakingProviderError(t *testing.T) 
 	}
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
 		Repos:     []string{"owner/repo"},
 		StatePath: t.TempDir() + "/state.json",
 		Now:       fixedClock(),
@@ -205,7 +209,7 @@ func TestRunOnceDryRunDoesNotPostOrPersist(t *testing.T) {
 	}
 	state := filepath.Join(t.TempDir(), "state.json")
 	var out strings.Builder
-	_, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, DryRun: true, StatePath: state}, r, &out)
+	_, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, DryRun: true, StatePath: state}, r, &out)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -228,7 +232,7 @@ func TestRunOnceSkipsDraftPullRequests(t *testing.T) {
 		errors: map[string]error{},
 	}
 	var out strings.Builder
-	results, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: t.TempDir() + "/state.json"}, r, &out)
+	results, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: t.TempDir() + "/state.json"}, r, &out)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -253,7 +257,7 @@ func TestRunOnceSkipsWhenHeadMovedDuringReview(t *testing.T) {
 	}
 	state := filepath.Join(t.TempDir(), "state.json")
 	var out strings.Builder
-	results, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: state}, r, &out)
+	results, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -295,7 +299,7 @@ func TestRunOnceDoesNotPostWhenPrimaryProviderFails(t *testing.T) {
 		errors: map[string]error{"codex exec -": fmt.Errorf("codex unavailable")},
 	}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
 		t.Fatal("RunOnce() error = nil, want primary provider error")
 	}
 	if len(r.posted()) != 0 {
@@ -320,6 +324,7 @@ func TestRunOncePersistsPostedReviewsWhenALaterRepoFails(t *testing.T) {
 	}
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
 		Repos:     []string{"owner/first", "owner/second"},
 		StatePath: state,
 	}, r, &out)
@@ -355,7 +360,7 @@ func TestRunOncePersistsStateWithOwnerOnlyPermissions(t *testing.T) {
 	}
 	state := filepath.Join(t.TempDir(), "nested", "state.json")
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err != nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	info, err := os.Stat(state)
@@ -404,7 +409,7 @@ func TestListPullRequestsExcludesDraftsInTheQuery(t *testing.T) {
 		errors:    map[string]error{},
 	}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if len(r.calls) != 1 || !containsArg(r.calls[0].args, "--draft=false") {
@@ -423,7 +428,7 @@ func TestRunOnceStopsRetryingDeniedSecondaryProvider(t *testing.T) {
 		errors: map[string]error{"agy run -": fmt.Errorf("agy: exit status 1: 403 Forbidden")},
 	}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, GeminiTries: 5, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, GeminiTries: 5, StatePath: filepath.Join(t.TempDir(), "state.json")}, r, &out); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	var geminiCalls int
@@ -515,7 +520,7 @@ func TestRunOnceRefusesToRunWhileAnotherRunHoldsState(t *testing.T) {
 	defer release()
 	r := &fakeRunner{responses: map[string]string{}, errors: map[string]error{}}
 	var out strings.Builder
-	if _, err := RunOnce(context.Background(), Config{Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
+	if _, err := RunOnce(context.Background(), Config{GeminiCmd: testGeminiCmd, Repos: []string{"owner/repo"}, StatePath: state}, r, &out); err == nil {
 		t.Fatal("RunOnce() error = nil, want a held-lock error")
 	}
 	if len(r.calls) != 0 {
@@ -536,6 +541,7 @@ func TestRunOnceContinuesToLaterTargetsAfterAFailure(t *testing.T) {
 	}
 	var out strings.Builder
 	results, err := RunOnce(context.Background(), Config{
+		GeminiCmd: testGeminiCmd,
 		Repos:     []string{"owner/first", "owner/second"},
 		StatePath: filepath.Join(t.TempDir(), "state.json"),
 	}, r, &out)
@@ -570,6 +576,69 @@ func TestRunCommandReportsOperatorCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("runCommand() error = %v, want it to report context.Canceled", err)
 	}
+}
+
+func TestDefaultSecondaryProviderUsesAgyPrintMode(t *testing.T) {
+	cfg := Config{Repos: []string{"owner/repo"}, StatePath: filepath.Join(t.TempDir(), "state.json")}
+	if err := cfg.setDefaults(); err != nil {
+		t.Fatalf("setDefaults() error = %v", err)
+	}
+	want := []string{"agy", "--print", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", PromptPlaceholder}
+	if !slices.Equal(cfg.GeminiCmd, want) {
+		t.Fatalf("default GeminiCmd = %#v, want %#v", cfg.GeminiCmd, want)
+	}
+}
+
+func TestApplyPromptSubstitutesOrFallsBackToStdin(t *testing.T) {
+	argv, applied := applyPrompt([]string{"agy", "-p", PromptPlaceholder}, "review this")
+	if !applied || !slices.Equal(argv, []string{"agy", "-p", "review this"}) {
+		t.Fatalf("applyPrompt() = %#v, %v; want the prompt substituted", argv, applied)
+	}
+	argv, applied = applyPrompt([]string{"codex", "exec", "-"}, "review this")
+	if applied || !slices.Equal(argv, []string{"codex", "exec", "-"}) {
+		t.Fatalf("applyPrompt() = %#v, %v; want the argv untouched", argv, applied)
+	}
+}
+
+func TestRunProviderSendsPromptWhereTheCommandExpectsIt(t *testing.T) {
+	r := &fakeRunner{responses: map[string]string{"agy -p review this": "Gemini ok", "codex exec -": "Codex ok"}, errors: map[string]error{}}
+	if _, err := runProvider(context.Background(), r, []string{"agy", "-p", PromptPlaceholder}, "review this", time.Minute); err != nil {
+		t.Fatalf("runProvider() error = %v", err)
+	}
+	if r.calls[0].stdin != "" {
+		t.Fatalf("an argv prompt must not also go to stdin: %#v", r.calls[0])
+	}
+	if _, err := runProvider(context.Background(), r, []string{"codex", "exec", "-"}, "review this", time.Minute); err != nil {
+		t.Fatalf("runProvider() error = %v", err)
+	}
+	if r.calls[1].stdin != "review this" {
+		t.Fatalf("a stdin provider must receive the prompt on stdin: %#v", r.calls[1])
+	}
+}
+
+func TestLockHeartbeatKeepsALongPassClaimAlive(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "state.json")
+	release, err := lockState(state, 200*time.Millisecond, time.Now)
+	if err != nil {
+		t.Fatalf("lockState() error = %v", err)
+	}
+	defer release()
+	first, err := os.Stat(state + ".lock")
+	if err != nil {
+		t.Fatalf("stat lock: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		info, err := os.Stat(state + ".lock")
+		if err != nil {
+			t.Fatalf("stat lock: %v", err)
+		}
+		if info.ModTime().After(first.ModTime()) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("lock timestamp was never refreshed by the heartbeat")
 }
 
 func TestLoadStateTreatsMissingFileAsEmpty(t *testing.T) {

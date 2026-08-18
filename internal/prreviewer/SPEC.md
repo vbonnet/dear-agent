@@ -67,6 +67,20 @@ loop control — and must not restate the requirements below. The split mirrors
 
 **PRV-23** When an external command is terminated by pass cancellation, the system shall report the cancellation alongside the command failure.
 
+**PRV-24** When a provider command declares the prompt placeholder, the system shall substitute the prompt into its argument vector instead of sending it on standard input.
+
+**PRV-25** When a state lock is held, the system shall refresh its timestamp for the life of the pass so a long pass is not treated as stale.
+
+## Residual Risk
+
+`IsolatedRunner` removes the credential variables listed in the implementation
+and moves the provider out of the checkout, but a review provider still runs as
+the operator with the operator's filesystem access and its own provider
+credentials. A provider that obeys injected instructions could therefore still
+read operator-readable files. Closing that gap requires an OS-level sandbox for
+provider execution, which is out of scope for this contract and is not claimed
+by any requirement above.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`

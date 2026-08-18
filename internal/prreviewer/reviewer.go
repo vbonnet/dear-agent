@@ -92,23 +92,30 @@ func (r IsolatedRunner) Run(ctx context.Context, name string, args []string, std
 	return runCommand(ctx, name, args, stdin, dir, providerEnv(os.Environ()))
 }
 
-// gitHubCredentialVars are environment variables that grant GitHub access and
-// must never reach a review provider.
-var gitHubCredentialVars = []string{
+// scrubbedProviderVars are environment variables that carry credentials the
+// providers do not need. Providers authenticate from their own configuration,
+// so removing these keeps an unrelated token out of a process that reads
+// contributor-controlled text. Kept in line with the scrub list used by the
+// canonical AGY launch in agm/cmd/agm/gemini_research.go.
+var scrubbedProviderVars = []string{
 	"GH_TOKEN",
 	"GITHUB_TOKEN",
 	"GH_ENTERPRISE_TOKEN",
 	"GITHUB_ENTERPRISE_TOKEN",
-	"GH_CONFIG_DIR",
 	"GITHUB_API_TOKEN",
+	"GH_CONFIG_DIR",
+	"ANTHROPIC_API_KEY",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"AWS_SECRET_ACCESS_KEY",
+	"AWS_SESSION_TOKEN",
 }
 
-// providerEnv removes the GitHub credentials from an environment listing.
+// providerEnv removes the scrubbed credentials from an environment listing.
 func providerEnv(environ []string) []string {
 	kept := make([]string, 0, len(environ))
 	for _, entry := range environ {
 		name, _, ok := strings.Cut(entry, "=")
-		if ok && slices.Contains(gitHubCredentialVars, name) {
+		if ok && slices.Contains(scrubbedProviderVars, name) {
 			continue
 		}
 		kept = append(kept, entry)
@@ -244,7 +251,9 @@ func (cfg *Config) setDefaults() error {
 		cfg.CodexCmd = []string{"codex", "exec", "-"}
 	}
 	if len(cfg.GeminiCmd) == 0 {
-		cfg.GeminiCmd = []string{"agy", "run", "-"}
+		// The canonical one-shot AGY invocation in agm/cmd/agm/gemini_research.go
+		// is print mode with the prompt in argv; agy has no stdin prompt form.
+		cfg.GeminiCmd = []string{"agy", "--print", "--dangerously-skip-permissions", "--disable-slash-commands", "-p", PromptPlaceholder}
 	}
 	if cfg.GeminiTries <= 0 {
 		cfg.GeminiTries = 2
@@ -357,6 +366,26 @@ func currentHeadSHA(ctx context.Context, runner Runner, repo string, number int)
 	return view.HeadRefOID, nil
 }
 
+// PromptPlaceholder marks the argument a provider command wants the prompt
+// substituted into. A command without it receives the prompt on stdin.
+const PromptPlaceholder = "{prompt}"
+
+// applyPrompt substitutes the prompt into argv and reports whether it did, so
+// providers that only accept an argument prompt are still driven correctly.
+func applyPrompt(cmd []string, prompt string) ([]string, bool) {
+	applied := false
+	argv := make([]string, len(cmd))
+	for i, arg := range cmd {
+		if strings.Contains(arg, PromptPlaceholder) {
+			argv[i] = strings.ReplaceAll(arg, PromptPlaceholder, prompt)
+			applied = true
+			continue
+		}
+		argv[i] = arg
+	}
+	return argv, applied
+}
+
 func runProvider(ctx context.Context, runner Runner, cmd []string, prompt string, timeout time.Duration) (string, error) {
 	if len(cmd) == 0 {
 		return "", errors.New("provider command is empty")
@@ -366,7 +395,13 @@ func runProvider(ctx context.Context, runner Runner, cmd []string, prompt string
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	out, err := runner.Run(ctx, cmd[0], cmd[1:], prompt)
+	argv, applied := applyPrompt(cmd, prompt)
+	stdin := prompt
+	if applied {
+		stdin = ""
+	}
+	cmd = argv
+	out, err := runner.Run(ctx, cmd[0], cmd[1:], stdin)
 	if err != nil {
 		return "", err
 	}
@@ -500,7 +535,14 @@ func lockState(path string, staleAfter time.Duration, now func() time.Time) (fun
 				os.Remove(lockPath)
 				return nil, fmt.Errorf("write state lock: %w", err)
 			}
-			return func() { os.Remove(lockPath) }, nil
+			// A pass longer than the staleness window would otherwise have its
+			// live lock reclaimed by another run, so the lease is heartbeaten.
+			stop := make(chan struct{})
+			go heartbeatLock(lockPath, staleAfter/4, stop)
+			return func() {
+				close(stop)
+				os.Remove(lockPath)
+			}, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("create state lock: %w", err)
@@ -520,6 +562,26 @@ func lockState(path string, staleAfter time.Duration, now func() time.Time) (fun
 		}
 	}
 	return nil, fmt.Errorf("could not claim state lock %s", lockPath)
+}
+
+// heartbeatLock refreshes the lock timestamp until the pass releases it.
+func heartbeatLock(lockPath string, interval time.Duration, stop <-chan struct{}) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			if err := os.Chtimes(lockPath, now, now); err != nil {
+				return
+			}
+		}
+	}
 }
 
 func loadState(path string) (state, error) {
