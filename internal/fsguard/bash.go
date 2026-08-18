@@ -77,6 +77,14 @@ const maxShellDepth = 8
 // Python shlex's punctuation_chars default set.
 const punctuation = ";|&<>()"
 
+// shellOperators are the operator tokens recognized inside a run of punctuation
+// characters, ordered longest-first so maximal munch splits a run correctly.
+var shellOperators = []string{
+	"&>>", ">>&", "<<<",
+	"&&", "||", ";;", ">>", "<<", "&>", ">&", "|&",
+	";", "|", "&", "(", ")", "<", ">",
+}
+
 // tokenize splits a shell command into tokens, keeping operator runs as their
 // own tokens and preserving statement boundaries across newlines (each
 // physical line is tokenized independently with an explicit ";" inserted
@@ -138,13 +146,44 @@ func tokenizeLine(line string) (tokens []string, ok bool) {
 			} else {
 				i++
 			}
+		case c == '#' && !haveWord:
+			// A '#' that opens a word starts a comment: Bash discards the rest
+			// of the line, so those words must not become operands (otherwise
+			// `cp a ~/src/f # backup` would read `backup` as the destination).
+			// Inside a word (`file#1`) it is an ordinary character.
+			i = len(runes)
 		case strings.ContainsRune(punctuation, c):
+			// A digit word glued straight onto a redirection operator is that
+			// redirection's file descriptor (`2>&1`), not an operand. Keeping
+			// the two in one token preserves the adjacency the shell relies on,
+			// so `rm 2 > log` — where `2` really is a file operand — stays
+			// distinguishable after tokenization.
+			fd := ""
+			if haveWord && (c == '>' || c == '<') && isAllDigits(cur.String()) {
+				fd = cur.String()
+				cur.Reset()
+				haveWord = false
+			}
 			flush()
 			j := i
 			for j < len(runes) && strings.ContainsRune(punctuation, runes[j]) {
 				j++
 			}
-			tokens = append(tokens, string(runes[i:j]))
+			// Split the run into individual operators by maximal munch: a run
+			// like `);` is two operators, and emitting it whole would hide the
+			// `)` from subshell tracking and the `;` from segment splitting.
+			for run := string(runes[i:j]); run != ""; {
+				op := run
+				for _, cand := range shellOperators {
+					if strings.HasPrefix(run, cand) {
+						op = cand
+						break
+					}
+				}
+				tokens = append(tokens, fd+op)
+				fd = "" // the descriptor belongs to the first operator only
+				run = run[len(op):]
+			}
 			i = j
 		default:
 			cur.WriteRune(c)
@@ -179,8 +218,20 @@ func scanQuote(runes []rune, start int) (content string, next int, ok bool) {
 	return b.String(), j + 1, true
 }
 
+// isRedirOp reports whether tok is a redirection operator, allowing the
+// file-descriptor prefix the tokenizer keeps glued on (`2>&1` -> `2>&`).
+func isRedirOp(tok string) bool {
+	i := 0
+	for i < len(tok) && tok[i] >= '0' && tok[i] <= '9' {
+		i++
+	}
+	return redirOps[tok[i:]]
+}
+
 // splitSegments groups tokens into simple-command segments, dropping the
-// control operators that separate them.
+// control operators that separate them. Subshell parentheses survive as
+// single-token marker segments so checkSegments can restore the tracked
+// working directory on `)` — a `cd` inside `( … )` does not outlive it.
 func splitSegments(tokens []string) [][]string {
 	var segments [][]string
 	var current []string
@@ -189,6 +240,9 @@ func splitSegments(tokens []string) [][]string {
 			if len(current) > 0 {
 				segments = append(segments, current)
 				current = nil
+			}
+			if tok == "(" || tok == ")" {
+				segments = append(segments, []string{tok})
 			}
 			continue
 		}
@@ -248,6 +302,46 @@ var optsWithValue = map[string]map[string]bool{
 	"chmod":    {"--reference": true},
 	"chown":    {"--reference": true},
 	"chgrp":    {"--reference": true},
+	"touch":    {"-d": true, "--date": true, "-t": true, "-r": true, "--reference": true},
+	"rsync": {
+		"--exclude": true, "--include": true, "--exclude-from": true,
+		"--include-from": true, "--files-from": true, "--filter": true, "-f": true,
+		"--rsh": true, "-e": true, "--chmod": true, "--chown": true,
+		"--usermap": true, "--groupmap": true, "--suffix": true,
+		"--timeout": true, "--contimeout": true, "--bwlimit": true,
+		"--max-size": true, "--min-size": true, "--block-size": true, "-B": true,
+		"--modify-window": true, "--port": true, "--sockopts": true,
+		"--out-format": true, "--log-file-format": true, "--info": true,
+		"--debug": true, "--outbuf": true, "--protocol": true, "--iconv": true,
+		"--checksum-seed": true, "--compress-level": true,
+		"--skip-compress": true, "--password-file": true,
+		"--remote-option": true, "-M": true,
+	},
+}
+
+// destValueOpts lists, per command, the options whose value is itself a write
+// destination rather than an inert scalar. Consuming them like an ordinary
+// option value would silently drop a real target, so they are consumed *and*
+// classified (see optionTargets). rsync's auxiliary output directories are the
+// motivating case: `rsync a b --backup-dir ~/src/dear-agent` writes there.
+var destValueOpts = map[string]map[string]bool{
+	"rsync": {
+		"--backup-dir": true, "--temp-dir": true, "-T": true,
+		"--partial-dir": true, "--compare-dest": true, "--copy-dest": true,
+		"--link-dest": true, "--log-file": true, "--write-batch": true,
+	},
+}
+
+// optionValue reports whether tok names one of opts, either exactly (its value
+// is the following token) or in the `--opt=value` form (returned as glued).
+func optionValue(opts map[string]bool, tok string) (glued string, ok bool) {
+	if opts[tok] {
+		return "", true
+	}
+	if i := strings.IndexByte(tok, '='); i > 0 && opts[tok[:i]] {
+		return tok[i+1:], true
+	}
+	return "", false
 }
 
 // leadingSpecOperand lists commands whose first non-option positional is a
@@ -278,14 +372,18 @@ func targetDirOption(cmd, tok string) (inline string, ok bool) {
 		return "", true
 	case strings.HasPrefix(tok, "--target-directory="):
 		return strings.TrimPrefix(tok, "--target-directory="), true
-	case strings.HasPrefix(tok, "--") || !strings.HasPrefix(tok, "-"):
+	case strings.HasPrefix(tok, "--") || !strings.HasPrefix(tok, "-") || tok == "-":
 		return "", false
-	case strings.HasPrefix(tok, "-t"):
-		return tok[2:], true // -tDIR
-	case strings.HasSuffix(tok, "t"):
-		return "", true // short cluster ending in t, e.g. -rt DIR
 	}
-	return "", false
+	// Short-option cluster. `-t` takes a required directory, so the first `t`
+	// ends the cluster: whatever follows it in the same word is the glued
+	// destination (`-tDIR`, `-atDIR`), and an empty remainder means the
+	// destination is the next token (`-t`, `-rt DIR`).
+	_, afterT, found := strings.Cut(tok[1:], "t")
+	if !found {
+		return "", false
+	}
+	return afterT, true
 }
 
 // hasReferenceOption reports whether a chmod/chown/chgrp invocation takes its
@@ -328,6 +426,12 @@ func targetOperands(cmd string, rest []string) []string {
 				}
 				continue
 			}
+			if glued, isDestValue := optionValue(destValueOpts[cmd], a); isDestValue {
+				if glued == "" {
+					i++ // destination is the next token; optionTargets classifies it
+				}
+				continue
+			}
 			if isOption(a) {
 				if valueOpts[a] {
 					i++ // consume the option's value so it is not seen as a target
@@ -345,8 +449,8 @@ func targetOperands(cmd string, rest []string) []string {
 }
 
 // optionTargets returns the mutation targets a command names through an option
-// value rather than a positional operand — currently only GNU's
-// `-t`/`--target-directory` destination.
+// value rather than a positional operand: GNU's `-t`/`--target-directory`
+// destination and the auxiliary output directories in destValueOpts.
 func optionTargets(cmd string, rest []string) []string {
 	var out []string
 	for i := 0; i < len(rest); i++ {
@@ -356,7 +460,9 @@ func optionTargets(cmd string, rest []string) []string {
 		}
 		inline, ok := targetDirOption(cmd, a)
 		if !ok {
-			continue
+			if inline, ok = optionValue(destValueOpts[cmd], a); !ok {
+				continue
+			}
 		}
 		if inline != "" {
 			out = append(out, inline)
@@ -371,21 +477,20 @@ func optionTargets(cmd string, rest []string) []string {
 }
 
 // stripRedirections removes redirection syntax from a simple-command segment:
-// the operator, the token it redirects to, and any bare file-descriptor digit
-// in front of it (the `2` of `2>&1`, which tokenizes as its own word). Redirect
-// targets are classified separately by checkRedirections; left in the segment
-// they would masquerade as command operands, so `cp a ~/src/dear-agent/f 2>&1`
-// would pick `1` as cp's destination and miss the protected write entirely.
+// the operator (with any file descriptor the tokenizer kept glued to it) and
+// the token it redirects to. Redirect targets are classified separately by
+// checkRedirections; left in the segment they would masquerade as command
+// operands, so `cp a ~/src/dear-agent/f 2>&1` would pick `1` as cp's
+// destination and miss the protected write entirely. A whitespace-separated
+// digit is a real operand (`rm 2 > log` removes the file `2`) and survives,
+// because the tokenizer only glues a descriptor that was lexically adjacent.
 func stripRedirections(segment []string) []string {
 	out := make([]string, 0, len(segment))
 	for i := 0; i < len(segment); i++ {
 		tok := segment[i]
-		if !redirOps[tok] {
+		if !isRedirOp(tok) {
 			out = append(out, tok)
 			continue
-		}
-		if n := len(out); n > 0 && isAllDigits(out[n-1]) {
-			out = out[:n-1] // drop the leading fd of `2>&1`
 		}
 		i++ // drop the redirect target as well
 	}
@@ -664,17 +769,17 @@ func (g *Guard) inspect(command, cwd string, depth int) (allowed bool, message s
 	if !ok {
 		return true, "" // unparseable -> defer to deny rules (fail open)
 	}
-	if allowed, msg := g.checkRedirections(tokens, cwd); !allowed {
-		return false, msg
-	}
 	return g.checkSegments(tokens, cwd, depth)
 }
 
 // checkRedirections classifies the target of every redirection operator,
-// skipping pure file-descriptor duplications such as `2>&1` or `>&2`.
+// skipping pure file-descriptor duplications such as `2>&1` or `>&2`. It runs
+// per segment, against the directory `cd` tracking has reached at that point,
+// so `cd ~/src/dear-agent && echo x > README.md` resolves the bare target
+// inside the protected checkout rather than against the original cwd.
 func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, message string) {
 	for idx, tok := range tokens {
-		if !redirOps[tok] || idx+1 >= len(tokens) {
+		if !isRedirOp(tok) || idx+1 >= len(tokens) {
 			continue
 		}
 		target := tokens[idx+1]
@@ -696,7 +801,23 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 // chained `cd ~/src/repo && git commit` is attributed to the right directory.
 func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed bool, message string) {
 	currentDir := g.expand(cwd, cwd)
+	var subshellDirs []string // saved cwd per open `(`
 	for _, segment := range splitSegments(tokens) {
+		// A `cd` inside `( … )` is undone when the subshell exits, so restore
+		// the caller's directory on `)`; otherwise `(cd /tmp); rm AGENTS.md`
+		// would classify the removal against /tmp while it really runs in cwd.
+		if len(segment) == 1 && (segment[0] == "(" || segment[0] == ")") {
+			if segment[0] == "(" {
+				subshellDirs = append(subshellDirs, currentDir)
+			} else if n := len(subshellDirs); n > 0 {
+				currentDir = subshellDirs[n-1]
+				subshellDirs = subshellDirs[:n-1]
+			}
+			continue
+		}
+		if ok, msg := g.checkRedirections(segment, currentDir); !ok {
+			return false, msg
+		}
 		args := stripRunners(realArgs(stripRedirections(segment)))
 		if len(args) == 0 {
 			continue
@@ -706,7 +827,12 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 		// bare name; otherwise `/bin/rm ~/src/f` would slip past every map lookup.
 		cmd := filepath.Base(args[0])
 
-		if cmd == "cd" && len(args) > 1 {
+		// `cd` is matched on the literal command word, not the basename: only
+		// the shell builtin changes the shell's directory. An external program
+		// that merely happens to be named `cd` (`/tmp/cd /tmp`) cannot change
+		// its parent's cwd, so tracking it would move the guard's idea of the
+		// directory away from where the following commands actually run.
+		if args[0] == "cd" && len(args) > 1 {
 			currentDir = g.expand(args[1], currentDir)
 			continue
 		}

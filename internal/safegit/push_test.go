@@ -59,6 +59,13 @@ func TestForceFlag(t *testing.T) {
 		{"equals-form repo option keeps refspec force", []string{"--repo=origin", "origin", "+main"}, "+main", true},
 		{"force refspec after end-of-options", []string{"--", "origin", "+main"}, "+main", true},
 		{"force flag still caught before repository", []string{"--force", "+prod", "main"}, "--force", true},
+
+		// `-f` is push's only short option spelled with an 'f', so a cluster
+		// containing one forces just as a bare -f does.
+		{"clustered -uf is force", []string{"-uf", "origin", "main"}, "-uf", true},
+		{"clustered -fu is force", []string{"-fu", "origin", "main"}, "-fu", true},
+		{"clustered -qnv is not force", []string{"-qnv", "origin", "main"}, "", false},
+		{"long --follow-tags is not force", []string{"--follow-tags", "origin", "main"}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

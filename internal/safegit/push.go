@@ -106,6 +106,13 @@ func ForceFlag(args []string) (string, bool) {
 			case pushOptsWithValue[a]:
 				i++ // the value is not a positional, so it is not the repository
 				continue
+			case strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") &&
+				strings.ContainsRune(a, 'f'):
+				// Short options cluster: `git push -uf origin main` forces just
+				// as `-f` does, and `-f` is push's only short option spelled
+				// with an 'f', so any single-dash cluster containing one is a
+				// force push.
+				return a, true
 			case strings.HasPrefix(a, "-") && a != "-":
 				continue // any other option
 			}

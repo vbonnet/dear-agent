@@ -211,6 +211,46 @@ func TestInspectCommand(t *testing.T) {
 		// A remote may legally be named +prod; only refspecs carry force
 		// semantics in a leading '+' (ce-3knl.3).
 		{"git push +remote is not a force push", "git -C ~/src/dear-agent push +prod main", home, true, ""},
+		{"git push clustered -uf blocked", "git -C ~/src/dear-agent push -uf origin main", home, false, "force-push"},
+
+		// Redirect targets resolve against the directory `cd` tracking has
+		// reached, not the original cwd (ce-3knl.3).
+		{"cd then bare redirect blocked", "cd ~/src/dear-agent && echo x > README.md", wt, false, "~/src"},
+
+		// A '#' opening a word starts a comment, so its words are not operands;
+		// inside a word it is an ordinary character (ce-3knl.3).
+		{"comment does not displace destination", "cp /tmp/a ~/src/dear-agent/f # backup", "/tmp", false, "~/src"},
+		{"hash inside a word is not a comment", "rm file#1", wt, true, ""},
+
+		// touch's -d/-t/-r take values that are not paths (ce-3knl.3).
+		{"touch -d value not a target", "touch -d yesterday /tmp/out", home + "/src/dear-agent", true, ""},
+		{"touch -t stamp not a target", "touch -t 202601010000 /tmp/out", home + "/src/dear-agent", true, ""},
+		{"touch real target still blocked", "touch NEWFILE", home + "/src/dear-agent", false, "~/src"},
+
+		// A `cd` inside a subshell does not outlive it (ce-3knl.3).
+		{"subshell cd is restored", "(cd /tmp); rm AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"subshell interior still checked", "(cd ~/src/dear-agent; rm AGENTS.md)", wt, false, "~/src"},
+
+		// Only the shell builtin `cd` moves the shell; an external program that
+		// merely has that basename does not (ce-3knl.3).
+		{"external cd does not move tracking", "/tmp/cd /tmp; rm AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"builtin cd still tracked", "cd /tmp; rm AGENTS.md", home + "/src/dear-agent", true, ""},
+
+		// -t inside a short-option cluster with its directory glued on
+		// (ce-3knl.3).
+		{"cp -atDIR cluster blocked", "cp -at~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -at spaced cluster blocked", "cp -at ~/src/dear-agent /tmp/a", home, false, "~/src"},
+
+		// rsync value-taking options must be consumed, and its auxiliary output
+		// directories are themselves write targets (ce-3knl.3).
+		{"rsync --exclude after operands", "rsync /tmp/a ~/src/dear-agent/d --exclude foo", "/tmp", false, "~/src"},
+		{"rsync --backup-dir is a target", "rsync /tmp/a /tmp/b --backup-dir ~/src/dear-agent", "/tmp", false, "~/src"},
+		{"rsync benign allowed", "rsync /tmp/a /tmp/b --exclude foo", "/tmp", true, ""},
+
+		// A digit is a file descriptor only when glued to the operator; with
+		// whitespace it is an ordinary operand (ce-3knl.3).
+		{"whitespace digit is an operand", "rm 2 > /tmp/log", home + "/src/dear-agent", false, "~/src"},
+		{"glued fd is still stripped", "cp /tmp/a ~/src/dear-agent/f 2>&1", wt, false, "~/src"},
 
 		// cd tracking for git.
 		{"cd then git commit blocked", "cd ~/src/dear-agent && git commit -m x", home, false,

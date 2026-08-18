@@ -81,7 +81,19 @@ state why.
 
 **FSG-47** When `chmod`, `chown`, or `chgrp` takes its mode/owner/group from `--reference` (e.g. `chmod --reference=RFILE FILE...`), the system shall not drop the leading positional as a spec operand, because in that form the first positional is already a mutation target.
 
-**FSG-48** When `cp`, `mv`, `ln`, or `install` names its destination with `-t`/`--target-directory` (including the `--target-directory=DIR`, `-tDIR`, and clustered `-rt DIR` forms), the system shall classify that option's value as the write target and treat every positional operand as a read-only source.
+**FSG-48** When `cp`, `mv`, `ln`, or `install` names its destination with `-t`/`--target-directory` (including the `--target-directory=DIR`, `-tDIR`, and clustered `-at DIR`/`-atDIR` forms), the system shall classify that option's value as the write target and treat every positional operand as a read-only source.
+
+**FSG-50** When a word begins with `#`, the system shall treat it as the start of a shell comment and ignore the remainder of the line, so commented words never become operands; a `#` inside a word (e.g. `file#1`) shall remain an ordinary character.
+
+**FSG-51** When a digit is lexically adjacent to a redirection operator (e.g. the `2` of `2>&1`), the system shall treat it as a file descriptor and strip it with the redirection; when whitespace separates them (e.g. `rm 2 > log`), the system shall keep the digit as an ordinary write-target operand.
+
+**FSG-52** When an option value names an auxiliary output location rather than an inert scalar (e.g. `rsync --backup-dir DIR`, `--temp-dir`, `--partial-dir`, `--compare-dest`, `--copy-dest`, `--link-dest`, `--log-file`, `--write-batch`), the system shall classify that value as a write target.
+
+**FSG-53** When a `cd` occurs inside a subshell (`( … )`), the system shall restore the enclosing working directory once the subshell closes, because the shell does not carry that `cd` past `)`.
+
+**FSG-54** When the command word merely has the basename `cd` but is not the shell builtin (e.g. `/tmp/cd`), the system shall not update the tracked working directory, because an external process cannot change its parent's directory.
+
+**FSG-55** The system shall classify redirect targets against the working directory that `cd` tracking has reached at that point in the command, so `cd ~/src/<repo> && echo x > README.md` resolves the bare target inside the protected checkout.
 
 **FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all positional target arguments (see FSG-43, FSG-44) as write targets.
 
@@ -118,6 +130,8 @@ state why.
 **FSG-29** When `git push` is invoked within `~/src/` without any force flag or force refspec, the system shall allow it (a plain `git -C ~/src/<repo> push origin main`).
 
 **FSG-30** When `git push` is invoked within `~/src/` with any destructive form — `--force`/`-f`, `--force-with-lease[=…]`, `--force-if-includes`, `--mirror`, or a leading-plus force refspec (e.g. `+main`) — the system shall block it. Detection reuses the `safegit.ForceFlag` parser so the guard and `safe-push` share one definition of "destructive push" rather than maintaining a weaker copy.
+
+**FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`.
 
 **FSG-49** When a leading-plus token occupies the repository operand position of a `git push` (a remote legitimately named `+prod`, as in `git -C ~/src/<repo> push +prod main`), the system shall allow it rather than reading it as a force refspec, because `git push` is `git push [options] [repository [refspec...]]` and only refspec operands carry force semantics.
 
