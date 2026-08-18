@@ -122,6 +122,11 @@ Gates enforced before merging:
   1. Required CI checks pass (no failures, no pending)
   2. No unresolved review threads
   3. Head commit ≥ 5 minutes old (soak time)
+  4. Head is built on the current base tip. A behind branch is advanced to the
+     base tip and the attempt blocks: the push invalidates the checks that just
+     passed, so the merge waits for the re-run. Runs last, so a CI cycle is
+     only spent on a PR that already cleared every other gate. Use --watch to
+     advance and merge in one command. A conflicting branch is never rewritten.
 
 P4 gates (only when a .safe-merge.yml is present — see below):
   - expected_reviewers: each listed reviewer must have a review newer than the
