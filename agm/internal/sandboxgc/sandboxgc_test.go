@@ -200,11 +200,12 @@ func (f *fakeHost) checker(base string, withLiveGate bool) *Checker {
 func TestCheckReapable(t *testing.T) {
 	dir := testBase + "/deadbeef"
 	tests := []struct {
-		name       string
-		host       fakeHost
-		dir        string
-		liveGate   bool
-		wantReason string // "" = reapable
+		name          string
+		host          fakeHost
+		dir           string
+		liveGate      bool
+		wantReason    string // "" = reapable
+		wantProbeFail bool
 	}{
 		{
 			name:     "reapable: no session, no process, no mount",
@@ -234,11 +235,12 @@ func TestCheckReapable(t *testing.T) {
 			wantReason: ReasonLiveSession,
 		},
 		{
-			name:       "refused (fail closed): session store unreachable",
-			host:       fakeHost{liveErr: errors.New("dolt down")},
-			dir:        dir,
-			liveGate:   true,
-			wantReason: ReasonLiveSession,
+			name:          "refused (fail closed): session store unreachable",
+			host:          fakeHost{liveErr: errors.New("dolt down")},
+			dir:           dir,
+			liveGate:      true,
+			wantReason:    ReasonLiveSession,
+			wantProbeFail: true,
 		},
 		{
 			name:       "refused: process cwd inside",
@@ -255,11 +257,12 @@ func TestCheckReapable(t *testing.T) {
 			wantReason: ReasonLiveProcess,
 		},
 		{
-			name:       "refused (fail closed): lsof unavailable",
-			host:       fakeHost{procsErr: errors.New("lsof missing")},
-			dir:        dir,
-			liveGate:   true,
-			wantReason: ReasonLiveProcess,
+			name:          "refused (fail closed): lsof unavailable",
+			host:          fakeHost{procsErr: errors.New("lsof missing")},
+			dir:           dir,
+			liveGate:      true,
+			wantReason:    ReasonLiveProcess,
+			wantProbeFail: true,
 		},
 		{
 			name:     "archive path: nil live gate skips session check",
@@ -292,6 +295,9 @@ func TestCheckReapable(t *testing.T) {
 			if ref.Reason != tt.wantReason {
 				t.Errorf("refusal reason = %q, want %q (detail: %s)", ref.Reason, tt.wantReason, ref.Detail)
 			}
+			if ref.ProbeFailure != tt.wantProbeFail {
+				t.Errorf("ProbeFailure = %v, want %v (detail: %s)", ref.ProbeFailure, tt.wantProbeFail, ref.Detail)
+			}
 		})
 	}
 }
@@ -299,10 +305,11 @@ func TestCheckReapable(t *testing.T) {
 func TestReap(t *testing.T) {
 	dir := testBase + "/deadbeef"
 	tests := []struct {
-		name        string
-		host        fakeHost
-		wantReason  string // "" = reaped
-		wantRemoved bool
+		name          string
+		host          fakeHost
+		wantReason    string // "" = reaped
+		wantRemoved   bool
+		wantProbeFail bool
 	}{
 		{
 			name:        "happy path: unmount clears merged, then removed",
@@ -337,9 +344,10 @@ func TestReap(t *testing.T) {
 			wantReason: ReasonLiveSession,
 		},
 		{
-			name:       "HARD GATE (fail closed): mount table unreadable -> refuse",
-			host:       fakeHost{mountsErr: errors.New("mount cmd failed")},
-			wantReason: ReasonMountInside,
+			name:          "HARD GATE (fail closed): mount table unreadable -> refuse",
+			host:          fakeHost{mountsErr: errors.New("mount cmd failed")},
+			wantReason:    ReasonMountInside,
+			wantProbeFail: true,
 		},
 	}
 	for _, tt := range tests {
@@ -357,6 +365,9 @@ func TestReap(t *testing.T) {
 				}
 				if ref.Reason != tt.wantReason {
 					t.Errorf("refusal reason = %q, want %q (detail: %s)", ref.Reason, tt.wantReason, ref.Detail)
+				}
+				if ref.ProbeFailure != tt.wantProbeFail {
+					t.Errorf("ProbeFailure = %v, want %v (detail: %s)", ref.ProbeFailure, tt.wantProbeFail, ref.Detail)
 				}
 			}
 			gotRemoved := len(tt.host.removed) > 0
