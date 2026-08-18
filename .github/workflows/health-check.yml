@@ -44,12 +44,16 @@ jobs:
           cache-dependency-path: "go.sum"
 
       - name: Install golangci-lint
-        # Installs the pinned binary onto PATH so repo-health's lint metric is
-        # available; without it the metric degrades to n/a (not a failure).
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-            | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_VERSION}"
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+        # Use CI's owned action family and exact linter version, but install
+        # only: repo-health runs the binary itself to collect its lint metric.
+        # goinstall keeps integrity on the Go module/SumDB path rather than the
+        # retired install script's ambiguous release-checksum matcher.
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: ${{ env.GOLANGCI_VERSION }}
+          install-mode: goinstall
+          install-only: true
+          skip-save-cache: true
 
       - name: Build repo-health
         run: |
