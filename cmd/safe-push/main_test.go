@@ -47,3 +47,38 @@ func TestUsageContainsBinaryName(t *testing.T) {
 		t.Error("usage string should contain binary name 'safe-push'")
 	}
 }
+
+// TestRun_RejectsForcePush drives the guard through the actual CLI entry point,
+// which is where the bug was reported: `safe-push -uf origin main` reached git
+// as a force push because the classifier compared whole argv tokens against
+// "-f" and never expanded bundled short-option clusters. The force check runs
+// before gh resolution, so these cases need no git, no gh, and no network.
+func TestRun_RejectsForcePush(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+	}{
+		{"standalone short force", []string{"-f", "origin", "main"}},
+		{"long force", []string{"--force", "origin", "main"}},
+		{"clustered -uf", []string{"-uf", "origin", "main"}},
+		{"clustered -fu", []string{"-fu", "origin", "main"}},
+		{"clustered -vfq", []string{"-vfq", "origin", "main"}},
+		{"cluster after -C", []string{"-C", "/repo", "-uf", "origin", "main"}},
+		{"force-with-lease", []string{"--force-with-lease", "origin", "main"}},
+		{"force-with-lease with ref", []string{"--force-with-lease=refs/heads/x", "origin"}},
+		{"force-if-includes", []string{"--force-if-includes", "origin", "main"}},
+		{"mirror", []string{"--mirror", "origin"}},
+		{"force refspec", []string{"origin", "+main"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := run(tc.argv)
+			if err == nil {
+				t.Fatalf("run(%q) = nil, want a force-push rejection", tc.argv)
+			}
+			if !strings.Contains(err.Error(), "force-push") {
+				t.Fatalf("run(%q) error %q should name the force-push policy", tc.argv, err)
+			}
+		})
+	}
+}
