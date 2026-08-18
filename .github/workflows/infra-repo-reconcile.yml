@@ -24,6 +24,18 @@ name: Infra Repo Reconciliation
 #   TF_VAR_archived_repos  the real inventory as JSON (same shape as
 #                          repos.auto.tfvars), so the managed set can be
 #                          computed without the gitignored file being present.
+#
+# When the token/inventory are absent the reconciliation cannot run at all. It
+# used to `exit 1` on the scheduled path, which painted `main` red every day and
+# made main-health-watchdog file a fresh incident each time — for a condition no
+# commit caused and no code change can fix. The daily red carried one bit
+# ("still not provisioned") and drowned the failures that meant something.
+#
+# The preflight is now its own job, and it decides for BOTH triggers instead of
+# branching on the event name. When the inputs are missing it warns, records the
+# reason in the run summary, and leaves the reconcile job SKIPPED — visibly
+# not-run, rather than a green run claiming an audit happened. Provisioning the
+# secrets turns enforcement back on with no further change.
 
 on:
   schedule:
@@ -42,17 +54,18 @@ permissions:
   issues: write
 
 jobs:
-  reconcile:
-    name: Infra Repo Reconciliation
+  preflight:
+    name: Inventory preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Preflight — token + inventory present
-        id: preflight
+      - name: Token + inventory present
+        id: check
         env:
           INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
           TF_VAR_active_repos: ${{ secrets.TF_VAR_active_repos }}
@@ -70,17 +83,32 @@ jobs:
           fi
 
           if [ -z "${missing}" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            # Don't block PRs before the secrets are configured — skip neutrally.
-            echo "::notice::missing ${missing}— skipping reconciliation on this PR (configure to enable enforcement)."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::missing ${missing}(needed to reconcile against the real inventory)"; exit 1
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::reconciliation did not run — missing: ${missing}"
+          {
+            echo "### Infra repo reconciliation did not run"
+            echo
+            echo "Missing: \`${missing}\`"
+            echo
+            echo "Live repositories were **not** diffed against the IaC inventory."
+            echo "Configure the secrets (see this workflow's header) to enable enforcement."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  reconcile:
+    name: Infra Repo Reconciliation
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Reconcile live repos against IaC
-        if: steps.preflight.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
           TF_VAR_active_repos: ${{ secrets.TF_VAR_active_repos }}
@@ -152,7 +180,7 @@ jobs:
           fi
 
       - name: Comment on PR
-        if: github.event_name == 'pull_request' && always() && steps.preflight.outputs.skip != 'true'
+        if: github.event_name == 'pull_request' && always()
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88  # v3.0.5
         with:
           header: infra-reconcile
