@@ -47,7 +47,7 @@ jobs:
       - name: Fetch all remote branches
         # actions/checkout only wires up refs for the triggering ref by
         # default even with fetch-depth: 0 -- the reaper needs every branch's
-        # tip + committer date, so fetch the full refs/heads/* namespace.
+        # tip commit SHA, so fetch the full refs/heads/* namespace.
         run: git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
 
       - name: Set up Go
