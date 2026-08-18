@@ -248,6 +248,39 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
+	// Gate 0: deterministic PR state. Closed/merged, draft, and conflicts are
+	// visible from one `gh pr view` and each has one exact fix, so fail fast
+	// with that fix instead of arming auto-merge and letting the completion
+	// wait time out 45 minutes later with no cause named. BEHIND is
+	// deliberately NOT a fail here: safe-merge advances behind branches itself
+	// (base-freshness gate, ce-gdy60), so failing early on it would defeat
+	// that remediation; pr-blockers still reports BEHIND for diagnosis.
+	if err := runGate(ctx, "state", func() error {
+		st, err := FetchPRState(ctx, cfg.PRNumber, cfg.Repo)
+		if err != nil {
+			return err
+		}
+		if s := strings.ToUpper(st.State); s != "OPEN" {
+			return fmt.Errorf("PR #%d is %s; nothing to merge", cfg.PRNumber, s)
+		}
+		var lines []string
+		for _, b := range StateBlockers(st, cfg.Repo) {
+			if b.Code == BlockBehind {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("  • %s: %s\n    fix: %s", b.Code, b.Detail, b.Fix))
+		}
+		if len(lines) == 0 {
+			return nil
+		}
+		return fmt.Errorf("PR state blocks merging:\n%s", strings.Join(lines, "\n"))
+	}); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "state: "+err.Error())
+		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `pr-blockers %d --repo %s` for the full diagnosis\n", cfg.PRNumber, cfg.Repo)
+		return fmt.Errorf("state gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ PR state mergeable (open, not draft, no conflicts)")
+
 	// Gate 1: every provider-effective required CI check must pass.
 	if err := runGate(ctx, "ci", func() error { return checkAllCIContext(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 		// P4 flake valve: when flaky_checks are configured, give a failing
@@ -275,7 +308,7 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: SKIPPED via --skip-review-check")
 		fmt.Fprintln(os.Stderr, "safe-merge: ⚠ review-thread gate skipped (--skip-review-check)")
 	} else {
-		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(cfg.PRNumber, cfg.Repo) }); err != nil {
+		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 			appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
 			parts := strings.SplitN(cfg.Repo, "/", 2)
 			owner, repoName := parts[0], parts[1]
@@ -1014,137 +1047,6 @@ func parseCheckRuns(data []byte) error {
 		return fmt.Errorf("parsing check output: %w", err)
 	}
 	return validateCheckRuns(checks)
-}
-
-const reviewThreadsQuery = `
-query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
-        nodes {
-          isResolved
-          isOutdated
-          comments(first: 1) {
-            nodes {
-              author { login }
-              body
-            }
-          }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-}`
-
-type gqlReviewThread struct {
-	IsResolved bool `json:"isResolved"`
-	IsOutdated bool `json:"isOutdated"`
-	Comments   struct {
-		Nodes []struct {
-			Author struct {
-				Login string `json:"login"`
-			} `json:"author"`
-			Body string `json:"body"`
-		} `json:"nodes"`
-	} `json:"comments"`
-}
-
-type gqlReviewResult struct {
-	Data struct {
-		Repository struct {
-			PullRequest struct {
-				ReviewThreads struct {
-					Nodes    []gqlReviewThread `json:"nodes"`
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-				} `json:"reviewThreads"`
-			} `json:"pullRequest"`
-		} `json:"repository"`
-	} `json:"data"`
-}
-
-func checkReviewThreads(prNum int, repo string) error {
-	parts := strings.SplitN(repo, "/", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid repo %q", repo)
-	}
-	owner, name := parts[0], parts[1]
-
-	var threads []gqlReviewThread
-	cursor := ""
-	for {
-		args := []string{
-			"api", "graphql",
-			"--field", fmt.Sprintf("owner=%s", owner),
-			"--field", fmt.Sprintf("name=%s", name),
-			"--field", fmt.Sprintf("number=%d", prNum),
-			"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
-		}
-		if cursor != "" {
-			args = append(args, "--field", fmt.Sprintf("cursor=%s", cursor))
-		}
-		out, err := runCommand(exec.Command("gh", args...))
-		if err != nil {
-			return fmt.Errorf("GraphQL query failed: %w", err)
-		}
-		var result gqlReviewResult
-		if err := json.Unmarshal(out, &result); err != nil {
-			return fmt.Errorf("parsing GraphQL response: %w", err)
-		}
-		page := result.Data.Repository.PullRequest.ReviewThreads
-		threads = append(threads, page.Nodes...)
-		if !page.PageInfo.HasNextPage {
-			break
-		}
-		if page.PageInfo.EndCursor == "" || page.PageInfo.EndCursor == cursor {
-			return fmt.Errorf("GraphQL review-thread pagination did not advance")
-		}
-		cursor = page.PageInfo.EndCursor
-	}
-	return reviewThreadError(threads)
-}
-
-// parseReviewThreads returns an error if any unresolved, non-outdated review
-// threads exist in the GraphQL response. Exported for testing.
-func parseReviewThreads(data []byte) error {
-	var result gqlReviewResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		return fmt.Errorf("parsing GraphQL response: %w", err)
-	}
-
-	return reviewThreadError(result.Data.Repository.PullRequest.ReviewThreads.Nodes)
-}
-
-func reviewThreadError(threads []gqlReviewThread) error {
-	var unresolved []string
-	for i, t := range threads {
-		if t.IsResolved || t.IsOutdated {
-			continue
-		}
-		label := fmt.Sprintf("thread #%d", i+1)
-		if len(t.Comments.Nodes) > 0 {
-			c := t.Comments.Nodes[0]
-			author := c.Author.Login
-			if author == "" {
-				author = "unknown"
-			}
-			body := c.Body
-			if len([]rune(body)) > 80 {
-				body = string([]rune(body)[:80]) + "…"
-			}
-			label = fmt.Sprintf("  • @%s: %q", author, body)
-		}
-		unresolved = append(unresolved, label)
-	}
-
-	if len(unresolved) > 0 {
-		return fmt.Errorf("%d unresolved review thread(s):\n%s",
-			len(unresolved), strings.Join(unresolved, "\n"))
-	}
-	return nil
 }
 
 type prViewResult struct {

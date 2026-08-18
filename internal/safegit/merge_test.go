@@ -631,10 +631,32 @@ func TestParseReviewThreads_AllResolved(t *testing.T) {
 		body     string
 	}{
 		{resolved: true},
-		{resolved: false, outdated: true},
+		{resolved: true, outdated: true},
 	})
 	if err := parseReviewThreads(data); err != nil {
-		t.Fatalf("all threads resolved/outdated should pass, got: %v", err)
+		t.Fatalf("all threads resolved should pass, got: %v", err)
+	}
+}
+
+// Unresolved OUTDATED threads must block: GitHub's required conversation
+// resolution counts them even though the UI collapses them. Skipping them
+// here made safe-merge report "no unresolved review threads" on PRs the
+// provider kept BLOCKED (retro 2026-08-18-pr-merge-blocker-guessing).
+func TestParseReviewThreads_UnresolvedOutdatedBlocks(t *testing.T) {
+	data := makeReviewJSON([]struct {
+		resolved bool
+		outdated bool
+		author   string
+		body     string
+	}{
+		{resolved: false, outdated: true, author: "gemini-code-assist", body: "Still relevant"},
+	})
+	err := parseReviewThreads(data)
+	if err == nil {
+		t.Fatal("unresolved outdated thread must block the merge, got nil")
+	}
+	if !strings.Contains(err.Error(), "outdated") {
+		t.Errorf("error should flag the thread as outdated, got: %v", err)
 	}
 }
 
