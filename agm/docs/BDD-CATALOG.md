@@ -852,6 +852,17 @@ analytics dashboard SPEC coverage.
 across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen routes
 rather than a Claude-only accounting path.
 
+### Living-Document Reference Linting
+
+**File:** [`docref_lint.feature`](../test/bdd/features/docref_lint.feature)
+
+**Drives:** the backtick-reference classifier and path resolver in
+`tools/docref-lint`, run as a `run_step` in `scripts/guardrail-bundle.sh`.
+
+**Key scenarios:**
+- Only backticked repository paths are read as claims.
+- A claim about a missing artifact is reported as a finding.
+
 ### CI Health Escape Analysis
 
 **File:** [`ci_health_escape_analysis.feature`](../test/bdd/features/ci_health_escape_analysis.feature)

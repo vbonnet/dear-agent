@@ -1,10 +1,12 @@
 package ops
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +160,9 @@ func TestSandboxGCKeepsMountedSandbox(t *testing.T) {
 	if res.Reaped != 0 || res.Kept != 1 {
 		t.Errorf("reaped=%d kept=%d, want 0/1", res.Reaped, res.Kept)
 	}
+	if res.ProbeFailures != 0 {
+		t.Errorf("ProbeFailures = %d, want 0 — the mount table was read fine and genuinely found a mount", res.ProbeFailures)
+	}
 	if _, err := os.Stat(mounted); err != nil {
 		t.Errorf("mounted sandbox must never be removed: %v", err)
 	}
@@ -181,8 +186,58 @@ func TestSandboxGCKeepsSandboxWithLiveProcess(t *testing.T) {
 	if res.Reaped != 0 || res.Kept != 1 {
 		t.Errorf("reaped=%d kept=%d, want 0/1", res.Reaped, res.Kept)
 	}
+	if res.ProbeFailures != 0 {
+		t.Errorf("ProbeFailures = %d, want 0 — lsof ran fine and genuinely found a live process", res.ProbeFailures)
+	}
 	if _, err := os.Stat(busy); err != nil {
 		t.Errorf("in-use sandbox must never be removed: %v", err)
+	}
+}
+
+// TestSandboxGCCountsProbeFailuresSeparately guards the review gap where a
+// systemic safety-probe failure (lsof missing, mount table unreadable) was
+// indistinguishable from a genuine live-process/mount finding: both landed in
+// Kept with Errors left at 0, so a sweep that could not evaluate ANY sandbox
+// still looked like a healthy idle sweep to the disk-watchdog heartbeat.
+func TestSandboxGCCountsProbeFailuresSeparately(t *testing.T) {
+	base := sandboxTestBase(t)
+	mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+		return nil, errors.New("lsof: command not found")
+	}
+
+	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: true}, base, checker)
+	if err != nil {
+		t.Fatalf("sandboxGCWithChecker: %v", err)
+	}
+	if res.Reaped != 0 || res.Kept != 1 {
+		t.Errorf("reaped=%d kept=%d, want 0/1", res.Reaped, res.Kept)
+	}
+	if res.Errors != 0 {
+		t.Errorf("Errors = %d, want 0 — a probe failure is a refusal, not a removal failure", res.Errors)
+	}
+	if res.ProbeFailures != 1 {
+		t.Errorf("ProbeFailures = %d, want 1 — the sweep could not evaluate this sandbox at all", res.ProbeFailures)
+	}
+}
+
+// TestSandboxGCDryRunCountsProbeFailures covers the dry-run classification
+// path (CheckReapable, not Reap), which computes ProbeFailures separately.
+func TestSandboxGCDryRunCountsProbeFailures(t *testing.T) {
+	base := sandboxTestBase(t)
+	mkSandbox(t, base, "deadbeef", 24*time.Hour)
+	checker := newTestChecker(base, map[string]bool{}, nil)
+	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+		return nil, errors.New("lsof: command not found")
+	}
+
+	res, err := sandboxGCWithChecker(&SandboxGCRequest{Reap: false}, base, checker)
+	if err != nil {
+		t.Fatalf("sandboxGCWithChecker: %v", err)
+	}
+	if res.Kept != 1 || res.ProbeFailures != 1 {
+		t.Errorf("kept=%d probeFailures=%d, want 1/1", res.Kept, res.ProbeFailures)
 	}
 }
 
@@ -318,5 +373,45 @@ func TestLiveSessionIDsNilContextFailsClosed(t *testing.T) {
 	}
 	if _, err := liveSessionIDsFromStorage(&OpContext{})(); err == nil {
 		t.Error("nil Storage must fail closed")
+	}
+}
+
+// The refusal has to survive the process boundary. An automated caller (today
+// cmd/disk-watchdog, which always passes --reap) reads these exact field names
+// off stdout to tell "the deletion you asked for did not happen" from an
+// ordinary preview run; renaming either one turns a refused reap back into a
+// success the caller reports as reclaimed space. cmd/ cannot import this
+// internal package, so the consumer pins the same literals on its side.
+func TestSandboxGCResultPublishesTheRefusalOnTheWire(t *testing.T) {
+	out, err := json.Marshal(&SandboxGCResult{
+		DryRun:      true,
+		Scanned:     9,
+		Reaped:      4,
+		ReapRefused: "refusing to reap: live-session inventory is partial",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["dry_run"] != true {
+		t.Errorf("dry_run missing from %s", out)
+	}
+	if _, ok := got["reap_refused"].(string); !ok {
+		t.Errorf("reap_refused missing from %s", out)
+	}
+}
+
+// The mirror: a sweep that did what it was asked publishes no refusal, so a
+// caller cannot read one where there is none.
+func TestSandboxGCResultOmitsTheRefusalWhenItReaped(t *testing.T) {
+	out, err := json.Marshal(&SandboxGCResult{Scanned: 9, Reaped: 4, Kept: 5})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(out), "reap_refused") {
+		t.Errorf("a completed sweep published a refusal: %s", out)
 	}
 }
