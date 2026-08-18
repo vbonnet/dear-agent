@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -14,7 +15,7 @@ import (
 // runHarnessPostCreate runs the harness-specific post-create flow (deterministic
 // association + readiness signal for Claude, prompt-readiness wait + prompt
 // delivery for CLI harnesses).
-func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup bool) error {
+func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup, promptDelivered bool) error {
 	switch {
 	case harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "":
 		return runClaudePostCreate(ctx, sessionName, modeAppliedAtStartup)
@@ -31,11 +32,23 @@ func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAt
 	case harnessName == "codex-cli":
 		return runCodexPostCreate(ctx, sessionName)
 	case harnessName == "agy":
-		return runAgyPostCreate(ctx, sessionName)
+		return runAgyPostCreate(ctx, sessionName, promptDelivered)
+	case harnessName == "pi-cli":
+		return runPiPostCreate(ctx, sessionName)
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil
 	}
+}
+
+func runPiPostCreate(ctx context.Context, sessionName string) error {
+	if err := tmux.WaitForPiPromptContext(ctx, sessionName, 30*time.Second); err != nil {
+		return fmt.Errorf("pi did not reach managed readiness after creation: %w", err)
+	}
+	ui.PrintSuccess("Pi is ready with AGM authorization controls")
+	// The managed footer is the delivery acknowledgement. Pi does not expose
+	// Claude's echoed-composer signals, so the Claude retry verifier is not used.
+	return deliverInitialPrompt(ctx, sessionName, false, false)
 }
 
 // runClaudePostCreate associates the freshly-spawned Claude session and signals
@@ -66,34 +79,38 @@ func runClaudePostCreate(ctx context.Context, sessionName string, modeAppliedAtS
 	return deliverInitialPrompt(ctx, sessionName, true, true)
 }
 
-// deliverInitialPrompt sends the user-supplied --prompt or --prompt-file to the
-// session. The multiLine flag selects SendMultiLinePromptSafeContext (Claude) vs
-// SendPromptLiteral (Gemini/OpenCode/Codex). verifyDelivery enables the generic
-// retry verifier, which depends on Claude-style prompt echo/processing signals.
+// deliverInitialPrompt sends the user-supplied --prompt or --prompt-file only
+// after atomically revalidating the registered harness and current composer on
+// one exact pane. verifyDelivery enables the generic retry verifier, which
+// depends on Claude-style prompt echo/processing signals. multiLine remains in
+// the call shape for harness post-create compatibility; exact-pane delivery is
+// multiline-safe for every supported CLI harness.
 func deliverInitialPrompt(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	return deliverInitialPromptWithSender(ctx, sessionName, multiLine, verifyDelivery, session.NewRealTmux())
+}
+
+func deliverInitialPromptWithSender(ctx context.Context, sessionName string, multiLine, verifyDelivery bool, sender session.AtomicInputSender) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	switch {
 	case prompt != "":
-		return deliverInitialPromptText(ctx, sessionName, multiLine, verifyDelivery)
+		return deliverInitialPromptTextWithSender(ctx, sessionName, multiLine, verifyDelivery, sender)
 	case promptFile != "":
-		return deliverInitialPromptFile(ctx, sessionName, verifyDelivery)
+		return deliverInitialPromptFileWithSender(ctx, sessionName, verifyDelivery, sender)
 	default:
 		return nil
 	}
 }
 
 func deliverInitialPromptText(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	return deliverInitialPromptTextWithSender(ctx, sessionName, multiLine, verifyDelivery, session.NewRealTmux())
+}
+
+func deliverInitialPromptTextWithSender(ctx context.Context, sessionName string, _ bool, verifyDelivery bool, sender session.AtomicInputSender) error {
 	debug.Log("Sending prompt from --prompt flag")
 	send := func() error {
-		if multiLine {
-			return tmux.SendMultiLinePromptSafeContext(ctx, sessionName, prompt, false)
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return tmux.SendPromptLiteral(sessionName, prompt, false)
+		return sendInitialPromptAtomically(ctx, sender, sessionName, harnessName, prompt)
 	}
 	if err := send(); err != nil {
 		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt", "")
@@ -105,10 +122,17 @@ func deliverInitialPromptText(ctx context.Context, sessionName string, multiLine
 }
 
 func deliverInitialPromptFile(ctx context.Context, sessionName string, verifyDelivery bool) error {
+	return deliverInitialPromptFileWithSender(ctx, sessionName, verifyDelivery, session.NewRealTmux())
+}
+
+func deliverInitialPromptFileWithSender(ctx context.Context, sessionName string, verifyDelivery bool, sender session.AtomicInputSender) error {
 	debug.Log("Sending prompt from --prompt-file flag: %s", promptFile)
 	promptContent, readable := readPromptForVerification(promptFile)
+	if !readable {
+		return reportInitialPromptSendFailure(ctx, fmt.Errorf("read prompt file %q", promptFile), "Failed to send prompt from file", promptFile)
+	}
 	send := func() error {
-		return tmux.SendPromptFileSafeContext(ctx, sessionName, promptFile, false)
+		return sendInitialPromptAtomically(ctx, sender, sessionName, harnessName, string(promptContent))
 	}
 	if err := send(); err != nil {
 		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt from file", promptFile)
@@ -117,6 +141,26 @@ func deliverInitialPromptFile(ctx context.Context, sessionName string, verifyDel
 		return nil
 	}
 	return verifyAndRetryPromptDelivery(ctx, sessionName, string(promptContent), send)
+}
+
+func sendInitialPromptAtomically(ctx context.Context, sender session.AtomicInputSender, sessionName, harness, message string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sender == nil {
+		return fmt.Errorf("verified initial prompt delivery requires atomic tmux readiness")
+	}
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, message, session.InputDeliveryOptions{})
+	if err != nil {
+		return fmt.Errorf("atomic initial prompt delivery: %w", err)
+	}
+	if !readiness.Ready {
+		return fmt.Errorf("initial prompt target is not ready: %s", readiness.State)
+	}
+	if readiness.PaneID == "" {
+		return fmt.Errorf("initial prompt delivery did not verify an exact pane")
+	}
+	return nil
 }
 
 func readPromptForVerification(file string) ([]byte, bool) {
@@ -224,16 +268,21 @@ func realAgyPostCreateRuntime() agyPostCreateRuntime {
 	}
 }
 
-func runAgyPostCreate(ctx context.Context, sessionName string) error {
-	return runAgyPostCreateWithRuntime(ctx, sessionName, realAgyPostCreateRuntime())
+func runAgyPostCreate(ctx context.Context, sessionName string, promptDelivered bool) error {
+	return runAgyPostCreateWithRuntime(ctx, sessionName, promptDelivered, realAgyPostCreateRuntime())
 }
 
-func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtime agyPostCreateRuntime) error {
+func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, promptDelivered bool, runtime agyPostCreateRuntime) error {
 	debug.Phase("AGY Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
 		debug.Log("Test environment: skipping AGY prompt wait")
 		ui.PrintSuccess("AGY test session ready (init sequence skipped)")
+	case promptDelivered:
+		// Shared creation already submitted the prompt, discovered the resulting
+		// native identity, and persisted it before this completion phase.
+		debug.Log("AGY startup prompt and native identity completed before registration")
+		ui.PrintSuccess("AGY is ready and session associated!")
 	default:
 		debug.Log("Waiting for AGY prompt readiness before metadata capture and prompt delivery")
 		if err := runtime.wait(ctx, sessionName, 30*time.Second); err != nil {

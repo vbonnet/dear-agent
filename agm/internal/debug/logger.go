@@ -39,17 +39,25 @@ func Init(enabled bool, sessionName string) error {
 	}
 
 	debugDir := filepath.Join(homeDir, ".agm", "debug")
-	if err := os.MkdirAll(debugDir, 0755); err != nil {
+	if err := os.MkdirAll(debugDir, 0700); err != nil {
 		return fmt.Errorf("failed to create debug dir: %w", err)
+	}
+	// #nosec G302 -- an owner-only directory needs traversal permission.
+	if err := os.Chmod(debugDir, 0700); err != nil {
+		return fmt.Errorf("failed to secure debug dir: %w", err)
 	}
 
 	// Create log file with timestamp
 	timestamp := time.Now().Format("20060102-150405")
 	logPath := filepath.Join(debugDir, fmt.Sprintf("new-%s-%s.log", sessionName, timestamp))
 
-	file, err := os.Create(logPath)
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create debug log: %w", err)
+	}
+	if err := file.Chmod(0600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("failed to secure debug log: %w", err)
 	}
 
 	slog.Info("Debug log initialized", "path", logPath)

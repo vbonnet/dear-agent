@@ -208,7 +208,10 @@ AGM automatically installs state management hooks during session creation. To ma
 
 ```bash
 # Copy hooks to Claude config directory
-cp ~/.agm/hooks/claude/* ~/.claude/hooks/
+# rsync, not cp: it writes each file to a temporary name and renames it into
+# place, so a hook that is compiled and already running is never overwritten
+# in place (ce-77ip.8). A glob copy can expand to binaries.
+rsync -a ~/.agm/hooks/claude/ ~/.claude/hooks/
 
 # Verify hooks installed
 ls -la ~/.claude/hooks/session-start/
@@ -231,16 +234,16 @@ agm send <session-name-or-id> "<message>"
 **Examples:**
 ```bash
 # Send to specific session by name
-agm send analysis-session "Analyze the latest data"
+agm send msg analysis-session --prompt "Analyze the latest data"
 
 # Send to session by ID prefix
-agm send a1b2c3 "Update the report"
+agm send msg a1b2c3 --prompt "Update the report"
 
 # Send from within a session (automatic sender detection)
-agm send research-session "Research complete, proceeding to phase 2"
+agm send msg research-session --prompt "Research complete, proceeding to phase 2"
 
-# Send with high priority (future feature)
-agm send --priority high critical-session "Urgent: API quota exhausted"
+# Send with urgent priority
+agm send msg critical-session --priority urgent --prompt "Urgent: API quota exhausted"
 ```
 
 ### Message Format
@@ -248,12 +251,12 @@ agm send --priority high critical-session "Urgent: API quota exhausted"
 Messages are delivered as multi-line prompts to the target session:
 
 ```
-[Delivered Format in Target Session]
-> From: research-session (12345678-abcd-ef01-2345-6789abcdef01)
-> Sent: 2026-02-20T14:30:00Z
->
-> Analyze the latest data in ~/reports/q4-2025.csv and summarize key trends.
+[From: research-session | ID: 1784686866639-research-session-002 | Sent: 2026-07-21T19:21:06Z]
+Analyze the latest data in ~/reports/q4-2025.csv and summarize key trends.
 ```
+
+For AGY, AGM sends this attribution and multiline body as one bracketed native
+composer submission. Embedded newlines do not split the header from the body.
 
 ### Delivery Guarantees
 
@@ -262,7 +265,9 @@ AGM provides **at-least-once delivery**:
 - ✅ Messages persist in SQLite queue (survives daemon restarts)
 - ✅ Automatic retry (3 attempts with exponential backoff)
 - ✅ Acknowledgment protocol (confirms delivery)
-- ⚠️ No guarantee of ordering (parallel delivery possible)
+- ✅ Fan-out delivery is attempted in resolved recipient order, one recipient at a time
+- ✅ Each CLI recipient must pass shared harness readiness before exact-pane input
+- ⚠️ Independently queued invocations have no global ordering guarantee
 - ⚠️ Duplicate delivery possible (on network errors, use idempotency)
 
 ### Acknowledgment Protocol

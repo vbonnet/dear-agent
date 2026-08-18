@@ -74,7 +74,7 @@ func RegisterSessionProtocolGuardrailSteps(ctx *godog.ScenarioContext) {
 			if !slices.Contains(tags, harness) {
 				return fmt.Errorf("A2A card tags %v omit harness %q", tags, harness)
 			}
-			for _, active := range []string{"claude-code", "codex-cli", "agy", "opencode-cli"} {
+			for _, active := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"} {
 				if active != harness && slices.Contains(tags, active) {
 					return fmt.Errorf("A2A card for %q also advertises %q", harness, active)
 				}

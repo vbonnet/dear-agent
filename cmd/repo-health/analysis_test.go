@@ -5,9 +5,10 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // parseFunc parses src and returns the first function declaration plus the
@@ -106,8 +107,7 @@ func TestParseGoFilesExcludesAndCounts(t *testing.T) {
 func TestParseGoFilesHonorsRepositoryIgnoreAndGeneratedPolicy(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cmd := exec.Command("git", "init", "-q")
-	cmd.Dir = root
+	cmd := gittest.Command(t, root, "init", "-q")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}

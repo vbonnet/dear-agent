@@ -11,7 +11,7 @@ harness- and model-family-neutral.
 
 ## EARS Requirements
 
-**EHP-01** When supported harnesses are enumerated, the system shall return Claude Code, Codex CLI, Antigravity, and OpenCode in canonical order.
+**EHP-01** When supported harnesses are enumerated, the system shall return Claude Code, Codex CLI, Antigravity, OpenCode, and Pi in canonical order.
 
 **EHP-02** When a canonical harness name or documented alias is selected, the system shall construct the corresponding transcript adapter.
 
@@ -70,6 +70,10 @@ harness- and model-family-neutral.
 **EHP-29** When daily logs and critic decisions are written, the system shall create their directories, append rather than replace prior evidence, and retain structured timestamps.
 
 **EHP-30** When a memory freshness date is unavailable or malformed, the system shall fall back to file modification time and surface a bounded age caveat.
+
+**EHP-31** When Pi sessions are discovered, the adapter shall scan both Pi-native and AGM-private JSONL trees without following symlinks, identify sessions from exact header IDs, filter by absolute cwd and update time, and deduplicate private copies.
+
+**EHP-32** When Pi transcript text is extracted, the adapter shall retain only user and assistant text parts while omitting thinking, tool results, and malformed records.
 
 ## BDD Traceability
 

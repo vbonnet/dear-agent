@@ -1,15 +1,40 @@
 package githooks_test
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+// lockedBuffer safely captures concurrently copied stdout and stderr from a
+// child hook while the test polls its output for a timeout diagnostic.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
 
 // hookPath resolves scripts/git-hooks/post-merge relative to this test file so
 // the test is independent of the working directory `go test` chooses.
@@ -28,16 +53,12 @@ func hookPath(t *testing.T) string {
 	return p
 }
 
-// git runs a git command in dir and fails the test on error.
+// git runs a git command in dir and fails the test on error. The sandbox
+// supplies a deterministic identity and, critically, an empty hooks path: these
+// repositories are merged into, and an inherited host hook would run for real.
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	// Deterministic identity; no global config dependence.
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-	)
+	cmd := gittest.Command(t, dir, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -47,10 +68,19 @@ func git(t *testing.T, dir string, args ...string) {
 // commit, and returns its path.
 func newRepo(t *testing.T) string {
 	t.Helper()
+	return newRepoAt(t, t.TempDir())
+}
+
+// newRepoAt is newRepo at a caller-chosen path, for tests that need the repo
+// to sit at a specific place relative to a managed root.
+func newRepoAt(t *testing.T, dir string) string {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	dir := t.TempDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	git(t, dir, "init", "-q", "-b", "main")
 	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -79,6 +109,19 @@ func stubAGM(t *testing.T, sentinel string) string {
 // returns the process exit; the hook must always exit 0.
 func runHook(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
 	t.Helper()
+	runHookWith(t, repoDir, agmDir,
+		append([]string{"DEAR_AGENT_MANAGED_REPO_ROOTS=" + repoDir}, extraEnv...)...)
+}
+
+// runHookUnscoped runs the hook WITHOUT opting the temp repo into the managed
+// roots, so the managed-repository gate is the thing under test.
+func runHookUnscoped(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
+	t.Helper()
+	runHookWith(t, repoDir, agmDir, extraEnv...)
+}
+
+func runHookWith(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
+	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
@@ -89,7 +132,9 @@ func runHook(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
 	}
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repoDir
-	cmd.Env = append(os.Environ(),
+	// gittest.Env is the base so the git commands the hook itself runs are
+	// sanitized too; the test's own overrides come last and win.
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+path,
 		"AGM_POST_MERGE_SWEEP_SYNC=1", // deterministic: run sweep in foreground
@@ -108,6 +153,20 @@ func swept(t *testing.T, sentinel string) bool {
 	t.Helper()
 	_, err := os.Stat(sentinel)
 	return err == nil
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration, message string, output *lockedBuffer) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s:\n%s", message, output.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // On the default branch, the hook triggers the sweep.
@@ -145,6 +204,83 @@ func TestPostMerge_OptOut_Skips(t *testing.T) {
 	}
 }
 
+// The hook is installed globally (core.hooksPath), so it fires after a merge
+// in EVERY repository — including the throwaway ones a test suite creates. On
+// 2026-07-10 that ran a repository-wide `agm worktree sweep --execute` from
+// two temporary repositories and deleted two live worktrees (F-01, ce-3knl.1).
+// Outside the managed roots the hook must do nothing at all.
+//
+// Note this is the one hook test that does NOT set
+// DEAR_AGENT_MANAGED_REPO_ROOTS: every other test opts its temp repo in, so
+// without this case the gate itself would never be exercised.
+func TestPostMerge_UnmanagedRepo_NoOp(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir)
+	if swept(t, sentinel) {
+		t.Fatal("sweep ran in a repository outside the managed roots")
+	}
+}
+
+func TestPostMerge_UnsetHome_UnmanagedRepo_NoOp(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir, "HOME=")
+	if swept(t, sentinel) {
+		t.Fatal("sweep ran when HOME was unavailable to establish managed roots")
+	}
+}
+
+func TestPostMerge_UnsetHome_ExplicitManagedRoot_NoOp(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir,
+		"HOME=", "DEAR_AGENT_MANAGED_REPO_ROOTS="+repo)
+	if swept(t, sentinel) {
+		t.Fatal("sweep ran when HOME was unavailable despite an explicit managed root")
+	}
+}
+
+// A repository nested under a managed root is managed. ~/worktrees/<repo>/<wt>
+// is the normal shape, so the gate must match by path prefix, not equality.
+func TestPostMerge_NestedUnderManagedRoot_Sweeps(t *testing.T) {
+	root := t.TempDir()
+	repo := newRepoAt(t, filepath.Join(root, "some-repo", "some-worktree"))
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHook(t, repo, agmDir, "DEAR_AGENT_MANAGED_REPO_ROOTS="+root)
+	if !swept(t, sentinel) {
+		t.Fatal("a repository nested under a managed root must be managed")
+	}
+}
+
+func TestPostMerge_FilesystemRootManaged_Sweeps(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir, "DEAR_AGENT_MANAGED_REPO_ROOTS=/")
+	if !swept(t, sentinel) {
+		t.Fatal("a repository beneath the filesystem root must be managed when / is configured")
+	}
+}
+
+// A root that merely shares a textual prefix with the repo path is not a
+// parent of it: ~/src must not manage a repository in ~/src-scratch.
+func TestPostMerge_SiblingPrefixRoot_NoOp(t *testing.T) {
+	base := t.TempDir()
+	repo := newRepoAt(t, filepath.Join(base, "src-scratch"))
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir,
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+filepath.Join(base, "src"))
+	if swept(t, sentinel) {
+		t.Fatal("a sibling sharing a path prefix was treated as managed")
+	}
+}
+
 // With no `agm` on PATH the hook is an inert no-op that still exits 0.
 func TestPostMerge_NoAGM_NoOp(t *testing.T) {
 	repo := newRepo(t)
@@ -159,21 +295,25 @@ func TestPostMerge_NoAGM_NoOp(t *testing.T) {
 // ── Stage 1 (binary rebuild) ────────────────────────────────────────────────
 
 // stubGo writes a fake `go` that records each `go build -o <tmp> <pkg>`
-// invocation into recordFile as "<pkg>|<HEAD-of-cwd>" (one per line) and returns
-// the dir holding it. Capturing the cwd's HEAD lets tests assert WHICH commit the
-// hook built from — the whole point of the origin/main fix: the build must run in
-// a checkout pinned to trunk, not in whatever ref the local working tree sits on.
-// It also writes a fake binary to the `-o` path so the hook's atomic rename into
-// GOBIN succeeds (the hook now build-to-temp + mv instead of `go install`).
+// invocation into recordFile as "<pkg>|<HEAD-of-cwd>|<ldflags>" (one per line)
+// and returns the dir holding it. Capturing the cwd's HEAD and the single value
+// following -ldflags lets tests assert which commit and provenance profile the
+// hook built. It also writes a fake binary to the `-o` path so the hook's atomic
+// rename into GOBIN succeeds.
 func stubGo(t *testing.T, recordFile string) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = build ]; then\n" +
-		"  out=\"\"; pkg=\"\"; prev=\"\"\n" +
-		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
+		"  out=\"\"; pkg=\"\"; ldflags=\"\"; prev=\"\"\n" +
+		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; [ \"$prev\" = -ldflags ] && ldflags=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
+		"  [ -n \"$STUB_GO_FAIL_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_FAIL_PKG\" ] && exit 1\n" +
+		"  if [ -n \"$STUB_GO_BLOCK_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_BLOCK_PKG\" ]; then\n" +
+		"    : > \"$STUB_GO_BLOCK_READY\"\n" +
+		"    while [ ! -e \"$STUB_GO_BLOCK_RELEASE\" ]; do sleep 0.01; done\n" +
+		"  fi\n" +
 		"  [ -n \"$out\" ] && printf 'fakebin\\n' > \"$out\"\n" +
-		"  echo \"$pkg|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"\n" +
+		"  printf '%s|%s|%s\\n' \"$pkg\" \"$(git rev-parse HEAD 2>/dev/null)\" \"$ldflags\" >> \"" + recordFile + "\"\n" +
 		"fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
@@ -182,11 +322,32 @@ func stubGo(t *testing.T, recordFile string) string {
 	return dir
 }
 
-// installRecord is one captured `go install` invocation: the package and the
-// HEAD commit of the directory the build actually ran in.
+// stubLockf models stock macOS lockf's file-and-command CLI. It records the
+// invocation and executes the command after the lock-file argument, rejecting
+// the invalid open-file-descriptor shape that prompted the regression.
+func stubLockf(t *testing.T, recordFile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" > \"" + recordFile + "\"\n" +
+		"[ \"$1\" = -t ] || exit 64\n" +
+		"shift 2\n" +
+		"[ -n \"$1\" ] || exit 64\n" +
+		"shift\n" +
+		"[ $# -gt 0 ] || exit 64\n" +
+		"exec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "lockf"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// installRecord is one captured `go build` invocation: the package, the HEAD
+// commit of the build directory, and the single value following -ldflags.
 type installRecord struct {
-	pkg    string
-	commit string
+	pkg     string
+	commit  string
+	ldflags string
 }
 
 // installRecords parses the stub's record into structured invocations.
@@ -201,8 +362,9 @@ func installRecords(t *testing.T, recordFile string) []installRecord {
 		if l == "" {
 			continue
 		}
-		pkg, commit, _ := strings.Cut(l, "|")
-		out = append(out, installRecord{pkg: pkg, commit: commit})
+		pkg, rest, _ := strings.Cut(l, "|")
+		commit, ldflags, _ := strings.Cut(rest, "|")
+		out = append(out, installRecord{pkg: pkg, commit: commit, ldflags: ldflags})
 	}
 	return out
 }
@@ -220,8 +382,7 @@ func installed(t *testing.T, recordFile string) []string {
 // revParse returns the resolved commit for ref in dir.
 func revParse(t *testing.T, dir, ref string) string {
 	t.Helper()
-	cmd := exec.Command("git", "rev-parse", ref)
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, "rev-parse", ref)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git rev-parse %s in %s: %v\n%s", ref, dir, err, out)
@@ -229,18 +390,18 @@ func revParse(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// newRebuildRepo builds a repo that looks like dear-agent: it has the two
+// newRebuildRepo builds a repo that looks like dear-agent: it has the managed
 // binary package dirs and a baseline commit on main. It returns the repo path.
 func newRebuildRepo(t *testing.T) string {
 	t.Helper()
 	repo := newRepo(t)
-	for _, p := range []string{"agm/cmd/agm", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
+	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "wayfinder/cmd/wayfinder", "pkg/llm/auth", "internal/x", "docs"} {
 		if err := os.MkdirAll(filepath.Join(repo, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seed each package dir with a tracked file so later diffs are meaningful.
-	for _, f := range []string{"agm/cmd/agm/main.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
+	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "wayfinder/cmd/wayfinder/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -283,10 +444,11 @@ func runRebuildRecord(t *testing.T, repo string, extraEnv ...string) string {
 	goDir := stubGo(t, record)
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"AGM_POST_MERGE_SWEEP=0", // isolate Stage 1: no sweep
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo, // scope the hook to this temp repo
+		"AGM_POST_MERGE_SWEEP=0",              // isolate Stage 1: no sweep
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -320,9 +482,10 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 		goDir := stubGo(t, record)
 		cmd := exec.Command("bash", hookPath(t))
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(gittest.Env(t),
 			"HOME="+home, "GOBIN="+gobin,
 			"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
 			"AGM_POST_MERGE_SWEEP=0",
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -346,13 +509,301 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 	}
 }
 
-// A change under a shared source tree (pkg/) rebuilds BOTH binaries.
-func TestRebuild_SharedSource_RebuildsBoth(t *testing.T) {
+// A change under a root shared source tree (pkg/) rebuilds every consumer.
+func TestRebuild_SharedSource_RebuildsAllConsumers(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"pkg/llm/auth/auth.go": "package auth // v2\n"})
 	got := runRebuild(t, repo)
-	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./cmd/vroom-dispatch") {
-		t.Fatalf("expected both binaries rebuilt on a pkg/ change, got %v", got)
+	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") || !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("expected all consumers rebuilt on a pkg/ change, got %v", got)
+	}
+}
+
+// The async archive companion consumes agm/internal just like the CLI. Both
+// binaries must be built from one source revision so a merged prompt/lifecycle
+// change cannot leave the detached reaper running stale code.
+func TestRebuild_AGMSharedLifecycle_RebuildsCLIAndReaperFromSameRevision(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	wantCommit := revParse(t, repo, "HEAD")
+
+	recs := installRecords(t, runRebuildRecord(t, repo))
+	commits := make(map[string]string)
+	for _, rec := range recs {
+		commits[rec.pkg] = rec.commit
+	}
+	for _, pkg := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper"} {
+		if commits[pkg] != wantCommit {
+			t.Errorf("%s built from %q; want shared source revision %s (records: %+v)", pkg, commits[pkg], wantCommit, recs)
+		}
+	}
+	if _, ok := commits["./cmd/vroom-dispatch"]; ok {
+		t.Fatal("AGM-only shared source unexpectedly rebuilt vroom-dispatch")
+	}
+}
+
+// A partial pair build must not replace either installed binary. In
+// particular, a reaper build failure cannot leave a newer CLI beside the old
+// detached lifecycle implementation.
+func TestRebuild_AGMPairBuildFailurePreservesInstalledPair(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	gobin := t.TempDir()
+	for name, content := range map[string]string{"agm": "old-agm\n", "agm-reaper": "old-reaper\n"} {
+		if err := os.WriteFile(filepath.Join(gobin, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_FAIL_PKG=./agm/cmd/agm-reaper",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook must fail safe, got %v\n%s", err, out)
+	}
+
+	for name, want := range map[string]string{"agm": "old-agm\n", "agm-reaper": "old-reaper\n"} {
+		got, err := os.ReadFile(filepath.Join(gobin, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s changed after pair build failure: got %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestRebuild_AGMPairActivationIsSerializedAcrossHookProcesses(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput lockedBuffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = repo
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first hook did not reach staged build:\n%s", firstOutput.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput lockedBuffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = repo
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("contending hook did not wait for lock owner: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("contending hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("contending hook did not reacquire deployment lock: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+	if got := installRecords(t, record); len(got) != 4 {
+		t.Fatalf("concurrent hooks staged %d builds, want two serialized coherent pairs: %v", len(got), got)
+	}
+}
+
+func TestRebuild_AGMPairRefreshesTrunkAfterWaitingForLock(t *testing.T) {
+	origin := newRebuildRepo(t)
+	firstCheckout := cloneRepo(t, origin)
+	secondCheckout := cloneRepo(t, origin)
+
+	sharedSource := filepath.Join(origin, "agm", "internal", "tmux", "prompt.go")
+	if err := os.WriteFile(sharedSource, []byte("package tmux // revision x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "agm/internal/tmux/prompt.go")
+	git(t, origin, "commit", "-qm", "revision x")
+	firstRevision := revParse(t, origin, "HEAD")
+	git(t, firstCheckout, "pull", "-q", "--ff-only")
+
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+firstCheckout+string(os.PathListSeparator)+secondCheckout,
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput lockedBuffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = firstCheckout
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+	waitForFile(t, ready, 20*time.Second, "first hook did not reach staged build", &firstOutput)
+
+	if err := os.WriteFile(sharedSource, []byte("package tmux // revision y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "agm/internal/tmux/prompt.go")
+	git(t, origin, "commit", "-qm", "revision y")
+	secondRevision := revParse(t, origin, "HEAD")
+	git(t, secondCheckout, "pull", "-q", "--ff-only")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput lockedBuffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = secondCheckout
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("newer hook did not wait for the older deployment: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("newer hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("newer hook did not deploy after lock release: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+
+	records := installRecords(t, record)
+	if len(records) != 4 {
+		t.Fatalf("serialized hooks staged %d builds, want two coherent pairs: %v", len(records), records)
+	}
+	for i, want := range []string{firstRevision, firstRevision, secondRevision, secondRevision} {
+		if records[i].commit != want {
+			t.Fatalf("build %d used revision %s, want %s (records: %+v)", i, records[i].commit, want, records)
+		}
+	}
+}
+
+func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
+	tests := []struct {
+		name       string
+		pidContent string
+	}{
+		{name: "ownerless"},
+		{name: "malformed owner", pidContent: "not-a-pid\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRebuildRepo(t)
+			mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+			gobin := t.TempDir()
+			lockDir := filepath.Join(gobin, ".agm-pair-install.lock")
+			if err := os.Mkdir(lockDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.pidContent != "" {
+				if err := os.WriteFile(filepath.Join(lockDir, "pid"), []byte(tc.pidContent), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			record := filepath.Join(t.TempDir(), "installed")
+			goDir := stubGo(t, record)
+			cmd := exec.Command("bash", hookPath(t))
+			cmd.Dir = repo
+			cmd.Env = append(gittest.Env(t),
+				"HOME="+t.TempDir(),
+				"GOBIN="+gobin,
+				"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
+				"AGM_POST_MERGE_SWEEP=0",
+			)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("hook failed with %s legacy lock: %v\n%s", tc.name, err, output)
+			}
+			if got := installRecords(t, record); len(got) != 2 {
+				t.Fatalf("hook staged %d builds, want one coherent pair: %v", len(got), got)
+			}
+		})
 	}
 }
 
@@ -367,9 +818,173 @@ func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	if !slices.Contains(got, "./cmd/vroom-dispatch") {
 		t.Fatalf("vroom-dispatch not rebuilt for its own change: %v", got)
 	}
+	if slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder rebuilt for a vroom-dispatch-only change: %v", got)
+	}
 }
 
-// A change confined to agm/ rebuilds ONLY agm.
+// A Wayfinder runtime change rebuilds Wayfinder and no unrelated executable.
+// This is the exact boundary missed when PR #1024 changed validator Go files
+// but the installed binary remained at the prior revision.
+func TestRebuild_WayfinderOnly(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"wayfinder/cmd/wayfinder/main.go": "package main // v2\n"})
+	got := runRebuild(t, repo)
+	if !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder not rebuilt for its own runtime change: %v", got)
+	}
+	for _, unrelated := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper", "./cmd/vroom-dispatch"} {
+		if slices.Contains(got, unrelated) {
+			t.Fatalf("%s rebuilt for a wayfinder-only change: %v", unrelated, got)
+		}
+	}
+}
+
+func TestRebuild_WayfinderUsesMacOSLockfFileAndCommandForm(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"wayfinder/cmd/wayfinder/main.go": "package main // v2\n"})
+	gobin := t.TempDir()
+	installRecord := filepath.Join(t.TempDir(), "installed")
+	lockfRecord := filepath.Join(t.TempDir(), "lockf-args")
+	goDir := stubGo(t, installRecord)
+	lockfDir := stubLockf(t, lockfRecord)
+
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(gittest.Env(t),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+lockfDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
+		"AGM_POST_MERGE_SWEEP=0",
+		"DEAR_AGENT_INSTALL_LOCK_TOOL=lockf",
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Wayfinder lockf-form rebuild failed: %v\n%s", err, output)
+	}
+	if got := installed(t, installRecord); !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("Wayfinder was not installed through lockf command form: %v", got)
+	}
+	args, err := os.ReadFile(lockfRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"-t 300 " + filepath.Join(gobin, ".wayfinder-install.lock"),
+		"env DEAR_AGENT_POST_MERGE_INTERNAL_MODE=wayfinder DEAR_AGENT_POST_MERGE_REBUILD=1 bash",
+		hookPath(t),
+	} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("lockf invocation missing %q: %s", want, args)
+		}
+	}
+}
+
+// Two default-branch hooks can overlap from distinct checkouts that install to
+// one GOBIN. The newer contender must wait, then refresh origin/main while it
+// owns the lock so an older, slower build cannot become the final activation.
+func TestRebuild_WayfinderRefreshesTrunkAfterWaitingForLock(t *testing.T) {
+	origin := newRebuildRepo(t)
+	firstCheckout := cloneRepo(t, origin)
+	secondCheckout := cloneRepo(t, origin)
+
+	sharedSource := filepath.Join(origin, "wayfinder", "cmd", "wayfinder", "main.go")
+	if err := os.WriteFile(sharedSource, []byte("package main // revision x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "wayfinder/cmd/wayfinder/main.go")
+	git(t, origin, "commit", "-qm", "wayfinder revision x")
+	firstRevision := revParse(t, origin, "HEAD")
+	git(t, firstCheckout, "pull", "-q", "--ff-only")
+
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+firstCheckout+string(os.PathListSeparator)+secondCheckout,
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./wayfinder/cmd/wayfinder",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput lockedBuffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = firstCheckout
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+	waitForFile(t, ready, 20*time.Second, "first Wayfinder hook did not reach staged build", &firstOutput)
+
+	if err := os.WriteFile(sharedSource, []byte("package main // revision y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "wayfinder/cmd/wayfinder/main.go")
+	git(t, origin, "commit", "-qm", "wayfinder revision y")
+	secondRevision := revParse(t, origin, "HEAD")
+	git(t, secondCheckout, "pull", "-q", "--ff-only")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput lockedBuffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = secondCheckout
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("newer Wayfinder hook did not wait for the older deployment: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first Wayfinder hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("newer Wayfinder hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("newer Wayfinder hook did not deploy after lock release: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+
+	records := installRecords(t, record)
+	if len(records) != 2 {
+		t.Fatalf("serialized Wayfinder hooks staged %d builds, want two: %v", len(records), records)
+	}
+	for i, want := range []string{firstRevision, secondRevision} {
+		if records[i].commit != want {
+			t.Fatalf("Wayfinder build %d used revision %s, want %s (records: %+v)", i, records[i].commit, want, records)
+		}
+	}
+}
+
+// Any compiled AGM change rebuilds the coherent CLI/reaper pair. Even when a
+// source change is CLI-local, exact revision handshaking means the detached
+// companion must move to the same commit.
 func TestRebuild_AgmOnly(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"agm/cmd/agm/main.go": "package main // v2\n"})
@@ -377,8 +992,14 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	if slices.Contains(got, "./cmd/vroom-dispatch") {
 		t.Fatalf("vroom-dispatch rebuilt for an agm-only change: %v", got)
 	}
+	if slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder rebuilt for an agm-only change: %v", got)
+	}
 	if !slices.Contains(got, "./agm/cmd/agm") {
 		t.Fatalf("agm not rebuilt for its own change: %v", got)
+	}
+	if !slices.Contains(got, "./agm/cmd/agm-reaper") {
+		t.Fatalf("agm-reaper not rebuilt with coherent AGM pair: %v", got)
 	}
 }
 
@@ -548,11 +1169,12 @@ func runDeployRecord(t *testing.T, repo string, extraEnv ...string) string {
 	makeDir := stubMake(t, record)
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+makeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"DEAR_AGENT_POST_MERGE_REBUILD=0", // isolate Stage 1.6 from Stage 1
-		"AGM_POST_MERGE_SWEEP=0",          // isolate Stage 1.6 from Stage 2
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo, // scope the hook to this temp repo
+		"DEAR_AGENT_POST_MERGE_REBUILD=0",     // isolate Stage 1.6 from Stage 1
+		"AGM_POST_MERGE_SWEEP=0",              // isolate Stage 1.6 from Stage 2
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -687,9 +1309,10 @@ func runBeadTransition(t *testing.T, repo, beadsDB string, extraEnv ...string) [
 	bdDir := stubBd(t, closeLog)
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+bdDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo, // scope the hook to this temp repo
 		"DEAR_AGENT_POST_MERGE_REBUILD=0",
 		"DEAR_AGENT_POST_MERGE_VERIFY=0",
 		"AGM_POST_MERGE_SWEEP=0",

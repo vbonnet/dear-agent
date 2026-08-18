@@ -6,12 +6,12 @@
 # RELATED-SPEC: agm/test/bdd/SPEC.md
 # RELATED-SPEC: agm/test/bdd/steps/SPEC.md
 # RELATED-SPEC: agm/test/contract/SPEC.md
-# RELATED-SPEC: agm/test/contracts/SPEC.md
 # RELATED-SPEC: agm/test/e2e/SPEC.md
 # RELATED-SPEC: agm/test/helpers/SPEC.md
 # RELATED-SPEC: agm/test/integration/SPEC.md
 # RELATED-SPEC: agm/test/integration/helpers/SPEC.md
-# RELATED-SPEC: agm/test/integration/lifecycle/SPEC.md
+# RELATED-SPEC: agm/test/integration/isolated/SPEC.md
+# RELATED-SPEC: agm/test/integration/portable/SPEC.md
 # RELATED-SPEC: agm/test/performance/SPEC.md
 # RELATED-SPEC: agm/test/regression/SPEC.md
 # RELATED-SPEC: agm/test/unit/SPEC.md
@@ -38,12 +38,12 @@ Feature: Test support package guardrails
       | agm/test/bdd                                              |
       | agm/test/bdd/steps                                        |
       | agm/test/contract                                         |
-      | agm/test/contracts                                        |
       | agm/test/e2e                                              |
       | agm/test/helpers                                          |
       | agm/test/integration                                      |
       | agm/test/integration/helpers                              |
-      | agm/test/integration/lifecycle                            |
+      | agm/test/integration/isolated                             |
+      | agm/test/integration/portable                             |
       | agm/test/performance                                      |
       | agm/test/regression                                       |
       | agm/test/unit                                             |
@@ -87,12 +87,21 @@ Feature: Test support package guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
 
   Scenario: Live harness contracts use canonical guarded CLI routes
     Given live harness contract sources are configured
     When AGM validates live harness contract command construction
     Then live harness contracts should use canonical session and harness arguments
     And unavailable live harness dependencies should be skipped explicitly
+    And the credential-free active registry contract should always remain runnable
+    And mock-only Pact tests should not be reported as adapter coverage
 
   Scenario: Trust protocol hooks restore process state and owned storage
     When AGM validates trust protocol scenario isolation
@@ -105,3 +114,23 @@ Feature: Test support package guardrails
     When AGM validates performance client readiness
     Then performance workloads should use bounded hub client readiness
     And churn cleanup should be observed before stable clients disconnect
+
+  Scenario: Real Codex lifecycle tests own their complete runtime
+    Given isolated Codex lifecycle test sources are configured
+    When AGM validates real lifecycle isolation
+    Then the lifecycle should use a source-built AGM and unique tmux socket
+    And the lifecycle should exercise send kill resume and archive through the source-built AGM
+    And unexpected lifecycle setup failures should fail the test
+    And cleanup should target only owned test resources
+    And legacy suite opt-outs should not suppress required integration contracts
+
+  Scenario: Named test environments remain inside one owned root
+    Given named test environment lifecycle sources are configured
+    When AGM validates named test environment ownership
+    Then canonical creation reconstruction discovery and cleanup should share one root
+    And the canonical short root should be private and scoped to the effective user
+    And existing retired named environments should activate in place
+    And new canonical creation should refuse a retired same-name collision
+    And retired named environment paths should be discovered and removed exactly
+    And overlong names should be rejected only for new environments
+    And unsafe named test environment paths should be rejected before mutation

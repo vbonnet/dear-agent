@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,10 +15,11 @@ import (
 type fakeProvider struct {
 	name string
 
-	mu    sync.Mutex
-	calls int
-	resp  *provider.GenerateResponse
-	err   error
+	mu          sync.Mutex
+	calls       int
+	resp        *provider.GenerateResponse
+	err         error
+	nilResponse bool
 
 	// errOnce, if true, fails the first call and succeeds afterwards.
 	// Useful for checking that the router falls through to the next
@@ -25,7 +27,7 @@ type fakeProvider struct {
 	errOnce bool
 }
 
-func (f *fakeProvider) Name() string                  { return f.name }
+func (f *fakeProvider) Name() string                        { return f.name }
 func (f *fakeProvider) Capabilities() provider.Capabilities { return provider.Capabilities{} }
 
 func (f *fakeProvider) Generate(_ context.Context, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
@@ -44,6 +46,9 @@ func (f *fakeProvider) Generate(_ context.Context, req *provider.GenerateRequest
 		clone := *f.resp
 		clone.Model = req.Model
 		return &clone, nil
+	}
+	if f.nilResponse {
+		return nil, nil
 	}
 	return &provider.GenerateResponse{Text: f.name + " ok", Model: req.Model}, nil
 }
@@ -94,6 +99,9 @@ func TestRouter_Generate_PrimarySucceeds(t *testing.T) {
 	if resp.Model != "claude-opus-4-7" {
 		t.Errorf("response model = %q, want claude-opus-4-7", resp.Model)
 	}
+	if resp.Metadata["router_provider"] != "anthropic" || resp.Metadata["router_model"] != "claude-opus-4-7" || resp.Metadata["router_role"] != "research" {
+		t.Errorf("response routing metadata = %#v", resp.Metadata)
+	}
 	if primary.calls != 1 {
 		t.Errorf("primary calls = %d, want 1", primary.calls)
 	}
@@ -127,9 +135,45 @@ func TestRouter_Generate_FallsThroughOnError(t *testing.T) {
 	if resp.Model != "gemini-2.5-flash" {
 		t.Errorf("response model = %q, want gemini-2.5-flash", resp.Model)
 	}
+	if resp.Metadata["router_provider"] != "gemini" {
+		t.Errorf("response provider = %v, want gemini", resp.Metadata["router_provider"])
+	}
 	if primary.calls != 1 || secondary.calls != 1 || tertiary.calls != 1 {
 		t.Errorf("call counts = primary:%d secondary:%d tertiary:%d (want 1,1,1)",
 			primary.calls, secondary.calls, tertiary.calls)
+	}
+}
+
+func TestRouter_Generate_AttributesCircuitBreakerFallback(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "claude-opus-4-7"},
+	}}
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	r, err := New(Options{
+		Config: cfg,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Metadata["router_provider"] != "openai" || resp.Metadata["router_model"] != "gpt-4o" || resp.Metadata["router_fallback"] != true {
+		t.Fatalf("fallback routing metadata = %#v", resp.Metadata)
+	}
+	if resp.Metadata["router_candidate_model"] != "claude-opus-4-7" || resp.Metadata["router_role"] != "research" {
+		t.Fatalf("candidate routing metadata = %#v", resp.Metadata)
 	}
 }
 
@@ -236,6 +280,9 @@ func TestRouter_GenerateForModel_RoutesDirectly(t *testing.T) {
 	if resp.Model != "gpt-4o" {
 		t.Errorf("model = %q, want gpt-4o", resp.Model)
 	}
+	if resp.Metadata["router_provider"] != "openai" || resp.Metadata["router_model"] != "gpt-4o" {
+		t.Errorf("response routing metadata = %#v", resp.Metadata)
+	}
 	if prov.calls != 1 {
 		t.Errorf("calls = %d, want 1", prov.calls)
 	}
@@ -246,6 +293,26 @@ func TestRouter_GenerateForModel_RejectsEmptyID(t *testing.T) {
 	r := newRouter(t, cfg, nil)
 	if _, err := r.GenerateForModel(context.Background(), "", &provider.GenerateRequest{Prompt: "hi"}); err == nil {
 		t.Fatal("expected error on empty model id")
+	}
+}
+
+func TestRouter_NilResponseFallsThroughAndDirectRouteRejectsIt(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "gpt-4o", Secondary: "claude-sonnet-4-6"},
+	}}
+	r := newRouter(t, cfg, map[string]provider.Provider{
+		"openai|gpt-4o":               &fakeProvider{name: "openai", nilResponse: true},
+		"anthropic|claude-sonnet-4-6": &fakeProvider{name: "anthropic"},
+	})
+	resp, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil || resp == nil || resp.Metadata["router_provider"] != "anthropic" {
+		t.Fatalf("Generate() = (%v, %v), want healthy fallback", resp, err)
+	}
+	direct := newRouter(t, &Config{Version: 1, Roles: map[string]RoleSpec{}}, map[string]provider.Provider{
+		"openai|gpt-4o": &fakeProvider{name: "openai", nilResponse: true},
+	})
+	if _, err := direct.GenerateForModel(context.Background(), "gpt-4o", &provider.GenerateRequest{Prompt: "hi"}); err == nil || !strings.Contains(err.Error(), "nil response") {
+		t.Fatalf("GenerateForModel() error = %v, want nil-response error", err)
 	}
 }
 
@@ -276,8 +343,8 @@ func TestRouter_ProviderCachedAcrossCalls(t *testing.T) {
 
 func TestRouter_HasRoleAndDefaultRole(t *testing.T) {
 	cfg := &Config{Version: 1, DefaultRole: "research", Roles: map[string]RoleSpec{
-		"research":     {Primary: "gpt-4o"},
-		"implementer":  {Primary: "claude-opus-4-7"},
+		"research":    {Primary: "gpt-4o"},
+		"implementer": {Primary: "claude-opus-4-7"},
 	}}
 	r, err := New(Options{Config: cfg, Factory: func(_, _ string) (provider.Provider, error) {
 		return &fakeProvider{}, nil

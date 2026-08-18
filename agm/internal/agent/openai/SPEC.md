@@ -1,6 +1,6 @@
 # OpenAI Agent Adapter Specification
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -19,7 +19,33 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-04** When creating an OpenAI session, the system shall create a private session directory, persist metadata, and reject duplicate session IDs.
 
-**OAI-05** When adding a message to an OpenAI session, the system shall synchronize access to prevent data races, update in-memory metadata, append the JSONL message, and persist the updated metadata.
+**OAI-05** When adding one or more messages to an OpenAI session, the system shall synchronize cross-process access, reload current JSONL history and on-disk metadata, atomically replace that history with the appended messages, persist matching counts without overwriting newer metadata fields, and restore the prior history if metadata persistence fails.
+
+**OAI-06** When an OpenAI adapter creates a session, the system shall persist its resolved model and non-secret runtime settings; when another process reconstructs that session's adapter, it shall restore the persisted model, temperature, token limit, base URL, Azure mode, and Azure API version while obtaining the API credential only from current runtime configuration.
+
+**OAI-07** When an OpenAI adapter sends to a session, the system shall serialize the complete history-read, provider-completion, and persistence transaction across adapter instances and processes; it shall send the latest completed history plus the new user message, commit the user and assistant messages as one completed turn only after provider success without overwriting newer session metadata, and leave durable history unchanged when completion fails.
+
+**OAI-08** When an OpenAI adapter waits for the store-scoped session lock or calls the provider, the system shall honor the caller's context and apply a finite provider deadline even for legacy callers without one; cancellation or timeout shall release the lock and shall leave durable history unchanged.
+
+**OAI-09** When an OpenAI adapter clears session history, the system shall serialize the mutation, reload the current on-disk metadata under that boundary, atomically replace only the message history, and preserve the session model, title, working directory, and persisted non-secret runtime configuration so a later process reconstructs identical delivery settings without losing updates from another process.
+
+**OAI-10** When any OpenAI session manager updates title, working directory, or persisted runtime configuration, the system shall acquire the same store-scoped session lock as message commit and history clear, reload current metadata under that lock, apply only the requested field change, and preserve independent updates made by another process.
+
+**OAI-11** When the pure OpenAI API adapter reports session status, the system shall report an existing stored session as active and a missing stored session as terminated without invoking tmux; tmux-backed Codex CLI readiness belongs exclusively to the `codex-cli` adapter.
+
+**OAI-12** When documenting the legacy OpenAI API adapter, the system shall distinguish direct Go adapter construction from the supported AGM control plane, shall limit production delivery to already-registered `openai` or `gpt` manifests, and shall not advertise public CLI creation or resume commands that harness validation rejects.
+
+**OAI-13** When an OpenAI session is deleted while another adapter may deliver to the same store and session ID, deletion shall acquire the store-scoped session lock shared with provider completion, and delivery shall revalidate authoritative on-disk metadata under that lock before provider work; either a started completed turn shall commit before deletion or a completed deletion shall reject the send without calling the provider.
+
+**OAI-14** When an OpenAI adapter is reconstructed or its readiness is checked for a request-scoped delivery, the system shall use the caller context while waiting for the authoritative store lock, shall return cancellation or deadline errors without reporting the session terminated, and shall not retain the surrounding lifecycle lock after the request is canceled.
+
+**OAI-15** When OpenAI session history contains a valid JSONL message record larger than the default scanner token limit, the system shall reload the complete record for append, read, and clear transactions without making the session unusable.
+
+**OAI-16** When importing a parsed OpenAI conversation, the system shall convert the complete message batch once and persist it with at most one history transaction; an empty import shall not perform a history transaction.
+
+**OAI-17** When a fan-out recipient uses an OpenAI-compatible API adapter, the system shall bound stable-lock acquisition, reconstruction, and readiness as a separate preflight phase and shall leave the completed-turn phase its full provider deadline while preserving cancellation from the original caller.
+
+**OAI-18** When AGM reconstructs an OpenAI-compatible adapter for one registered session, the system shall load only that session's authoritative metadata under the request context and shall not enumerate or parse unrelated session directories while holding the surrounding lifecycle lock.
 
 ## BDD Traceability
 

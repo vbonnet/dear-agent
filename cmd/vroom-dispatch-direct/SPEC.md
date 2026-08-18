@@ -10,19 +10,19 @@
 
 `cmd/vroom-dispatch-direct` dispatches worker sessions straight from `bd ready`
 with no intermediate prompt-file layer. Dispatch state is derived from ground
-truth (live `worker-<id>` sessions and open PRs), capacity is controlled by
-real spawn backpressure, and session names are tmux-safe so a dotted bead id
-can never brick a dispatch run (ce-b1zw).
+truth (occupied non-archived `worker-<id>` names and open PRs), capacity is
+controlled by real spawn backpressure, and session names are tmux-safe so a
+dotted bead id can never brick a dispatch run (ce-b1zw).
 
 ## EARS Requirements
 
 **VDD-01** When a dispatch run starts, the system shall read ready beads from `bd ready --json` and order eligible candidates by priority (P0 first) then id.
 
-**VDD-02** The system shall not dispatch a bead that is human-gated, already has a live worker session, or is already in flight in an open PR.
+**VDD-02** The system shall not dispatch a bead that is human-gated, already owns a non-archived worker session name, or is already in flight in an open PR.
 
 **VDD-03** When a worker session is spawned for a bead, the system shall derive the session name from the tmux-safe form of the bead id (dots, colons, and spaces normalized to dashes) so agm's tmux-safety check never falls into an interactive prompt.
 
-**VDD-04** When live-worker deduplication compares bead ids against `agm session list` output, the system shall normalize both sides of the comparison so a sanitized session name dedups its dotted bead id and a legacy dotted session name dedups the same bead.
+**VDD-04** When worker-name deduplication compares bead ids against `agm session list` output, the system shall normalize both sides of the comparison so a sanitized session name dedups its dotted bead id and a legacy dotted session name dedups the same bead.
 
 **VDD-05** If a spawn fails with a deterministic per-bead error (unsafe or invalid session name, invalid bead, or an interactive prompt with no TTY), then the system shall log the failure, skip that bead, and continue dispatching the remaining candidates.
 
@@ -57,3 +57,15 @@ can never brick a dispatch run (ce-b1zw).
 **VDD-20** When an open pull request exists for a bead with accumulated no-progress strikes, the system shall reset its strike count to zero, treating an open PR as evidence of real progress.
 
 **VDD-21** When a dispatch run reconciles (closes or blocks) a bead, the system shall exclude it from that same run's candidate selection, and in dry-run mode the system shall report what reconciliation would do without closing, blocking, or persisting any ledger mutation.
+
+**VDD-22** When worker-name deduplication reads session state, the system shall treat active, running, zombie, and stopped worker sessions as occupied because AGM rejects duplicate non-archived names; archived sessions shall not suppress dispatch.
+
+**VDD-23** When session inventory exceeds one AGM list page, the system shall retrieve every page before candidate selection so an older occupied worker name cannot fall outside deduplication.
+
+**VDD-24** When a worker is selected for dispatch, the trusted host shall create task-owned bare Git state and linked dear-agent and engram-research worktrees, borrow only immutable base objects from the read-only source repositories, and grant the worker only those task-owned paths plus the canonical Beads database.
+
+**VDD-25** When the host creates task-owned Git state, the trusted host shall retain the source repository's origin URL and commit identity, seed the source origin/main commit as the worker base, and keep source repository Git control files outside the worker grant.
+
+**VDD-26** When VROOM launches AGM for a prepared worker, the dispatcher shall bind the exact add-directory payload and, for Codex, the system-managed worker guard path to that session name through a one-launch trusted handoff.
+
+**VDD-27** When an operator supplies `-prepare-worker`, the dispatcher shall prepare that bead's same production workspace without dispatching and print the session name, add directories, and applicable managed guard path as JSON for recovery of an existing session.

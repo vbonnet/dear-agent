@@ -49,6 +49,11 @@
       "name": "opencode-cli",
       "mode": "agents-md-skill-fallback",
       "catalog": ".dear-agent/marketplace.json"
+    },
+    {
+      "name": "pi-cli",
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
     }
   ]
 }

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Harness availability detection
 
-declare -A HARNESS_CMDS=(
-    [claude-code]="claude"
-    [codex-cli]="codex"
-    [gemini-cli]="gemini"
-    [opencode-cli]="opencode"
-)
+harness_command() {
+    case "$1" in
+        claude-code) printf '%s\n' "claude" ;;
+        codex-cli) printf '%s\n' "codex" ;;
+        gemini-cli) printf '%s\n' "gemini" ;;
+        opencode-cli) printf '%s\n' "opencode" ;;
+        *) return 1 ;;
+    esac
+}
 
 harness_available() {
     local harness="$1"
-    local cmd="${HARNESS_CMDS[$harness]:-}"
-    if [[ -z "$cmd" ]]; then
+    local cmd
+    if ! cmd=$(harness_command "$harness"); then
         return 1
     fi
     command -v "$cmd" >/dev/null 2>&1
@@ -27,10 +30,12 @@ skip_if_no_harness() {
 }
 
 detect_all_harnesses() {
+    local cmd
     printf "# Harness availability:\n"
     for harness in claude-code codex-cli gemini-cli opencode-cli; do
+        cmd=$(harness_command "$harness")
         if harness_available "$harness"; then
-            printf "#   %s: available (%s)\n" "$harness" "$(command -v "${HARNESS_CMDS[$harness]}")"
+            printf "#   %s: available (%s)\n" "$harness" "$(command -v "$cmd")"
         else
             printf "#   %s: NOT AVAILABLE\n" "$harness"
         fi

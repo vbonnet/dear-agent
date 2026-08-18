@@ -37,6 +37,7 @@ Feature: Root maintenance command guardrails
       | codex-cli    | 5.5     |
       | agy          | 3.1-pro-high |
       | opencode-cli | glm-5.2 |
+      | pi-cli       | sonnet  |
 
   Scenario Outline: Burndown workers preserve supported model families
     Given burndown worker model family "<family>" uses model "<model>"

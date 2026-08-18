@@ -8,7 +8,7 @@ import (
 
 // Hooks is the workflow lifecycle extension surface for the workflow runner:
 // Define, Enforce, Audit, and Resolve. The four hooks line up with the substrate
-// properties from ADR-009: callers plug in their own logic to participate in
+// properties from ADR-010: callers plug in their own logic to participate in
 // each phase without forking the runner. Do not call this "DEAR" in docs; ADR-035
 // reserves that acronym for the process-level Define/Execute/Audit/Retro loop.
 //

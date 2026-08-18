@@ -12,6 +12,8 @@
 
 **BDDR-04** When SPEC and feature traceability drift, the BDD invariants shall fail with the missing contract relationship.
 
+**BDDR-05** When a lifecycle scenario claims an operation succeeded, the system shall invoke the production operation boundary and assert observable storage or runtime effects instead of setting simulated success flags.
+
 **BDDR-06** When a BDD scenario hook overrides process-wide environment variables or creates an owned temporary directory, the system shall limit setup to applicable scenarios, restore the exact prior environment, reuse explicit shared Go caches, remove only the owned directory, and report restoration or cleanup failures.
 
 ## BDD Traceability

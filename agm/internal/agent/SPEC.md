@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-20 -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -8,12 +8,17 @@
 
 ## Overview
 
-`agm/internal/agent` owns the harness adapter contract used by AGM to create,
-resume, send to, inspect, export, import, and terminate AI agent sessions. It
-also owns the model alias registry used by CLI creation flows, OpenCode model
-selection, and cross-harness tier aliases.
+`agm/internal/agent` owns harness identity, descriptive capabilities, model
+routing, concrete harness adapters, and the finite discovery catalog.
+Consumers define narrow capability interfaces for the behavior they invoke;
+there is no universal harness lifecycle facade. Cross-surface create, kill,
+archive, resume, and message-delivery ordering belongs to
+`agm/internal/ops`; the root CLI retains only interactive resume attachment
+after the shared operation returns and releases the stable-session lock.
+The agent package also owns the model alias registry used by CLI
+creation flows, OpenCode model selection, and cross-harness tier aliases.
 
-Claude Code is the reference implementation. Codex CLI, AGY, and OpenCode are
+Claude Code is the reference implementation. Codex CLI, AGY, OpenCode, and Pi are
 active parity harnesses. Gemini CLI is accepted only for deprecated
 compatibility.
 
@@ -21,7 +26,7 @@ compatibility.
 
 ### Harness Parity
 
-**AGP-01** When AGM enumerates active harnesses, the system shall return `claude-code`, `codex-cli`, `agy`, and `opencode-cli` in canonical parity order.
+**AGP-01** When AGM enumerates active harnesses, the system shall return `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli` in canonical parity order.
 
 **AGP-02** When AGM validates a deprecated compatibility harness, the system shall accept `gemini-cli` without adding it to the active parity set.
 
@@ -32,6 +37,18 @@ compatibility.
 **AGP-05** When AGM builds OpenCode model choices, the system shall include model aliases from every active harness and the OpenRouter-compatible model family source while excluding deprecated-only Gemini CLI aliases.
 
 **AGP-13** When AGM validates active harness adapter conformance, the system shall run the same non-I/O adapter contract across every active harness and require canonical identity, non-empty version, sane capabilities, default model coverage, test model coverage, model aliases, and model family coverage.
+
+**AGP-54** When AGM resolves the `codex-cli` harness, the system shall use `CodexCLIAdapter` and shall not route Codex terminal status through the OpenAI API adapter.
+
+**AGP-56** When a CLI or MCP surface exposes create, kill, archive, or message-delivery behavior, the surface shall delegate lifecycle ordering, rollback, and verified postconditions to `agm/internal/ops` rather than implement a competing surface-specific lifecycle.
+
+**AGP-58** When AGM discovers or compares harness adapters, the system shall expose only canonical name, version, and descriptive capabilities through `agent.Harness` rather than require a universal lifecycle interface.
+
+**AGP-59** When an AGM consumer needs harness behavior, the consumer shall depend on a capability interface containing only the methods that operation invokes or on a concrete adapter when the behavior is harness-specific.
+
+**AGP-60** When the pure API message transaction reconstructs an adapter, the system shall require context-aware readiness and context-aware message delivery at compile time without requiring create, resume, terminate, history, import, export, or command behavior.
+
+**AGP-61** When AGM constructs a harness adapter, the adapter constructor shall return its concrete adapter type, while heterogeneous discovery shall use the single finite harness constructor catalog without a second mutable runtime registry.
 
 ### Model Families
 
@@ -49,7 +66,39 @@ compatibility.
 
 **AGP-10** When a user selects a Claude tier alias for another active harness, the system shall resolve the tier to that harness's closest native model alias.
 
-**AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
+**AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`.
+
+### Pi Native Session Lifecycle
+
+**AGP-39** When AGM creates a Pi session, the system shall invoke `pi` with AGM's session ID as Pi's exact `--session-id`, an AGM-owned private `--session-dir`, the managed authorization `--extension`, explicit project approval, and the resolved model and active-tool set.
+
+**AGP-40** When AGM resumes a Pi session, the system shall use the persisted Pi session ID and session directory and shall reject unsafe or ambiguous native identity rather than substitute newest-file discovery.
+
+**AGP-41** When AGM sends a prompt, mode transition, or model transition to a running Pi session, the system shall wait for the managed `AGM <mode>/ready` status and shall route the operation through Pi's native composer or AGM extension commands.
+
+**AGP-42** When AGM reads, imports, exports, or resumes Pi history, the system shall resolve the transcript whose header contains the exact persisted Pi session ID, bound every file and tree walk, reject duplicate native IDs, and preserve the identity in both manifest and Dolt metadata.
+
+**AGP-43** When AGM evaluates Pi capabilities, the system shall expose native AGENTS.md loading, project skills, exact model routing, resumable JSONL sessions, managed hooks, and bridged tool authorization without claiming native quota or rate-limit telemetry that Pi does not provide.
+
+**AGP-44** When AGM exports Pi history through the shared message model, the system shall include user and assistant text without mislabeling tool results as assistant speech, while native export shall preserve the original JSONL.
+
+**AGP-45** When OpenCode resolves an alias aggregated from multiple harness catalogs, the system shall use stable explicit precedence and prefer provider-qualified routes instead of depending on map iteration order.
+
+**AGP-46** When the Pi adapter imports a native transcript, the system shall preserve an established provider-qualified model and shall not fabricate a default override when native model provenance is absent.
+
+**AGP-47** When AGM cold-resumes a Pi session before Pi has persisted a native transcript, the system shall preserve the configured model or use the Pi harness default; when a persisted transcript exists without model provenance, the system shall omit `--model` so Pi retains native session truth.
+
+**AGP-48** When any Pi lifecycle entry point finds an existing tmux session during cold resume, the system shall preserve it only after proving Pi-specific process identity, including the canonical npm Node entrypoint without accepting a generic `node` process, otherwise require a positively classified restartable shell before command delivery, and fail without pane mutation when another harness, a non-shell foreground, a disappeared pane, or a liveness-scan error is observed.
+
+**AGP-49** When AGM launches Pi for create or cold resume, the system shall generate a unique launch ID, pass it through the canonical command and managed extension, and require readiness carrying that exact ID before registration, attachment, or success.
+
+**AGP-50** When the root AGM command classifies an existing Pi pane during resume, the system shall propagate the command context through Pi identity and generic pane-liveness scans and shall return cancellation before command delivery, attachment, or metadata mutation.
+
+**AGP-51** When the Pi adapter resumes a session, the system shall classify exact process liveness before validating or materializing relaunch configuration; a proven live Pi process shall remain attachable when its persisted coding-agent directory is no longer available, while a required relaunch shall validate configuration and permission artifacts before creating a new tmux session.
+
+**AGP-52** When the Pi adapter creates a session, an explicitly present `SessionContext.Environment` coding-agent directory, including an empty native-default value, shall take precedence over the adapter process environment; create and import shall persist coding-agent directory presence even for the native default, and resume shall use the caller environment only for metadata that lacks both a persisted directory and that marker.
+
+**AGP-62** When an adapter or private harness handoff pastes a TUI command, shell launch, or set-directory command into tmux, the system shall reject invalid UTF-8 and terminal control characters in every caller-derived or generated interpolated value before invoking the tmux delivery boundary.
 
 ### AGY Model and Adapter Lifecycle
 
@@ -91,6 +140,8 @@ compatibility.
 
 **AGP-38** When the AGY adapter creates or cold-resumes through a symlinked workspace, the system shall use the canonical physical workspace path consistently for locking, tmux creation, command construction, identity correlation, and newly persisted metadata.
 
+**AGP-55** When the AGY adapter delivers an initial prompt or a later message, the system shall use AGY's harness-aware literal paste path, preserve embedded line feeds as one bracketed-paste submission, and send exactly one final Enter.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.
@@ -101,6 +152,8 @@ compatibility.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
 
+**AGP-53** When the Codex CLI adapter creates a tmux session for a fresh create or cold resume and private launch preparation or command delivery fails, the system shall clean up the session it created without terminating a pre-existing session.
+
 ### Harness Doctor Health
 
 **AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
@@ -109,7 +162,9 @@ compatibility.
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.
 
+**AGP-57** When AGM validates the harness parity specification, the system shall reject any `AGP` requirement identifier that does not occur exactly once so executable evidence can address one unambiguous contract.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
-- Package tests: `agm/internal/agent/agy_adapter_test.go`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`

@@ -39,6 +39,18 @@ func init() {
 }
 
 func runQueueList(cmd *cobra.Command, args []string) error {
+	rawStatusFilter, _ := cmd.Flags().GetString("status")
+	limit, _ := cmd.Flags().GetInt("limit")
+
+	var statusFilter messages.QueueState
+	if rawStatusFilter != "" {
+		parsed, err := messages.ParseQueueState(rawStatusFilter)
+		if err != nil {
+			return fmt.Errorf("invalid status filter: %w", err)
+		}
+		statusFilter = parsed
+	}
+
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
 		return fmt.Errorf("failed to open message queue: %w", err)
@@ -61,20 +73,6 @@ func runQueueList(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Delivered: %d\n", delivered)
 	fmt.Printf("  Failed:    %d\n", failed)
 	fmt.Printf("  Total:     %d\n", total)
-
-	// Get filter and limit
-	statusFilter, _ := cmd.Flags().GetString("status")
-	limit, _ := cmd.Flags().GetInt("limit")
-
-	if statusFilter != "" {
-		// Validate status filter
-		switch statusFilter {
-		case messages.StatusQueued, messages.StatusDelivered, messages.StatusFailed:
-			// valid
-		default:
-			return fmt.Errorf("invalid status filter %q: must be queued, delivered, or failed", statusFilter)
-		}
-	}
 
 	// List messages
 	entries, err := queue.GetQueueList(statusFilter, limit)
@@ -119,13 +117,13 @@ func runQueueList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func statusIcon(status string) string {
+func statusIcon(status messages.QueueState) string {
 	switch status {
-	case messages.StatusQueued:
+	case messages.QueueStateQueued:
 		return "⏳"
-	case messages.StatusDelivered:
+	case messages.QueueStateDelivered:
 		return "✓"
-	case messages.StatusFailed:
+	case messages.QueueStateFailed:
 		return "✗"
 	default:
 		return "?"

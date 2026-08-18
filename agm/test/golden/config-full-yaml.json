@@ -33,8 +33,7 @@
         "InitialDelay": 1000000000,
         "MaxDelay": 30000000000,
         "Multiplier": 2
-      },
-      "FallbackTmux": true
+      }
     },
     "ClaudeHooks": {
       "Enabled": false,
@@ -61,7 +60,8 @@
       "claude-code": "🤖",
       "codex-cli": "🧠",
       "gemini-cli": "✨",
-      "opencode-cli": "💻"
+      "opencode-cli": "💻",
+      "pi-cli": "π"
     },
     "CustomFormats": {
       "compact": "{{.AgentIcon}} #[fg={{.StateColor}}]●#[default] {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}} | {{.Branch}}",
@@ -78,7 +78,9 @@
     "Onboarding": {
       "Enabled": true,
       "TemplatePath": ""
-    }
+    },
+    "WritableDirs": null,
+    "BypassCodexHookTrustReason": ""
   },
   "Budget": {
     "Enabled": false,
@@ -88,7 +90,8 @@
       "claude-code": 0,
       "codex-cli": 0,
       "gemini-cli": 0,
-      "opencode-cli": 0
+      "opencode-cli": 0,
+      "pi-cli": 0
     },
     "FallbackChain": [
       "sonnet",

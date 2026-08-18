@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestArchiveSkipsNonCodexHarness(t *testing.T) {
@@ -20,12 +21,20 @@ func TestArchiveSkipsNonCodexHarness(t *testing.T) {
 }
 
 func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
-	orig := archiveCodexThreadFn
-	t.Cleanup(func() { archiveCodexThreadFn = orig })
+	origRemote := runCodexRemoteArchiveFn
+	origLocal := runCodexLocalArchiveFn
+	t.Cleanup(func() {
+		runCodexRemoteArchiveFn = origRemote
+		runCodexLocalArchiveFn = origLocal
+	})
 
 	var got string
-	archiveCodexThreadFn = func(_ context.Context, threadID string) error {
+	runCodexRemoteArchiveFn = func(_ context.Context, threadID string) error {
 		got = threadID
+		return nil
+	}
+	runCodexLocalArchiveFn = func(context.Context, string) error {
+		t.Fatal("local fallback must not run after remote archive succeeds")
 		return nil
 	}
 
@@ -46,45 +55,83 @@ func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
 	}
 }
 
-func TestArchiveCodexThreadUsesOnlyThreadScopedControl(t *testing.T) {
-	origArchiver := newThreadArchiver
-	origFallback := runCodexArchiveFn
+func TestArchivePersistedCodexSessionFallsBackToLocalSavedSession(t *testing.T) {
+	origRemote := runCodexRemoteArchiveFn
+	origLocal := runCodexLocalArchiveFn
 	t.Cleanup(func() {
-		newThreadArchiver = origArchiver
-		runCodexArchiveFn = origFallback
+		runCodexRemoteArchiveFn = origRemote
+		runCodexLocalArchiveFn = origLocal
 	})
 
-	fake := &fakeThreadArchiver{}
-	newThreadArchiver = func() codexThreadArchiver { return fake }
-	runCodexArchiveFn = func(context.Context, string) error {
-		t.Fatal("CLI fallback must not run when the thread archive succeeds")
+	runCodexRemoteArchiveFn = func(_ context.Context, threadID string) error {
+		if threadID != "local-import" {
+			t.Fatalf("remote archive target = %q, want local-import", threadID)
+		}
+		return errors.New("remote control unavailable")
+	}
+	var localTarget string
+	runCodexLocalArchiveFn = func(_ context.Context, threadID string) error {
+		localTarget = threadID
 		return nil
 	}
 
-	if err := archiveCodexThread(context.Background(), "thread-123"); err != nil {
-		t.Fatalf("archiveCodexThread() error = %v", err)
+	result, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "local-import",
+	})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
 	}
-	if fake.threadID != "thread-123" {
-		t.Fatalf("thread archive target = %q, want thread-123", fake.threadID)
+	if localTarget != "local-import" {
+		t.Fatalf("local archive target = %q, want local-import", localTarget)
+	}
+	if result.Target != "local-import" {
+		t.Fatalf("result target = %q, want local-import", result.Target)
 	}
 }
 
-func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
-	origArchiver := newThreadArchiver
-	origFallback := runCodexRemoteArchiveFn
+func TestArchivePersistedCodexSessionReportsBothArchiveFailures(t *testing.T) {
+	origRemote := runCodexRemoteArchiveFn
+	origLocal := runCodexLocalArchiveFn
 	t.Cleanup(func() {
-		newThreadArchiver = origArchiver
-		runCodexRemoteArchiveFn = origFallback
+		runCodexRemoteArchiveFn = origRemote
+		runCodexLocalArchiveFn = origLocal
 	})
 
+	remoteErr := errors.New("remote control unavailable")
+	localErr := errors.New("saved session unavailable")
+	runCodexRemoteArchiveFn = func(context.Context, string) error { return remoteErr }
+	runCodexLocalArchiveFn = func(context.Context, string) error { return localErr }
+
+	_, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "missing-session",
+	})
+	if !errors.Is(err, localErr) {
+		t.Fatalf("Archive() error = %v, want local error", err)
+	}
+	if !errors.Is(err, remoteErr) {
+		t.Fatalf("Archive() error = %v, want remote error", err)
+	}
+	if !strings.Contains(err.Error(), remoteErr.Error()) {
+		t.Fatalf("Archive() error = %v, want remote failure context", err)
+	}
+}
+
+func TestArchivePersistedCodexSessionUsesUnixRemote(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", fakeCodexPath(t, home))
-	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
-	runCodexRemoteArchiveFn = runCodexRemoteArchive
 
-	if err := archiveCodexThread(context.Background(), "thread-456"); err != nil {
-		t.Fatalf("archiveCodexThread() error = %v", err)
+	result, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "thread-456",
+	})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+	if result.Target != "thread-456" {
+		t.Fatalf("target = %q, want thread-456", result.Target)
 	}
 
 	args := strings.TrimSpace(readFakeCodexArgs(t, home))
@@ -94,41 +141,82 @@ func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
 	}
 }
 
-func TestArchiveCodexThreadDoesNotFallBackAfterContextCancellation(t *testing.T) {
-	origArchiver := newThreadArchiver
-	origFallback := runCodexRemoteArchiveFn
-	t.Cleanup(func() {
-		newThreadArchiver = origArchiver
-		runCodexRemoteArchiveFn = origFallback
-	})
+func TestArchivePersistedCodexSessionLocalFallbackIgnoresRemoteOverride(t *testing.T) {
+	origRemote := runCodexRemoteArchiveFn
+	t.Cleanup(func() { runCodexRemoteArchiveFn = origRemote })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+	t.Setenv(envRemote, "unix:///custom/remote.sock")
 	runCodexRemoteArchiveFn = func(context.Context, string) error {
-		t.Fatal("CLI fallback must not run after context cancellation")
+		return errors.New("remote control unavailable")
+	}
+
+	_, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "local-import",
+	})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+	args := strings.TrimSpace(readFakeCodexArgs(t, home))
+	if args != "archive local-import" {
+		t.Fatalf("local fallback args = %q, want archive without --remote", args)
+	}
+}
+
+func TestArchivePreservesCallerContextError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+	origLocal := runCodexLocalArchiveFn
+	t.Cleanup(func() { runCodexLocalArchiveFn = origLocal })
+	runCodexLocalArchiveFn = func(context.Context, string) error {
+		t.Fatal("local fallback must not run after caller cancellation")
 		return nil
 	}
 
-	err := archiveCodexThread(ctx, "thread-789")
-	if !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("archiveCodexThread() error = %v, want original archive error", err)
+	tests := []struct {
+		name    string
+		context func() (context.Context, context.CancelFunc)
+		want    error
+	}{
+		{
+			name: "canceled",
+			context: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "caller deadline",
+			context: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			},
+			want: context.DeadlineExceeded,
+		},
 	}
-}
 
-type fakeThreadArchiver struct {
-	threadID string
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.context()
+			defer cancel()
 
-func (f *fakeThreadArchiver) ArchiveThread(_ context.Context, threadID string) error {
-	f.threadID = threadID
-	return nil
-}
-
-type failingThreadArchiver struct{}
-
-func (failingThreadArchiver) ArchiveThread(context.Context, string) error {
-	return os.ErrClosed
+			_, err := Archive(ctx, Request{
+				Harness:        "codex-cli",
+				CodexSessionID: "thread-canceled",
+			})
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Archive() error = %v, want %v", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "timed out after") {
+				t.Fatalf("Archive() mislabeled caller context error as helper timeout: %v", err)
+			}
+		})
+	}
 }
 
 func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {

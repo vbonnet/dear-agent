@@ -26,6 +26,11 @@ import (
 // find nothing. Callers should check with errors.Is.
 var ErrNotFound = errors.New("source: not found")
 
+// MaxFetchK is the largest result set a source adapter accepts for one Fetch
+// call. It bounds caller-controlled allocation and query work while leaving
+// clients free to page through a larger corpus.
+const MaxFetchK = 100
+
 // Adapter is the interface every storage backend implements. The
 // engine talks to exactly one adapter at a time, selected at startup
 // by a small registry (TODO Phase 5). Adapters are expected to be safe
@@ -60,7 +65,8 @@ type Adapter interface {
 
 // FetchQuery is the read shape: a free-form Query string plus structured
 // Filters plus a count K. K=0 means "use the adapter default" (the SQLite
-// adapter's default is 10).
+// adapter's default is 10). Values above MaxFetchK are rejected so a caller
+// cannot cause an unbounded allocation or query.
 type FetchQuery struct {
 	// Query is a free-form search string. Adapters interpret this in
 	// backend-native terms — FTS5 for sqlite, ripgrep for llm-wiki,
@@ -72,7 +78,8 @@ type FetchQuery struct {
 	Filters Filters
 
 	// K is the maximum number of Sources to return. Zero means "adapter
-	// default". Adapters must honour K exactly when non-zero.
+	// default". Adapters must honour K exactly when it is in [1, MaxFetchK]
+	// and reject larger values.
 	K int
 
 	// Rerank, when true, asks the adapter to rerank results using any

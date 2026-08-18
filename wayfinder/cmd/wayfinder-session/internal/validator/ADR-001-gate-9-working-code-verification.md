@@ -2,7 +2,7 @@
 
 <!-- Last audited at: 2026-07-17 -->
 
-- **Status:** Accepted
+Status: Accepted
 - **Scope:** Wayfinder BUILD completion
 - **Decision owner:** Wayfinder validator
 

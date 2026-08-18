@@ -223,9 +223,10 @@ func (rt *restartTracker) consecutiveRestarts(name string) int {
 type supervisorHealth int
 
 const (
-	healthAlive supervisorHealth = iota
-	healthStale                  // heartbeat old but session exists
-	healthDead                   // no session or session archived
+	healthAlive      supervisorHealth = iota
+	healthStale                       // heartbeat old but session exists
+	healthDead                        // no session or session archived
+	healthAuthFailed                  // session exists but the pane is stuck in provider auth
 )
 
 func (h supervisorHealth) String() string {
@@ -236,6 +237,8 @@ func (h supervisorHealth) String() string {
 		return "stale"
 	case healthDead:
 		return "dead"
+	case healthAuthFailed:
+		return "auth_failed"
 	default:
 		return "unknown"
 	}
@@ -285,6 +288,9 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 	if !sessionUp {
 		return healthDead
 	}
+	if isSupervisorAuthFailed(sup) {
+		return healthAuthFailed
+	}
 
 	heartbeat := readHeartbeatTime(home, heartbeatFileName(sup.Name))
 	if heartbeat.IsZero() {
@@ -300,6 +306,185 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 	}
 
 	return healthAlive
+}
+
+// captureSupervisorPane returns the most recent supervisor pane text. It is a
+// package variable so tests can cover auth classification without shelling out.
+var captureSupervisorPane = func(name string) (string, error) {
+	args := []string{"capture-pane", "-t", name, "-p", "-S", "-80"}
+	if socket := os.Getenv("AGM_TMUX_SOCKET"); socket != "" {
+		args = append([]string{"-S", socket}, args...)
+	}
+	cmd := exec.Command("tmux", args...)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+func isSupervisorAuthFailed(sup supervisor) bool {
+	content, err := captureSupervisorPane(sup.Name)
+	if err != nil {
+		return false
+	}
+	return supervisorPaneAuthFailed(content, sup.Harness)
+}
+
+func supervisorPaneAuthFailed(content, harness string) bool {
+	lines := recentSupervisorPaneLines(content)
+	if len(lines) == 0 || supervisorPaneEndsAtPrompt(lines) {
+		return false
+	}
+	lower := strings.Join(lines, "\n")
+	switch harness {
+	case "claude-code":
+		return claudePaneAuthFailed(lines, lower)
+	case "codex-cli":
+		if codexPaneReady(lines) {
+			return false
+		}
+		return codexPaneAuthFailed(lower)
+	case "agy":
+		if agyPaneReady(lines) {
+			return false
+		}
+		return agyPaneAuthFailed(lower)
+	default:
+		return false
+	}
+}
+
+// codexPaneReady mirrors the shared Codex readiness contract: after a turn,
+// the idle cursor is followed by the structured model/workdir footer. Stale
+// auth text above that current composer must not trigger recovery.
+func codexPaneReady(lines []string) bool {
+	for i, line := range slices.Backward(lines) {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "gpt-") || !strings.Contains(line, " · ") {
+			continue
+		}
+		for j := i - 1; j >= 0 && j >= i-3; j-- {
+			candidate := strings.TrimSpace(lines[j])
+			if candidate == "" {
+				continue
+			}
+			if candidate == "›" || candidate == "»" {
+				return true
+			}
+			break
+		}
+	}
+	return false
+}
+
+// agyPaneReady mirrors the shared AGY composer contract: a current > composer
+// owns input, and normal idle chrome (e.g. ? for shortcuts, sandbox status)
+// may follow it. Historical auth text above that composer must not trigger recovery.
+func agyPaneReady(lines []string) bool {
+	composer := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == ">" {
+			composer = i
+		}
+	}
+	if composer < 0 {
+		return false
+	}
+	for _, line := range lines[composer+1:] {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" || strings.Trim(lower, "─━┄┈╌╍═│┃┆┊╎⏏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" ||
+			strings.Contains(lower, "? for shortcuts") ||
+			strings.Contains(lower, "shift+tab to") ||
+			strings.Contains(lower, "accept edits") ||
+			(strings.Contains(lower, "sandbox") && strings.Contains(lower, "gemini-")) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func claudePaneAuthFailed(lines []string, lower string) bool {
+	if claudePaneReady(lines) {
+		return false
+	}
+	return hasExactLine(lines, "please run /login") ||
+		(strings.Contains(lower, "claude") &&
+			(strings.Contains(lower, "/login") || strings.Contains(lower, "oauth")) &&
+			hasAny(lower, "401", "unauthorized", "authentication", "session expired", "token expired", "not authenticated"))
+}
+
+// claudePaneReady mirrors the shared Claude composer contract: a current
+// composer glyph owns input, and the normal footer may follow it. Historical
+// auth text above that composer is not evidence of a current auth block.
+func claudePaneReady(lines []string) bool {
+	composer := -1
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "❯" || strings.HasPrefix(line, "❯ ") {
+			composer = i
+		}
+	}
+	if composer < 0 {
+		return false
+	}
+	for _, line := range lines[composer+1:] {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" || strings.Trim(lower, "─━┄┈╌╍ ") == "" ||
+			strings.Contains(lower, "? for shortcuts") ||
+			strings.Contains(lower, "shift+tab to cycle") ||
+			strings.Contains(lower, "plan mode on") {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func codexPaneAuthFailed(lower string) bool {
+	return strings.Contains(lower, "codex login") ||
+		strings.Contains(lower, "run `codex login`") ||
+		(strings.Contains(lower, "openai") && strings.Contains(lower, "api key") &&
+			hasAny(lower, "missing", "not found", "unauthorized", "authentication", "not authenticated"))
+}
+
+func agyPaneAuthFailed(lower string) bool {
+	return strings.Contains(lower, "gcloud auth application-default login") ||
+		strings.Contains(lower, "google_application_credentials") ||
+		(strings.Contains(lower, "agy") && strings.Contains(lower, "sign in") &&
+			hasAny(lower, "authentication", "not authenticated", "session expired", "token expired"))
+}
+
+func recentSupervisorPaneLines(content string) []string {
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	var lines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			lines = append(lines, strings.ToLower(line))
+		}
+	}
+	const recentLineLimit = 12
+	if len(lines) > recentLineLimit {
+		lines = lines[len(lines)-recentLineLimit:]
+	}
+	return lines
+}
+
+func supervisorPaneEndsAtPrompt(lines []string) bool {
+	last := strings.TrimSpace(lines[len(lines)-1])
+	return last == ">" || last == "›"
+}
+
+func hasAny(content string, markers ...string) bool {
+	for _, marker := range markers {
+		if strings.Contains(content, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExactLine(lines []string, want string) bool {
+	return slices.Contains(lines, want)
 }
 
 // heartbeatFileName maps a supervisor identity to the compact heartbeat file
@@ -510,6 +695,68 @@ const spawnCommandTimeout = 5 * time.Minute
 // keeps us decoupled from agm's internal error taxonomy.
 const spawnTooSoonMarker = "spawn too soon"
 
+// governorPauseMarker is the stable AGM diagnostic for the other transient
+// spawn-stagger condition. It is intentionally narrower than "resource
+// governor" so unrelated governor safety failures do not become retryable.
+const governorPauseMarker = "spawns paused by resource governor"
+
+// governorAdmissionMarker introduces the machine-parseable RFC3339 boundary
+// in AGM's governor-pause diagnostic.
+const governorAdmissionMarker = "earliest possible admission is "
+
+// spawnRetryNow is the clock used to turn AGM's advertised governor boundary
+// into a delay. It is injectable so the retry contract has deterministic tests.
+var spawnRetryNow = time.Now
+
+func isRetryableSpawnRefusal(output string) bool {
+	hasTransientMarker := strings.Contains(output, spawnTooSoonMarker) ||
+		strings.Contains(output, governorPauseMarker)
+	if !hasTransientMarker {
+		return false
+	}
+
+	// AGM's FormatDenied output emits one bullet for every failed gate. A
+	// spawn-stagger pause can coexist with a hard safety denial, so checking for
+	// any transient marker would incorrectly retry disk, process-cap, or
+	// admission-brake failures. If structured gate bullets are present, require
+	// every failed gate to be the recognized transient spawn-stagger gate.
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "• [") {
+			continue
+		}
+		closeBracket := strings.IndexByte(line, ']')
+		if closeBracket < len("• [") {
+			return false
+		}
+		if line[len("• ["):closeBracket] != "spawn_stagger" ||
+			(!strings.Contains(line, spawnTooSoonMarker) && !strings.Contains(line, governorPauseMarker)) {
+			return false
+		}
+	}
+
+	// Retain compatibility with the older single-line AGM diagnostic while
+	// enforcing the complete gate set whenever current structured output is
+	// available.
+	return true
+}
+
+func spawnRetryDelay(output string) time.Duration {
+	if strings.Contains(output, governorPauseMarker) {
+		if _, suffix, ok := strings.Cut(output, governorAdmissionMarker); ok {
+			fields := strings.Fields(suffix)
+			if len(fields) > 0 {
+				if boundary, err := time.Parse(time.RFC3339, fields[0]); err == nil {
+					if remaining := boundary.Sub(spawnRetryNow()); remaining > 0 {
+						return remaining
+					}
+				}
+			}
+		}
+	}
+	return minSpawnInterval
+}
+
 // runSpawn executes `agm session new` for one supervisor and returns the
 // combined output. It is a package var so tests can stub the spawn without
 // shelling out to agm.
@@ -525,17 +772,29 @@ var runSpawn = func(sup supervisor, model string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+var runArchiveSupervisor = func(sup supervisor) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), spawnCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "agm", sessionArchiveArgs(sup)...)
+	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_DISPATCHER_SUPERVISOR_REAP=1")
+	return cmd.CombinedOutput()
+}
+
+func sessionArchiveArgs(sup supervisor) []string {
+	return []string{"session", "archive", "--async", "--workspace=oss", "--outcome", "crashed", sup.Name}
+}
+
 // sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package
-// var so tests can avoid waiting out the real 2-minute window.
+// var so tests can avoid waiting out the real admission window.
 var sleepFor = time.Sleep
 
-// spawnSessionWithRetry runs `agm session new` for a supervisor, retrying when
-// agm's circuit breaker refuses the spawn as "spawn too soon" (ce-mu36). On a
-// refusal it waits out the full minSpawnInterval window before retrying, up to
-// maxSpawnAttempts times. Waiting the full window (rather than only the
-// remainder) keeps the fix simple and safe: we don't track the prior spawn's
-// timestamp, and an over-wait only costs time, never correctness. Any other
-// failure (or success) returns immediately — only the breaker refusal retries.
+// spawnSessionWithRetry runs `agm session new` for a supervisor, retrying the
+// two transient spawn-stagger refusals: a recent successful spawn and a
+// governor-owned pause. It waits the fixed spawn interval for a recent spawn
+// and the advertised earliest admission boundary for a governor pause, up to
+// maxSpawnAttempts. A missing, malformed, or expired governor boundary falls
+// back to the fixed interval. Any other failure (or success) returns
+// immediately.
 func spawnSessionWithRetry(sup supervisor, model string) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxSpawnAttempts; attempt++ {
@@ -544,16 +803,71 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 			return nil
 		}
 		lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
-		if !strings.Contains(string(output), spawnTooSoonMarker) {
+		if !isRetryableSpawnRefusal(string(output)) {
 			return lastErr
 		}
 		if attempt < maxSpawnAttempts {
+			delay := spawnRetryDelay(string(output))
 			fmt.Printf("\n    %s: spawn refused by circuit breaker (attempt %d/%d); waiting %s for the spawn window to clear... ",
-				sup.Name, attempt, maxSpawnAttempts, minSpawnInterval)
-			sleepFor(minSpawnInterval)
+				sup.Name, attempt, maxSpawnAttempts, delay)
+			sleepFor(delay)
 		}
 	}
 	return fmt.Errorf("circuit breaker still refusing after %d attempts: %w", maxSpawnAttempts, lastErr)
+}
+
+func archiveAuthFailedSupervisor(sup supervisor) error {
+	deadline := time.Now().Add(spawnCommandTimeout)
+	output, err := runArchiveSupervisor(sup)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if isSessionArchived(context.Background(), sup.Name, remaining) {
+			return nil
+		}
+		if remaining <= 0 {
+			break
+		}
+		sleepFor(minDuration(2*time.Second, remaining))
+	}
+	return fmt.Errorf("auth-failed supervisor %s remained active after archive", sup.Name)
+}
+
+// isSessionArchived waits on the durable lifecycle state, not merely tmux
+// disappearance. The detached reaper closes tmux before it commits archive
+// cleanup, so liveness alone can race duplicate-name admission.
+func isSessionArchived(parent context.Context, name string, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--workspace=oss", "--json", "--fields", "name,status")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	var result struct {
+		Sessions []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return false
+	}
+	for _, session := range result.Sessions {
+		if session.Name == name {
+			return session.Status == "archived"
+		}
+	}
+	return false
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // createAndBootSession spawns one supervisor session and walks it through the
@@ -775,6 +1089,46 @@ func runHealthMonitor(parent context.Context, home string, state *sessionState, 
 					"supervisor": sup.Name,
 					"heartbeat":  heartbeatFileName(sup.Name),
 				})
+
+			case healthAuthFailed:
+				ok, count := tracker.shouldRestart(sup.Name)
+				if !ok {
+					if tracker.shouldEscalate(sup.Name) {
+						msg := fmt.Sprintf("%s: %d consecutive auth-failed restarts — needs human intervention",
+							sup.Name, count)
+						escalateToHuman(home, "restart_exhausted", msg, map[string]any{
+							"supervisor": sup.Name,
+							"restarts":   count,
+							"reason":     "auth_failed",
+						})
+						fmt.Printf("[%s] ESCALATION: %s\n", sup.Name, msg)
+					}
+					continue
+				}
+
+				fmt.Printf("[%s] auth failed at %s (attempt %d/%d), archiving and restarting...\n",
+					sup.Name, time.Now().Format("15:04:05"), count+1, maxRestarts)
+				writeTrail(home, "dispatch.supervisor_auth_failed", map[string]any{
+					"supervisor": sup.Name,
+					"harness":    sup.Harness,
+					"attempt":    count + 1,
+				})
+
+				tracker.recordAttempt(sup.Name)
+				if err := archiveAuthFailedSupervisor(sup); err != nil {
+					fmt.Fprintf(os.Stderr, "[%s] auth-failed archive failed: %v\n", sup.Name, err)
+					writeTrail(home, "dispatch.supervisor_auth_archive_failed", map[string]any{
+						"supervisor": sup.Name,
+						"error":      err.Error(),
+					})
+					continue
+				}
+				delete(state.Sessions, sup.Name)
+				recreateCtx, recreateSpan := otel.Tracer(tracerName).Start(ctx, "vroom.session.recreate",
+					trace.WithAttributes(attribute.String("supervisor.name", sup.Name), attribute.String("supervisor.restart_reason", "auth_failed")))
+				createAndBootSession(recreateCtx, home, sup, state, model)
+				recreateSpan.End()
+				saveState(home, state)
 
 			case healthDead:
 				ok, count := tracker.shouldRestart(sup.Name)

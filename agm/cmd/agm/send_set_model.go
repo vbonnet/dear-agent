@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
@@ -89,10 +91,14 @@ func resolveSetModelInstruction(harnessName, modelInput string) (setModelInstruc
 		return setModelInstruction{}, fmt.Errorf("model %q resolved to an empty identifier for harness %q", modelInput, normalized)
 	}
 
+	command := "/model " + resolved
+	if normalized == "pi-cli" {
+		command = "/agm-model " + resolved
+	}
 	return setModelInstruction{
 		Harness:       normalized,
 		ResolvedModel: resolved,
-		Command:       "/model " + resolved,
+		Command:       command,
 	}, nil
 }
 
@@ -125,24 +131,28 @@ func resolveSetModelHarness(sessionName string) string {
 // requested, because persisting a different or stale model would poison cold
 // resume provenance.
 func newModelConfirmation(instruction setModelInstruction, baseline, current string) (string, bool) {
+	prefix := "Set model to "
+	if instruction.Harness == "pi-cli" {
+		prefix = "AGM model: "
+	}
 	baselineCounts := make(map[string]int)
 	for line := range strings.SplitSeq(baseline, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "Set model to ") {
+		if strings.HasPrefix(trimmed, prefix) {
 			baselineCounts[trimmed]++
 		}
 	}
 	currentCounts := make(map[string]int)
 	for line := range strings.SplitSeq(current, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "Set model to ") {
+		if !strings.HasPrefix(trimmed, prefix) {
 			continue
 		}
 		currentCounts[trimmed]++
 		if currentCounts[trimmed] <= baselineCounts[trimmed] {
 			continue
 		}
-		if instruction.Harness == "agy" && strings.TrimSpace(strings.TrimPrefix(trimmed, "Set model to ")) != instruction.ResolvedModel {
+		if (instruction.Harness == "agy" || instruction.Harness == "pi-cli") && strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)) != instruction.ResolvedModel {
 			continue
 		}
 		return trimmed, true
@@ -179,15 +189,26 @@ func verifyModelSet(ctx context.Context, sessionName string, instruction setMode
 }
 
 // persistAgyModelSwitch records only model provenance AGM can defend. A
-// confirmed switch stores the exact resolved public label; an unverified
-// switch clears the creation-time override so cold resume lets AGY retain the
-// saved conversation's native selection instead of silently reverting it.
+// confirmed switch stores the exact resolved public label. An unverified AGY
+// switch clears the creation-time override so cold resume retains the saved
+// native selection. Pi does the same only after a native transcript exists;
+// before Pi's first assistant response there is no saved selection to retain,
+// so AGM preserves the configured launch model.
 func persistAgyModelSwitch(storage dolt.Storage, m *manifest.Manifest, instruction setModelInstruction, verified bool) error {
 	if storage == nil || m == nil {
 		return fmt.Errorf("AGY model switch persistence requires session storage and a manifest")
 	}
-	if instruction.Harness != "agy" {
+	if instruction.Harness != "agy" && instruction.Harness != "pi-cli" {
 		return nil
+	}
+	if instruction.Harness == "pi-cli" && !verified && m.Pi != nil {
+		_, transcriptErr := pisession.FindTranscript(m.Pi.SessionDir, m.Pi.SessionID)
+		if errors.Is(transcriptErr, pisession.ErrTranscriptNotFound) {
+			return nil
+		}
+		if transcriptErr != nil {
+			return fmt.Errorf("resolve Pi model provenance: %w", transcriptErr)
+		}
 	}
 	if verified {
 		m.Model = instruction.ResolvedModel
@@ -195,13 +216,13 @@ func persistAgyModelSwitch(storage dolt.Storage, m *manifest.Manifest, instructi
 		m.Model = ""
 	}
 	if err := storage.UpdateSession(m); err != nil {
-		return fmt.Errorf("update AGY model provenance: %w", err)
+		return fmt.Errorf("update %s model provenance: %w", instruction.Harness, err)
 	}
 	return nil
 }
 
 func persistAgyModelSwitchForSession(sessionName string, instruction setModelInstruction, verified bool) error {
-	if instruction.Harness != "agy" {
+	if instruction.Harness != "agy" && instruction.Harness != "pi-cli" {
 		return nil
 	}
 	adapter, err := getStorage()
@@ -210,7 +231,7 @@ func persistAgyModelSwitchForSession(sessionName string, instruction setModelIns
 		if setModelHarness != "" {
 			return nil
 		}
-		return fmt.Errorf("AGY model command was sent but session storage could not be opened: %w", err)
+		return fmt.Errorf("%s model command was sent but session storage could not be opened: %w", instruction.Harness, err)
 	}
 	defer func() { _ = adapter.Close() }()
 	m, _, err := session.ResolveIdentifier(sessionName, cfg.SessionsDir, adapter)
@@ -218,7 +239,7 @@ func persistAgyModelSwitchForSession(sessionName string, instruction setModelIns
 		if setModelHarness != "" {
 			return nil
 		}
-		return fmt.Errorf("AGY model command was sent but its session manifest could not be resolved: %w", err)
+		return fmt.Errorf("%s model command was sent but its session manifest could not be resolved: %w", instruction.Harness, err)
 	}
 	return persistAgyModelSwitch(adapter, m, instruction, verified)
 }

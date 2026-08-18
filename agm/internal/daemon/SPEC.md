@@ -1,14 +1,14 @@
 # AGM Daemon Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-27 -->
 
 ## Purpose
 
-`agm/internal/daemon` owns background queue delivery, state polling, OpenCode SSE
-adapter startup, fallback behavior, PID-file exclusivity, retry handling, health,
-and daemon metrics. The daemon must preserve the shared message-delivery contract
-across harnesses so non-Claude harnesses do not depend on Claude-specific hooks
-to receive queued work.
+`agm/internal/daemon` owns background queue scheduling, display-state polling,
+OpenCode SSE adapter startup, PID-file exclusivity, retry handling, health, and
+daemon metrics. It delegates direct recipient resolution, readiness, and
+delivery to `internal/ops.SendMessage` so every harness uses the same
+transaction.
 
 ## EARS Requirements
 
@@ -20,19 +20,27 @@ to receive queued work.
 
 **DAEMON-04** When OpenCode adapter support is enabled and an event bus is configured, the system shall initialize the OpenCode SSE adapter from shared configuration.
 
-**DAEMON-05** When OpenCode adapter startup fails and fallback is enabled, the system shall continue using tmux monitoring for OpenCode sessions.
+**DAEMON-05** When OpenCode adapter initialization or startup fails, the system shall report that OpenCode sessions remain unmonitored until the adapter succeeds.
 
-**DAEMON-06** When OpenCode adapter startup fails and fallback is disabled, the system shall report that OpenCode sessions will not be monitored until the adapter succeeds.
+**DAEMON-06** When OpenCode adapter startup fails, the system shall not claim that another monitor started unless it actually activated one.
 
 **DAEMON-07** When the daemon starts, the system shall retry recently failed messages before entering the periodic poll loop.
 
 **DAEMON-08** When a poll tick runs, the system shall update queue-depth, poll-duration, delivery-attempt, state-detection, and alert metrics from the same collector.
 
-**DAEMON-09** When a queued message targets a session that is not ready, the system shall defer delivery instead of losing or corrupting the message.
+**DAEMON-09** When the daemon polls a queued message, the system shall invoke `internal/ops.SendMessage` as the sole direct-delivery transaction.
 
-**DAEMON-10** When a queued message is delivered successfully, the system shall acknowledge it when an acknowledgment manager is configured.
+**DAEMON-10** When a queued message is delivered successfully, the system shall update state by the returned stable session ID only while an asynchronous response remains pending, preserve the post-turn state of a completed API delivery, mark the queue entry delivered, and acknowledge it when an acknowledgment manager is configured.
 
 **DAEMON-11** When standalone health status is requested, the system shall report daemon running state, PID when available, queue statistics when a queue is provided, and an overall health level derived from configured queue-depth thresholds.
+
+**DAEMON-12** When retry accounting or terminal-state persistence fails, the system shall log the failure and leave the durable queue record eligible for later processing rather than claiming that the configured attempt bound was recorded.
+
+**DAEMON-13** When the shared operation returns a typed not-ready state other than `NOT_FOUND`, the daemon shall defer the queued message without consuming a retry attempt.
+
+**DAEMON-14** When the shared operation returns `NOT_FOUND` or another resolution or delivery failure, the daemon shall apply the existing durable retry policy.
+
+**DAEMON-15** The daemon shall not call `session.CheckSessionDelivery` or own a separate tmux sender.
 
 ## BDD Traceability
 

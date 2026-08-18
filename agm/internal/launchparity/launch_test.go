@@ -16,7 +16,9 @@ func TestActiveHarnessContracts(t *testing.T) {
 		{harness: "claude-code", mode: "auto", interactive: "claude", modeToken: "--permission-mode auto"},
 		{harness: "codex-cli", mode: "auto", interactive: "codex", modeToken: "-a never"},
 		{harness: "agy", mode: "auto", interactive: "agy", modeToken: "--dangerously-skip-permissions"},
+		{harness: "agy", mode: "plan", interactive: "agy", modeToken: "--mode plan"},
 		{harness: "opencode-cli", mode: "plan", interactive: "opencode attach"},
+		{harness: "pi-cli", mode: "plan", interactive: "pi", modeToken: "--tools read,grep,find,ls"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {
@@ -32,6 +34,21 @@ func TestActiveHarnessContracts(t *testing.T) {
 				t.Fatalf("persistent exit suffix = %q, want empty", contract.ExitSuffix)
 			}
 		})
+	}
+}
+
+func TestAgyPermissionModeMappingIsCanonical(t *testing.T) {
+	for _, test := range []struct {
+		mode string
+		args []string
+	}{
+		{mode: "auto", args: []string{"--dangerously-skip-permissions"}},
+		{mode: "plan", args: []string{"--mode", "plan"}},
+		{mode: "default", args: nil},
+	} {
+		if got := AgyPermissionModeFlag(test.mode); got != strings.Join(test.args, " ") {
+			t.Fatalf("AgyPermissionModeFlag(%q) = %q, want %q", test.mode, got, strings.Join(test.args, " "))
+		}
 	}
 }
 

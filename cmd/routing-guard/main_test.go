@@ -54,6 +54,7 @@ var testPatterns = []string{
 	"wf/**",
 	"**/.wayfinder/**",
 	"**/WAYFINDER-STATUS.md",
+	"**/WAYFINDER-HISTORY.jsonl",
 	"**/WAYFINDER-HISTORY.md",
 }
 
@@ -68,6 +69,7 @@ func TestForbidden(t *testing.T) {
 		{"agm/.wayfinder/foo/S6-design.md", true},
 		{".wayfinder/run/D1.md", true},
 		{"agm/wayfinder-oss-agm-g2/WAYFINDER-STATUS.md", true},
+		{"agm/wayfinder-oss-agm-g2/WAYFINDER-HISTORY.jsonl", true},
 		{"agm/wayfinder-oss-agm-g2/WAYFINDER-HISTORY.md", true},
 		{"WAYFINDER-STATUS.md", true}, // root-level still caught
 		// Other temporal artifacts.
@@ -111,7 +113,7 @@ func TestForbidden(t *testing.T) {
 		{"wayfinder/cmd/wayfinder-session/internal/validator/testdata/d2-valid-100.md", false},
 		{"pkg/validator/wayfinderartifact.go", false},
 		{"agm/internal/a2a/wayfinder/wayfinder.go", false},
-		{"docs/adr/ADR-035-wayfinder-enforcement.md", false},
+		{"docs/adr/ADR-036-wayfinder-enforcement.md", false},
 		{"internal/telemetry/wayfinder_roi_logger.go", false},
 		{"README.md", false},
 		{"cmd/routing-guard/main.go", false},

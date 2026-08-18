@@ -138,7 +138,7 @@ func TestExpandPath(t *testing.T) {
 		{
 			name:    "tilde only",
 			path:    "~",
-			want:    home,
+			want:    filepath.Clean(home),
 			wantErr: false,
 		},
 		{
@@ -151,6 +151,12 @@ func TestExpandPath(t *testing.T) {
 			name:    "tilde with nested path",
 			path:    "~/Documents/test.txt",
 			want:    filepath.Join(home, "Documents/test.txt"),
+			wantErr: false,
+		},
+		{
+			name:    "tilde with platform separator",
+			path:    "~" + string(filepath.Separator) + filepath.Join("Documents", "platform.txt"),
+			want:    filepath.Join(home, "Documents", "platform.txt"),
 			wantErr: false,
 		},
 		{

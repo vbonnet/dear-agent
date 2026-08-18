@@ -1,8 +1,30 @@
 package tmux
 
 import (
+	"slices"
 	"testing"
 )
+
+func TestPasteBufferArgsPreserveAgyMultilineAsBracketedRaw(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		flag    string
+	}{
+		{name: "agy", harness: "agy", flag: "-dpr"},
+		{name: "claude legacy", harness: "claude-code", flag: "-d"},
+		{name: "unknown legacy", harness: "", flag: "-d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pasteBufferArgs("/tmp/agm.sock", "recipient", tt.harness)
+			want := []string{"-S", "/tmp/agm.sock", "paste-buffer", "-b", "agm-cmd", "-t", "recipient", tt.flag}
+			if !slices.Equal(got, want) {
+				t.Fatalf("pasteBufferArgs() = %q, want %q", got, want)
+			}
+		})
+	}
+}
 
 // TestSendPromptLiteral_ConditionalESC is a REGRESSION TEST for Bug 2:
 // ESC sent unconditionally, interrupting operations instead of queueing
@@ -336,6 +358,11 @@ func TestHasQueuedInput_DetectsPastedText(t *testing.T) {
 		{
 			name:     "pasted text partial match",
 			input:    "[Pasted text",
+			expected: true,
+		},
+		{
+			name:     "Codex pasted-content chip",
+			input:    "› [Pasted Content 2172 chars]",
 			expected: true,
 		},
 		{

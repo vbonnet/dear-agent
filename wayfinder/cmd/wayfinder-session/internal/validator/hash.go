@@ -2,6 +2,7 @@ package validator
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/vbonnet/dear-agent/pkg/hash"
@@ -14,6 +15,22 @@ import (
 // - File cannot be read
 func calculatePhaseEngramHash(engramPath string) (string, error) {
 	return hash.CalculateFileHash(engramPath)
+}
+
+func resolvePhaseEngramPath(projectDir, engramPath string) (string, error) {
+	if filepath.IsAbs(engramPath) || isHomeRelativePath(engramPath) {
+		return hash.ExpandPath(engramPath)
+	}
+
+	absoluteProjectDir, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve project directory: %w", err)
+	}
+	return filepath.Join(absoluteProjectDir, engramPath), nil
+}
+
+func isHomeRelativePath(path string) bool {
+	return path == "~" || (len(path) > 1 && path[0] == '~' && os.IsPathSeparator(path[1]))
 }
 
 // validateMethodologyFreshness validates that the deliverable was created using
@@ -56,8 +73,18 @@ func validateMethodologyFreshness(projectDir, phaseName, hashMismatchReason stri
 		return nil
 	}
 
-	// Calculate current hash of the phase engram
-	currentHash, err := calculatePhaseEngramHash(fm.PhaseEngramPath)
+	// Resolve portable project-relative frontmatter to an absolute runtime path.
+	engramPath, err := resolvePhaseEngramPath(projectDir, fm.PhaseEngramPath)
+	if err != nil {
+		return NewValidationError(
+			"complete "+phaseName,
+			fmt.Sprintf("failed to resolve phase engram path %s: %v", fm.PhaseEngramPath, err),
+			"Ensure the phase_engram_path in frontmatter points to a valid engram file",
+		)
+	}
+
+	// Calculate current hash of the phase engram.
+	currentHash, err := calculatePhaseEngramHash(engramPath)
 	if err != nil {
 		return NewValidationError(
 			"complete "+phaseName,
@@ -82,7 +109,7 @@ func validateMethodologyFreshness(projectDir, phaseName, hashMismatchReason stri
 		}
 
 		// Override reason provided - log warning but allow completion
-		// TODO: Log hash mismatch to WAYFINDER-HISTORY.md (deferred to future iteration)
+		// TODO: Log hash mismatch to WAYFINDER-HISTORY.jsonl (deferred to future iteration)
 		// For now, just allow completion
 		// In production, this would log: "Phase %s completed with hash mismatch override: %s", phaseName, hashMismatchReason
 	}

@@ -25,7 +25,17 @@
 
 **WFCMD-09** When SETUP starts, or when BUILD starts after SETUP was skipped, the system shall create a tracking bead if none exists and shall preserve the phase transition when tracker creation is unavailable.
 
-**WFCMD-10** When a rewind has been persisted and its Git commit fails, the system shall report a warning without reporting the rewind operation as failed.
+**WFCMD-10** When required archive, trace, or Git commit persistence for a rewind fails, the system shall return an explicit error and shall not report the rewind operation as successful.
+
+**WFCMD-11** When `session start` receives a project directory outside a Git work tree, the system shall reject the request before creating any lifecycle artifact.
+
+**WFCMD-12** When a deterministic pre-rewind archive input is invalid, the system shall reject the rewind before mutating canonical status or appending rewind trace evidence.
+
+**WFCMD-13** While a rewind transition is in progress for a project, the system shall reject a concurrent rewind before parsing or mutating that project's lifecycle state.
+
+**WFCMD-14** When a rewind transition lock is created, the system shall place it in the project's owned internal metadata namespace so home, cache, profile, temporary-directory, symlink, and case aliases cannot select a second lock namespace.
+
+**WFCMD-15** When `.wayfinder`, its lock directory, or its rewind lock file is a symbolic link, reparse point, non-directory parent, non-regular file, or multiply linked file, the system shall reject lock admission rather than open or create a lock outside the owned project namespace.
 
 ## Traceability
 

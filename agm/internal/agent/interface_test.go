@@ -6,114 +6,42 @@ import (
 	"time"
 )
 
-// MockAgent is a test implementation of the Agent interface.
-type MockAgent struct {
-	NameFunc               func() string
-	VersionFunc            func() string
-	CreateSessionFunc      func(SessionContext) (SessionID, error)
-	ResumeSessionFunc      func(SessionID) error
-	TerminateSessionFunc   func(SessionID) error
-	GetSessionStatusFunc   func(SessionID) (Status, error)
-	SendMessageFunc        func(SessionID, Message) error
-	GetHistoryFunc         func(SessionID) ([]Message, error)
-	ExportConversationFunc func(SessionID, ConversationFormat) ([]byte, error)
-	ImportConversationFunc func([]byte, ConversationFormat) (SessionID, error)
-	CapabilitiesFunc       func() Capabilities
-	ExecuteCommandFunc     func(Command) error
+type mockHarness struct {
+	name         string
+	version      string
+	capabilities Capabilities
 }
 
-func (m *MockAgent) Name() string {
-	if m.NameFunc != nil {
-		return m.NameFunc()
-	}
-	return "mock"
+func (m *mockHarness) Name() string {
+	return m.name
 }
 
-func (m *MockAgent) Version() string {
-	if m.VersionFunc != nil {
-		return m.VersionFunc()
-	}
-	return "1.0"
+func (m *mockHarness) Version() string {
+	return m.version
 }
 
-func (m *MockAgent) CreateSession(ctx SessionContext) (SessionID, error) {
-	if m.CreateSessionFunc != nil {
-		return m.CreateSessionFunc(ctx)
-	}
-	return "mock-session-id", nil
+func (m *mockHarness) Capabilities() Capabilities {
+	return m.capabilities
 }
 
-func (m *MockAgent) ResumeSession(sessionID SessionID) error {
-	if m.ResumeSessionFunc != nil {
-		return m.ResumeSessionFunc(sessionID)
-	}
-	return nil
-}
+func TestHarnessInterfaceIsMetadataOnly(t *testing.T) {
+	var _ Harness = (*mockHarness)(nil)
 
-func (m *MockAgent) TerminateSession(sessionID SessionID) error {
-	if m.TerminateSessionFunc != nil {
-		return m.TerminateSessionFunc(sessionID)
+	harness := &mockHarness{
+		name:    "mock",
+		version: "1.0",
+		capabilities: Capabilities{
+			SupportsTools:    true,
+			MaxContextWindow: 100000,
+			ModelName:        "mock-model",
+		},
 	}
-	return nil
-}
-
-func (m *MockAgent) GetSessionStatus(sessionID SessionID) (Status, error) {
-	if m.GetSessionStatusFunc != nil {
-		return m.GetSessionStatusFunc(sessionID)
+	if harness.Name() != "mock" || harness.Version() != "1.0" {
+		t.Fatalf("unexpected harness identity: %s %s", harness.Name(), harness.Version())
 	}
-	return StatusActive, nil
-}
-
-func (m *MockAgent) SendMessage(sessionID SessionID, message Message) error {
-	if m.SendMessageFunc != nil {
-		return m.SendMessageFunc(sessionID, message)
+	if got := harness.Capabilities().ModelName; got != "mock-model" {
+		t.Fatalf("Capabilities().ModelName = %q, want mock-model", got)
 	}
-	return nil
-}
-
-func (m *MockAgent) GetHistory(sessionID SessionID) ([]Message, error) {
-	if m.GetHistoryFunc != nil {
-		return m.GetHistoryFunc(sessionID)
-	}
-	return []Message{}, nil
-}
-
-func (m *MockAgent) ExportConversation(sessionID SessionID, format ConversationFormat) ([]byte, error) {
-	if m.ExportConversationFunc != nil {
-		return m.ExportConversationFunc(sessionID, format)
-	}
-	return []byte("{}"), nil
-}
-
-func (m *MockAgent) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
-	if m.ImportConversationFunc != nil {
-		return m.ImportConversationFunc(data, format)
-	}
-	return "imported-session-id", nil
-}
-
-func (m *MockAgent) Capabilities() Capabilities {
-	if m.CapabilitiesFunc != nil {
-		return m.CapabilitiesFunc()
-	}
-	return Capabilities{
-		SupportsSlashCommands: false,
-		SupportsTools:         true,
-		MaxContextWindow:      100000,
-		ModelName:             "mock-model",
-	}
-}
-
-func (m *MockAgent) ExecuteCommand(cmd Command) error {
-	if m.ExecuteCommandFunc != nil {
-		return m.ExecuteCommandFunc(cmd)
-	}
-	return nil
-}
-
-// TestAgentInterface_MockImplementation verifies that MockAgent satisfies the Agent interface.
-func TestAgentInterface_MockImplementation(t *testing.T) {
-	var _ Agent = (*MockAgent)(nil)
 }
 
 // TestCapabilities_Struct tests the Capabilities struct.

@@ -271,7 +271,7 @@ func BenchmarkFilterByWorkspace(b *testing.B) {
 	}
 }
 
-// TestWriteResumeTimestamp verifies orchestrator integration (ADR-010)
+// TestWriteResumeTimestamp verifies orchestrator integration (CLI-21).
 func TestWriteResumeTimestamp(t *testing.T) {
 	// Setup: temporary sessions directory
 	tmpDir := t.TempDir()

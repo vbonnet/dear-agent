@@ -21,6 +21,7 @@ Feature: MCP harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Deprecated Gemini keeps MCP compatibility
     Given harness "gemini-cli" is configured

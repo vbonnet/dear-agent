@@ -380,17 +380,17 @@ func TestRenameSessionIdentityRejectsIDReuseAfterServerRestart(t *testing.T) {
 	}
 }
 
-func TestIsMissingSessionOutputIncludesEmptyServerVerdict(t *testing.T) {
+func TestIsMissingSessionOutputRequiresExplicitMissingTarget(t *testing.T) {
 	for _, output := range []string{
 		"can't find session: missing",
 		"no current target",
-		"no server running on /private/tmp/agm.sock",
 	} {
 		if !isMissingSessionOutput([]byte(output)) {
 			t.Fatalf("isMissingSessionOutput(%q) = false, want true", output)
 		}
 	}
 	for _, output := range []string{
+		"no server running on /private/tmp/agm.sock",
 		"permission denied",
 		"failed to connect to server",
 		"server exited unexpectedly",
@@ -514,7 +514,7 @@ func TestNewSession_SettingsInjection(t *testing.T) {
 		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
 	}
 	skipIfNoTmux(t)
-	_, cleanup := setupTestSocket(t)
+	socketPath, cleanup := setupTestSocket(t)
 	defer cleanup()
 
 	sessionName := "test-settings"
@@ -522,21 +522,49 @@ func TestNewSession_SettingsInjection(t *testing.T) {
 	require.NoError(t, err)
 	defer killSession(sessionName)
 
-	// Give settings time to apply
-	time.Sleep(300 * time.Millisecond)
-
-	// Verify session exists
 	exists, err := HasSession(sessionName)
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	// Note: Testing actual tmux option values requires parsing tmux output
-	// For now, we just verify the session was created successfully
-	t.Log("Settings injection:")
-	t.Log("  - set-window-option -g aggressive-resize on")
-	t.Log("  - set-option -g window-size latest")
-	t.Log("  - set -g mouse on")
-	t.Log("  - set -s set-clipboard on")
+	tests := []struct {
+		name     string
+		args     []string
+		expected string
+	}{
+		{
+			name:     "aggressive resize",
+			args:     []string{"show-options", "-w", "-v", "-t", sessionName, "aggressive-resize"},
+			expected: "on",
+		},
+		{
+			name:     "window size",
+			args:     []string{"show-options", "-w", "-v", "-t", sessionName, "window-size"},
+			expected: "latest",
+		},
+		{
+			name:     "mouse",
+			args:     []string{"show-options", "-v", "-t", sessionName, "mouse"},
+			expected: "on",
+		},
+		{
+			name:     "clipboard",
+			args:     []string{"show-options", "-s", "-v", "set-clipboard"},
+			expected: "on",
+		},
+		{
+			name:     "escape time",
+			args:     []string{"show-options", "-s", "-v", "escape-time"},
+			expected: "10",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"-S", socketPath}, tt.args...)
+			output, err := exec.Command("tmux", args...).Output()
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, strings.TrimSpace(string(output)))
+		})
+	}
 }
 
 // TestNewSession_BuildEnvVars verifies build environment variables are set on new sessions

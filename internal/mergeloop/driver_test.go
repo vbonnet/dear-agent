@@ -179,6 +179,90 @@ func TestAttemptCapLeadsToAbandon(t *testing.T) {
 	}
 }
 
+func TestProjectionErrorPreservesAttemptBudget(t *testing.T) {
+	failing := PR{Number: 7, HeadRefName: "f", MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("Build & Test", CheckFail)}}
+	lister := &fakeLister{prs: []PR{failing}}
+	spn := &fakeSpawner{}
+	d, tr := newTestDriver(t, nil, &Deps{Lister: lister, Spawner: spn})
+
+	// Exhaust the two-attempt budget for one stable failing-check signature.
+	for i := range 2 {
+		if _, err := d.Tick(context.Background()); err != nil {
+			t.Fatalf("failing tick %d: %v", i, err)
+		}
+	}
+	if got := tr.Attempts(7); got != 2 {
+		t.Fatalf("attempts before projection error = %d, want 2", got)
+	}
+
+	// A transient projection outage must not manufacture an "unknown"
+	// signature and erase that history.
+	lister.prs = []PR{{
+		Number:               7,
+		HeadRefName:          "f",
+		MergeStateStatus:     "CLEAN",
+		Mergeable:            "MERGEABLE",
+		CheckProjectionError: "provider timeout",
+	}}
+	if res, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("projection-error tick: %v", err)
+	} else if res.Skipped != 1 {
+		t.Fatalf("projection-error skipped = %d, want 1", res.Skipped)
+	}
+	if got := tr.Attempts(7); got != 2 {
+		t.Fatalf("attempts after projection error = %d, want 2", got)
+	}
+
+	// A normal CI rerun also passes through pending and has no failure
+	// signature yet. It must preserve the same budget.
+	lister.prs = []PR{{
+		Number:           7,
+		HeadRefName:      "f",
+		MergeStateStatus: "CLEAN",
+		Mergeable:        "MERGEABLE",
+		Checks:           []Check{reqCheck("Build & Test", CheckPending)},
+	}}
+	if res, err := d.Tick(context.Background()); err != nil {
+		t.Fatalf("pending tick: %v", err)
+	} else if res.Skipped != 1 {
+		t.Fatalf("pending skipped = %d, want 1", res.Skipped)
+	}
+	if got := tr.Attempts(7); got != 2 {
+		t.Fatalf("attempts after pending rerun = %d, want 2", got)
+	}
+
+	// Once projection recovers with the same failure, the exhausted budget
+	// still escalates instead of spawning an unbounded third repair agent.
+	lister.prs = []PR{failing}
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("recovered tick: %v", err)
+	}
+	if len(spn.spawned) != 2 {
+		t.Fatalf("spawn count after recovery = %d, want 2", len(spn.spawned))
+	}
+	if res.Escalated != 1 {
+		t.Fatalf("escalated after recovery = %d, want 1", res.Escalated)
+	}
+
+	// A complete projection of a genuinely different failure still opens a
+	// fresh bounded budget.
+	different := failing
+	different.Checks = []Check{reqCheck("Lint", CheckFail)}
+	lister.prs = []PR{different}
+	res, err = d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("different-failure tick: %v", err)
+	}
+	if res.AgentsSpawn != 1 || len(spn.spawned) != 3 {
+		t.Fatalf("different-failure spawns = %d total %d, want 1 and 3", res.AgentsSpawn, len(spn.spawned))
+	}
+	if got := tr.Attempts(7); got != 1 {
+		t.Fatalf("different-failure attempts = %d, want fresh budget at 1", got)
+	}
+}
+
 func TestSpawnUnavailableDefersNotBlocks(t *testing.T) {
 	prs := []PR{
 		{Number: 8, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE", Checks: []Check{reqCheck("ci", CheckFail)}},

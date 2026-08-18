@@ -15,7 +15,7 @@ func TestInstallHarnessCmd_InvalidHarness(t *testing.T) {
 }
 
 func TestInstallHarnessCmd_ValidHarness(t *testing.T) {
-	tests := []string{"codex", "gemini", "opencode"}
+	tests := []string{"codex", "gemini", "opencode", "pi"}
 
 	for _, harness := range tests {
 		t.Run(harness, func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestInstallCodexCmd_Exists(t *testing.T) {
 
 func TestInstallHarnessValidateHarnessTypes(t *testing.T) {
 	// Test that all valid harness types are accepted
-	validTypes := []string{"codex", "gemini", "opencode"}
+	validTypes := []string{"codex", "gemini", "opencode", "pi"}
 
 	for _, harness := range validTypes {
 		_, err := ops.ValidateHarness(harness)

@@ -1,11 +1,13 @@
 # SPEC: internal/override/SPEC.md
 # RELATED-SPEC: internal/baseline/SPEC.md
 # RELATED-SPEC: internal/benchmark/SPEC.md
+# RELATED-SPEC: internal/buildstamp/SPEC.md
 # RELATED-SPEC: internal/ci/act/SPEC.md
 # RELATED-SPEC: internal/common/SPEC.md
 # RELATED-SPEC: internal/drift/SPEC.md
 # RELATED-SPEC: internal/earslint/SPEC.md
 # RELATED-SPEC: internal/fileutil/SPEC.md
+# RELATED-SPEC: internal/gittest/SPEC.md
 # RELATED-SPEC: internal/logrotate/SPEC.md
 # RELATED-SPEC: internal/sqlite/SPEC.md
 # RELATED-SPEC: internal/tracking/SPEC.md
@@ -23,11 +25,13 @@ Feature: Internal foundation guardrails
       | package            |
       | internal/baseline  |
       | internal/benchmark |
+      | internal/buildstamp |
       | internal/ci/act    |
       | internal/common    |
       | internal/drift     |
       | internal/earslint  |
       | internal/fileutil  |
+      | internal/gittest   |
       | internal/logrotate |
       | internal/override  |
       | internal/sqlite    |
@@ -69,3 +73,16 @@ Feature: Internal foundation guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
+
+  Scenario: Test-created Git repositories cannot execute host hooks
+    Given the host global Git configuration installs a canary hook
+    When AGM runs the hermetic Git sandbox regressions
+    Then the unisolated control should prove the canary hook fires
+    And no sandboxed repository should execute a host hook

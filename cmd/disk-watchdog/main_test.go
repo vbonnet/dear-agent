@@ -5,20 +5,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
 	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
 func TestSweepMergedWorktrees_InvokesExecuteJSON(t *testing.T) {
-	var gotName string
-	var gotArgs []string
+	var calls []string
 	cfg := config{
 		agmBin: "agm",
 		runCommand: func(_ context.Context, name string, args ...string) ([]byte, error) {
-			gotName = name
-			gotArgs = args
+			calls = append(calls, name+" "+strings.Join(args, " "))
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":3,"reaped":1,"kept":2,"errors":0}`), nil
+			}
 			return []byte(`{"worktrees":[],"removed":["/x/a","/x/b"],"failed":{"/x/c":"boom"}}`), nil
 		},
 	}
@@ -26,22 +31,28 @@ func TestSweepMergedWorktrees_InvokesExecuteJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweepMergedWorktrees: %v", err)
 	}
-	if gotName != "agm" {
-		t.Errorf("binary = %q, want agm", gotName)
+	want := []string{
+		"agm sandbox gc --reap --json",
+		"agm worktree sweep --execute -o json",
 	}
-	want := []string{"worktree", "sweep", "--execute", "-o", "json"}
-	if strings.Join(gotArgs, " ") != strings.Join(want, " ") {
-		t.Errorf("args = %v, want %v", gotArgs, want)
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls = %v, want %v", calls, want)
 	}
 	if len(r.Removed) != 2 || len(r.Failed) != 1 {
 		t.Errorf("parsed result wrong: %+v", r)
+	}
+	if r.SandboxGC == nil || r.SandboxGC.Reaped != 1 {
+		t.Errorf("sandbox gc summary = %+v, want reaped=1", r.SandboxGC)
 	}
 }
 
 func TestSweepMergedWorktrees_ErrorPropagates(t *testing.T) {
 	cfg := config{
 		agmBin: "agm",
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":0,"reaped":0,"kept":0,"errors":0}`), nil
+			}
 			return nil, errors.New("exit 1")
 		},
 	}
@@ -53,7 +64,10 @@ func TestSweepMergedWorktrees_ErrorPropagates(t *testing.T) {
 func TestSweepMergedWorktrees_GarbageOutputIsError(t *testing.T) {
 	cfg := config{
 		agmBin: "agm",
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":0,"reaped":0,"kept":0,"errors":0}`), nil
+			}
 			return []byte("not json"), nil
 		},
 	}
@@ -139,5 +153,196 @@ func TestRun_BadFlagIsUsageError(t *testing.T) {
 	var buf bytes.Buffer
 	if _, err := run([]string{"--no-such-flag"}, &buf); err == nil {
 		t.Fatal("expected usage error")
+	}
+}
+
+// --- admission brake (ce-93lw.18) ---
+
+// TestDecideBrake pins the tick-outcome to brake-transition policy. Row two is
+// the 2026-07-18 incident itself: alarmed, with the remediation being SIGKILLed.
+func TestDecideBrake(t *testing.T) {
+	killed := &sweepResult{Error: "/Users/x/go/bin/agm worktree sweep --execute: signal: killed"}
+	swept := &sweepResult{Removed: []string{"/w/a", "/w/b"}}
+
+	tests := []struct {
+		name        string
+		breached    bool
+		rem         *sweepResult
+		wantEngage  bool
+		wantRelease bool
+	}{
+		{"healthy tick releases", false, nil, false, true},
+		{"breached with killed remediation engages", true, killed, true, false},
+		{"breached with successful remediation leaves it alone", true, swept, false, false},
+		{"breached with no remediation attempt leaves it alone", true, nil, false, false},
+		{"healthy tick releases even if a sweep ran", false, swept, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decideBrake(tt.breached, tt.rem)
+			if got.Engage != tt.wantEngage || got.Release != tt.wantRelease {
+				t.Errorf("decideBrake(%v, %+v) = {engage:%v release:%v}, want {engage:%v release:%v}",
+					tt.breached, tt.rem, got.Engage, got.Release, tt.wantEngage, tt.wantRelease)
+			}
+		})
+	}
+}
+
+func TestDecideBrake_ReasonCarriesTheRemediationError(t *testing.T) {
+	d := decideBrake(true, &sweepResult{Error: "agm worktree sweep --execute: signal: killed"})
+	if !d.Engage {
+		t.Fatal("a failed remediation must engage the brake")
+	}
+	if !strings.Contains(d.Reason, "signal: killed") {
+		t.Errorf("reason = %q, want it to carry the remediation error verbatim", d.Reason)
+	}
+}
+
+func TestUpdateAdmissionBrake_EngagesAndReleases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := config{brakePath: path, brakeTTL: time.Hour}
+
+	updateAdmissionBrake(cfg, true, &sweepResult{Error: "signal: killed"})
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read after engage: %v", err)
+	}
+	switch {
+	case brake == nil:
+		t.Fatal("brake not engaged after a failed remediation")
+	case brake.Source != brakeSource:
+		t.Errorf("Source = %q, want %q", brake.Source, brakeSource)
+	case !strings.Contains(brake.Reason, "signal: killed"):
+		t.Errorf("Reason = %q, want the remediation error", brake.Reason)
+	}
+
+	updateAdmissionBrake(cfg, false, nil)
+	brake, err = admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read after release: %v", err)
+	}
+	if brake != nil {
+		t.Errorf("brake still engaged after a healthy tick: %+v", brake)
+	}
+}
+
+func TestUpdateAdmissionBrake_SuccessfulRemediationLeavesBrakeInPlace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := config{brakePath: path, brakeTTL: time.Hour}
+
+	if err := admission.Engage(path, brakeSource, "earlier failure", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+	updateAdmissionBrake(cfg, true, &sweepResult{Removed: []string{"/w/a"}})
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	switch {
+	case brake == nil:
+		t.Fatal("one successful sweep under an active alarm is not evidence of health; brake should remain")
+	case brake.Reason != "earlier failure":
+		t.Errorf("Reason = %q, want the original brake preserved", brake.Reason)
+	}
+}
+
+func TestApplyBrake_DryRunNeverTouchesTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := config{brakePath: path, brakeTTL: time.Hour, dryRun: true}
+
+	applyBrake(cfg, true, "would engage")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("--dry-run wrote a brake file (stat err = %v)", err)
+	}
+
+	if err := admission.Engage(path, brakeSource, "pre-existing", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+	applyBrake(cfg, false, "")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("--dry-run removed an existing brake file: %v", err)
+	}
+}
+
+// A brake write failure is a warning, never a reason to suppress the alarm.
+func TestApplyBrake_WriteFailureDoesNotPanicOrExit(t *testing.T) {
+	// A path whose parent is a regular file: MkdirAll and rename both fail.
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg := config{brakePath: filepath.Join(file, "admission-brake.json"), brakeTTL: time.Hour}
+
+	applyBrake(cfg, true, "boom") // must not panic
+	applyBrake(cfg, false, "")    // must not panic
+}
+
+func TestRun_HealthyTickReleasesAStaleBrake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	if err := admission.Engage(path, brakeSource, "stale from an earlier incident", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	var out bytes.Buffer
+	// Thresholds a real filesystem cannot breach, so the tick is healthy.
+	//
+	// They must be tiny-but-POSITIVE: DiskAlertThresholds.withDefaults treats a
+	// zero threshold as "unset" and substitutes the 20 GiB default, so passing 0
+	// here silently asked for default thresholds instead of disabling them. That
+	// made this test pass only while the host happened to have >20 GiB free, and
+	// on a fuller disk it breached and ran the real `agm worktree sweep
+	// --execute`.
+	//
+	// --agm points at a path that cannot exist, so if the no-breach premise ever
+	// breaks again this test fails loudly instead of shelling out to real
+	// worktree remediation.
+	code, err := run([]string{
+		"--path", t.TempDir(),
+		"--brake", path,
+		"--trail", filepath.Join(t.TempDir(), "trail.jsonl"),
+		"--agm", filepath.Join(t.TempDir(), "no-such-agm"),
+		"--free-warn-gb", "0.0001",
+		"--free-critical-gb", "0.0001",
+		"--inode-warn", "0.999999",
+		"--inode-critical", "0.999999",
+	}, &out)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 for a healthy tick (output: %s)", code, out.String())
+	}
+
+	brake, rerr := admission.Read(path)
+	if rerr != nil {
+		t.Fatalf("Read: %v", rerr)
+	}
+	if brake != nil {
+		t.Errorf("healthy tick left the brake engaged: %+v", brake)
+	}
+}
+
+// The mirror of the governor's guard: a healthy disk tick must not clear a
+// brake vroom-governor engaged because its own probes had gone unreadable.
+func TestApplyBrake_HealthyTickDoesNotClearAnotherWatchdogsBrake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := config{brakePath: path, brakeTTL: time.Hour}
+	if err := admission.Engage(path, "vroom-governor", "load probe unreadable", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	applyBrake(cfg, false, "")
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	switch {
+	case brake == nil:
+		t.Fatal("a healthy disk tick cleared the vroom-governor brake")
+	case brake.Source != "vroom-governor":
+		t.Errorf("Source = %q, want the vroom-governor brake preserved", brake.Source)
 	}
 }

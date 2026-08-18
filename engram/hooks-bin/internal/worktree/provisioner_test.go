@@ -1,13 +1,13 @@
 package worktree
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // setupTestRepo creates a test git repository with an initial commit.
@@ -23,14 +23,11 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	}
 
 	// Initialize git repo
-	cmd := exec.CommandContext(context.Background(), "git", "init", repoPath)
+	cmd := gittest.Command(t, tmpDir, "init", repoPath)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to git init: %v", err)
 	}
-
-	// Configure git
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "config", "user.email", "test@example.com").Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "config", "user.name", "Test User").Run()
+	gittest.HardenRepo(t, repoPath)
 
 	// Create initial commit (required for worktree)
 	readmeFile := filepath.Join(repoPath, "README.md")
@@ -38,8 +35,8 @@ func setupTestRepo(t *testing.T) (string, func()) {
 		t.Fatalf("Failed to write README: %v", err)
 	}
 
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "add", ".").Run()
-	cmd = exec.CommandContext(context.Background(), "git", "-C", repoPath, "commit", "-m", "Initial commit")
+	gittest.Command(t, repoPath, "add", ".").Run()
+	cmd = gittest.Command(t, repoPath, "commit", "-m", "Initial commit")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create initial commit: %v", err)
 	}
@@ -223,7 +220,7 @@ func TestProvisioner_CustomBranchName(t *testing.T) {
 	}
 
 	// Verify branch name is correct
-	cmd := exec.CommandContext(context.Background(), "git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := gittest.Command(t, worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to get branch name: %v", err)
@@ -358,14 +355,12 @@ func BenchmarkProvisioner_Provision_Cached(b *testing.B) {
 	tmpDir := b.TempDir()
 	repoPath := filepath.Join(tmpDir, "repo")
 	os.Mkdir(repoPath, 0755)
-	exec.CommandContext(context.Background(), "git", "init", repoPath).Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "config", "user.email", "bench@test.com").Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "config", "user.name", "Bench").Run()
+	gittest.Command(b, tmpDir, "init", repoPath).Run()
 
 	readme := filepath.Join(repoPath, "README.md")
 	os.WriteFile(readme, []byte("bench"), 0644)
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "add", ".").Run()
-	exec.CommandContext(context.Background(), "git", "-C", repoPath, "commit", "-m", "Init").Run()
+	gittest.Command(b, repoPath, "add", ".").Run()
+	gittest.Command(b, repoPath, "commit", "-m", "Init").Run()
 
 	worktreeBase := filepath.Join(tmpDir, "worktrees")
 	config := &ProvisionerConfig{

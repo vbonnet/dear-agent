@@ -1,9 +1,11 @@
 package tmux
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -520,6 +522,109 @@ func TestWithTmuxLock_LockAlreadyHeld(t *testing.T) {
 
 	if err == nil {
 		t.Error("withTmuxLock() should have failed with lock already held")
+	}
+}
+
+func TestWithTmuxLockContextHonorsContentionDeadline(t *testing.T) {
+	cleanupTmuxLock(t)
+	defer cleanupTmuxLock(t)
+	if err := AcquireTmuxLock(); err != nil {
+		t.Fatalf("AcquireTmuxLock() failed: %v", err)
+	}
+	defer ReleaseTmuxLock()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	executed := false
+	err := withTmuxLockContext(ctx, func() error {
+		executed = true
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("withTmuxLockContext() error = %v, want deadline exceeded", err)
+	}
+	if executed {
+		t.Fatal("contended context lock executed its mutation after deadline")
+	}
+}
+
+func TestWithTmuxLockContextHonorsExternalFlockDeadline(t *testing.T) {
+	cleanupTmuxLock(t)
+	defer cleanupTmuxLock(t)
+	external, err := lock.New(filepath.Join(getStateDir(), "tmux-server.lock"))
+	if err != nil {
+		t.Fatalf("create external file lock: %v", err)
+	}
+	if err := external.TryLock(); err != nil {
+		t.Fatalf("acquire external file lock: %v", err)
+	}
+	defer func() {
+		if err := external.Unlock(); err != nil {
+			t.Errorf("release external file lock: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	executed := false
+	err = withTmuxLockContext(ctx, func() error {
+		executed = true
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("withTmuxLockContext() error = %v, want deadline exceeded", err)
+	}
+	if executed {
+		t.Fatal("external flock contention executed mutation after deadline")
+	}
+}
+
+func TestWithTmuxLockContextHonorsProcessMutexDeadline(t *testing.T) {
+	cleanupTmuxLock(t)
+	defer cleanupTmuxLock(t)
+	tmuxServerLockMu.Lock()
+	defer tmuxServerLockMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	executed := false
+	err := withTmuxLockContext(ctx, func() error {
+		executed = true
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("withTmuxLockContext() error = %v, want deadline exceeded", err)
+	}
+	if executed {
+		t.Fatal("process-mutex contention executed mutation after deadline")
+	}
+}
+
+func TestWithTmuxLockContextWaitsThenExecutes(t *testing.T) {
+	cleanupTmuxLock(t)
+	defer cleanupTmuxLock(t)
+	if err := AcquireTmuxLock(); err != nil {
+		t.Fatalf("AcquireTmuxLock() failed: %v", err)
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		_ = ReleaseTmuxLock()
+		close(released)
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	executed := false
+	if err := withTmuxLockContext(ctx, func() error {
+		executed = true
+		return nil
+	}); err != nil {
+		t.Fatalf("withTmuxLockContext() error = %v", err)
+	}
+	<-released
+	if !executed {
+		t.Fatal("context lock did not execute after contention cleared")
 	}
 }
 

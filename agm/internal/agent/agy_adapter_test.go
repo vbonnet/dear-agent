@@ -43,6 +43,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origHasSession := agyHasSession
 	origNewSession := agyNewSession
 	origSendCommand := agySendCommand
+	origSendPromptLiteral := agySendPromptLiteral
 	origWaitForPrompt := agyWaitForPrompt
 	origWaitForResumePrompt := agyWaitForResumePrompt
 	origCheckProcess := agyCheckProcess
@@ -59,6 +60,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyHasSession = origHasSession
 		agyNewSession = origNewSession
 		agySendCommand = origSendCommand
+		agySendPromptLiteral = origSendPromptLiteral
 		agyWaitForPrompt = origWaitForPrompt
 		agyWaitForResumePrompt = origWaitForResumePrompt
 		agyCheckProcess = origCheckProcess
@@ -71,8 +73,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	})
 }
 
-// TestAgyAdapterImplementsAgentInterface verifies AgyAdapter implements Agent interface.
-func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
+func TestAgyAdapterImplementsHarnessContract(t *testing.T) {
 	// Create adapter with mock store
 	mockStore := &MockSessionStore{
 		sessions: make(map[SessionID]*SessionMetadata),
@@ -83,8 +84,7 @@ func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
 		t.Fatalf("NewAgyAdapter failed: %v", err)
 	}
 
-	// Verify adapter implements Agent interface (type already Agent from NewAgyAdapter)
-	_ = adapter
+	var _ Harness = adapter
 }
 
 // TestAgyAdapterName tests Name() method.
@@ -204,11 +204,8 @@ func TestAgyCreateSessionUsesCanonicalModelAwareCommand(t *testing.T) {
 		t.Fatalf("CreateSession sent commands = %v, want one canonical launch", sent)
 	}
 	for _, want := range []string{
-		"agy --model 'Gemini 3.5 Flash (Low)'",
-		"--dangerously-skip-permissions",
-		"--conversation 'native-conversation-id'",
-		"--add-dir '/extra dir'",
-		"&& exit",
+		"__exec-agy",
+		"--handoff",
 	} {
 		if !strings.Contains(sent[0], want) {
 			t.Errorf("CreateSession command %q missing %q", sent[0], want)
@@ -258,6 +255,62 @@ func TestAgyCreateSessionImportedConversationOmitsUnknownModel(t *testing.T) {
 	}
 }
 
+func TestAgyCreateRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	sent := false
+	agySendCommand = func(string, string) error { sent = true; return nil }
+	rolledBack := false
+	agyKillSession = func(string) error { rolledBack = true; return nil }
+
+	_, err := (&AgyAdapter{sessionStore: &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}}).CreateSession(SessionContext{
+		Name:             "agy-terminal-control",
+		WorkingDirectory: t.TempDir(),
+		AuthorizedDirs:   []string{"safe\nunsafe"},
+		Environment:      map[string]string{"AGY_CONVERSATION_ID": "imported-native-id"},
+	})
+	if err == nil || (!strings.Contains(err.Error(), "pasted shell value") && !strings.Contains(err.Error(), "contains control characters")) {
+		t.Fatalf("CreateSession() error = %v, want terminal-control rejection", err)
+	}
+	if sent {
+		t.Fatal("AGY create contacted its configured tmux sender before validation")
+	}
+	if !rolledBack {
+		t.Fatal("AGY create did not roll back the tmux session after validation failure")
+	}
+}
+
+func TestAgyColdResumeRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"agy-id": {
+			TmuxName:       "agy-resume",
+			WorkingDir:     t.TempDir(),
+			UUID:           "imported-native-id",
+			AuthorizedDirs: []string{"safe\nunsafe"},
+		},
+	}}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	sent := false
+	agySendCommand = func(string, string) error { sent = true; return nil }
+	rolledBack := false
+	agyKillSession = func(name string) error { rolledBack = true; return nil }
+
+	err := (&AgyAdapter{sessionStore: store}).ResumeSession("agy-id")
+	if err == nil || (!strings.Contains(err.Error(), "pasted shell value") && !strings.Contains(err.Error(), "contains control characters")) {
+		t.Fatalf("ResumeSession() error = %v, want terminal-control rejection", err)
+	}
+	if sent {
+		t.Fatal("AGY resume contacted its configured tmux sender before validation")
+	}
+	if !rolledBack {
+		t.Fatal("AGY resume did not roll back the tmux session after validation failure")
+	}
+}
+
 func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	agyHasSession = func(string) (bool, error) { return false, nil }
@@ -295,6 +348,123 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	}
 	if discoveredWorkDir != "/work" || snapshotCalls != 1 || discoveryCalls != 1 || metadata.UUID != "provider-conversation-id" {
 		t.Fatalf("discovered workdir/snapshot/discovery calls/native ID = %q/%d/%d/%q", discoveredWorkDir, snapshotCalls, discoveryCalls, metadata.UUID)
+	}
+}
+
+func TestAgyCreateSessionBootstrapsLazyNativeIdentityWithInitialPrompt(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	launches := 0
+	agySendCommand = func(string, string) error { launches++; return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	promptDeliveries := 0
+	agySendPromptLiteral = func(sessionName, prompt string, interrupt bool, harness string) error {
+		if sessionName != "agy-lazy-adapter" || prompt != "persist adapter\nprompt" || interrupt || harness != "agy" {
+			t.Fatalf("initial prompt delivery = %q/%q/%t/%q", sessionName, prompt, interrupt, harness)
+		}
+		promptDeliveries++
+		return nil
+	}
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "old-native-id", nil },
+		func(_ context.Context, workDir, previous string) (*agysession.Metadata, error) {
+			if promptDeliveries != 1 || previous != "old-native-id" {
+				t.Fatalf("identity discovery state = prompt deliveries:%d previous:%q", promptDeliveries, previous)
+			}
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	)
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	id, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-lazy-adapter", WorkingDirectory: "/work", Model: "3.5-flash-low", InitialPrompt: "persist adapter\nprompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := store.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launches != 1 || promptDeliveries != 1 || metadata.UUID != "new-native-id" {
+		t.Fatalf("adapter lifecycle = launches:%d prompts:%d native ID:%q", launches, promptDeliveries, metadata.UUID)
+	}
+}
+
+func TestAgyCreateSessionRollsBackWhenInitialPromptBootstrapFails(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	wantErr := errors.New("fixture initial prompt failure")
+	agySendPromptLiteral = func(string, string, bool, string) error { return wantErr }
+	discovered := false
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "old-native-id", nil },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			discovered = true
+			return nil, nil
+		},
+	)
+	killed := ""
+	agyKillSession = func(name string) error { killed = name; return nil }
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	_, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-bootstrap-failure", WorkingDirectory: "/work", Model: "3.5-flash-low", InitialPrompt: "must fail",
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("CreateSession error = %v, want %v", err, wantErr)
+	}
+	if discovered || killed != "agy-bootstrap-failure" {
+		t.Fatalf("failure state = discovered:%t killed:%q", discovered, killed)
+	}
+	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
+		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
+	}
+}
+
+func TestAgySendMessageUsesHarnessAwareMultilineDelivery(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("agy-message-session")
+	if err := store.Set(sessionID, &SessionMetadata{TmuxName: "agy-message-pane"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantMessage := "[From: codex]\n\nfirst line\nsecond line"
+	called := 0
+	agySendPromptLiteral = func(sessionName, prompt string, interrupt bool, harness string) error {
+		called++
+		if sessionName != "agy-message-pane" || prompt != wantMessage || interrupt || harness != "agy" {
+			t.Fatalf("message delivery = %q/%q/%t/%q", sessionName, prompt, interrupt, harness)
+		}
+		return nil
+	}
+
+	if err := (&AgyAdapter{sessionStore: store}).SendMessage(sessionID, Message{Content: wantMessage}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("harness-aware message deliveries = %d, want 1", called)
+	}
+}
+
+func TestAgySendMessagePropagatesHarnessAwareDeliveryFailure(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("agy-message-session")
+	if err := store.Set(sessionID, &SessionMetadata{TmuxName: "agy-message-pane"}); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("fixture AGY paste failure")
+	agySendPromptLiteral = func(string, string, bool, string) error { return wantErr }
+
+	err := (&AgyAdapter{sessionStore: store}).SendMessage(sessionID, Message{Content: "line one\nline two"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SendMessage error = %v, want %v", err, wantErr)
 	}
 }
 
@@ -356,7 +526,7 @@ func TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery(t *test
 	if len(discoveredWorkDirs) != 2 || discoveredWorkDirs[0] != wantWorkDir || discoveredWorkDirs[1] != wantWorkDir {
 		t.Fatalf("discovery workdirs = %v, want normalized %q", discoveredWorkDirs, wantWorkDir)
 	}
-	if !strings.Contains(command, "cd '"+wantWorkDir+"' && agy") {
+	if !strings.Contains(command, "--workdir '"+wantWorkDir+"'") {
 		t.Fatalf("launch command %q does not use normalized workdir %q", command, wantWorkDir)
 	}
 }
@@ -686,10 +856,8 @@ func TestAgyResumeSessionPreservesNativeIdentityModelAndMode(t *testing.T) {
 		t.Fatal("ResumeSession did not recreate the missing tmux session")
 	}
 	for _, want := range []string{
-		"agy --model 'Claude Sonnet 4.6 (Thinking)'",
-		"--dangerously-skip-permissions",
-		"--conversation 'native-conversation-id'",
-		"--add-dir '/extra dir'",
+		"__exec-agy",
+		"--handoff",
 	} {
 		if !strings.Contains(command, want) {
 			t.Errorf("resume command %q missing %q", command, want)
@@ -903,7 +1071,7 @@ func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 	}
 	agyNewSession = func(_ string, gotWorkDir string) error { events = append(events, "new:"+gotWorkDir); return nil }
 	agySendCommand = func(_ string, command string) error {
-		if !strings.Contains(command, "cd '"+workDir+"' && agy") {
+		if !strings.Contains(command, "--workdir '"+workDir+"'") {
 			t.Fatalf("resume command %q does not use canonical workspace %q", command, workDir)
 		}
 		events = append(events, "send")

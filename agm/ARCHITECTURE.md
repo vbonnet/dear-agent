@@ -8,13 +8,11 @@ AGM (Agent Gateway Manager) is a multi-agent session management system that prov
 
 ## Architecture
 
-### C4 Component Diagram
+### C4 Component Model
 
-The following diagram shows the internal component architecture of AGM at the C4 Level 3 (Component) view:
-
-![AGM Component Architecture](diagrams/rendered/c4-component-agm.svg)
-
-[View PNG version](diagrams/rendered/c4-component-agm.png) | [View D2 Source](diagrams/c4-component-agm.d2)
+The code-native [D2 source](diagrams/c4-component-agm.d2) describes AGM at the
+C4 Level 3 component view. Generated renders are not checked in because the
+source is the living artifact.
 
 ### Key Components
 
@@ -47,19 +45,21 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 
 See `docs/AGENTIC-API.md` for the complete agentic API reference.
 
-#### 4. Adapter Registry (Multi-CLI Support)
-The adapter pattern enables AGM to support multiple AI agents with a unified interface:
+#### 4. Concrete Harness Adapters (Multi-CLI Support)
+The adapter pattern enables AGM to support multiple interactive harnesses
+without claiming that every lifecycle mechanism is interchangeable:
 
 - **Claude Adapter**: CLI integration, UUID detection, slash commands, history.jsonl parsing
-- **Gemini Adapter**: API integration, session file management, command translation
-- **Codex Adapter**: OpenAI API integration, thread management
+- **Codex Adapter**: Codex CLI launch, native session identity, and composer delivery
+- **AGY Adapter**: AGY CLI launch, provider conversation identity, and native readiness
 - **OpenCode Adapter**: SSE event stream integration, server port management, real-time state updates
+- **Pi Adapter**: Pi CLI launch, managed extension readiness, and native JSONL sessions
+- **Gemini Adapter**: Deprecated CLI compatibility for existing sessions
 
-Each adapter implements the unified `Agent` interface, allowing AGM to:
-- Abstract away CLI-specific differences
-- Provide consistent session management across providers
-- Enable seamless switching between agents
-- Translate generic commands to agent-specific actions
+Constructors return concrete adapters. `agent.Harness` exposes only name,
+version, and descriptive capabilities for heterogeneous discovery and
+conformance. Shared operation owners define capability-sized interfaces when
+they need behavior; they do not depend on a universal lifecycle facade.
 
 #### 5. Coordination & Storage Layer
 - **Dolt Storage**: Session metadata persistence with transactional database operations (Git-like versioned SQL)
@@ -67,9 +67,11 @@ Each adapter implements the unified `Agent` interface, allowing AGM to:
 - **Message Queue**: Async communication with retry logic and acknowledgments
 - **State Monitor (Astrocyte)**: Real-time state detection (READY, THINKING, PERMISSION_PROMPT, COMPACTING, OFFLINE)
 
-#### 6. Backend Abstraction
-- **Tmux Backend**: Session management, pane control, key sending
-- **Temporal Backend**: Workflow orchestration, durable execution (future)
+#### 6. Local Runtime Boundary
+- **Session tmux runtime**: One `session.RealTmux` adapter owns session
+  management, strict existence, liveness, readiness, pane control, and input.
+- **Alternative runtimes**: Added only with a production caller and a
+  consumer-sized contract; dormant backend registries are not retained.
 
 #### 7. UI & Presentation Layer
 - **Interactive UI (Huh TUI)**: Session picker, forms, confirmations, fuzzy search
@@ -80,18 +82,17 @@ Each adapter implements the unified `Agent` interface, allowing AGM to:
 The adapter pattern is central to AGM's architecture:
 
 ```
-Generic AGM Command → Command Translator → Agent Adapter → Agent-Specific Action
-     "resume"              ↓                      ↓               ↓
-                    Analyze session       Claude Adapter:   `/resume {uuid}\r`
-                    metadata              Gemini Adapter:   API call with history
-                                         Codex Adapter:    Thread continuation
+Generic AGM Operation → Transaction Owner → Required Capability → Harness Action
+       "resume"                 ↓                    ↓                 ↓
+                        Validate lifecycle      tmux/session seam   native resume
+                        and postconditions      or concrete adapter  mechanism
 ```
 
 **Benefits:**
-- **Extensibility**: Adding new agents requires only implementing the `Agent` interface
-- **Maintainability**: Agent-specific logic is isolated in adapters
-- **Testability**: Each adapter can be tested independently with mocks
-- **Flexibility**: Users can switch agents without changing workflows
+- **Explicit substitutability**: Consumers request only behavior they invoke
+- **Maintainability**: Harness-specific mechanisms stay isolated in concrete adapters
+- **Testability**: Shared operations use small, consumer-owned test seams
+- **Discovery**: Metadata remains comparable across the finite harness catalog
 
 ### Session Lifecycle Flow
 
@@ -99,9 +100,9 @@ Generic AGM Command → Command Translator → Agent Adapter → Agent-Specific 
 2. **CLI Validation**: Command layer validates flags and parameters
 3. **UUID Generation**: SessionManager generates unique session ID
 4. **Adapter Selection**: Appropriate adapter chosen based on agent flag
-5. **Agent Startup**: Adapter starts agent CLI via backend
+5. **Agent Startup**: Adapter starts the agent CLI through the session tmux runtime
 6. **Database Persistence**: Dolt adapter inserts session metadata into database
-7. **Backend Attachment**: TmuxBackend attaches to session
+7. **Runtime Attachment**: The session tmux runtime attaches to the exact session
 
 ### Session Hierarchy and Parent-Child Relationships
 
@@ -237,7 +238,9 @@ See [ADR-019](docs/adr/ADR-019-a2a-agent-cards.md) for the full decision record.
 ## Design Principles
 
 ### 1. Adapter Pattern for Multi-CLI Support
-All agent-specific logic is encapsulated in adapters implementing a common interface, enabling seamless multi-agent support.
+Agent-specific logic stays in concrete adapters. Shared operation owners
+define small, consumer-owned capability interfaces for only the behavior they
+invoke; there is no common lifecycle interface across all harnesses.
 
 ### 2. Smart Identifier Resolution
 Multi-strategy resolution algorithm (exact → UUID prefix → fuzzy → interactive) eliminates typing exact names.
@@ -351,7 +354,7 @@ See [TESTING.md](TESTING.md) for complete test isolation guide.
 
 - [AGM CLI Architecture](../agm-session-lifecycle/agm/cmd/agm/ARCHITECTURE.md) - Detailed CLI architecture
 - [AGM Specification](SPEC.md) - Complete system specification
-- [Backend Implementation](BACKEND_IMPLEMENTATION.md) - Backend abstraction details
+- [ADR-032](docs/adr/ADR-032-single-local-runtime-owner.md) - Single local runtime ownership
 - [Capability Matrix](CAPABILITY-MATRIX.md) - Feature comparison across agents
 - [Testing Guide](TESTING.md) - Test isolation and best practices
 - [ADR-006](cmd/agm/ADR-006-test-isolation-enforcement.md) - Test isolation enforcement decision

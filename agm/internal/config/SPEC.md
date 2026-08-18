@@ -6,8 +6,8 @@
 
 `agm/internal/config` owns AGM runtime configuration loading, defaults, adapter
 settings, centralized storage resolution, and legacy dotfile compatibility. The
-package is part of harness parity because Claude Code, Codex CLI, AGY, and
-OpenCode must resolve the same repository, storage, budget, sandbox, status-line,
+package is part of harness parity because Claude Code, Codex CLI, AGY, OpenCode,
+and Pi must resolve the same repository, storage, budget, sandbox, status-line,
 and adapter contracts before command handlers or daemons make harness-specific
 decisions.
 

@@ -48,17 +48,17 @@ func (RealGitOps) DeleteBranch(repoPath, branchName string, force bool) error {
 
 // Result holds the outcome of a session cleanup operation.
 type Result struct {
-	WorktreesRemoved    int      `json:"worktrees_removed"`
-	BranchesDeleted     int      `json:"branches_deleted"`
-	TmpFilesRemoved     int      `json:"tmp_files_removed"`
-	InterruptFlagCleared bool    `json:"interrupt_flag_cleared"`
-	Errors              []string `json:"errors,omitempty"`
+	WorktreesRemoved     int      `json:"worktrees_removed"`
+	BranchesDeleted      int      `json:"branches_deleted"`
+	TmpFilesRemoved      int      `json:"tmp_files_removed"`
+	InterruptFlagCleared bool     `json:"interrupt_flag_cleared"`
+	Errors               []string `json:"errors,omitempty"`
 }
 
 // SessionResources cleans up resources associated with a session during archive.
 // It performs three cleanup tasks:
 //  1. Remove git worktrees tracked in the database for this session
-//  2. Delete git branches matching the session name in repos where worktrees were found
+//  2. Delete the recorded branches only after their owning worktrees are gone
 //  3. Remove /tmp/build-SESSION* files
 //
 // All cleanup is best-effort: errors are logged and collected but do not halt the process.
@@ -69,8 +69,19 @@ func SessionResources(ctx context.Context, sessionName string, store WorktreeSto
 
 	result := &Result{}
 
-	// 1. Clean up worktrees tracked in database
-	reposSeen := map[string]bool{}
+	// 1. Clean up worktrees tracked in the database. Branch deletion is
+	// authorized only by the branch recorded on a worktree that was removed (or
+	// was already absent), never by a merely matching session name.
+	branchesByRepo := map[string]map[string]struct{}{}
+	rememberRemovedBranch := func(repoPath, branch string) {
+		if repoPath == "" || branch == "" {
+			return
+		}
+		if branchesByRepo[repoPath] == nil {
+			branchesByRepo[repoPath] = map[string]struct{}{}
+		}
+		branchesByRepo[repoPath][branch] = struct{}{}
+	}
 	if store != nil {
 		worktrees, err := store.ListWorktreesBySession(ctx, sessionName)
 		if err != nil {
@@ -84,7 +95,7 @@ func SessionResources(ctx context.Context, sessionName string, store WorktreeSto
 					logger.Info("Worktree already gone, untracking", "path", wt.WorktreePath)
 					_ = store.UntrackWorktree(ctx, wt.WorktreePath)
 					result.WorktreesRemoved++
-					reposSeen[wt.RepoPath] = true
+					rememberRemovedBranch(wt.RepoPath, wt.Branch)
 					continue
 				}
 
@@ -96,23 +107,25 @@ func SessionResources(ctx context.Context, sessionName string, store WorktreeSto
 				} else {
 					logger.Info("Removed worktree", "path", wt.WorktreePath)
 					result.WorktreesRemoved++
+					rememberRemovedBranch(wt.RepoPath, wt.Branch)
 				}
 
 				// Untrack in database regardless of removal success
 				_ = store.UntrackWorktree(ctx, wt.WorktreePath)
-				reposSeen[wt.RepoPath] = true
 			}
 		}
 	}
 
-	// 2. Delete branches matching session name in repos where worktrees were found
-	for repoPath := range reposSeen {
-		if err := git.DeleteBranch(repoPath, sessionName, true); err != nil {
-			// Branch may not exist or already be deleted — this is expected
-			logger.Debug("Could not delete branch", "branch", sessionName, "repo", repoPath, "error", err)
-		} else {
-			logger.Info("Deleted branch", "branch", sessionName, "repo", repoPath)
-			result.BranchesDeleted++
+	// 2. Delete only branches positively attributed by removed worktree records.
+	for repoPath, branches := range branchesByRepo {
+		for branch := range branches {
+			if err := git.DeleteBranch(repoPath, branch, true); err != nil {
+				// Branch may not exist or already be deleted — this is expected.
+				logger.Debug("Could not delete branch", "branch", branch, "repo", repoPath, "error", err)
+			} else {
+				logger.Info("Deleted branch", "branch", branch, "repo", repoPath)
+				result.BranchesDeleted++
+			}
 		}
 	}
 

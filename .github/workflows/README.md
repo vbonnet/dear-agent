@@ -2,7 +2,7 @@
 
 ## CI (`ci.yml`)
 
-Required-status workflow. Two test jobs:
+Required-status workflow. Core test jobs:
 
 - **Build & Test** — runs `go test -race -count=1 ./...` on Ubuntu and
   macOS. The full unit-test surface, every PR, no exceptions.
@@ -13,6 +13,15 @@ Required-status workflow. Two test jobs:
   [ADR-028](../../docs/adr/ADR-028-smart-integration-test-selection.md)
   for the algorithm and trust boundaries; `make test-affected-print`
   shows the live decision locally.
+- **AGM Codex Contracts** — runs the credential-free all-active-harness parity
+  contract and the isolated source-built Codex create/list/send/kill/resume/
+  archive lifecycle on every CI event, then enforces versioned statement-
+  coverage floors for the backend, shared operations, state, and safety
+  packages.
+- **AGM Tagged Sweep** — on the daily schedule and manual dispatch, compiles and
+  runs the full credential-free contract and integration graphs. Legacy
+  provider-hosted Ginkgo scenarios remain explicit opt-in; portable contracts
+  and the isolated source-built Codex lifecycle still run in this job.
 
 Plus a `govulncheck` job that gates on known-vuln deps.
 

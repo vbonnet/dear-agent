@@ -5,6 +5,7 @@
 # RELATED-SPEC: cmd/bead-pr-guard/SPEC.md
 # RELATED-SPEC: cmd/bead-pr-sync/SPEC.md
 # RELATED-SPEC: cmd/merge-audit/SPEC.md
+# RELATED-SPEC: cmd/ai-review/SPEC.md
 Feature: Root lifecycle command guardrails
   Repository lifecycle commands should keep executable SPEC traceability, and
   repair-agent routing should remain neutral across active harnesses and model
@@ -17,6 +18,7 @@ Feature: Root lifecycle command guardrails
 
     Examples:
       | package                |
+      | cmd/ai-review          |
       | cmd/babysit-prs        |
       | cmd/bead-close-guard   |
       | cmd/bead-pr-guard      |
@@ -36,6 +38,7 @@ Feature: Root lifecycle command guardrails
       | codex-cli    | 5.5       |
       | agy          | 3.1-pro-high |
       | opencode-cli | glm-5.2   |
+      | pi-cli       | sonnet    |
 
   Scenario Outline: Merge repair agents preserve model-family routes
     Given merge repair model family "<family>" uses model "<model>"

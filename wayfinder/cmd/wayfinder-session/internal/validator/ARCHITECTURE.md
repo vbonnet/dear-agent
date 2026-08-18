@@ -26,8 +26,15 @@ review, test, deployment, or monitoring outcomes.
 5. document quality and code-deliverable verification where applicable.
 
 SPEC uses a deterministic strict-EARS parser. PLAN uses the architecture review
-adapter when configured. BUILD rejects placeholder-only evidence and runs
-bounded build/test checks for discovered code.
+adapter when configured. Document review removes one canonical leading YAML
+frontmatter block before checking the Markdown body; a malformed leading block
+fails closed. BUILD rejects placeholder-only evidence and runs bounded
+build/test checks for discovered code. Methodology hashing keeps the portable
+`phase_engram_path` representation in frontmatter and resolves relative values
+against the project directory only at the validation seam; absolute and `~/`
+values remain compatible. Home-relative recognition is boundary-aware: exact
+`~` and `~` followed by a platform path separator expand to the home directory,
+while other leading-tilde components remain project-relative.
 
 ## Trust boundaries
 

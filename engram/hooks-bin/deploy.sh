@@ -41,8 +41,13 @@ for hook in "${HOOKS[@]}"; do
         SRC="$BIN_DIR/$hook"
     fi
     if [ -f "$SRC" ]; then
-        cp "$SRC" "$HOOKS_DIR/engram-$hook"
-        chmod +x "$HOOKS_DIR/engram-$hook"
+        # Stage and rename rather than copying over the live hook: replacing
+        # an already-executed binary in place can leave a stale code-signing
+        # cache entry that macOS kills on next exec (ce-77ip.8).
+        stage=$(mktemp "$HOOKS_DIR/engram-$hook.XXXXXX")
+        cp "$SRC" "$stage"
+        chmod +x "$stage"
+        mv -f "$stage" "$HOOKS_DIR/engram-$hook"
         DEPLOYED=$((DEPLOYED + 1))
     else
         echo "  WARNING: $hook binary not found (tried ${hook}${SUFFIX} and ${hook})"

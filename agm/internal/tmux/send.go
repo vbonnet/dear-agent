@@ -169,12 +169,25 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 	return SendMultiLinePromptSafeContext(context.Background(), sessionName, prompt, shouldInterrupt)
 }
 
+// SendMultiLinePromptSafeForHarness preserves the native composer semantics of
+// harness while retaining the shared readiness and delivery protocol.
+func SendMultiLinePromptSafeForHarness(sessionName string, prompt string, shouldInterrupt bool, harness string) error {
+	return SendMultiLinePromptSafeForHarnessContext(context.Background(), sessionName, prompt, shouldInterrupt, harness)
+}
+
 // SendMultiLinePromptSafeContext is the command-scoped multiline delivery
 // path. Caller cancellation stops readiness polling and the stability delay
 // before any prompt bytes are written.
 func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, prompt string, shouldInterrupt bool) error {
-	// Wait for Claude to be ready (consistent with all other *Safe functions)
-	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
+	return SendMultiLinePromptSafeForHarnessContext(ctx, sessionName, prompt, shouldInterrupt, "")
+}
+
+// SendMultiLinePromptSafeForHarnessContext is the harness-aware command-scoped
+// multiline delivery path. In particular, AGY requires raw bracketed paste so
+// embedded newlines stay inside one composer submission.
+func SendMultiLinePromptSafeForHarnessContext(ctx context.Context, sessionName string, prompt string, shouldInterrupt bool, harness string) error {
+	// Wait for the active harness composer (consistent with other *Safe functions).
+	if err := WaitForPromptSimpleForHarnessContext(ctx, sessionName, 60*time.Second, harness); err != nil {
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 
@@ -200,7 +213,7 @@ func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, pro
 		// Re-capture pane to verify composer stability
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
 		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
-			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
+			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-J", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {
@@ -220,7 +233,7 @@ func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, pro
 	}
 
 	// Send using literal mode (preserves newlines), with conditional interrupt
-	if err := SendPromptLiteral(sessionName, prompt, shouldInterrupt); err != nil {
+	if err := SendPromptLiteralForHarness(sessionName, prompt, shouldInterrupt, harness); err != nil {
 		return fmt.Errorf("failed to send multi-line prompt: %w", err)
 	}
 

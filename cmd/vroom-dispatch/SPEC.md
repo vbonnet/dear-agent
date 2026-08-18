@@ -23,9 +23,9 @@ harness when a supervisor is stale.
 
 **VD-05** When the canonical Overseer is spawned on the `agy` harness, the system shall pass `--mode=auto` so AGM launches AGY with its startup skip-permissions mechanism instead of default prompt-per-command mode.
 
-**VD-06** When a supervisor spawn fails because AGM's spawn circuit breaker reports "spawn too soon", the system shall retry within the bounded retry policy instead of permanently dropping that supervisor.
+**VD-06** When a supervisor spawn fails and every AGM failed gate is the recognized recent-spawn stagger or resource-governor pause, the system shall retry within the bounded retry policy instead of permanently dropping that supervisor, waiting until the advertised earliest admission boundary for a governor pause.
 
-**VD-07** When a supervisor spawn fails for an error other than recognized circuit-breaker backpressure, the system shall surface the failure and shall not retry blindly.
+**VD-07** When a supervisor spawn fails for an error other than recognized circuit-breaker backpressure, including a refusal that combines transient backpressure with any hard safety gate, the system shall surface the failure and shall not retry blindly.
 
 **VD-08** When supervisor role metadata is present, the system shall pass the matching `--role` flag to `agm session new` so the supervisor receives its RBAC permission profile.
 
@@ -46,6 +46,8 @@ harness when a supervisor is stale.
 **VD-16** When the Orchestrator selects work, the system shall dispatch directly from Beads through `vroom-dispatch-direct` and shall not consume roadmap, dispatch-ledger, deploy-ledger, or prompt-file projections.
 
 **VD-17** When a supervisor evaluates completion, the system shall require evidence that the change is merged, deployed when applicable, and verified before closing its bead.
+
+**VD-18** When a supervisor session is still registered but its pane shows a provider authentication failure for its configured harness, the system shall archive that broken active session before recreating it through the normal bounded restart path.
 
 ## BDD Traceability
 

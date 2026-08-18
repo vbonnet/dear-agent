@@ -12,8 +12,8 @@ func TestLogRewindEvent_FullFlow(t *testing.T) {
 
 	createStatusFile(t, tmpDir, "RETRO")
 
-	// Create WAYFINDER-HISTORY.md for history logging
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	// Create WAYFINDER-HISTORY.jsonl for history logging
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("# History\n\n"), 0644); err != nil {
 		t.Fatalf("Failed to write HISTORY file: %v", err)
 	}
@@ -62,17 +62,16 @@ func TestLogRewindEvent_FullFlow(t *testing.T) {
 	}
 }
 
-// TestLogRewindEvent_ErrorHandling tests fail-gracefully behavior
+// TestLogRewindEvent_ErrorHandling tests explicit required-persistence failures.
 func TestLogRewindEvent_ErrorHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Don't create STATUS file - should trigger error but not panic
+	// Don't create STATUS file - should return an error but not panic.
 	flags := RewindFlags{NoPrompt: true, Reason: "Test"}
 
-	// Should return nil (fail-gracefully), log warning to stderr
 	err := LogRewindEvent(tmpDir, "RETRO", "SETUP", flags)
-	if err != nil {
-		t.Errorf("LogRewindEvent should return nil even on errors (fail-gracefully), got: %v", err)
+	if err == nil {
+		t.Error("LogRewindEvent should return an explicit missing-status error")
 	}
 }
 
@@ -82,7 +81,7 @@ func TestLogRewindEvent_WithPrompting(t *testing.T) {
 
 	createStatusFile(t, tmpDir, "BUILD")
 
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("# History\n\n"), 0644); err != nil {
 		t.Fatalf("Failed to write HISTORY file: %v", err)
 	}

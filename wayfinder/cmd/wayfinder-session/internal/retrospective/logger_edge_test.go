@@ -76,7 +76,7 @@ func TestLogToHistory_ErrorHandling(t *testing.T) {
 	}
 
 	// Verify file exists
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
 		t.Errorf("HISTORY file was not created")
 	}

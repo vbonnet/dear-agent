@@ -1,4 +1,5 @@
 # SPEC: .github/workflows/SPEC.md
+# RELATED-SPEC: agm/test/coverage/SPEC.md
 # RELATED-SPEC: .agents/skills/beads/agents/SPEC.md
 # RELATED-SPEC: .github/SPEC.md
 # RELATED-SPEC: .github/act/SPEC.md
@@ -94,3 +95,18 @@ Feature: Declarative runtime guardrails
       | opencode-cli  | deepseek  |
       | opencode-cli  | nemotron  |
       | opencode-cli  | qwen      |
+      | pi-cli        | anthropic |
+      | pi-cli        | openai    |
+      | pi-cli        | gemini    |
+      | pi-cli        | glm       |
+      | pi-cli        | deepseek  |
+      | pi-cli        | nemotron  |
+      | pi-cli        | qwen      |
+
+  Scenario: CI schedules credential-free Codex contract evidence
+    Given the repository CI workflow is configured
+    When AGM validates the Codex contract CI job
+    Then CI should run portable active harness parity
+    And CI should run the isolated source-built Codex lifecycle
+    And CI should enforce critical lifecycle coverage
+    And scheduled CI should run the credential-free tagged graphs

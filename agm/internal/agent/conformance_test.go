@@ -11,12 +11,10 @@ func TestActiveHarnessesSatisfyConformanceSuite(t *testing.T) {
 
 func TestHarnessConformanceReportsBrokenAdapter(t *testing.T) {
 	t.Parallel()
-	broken := &MockAgent{
-		NameFunc:    func() string { return "wrong" },
-		VersionFunc: func() string { return "" },
-		CapabilitiesFunc: func() Capabilities {
-			return Capabilities{}
-		},
+	broken := &mockHarness{
+		name:         "wrong",
+		version:      "",
+		capabilities: Capabilities{},
 	}
 	findings := ValidateHarnessConformance("claude-code", broken)
 	if len(findings) == 0 {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/pkg/source"
 	"github.com/vbonnet/dear-agent/pkg/source/contract"
 	"github.com/vbonnet/dear-agent/pkg/source/llmwiki"
@@ -31,6 +32,19 @@ func TestOpen_RejectsFilePath(t *testing.T) {
 	_ = os.WriteFile(f, []byte{}, 0o600)
 	if _, err := llmwiki.Open(f); err == nil {
 		t.Fatal("expected error when path is a file")
+	}
+}
+
+func TestFetch_RejectsExcessiveK(t *testing.T) {
+	a, err := llmwiki.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer a.Close()
+
+	_, err = a.Fetch(context.Background(), source.FetchQuery{K: source.MaxFetchK + 1})
+	if err == nil {
+		t.Fatalf("Fetch(K=%d) succeeded, want bound error", source.MaxFetchK+1)
 	}
 }
 
@@ -74,12 +88,12 @@ func TestAdd_AutoCommitInRealRepo(t *testing.T) {
 		{"config", "user.name", "Test"},
 		{"commit", "--allow-empty", "-m", "init"},
 	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
+		cmd := gittest.Command(t, dir, args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v (%s)", args, err, string(out))
 		}
 	}
+	gittest.HardenRepo(t, dir)
 	a, err := llmwiki.Open(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -97,8 +111,7 @@ func TestAdd_AutoCommitInRealRepo(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 	// Two commits: init + the source add.
-	cmd := exec.Command("git", "log", "--oneline")
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, "log", "--oneline")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log: %v", err)

@@ -62,6 +62,8 @@ func setModelParityModel(t *testing.T, harness string) string {
 		return "3.5-flash"
 	case "opencode-cli":
 		return "glm-5.2"
+	case "pi-cli":
+		return "gpt-fast"
 	default:
 		t.Fatalf("missing parity model for harness %q", harness)
 		return ""

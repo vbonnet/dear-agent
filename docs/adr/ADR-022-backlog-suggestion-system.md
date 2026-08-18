@@ -1,6 +1,6 @@
 # ADR-022: Backlog Suggestion System
 
-**Status**: Deprecated (2026-07-17; Beads owns live work and VROOM dispatch)
+Status: Deprecated (2026-07-17; Beads owns live work and VROOM dispatch)
 
 [ADR-015](ADR-015-signal-aggregator.md) ranks projects by health metric
 (commits/week, lint count, dep freshness). It cannot rank *declared
@@ -27,8 +27,8 @@ removed. The orchestrator dashboard no longer reads that retired store.
 2. **Priority.** Explicit `Priority` cell dominates. Absent, it is
    derived from phase order (earlier phases unblock later ones).
 3. **Dependency leverage.** Among equal priority, more *direct*
-   dependents wins — the defensible analogue of "oldest first" (agm
-   ADR-023 rule 3). Bounded, O(n²) worst case on a small backlog.
+   dependents wins — the defensible analogue of the retired orchestrator's
+   "oldest first" rule. Bounded, O(n²) worst case on a small backlog.
 4. **Effort tiebreaker.** Smaller `Effort` (S=1, M=2, L=3) first. Quick
    wins reduce WIP and unblock dependents sooner.
 5. **Determinism.** Final tiebreak: `Phase` then `ID`. The same backlog

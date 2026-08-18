@@ -6,17 +6,46 @@
   Claude Code sessions sharing one credentials file) survives access-token
   expiry without a human re-running /login. This is the IDLE BACKSTOP: it runs
   even when no session is active, so the credentials file never goes stale and
-  the single-use refresh-token family never dies of neglect. During active
-  sessions the Claude Code `apiKeyHelper` (which also points at this binary)
-  drives on-demand refresh on TTL / HTTP 401; both paths share the same
-  cross-process file lock, so they never race or double-spend the refresh token.
+  the single-use refresh-token family never dies of neglect.
 
-  Runs with -force so every tick guarantees a fresh token regardless of the
-  remaining lifetime (the binary is the single-owner, file-locked refresher
-  mandated by ce-rnpt / ce-f3e3, designed for exactly this cadence). stdout
-  carries ONLY the access token (apiKeyHelper contract), so it is routed to
-  /dev/null to keep the secret out of the log file; structured logs and the
-  JSONL audit trail go to stderr / ~/.local/state/dear-agent.
+  WARNING -- the single-writer invariant this job was designed around is VOID.
+  It assumed a retired `apiKeyHelper` (not to be restored) drove on-demand
+  refresh through this same binary during active sessions, so both paths shared
+  one cross-process file lock and could never race or double-spend the refresh
+  token. That apiKeyHelper was removed on 2026-07-10 because Claude Code
+  >=2.1.205 treats it as an external API key that shadows healthy OAuth
+  (anthropics/claude-code#11587). Since then this binary is the ONLY refresher
+  that takes the lock, while ~15 other OAuth clients on the host (the
+  Desktop-embedded claude-code runtime, CLI sessions, agm sandbox spawns) each
+  refresh independently against the same credentials file. Nothing prevents one
+  of them from presenting an already-spent refresh token, which the server
+  treats as replay and answers by revoking the entire family. Restoring a real
+  single-writer guarantee is tracked in ce-77ip; until then this job carries
+  -cadence so a death is at least ALERTED and SURVIVED rather than silent.
+
+  Runs without -force so each tick refreshes only when the access token is near
+  expiry. Claude Code runtimes also refresh this shared credentials file and do
+  not take dear-agent's lock, so forced 30-minute rotations widen the refresh
+  replay race instead of preventing it.
+
+  -expiry-skew MUST stay larger than StartInterval. Dropping -force alone left a
+  worse bug: the default skew is 60s but this job only looks every 1800s, so a
+  tick almost always finds the token "fresh" with minutes left, does nothing,
+  and the NEXT tick arrives with the token already expired. Observed on
+  2026-08-15: the token died at 09:21:24Z, the 08:53:43Z tick declined to
+  refresh, and the 09:23:43Z tick refreshed 2m19s too late -- every request in
+  that window got a 401 "login expired". A skew wider than the tick guarantees
+  some tick always sees the expiry coming and rotates ahead of it.
+
+  That margin is also what keeps the family alive. A token refreshed well before
+  expiry is never near-expiry from a Claude Code runtime's point of view, so no
+  other client on the host has cause to rotate it -- this job stays the de facto
+  single writer without needing a lock the other clients do not take.
+
+  stdout carries ONLY the access token
+  (stdout-only token contract), so it is routed to /dev/null to keep the secret
+  out of the log file; structured logs and the JSONL audit trail go to stderr /
+  ~/.local/state/dear-agent.
 
   The plist is a TEMPLATE: the install target
   (make install-token-refresher-launchagent) substitutes __HOME__ for the real
@@ -30,7 +59,10 @@
   <key>ProgramArguments</key>
   <array>
     <string>__HOME__/go/bin/token-refresher</string>
-    <string>-force</string>
+    <string>-cadence</string>
+    <!-- Must exceed StartInterval below; see the header note. -->
+    <string>-expiry-skew</string>
+    <string>45m</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -41,7 +73,8 @@
     <string>__HOME__</string>
   </dict>
 
-  <!-- One refresh every 30 minutes, well ahead of access-token expiry. -->
+  <!-- Check every 30 minutes; refresh only when the access token is within
+       -expiry-skew (45m) of expiring. Keep this BELOW the skew above. -->
   <key>StartInterval</key>
   <integer>1800</integer>
 
@@ -52,7 +85,7 @@
   <key>AbandonProcessGroup</key>
   <false/>
 
-  <!-- stdout is the access token (apiKeyHelper contract) — discard it so the
+  <!-- stdout is the access token (stdout-only token contract) — discard it so the
        secret never lands in a log file. -->
   <key>StandardOutPath</key>
   <string>/dev/null</string>

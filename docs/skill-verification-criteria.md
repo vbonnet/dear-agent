@@ -160,6 +160,7 @@ checked each declared criterion. This doc will be updated when that gate lands.
 ## See also
 
 - `docs/skill-tiers.md` — `model:` / `effort:` frontmatter requirements (CI-enforced today)
+- `docs/skill-placement.md` — which repo owns a skill, and how it reaches a session
 - `pkg/skilllint/` — skill frontmatter linter
 - `CONTEXT.md §DEAR` — canonical Process DEAR definition
 - `docs/adr/ADR-035-dear-terminology-disambiguation.md` — Process DEAR vs workflow lifecycle hooks

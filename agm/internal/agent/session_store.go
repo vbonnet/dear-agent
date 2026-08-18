@@ -49,6 +49,10 @@ type SessionMetadata struct {
 	// PermissionMode is the shared AGM mode selected at creation time.
 	PermissionMode string `json:"permission_mode,omitempty"`
 
+	// PermissionPolicyJSON is the resolved, create-time policy passed to a
+	// harness-native authorization bridge. It is retained for exact cold resume.
+	PermissionPolicyJSON string `json:"permission_policy_json,omitempty"`
+
 	// AuthorizedDirs are additional workspace directories supplied at launch.
 	AuthorizedDirs []string `json:"authorized_dirs,omitempty"`
 
@@ -58,6 +62,20 @@ type SessionMetadata struct {
 	// Gemini CLI it is extracted from --list-sessions output.
 	// Used for --resume flag to restore specific session state.
 	UUID string `json:"uuid,omitempty"`
+
+	// NativeSessionDir is the harness-owned directory containing native state.
+	NativeSessionDir string `json:"native_session_dir,omitempty"`
+
+	// CodingAgentDir is Pi's explicitly configured native configuration root.
+	// It is retained so cold resume does not depend on the tmux server's env.
+	CodingAgentDir string `json:"coding_agent_dir,omitempty"`
+
+	// CodingAgentDirSet distinguishes an intentional native-default value from
+	// legacy metadata that predates coding-agent directory persistence.
+	CodingAgentDirSet bool `json:"coding_agent_dir_set,omitempty"`
+
+	// TranscriptPath is the exact validated native transcript when known.
+	TranscriptPath string `json:"transcript_path,omitempty"`
 
 	// SystemPrompt is the optional system prompt/instruction for the session.
 	// Updated via CommandSetSystemPrompt.

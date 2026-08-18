@@ -1,6 +1,6 @@
 # Quota Monitoring Harness Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -11,7 +11,7 @@
 Quota monitoring parity means AGM exposes a truthful quota record for every
 active harness and supported model family. Claude Code has the richest native
 statusline feed. Codex CLI, AGY, and OpenCode may lack equivalent native quota
-APIs, so they must persist manifest-backed context/cost data and explicitly
+APIs, and Pi exposes transcript usage without a provider quota API, so they must persist manifest-backed context/cost data and explicitly
 report unavailable rate-limit or price data instead of silently substituting
 Claude-specific defaults.
 
@@ -38,6 +38,8 @@ Claude-specific defaults.
 **QMP-10** When an active harness or supported model family is added, the system shall require quota parity tests for monitoring surfaces and pricing policy coverage.
 
 **QMP-11** When GLM, DeepSeek, Nemotron, or Qwen is a supported default family, the system shall require sourced shared pricing rather than accepting an explicitly-unpriced placeholder.
+
+**QMP-12** When AGM reports Pi quota data, the system shall identify Pi JSONL usage and manifest estimates as the context and cost sources while marking provider rate-limit telemetry unavailable.
 
 ## BDD Traceability
 

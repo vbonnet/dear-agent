@@ -35,9 +35,11 @@ type ArchiveSessionRequest struct {
 	// manifest.OutcomeCompleted so every archived record is triage-legible.
 	Outcome manifest.SessionOutcome `json:"outcome,omitempty"`
 	// AllowSupervisorReap bypasses the supervisor-protection guard (but not the
-	// active-tmux or verification guards). Set by gc when reaping a STOPPED
-	// protected-role orphan that has no live tmux pane; never set for live
-	// supervisor sessions.
+	// active-tmux or verification guards). Set only by typed recovery paths that
+	// already proved the supervisor is safe to reap: GC for stopped protected-role
+	// orphans, and async supervisor auth recovery where the parent preflight still
+	// sets AllowActiveTmux and the detached reaper performs the final archive only
+	// after the pane exits.
 	AllowSupervisorReap bool `json:"allow_supervisor_reap,omitempty"`
 	// AllowActiveTmux permits an async reaper preflight to validate every other
 	// archive guard while the pane is intentionally still alive. The final
@@ -97,6 +99,47 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		return nil, ErrSessionNotFound(req.Identifier)
 	}
 
+	if m.SessionID == "" {
+		return nil, ErrStorageError("archive_session", fmt.Errorf("resolved session has no stable session ID"))
+	}
+
+	// Archive and API delivery share the stable session-ID mutation boundary.
+	// Reloading after acquisition makes the lifecycle decision authoritative:
+	// either an in-flight paid completion commits before archive, or archive wins
+	// and a later delivery observes the archived lifecycle before provider work.
+	requestCtx := archiveOperationContext(ctx)
+	lock := WithSessionLockContext
+	if isAPISessionManifest(m) {
+		lock = WithAPISessionLockContext
+	}
+	var result *ArchiveSessionResult
+	err = lock(requestCtx, m.SessionID, func() error {
+		if err := requestCtx.Err(); err != nil {
+			return err
+		}
+		current, err := ctx.Storage.GetSession(m.SessionID)
+		if err != nil {
+			return ErrStorageError("archive_session_reload", err)
+		}
+		if current == nil {
+			return ErrSessionNotFound(m.SessionID)
+		}
+		result, err = archiveResolvedSession(ctx, current, req)
+		return err
+	})
+	return result, err
+}
+
+func isAPISessionManifest(m *manifest.Manifest) bool {
+	if m == nil {
+		return false
+	}
+	return m.Harness == "openai" || m.Harness == "gpt"
+}
+
+// archiveResolvedSession validates and mutates one current session snapshot
+// while its stable-ID lifecycle lock is held.
+func archiveResolvedSession(ctx *OpContext, m *manifest.Manifest, req *ArchiveSessionRequest) (*ArchiveSessionResult, error) {
 	// Check if already archived
 	if m.Lifecycle == manifest.LifecycleArchived {
 		if req.Idempotent {
@@ -206,10 +249,7 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 	recordArchiveTrust(m.Name, m.WorkingDirectory, m.Context.Project, m.SessionID, m.CreatedAt)
 	deregisterMonitor(ctx, m.Name)
 
-	sandboxPath := ""
-	if m.Sandbox != nil {
-		sandboxPath = m.Sandbox.MergedPath
-	}
+	sandboxPath := ownedSandboxPathForArchive(m)
 	mcpKilled, mcpErr := mcp.CleanupSessionMCPProcesses(
 		&mcp.ProcFSFinder{}, &mcp.SignalKiller{},
 		m.SessionID, sandboxPath,
@@ -223,10 +263,14 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 
 	killTmuxAndProcessGroup(m)
 
-	postCleanup := CleanupAfterArchive(
+	cleanSandbox := sandboxCleanupFunc(cleanupSandboxDir)
+	if ctx.archiveSandboxCleaner != nil {
+		cleanSandbox = ctx.archiveSandboxCleaner
+	}
+	postCleanup := cleanupAfterArchive(
 		m.SessionID, m.Name,
 		m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
-		req.KeepSandbox,
+		req.KeepSandbox, cleanSandbox,
 	)
 	sessionCleanup := cleanupTrackedSessionResources(ctx, m.Name)
 	cleanupPendingDir(m.Name)
@@ -479,8 +523,25 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 		slog.Warn("Failed to get home dir for sandbox cleanup", "error", err)
 		return false
 	}
+	return cleanupSandboxDirWithChecker(sessionID, mergedPath, base, sandboxgc.NewChecker(base, nil))
+}
 
+func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) bool {
 	sandboxDir := filepath.Join(base, sessionID)
+	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
+		slog.Warn("Refusing sandbox cleanup with a mismatched safety checker", "session", sessionID)
+		return false
+	}
+	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
+		slog.Warn("Refusing sandbox cleanup outside the allowlisted base", "session", sessionID, "error", err)
+		return false
+	}
+	expectedMergedPath := filepath.Join(sandboxDir, "merged")
+	if mergedPath != expectedMergedPath {
+		slog.Warn("Refusing sandbox cleanup with an unattributed merged path",
+			"session", sessionID, "path", mergedPath, "expected", expectedMergedPath)
+		return false
+	}
 	if _, err := os.Lstat(sandboxDir); os.IsNotExist(err) {
 		return false
 	}
@@ -489,15 +550,11 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 	// This file contains RBAC permission rules written by ConfigureProjectPermissions.
 	preserveSettingsFromUpper(sandboxDir)
 
-	// Unmount merged path if known (checker.Reap also unmounts <dir>/merged,
-	// but mergedPath from the manifest may differ from the default layout).
-	if mergedPath != "" {
-		if err := unmountBestEffort(mergedPath); err != nil {
-			slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
-		}
+	// Unmount the validated merged path before checker.Reap retries the default path.
+	if err := checker.Unmount(mergedPath); err != nil {
+		slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
 	}
 
-	checker := sandboxgc.NewChecker(base, nil)
 	if err := checker.Reap(sandboxDir); err != nil {
 		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
 			"session", sessionID, "path", sandboxDir, "error", err)
@@ -506,6 +563,35 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 
 	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
 	return true
+}
+
+func ownedSandboxPathForArchive(m *manifest.Manifest) string {
+	if m == nil || m.Sandbox == nil {
+		return ""
+	}
+	if err := manifest.ValidateSandboxOwnership(m.SessionID, m.Sandbox); err != nil {
+		slog.Warn("Ignoring invalid sandbox ownership metadata during archive",
+			"session", m.SessionID, "error", err)
+		return ""
+	}
+	base, err := sandboxgc.DefaultBase()
+	if err != nil {
+		slog.Warn("Ignoring sandbox ownership without a resolvable cleanup base",
+			"session", m.SessionID, "error", err)
+		return ""
+	}
+	sandboxDir := filepath.Dir(m.Sandbox.MergedPath)
+	if sandboxDir != filepath.Join(base, m.SessionID) {
+		slog.Warn("Ignoring sandbox ownership outside the current host cleanup base",
+			"session", m.SessionID, "path", m.Sandbox.MergedPath)
+		return ""
+	}
+	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
+		slog.Warn("Ignoring sandbox ownership outside the allowlisted cleanup base",
+			"session", m.SessionID, "error", err)
+		return ""
+	}
+	return m.Sandbox.MergedPath
 }
 
 // preserveSettingsFromUpper copies .claude/settings.local.json from the sandbox

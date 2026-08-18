@@ -51,7 +51,7 @@ func NewInitSequence(sessionName string) *InitSequence {
 // Note: Caller is responsible for waiting for ready-file signal after this completes.
 //
 // Uses WaitForClaudePrompt (capture-pane polling) instead of control mode for prompt detection.
-// See ADR-0001 for rationale on why capture-pane is preferred over control mode.
+// See ADR-001 for rationale on why capture-pane is preferred over control mode.
 //
 // Note: Does NOT acquire tmux lock here because SendCommand (called by SendCommandLiteral)
 // already handles locking. Attempting to lock here causes double-lock errors.
@@ -164,7 +164,7 @@ func SendCommandLiteral(sessionName, command string) error {
 
 // sendRename sends the /rename command and waits for it to complete.
 // Uses capture-pane polling (WaitForClaudePrompt) to detect when Claude is ready.
-// See ADR-0001 for rationale on capture-pane vs control mode.
+// See ADR-001 for rationale on capture-pane vs control mode.
 func (seq *InitSequence) sendRename() error {
 	debug.Log("sendRename: Starting for session %s", seq.SessionName)
 
@@ -226,7 +226,7 @@ func (seq *InitSequence) sendRename() error {
 // sendAssociation sends /agm:agm-assoc command.
 // Uses capture-pane polling (WaitForClaudePrompt) to detect when Claude is ready.
 // Note: Caller is responsible for waiting for ready-file signal to confirm association completed.
-// See ADR-0001 for rationale on capture-pane vs control mode.
+// See ADR-001 for rationale on capture-pane vs control mode.
 func (seq *InitSequence) sendAssociation() error {
 	// Wait for Claude prompt. After /rename completes (with 5s sleep), Claude should
 	// be back at the prompt. Skip entirely when pre-verified.

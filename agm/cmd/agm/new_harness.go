@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,12 +12,16 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/pkg/override"
 )
 
-// startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode/AGY).
+// startHarness dispatches per-harness initialization.
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
@@ -35,6 +40,9 @@ func startHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPreConfi
 	case "agy":
 		modeApplied, err := startAgyHarness(ctx, spec)
 		return modeApplied, false, err
+	case "pi-cli":
+		modeApplied, err := startPiHarness(ctx, spec)
+		return modeApplied, false, err
 	default:
 		debug.Phase("Skip CLI Startup")
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
@@ -45,11 +53,105 @@ func startHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPreConfi
 
 func activeHarnessHasTmuxLauncher(harness string) bool {
 	switch agent.NormalizeHarnessName(harness) {
-	case "claude-code", "codex-cli", "agy", "opencode-cli":
+	case "claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli":
 		return true
 	default:
 		return false
 	}
+}
+
+func resolveHarnessLaunchSubmission(harness string, launch ops.HarnessLaunchCommand, submissionErr error) error {
+	uncertain, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr)
+	if uncertain {
+		message := fmt.Sprintf("%s launch submission acknowledgement was lost; preserving the launch because the command may already be queued", harness)
+		debug.Log("%s: %v", message, submissionErr)
+		ui.PrintWarning(message)
+	}
+	return err
+}
+
+func runBeforeHarnessSpawn(
+	spec ops.HarnessLaunchSpec,
+	reservations ...*override.Reservation,
+) ([]*override.Reservation, error) {
+	if spec.BeforeSpawn == nil {
+		return reservations, nil
+	}
+	return spec.BeforeSpawn(reservations...)
+}
+
+func submitHarnessLaunch(
+	harness string,
+	spec ops.HarnessLaunchSpec,
+	launch ops.HarnessLaunchCommand,
+	submit func() error,
+) error {
+	reservations, err := runBeforeHarnessSpawn(spec, launch.Reservations...)
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("%s launch admission: %w", harness, err),
+			launch.CancelUndelivered(),
+		)
+	}
+	if launch.BindOverrideReservations != nil {
+		if err := launch.FinalizeLaunch(true, reservations...); err != nil {
+			return errors.Join(
+				fmt.Errorf("%s launch override transaction: %w", harness, err),
+				launch.CancelUndelivered(),
+			)
+		}
+		return resolveHarnessLaunchSubmission(harness, launch, submit())
+	}
+	if len(reservations) != 0 || spec.AfterAuthorization != nil {
+		return errors.Join(
+			fmt.Errorf("%s launch cannot bind admission effects to its executor", harness),
+			launch.CancelUndelivered(),
+		)
+	}
+	return resolveHarnessLaunchSubmission(harness, launch, submit())
+}
+
+type piHarnessRuntime struct {
+	lookPath      func(string) (string, error)
+	sendCommand   func(string, string) error
+	waitForPrompt func(context.Context, string, string, time.Duration) error
+	sleep         func(time.Duration)
+}
+
+func realPiHarnessRuntime() piHarnessRuntime {
+	return piHarnessRuntime{
+		lookPath: exec.LookPath, sendCommand: tmux.SendCommand,
+		waitForPrompt: tmux.WaitForPiLaunchPromptContext, sleep: time.Sleep,
+	}
+}
+
+func startPiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
+	return startPiHarnessWithRuntime(ctx, spec, realPiHarnessRuntime())
+}
+
+func startPiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime piHarnessRuntime) (bool, error) {
+	debug.Phase("Start Pi")
+	if _, err := runtime.lookPath("pi"); err != nil {
+		return false, fmt.Errorf("pi executable is unavailable: %w", err)
+	}
+	if spec.PiLaunchID == "" {
+		spec.PiLaunchID = launchparity.NewPiLaunchID()
+	}
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare Pi launch: %w", err)
+	}
+	if err := submitHarnessLaunch("Pi", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, launch.Command)
+	}); err != nil {
+		return launch.ModeAppliedAtStartup, fmt.Errorf("start Pi in tmux: %w", err)
+	}
+	runtime.sleep(500 * time.Millisecond)
+	if err := runtime.waitForPrompt(ctx, spec.SessionName, spec.PiLaunchID, 90*time.Second); err != nil {
+		return launch.ModeAppliedAtStartup, fmt.Errorf("pi managed readiness: %w", err)
+	}
+	ui.PrintSuccess("Pi adapter ready")
+	return launch.ModeAppliedAtStartup, nil
 }
 
 // startClaudeHarness builds and sends the claude command, waits for the prompt,
@@ -61,10 +163,15 @@ func startClaudeHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPr
 	}
 
 	debug.Phase("Start Claude")
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, false, fmt.Errorf("prepare Claude launch: %w", err)
+	}
 	claudeCmd, modeAppliedAtStartup := launch.Command, launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", claudeCmd)
-	if err := tmux.SendCommand(spec.SessionName, claudeCmd); err != nil {
+	if err := submitHarnessLaunch("Claude", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, claudeCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start Claude in tmux session",
 			"  • Verify Claude is installed: which claude\n"+
@@ -149,24 +256,89 @@ func waitForClaudeReady(ctx context.Context, sessionName string, claudeReady *tm
 // is true the wrapper has already attached/exited and the caller should
 // short-circuit the rest of session setup.
 func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
+	return startGeminiHarnessWithRuntime(ctx, spec, geminiWrapperRuntime{
+		lookPath: exec.LookPath,
+		prepare:  prepareGeminiWrapperLaunch,
+		run:      runGeminiWrapperLaunch,
+	})
+}
+
+type geminiWrapperLaunch struct {
+	executable string
+	arguments  []string
+	bind       func(bool, ...*override.Reservation) error
+	cancel     func() error
+}
+
+type geminiWrapperRuntime struct {
+	lookPath func(string) (string, error)
+	prepare  func(string, string) (geminiWrapperLaunch, error)
+	run      func(context.Context, string, []string) error
+}
+
+func prepareGeminiWrapperLaunch(sessionName, wrapperPath string) (geminiWrapperLaunch, error) {
+	command := shellquote.Quote(wrapperPath) +
+		" --agent=gemini-cli " +
+		shellquote.Quote(sessionName)
+	prepared, err := harnessexec.PrepareHarnessCommand(sessionName, command, true, false)
+	if err != nil {
+		return geminiWrapperLaunch{}, err
+	}
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		return geminiWrapperLaunch{}, errors.Join(err, prepared.Cancel())
+	}
+	return geminiWrapperLaunch{
+		executable: executable,
+		arguments:  arguments,
+		bind:       prepared.BindOverrideReservations,
+		cancel:     prepared.Cancel,
+	}, nil
+}
+
+func runGeminiWrapperLaunch(ctx context.Context, executable string, arguments []string) error {
+	cmd := exec.CommandContext(ctx, executable, arguments...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func startGeminiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime geminiWrapperRuntime) (bool, error) {
 	debug.Phase("Start Gemini")
-	wrapperPath, err := exec.LookPath("agm-agent-wrapper")
+	wrapperPath, err := runtime.lookPath("agm-agent-wrapper")
 	if err != nil {
 		return false, startGeminiDirect(ctx, spec)
 	}
 	debug.Log("Found agm-agent-wrapper at: %s", wrapperPath)
-	debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
-	cmd := exec.CommandContext(ctx, wrapperPath, "--agent=gemini-cli", spec.SessionName)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	debug.Log("Preparing foreground wrapper launch: %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
+	launch, err := runtime.prepare(spec.SessionName, wrapperPath)
+	if err != nil {
+		return false, fmt.Errorf("prepare Gemini wrapper launch: %w", err)
+	}
+	reservations, err := runBeforeHarnessSpawn(spec)
+	if err != nil {
+		return false, errors.Join(
+			fmt.Errorf("gemini launch admission: %w", err),
+			launch.cancel(),
+		)
+	}
+	if err := launch.bind(true, reservations...); err != nil {
+		return false, errors.Join(
+			fmt.Errorf("gemini launch override transaction: %w", err),
+			launch.cancel(),
+		)
+	}
+	if err := runtime.run(ctx, launch.executable, launch.arguments); err != nil {
 		ui.PrintError(err,
 			"Failed to run agm-agent-wrapper",
 			"  • Check wrapper installed: which agm-agent-wrapper\n"+
 				"  • Try direct mode by temporarily renaming wrapper\n"+
 				"  • Attach and check: tmux attach -t "+spec.SessionName)
-		return false, err
+		return false, errors.Join(err, launch.cancel())
+	}
+	if err := launch.cancel(); err != nil {
+		return false, fmt.Errorf("release Gemini wrapper handoff: %w", err)
 	}
 	ui.PrintSuccess("Gemini session ended")
 	return true, nil
@@ -176,9 +348,15 @@ func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, 
 // optional first-run trust prompt by sending "1<Enter>" if detected.
 func startGeminiDirect(ctx context.Context, spec ops.HarnessLaunchSpec) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
-	geminiCmd := ops.BuildHarnessLaunchCommand(spec).Command
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return fmt.Errorf("prepare Gemini launch: %w", err)
+	}
+	geminiCmd := launch.Command
 	debug.Log("Sending command: %s", geminiCmd)
-	if err := tmux.SendCommand(spec.SessionName, geminiCmd); err != nil {
+	if err := submitHarnessLaunch("Gemini", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, geminiCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start Gemini in tmux session",
 			"  • Verify Gemini is installed: which gemini\n"+
@@ -253,11 +431,16 @@ func startAgyHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec,
 		return false, err
 	}
 
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare AGY launch: %w", err)
+	}
 	agyCmd := launch.Command
 	modeAppliedAtStartup := launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", agyCmd)
-	if err := runtime.sendCommand(spec.SessionName, agyCmd); err != nil {
+	if err := submitHarnessLaunch("AGY", spec, launch, func() error {
+		return runtime.sendCommand(spec.SessionName, agyCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start AGY in tmux session",
 			"  • Verify AGY is installed: which agy\n"+
@@ -293,10 +476,15 @@ func startAgyHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec,
 // The shared ops lifecycle owns teardown on failure.
 func startCodexHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start Codex")
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare Codex launch: %w", err)
+	}
 	codexCmd := launch.Command
 	debug.Log("Sending command: %s", codexCmd)
-	if err := tmux.SendCommand(spec.SessionName, codexCmd); err != nil {
+	if err := submitHarnessLaunch("Codex", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, codexCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start Codex in tmux session",
 			"  • Verify Codex is installed: which codex\n"+
@@ -354,9 +542,15 @@ func validateCodexCredentials() error {
 func startOpenCodeHarness(spec ops.HarnessLaunchSpec) error {
 	debug.Phase("Start OpenCode")
 	debug.Log("OpenCode server validated (health check passed)")
-	opencodeCmd := ops.BuildHarnessLaunchCommand(spec).Command
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return fmt.Errorf("prepare OpenCode launch: %w", err)
+	}
+	opencodeCmd := launch.Command
 	debug.Log("Sending command: %s", opencodeCmd)
-	if err := tmux.SendCommand(spec.SessionName, opencodeCmd); err != nil {
+	if err := submitHarnessLaunch("OpenCode", spec, launch, func() error {
+		return tmux.SendCommand(spec.SessionName, opencodeCmd)
+	}); err != nil {
 		ui.PrintError(err,
 			"Failed to start OpenCode in tmux session",
 			"  • Verify OpenCode server is running: curl http://localhost:4096/health\n"+

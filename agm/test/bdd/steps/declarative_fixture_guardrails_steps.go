@@ -20,9 +20,6 @@ var declarativeFixtureDirs = []string{
 	"agm/internal/testdata/orphan-recovery",
 	"agm/test/golden",
 	"agm/test/golden/agent-interactions",
-	"agm/test/integration/testdata/archived_sessions/claude-001",
-	"agm/test/integration/testdata/archived_sessions/corrupted",
-	"agm/test/integration/testdata/manifests",
 	"agm/tests/e2e-install/Dockerfiles",
 	"benchmarks/baselines",
 	"engram/internal/health/testdata",
@@ -67,7 +64,7 @@ func configureDeclarativeFixtureRoute(ctx context.Context, harness, family strin
 	if err != nil {
 		return err
 	}
-	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}}[harness]; !ok {
+	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}, "pi-cli": {}}[harness]; !ok {
 		return fmt.Errorf("unsupported active harness %q", harness)
 	}
 	if _, ok := map[string]struct{}{"anthropic": {}, "openai": {}, "gemini": {}, "glm": {}, "deepseek": {}, "nemotron": {}, "qwen": {}}[family]; !ok {

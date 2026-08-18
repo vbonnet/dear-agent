@@ -126,9 +126,11 @@ date +%s > "$RATE_LIMIT_FILE"
 
 ### Step 1: Deploy v2 Hook
 ```bash
-# Copy v2 hook to production location
-cp ~/bin/engram-health-hook-v2.sh ~/bin/engram-health-hook.sh
-chmod +x ~/bin/engram-health-hook.sh
+# Copy v2 hook to production location. Stage and rename so a running hook is
+# never replaced in place (ce-77ip.8).
+stage=$(mktemp ~/bin/engram-health-hook.XXXXXX) \
+  && cp ~/bin/engram-health-hook-v2.sh "$stage" \
+  && chmod 755 "$stage" && mv -f "$stage" ~/bin/engram-health-hook.sh
 ```
 
 ### Step 2: Update Settings (if needed)

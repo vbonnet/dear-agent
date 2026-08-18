@@ -25,7 +25,7 @@ func TestSessionOutcome_MetadataRoundTrip(t *testing.T) {
 			}
 
 			var got manifest.Manifest
-			if err := unmarshalEngramMetadata(&got, b); err != nil {
+			if err := unmarshalSessionMetadata(&got, b); err != nil {
 				t.Fatalf("unmarshal metadata: %v", err)
 			}
 			if got.Outcome != want {
@@ -57,7 +57,7 @@ func TestSessionOutcome_ReadAlongsideEngram(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, b); err != nil {
+	if err := unmarshalSessionMetadata(&got, b); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.Outcome != manifest.OutcomeGCStale {
@@ -81,7 +81,7 @@ func TestSessionMetadata_CodexRoundTrip(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, b); err != nil {
+	if err := unmarshalSessionMetadata(&got, b); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.Codex == nil {
@@ -92,6 +92,31 @@ func TestSessionMetadata_CodexRoundTrip(t *testing.T) {
 	}
 	if got.Codex.TranscriptPath != src.Codex.TranscriptPath {
 		t.Errorf("Codex transcript path = %q, want %q", got.Codex.TranscriptPath, src.Codex.TranscriptPath)
+	}
+}
+
+func TestSessionMetadata_OpenAIRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{
+		OpenAI: &manifest.OpenAI{
+			SessionsDir:     "/tmp/openai-sessions",
+			BaseURL:         "https://azure.example.test",
+			IsAzure:         true,
+			AzureAPIVersion: "2025-01-01-preview",
+			Temperature:     1.2,
+			MaxTokens:       2048,
+		},
+	}
+	metadata, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+
+	var got manifest.Manifest
+	if err := unmarshalSessionMetadata(&got, metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if got.OpenAI == nil || *got.OpenAI != *src.OpenAI {
+		t.Fatalf("OpenAI metadata = %#v, want %#v", got.OpenAI, src.OpenAI)
 	}
 }
 
@@ -110,7 +135,7 @@ func TestSessionMetadata_AgyRoundTrip(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, b); err != nil {
+	if err := unmarshalSessionMetadata(&got, b); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.Agy == nil {
@@ -127,5 +152,43 @@ func TestSessionMetadata_AgyRoundTrip(t *testing.T) {
 	}
 	if got.Agy.TranscriptPath != src.Agy.TranscriptPath {
 		t.Errorf("AGY transcript path = %q, want %q", got.Agy.TranscriptPath, src.Agy.TranscriptPath)
+	}
+}
+
+func TestSessionMetadata_PiRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{
+		WorkingDirectory: "/tmp/pi-work",
+		Pi: &manifest.Pi{
+			SessionID: "pi-native-id", SessionDir: "/tmp/pi-sessions", TranscriptPath: "/tmp/pi-sessions/native.jsonl",
+			CodingAgentDir: "/tmp/pi-agent", CodingAgentDirSet: true,
+		},
+	}
+	metadata, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := &manifest.Manifest{}
+	if err := unmarshalSessionMetadata(got, metadata); err != nil {
+		t.Fatal(err)
+	}
+	if got.Pi == nil || *got.Pi != *src.Pi {
+		t.Fatalf("Pi metadata = %#v, want %#v", got.Pi, src.Pi)
+	}
+}
+
+func TestSessionMetadata_PiNativeDefaultPresenceRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "pi-native-default", CodingAgentDirSet: true,
+	}}
+	metadata, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := &manifest.Manifest{}
+	if err := unmarshalSessionMetadata(got, metadata); err != nil {
+		t.Fatal(err)
+	}
+	if got.Pi == nil || got.Pi.CodingAgentDir != "" || !got.Pi.CodingAgentDirSet {
+		t.Fatalf("Pi native-default presence = %#v", got.Pi)
 	}
 }

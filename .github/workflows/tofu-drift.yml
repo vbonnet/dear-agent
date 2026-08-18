@@ -16,6 +16,7 @@ name: Tofu Drift Detection
 #   R2_STATE_BUCKET         R2 bucket holding the tofu state.
 #   R2_ACCESS_KEY_ID        R2 S3 access key id.
 #   R2_SECRET_ACCESS_KEY    R2 S3 secret access key.
+#   CLAUDE_CODE_OAUTH_TOKEN OAuth token applied to opted-in review repos.
 # These are the same credentials used for a local `tofu apply`; nothing new is
 # invented here. If any secret is absent the job fails loudly (see preflight).
 
@@ -52,9 +53,10 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           missing=()
-          for v in R2_ACCOUNT_ID R2_STATE_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY INFRA_GITHUB_TOKEN; do
+          for v in R2_ACCOUNT_ID R2_STATE_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY INFRA_GITHUB_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
             [ -z "${!v}" ] && missing+=("$v")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -85,6 +87,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
           TF_VAR_personal_owner: vbonnet
           TF_VAR_org_name: dear-labs
+          TF_VAR_claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set +e
           tofu plan -detailed-exitcode -no-color 2>&1 | tee /tmp/drift.txt

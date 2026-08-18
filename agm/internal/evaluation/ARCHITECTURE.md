@@ -535,7 +535,7 @@ evaluator := evaluation.NewOnlineEvaluator(
 - ❌ More complex API surface
 - ❌ Two methods to maintain
 
-See [ADR-001](./ADR/ADR-001-dual-judge-interfaces.md) for details.
+See [ADR-001](./ADR/ADR-001-evaluation-boundaries.md) for the retained boundary.
 
 ### Why Multiple LLM Judges (GPT-4 and Claude)?
 
@@ -556,7 +556,7 @@ See [ADR-001](./ADR/ADR-001-dual-judge-interfaces.md) for details.
 - ❌ Higher implementation cost
 - ❌ Inconsistent eval quality across judges
 
-See [ADR-002](./ADR/ADR-002-multiple-llm-judges.md) for details.
+Provider choice is part of [ADR-001](./ADR/ADR-001-evaluation-boundaries.md).
 
 ### Why Threshold-Based Deployment Blocking?
 
@@ -577,7 +577,7 @@ See [ADR-002](./ADR/ADR-002-multiple-llm-judges.md) for details.
 - ❌ Requires threshold tuning
 - ❌ False positives possible
 
-See [ADR-003](./ADR/ADR-003-threshold-based-deployment-blocking.md) for details.
+Threshold ownership is part of [ADR-001](./ADR/ADR-001-evaluation-boundaries.md).
 
 ### Why Pluggable Alerter Interface?
 
@@ -598,7 +598,7 @@ See [ADR-003](./ADR/ADR-003-threshold-based-deployment-blocking.md) for details.
 - ❌ Requires interface implementation
 - ❌ More complex configuration
 
-See [ADR-004](./ADR/ADR-004-pluggable-alert-channels.md) for details.
+Alert boundaries are part of [ADR-001](./ADR/ADR-001-evaluation-boundaries.md).
 
 ## Performance Characteristics
 

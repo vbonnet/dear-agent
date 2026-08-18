@@ -1,6 +1,11 @@
 package session
 
-import "context"
+import (
+	"context"
+	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+)
 
 // SessionInfo holds information about a tmux session
 type SessionInfo struct {
@@ -28,6 +33,9 @@ type LivenessInfo struct {
 	// ZombieWriter reports that no harness is alive but an agm process is
 	// still in the pane tree — the ce-qkf7 orphaned-heartbeat-writer mode.
 	ZombieWriter bool
+	// RestartableShell reports that the pane contains only its root shell and
+	// can safely accept a harness relaunch.
+	RestartableShell bool
 	// Evidence summarizes the pane's descendant process names.
 	Evidence string
 }
@@ -64,6 +72,108 @@ type TmuxSessionKiller interface {
 // use this capability so backend failure cannot be mistaken for absence.
 type StrictSessionExistenceChecker interface {
 	HasSessionStrict(ctx context.Context, name string) (bool, error)
+}
+
+// HarnessReadinessWaiter is the optional startup capability used by shared
+// lifecycle operations that launch a harness without a surface runtime. A nil
+// error means the named harness has reached its interactive prompt/composer.
+type HarnessReadinessWaiter interface {
+	WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error
+}
+
+// ResumeTmuxIdentityManager creates and compensates one exact tmux session
+// identity. Resume operations require this capability for cold-start rollback
+// so a same-named replacement can never be destroyed.
+type ResumeTmuxIdentityManager interface {
+	CreateSessionWithIdentity(name, workdir string) (tmux.SessionIdentity, error)
+	KillSessionIdentityChecked(identity tmux.SessionIdentity) error
+	HasSessionIdentityStrict(identity tmux.SessionIdentity) (bool, error)
+}
+
+// ExpectedHarnessLivenessChecker classifies the configured harness rather than
+// accepting any generic agent process. Resume uses this capability to decide
+// whether an existing Pi pane is a safe restartable shell.
+type ExpectedHarnessLivenessChecker interface {
+	ExpectedHarnessLiveness(ctx context.Context, sessionName, harness string) (LivenessInfo, error)
+}
+
+// ResumeReadiness is the native readiness outcome. Warnings preserve the
+// existing permissive Claude and AGY slow-start policy without leaking
+// terminal presentation into the operation adapter.
+type ResumeReadiness struct {
+	Warnings []string
+}
+
+// ResumeReadinessWaiter observes the native readiness boundary for a resumed
+// harness. PiLaunchID binds Pi readiness to the exact command submitted by the
+// current operation.
+type ResumeReadinessWaiter interface {
+	WaitForResumeReady(ctx context.Context, sessionName, harness, piLaunchID string, timeout time.Duration) (ResumeReadiness, error)
+}
+
+// PromptSubmission is the irreversible outcome of safe prompt delivery.
+// MayHaveStarted is true both for confirmed delivery and for a lost
+// acknowledgement after the final submission boundary.
+type PromptSubmission struct {
+	MayHaveStarted bool
+}
+
+// SafePromptSender preserves the active harness's native composer semantics
+// while submitting one optional post-resume prompt.
+type SafePromptSender interface {
+	SendPrompt(ctx context.Context, sessionName, harness, prompt string) (PromptSubmission, error)
+}
+
+// LiteralKeySender sends one tmux key token without adding Enter. Resume uses
+// it only to replay saved permission-mode Shift+Tab transitions.
+type LiteralKeySender interface {
+	SendLiteralKeys(sessionName, keys string) error
+}
+
+// InputReadiness is the observable result of inspecting a tmux pane before
+// message delivery. State is the detector verdict (for example YES, NO,
+// QUEUE, OVERLAY, or NOT_FOUND).
+type InputReadiness struct {
+	Ready  bool
+	State  string
+	PaneID string
+	Forced bool
+}
+
+// InputDeliveryOptions controls narrowly scoped exceptions inside the atomic
+// readiness-and-delivery boundary. AllowQueuedAGM accepts only a positively
+// identified queued AGM paste; it never bypasses generic busy states, human
+// drafts, process ownership, permission, overlays, onboarding, missing targets,
+// or other fail-closed states.
+type InputDeliveryOptions struct {
+	AllowQueuedAGM bool
+}
+
+// InputReadinessChecker is the optional pre-delivery capability used by
+// shared message operations. Delivery is safe only when Ready is true.
+type InputReadinessChecker interface {
+	CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error)
+}
+
+// PaneOutputCapturer is the optional read capability used by result-surfacing
+// operations to return the tail of a session's terminal output.
+type PaneOutputCapturer interface {
+	CapturePaneTail(sessionName string, lines int) (string, error)
+}
+
+// AtomicInputSender checks harness input ownership and delivers to the
+// resulting exact pane while holding one tmux mutation boundary. If Ready is
+// false, no input was sent; if Ready is true, delivery completed successfully.
+// A forced result is valid only for a positively identified queued AGM paste
+// and reports the post-clear empty-composer state YES.
+type AtomicInputSender interface {
+	SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error)
+}
+
+// VerifiedPaneSender delivers to the exact pane returned by
+// InputReadinessChecker, preventing active-pane changes from redirecting input.
+type VerifiedPaneSender interface {
+	SendKeysToPane(ctx context.Context, paneID, keys string) error
 }
 
 // TmuxInterface provides an abstraction for tmux operations

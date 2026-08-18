@@ -7,15 +7,20 @@
 The AGM MCP Server (`agm-mcp-server`) is a lightweight MCP (Model Context
 Protocol) server that bridges Claude Code (and other MCP clients) with AGM
 session management and Wayfinder project tracking. It runs as a single
-stdio process and provides eight tools across three domains:
+stdio process and provides eleven tools across three domains:
 
-- **AGM session tools** — list, search, get, archive, and kill AGM sessions
+- **AGM session tools** — list, search, get, create, message, archive, and kill sessions
 - **Schema tool** — introspect available ops at runtime
 - **Wayfinder tools** — list and get Wayfinder sessions from the local filesystem
 
 The server delegates all AGM session logic to `agm/internal/ops` (which owns
 the Dolt storage layer) and reads Wayfinder data directly from
 `WAYFINDER-STATUS.md` files on disk.
+
+The running artifact's implementation identity comes from the shared
+`pkg/version` package and is exposed consistently in the process header,
+startup log, and MCP initialization response. This build identity is distinct
+from the wire protocol version, which the MCP SDK negotiates independently.
 
 ## Source Files
 
@@ -33,9 +38,12 @@ the Dolt storage layer) and reads Wayfinder data directly from
 |-----------|--------|-------------|
 | `agm_list_sessions` | `tools.go` | List AGM sessions with status/type/limit filters |
 | `agm_search_sessions` | `tools.go` | Search sessions by partial name match |
-| `agm_get_session_metadata` | `tools.go` | Full metadata for a session by ID/name |
+| `agm_get_session_metadata` | `tools.go` | Full metadata for a session by ID/name (never includes captured output) |
+| `agm_get_session_output` | `tools.go` | Tail of a session's terminal output: live pane, or the durable final capture after completion |
 | `agm_archive_session` | `tools.go` | Mark a session archived (supports dry-run) |
 | `agm_kill_session` | `tools.go` | Kill and verify the exact tmux session (supports dry-run and explicit safety confirmation) |
+| `agm_create_session` | `tools.go` | Create an AGM-managed session |
+| `agm_send_message` | `tools.go` | Send a message to an AGM-managed session |
 | `agm_list_ops` | `tools.go` | List all available ops (schema discovery) |
 | `engram_list_wayfinder_sessions` | `tools.go` + `wayfinder.go` | List Wayfinder sessions from `wf/` directory |
 | `engram_get_wayfinder_session` | `tools.go` + `wayfinder.go` | Get full frontmatter for one Wayfinder session |
@@ -71,7 +79,8 @@ tools.go handler
 newMCPOpContext()        → opens Dolt DB via agm/internal/dolt
     ↓
 ops.ListSessions() / ops.SearchSessions() / ops.GetSession() /
-ops.ArchiveSession() / ops.KillSession() / ops.ListOps()
+ops.ArchiveSession() / ops.KillSession() / ops.CreateSessionWithContext() /
+ops.SendMessage() / ops.ListOps()
     ↓
 mcpSuccess(result)       → JSON-encoded CallToolResult
     ↓

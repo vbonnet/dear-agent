@@ -83,7 +83,7 @@ type Frontmatter struct {
 	// Range: 0.0 (low quality) to 2.0 (exceptional quality)
 	// Default: 1.0 (neutral/average quality)
 	// Future: May be user-editable or ML-calculated
-	EncodingStrength float64 `yaml:"encoding_strength,omitempty"`
+	EncodingStrength float64 `yaml:"encoding_strength"`
 
 	// RetrievalCount tracks how many times this engram has been successfully retrieved.
 	// Incremented each time the engram is returned in a query result.
@@ -103,6 +103,10 @@ type Frontmatter struct {
 
 	// Triggers defines event-driven injection rules (optional).
 	Triggers []TriggerSpec `yaml:"triggers,omitempty"`
+
+	// Extra preserves newer or provider-specific frontmatter across tracking
+	// updates without making every extension part of the core schema.
+	Extra map[string]any `yaml:",inline"`
 }
 
 // EngramType constants

@@ -17,41 +17,55 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/safepr"
 	wayfindersandbox "github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
 
 type localDevGuardrailState struct {
-	command              string
-	commandSpec          string
-	library              string
-	librarySpec          string
-	traceDir             string
-	trace                safepr.Session
-	harness              string
-	family               string
-	preflightMinutes     int
-	localTestTimeout     string
-	affectedTestTimeout  string
-	ciTestTimeout        string
-	localVulnAllowlist   []string
-	ciVulnAllowlist      []string
-	worktreeBase         string
-	worktreeRepo         string
-	worktreePath         string
-	initialLockReason    string
-	transactionOutcome   string
-	transactionErr       error
-	lockedInPreflight    bool
-	lockedInPRCreate     bool
-	wayfinderCleanupErr  error
-	worktreePreserved    bool
-	cleanupRegression    string
-	cleanupRegressionErr error
-	childRegression      string
-	childRegressionErr   error
-	auditRegression      string
-	auditRegressionErr   error
+	command               string
+	commandSpec           string
+	library               string
+	librarySpec           string
+	traceDir              string
+	trace                 safepr.Session
+	harness               string
+	family                string
+	preflightMinutes      int
+	localTestTimeout      string
+	affectedTestTimeout   string
+	ciTestTimeout         string
+	affectedPackageMins   int
+	affectedListMins      int
+	affectedStartupMins   int
+	affectedCommandMins   int
+	affectedJobMins       int
+	localVulnAllowlist    []string
+	ciVulnAllowlist       []string
+	worktreeBase          string
+	worktreeRepo          string
+	worktreePath          string
+	initialLockReason     string
+	transactionOutcome    string
+	transactionErr        error
+	lockedInPreflight     bool
+	lockedInPRCreate      bool
+	wayfinderCleanupErr   error
+	worktreePreserved     bool
+	cleanupRegression     string
+	cleanupRegressionErr  error
+	childRegression       string
+	childRegressionErr    error
+	auditRegression       string
+	auditRegressionErr    error
+	noMergeRegression     string
+	noMergeRegressionErr  error
+	treeRegression        string
+	treeRegressionErr     error
+	requiredCIRegression  string
+	requiredCIError       error
+	mergeLoopCIRegression string
+	mergeLoopCIError      error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -97,15 +111,17 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
 	ctx.Step(`^AGM runs the protected cleanup regressions$`, agmRunsProtectedCleanupRegressions)
 	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
-	ctx.Step(`^AGM runs the protected repository cleanup regression$`, agmRunsProtectedRepositoryCleanupRegression)
-	ctx.Step(`^repository cleanup should preserve the worktree and its branches$`, repositoryCleanupShouldPreserveWorktreeAndBranches)
-	ctx.Step(`^AGM runs the safe-pr abrupt-parent regression$`, agmRunsSafePRAbruptParentRegression)
-	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
-	ctx.Step(`^AGM runs the safe-pr final transaction audit regression$`, agmRunsSafePRFinalTransactionAuditRegression)
-	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
+	registerSafePRRegressionGuardrailSteps(ctx)
+	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
+	ctx.Step(`^bounded affected runner commands should terminate their descendants$`, boundedAffectedRunnerCommandsShouldTerminateTheirDescendants)
+	ctx.Step(`^AGM runs the affected runner fixture regressions$`, agmRunsAffectedRunnerFixtureRegressions)
+	ctx.Step(`^partial readiness, early completion, and setup timeout should be distinguished$`, affectedRunnerFixturesShouldDistinguishSetupOutcomes)
+	ctx.Step(`^AGM runs the effective required-check regressions$`, agmRunsEffectiveRequiredCheckRegressions)
+	ctx.Step(`^safe-merge should enforce complete provider-required CI without advisory drift$`, safeMergeShouldEnforceProviderRequiredCI)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
+	ctx.Step(`^affected integration deadline layers should preserve their nested budgets$`, affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets)
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
@@ -225,79 +241,91 @@ func cleanupShouldPreserveGitLockedCheckouts(ctx context.Context) error {
 	return nil
 }
 
-func agmRunsProtectedRepositoryCleanupRegression(ctx context.Context) error {
+func agmRunsEffectiveRequiredCheckRegressions(ctx context.Context) error {
 	state, err := getLocalDevGuardrailState(ctx)
 	if err != nil {
 		return err
 	}
-	state.cleanupRegression, state.cleanupRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails$`,
-		"./internal/safepr",
+	state.requiredCIRegression, state.requiredCIError = runLocalGuardrailGoTest(ctx,
+		`^Test(ParseAppliedRulesRequiredChecks|ParseAppliedRulesRequiredChecksKnownEmpty|ParseAppliedRulesRequiredChecksFlagsRequiredWorkflows|ParseClassicRequiredChecksPreservesIntegrationScope|MergeRequiredCheckPoliciesUnionsLayeredSources|DiscoverRequiredChecksAcceptsAuthoritativeEmpty|DiscoverRequiredChecksRejectsPartialPolicyOnSourceError|DiscoverRequiredChecksUsesPaginatedSlurp|RulesBranchEndpointEscapesSlashBase|ProviderRequiredClassificationIgnoresAdvisoryFailure|ProviderRequiredClassificationBlocksRequiredFailurePendingAndMissing|ProviderRequiredClassificationRejectsAmbiguousIntegrationIdentity|ProviderRequiredClassificationRejectsDiscoveryDisagreement|ProjectRequiredChecksReconcilesEffectivePolicy|ProjectRequiredChecksSynthesizesMissingContext|ProjectRequiredChecksAcceptsStatusExits|ProjectRequiredChecksAcceptsAuthoritativeEmptyProviderError|ProjectRequiredChecksPreservesAuthoritativeEmptyFallback|ProjectRequiredChecksRejectsNoChecksWhenPolicyNonempty|CheckAllCIAcceptsNoChecksWhenPolicyEmpty|CheckAllCIValidatesAllWhenPolicyEmpty|CheckAllCIIgnoresNonzeroAdvisoryCheckStatus)$`,
+		"./internal/safegit",
 	)
-	return nil
-}
-
-func repositoryCleanupShouldPreserveWorktreeAndBranches(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.cleanupRegressionErr != nil {
-		return fmt.Errorf("protected repository cleanup regression: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
-	}
-	return nil
-}
-
-func agmRunsSafePRAbruptParentRegression(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	state.childRegression, state.childRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestWorktreeTransactionLockOutlivesKilledParentFor(ProtectedChild|GitHelper)$`,
-		"./internal/safepr",
+	cmdOutput, cmdErr := runLocalGuardrailNamedGoTests(ctx, "./cmd/mergeloop",
+		"TestMergeLoopUsesSharedRequiredProjection",
+		"TestMergeLoopPreservesAuthoritativeEmptyFallback",
+		"TestMergeLoopMapsProjectedRequiredStatuses",
+		"TestMergeLoopDefersOnlyUnavailableProjection",
+		"TestMergeLoopDefersOnlyUnknownProjectedStatus",
+		"TestMergeLoopAbortsWhenParentContextCanceled",
+		"TestMergeLoopSkipsProjectionWhenOpenPRsExceedCap",
 	)
-	return nil
-}
-
-func childShouldRetainTransactionOwnershipUntilExit(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	if state.childRegressionErr != nil {
-		return fmt.Errorf("safe-pr abrupt-parent regression: %w: %s", state.childRegressionErr, state.childRegression)
-	}
-	return nil
-}
-
-func agmRunsSafePRFinalTransactionAuditRegression(ctx context.Context) error {
-	state, err := getLocalDevGuardrailState(ctx)
-	if err != nil {
-		return err
-	}
-	state.auditRegression, state.auditRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestRun_CreateAuditsFinalTransactionOutcome$`,
-		"./cmd/safe-pr",
+	internalOutput, internalErr := runLocalGuardrailNamedGoTests(ctx, "./internal/mergeloop",
+		"TestProjectionErrorPreservesAttemptBudget",
 	)
+	state.mergeLoopCIRegression = strings.Join([]string{cmdOutput, internalOutput}, "\n")
+	state.mergeLoopCIError = errors.Join(cmdErr, internalErr)
 	return nil
 }
 
-func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) error {
+func safeMergeShouldEnforceProviderRequiredCI(ctx context.Context) error {
 	state, err := getLocalDevGuardrailState(ctx)
 	if err != nil {
 		return err
 	}
-	if state.auditRegressionErr != nil {
-		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
+	if state.requiredCIError != nil {
+		return fmt.Errorf("safegit effective required-check regressions: %w: %s", state.requiredCIError, state.requiredCIRegression)
+	}
+	if state.mergeLoopCIError != nil {
+		return fmt.Errorf("mergeloop effective required-check regressions: %w: %s", state.mergeLoopCIError, state.mergeLoopCIRegression)
 	}
 	return nil
 }
 
 func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
+	return runLocalGuardrailGoTestWith(parent, nil, pattern, packages...)
+}
+
+func runLocalGuardrailNamedGoTests(parent context.Context, packagePath string, testNames ...string) (string, error) {
+	patterns := make([]string, 0, len(testNames))
+	for _, testName := range testNames {
+		patterns = append(patterns, regexp.QuoteMeta(testName))
+	}
+	pattern := "^(" + strings.Join(patterns, "|") + ")$"
+	output, err := runLocalGuardrailGoTest(parent, pattern, packagePath)
+	if err != nil {
+		return output, err
+	}
+	if missing := missingNamedGoTestRuns(output, testNames...); len(missing) > 0 {
+		return output, fmt.Errorf("go test package %q did not run named regressions: %s", packagePath, strings.Join(missing, ", "))
+	}
+	return output, nil
+}
+
+func missingNamedGoTestRuns(output string, testNames ...string) []string {
+	ran := make(map[string]struct{}, len(testNames))
+	for line := range strings.SplitSeq(output, "\n") {
+		if testName, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), "=== RUN   "); ok {
+			ran[testName] = struct{}{}
+		}
+	}
+
+	missing := make([]string, 0, len(testNames))
+	for _, testName := range testNames {
+		if _, ok := ran[testName]; !ok {
+			missing = append(missing, testName)
+		}
+	}
+	return missing
+}
+
+// runLocalGuardrailGoTestWith is runLocalGuardrailGoTest with extra `go test`
+// flags. Its output is always verbose so BDD assertions can prove that the
+// intended named regression ran instead of accepting a vacuous zero-match run.
+func runLocalGuardrailGoTestWith(parent context.Context, extraArgs []string, pattern string, packages ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
-	commandArgs := []string{"test", "-count=1", "-timeout=90s", "-run", pattern}
+	commandArgs := []string{"test", "-v", "-count=1", "-timeout=90s", "-run", pattern}
+	commandArgs = append(commandArgs, extraArgs...)
 	commandArgs = append(commandArgs, packages...)
 	cmd := exec.CommandContext(ctx, "go", commandArgs...)
 	cmd.Dir = localDevBDDRepoRoot()
@@ -312,6 +340,9 @@ func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ..
 	out, err := cmd.CombinedOutput()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return string(out), fmt.Errorf("go test timed out after 2m")
+	}
+	if err == nil && !strings.Contains(string(out), "=== RUN") {
+		return string(out), fmt.Errorf("go test pattern %q did not run a named regression", pattern)
 	}
 	return string(out), err
 }
@@ -461,7 +492,7 @@ func canonicalSafePRBDDPath(path string) string {
 func runSafePRBDDGit(parent context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := gittest.CommandContext(ctx, "", args...)
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -503,14 +534,87 @@ func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if len(ciMatch) != 2 {
 		return fmt.Errorf("required CI Go test timeout declaration not found")
 	}
-	affectedMatch := regexp.MustCompile(`(?m)^\s*goCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	affectedMatch := regexp.MustCompile(`(?m)^\s*goTestTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
 	if len(affectedMatch) != 2 {
 		return fmt.Errorf("affected integration Go test timeout declaration not found")
+	}
+	commandMatch := regexp.MustCompile(`(?m)^\s*goCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(commandMatch) != 2 {
+		return fmt.Errorf("affected integration process timeout declaration not found")
+	}
+	listMatch := regexp.MustCompile(`(?m)^\s*goListCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(listMatch) != 2 {
+		return fmt.Errorf("affected integration package-discovery timeout declaration not found")
+	}
+	jobMinutes, err := workflowJobTimeoutMinutes(ci, "integration-tests")
+	if err != nil {
+		return fmt.Errorf("affected integration CI job timeout: %w", err)
+	}
+	nativeMinutes, err := strconv.Atoi(string(affectedMatch[1]))
+	if err != nil {
+		return fmt.Errorf("parse affected integration native timeout: %w", err)
+	}
+	commandMinutes, err := strconv.Atoi(string(commandMatch[1]))
+	if err != nil {
+		return fmt.Errorf("parse affected integration process timeout: %w", err)
+	}
+	listMinutes, err := strconv.Atoi(string(listMatch[1]))
+	if err != nil {
+		return fmt.Errorf("parse affected integration package-discovery timeout: %w", err)
+	}
+	if commandMinutes < 2*nativeMinutes {
+		return fmt.Errorf("affected integration process timeout lacks one native interval of build headroom")
+	}
+	if jobMinutes < listMinutes+commandMinutes+nativeMinutes {
+		return fmt.Errorf("affected integration CI job timeout lacks one native interval beyond all bounded runner phases")
+	}
+	if !strings.Contains(string(affected), `"-timeout=" + goTestTimeout.String()`) {
+		return fmt.Errorf("affected integration runner does not pass its timeout to the Go test binary")
+	}
+	if !strings.Contains(string(affected), `goCommandTimeoutExitCode = 124`) {
+		return fmt.Errorf("affected integration runner does not preserve the timeout exit-code contract")
 	}
 	state.localTestTimeout = string(localMatch[1])
 	state.affectedTestTimeout = string(affectedMatch[1]) + "m"
 	state.ciTestTimeout = string(ciMatch[1])
 	return nil
+}
+
+func workflowJobTimeoutMinutes(workflow []byte, jobName string) (int, error) {
+	lines := strings.Split(string(workflow), "\n")
+	header := "  " + jobName + ":"
+	start := -1
+	for i, line := range lines {
+		if line == header {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return 0, fmt.Errorf("workflow job %q not found", jobName)
+	}
+
+	end := len(lines)
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") &&
+			strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "#") {
+			end = i
+			break
+		}
+	}
+
+	block := strings.Join(lines[start:end], "\n")
+	match := regexp.MustCompile(`(?m)^    timeout-minutes:\s*(\d+)\s*$`).FindStringSubmatch(block)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("workflow job %q has no explicit timeout-minutes", jobName)
+	}
+	minutes, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse workflow job %q timeout: %w", jobName, err)
+	}
+	return minutes, nil
 }
 
 func agmValidatesGoTestTimeoutParity(ctx context.Context) error {
@@ -536,6 +640,28 @@ func repositoryGoTestTimeoutsShouldMatch(ctx context.Context) error {
 			state.affectedTestTimeout,
 			state.ciTestTimeout,
 		)
+	}
+	return nil
+}
+
+func affectedIntegrationDeadlineLayersShouldPreserveTheirNestedBudgets(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.affectedTestTimeout == "" || state.ciTestTimeout == "" {
+		return fmt.Errorf("affected integration timeout state is not initialized")
+	}
+	affected, err := os.ReadFile(filepath.Join(localDevBDDRepoRoot(), "cmd", "test-affected", "main.go"))
+	if err != nil {
+		return fmt.Errorf("read affected integration runner: %w", err)
+	}
+	source := string(affected)
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx|parent),\s*goCommandTimeout\)`).MatchString(source) {
+		return fmt.Errorf("affected test command timeout is not wired through context.WithTimeout")
+	}
+	if !regexp.MustCompile(`context\.WithTimeout\((?:context\.Background\(\)|ctx|parent),\s*goListCommandTimeout\)`).MatchString(source) {
+		return fmt.Errorf("affected package discovery timeout is not wired through context.WithTimeout")
 	}
 	return nil
 }
@@ -772,4 +898,17 @@ func getLocalDevGuardrailState(ctx context.Context) (*localDevGuardrailState, er
 
 func localDevBDDRepoRoot() string {
 	return packageSpecBDDRepoRoot()
+}
+
+func minuteConstant(source, name string) (int, error) {
+	pattern := fmt.Sprintf(`(?m)^\s*%s\s*=\s*(\d+)\s*\*\s*time\.Minute$`, regexp.QuoteMeta(name))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(source)
+	if len(match) != 2 {
+		return 0, fmt.Errorf("affected integration %s declaration not found", name)
+	}
+	minutes, err := strconv.Atoi(match[1])
+	if err != nil || minutes <= 0 {
+		return 0, fmt.Errorf("affected integration %s must be positive minutes", name)
+	}
+	return minutes, nil
 }

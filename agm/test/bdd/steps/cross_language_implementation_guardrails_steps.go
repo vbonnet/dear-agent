@@ -9,6 +9,7 @@ import (
 
 	"github.com/cucumber/godog"
 
+	e2etest "github.com/vbonnet/dear-agent/agm/test/e2e"
 	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
@@ -72,6 +73,24 @@ func RegisterCrossLanguageImplementationGuardrailSteps(ctx *godog.ScenarioContex
 	ctx.Step(`^cross-language coverage runs through "([^"]*)" with "([^"]*)"$`, configureCrossLanguageRoute)
 	ctx.Step(`^AGM validates cross-language route parity$`, validateCrossLanguageRoute)
 	ctx.Step(`^every cross-language implementation should retain strict SPEC and BDD traceability$`, validateCrossLanguageSpecs)
+	ctx.Step(`^the AGM end-to-end harness detection helper is configured$`, agmE2EHarnessDetectionHelperIsConfigured)
+	ctx.Step(`^AGM validates portable harness command lookup$`, agmValidatesPortableHarnessCommandLookup)
+	ctx.Step(`^the exact harness mapping should run under macOS system Bash$`, exactHarnessMappingRunsUnderSystemBash)
+}
+
+func agmE2EHarnessDetectionHelperIsConfigured() error {
+	helper := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "lib", "harness-detect.sh")
+	_, err := os.Stat(helper)
+	return err
+}
+
+func agmValidatesPortableHarnessCommandLookup() error {
+	helper := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "lib", "harness-detect.sh")
+	return e2etest.ValidatePortableHarnessDetection(helper)
+}
+
+func exactHarnessMappingRunsUnderSystemBash() error {
+	return agmValidatesPortableHarnessCommandLookup()
 }
 
 func configureCrossLanguageRoute(ctx context.Context, harness, family string) error {
@@ -79,7 +98,7 @@ func configureCrossLanguageRoute(ctx context.Context, harness, family string) er
 	if err != nil {
 		return err
 	}
-	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}}[harness]; !ok {
+	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}, "pi-cli": {}}[harness]; !ok {
 		return fmt.Errorf("unsupported active harness %q", harness)
 	}
 	if _, ok := map[string]struct{}{"anthropic": {}, "openai": {}, "gemini": {}, "glm": {}, "deepseek": {}, "nemotron": {}, "qwen": {}}[family]; !ok {

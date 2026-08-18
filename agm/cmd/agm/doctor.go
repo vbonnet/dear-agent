@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -117,21 +118,46 @@ Examples:
 			ui.PrintSuccess(fmt.Sprintf("tmux installed: %s", tmuxVersion))
 		}
 
-		// Check tmux socket
-		socketInfo, err := tmux.GetSocketInfo()
-		if err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to check socket: %v", err))
-		} else {
-			if socketInfo.Exists {
-				if socketInfo.Accessible {
-					ui.PrintSuccess(fmt.Sprintf("tmux socket active: %s", socketInfo.Path))
-				} else if socketInfo.IsStale {
-					ui.PrintWarning(fmt.Sprintf("tmux socket is stale: %s", socketInfo.Path))
-					fmt.Println("  • Run 'agm session new' to start a session (stale socket will be cleaned)")
-					allHealthy = false
-				}
+		// Check tmux socket.
+		//
+		// The orphan check comes first (ce-7ep9): a tmux server whose socket
+		// file was unlinked keeps running but is unreachable, so its sessions
+		// are stranded. That state looks identical to "no socket yet" from the
+		// filesystem alone, and reporting it as ready-for-first-use hides an
+		// outage. Only the process table can tell the two apart.
+		orphanedServer, orphanErr := tmux.DetectOrphanedServer()
+		switch {
+		case orphanErr != nil:
+			ui.PrintWarning(fmt.Sprintf("Failed to check for orphaned tmux server: %v", orphanErr))
+			// The socket check is a safety gate: an inconclusive process scan
+			// cannot prove that no sessions are stranded, so it must not leave
+			// the overall diagnosis green.
+			allHealthy = false
+		case orphanedServer != nil:
+			ui.PrintError(
+				fmt.Errorf("tmux server running but unreachable: pid(s) %v", orphanedServer.PIDs),
+				fmt.Sprintf("orphaned tmux server on %s (socket file missing or unusable)", orphanedServer.SocketPath),
+				fmt.Sprintf("  • Sessions on this server are stranded and cannot be recovered\n"+
+					"  • Kill the orphaned server: kill %s\n"+
+					"  • Then verify: agm session list",
+					formatPIDs(orphanedServer.PIDs)))
+			allHealthy = false
+		default:
+			socketInfo, err := tmux.GetSocketInfo()
+			if err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to check socket: %v", err))
 			} else {
-				ui.PrintSuccess(fmt.Sprintf("tmux socket ready: %s (will be created on first use)", socketInfo.Path))
+				if socketInfo.Exists {
+					if socketInfo.Accessible {
+						ui.PrintSuccess(fmt.Sprintf("tmux socket active: %s", socketInfo.Path))
+					} else if socketInfo.IsStale {
+						ui.PrintWarning(fmt.Sprintf("tmux socket is stale: %s", socketInfo.Path))
+						fmt.Println("  • Run 'agm session new' to start a session (stale socket will be cleaned)")
+						allHealthy = false
+					}
+				} else {
+					ui.PrintSuccess(fmt.Sprintf("tmux socket ready: %s (will be created on first use)", socketInfo.Path))
+				}
 			}
 		}
 
@@ -463,7 +489,7 @@ func detectDuplicateSessionDirs(sessionsDir string) []DuplicateSessionDir {
 
 // checkHarnessHealth runs per-harness health checks for every harness in use
 // across the session manifests. AGM's active parity harnesses are claude-code,
-// codex-cli, agy, and opencode-cli; gemini-cli is deprecated compatibility.
+// codex-cli, agy, opencode-cli, and pi-cli; gemini-cli is deprecated compatibility.
 // This surfaces a missing binary, missing
 // auth/config, or absent config dir for whichever harnesses the sessions
 // actually use — without privileging Claude.
@@ -531,7 +557,7 @@ func reportHarnessHealth(name string, count int) bool {
 	ui.PrintWarning(fmt.Sprintf("Harness '%s' unhealthy", label))
 	switch {
 	case !hh.Known:
-		fmt.Printf("  • Unknown harness — active harnesses: claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli\n")
+		fmt.Printf("  • Unknown harness — active harnesses: claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated: gemini-cli\n")
 	case !hh.BinaryPresent:
 		fmt.Printf("  • CLI binary '%s' not found on PATH — install it or migrate these sessions\n", hh.BinaryName)
 	}
@@ -645,4 +671,14 @@ func init() {
 		"Output results as JSON")
 	doctorCmd.Flags().BoolVar(&doctorTestMode, "test", false,
 		"Check test sessions in ~/sessions-test/ (isolated from production)")
+}
+
+// formatPIDs renders PIDs space-separated so the printed remedy can be pasted
+// straight into a `kill` invocation.
+func formatPIDs(pids []int) string {
+	parts := make([]string, len(pids))
+	for i, p := range pids {
+		parts[i] = strconv.Itoa(p)
+	}
+	return strings.Join(parts, " ")
 }

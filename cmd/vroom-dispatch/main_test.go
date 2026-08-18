@@ -144,8 +144,10 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 	sup := supervisor{Name: "vroom-orchestrator", Role: "orchestrator"}
 
 	// Save and restore the injectable spawn/sleep hooks.
-	origRun, origSleep := runSpawn, sleepFor
-	t.Cleanup(func() { runSpawn, sleepFor = origRun, origSleep })
+	origRun, origSleep, origNow := runSpawn, sleepFor, spawnRetryNow
+	t.Cleanup(func() {
+		runSpawn, sleepFor, spawnRetryNow = origRun, origSleep, origNow
+	})
 
 	refusal := []byte("circuit breaker: spawn refused — spawn too soon")
 	cbErr := errors.New("exit status 1")
@@ -170,6 +172,33 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 		// Sleeps the window only between attempts, never after the final one.
 		if sleeps != 2 {
 			t.Errorf("expected 2 backoff sleeps, got %d", sleeps)
+		}
+	})
+
+	t.Run("retries a resource governor pause then succeeds", func(t *testing.T) {
+		calls := 0
+		now := time.Date(2026, 7, 22, 2, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
+		boundary := now.Add(7 * time.Minute)
+		spawnRetryNow = func() time.Time { return now }
+		defer func() { spawnRetryNow = origNow }()
+		var sleeps []time.Duration
+		sleepFor = func(delay time.Duration) { sleeps = append(sleeps, delay) }
+		runSpawn = func(supervisor, string) ([]byte, error) {
+			calls++
+			if calls == 1 {
+				return []byte("circuit breaker: spawn refused\n  • [spawn_stagger] spawns paused by resource governor; earliest possible admission is " + boundary.Format(time.RFC3339) + " if the governor does not extend the hold"), cbErr
+			}
+			return []byte("created"), nil
+		}
+
+		if err := spawnSessionWithRetry(sup, "sonnet-200k"); err != nil {
+			t.Fatalf("expected success after governor-pause retry, got %v", err)
+		}
+		if calls != 2 || len(sleeps) != 1 {
+			t.Fatalf("governor pause: want 2 calls/1 sleep, got %d calls/%d sleeps", calls, len(sleeps))
+		}
+		if sleeps[0] != 7*time.Minute {
+			t.Errorf("governor retry delay = %s, want advertised 7m boundary", sleeps[0])
 		}
 	})
 
@@ -228,6 +257,39 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 			t.Errorf("happy path: want 1 call/0 sleeps, got %d calls/%d sleeps", calls, sleeps)
 		}
 	})
+}
+
+func TestSpawnRetryDelayFallbacks(t *testing.T) {
+	origNow := spawnRetryNow
+	t.Cleanup(func() { spawnRetryNow = origNow })
+	now := time.Date(2026, 7, 22, 2, 0, 0, 0, time.UTC)
+	spawnRetryNow = func() time.Time { return now }
+
+	tests := map[string]struct {
+		output string
+		want   time.Duration
+	}{
+		"recent spawn": {
+			output: "circuit breaker: spawn refused — spawn too soon",
+			want:   minSpawnInterval,
+		},
+		"malformed governor boundary": {
+			output: "spawns paused by resource governor; earliest possible admission is not-a-time",
+			want:   minSpawnInterval,
+		},
+		"expired governor boundary": {
+			output: "spawns paused by resource governor; earliest possible admission is " + now.Add(-time.Minute).Format(time.RFC3339),
+			want:   minSpawnInterval,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := spawnRetryDelay(tt.output); got != tt.want {
+				t.Errorf("spawnRetryDelay() = %s, want %s", got, tt.want)
+			}
+		})
+	}
 }
 
 // TestMinSpawnIntervalMatchesAgm pins the assumption ce-mu36 relies on: the
@@ -556,6 +618,120 @@ func TestRestartTracker_ShouldEscalate(t *testing.T) {
 	rt.mu.Unlock()
 	if !rt.shouldEscalate(name) {
 		t.Fatal("shouldEscalate returned false after recovery reset, want true")
+	}
+}
+
+func TestSupervisorHealthStringIncludesAuthFailed(t *testing.T) {
+	if got := healthAuthFailed.String(); got != "auth_failed" {
+		t.Fatalf("healthAuthFailed.String() = %q, want auth_failed", got)
+	}
+}
+
+func TestSupervisorPaneAuthFailed(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		want    bool
+	}{
+		{
+			name:    "Claude login loop",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login",
+			want:    true,
+		},
+		{
+			name:    "Codex login prompt",
+			harness: "codex-cli",
+			content: "No OpenAI credentials found. Run `codex login` to continue.",
+			want:    true,
+		},
+		{
+			name:    "AGY Google application default credentials",
+			harness: "agy",
+			content: "Application Default Credentials unavailable; run gcloud auth application-default login",
+			want:    true,
+		},
+		{
+			name:    "ordinary auth task output",
+			harness: "codex-cli",
+			content: "Please fix the authentication module and update tests.\n›",
+			want:    false,
+		},
+		{
+			name:    "ordinary HTTP discussion",
+			harness: "agy",
+			content: "The API should return 401 Unauthorized for bad user credentials.\n>",
+			want:    false,
+		},
+		{
+			name:    "Claude auth phrase with healthy prompt",
+			harness: "claude-code",
+			content: "We need to handle a \"Please run /login\" response after token rotation.\n>",
+			want:    false,
+		},
+		{
+			name:    "Claude auth phrase in current explanation",
+			harness: "claude-code",
+			content: "The recovery code should detect Please run /login when Claude Code is blocked.",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by prompt",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login\n>",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by Claude composer",
+			harness: "claude-code",
+			content: "Error: 401 Unauthorized\nPlease run /login\n❯\n? for shortcuts",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by Codex footer composer",
+			harness: "codex-cli",
+			content: "codex login required\n›\n\ngpt-5.6 xhigh · ~/src/project",
+			want:    false,
+		},
+		{
+			name:    "stale auth block followed by AGY composer",
+			harness: "agy",
+			content: "Application Default Credentials unavailable; run gcloud auth application-default login\n>\n? for shortcuts",
+			want:    false,
+		},
+		{
+			name:    "generic auth phrase without harness evidence",
+			harness: "codex-cli",
+			content: "authentication failed in the mocked dependency; continue with the implementation",
+			want:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := supervisorPaneAuthFailed(tt.content, tt.harness); got != tt.want {
+				t.Fatalf("supervisorPaneAuthFailed() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSessionArchiveArgsAuthorizeSupervisorReapWithoutForce(t *testing.T) {
+	args := sessionArchiveArgs(supervisor{Name: "vroom-orchestrator"})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"session archive",
+		"--async",
+		"--workspace=oss",
+		"--outcome crashed",
+		"vroom-orchestrator",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("sessionArchiveArgs missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "--force") {
+		t.Fatalf("sessionArchiveArgs must not force supervisor archive: %v", args)
 	}
 }
 
@@ -1010,4 +1186,55 @@ func TestFlowProbesBoundContextAndWrapErrors(t *testing.T) {
 			t.Fatalf("defaultCountReadyBeads() error = %v, want wrapped decode error", err)
 		}
 	})
+}
+
+// TestSpawnRetryDoesNotSwallowSafetyRefusals pins the reason the ce-93lw.18
+// admission brake is NOT encoded as a stagger pause. The retry loop exists to
+// wait out the 2-minute spawn window; it keys on agm's "spawn too soon"
+// message. A disk-headroom or admission-brake refusal must propagate on the
+// first attempt instead of being retried three times into a saturated host.
+func TestSpawnRetryDoesNotSwallowSafetyRefusals(t *testing.T) {
+	origRun, origSleep := runSpawn, sleepFor
+	t.Cleanup(func() { runSpawn, sleepFor = origRun, origSleep })
+
+	refusals := map[string]string{
+		"disk headroom": "circuit breaker: spawn refused (load level: GREEN)\n\n" +
+			"  • [disk] free disk too low: 3.2 GB (minimum: 15.0 GB).",
+		"admission brake": "circuit breaker: spawn refused (load level: GREEN)\n\n" +
+			"  • [admission_brake] admission brake engaged by disk-watchdog: " +
+			"worktree-sweep remediation failed: signal: killed",
+		"agent process cap": "circuit breaker: spawn refused (load level: RED)\n\n" +
+			"  • [agent_procs] agent-process cap reached: 12/12 machine-wide agent processes.",
+		"governor pause with disk headroom": "circuit breaker: spawn refused (load level: RED)\n\n" +
+			"  • [spawn_stagger] spawns paused by resource governor; earliest possible admission is 2026-07-22T02:00:00-07:00 if the governor does not extend the hold\n" +
+			"  • [disk] free disk too low: 3.2 GB (minimum: 15.0 GB).",
+		"recent spawn with agent process cap": "circuit breaker: spawn refused (load level: RED)\n\n" +
+			"  • [spawn_stagger] spawn too soon: last spawn was 30s ago\n" +
+			"  • [agent_procs] agent-process cap reached: 12/12 machine-wide agent processes.",
+	}
+
+	for name, output := range refusals {
+		t.Run(name, func(t *testing.T) {
+			if isRetryableSpawnRefusal(output) {
+				t.Fatalf("refusal text would be retried as transient spawn backpressure: %q", output)
+			}
+
+			calls, sleeps := 0, 0
+			sleepFor = func(time.Duration) { sleeps++ }
+			runSpawn = func(supervisor, string) ([]byte, error) {
+				calls++
+				return []byte(output), errors.New("exit status 1")
+			}
+
+			if err := spawnSessionWithRetry(supervisors[0], "sonnet-200k"); err == nil {
+				t.Fatal("expected the refusal to propagate as an error")
+			}
+			if calls != 1 {
+				t.Errorf("spawn attempts = %d, want 1 — a safety refusal must not be retried", calls)
+			}
+			if sleeps != 0 {
+				t.Errorf("backoff sleeps = %d, want 0", sleeps)
+			}
+		})
+	}
 }

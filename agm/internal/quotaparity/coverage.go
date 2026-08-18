@@ -85,6 +85,15 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 			Persistence:     "manifest context_usage, cost_tracking, and opencode metadata",
 			Degradation:     "SSE failures fall back to tmux/manifest monitoring",
 		}, true
+	case "pi-cli":
+		return HarnessSurface{
+			Harness:         "pi-cli",
+			ContextSource:   "Pi native JSONL message usage and manifest context_usage",
+			CostSource:      "Pi native JSONL message usage and manifest cost_tracking",
+			RateLimitSource: "explicitly unavailable from Pi",
+			Persistence:     "Pi native transcript plus manifest context_usage and cost_tracking",
+			Degradation:     "missing native usage is displayed as unavailable, not a Claude-specific default",
+		}, true
 	default:
 		return HarnessSurface{}, false
 	}

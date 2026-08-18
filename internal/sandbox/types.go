@@ -16,6 +16,12 @@ type SandboxRequest struct {
 	// Example: ["~/src/ai-tools", "~/src/engram"]
 	LowerDirs []string
 
+	// WorkingDir is the host directory the session requested. Providers map
+	// this path into their own workspace topology and return that canonical
+	// location in Sandbox.WorkingDir. When empty, providers retain the legacy
+	// behavior of using the merged workspace root.
+	WorkingDir string
+
 	// WorkspaceDir is where the sandbox creates its scratch space.
 	// Provider creates: upper/, work/, merged/ inside this directory.
 	//
@@ -48,11 +54,16 @@ type Sandbox struct {
 	// Usually matches SessionID from the request.
 	ID string
 
-	// MergedPath is where agents operate.
-	// This directory contains the unified view of all LowerDirs.
+	// MergedPath is the root of the provider's materialized workspace.
+	// It may contain multiple repositories and is also the cleanup boundary.
 	//
 	// Example: "~/.agm/sandboxes/abc-123/merged"
 	MergedPath string
+
+	// WorkingDir is where the harness operates. It is the provider-mapped
+	// counterpart of SandboxRequest.WorkingDir and can be below MergedPath.
+	// Providers use MergedPath when the request omits WorkingDir.
+	WorkingDir string
 
 	// UpperPath is where agent modifications are stored.
 	// Hidden from agents, used by provider for copy-up operations.

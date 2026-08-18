@@ -174,10 +174,15 @@ func TestOverlayFSMultipleRepos(t *testing.T) {
 
 	err = os.WriteFile(filepath.Join(lowerDir2, "file2.txt"), []byte("repo2"), 0644)
 	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(lowerDir1, "shared.txt"), []byte("repo1"), 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(lowerDir2, "shared.txt"), []byte("repo2"), 0644)
+	require.NoError(t, err)
 
 	req := sandbox.SandboxRequest{
 		SessionID:    "test-multi-repo",
 		LowerDirs:    []string{lowerDir1, lowerDir2},
+		WorkingDir:   lowerDir2,
 		WorkspaceDir: workspaceDir,
 	}
 
@@ -191,6 +196,7 @@ func TestOverlayFSMultipleRepos(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.NotNil(t, sb)
+	assert.Equal(t, sb.MergedPath, sb.WorkingDir)
 
 	// Verify both files are visible in merged view
 	file1 := filepath.Join(sb.MergedPath, "file1.txt")
@@ -203,6 +209,10 @@ func TestOverlayFSMultipleRepos(t *testing.T) {
 	content2, err := os.ReadFile(file2)
 	assert.NoError(t, err)
 	assert.Equal(t, "repo2", string(content2))
+
+	sharedContent, err := os.ReadFile(filepath.Join(sb.MergedPath, "shared.txt"))
+	assert.NoError(t, err)
+	assert.Equal(t, "repo2", string(sharedContent), "requested lower directory must have overlay precedence")
 
 	// Cleanup
 	err = provider.Destroy(ctx, sb.ID)

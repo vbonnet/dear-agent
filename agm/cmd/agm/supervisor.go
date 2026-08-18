@@ -13,9 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
-	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
+	"github.com/vbonnet/dear-agent/pkg/override"
 	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
@@ -336,32 +337,111 @@ func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.Look
 // API-key-present guard. Unwrapped as exit code 2.
 var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; unset it or use an OAuth-only env")
 
-func runSupervisorRun(cmd *cobra.Command, _ []string) error {
-	// Skipping the OAuth-token requirement requires a recorded justification:
-	// the gate exists so a supervisor never launches without auth and silently
-	// fails downstream.
-	if supervisorSkipOAuthCheck {
-		if gerr := override.Require(cmd.Context(), override.Guard{
-			Tool: "agm supervisor run",
-			Flag: "--skip-oauth-check",
-			Gate: "CLAUDE_CODE_OAUTH_TOKEN presence requirement",
-			Risk: override.RiskP1,
-		}, supervisorSkipOAuthReason); gerr != nil {
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), gerr)
-			os.Exit(2)
+var reserveSupervisorDangerousOverride = override.Reserve
+
+func reserveSupervisorOAuthOverride(reason, session string) (*override.Reservation, error) {
+	reservation, err := reserveSupervisorDangerousOverride(override.Request{
+		Kind:    override.KindSupervisorOAuthCheck,
+		Reason:  reason,
+		Actor:   override.Actor(),
+		Session: session,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("authorize supervisor --skip-oauth-check: %w", err)
+	}
+	return reservation, nil
+}
+
+// submitSupervisorLaunch hands final live-admission effects to the private
+// Claude executor before starting it. A confirmed executor-start failure leaves
+// the sealed reservations and spawn obligation unconsumed.
+func submitSupervisorLaunch(
+	beforeSpawn func(...*override.Reservation) ([]*override.Reservation, error),
+	bind func(bool, ...*override.Reservation) error,
+	run func() error,
+	reservation *override.Reservation,
+) error {
+	var reservations []*override.Reservation
+	if reservation != nil {
+		reservations = append(reservations, reservation)
+	}
+	if beforeSpawn != nil {
+		var err error
+		reservations, err = beforeSpawn(reservations...)
+		if err != nil {
+			return fmt.Errorf("supervisor: launch admission: %w", err)
 		}
 	}
+	if bind == nil {
+		return errors.New("supervisor: private Claude executor cannot bind launch effects")
+	}
+	if err := bind(true, reservations...); err != nil {
+		return fmt.Errorf("supervisor: bind launch override transaction: %w", err)
+	}
+	if err := run(); err != nil {
+		return fmt.Errorf("supervisor: claude exited: %w", err)
+	}
+	return nil
+}
 
-	env := realSupervisorEnv{}
-	if err := checkSupervisorEnv(env, supervisorSkipOAuthCheck, ""); err != nil {
+// supervisorPreflight runs every pre-launch guard in order and returns the
+// resolved claude binary path, or the first refusal. It returns errors rather
+// than exiting so the ordering and the refusals are testable; runSupervisorRun
+// owns the exit code.
+//
+// Order matters. The env and binary guards come first so a misconfigured
+// invocation reports its real problem (no OAuth token, no claude on PATH)
+// instead of a resource refusal. The admission precheck comes last; the caller
+// separately commits the returned one-shot admission immediately before Run.
+//
+// credsPath overrides the OAuth credentials-file location (empty means the real
+// ~/.claude/.credentials.json), matching checkSupervisorEnv, so tests do not
+// depend on the host's auth.
+//
+// admit is the host admission gate. A supervisor is a persistent claude process
+// that consumes the same CPU, RAM, and disk as any worker, so it goes through
+// the same gates as `agm session new` — this path was entirely ungated while
+// the mesh saturated the host on 2026-07-18 (ce-93lw.18).
+func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath string, admit func() error) (string, error) {
+	if err := checkSupervisorEnv(env, skipOAuthCheck, credsPath); err != nil {
+		return "", err
+	}
+	bin, err := env.LookPath(supervisorClaudeBin)
+	if err != nil {
+		return "", fmt.Errorf("supervisor: cannot locate claude binary %q: %w", supervisorClaudeBin, err)
+	}
+	if admit != nil {
+		if err := admit(); err != nil {
+			return "", fmt.Errorf("supervisor: %w", err)
+		}
+	}
+	return bin, nil
+}
+
+func runSupervisorRun(cmd *cobra.Command, _ []string) error {
+	var admission *circuitBreakerAdmission
+	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", func() error {
+		var admissionErr error
+		admission, admissionErr = enforceCircuitBreakers(supervisorID)
+		return admissionErr
+	})
+	if err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
 		os.Exit(2)
 	}
-	bin, err := env.LookPath(supervisorClaudeBin)
+	bin, err = filepath.Abs(bin)
 	if err != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "supervisor: cannot locate claude binary %q: %v\n", supervisorClaudeBin, err)
-		os.Exit(2)
+		return fmt.Errorf("supervisor: resolve Claude executable: %w", err)
+	}
+
+	var oauthOverride *override.Reservation
+	if supervisorSkipOAuthCheck {
+		oauthOverride, err = reserveSupervisorOAuthOverride(supervisorSkipOAuthReason, supervisorID)
+		if err != nil {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
+			os.Exit(2)
+		}
 	}
 
 	// Announce the role so downstream logs attribute correctly.
@@ -369,20 +449,32 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"agm supervisor: id=%q primary-for=%q tertiary-for=%q binary=%q\n",
 		supervisorID, supervisorPrimaryFor, supervisorTertiaryFor, bin)
 
-	claudeCmd := exec.Command(bin, buildSupervisorClaudeArgs(supervisorClaudeModel, supervisorLoadDevChannels, supervisorExtraArgs)...)
+	prepared, err := harnessexec.PrepareClaudeCommand(buildSupervisorClaudeLaunch(
+		bin,
+		supervisorClaudeModel,
+		supervisorLoadDevChannels,
+		supervisorExtraArgs,
+		// --skip-oauth-check bypasses only the preflight requirement. Preserve
+		// the existing behavior of forwarding a fresh token when one is
+		// available.
+		false,
+	), os.Environ())
+	if err != nil {
+		return fmt.Errorf("supervisor: prepare private Claude executor: %w", err)
+	}
+	defer func() { _ = prepared.Cancel() }()
+
+	executable, arguments, err := prepared.DirectInvocation()
+	if err != nil {
+		return fmt.Errorf("supervisor: prepare private Claude invocation: %w", err)
+	}
+	claudeCmd := exec.Command(executable, arguments...)
 	claudeCmd.Stdin = os.Stdin
 	claudeCmd.Stdout = cmd.OutOrStdout()
 	claudeCmd.Stderr = cmd.ErrOrStderr()
-	// Scrub the env one more time before exec — defense in depth.
+	// Scrub the API key from the private executor too. The prepared handoff
+	// carries a fresh OAuth snapshot without exposing it in argv.
 	claudeCmd.Env = scrubAPIKey(os.Environ())
-	// Refresh the OAuth token from the live credentials file: a token captured
-	// into the orchestrator's env goes stale after Claude Code auto-refreshes
-	// the file (ce-dzhz). Strip any stale copy and inject the freshest token so
-	// the supervisor's claude never launches with an expired credential.
-	claudeCmd.Env = scrubEnvKey(claudeCmd.Env, auth.OAuthEnvVar)
-	if token := auth.ResolveOAuthToken(); token != "" {
-		claudeCmd.Env = append(claudeCmd.Env, auth.OAuthEnvVar+"="+token)
-	}
 	// Mark the supervisor id + mesh role in child env so the channel adapter
 	// and any in-session tooling can read them without re-parsing args.
 	claudeCmd.Env = append(claudeCmd.Env,
@@ -391,25 +483,43 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"AGM_SUPERVISOR_TERTIARY_FOR="+supervisorTertiaryFor,
 	)
 
-	if err := claudeCmd.Run(); err != nil {
-		return fmt.Errorf("supervisor: claude exited: %w", err)
+	if err := submitSupervisorLaunch(
+		admission.beforeSpawn,
+		prepared.BindOverrideReservations,
+		claudeCmd.Run,
+		oauthOverride,
+	); err != nil {
+		return err
 	}
 	return nil
 }
 
-func buildSupervisorClaudeArgs(model string, loadDevelopmentChannels bool, extraArgs []string) []string {
+func buildSupervisorClaudeLaunch(
+	binary, model string,
+	loadDevelopmentChannels bool,
+	extraArgs []string,
+	disableOAuth bool,
+) harnessexec.ClaudeLaunch {
 	if model == "" {
 		model = supervisorDefaultClaudeModel
 	}
-	args := []string{
-		"--model", agent.ResolveModelFullName("claude-code", model),
-		"--enable-auto-mode",
-		"--permission-mode", "auto",
-	}
+	args := append([]string(nil), extraArgs...)
 	if loadDevelopmentChannels {
-		args = append(args, "--dangerously-load-development-channels", "server:agm-bus")
+		args = append(
+			[]string{"--dangerously-load-development-channels", "server:agm-bus"},
+			args...,
+		)
 	}
-	return append(args, extraArgs...)
+	return harnessexec.ClaudeLaunch{
+		Binary:       binary,
+		SessionName:  supervisorID,
+		Model:        agent.ResolveModelFullName("claude-code", model),
+		AutoMode:     true,
+		Permission:   "auto",
+		ExtraArgs:    args,
+		DisableOAuth: disableOAuth,
+		Persistent:   true,
+	}
 }
 
 // checkSupervisorEnv runs the two pre-launch guards. Exported for testing

@@ -15,6 +15,8 @@
 #     logs               where conversation logs / session transcripts go
 #   pr-policy            informational map of PR verbs -> sanctioned command
 #                        (mirrors the enforcement in .claude/settings.json)
+#   adr-governance       declared ADR directory scopes, self-contained
+#                        aggregates, review budget, and reasoned exclusions
 #   forbidden-paths      directories where new files of a given kind MUST NOT
 #                        be created in THIS repo. Maps kind -> list of globs
 #                        relative to repo root.
@@ -109,10 +111,28 @@ instruction-policy:
       owner: vroom-worker-prompts
     - match: cmd/vroom-prompt-gen/main.go
       owner: vroom-worker-prompts
+    - match: internal/mergeloop/prompt.go
+      owner: merge-loop-worker-prompts
     - match: wayfinder/SKILL.md
       owner: wayfinder
     - match: wayfinder/skills/wayfinder/SKILL.md
       owner: wayfinder-plugin
+    - match: spec-governance/skills/write-spec/SKILL.md
+      owner: spec-governance
+    - match: spec-governance/skills/write-spec/references/contract-model.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/write-spec/references/ears-and-bdd.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/references/audit-verdicts.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/references/report-schema.md
+      owner: spec-governance-references
+    - match: spec-governance/skills/audit-specs/SKILL.md
+      owner: spec-governance
+    - match: docs/spec-authoring.md
+      owner: spec-governance
+    - match: docs/templates/SPEC.md.tmpl
+      owner: spec-governance
     - match: wayfinder/PHASES.md
       owner: wayfinder
     - match: wayfinder/SPEC.md
@@ -130,6 +150,74 @@ instruction-policy:
     - match: agm/youtube-plugin/commands/*.md
       owner: agm-commands
   exclusions-file: .instruction-policy-exclusions.yml
+
+# Architecture decisions have directory-scoped numeric identities. Every
+# numbered scope owns one complete index; aggregate ADR.md files are
+# self-contained. `make lint-adrs` rejects undeclared tracked ADR paths and
+# identity, lifecycle, index, size, supersession, or local-link drift.
+adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+    - path: agm/docs/adr
+      index: README.md
+    - path: agm/cmd/agm
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: agm/cmd/agm-daemon/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/cmd/agm-mcp-server/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/dolt/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/evaluation/ADR
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/tmux
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: engram/cmd/engram
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: engram/retrieval/docs/adrs
+      index: README.md
+      max-lines: 120
+    - path: pkg/engram/docs/adrs
+      index: README.md
+      max-lines: 120
+    - path: pkg/llm/docs
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: tools/dod-enforcer/adr
+      index: README.md
+      max-lines: 120
+    - path: wayfinder/cmd/wayfinder-session/internal/validator
+      index: ADR-INDEX.md
+      max-lines: 120
+  aggregates:
+    - path: engram/ecphory/ADR.md
+      max-lines: 120
+    - path: engram/ecphory/ranking/ADR.md
+      max-lines: 120
+    - path: pkg/hash/ADR.md
+      max-lines: 120
+    - path: pkg/monitoring/ADR.md
+      max-lines: 120
+    - path: pkg/telemetry/ADR.md
+      max-lines: 120
+    - path: tools/devlog/ADR.md
+      max-lines: 120
+  exclusions:
+    - match: "**/testdata/**"
+      reason: generated or parser fixture, not a living architectural decision
+    - match: "**/vendor/**"
+      reason: vendored third-party content is outside repository governance
+    - match: "**/node_modules/**"
+      reason: generated dependency content is outside repository governance
 
 forbidden-paths:
   research:
@@ -201,6 +289,7 @@ forbidden-paths:
     # retro (engram-research) for why these globs exist.
     - "**/.wayfinder/**"
     - "**/WAYFINDER-STATUS.md"
+    - "**/WAYFINDER-HISTORY.jsonl"
     - "**/WAYFINDER-HISTORY.md"
 
 # Framework-level defaults applied to every task in this repo. These
@@ -231,9 +320,9 @@ acceptance-criteria:
     description: "No previously-passing test is now failing"
 
 # DEAR Audit subsystem configuration. See ADR-011 and pkg/audit/config.
-# This is the dogfood configuration: dear-agent itself runs the daily
-# checks below on every push (via the workflow-audit CLI in CI). The
-# weekly / monthly tiers cost more and run from a scheduled trigger.
+# This block selects audit checks; scheduling is operator-owned per ADR-011.
+# Invoke workflow-audit directly or through configs/workflows wrappers, from
+# cron, CI, or another wrapper. No deployed scheduler is claimed here.
 #
 # Severity policy is the package default; we leave it implicit. Override
 # only when this repo deviates from the recommended P0/P1/P2/P3 actions.
@@ -243,8 +332,7 @@ audits:
       - check: build
       - check: test
         config:
-          # Skip -race in CI to keep the daily under 5 min; the weekly
-          # tier picks it up.
+          # Skip -race in the daily selection; the weekly tier picks it up.
           race: false
           timeout: "3m"
       - check: lint.go

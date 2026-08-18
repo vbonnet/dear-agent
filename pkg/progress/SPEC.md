@@ -138,17 +138,17 @@ The package uses a **strategy pattern** to switch between two backends (spinner 
 
 ### Key Design Decisions
 
-- **Decision: Strategy Pattern for Mode Selection** (See ADR-001)
+- **Decision: Strategy Pattern for Mode Selection**
   - Single `Indicator` type with two backend implementations
   - Mode selected at initialization based on `Options.Total`
   - Avoids exposing separate Spinner/ProgressBar types to users
 
-- **Decision: Automatic TTY Detection** (See ADR-002)
+- **Decision: Automatic TTY Detection**
   - Use `golang.org/x/term.IsTerminal()` instead of environment variables
   - Detects pipes, file redirects, and CI/CD environments automatically
   - No manual configuration required from users
 
-- **Decision: Idempotent Operations** (See ADR-003)
+- **Decision: Idempotent Operations**
   - Multiple calls to `Start()` are safe (no-op if already started)
   - `Complete()`/`Fail()` without `Start()` are safe (no-op)
   - Prevents panics from incorrect usage patterns

@@ -66,7 +66,7 @@ step "go build ./..."
 mkdir -p build
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "local")
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS="-s -w -X main.Version=local -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=preflight"
+LDFLAGS="-s -w -X github.com/vbonnet/dear-agent/pkg/version.Version=local -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${GIT_COMMIT} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${BUILD_DATE} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=preflight"
 go build -ldflags="${LDFLAGS}" -o build/agm ./agm/cmd/agm
 go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
 go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
@@ -80,6 +80,14 @@ ok "AI skills valid"
 step "make lint-instructions"
 make lint-instructions || fail "active instruction policy integrity failed"
 ok "active instruction policy guidance intact"
+
+step "make lint-adrs"
+make lint-adrs || fail "ADR identity/index/lifecycle contract failed"
+ok "ADR identity/index/lifecycle contract intact"
+
+step "make lint-headers"
+make lint-headers || fail "doc header format validation failed"
+ok "doc header format valid"
 
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then

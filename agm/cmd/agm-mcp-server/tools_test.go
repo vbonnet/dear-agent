@@ -22,10 +22,13 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -58,6 +61,61 @@ type blockingKillTmux struct {
 	probeOnce    sync.Once
 	killCalls    int
 }
+
+type mcpAPIProbeAgent struct {
+	status            agent.Status
+	readinessContexts []context.Context
+	sent              []agent.Message
+}
+
+type emptyAgyIdentityTracker struct{}
+
+func (emptyAgyIdentityTracker) Snapshot(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (emptyAgyIdentityTracker) Discover(context.Context, string, string) (*agysession.Metadata, error) {
+	return nil, errors.New("unexpected AGY identity discovery after readiness failure")
+}
+
+func (a *mcpAPIProbeAgent) Name() string    { return "api-probe" }
+func (a *mcpAPIProbeAgent) Version() string { return "test" }
+func (a *mcpAPIProbeAgent) CreateSession(agent.SessionContext) (agent.SessionID, error) {
+	return "", nil
+}
+func (a *mcpAPIProbeAgent) ResumeSession(agent.SessionID) error    { return nil }
+func (a *mcpAPIProbeAgent) TerminateSession(agent.SessionID) error { return nil }
+func (a *mcpAPIProbeAgent) GetSessionStatus(agent.SessionID) (agent.Status, error) {
+	return a.status, nil
+}
+func (a *mcpAPIProbeAgent) GetSessionStatusContext(ctx context.Context, _ agent.SessionID) (agent.Status, error) {
+	a.readinessContexts = append(a.readinessContexts, ctx)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return a.status, nil
+}
+func (a *mcpAPIProbeAgent) SendMessage(_ agent.SessionID, message agent.Message) error {
+	a.sent = append(a.sent, message)
+	return nil
+}
+func (a *mcpAPIProbeAgent) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return a.SendMessage(sessionID, message)
+}
+func (a *mcpAPIProbeAgent) GetHistory(agent.SessionID) ([]agent.Message, error) {
+	return a.sent, nil
+}
+func (a *mcpAPIProbeAgent) ExportConversation(agent.SessionID, agent.ConversationFormat) ([]byte, error) {
+	return nil, nil
+}
+func (a *mcpAPIProbeAgent) ImportConversation([]byte, agent.ConversationFormat) (agent.SessionID, error) {
+	return "", nil
+}
+func (a *mcpAPIProbeAgent) Capabilities() agent.Capabilities   { return agent.Capabilities{} }
+func (a *mcpAPIProbeAgent) ExecuteCommand(agent.Command) error { return nil }
 
 func (m *blockingKillTmux) HasSession(name string) (bool, error) {
 	m.probeOnce.Do(func() {
@@ -212,13 +270,163 @@ func TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt(t *testing.T) {
 	if result.ModeAppliedAtStartup {
 		t.Fatal("default AGY launch unexpectedly applied auto mode")
 	}
+	if result.Readiness != "" {
+		t.Fatalf("AGY readiness disposition = %q, want shared verification", result.Readiness)
+	}
 	if err := runtime.Complete(callerCtx, ops.CreateSessionCompletion{
-		Manifest: &manifest.Manifest{Name: "mcp-agy"}, Prompt: "startup prompt",
+		Manifest: &manifest.Manifest{Name: "mcp-agy", Harness: "agy"}, Prompt: "startup prompt",
 	}); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "startup prompt" {
 		t.Fatalf("commands after completion = %v, want launch then startup prompt", tmuxMock.SentCommands)
+	}
+}
+
+func TestMCPCreateSessionRuntimePreservesUncertainPrivateLaunch(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.SendKeysError = tmux.MarkPromptSubmissionUncertain(errors.New("lost tmux acknowledgement"))
+	runtime := &mcpCreateSessionRuntime{tmux: tmuxMock}
+
+	if _, err := runtime.Launch(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "codex-cli", SessionName: "mcp-codex-uncertain",
+		WorkDir: "/tmp/mcp-codex-uncertain",
+	}); err != nil {
+		t.Fatalf("uncertain MCP private launch returned an error: %v", err)
+	}
+}
+
+func TestMCPCreateSessionRuntimeBootstrapsAgyIdentityPromptExactlyOnce(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	runtime := &mcpCreateSessionRuntime{
+		tmux:             tmuxMock,
+		lookPath:         func(string) (string, error) { return "/usr/local/bin/agy", nil },
+		sleep:            func(time.Duration) {},
+		waitForAgyPrompt: func(context.Context, string, time.Duration) error { return nil },
+	}
+	ctx := t.Context()
+	launch, err := runtime.Launch(ctx, ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash-low", SessionName: "mcp-agy-lazy", WorkDir: "/tmp/mcp-agy-lazy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.BootstrapAgyCreateIdentity(ctx, ops.AgyCreateIdentityBootstrap{
+		SessionName: "mcp-agy-lazy", Prompt: "persist once",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	launch.PromptDelivered = true
+	if err := runtime.Complete(ctx, ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-agy-lazy"}, Prompt: "persist once", Launch: launch,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "persist once" {
+		t.Fatalf("MCP commands = %v, want bare launch and one identity-bootstrap prompt", tmuxMock.SentCommands)
+	}
+	if strings.Contains(tmuxMock.SentCommands[0], "persist once") || strings.Contains(tmuxMock.SentCommands[0], "--prompt-interactive") {
+		t.Fatalf("MCP launch leaked startup prompt into process arguments: %q", tmuxMock.SentCommands[0])
+	}
+	if got := tmuxMock.AtomicInputChecks; !reflect.DeepEqual(got, []string{"mcp-agy-lazy:agy"}) {
+		t.Fatalf("AGY identity bootstrap atomic checks = %v, want [mcp-agy-lazy:agy]", got)
+	}
+}
+
+func TestMCPCreateSessionRuntimeAgyIdentityBootstrapFailsClosedWhenComposerIsNotReady(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.InputReadiness = session.InputReadiness{State: "PERMISSION", PaneID: "%0"}
+	runtime := newMCPCreateSessionRuntime(tmuxMock)
+
+	err := runtime.BootstrapAgyCreateIdentity(t.Context(), ops.AgyCreateIdentityBootstrap{
+		SessionName: "mcp-agy-permission", Prompt: "must not authorize",
+	})
+	if err == nil || !strings.Contains(err.Error(), "PERMISSION") {
+		t.Fatalf("BootstrapAgyCreateIdentity() error = %v, want permission readiness failure", err)
+	}
+	if len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("AGY permission prompt received bootstrap input: %v", tmuxMock.SentCommands)
+	}
+}
+
+func TestMCPCreateSessionRuntimeCannotBypassSharedCodexReadiness(t *testing.T) {
+	t.Parallel()
+
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.WaitForHarnessReadyError = errors.New("Codex composer was not observed")
+	store := dolt.NewMockAdapter()
+	runtime := newMCPCreateSessionRuntime(tmuxMock)
+
+	_, err := ops.CreateSessionWithContext(t.Context(), &ops.OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &ops.CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "mcp-codex-readiness", Harness: "codex-cli",
+		Model: "5.5", Prompt: "must not send", SkipCodexRemoteControl: true,
+		Caller: ops.CreateSessionCaller{Surface: ops.CreateSurfaceMCP},
+	})
+	if err == nil || !strings.Contains(err.Error(), "composer was not observed") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want shared readiness failure", err)
+	}
+	if got := tmuxMock.WaitedHarnesses; !reflect.DeepEqual(got, []string{"mcp-codex-readiness:codex-cli"}) {
+		t.Fatalf("shared readiness waits = %v, want MCP Codex wait", got)
+	}
+	if got := tmuxMock.SentCommands; len(got) != 1 || strings.Contains(got[0], "must not send") {
+		t.Fatalf("commands before readiness failure = %v, want launch only", got)
+	}
+	registered, listErr := store.ListSessions(&dolt.SessionFilter{})
+	if listErr != nil {
+		t.Fatalf("ListSessions: %v", listErr)
+	}
+	if len(registered) != 0 {
+		t.Fatalf("registrations before readiness = %d, want 0", len(registered))
+	}
+	if tmuxMock.Sessions["mcp-codex-readiness"] {
+		t.Fatal("MCP Codex tmux session survived readiness rollback")
+	}
+}
+
+func TestMCPCreateSessionRuntimeCannotBypassSharedAgyReadiness(t *testing.T) {
+	t.Parallel()
+
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.WaitForHarnessReadyError = errors.New("AGY process-backed composer was not observed")
+	store := dolt.NewMockAdapter()
+	runtime := &mcpCreateSessionRuntime{
+		tmux: tmuxMock,
+		lookPath: func(string) (string, error) {
+			return "/usr/local/bin/agy", nil
+		},
+		sleep:            func(time.Duration) {},
+		waitForAgyPrompt: func(context.Context, string, time.Duration) error { return nil },
+	}
+
+	_, err := ops.CreateSessionWithContext(t.Context(), &ops.OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: emptyAgyIdentityTracker{},
+	}, &ops.CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "mcp-agy-readiness", Harness: "agy",
+		Model: "3.5-flash-low", Prompt: "must not send",
+		Caller: ops.CreateSessionCaller{Surface: ops.CreateSurfaceMCP},
+	})
+	if err == nil || !strings.Contains(err.Error(), "process-backed composer was not observed") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want shared AGY readiness failure", err)
+	}
+	if got := tmuxMock.WaitedHarnesses; !reflect.DeepEqual(got, []string{"mcp-agy-readiness:agy"}) {
+		t.Fatalf("shared readiness waits = %v, want MCP AGY wait", got)
+	}
+	if got := tmuxMock.SentCommands; len(got) != 1 || strings.Contains(got[0], "must not send") {
+		t.Fatalf("commands before readiness failure = %v, want launch only", got)
+	}
+	registered, listErr := store.ListSessions(&dolt.SessionFilter{})
+	if listErr != nil {
+		t.Fatalf("ListSessions: %v", listErr)
+	}
+	if len(registered) != 0 {
+		t.Fatalf("registrations before readiness = %d, want 0", len(registered))
+	}
+	if tmuxMock.Sessions["mcp-agy-readiness"] {
+		t.Fatal("MCP AGY tmux session survived readiness rollback")
 	}
 }
 
@@ -231,13 +439,34 @@ func TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation(t *testing.T)
 	cancel()
 
 	err := runtime.Complete(ctx, ops.CreateSessionCompletion{
-		Manifest: &manifest.Manifest{Name: "mcp-agy"}, Prompt: "must not run",
+		Manifest: &manifest.Manifest{Name: "mcp-agy", Harness: "agy"}, Prompt: "must not run",
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Complete error = %v, want context.Canceled", err)
 	}
 	if len(tmuxMock.SentCommands) != 0 {
 		t.Fatalf("commands after cancellation = %v, want none", tmuxMock.SentCommands)
+	}
+}
+
+func TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically(t *testing.T) {
+	t.Parallel()
+
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.InputReadiness = session.InputReadiness{Ready: false, State: "BUSY", PaneID: "%9"}
+	runtime := &mcpCreateSessionRuntime{tmux: tmuxMock}
+	err := runtime.Complete(t.Context(), ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-codex", Harness: "codex-cli"},
+		Prompt:   "must not run",
+	})
+	if err == nil || !strings.Contains(err.Error(), "harness input is BUSY") {
+		t.Fatalf("Complete() error = %v, want atomic BUSY rejection", err)
+	}
+	if got := tmuxMock.AtomicInputChecks; !reflect.DeepEqual(got, []string{"mcp-codex:codex-cli"}) {
+		t.Fatalf("atomic input checks = %v, want MCP Codex revalidation", got)
+	}
+	if len(tmuxMock.SentCommands) != 0 || len(tmuxMock.ExactPaneDeliveries) != 0 {
+		t.Fatalf("startup prompt sent after readiness changed: commands=%v panes=%v", tmuxMock.SentCommands, tmuxMock.ExactPaneDeliveries)
 	}
 }
 
@@ -345,6 +574,8 @@ func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
 		probeStarted: make(chan struct{}),
 		releaseProbe: make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(tmuxClient.releaseProbe) }) }
 	tmuxClient.Sessions["cancel-target"] = true
 	handlerDone := make(chan struct{})
 	opCtx := &ops.OpContext{Storage: store, Tmux: tmuxClient}
@@ -353,6 +584,9 @@ func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
 			return opCtx, func() { close(handlerDone) }, nil
 		})
 	})
+	// Register after the MCP session cleanups so LIFO cleanup releases the
+	// injected blocker before session shutdown can wait for the handler.
+	t.Cleanup(release)
 
 	requestCtx, cancel := context.WithCancel(t.Context())
 	callDone := make(chan error, 1)
@@ -366,14 +600,18 @@ func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
 		})
 		callDone <- err
 	}()
-	<-tmuxClient.probeStarted
+	select {
+	case <-tmuxClient.probeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP kill handler did not reach injected tmux probe")
+	}
 	cancel()
 	select {
 	case <-opCtx.Context.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("MCP handler context did not observe client cancellation")
 	}
-	close(tmuxClient.releaseProbe)
+	release()
 
 	select {
 	case <-handlerDone:
@@ -647,6 +885,56 @@ func TestSendMessageTool_RejectsEmptyMessage(t *testing.T) {
 	callToolExpectError(t, cli, "agm_send_message", map[string]any{"session_id": "some-id"})
 }
 
+func TestSendMessageTool_RoutesPureAPIBeforeTmux(t *testing.T) {
+	storage := dolt.NewMockAdapter()
+	if err := storage.CreateSession(&manifest.Manifest{
+		SessionID: "mcp-api-id",
+		Name:      "mcp-api",
+		Harness:   "openai",
+		Tmux:      manifest.Tmux{SessionName: "must-not-be-probed"},
+	}); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%9"}
+	apiAgent := &mcpAPIProbeAgent{status: agent.StatusActive}
+
+	cli := newTestMCPClient(t, func(server *mcp.Server, _ *Config) {
+		addSendMessageToolWithFactory(server, func() (*ops.OpContext, func(), error) {
+			return &ops.OpContext{
+				Storage: storage,
+				Tmux:    tmuxClient,
+				APIDeliveryFactory: func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
+					return apiAgent, nil
+				},
+			}, func() {}, nil
+		})
+	})
+	result, err := cli.CallTool(t.Context(), &mcp.CallToolParams{
+		Name: "agm_send_message",
+		Arguments: map[string]any{
+			"session_id": "mcp-api-id",
+			"message":    "API delivery",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(agm_send_message): %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("agm_send_message result = %s", extractText(t, result))
+	}
+	if len(apiAgent.sent) != 1 || apiAgent.sent[0].Content != "API delivery" {
+		t.Fatalf("API messages = %#v, want one delivery", apiAgent.sent)
+	}
+	if len(apiAgent.readinessContexts) != 1 {
+		t.Fatalf("API readiness contexts = %d, want one context-aware check", len(apiAgent.readinessContexts))
+	}
+	if len(tmuxClient.AtomicInputChecks) != 0 || len(tmuxClient.ExactPaneDeliveries) != 0 || len(tmuxClient.SentCommands) != 0 {
+		t.Fatalf("pure API MCP delivery touched tmux: checks=%v panes=%v commands=%v",
+			tmuxClient.AtomicInputChecks, tmuxClient.ExactPaneDeliveries, tmuxClient.SentCommands)
+	}
+}
+
 func TestLifecycleTools_RegisterUnderCorrectNames(t *testing.T) {
 	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) {
 		addCreateSessionTool(s, c)
@@ -676,7 +964,7 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 		t.Fatal("CreateSessionInput.Harness field missing")
 	}
 	tag := field.Tag.Get("jsonschema")
-	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "gemini-cli"} {
+	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli", "gemini-cli"} {
 		if !strings.Contains(tag, want) {
 			t.Errorf("Harness jsonschema tag %q missing %q", tag, want)
 		}

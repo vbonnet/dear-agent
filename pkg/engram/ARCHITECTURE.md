@@ -90,7 +90,7 @@ The engram package provides parsing and representation of .ai.md memory trace fi
 ┌──────────────────────────────────────────┴──────────┐
 │         Backward Compatibility Layer                │
 │                                                      │
-│  If encoding_strength == 0.0 → Set to 1.0          │
+│  If encoding_strength is absent → Set to 1.0       │
 │  If created_at.IsZero() → Set from file mtime      │
 │  retrieval_count defaults to 0 (zero value OK)     │
 │  last_accessed defaults to zero (never accessed)   │
@@ -142,7 +142,7 @@ func (p *Parser) ParseBytes(path string, data []byte) (*Engram, error)
     → Calls splitFrontmatter to extract frontmatter and content
     → Unmarshals frontmatter YAML into Frontmatter struct
     → Applies backward compatibility defaults:
-        - encoding_strength: 1.0 if zero
+        - encoding_strength: 1.0 if absent
         - created_at: file mtime if zero (requires os.Stat on path)
     → Returns Engram{Path, Frontmatter, Content}
 ```
@@ -213,7 +213,7 @@ type Frontmatter struct {
     Modified    time.Time `yaml:"modified,omitempty"`     // Last edit timestamp
 
     // Memory strength tracking (for ecphory prioritization)
-    EncodingStrength float64   `yaml:"encoding_strength,omitempty"`  // 0.0-2.0
+    EncodingStrength float64   `yaml:"encoding_strength"`  // 0.0-2.0
     RetrievalCount   int       `yaml:"retrieval_count,omitempty"`    // Usage counter
     CreatedAt        time.Time `yaml:"created_at,omitempty"`          // Creation time
     LastAccessed     time.Time `yaml:"last_accessed,omitempty"`       // Last retrieval
@@ -246,7 +246,7 @@ type Frontmatter struct {
 - **Why separate Modified and CreatedAt?** → Modified is manual edit tracking, CreatedAt is immutable first-creation timestamp
 
 **Backward Compatibility Defaults** (applied in ParseBytes):
-- `EncodingStrength == 0.0` → Set to `1.0` (neutral quality)
+- Missing `encoding_strength` → Set to `1.0` (neutral quality); explicit zero remains valid
 - `CreatedAt.IsZero()` → Set from file mtime (best available timestamp)
 - `RetrievalCount == 0` → Leave as 0 (zero value is correct)
 - `LastAccessed.IsZero()` → Leave as zero (never accessed)
@@ -319,7 +319,7 @@ Parser.ParseBytes():
     yaml.Unmarshal(frontmatter, &fm) → Frontmatter struct
     ↓
 Backward Compatibility:
-    fm.EncodingStrength == 0.0 → Set to 1.0
+    encoding_strength absent → Set to 1.0
     fm.CreatedAt.IsZero() → os.Stat → mtime → 2024-11-27
     ↓
 Parser.ParseBytes():

@@ -17,3 +17,8 @@ output "ruleset_id" {
   description = "ID of the branch-protection ruleset."
   value       = github_repository_ruleset.branch_protection.id
 }
+
+output "claude_review_enabled" {
+  description = "Whether the Claude Code PR-review workflow + secret are installed on this repo."
+  value       = var.enable_claude_review
+}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,39 @@ func TestEncodeDashSubstitution(t *testing.T) {
 				t.Errorf("EncodeDashSubstitution(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestGetPiHistoryPathsUsesExactNativeHeader(t *testing.T) {
+	dir := t.TempDir()
+	match := filepath.Join(dir, "match.jsonl")
+	other := filepath.Join(dir, "newer.jsonl")
+	if err := os.WriteFile(match, []byte(`{"type":"session","id":"pi-history","cwd":"/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte(`{"type":"session","id":"different","cwd":"/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	location, err := GetPiHistoryPaths(dir, "pi-history", match, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !location.Exists || len(location.Paths) != 1 || location.Paths[0] != match {
+		t.Fatalf("Pi location = %#v", location)
+	}
+	if _, err := GetPiHistoryPaths(dir, "pi-history", other, false); err == nil {
+		t.Fatal("mismatched recorded transcript path was trusted")
+	}
+}
+
+func TestGetPiHistoryPathsExplainsDeferredPersistence(t *testing.T) {
+	_, err := GetPiHistoryPaths(t.TempDir(), "pi-unpersisted", "", true)
+	var locationErr *LocationError
+	if !errors.As(err, &locationErr) {
+		t.Fatalf("error = %v, want LocationError", err)
+	}
+	if locationErr.Code != "PI_TRANSCRIPT_NOT_FOUND" || !strings.Contains(locationErr.Suggestion, "assistant message") {
+		t.Fatalf("location error = %#v", locationErr)
 	}
 }
 

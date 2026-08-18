@@ -3,7 +3,7 @@
 //
 // The loader is intentionally tolerant of missing fields — a repo
 // with no audits: block runs the package defaults; a repo with
-// audits: {} runs nothing. This matches ADR-011 §5.
+// audits: {} runs nothing.
 //
 // The loader does NOT register checks or apply the schema; that is
 // the caller's job. It only parses the file and resolves cadence
@@ -26,23 +26,23 @@ import (
 // routing) read their own keys from the same file. yaml.v3 ignores
 // unknown keys by default so the structs can stay narrow.
 type File struct {
-	Version int             `yaml:"version"`
-	Repo    string          `yaml:"repo"`
-	Audits  *AuditsSection  `yaml:"audits,omitempty"`
+	Version int            `yaml:"version"`
+	Repo    string         `yaml:"repo"`
+	Audits  *AuditsSection `yaml:"audits,omitempty"`
 }
 
-// AuditsSection mirrors the audits: block from ADR-011 §5.
+// AuditsSection mirrors the repository's audits: configuration block.
 type AuditsSection struct {
-	SeverityPolicy map[string]SeverityRule       `yaml:"severity-policy,omitempty"`
-	Schedule       map[string][]ScheduledCheck   `yaml:"schedule,omitempty"`
-	Trees          []Tree                        `yaml:"trees,omitempty"`
+	SeverityPolicy map[string]SeverityRule     `yaml:"severity-policy,omitempty"`
+	Schedule       map[string][]ScheduledCheck `yaml:"schedule,omitempty"`
+	Trees          []Tree                      `yaml:"trees,omitempty"`
 }
 
 // SeverityRule mirrors the per-severity policy block.
 type SeverityRule struct {
-	FailRun     bool   `yaml:"fail-run"`
-	Remediate   string `yaml:"remediate,omitempty"`
-	Notify      bool   `yaml:"notify,omitempty"`
+	FailRun   bool   `yaml:"fail-run"`
+	Remediate string `yaml:"remediate,omitempty"`
+	Notify    bool   `yaml:"notify,omitempty"`
 }
 
 // ScheduledCheck is one row under audits.schedule.<cadence>:.
@@ -53,9 +53,9 @@ type ScheduledCheck struct {
 
 // Tree is one entry under audits.trees: — used by polyglot repos.
 type Tree struct {
-	Path          string           `yaml:"path"`
-	ChecksAdd     []ScheduledCheck `yaml:"checks-add,omitempty"`
-	ChecksRemove  []ScheduledCheck `yaml:"checks-remove,omitempty"`
+	Path         string           `yaml:"path"`
+	ChecksAdd    []ScheduledCheck `yaml:"checks-add,omitempty"`
+	ChecksRemove []ScheduledCheck `yaml:"checks-remove,omitempty"`
 }
 
 // Load reads .dear-agent.yml from the given repo root. Returns nil
@@ -82,11 +82,11 @@ func Load(repoRoot string) (*File, error) {
 
 // BuildPlan converts a loaded File into an audit.Plan for the given
 // cadence. Resolution order:
-//   1. Start from the schedule[cadence] checks (or registry defaults
-//      when schedule is missing for the cadence).
-//   2. For each tree under trees:, apply checks-add and checks-remove
-//      as overrides for that tree.
-//   3. Repos without trees: get a single TreePlan rooted at repoRoot.
+//  1. Start from the schedule[cadence] checks (or registry defaults
+//     when schedule is missing for the cadence).
+//  2. For each tree under trees:, apply checks-add and checks-remove
+//     as overrides for that tree.
+//  3. Repos without trees: get a single TreePlan rooted at repoRoot.
 //
 // triggeredBy is recorded on the audit_runs row.
 func BuildPlan(f *File, repoRoot string, cadence audit.Cadence, registry *audit.Registry, triggeredBy string) (audit.Plan, error) {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestSplitNonEmpty(t *testing.T) {
@@ -158,9 +160,10 @@ func TestFindAffectedPackages_Integration(t *testing.T) {
 	dir := t.TempDir()
 
 	// Initialize git repo.
-	run(t, dir, "git", "init")
-	run(t, dir, "git", "config", "user.email", "test@test.com")
-	run(t, dir, "git", "config", "user.name", "Test")
+	gitRun(t, dir, "init")
+	gittest.HardenRepo(t, dir)
+	gitRun(t, dir, "config", "user.email", "test@test.com")
+	gitRun(t, dir, "config", "user.name", "Test")
 
 	// Create module with three packages:
 	//   root (main) -> pkg/a -> pkg/b
@@ -195,18 +198,18 @@ func C() string { return "c" }
 `)
 
 	// Commit everything on main.
-	run(t, dir, "git", "add", "-A")
-	run(t, dir, "git", "commit", "-m", "initial")
-	run(t, dir, "git", "branch", "-M", "main")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "initial")
+	gitRun(t, dir, "branch", "-M", "main")
 
 	// Create feature branch and modify pkg/b.
-	run(t, dir, "git", "checkout", "-b", "feature")
+	gitRun(t, dir, "checkout", "-b", "feature")
 	writeFile(t, filepath.Join(dir, "pkg", "b", "b.go"), `package b
 
 func B() string { return "b-modified" }
 `)
-	run(t, dir, "git", "add", "-A")
-	run(t, dir, "git", "commit", "-m", "modify pkg/b")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "modify pkg/b")
 
 	// Find affected packages.
 	affected, err := FindAffectedPackages(dir, "main")
@@ -254,13 +257,8 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// run executes a command in the given directory.
-func run(t *testing.T, dir string, name string, args ...string) {
+// gitRun executes Git in the hermetic test sandbox.
+func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
-	}
+	gittest.Run(t, dir, args...)
 }

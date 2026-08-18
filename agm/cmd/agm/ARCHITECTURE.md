@@ -1,9 +1,9 @@
 # AGM CLI - Architecture Documentation
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version:** 1.0
-**Last Updated:** 2026-02-11
+**Last Updated:** 2026-07-27
 
 ---
 
@@ -138,13 +138,14 @@ This enables:
 ### Component Layers
 
 #### Layer 1: Command Layer (Cobra)
-- **Responsibility**: Parse commands, validate flags, invoke business logic
+- **Responsibility**: Parse commands, validate flags, invoke shared operations,
+  render returned facts, and own interactive terminal attachment
 - **Components**: `rootCmd`, `newCmd`, `resumeCmd`, `sessionCmd`, `agentCmd`, etc.
 - **Pattern**: Each command is a self-contained `*cobra.Command`
 
 #### Layer 2: Business Logic Layer (internal packages)
-- **Responsibility**: Session lifecycle, agent routing, UUID detection
-- **Components**: `internal/session`, `internal/agent`, `internal/detection`
+- **Responsibility**: Session lifecycle transactions, agent routing, UUID detection
+- **Components**: `internal/ops`, `internal/session`, `internal/agent`, `internal/detection`
 - **Pattern**: Service objects with clear interfaces
 
 #### Layer 3: Integration Layer (tmux, manifest)
@@ -169,7 +170,7 @@ cmd/agm/
 ├── version.go              # Version command
 │
 ├── new.go                  # Create new session
-├── resume.go               # Resume existing session
+├── resume.go               # Resolve resume input, call shared operation, attach
 ├── list.go                 # List sessions
 ├── search.go               # Search sessions
 │
@@ -451,22 +452,25 @@ Resolve Identifier
   ├─ Fuzzy name match?
   └─ Interactive picker
   ↓
-Load Manifest
+Read and validate optional prompt-file input
   ↓
-Validate Session State
-  ├─ Check lifecycle (error if archived)
-  ├─ Check agent availability (warn if unavailable)
-  └─ Health check (worktree exists, tmux state)
+Call internal/ops.ResumeSession with stable ID
   ↓
-Create/Attach Tmux Session
+Shared operation acquires stable-ID lifecycle lock
   ↓
-Send 'cd <worktree>' to Tmux
+Reload session and classify lifecycle, worktree, and tmux health
   ↓
-Send '<agent> --resume <uuid>' to Tmux
+Preserve an existing runtime or create one exact tmux identity
   ↓
-Update Manifest Timestamp
+Build native resume launch through the private executor where required
   ↓
-Attach to Tmux Session
+Wait for native process/composer readiness
+  ↓
+Commit canonical identity, mode, optional prompt, and activity
+  ↓
+Return typed facts and release the lock
+  ↓
+Render results and optionally attach to the exact tmux target
 ```
 
 ### Configuration Loading Flow
@@ -509,9 +513,19 @@ The CLI integrates with tmux through the `internal/tmux` package:
 // Create or attach to tmux session
 tmux.CreateOrAttach(sessionName)
 
-// Send commands to tmux pane
+// Send ordinary commands to the tmux pane
 tmux.SendKeys(sessionName, "cd /path/to/project")
-tmux.SendKeys(sessionName, "claude --resume uuid")
+
+// Resume through the shared lifecycle owner. It selects any required private
+// executor and returns before interactive attachment.
+result, err := ops.ResumeSession(opCtx, &ops.ResumeSessionRequest{
+    SessionID: stableSessionID,
+    Prompt: prompt,
+})
+if err != nil {
+    return err
+}
+return finishResumeAttachment(ctx, tmuxAdapter, result)
 
 // Check tmux session status
 status := tmux.SessionExists(sessionName)
@@ -551,25 +565,32 @@ defer unlock()
 
 ### Agent Integration
 
-The CLI selects and starts agents via `internal/agent`:
+The CLI uses `internal/agent` for immutable harness discovery and concrete
+adapter metadata. Shared lifecycle transactions are owned by `internal/ops`;
+there is no universal lifecycle facade on `agent.Harness`:
 
 ```go
-// Get agent by name
-agent, err := agent.Get(agentName)
+// Discover immutable metadata for a known harness.
+harness, err := agent.GetHarness(harnessName)
+if err != nil {
+    return err
+}
+capabilities := harness.Capabilities()
+health := agent.CheckHarnessHealth(harnessName)
 
-// Check availability (API keys, CLI installation)
-available := agent.IsAvailable()
-
-// Start agent CLI
-err := agent.Start(ctx, sessionID, &agent.StartOptions{
-    WorkingDir: projectDir,
-    Resume:     true,
-    UUID:       claudeUUID,
+// Run the cross-surface creation transaction through shared operations.
+result, err := ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
+    Cwd:     projectDir,
+    Harness: harnessName,
+    Prompt:  initialPrompt,
 })
 
-// Get command translator
-translator := agent.GetTranslator()
-err := translator.RenameSession(ctx, sessionID, newName)
+// Use a concrete adapter only for a harness-specific compatibility operation.
+gemini, err := agent.NewGeminiCLIAdapter(store)
+err = gemini.ExecuteCommand(agent.Command{
+    Type:   agent.CommandRename,
+    Params: map[string]interface{}{"session_id": sessionID, "name": newName},
+})
 ```
 
 ### UI Integration
@@ -886,12 +907,13 @@ Multiple AGM commands can run concurrently:
 ```
 Terminal 1: agm session list       (reads manifests)
 Terminal 2: agm new my-session     (writes new manifest)
-Terminal 3: agm resume other       (reads + updates manifest)
+Terminal 3: agm resume other       (stable-ID locked shared transaction)
 ```
 
 **Safety Guarantees:**
 - Manifest writes are atomic (temp file + rename)
 - Manifest locks prevent concurrent modifications to same file
+- Resume acquires the stable session-ID lifecycle lock before mutable reads
 - Tmux locks prevent concurrent tmux server state changes
 - No global command lock (each command independent)
 
@@ -933,7 +955,7 @@ Terminal 3: agm resume other       (reads + updates manifest)
 - [AGM CLI Specification](SPEC.md)
 - [ADR-001: CLI Command Structure](ADR-001-cli-command-structure.md)
 - [ADR-002: Smart Identifier Resolution](ADR-002-smart-identifier-resolution.md)
-- [ADR-003: Dependency Injection Pattern](ADR-003-dependency-injection.md)
+- [ADR-006: Test Isolation Enforcement](ADR-006-test-isolation-enforcement.md)
 - [Cobra CLI Framework](https://github.com/spf13/cobra)
 - [Huh TUI Library](https://github.com/charmbracelet/huh)
 - [AGM System Architecture](../../docs/ARCHITECTURE.md)

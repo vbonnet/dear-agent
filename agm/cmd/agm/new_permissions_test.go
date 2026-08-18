@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
@@ -284,6 +286,9 @@ func TestPermissionsAllowFlagRegistered(t *testing.T) {
 	}
 	if flag.Value.Type() != "stringSlice" {
 		t.Errorf("--permissions-allow should be stringSlice type, got %q", flag.Value.Type())
+	}
+	if !strings.Contains(flag.Usage, "shared policy") || strings.Contains(flag.Usage, "written to project .claude") {
+		t.Errorf("--permissions-allow usage is not harness-neutral: %q", flag.Usage)
 	}
 }
 
@@ -622,19 +627,21 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 		launch: func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 			return ops.CreateSessionLaunchResult{}, nil
 		},
+		bootstrapAgyIdentity: func(context.Context, ops.AgyCreateIdentityBootstrap) error { return nil },
 		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
 			got = completion.Manifest
 			return nil
 		},
 	}
 	opCtx := &ops.OpContext{
-		Tmux: session.NewMockTmux(), CreationRuntime: runtime,
+		Tmux: session.NewMockTmux(), Storage: dolt.NewMockAdapter(), CreationRuntime: runtime,
 	}
 	if agent.NormalizeHarnessName(harness) == "agy" {
 		opCtx.AgyCreateIdentityTracker = permissionManifestAgyIdentityTracker{}
 	}
 	_, err := ops.CreateSessionWithContext(context.Background(), opCtx, &ops.CreateSessionRequest{
 		Cwd:                    t.TempDir(),
+		Prompt:                 "fixture startup prompt",
 		Title:                  "session-name",
 		Model:                  model,
 		Harness:                harness,

@@ -74,6 +74,7 @@ func testProviderLifecycle(t *testing.T, provider sandbox.Provider) {
 		sb, err := provider.Create(ctx, sandbox.SandboxRequest{
 			SessionID:    "integration-test-1",
 			LowerDirs:    []string{lowerDir},
+			WorkingDir:   lowerDir,
 			WorkspaceDir: workspaceDir,
 			Secrets: map[string]string{
 				"TEST_SECRET": "test_value",
@@ -85,8 +86,8 @@ func testProviderLifecycle(t *testing.T, provider sandbox.Provider) {
 		// Verify sandbox structure
 		assert.Equal(t, "integration-test-1", sb.ID)
 		assert.NotEmpty(t, sb.MergedPath)
+		assert.NotEmpty(t, sb.WorkingDir)
 		assert.NotEmpty(t, sb.UpperPath)
-		assert.NotEmpty(t, sb.WorkPath)
 		assert.NotEmpty(t, sb.Type)
 		assert.False(t, sb.CreatedAt.IsZero())
 
@@ -94,9 +95,10 @@ func testProviderLifecycle(t *testing.T, provider sandbox.Provider) {
 		_, err = os.Stat(sb.MergedPath)
 		assert.NoError(t, err, "Merged path should exist")
 
-		// Verify test file is visible in merged view
-		mergedTestFile := filepath.Join(sb.MergedPath, "test.txt")
-		content, err := os.ReadFile(mergedTestFile)
+		// Verify the requested repository is visible from the canonical harness
+		// directory, regardless of provider-specific workspace topology.
+		mappedTestFile := filepath.Join(sb.WorkingDir, "test.txt")
+		content, err := os.ReadFile(mappedTestFile)
 		if err == nil {
 			assert.Equal(t, "test content", string(content))
 		}

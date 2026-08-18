@@ -58,6 +58,33 @@ func TestResolveNamedHistoryLocation_AgyRequiresConversationID(t *testing.T) {
 	}
 }
 
+func TestResolveNamedHistoryLocation_PiUsesManifestNativeID(t *testing.T) {
+	m := &manifest.Manifest{
+		Name: "pi-history", Harness: "pi-cli",
+		Pi: &manifest.Pi{SessionID: "pi-native-history", SessionDir: "/tmp/pi-sessions"},
+	}
+	store := &fakeHistoryPathSessionStore{resolved: m}
+
+	resolved, identifier, err := resolveNamedHistoryLocation("pi-history", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != m || identifier != "pi-native-history" || store.listCalls != 0 {
+		t.Fatalf("resolved manifest/id/listCalls = %p/%q/%d", resolved, identifier, store.listCalls)
+	}
+}
+
+func TestResolveNamedHistoryLocation_PiRequiresCompleteIdentity(t *testing.T) {
+	store := &fakeHistoryPathSessionStore{resolved: &manifest.Manifest{Name: "pi-history", Harness: "pi-cli", Pi: &manifest.Pi{SessionID: "pi-native-history"}}}
+	_, _, err := resolveNamedHistoryLocation("pi-history", store)
+	if err == nil || !strings.Contains(err.Error(), "incomplete native identity") {
+		t.Fatalf("error = %v, want incomplete Pi identity", err)
+	}
+	if store.listCalls != 0 {
+		t.Fatalf("missing Pi identity entered Claude discovery %d time(s)", store.listCalls)
+	}
+}
+
 func TestResolveNamedHistoryLocation_PropagatesManifestResolutionFailure(t *testing.T) {
 	wantErr := errors.New("fixture storage unavailable")
 	store := &fakeHistoryPathSessionStore{resolveErr: wantErr}

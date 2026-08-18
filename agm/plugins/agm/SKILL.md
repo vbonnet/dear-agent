@@ -1,7 +1,7 @@
 ---
 name: agm
-description: Manage AGM sessions across Claude Code, Codex CLI, AGY, and OpenCode. Use when an agent needs to create, associate, list, inspect, resume, message, archive, or troubleshoot AGM-managed sessions; when a user mentions AGM session lifecycle; or when another workflow needs current session state. Do not use for task tracking or orchestration policy.
-content-hash: 89d78fc01ea41ee9e12901f51eb442c9ae8cf164d8051aef6a0b85b927d3b075
+description: Manage AGM sessions across Claude Code, Codex CLI, AGY, OpenCode, and Pi. Use when an agent needs to create, associate, list, inspect, resume, message, archive, or troubleshoot AGM-managed sessions; when a user mentions AGM session lifecycle; or when another workflow needs current session state. Do not use for task tracking or orchestration policy.
+content-hash: af0f3db9487a23f4c007c2f30f61d72cb0e5be1c46cd9fe13bca093bc48aecb3
 ---
 
 # AGM session management
@@ -28,7 +28,7 @@ For the richer Claude plugin workflows, read only the relevant file under
 
 ## Preserve these invariants
 
-- Treat Claude Code, Codex CLI, AGY, and OpenCode as active harnesses. Mention
+- Treat Claude Code, Codex CLI, AGY, OpenCode, and Pi as active harnesses. Mention
   Gemini only as deprecated compatibility when an existing command accepts it.
 - Pass user-controlled message or wiki content through a file input. Never
   interpolate it into shell syntax. For send, create a unique

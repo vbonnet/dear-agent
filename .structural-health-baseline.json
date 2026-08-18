@@ -1,5 +1,6 @@
 {
-  "version": 1,
+  "version": 2,
+  "scanner_version": 2,
   "findings": {
     "dead-package": [
       "github.com/vbonnet/dear-agent/agm/internal/a2a/artifacts",
@@ -16,15 +17,14 @@
       "github.com/vbonnet/dear-agent/agm/internal/a2a/wayfinder",
       "github.com/vbonnet/dear-agent/agm/internal/agents",
       "github.com/vbonnet/dear-agent/agm/internal/api",
-      "github.com/vbonnet/dear-agent/agm/internal/backend/restbackend",
       "github.com/vbonnet/dear-agent/agm/internal/command",
       "github.com/vbonnet/dear-agent/agm/internal/engram",
       "github.com/vbonnet/dear-agent/agm/internal/evaluation",
       "github.com/vbonnet/dear-agent/agm/internal/hooks",
-      "github.com/vbonnet/dear-agent/agm/internal/manager/dockerbackend",
+      "github.com/vbonnet/dear-agent/agm/internal/monitor/tmux",
       "github.com/vbonnet/dear-agent/agm/internal/plugin",
-      "github.com/vbonnet/dear-agent/agm/internal/procguard",
       "github.com/vbonnet/dear-agent/agm/internal/quality",
+      "github.com/vbonnet/dear-agent/agm/internal/search",
       "github.com/vbonnet/dear-agent/agm/internal/sentinel/intake",
       "github.com/vbonnet/dear-agent/agm/internal/skipdetect",
       "github.com/vbonnet/dear-agent/agm/internal/terminal",
@@ -39,9 +39,9 @@
       "github.com/vbonnet/dear-agent/engram/hooks-bin/internal/pivot",
       "github.com/vbonnet/dear-agent/engram/hooks-bin/internal/worktree",
       "github.com/vbonnet/dear-agent/engram/hooks/builtin",
-      "github.com/vbonnet/dear-agent/engram/internal/benchmark",
       "github.com/vbonnet/dear-agent/engram/internal/dashboard",
       "github.com/vbonnet/dear-agent/engram/internal/detectors",
+      "github.com/vbonnet/dear-agent/engram/internal/document",
       "github.com/vbonnet/dear-agent/engram/internal/enforcement",
       "github.com/vbonnet/dear-agent/engram/internal/memory",
       "github.com/vbonnet/dear-agent/engram/internal/scanners",
@@ -52,7 +52,6 @@
       "github.com/vbonnet/dear-agent/engram/internal/tokens",
       "github.com/vbonnet/dear-agent/engram/internal/tokens/tokenizers",
       "github.com/vbonnet/dear-agent/engram/internal/tokentracking",
-      "github.com/vbonnet/dear-agent/engram/internal/tracking",
       "github.com/vbonnet/dear-agent/internal/baseline",
       "github.com/vbonnet/dear-agent/internal/telemetry/enrichment",
       "github.com/vbonnet/dear-agent/internal/telemetry/errors",
@@ -63,13 +62,11 @@
       "github.com/vbonnet/dear-agent/pkg/hitl/github",
       "github.com/vbonnet/dear-agent/pkg/llm",
       "github.com/vbonnet/dear-agent/pkg/llm/delegation",
-      "github.com/vbonnet/dear-agent/pkg/notify",
       "github.com/vbonnet/dear-agent/pkg/plugin",
       "github.com/vbonnet/dear-agent/pkg/progress",
       "github.com/vbonnet/dear-agent/pkg/security",
       "github.com/vbonnet/dear-agent/pkg/signals",
       "github.com/vbonnet/dear-agent/pkg/source/registry",
-      "github.com/vbonnet/dear-agent/pkg/synchub",
       "github.com/vbonnet/dear-agent/pkg/validation",
       "github.com/vbonnet/dear-agent/pkg/validation/engram",
       "github.com/vbonnet/dear-agent/pkg/workspace/dolt",
@@ -77,27 +74,62 @@
       "github.com/vbonnet/dear-agent/tools/devlog/internal/output",
       "github.com/vbonnet/dear-agent/tools/dod-enforcer",
       "github.com/vbonnet/dear-agent/tools/schema-registry/internal/mcp",
-      "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/parser",
-      "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator",
-      "github.com/vbonnet/dear-agent/wayfinder/internal/phaseisolation",
+      "github.com/vbonnet/dear-agent/wayfinder/internal/project",
+      "github.com/vbonnet/dear-agent/wayfinder/internal/tracker",
       "github.com/vbonnet/dear-agent/wayfinder/lib/presets"
     ],
     "doc-path": [],
     "file-size": [
-      "agm/cmd/agm/send_msg.go",
-      "agm/internal/agent/openai_adapter_test.go",
-      "agm/internal/session/context_detector_test.go",
-      "agm/internal/ui/table.go",
-      "agm/test/performance/eventbus_load_test.go",
-      "cmd/vroom-dispatch/main.go",
-      "engram/cmd/engram/cmd/validate_integration_test.go",
-      "engram/hooks-bin/internal/validator/validator_bdd_test.go",
-      "engram/internal/config/loader_test.go",
-      "engram/internal/health/checks.go",
-      "pkg/llm/provider/provider_test.go",
-      "pkg/validator/wayfinderartifact_test.go",
-      "pkg/workflow/runner.go",
-      "wayfinder/cmd/wayfinder-session/internal/integration/wayfinder_v2_test.go"
+      "agm/cmd/agm-mcp-server/tools_test.go (1025 lines)",
+      "agm/cmd/agm/archive_test.go (1579 lines)",
+      "agm/cmd/agm/new.go (1097 lines)",
+      "agm/cmd/agm/send_msg.go (1191 lines)",
+      "agm/cmd/agm/supervisor.go (1056 lines)",
+      "agm/cmd/agm/supervisor_test.go (1004 lines)",
+      "agm/internal/agent/agy_adapter_test.go (1376 lines)",
+      "agm/internal/agent/openai_adapter_test.go (2405 lines)",
+      "agm/internal/codexhooks/verify.go (2881 lines)",
+      "agm/internal/dolt/adapter_test.go (1032 lines)",
+      "agm/internal/dolt/sessions.go (1709 lines)",
+      "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)",
+      "agm/internal/harnessexec/exec.go (1291 lines)",
+      "agm/internal/harnessexec/handoff.go (1733 lines)",
+      "agm/internal/harnessexec/handoff_test.go (2194 lines)",
+      "agm/internal/ops/session_create.go (1219 lines)",
+      "agm/internal/ops/session_create_test.go (1962 lines)",
+      "agm/internal/ops/session_mutation_test.go (1143 lines)",
+      "agm/internal/ops/session_resume_test.go (1323 lines)",
+      "agm/internal/sentinel/daemon/monitor.go (1036 lines)",
+      "agm/internal/session/context_detector_test.go (1432 lines)",
+      "agm/internal/tmux/liveness.go (1027 lines)",
+      "agm/internal/tmux/prompt_detector.go (1751 lines)",
+      "agm/internal/tmux/prompt_detector_test.go (1201 lines)",
+      "agm/internal/tmux/readiness.go (1044 lines)",
+      "agm/internal/tmux/tmux.go (1283 lines)",
+      "agm/internal/tmux/tmux_test.go (1109 lines)",
+      "agm/internal/ui/table.go (1054 lines)",
+      "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
+      "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
+      "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
+      "agm/test/performance/eventbus_load_test.go (1061 lines)",
+      "cmd/ai-review/spec_contract.go (3119 lines)",
+      "cmd/ai-review/spec_contract_test.go (2398 lines)",
+      "cmd/vroom-dispatch-direct/main.go (1173 lines)",
+      "cmd/vroom-dispatch/main.go (1618 lines)",
+      "cmd/vroom-dispatch/main_test.go (1240 lines)",
+      "engram/hooks-bin/internal/validator/validator_bdd_test.go (1009 lines)",
+      "engram/internal/health/checks.go (1461 lines)",
+      "internal/safegit/merge.go (1228 lines)",
+      "pkg/headerlint/headerlint_test.go (1334 lines)",
+      "pkg/instructionlint/instructionlint_test.go (1817 lines)",
+      "pkg/instructionlint/segments.go (1988 lines)",
+      "pkg/llm/provider/provider_test.go (1307 lines)",
+      "pkg/override/override.go (1036 lines)",
+      "pkg/workflow/runner.go (1296 lines)",
+      "tests/githooks/post_merge_test.go (1452 lines)",
+      "tools/specaudit/main.go (6090 lines)",
+      "tools/specaudit/main_test.go (3756 lines)",
+      "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
     ],
     "goroutine-recover": [
       "agm/cmd/agm-bus/main.go:190",
@@ -105,40 +137,599 @@
       "agm/cmd/agm-bus/main.go:329",
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
-      "agm/cmd/agm-statusline/main.go:262",
+      "agm/cmd/agm/archive.go:902",
+      "agm/cmd/agm/watch.go:110",
+      "agm/cmd/agm/watch.go:111",
       "agm/cmd/agm/watch.go:112",
-      "agm/cmd/agm/watch.go:113",
-      "agm/cmd/agm/watch.go:114",
-      "agm/cmd/agm/watch.go:251",
-      "agm/cmd/agm/watch_stalled.go:102",
+      "agm/cmd/override-audit-launchdaemon-installer/main.go:47",
+      "agm/cmd/override-audit-systemd-installer/main.go:47",
       "agm/hooks/cmd/posttool-cost-guard/main.go:85",
       "agm/hooks/cmd/sessionstart-chezmoi-drift/main.go:22",
-      "agm/internal/backend/restbackend/process.go:109",
       "agm/internal/bus/server.go:117",
       "agm/internal/bus/server.go:137",
       "agm/internal/bus/server.go:147",
+      "agm/internal/circuitbreaker/providers.go:161",
+      "agm/internal/harnessexec/handoff.go:42",
+      "agm/internal/harnessexec/handoff.go:815",
+      "agm/internal/harnessexec/handoff.go:874",
       "agm/internal/monitor/opencode/publisher.go:91",
       "agm/internal/monitor/opencode/sse_adapter.go:118",
       "agm/internal/monitor/opencode/sse_adapter.go:93",
-      "agm/internal/ops/workflow.go:230",
+      "agm/internal/ops/workflow.go:229",
       "agm/internal/sentinel/daemon/loop_monitor.go:300",
       "agm/internal/tmux/control.go:260",
       "agm/internal/tmux/output_watcher.go:151",
-      "agm/workflowbus/bridge.go:140"
+      "agm/workflowbus/bridge.go:140",
+      "cmd/test-affected/main.go:91",
+      "internal/sandbox/process_monitor.go:219"
     ],
     "raw-mem-gate": [],
     "zero-test": [
-      "github.com/vbonnet/dear-agent/cmd/agm-job",
-      "github.com/vbonnet/dear-agent/cmd/fd-pressure",
-      "github.com/vbonnet/dear-agent/cmd/mergeloop",
-      "github.com/vbonnet/dear-agent/cmd/src-health",
+      "github.com/vbonnet/dear-agent/cmd/merge-velocity",
       "github.com/vbonnet/dear-agent/cmd/workflow-cancel",
       "github.com/vbonnet/dear-agent/cmd/workflow-list",
       "github.com/vbonnet/dear-agent/cmd/workflow-logs",
       "github.com/vbonnet/dear-agent/pkg/validation",
-      "github.com/vbonnet/dear-agent/tools/devlog",
-      "github.com/vbonnet/dear-agent/tools/skill-lint",
-      "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator"
+      "github.com/vbonnet/dear-agent/tools/devlog"
     ]
-  }
+  },
+  "transitions": [
+    {
+      "previous_baseline_sha256": "fd91f139eac97d7b67ff3ed7a8f78d93dc21e5744bdebebe383ba08c524a21d4",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/agm/internal/monitor/tmux",
+          "github.com/vbonnet/dear-agent/agm/internal/search",
+          "github.com/vbonnet/dear-agent/engram/internal/document",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/corpus",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/project",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/tracker"
+        ],
+        "doc-path": [
+          "internal/ops.ResumeSession"
+        ],
+        "file-size": [
+          "agm/cmd/agm-mcp-server/tools_test.go",
+          "agm/cmd/agm/archive_test.go",
+          "agm/cmd/agm/new.go",
+          "agm/cmd/agm/supervisor.go",
+          "agm/cmd/agm/supervisor_test.go",
+          "agm/internal/agent/agy_adapter_test.go",
+          "agm/internal/codexhooks/verify.go",
+          "agm/internal/dolt/adapter_test.go",
+          "agm/internal/dolt/sessions.go",
+          "agm/internal/dolt/sessions_sqlite_test.go",
+          "agm/internal/harnessexec/exec.go",
+          "agm/internal/harnessexec/handoff.go",
+          "agm/internal/harnessexec/handoff_test.go",
+          "agm/internal/ops/session_create.go",
+          "agm/internal/ops/session_create_test.go",
+          "agm/internal/ops/session_mutation_test.go",
+          "agm/internal/ops/session_resume_test.go",
+          "agm/internal/sentinel/daemon/monitor.go",
+          "agm/internal/tmux/liveness.go",
+          "agm/internal/tmux/prompt_detector.go",
+          "agm/internal/tmux/tmux.go",
+          "agm/internal/tmux/tmux_test.go",
+          "agm/test/bdd/steps/harness_parity_steps.go",
+          "cmd/vroom-dispatch-direct/main.go",
+          "cmd/vroom-dispatch/main_test.go",
+          "pkg/headerlint/headerlint_test.go",
+          "pkg/instructionlint/instructionlint_test.go",
+          "pkg/instructionlint/segments.go",
+          "pkg/override/override.go",
+          "tests/githooks/post_merge_test.go",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:896",
+          "agm/cmd/agm/watch.go:110",
+          "agm/cmd/agm/watch.go:111",
+          "agm/cmd/override-audit-launchdaemon-installer/main.go:47",
+          "agm/cmd/override-audit-systemd-installer/main.go:47",
+          "agm/internal/circuitbreaker/providers.go:161",
+          "agm/internal/harnessexec/handoff.go:42",
+          "agm/internal/harnessexec/handoff.go:756",
+          "agm/internal/harnessexec/handoff.go:815",
+          "agm/internal/ops/workflow.go:229",
+          "internal/sandbox/process_monitor.go:219"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": [
+          "github.com/vbonnet/dear-agent/cmd/merge-velocity"
+        ]
+      },
+      "removed": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/agm/internal/procguard",
+          "github.com/vbonnet/dear-agent/engram/internal/benchmark",
+          "github.com/vbonnet/dear-agent/engram/internal/tracking",
+          "github.com/vbonnet/dear-agent/pkg/notify",
+          "github.com/vbonnet/dear-agent/pkg/synchub",
+          "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/parser",
+          "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator",
+          "github.com/vbonnet/dear-agent/wayfinder/internal/phaseisolation"
+        ],
+        "doc-path": [],
+        "file-size": [
+          "engram/cmd/engram/cmd/validate_integration_test.go",
+          "engram/internal/config/loader_test.go",
+          "pkg/validator/wayfinderartifact_test.go",
+          "wayfinder/cmd/wayfinder-session/internal/integration/wayfinder_v2_test.go"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/watch.go:113",
+          "agm/cmd/agm/watch.go:114",
+          "agm/cmd/agm/watch.go:251",
+          "agm/cmd/agm/watch_stalled.go:102",
+          "agm/internal/ops/workflow.go:230"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": [
+          "github.com/vbonnet/dear-agent/cmd/agm-job",
+          "github.com/vbonnet/dear-agent/cmd/fd-pressure",
+          "github.com/vbonnet/dear-agent/cmd/mergeloop",
+          "github.com/vbonnet/dear-agent/cmd/src-health",
+          "github.com/vbonnet/dear-agent/tools/skill-lint",
+          "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator"
+        ]
+      },
+      "reason": "Restore the audited green reference at c0da2ae6 while retaining the exact DAH-001 debt transition",
+      "reference": "ce-3knl.13.1; vbonnet/engram-research#250; dear-agent@c0da2ae6d73cbae9fd15f3aec246251f7d50cdfd"
+    },
+    {
+      "previous_baseline_sha256": "7035bd4de515d76fae0c4428ba0f09c3257d890385447bf3599a00b40f370458",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/internal/harnessexec/handoff.go:759",
+          "agm/internal/harnessexec/handoff.go:818"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/internal/harnessexec/handoff.go:756",
+          "agm/internal/harnessexec/handoff.go:815"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Record line-only key shifts from merged PR 1105; the two goroutine bodies are unchanged and semantic-key remediation is tracked separately",
+      "reference": "ce-3knl.13.2; vbonnet/dear-agent#1105; dear-agent@389e266c933fcbe1c7f94b4cad92c38712293171"
+    },
+    {
+      "previous_baseline_sha256": "34834a559654b201b1a46f2724a55221a26f2b13ba95ee571ec35958ebe15a0f",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [
+          "github.com/vbonnet/dear-agent/wayfinder/internal/corpus"
+        ],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
+    },
+    {
+      "previous_baseline_sha256": "2fb93827e5e67f40319e24261712dc1b6c68b71f20905fd08bb97f3010c5121d",
+      "previous_scanner_version": 1,
+      "scanner_version": 1,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go",
+          "agm/test/bdd/steps/spec_governance_tooling_steps_test.go",
+          "tools/specaudit/main.go",
+          "tools/specaudit/main_test.go"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [
+          "agm/cmd/agm-statusline/main.go:262"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "The harness-neutral SPEC governance audit intentionally adds four large bounded corpus and audit files; retain their explicit baseline admission while future growth remains ratcheted.",
+      "reference": "PR-1114"
+    },
+    {
+      "previous_baseline_sha256": "388b6fe9d2809a6b37192694c9e48409025fbfb31ea144a3b39e1573de6be8aa",
+      "previous_scanner_version": 1,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm-mcp-server/tools_test.go (1025 lines)",
+          "agm/cmd/agm/archive_test.go (1523 lines)",
+          "agm/cmd/agm/new.go (1097 lines)",
+          "agm/cmd/agm/send_msg.go (1191 lines)",
+          "agm/cmd/agm/supervisor.go (1056 lines)",
+          "agm/cmd/agm/supervisor_test.go (1004 lines)",
+          "agm/internal/agent/agy_adapter_test.go (1381 lines)",
+          "agm/internal/agent/openai_adapter_test.go (2405 lines)",
+          "agm/internal/codexhooks/verify.go (2881 lines)",
+          "agm/internal/dolt/adapter_test.go (1032 lines)",
+          "agm/internal/dolt/sessions.go (1665 lines)",
+          "agm/internal/dolt/sessions_sqlite_test.go (1955 lines)",
+          "agm/internal/harnessexec/exec.go (1097 lines)",
+          "agm/internal/harnessexec/handoff.go (1672 lines)",
+          "agm/internal/harnessexec/handoff_test.go (2194 lines)",
+          "agm/internal/ops/session_create.go (1207 lines)",
+          "agm/internal/ops/session_create_test.go (1933 lines)",
+          "agm/internal/ops/session_mutation_test.go (1143 lines)",
+          "agm/internal/ops/session_resume_test.go (1321 lines)",
+          "agm/internal/sentinel/daemon/monitor.go (1036 lines)",
+          "agm/internal/session/context_detector_test.go (1432 lines)",
+          "agm/internal/tmux/liveness.go (1018 lines)",
+          "agm/internal/tmux/prompt_detector.go (1236 lines)",
+          "agm/internal/tmux/tmux.go (1264 lines)",
+          "agm/internal/tmux/tmux_test.go (1109 lines)",
+          "agm/internal/ui/table.go (1054 lines)",
+          "agm/test/bdd/steps/harness_parity_steps.go (4862 lines)",
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1618 lines)",
+          "agm/test/bdd/steps/spec_governance_tooling_steps_test.go (1152 lines)",
+          "agm/test/performance/eventbus_load_test.go (1061 lines)",
+          "cmd/vroom-dispatch-direct/main.go (1173 lines)",
+          "cmd/vroom-dispatch/main.go (1327 lines)",
+          "cmd/vroom-dispatch/main_test.go (1126 lines)",
+          "engram/hooks-bin/internal/validator/validator_bdd_test.go (1009 lines)",
+          "engram/internal/health/checks.go (1461 lines)",
+          "pkg/headerlint/headerlint_test.go (1334 lines)",
+          "pkg/instructionlint/instructionlint_test.go (1817 lines)",
+          "pkg/instructionlint/segments.go (1988 lines)",
+          "pkg/llm/provider/provider_test.go (1307 lines)",
+          "pkg/override/override.go (1036 lines)",
+          "pkg/workflow/runner.go (1296 lines)",
+          "tests/githooks/post_merge_test.go (1472 lines)",
+          "tools/specaudit/main.go (6090 lines)",
+          "tools/specaudit/main_test.go (3807 lines)",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1210 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm-mcp-server/tools_test.go",
+          "agm/cmd/agm/archive_test.go",
+          "agm/cmd/agm/new.go",
+          "agm/cmd/agm/send_msg.go",
+          "agm/cmd/agm/supervisor.go",
+          "agm/cmd/agm/supervisor_test.go",
+          "agm/internal/agent/agy_adapter_test.go",
+          "agm/internal/agent/openai_adapter_test.go",
+          "agm/internal/codexhooks/verify.go",
+          "agm/internal/dolt/adapter_test.go",
+          "agm/internal/dolt/sessions.go",
+          "agm/internal/dolt/sessions_sqlite_test.go",
+          "agm/internal/harnessexec/exec.go",
+          "agm/internal/harnessexec/handoff.go",
+          "agm/internal/harnessexec/handoff_test.go",
+          "agm/internal/ops/session_create.go",
+          "agm/internal/ops/session_create_test.go",
+          "agm/internal/ops/session_mutation_test.go",
+          "agm/internal/ops/session_resume_test.go",
+          "agm/internal/sentinel/daemon/monitor.go",
+          "agm/internal/session/context_detector_test.go",
+          "agm/internal/tmux/liveness.go",
+          "agm/internal/tmux/prompt_detector.go",
+          "agm/internal/tmux/tmux.go",
+          "agm/internal/tmux/tmux_test.go",
+          "agm/internal/ui/table.go",
+          "agm/test/bdd/steps/harness_parity_steps.go",
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go",
+          "agm/test/bdd/steps/spec_governance_tooling_steps_test.go",
+          "agm/test/performance/eventbus_load_test.go",
+          "cmd/vroom-dispatch-direct/main.go",
+          "cmd/vroom-dispatch/main.go",
+          "cmd/vroom-dispatch/main_test.go",
+          "engram/hooks-bin/internal/validator/validator_bdd_test.go",
+          "engram/internal/health/checks.go",
+          "pkg/headerlint/headerlint_test.go",
+          "pkg/instructionlint/instructionlint_test.go",
+          "pkg/instructionlint/segments.go",
+          "pkg/llm/provider/provider_test.go",
+          "pkg/override/override.go",
+          "pkg/workflow/runner.go",
+          "tests/githooks/post_merge_test.go",
+          "tools/specaudit/main.go",
+          "tools/specaudit/main_test.go",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Make admitted file-size findings size-sensitive so later growth requires an explicit baseline transition.",
+      "reference": "PR-1149"
+    },
+    {
+      "previous_baseline_sha256": "78201b84aa23fa4c85a1dae11597a08915d4e18690200d130087393bad785e9d",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1621 lines)",
+          "tests/githooks/post_merge_test.go (1473 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1618 lines)",
+          "tests/githooks/post_merge_test.go (1472 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Accept line count growth in spec_governance_tooling_steps.go and post_merge_test.go",
+      "reference": "https://github.com/vbonnet/dear-agent/actions/runs/30936013599"
+    },
+    {
+      "previous_baseline_sha256": "9af6a147e0a88ae5714c7cd261d9c2e36597462a633df48a919e0268104cf821",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1579 lines)",
+          "agm/internal/agent/agy_adapter_test.go (1376 lines)",
+          "agm/internal/harnessexec/exec.go (1291 lines)",
+          "agm/internal/harnessexec/handoff.go (1733 lines)",
+          "agm/internal/ops/session_create_test.go (1962 lines)",
+          "agm/internal/ops/session_resume_test.go (1323 lines)",
+          "cmd/vroom-dispatch/main.go (1618 lines)",
+          "cmd/vroom-dispatch/main_test.go (1240 lines)",
+          "internal/safegit/merge.go (1228 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:902",
+          "agm/internal/harnessexec/handoff.go:815",
+          "agm/internal/harnessexec/handoff.go:874"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/cmd/agm/archive_test.go (1523 lines)",
+          "agm/internal/agent/agy_adapter_test.go (1381 lines)",
+          "agm/internal/harnessexec/exec.go (1097 lines)",
+          "agm/internal/harnessexec/handoff.go (1672 lines)",
+          "agm/internal/ops/session_create_test.go (1933 lines)",
+          "agm/internal/ops/session_resume_test.go (1321 lines)",
+          "cmd/vroom-dispatch/main.go (1327 lines)",
+          "cmd/vroom-dispatch/main_test.go (1126 lines)"
+        ],
+        "goroutine-recover": [
+          "agm/cmd/agm/archive.go:896",
+          "agm/internal/harnessexec/handoff.go:759",
+          "agm/internal/harnessexec/handoff.go:818"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Accept line count growth and goroutine-recover changes from PR #1101",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1101"
+    },
+    {
+      "previous_baseline_sha256": "2f0cc2fabf83000029318d29eb6ff0462ae488af1145d9c46ac3dcea085741ca",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/local_development_guardrails_steps.go (1007 lines)",
+          "tests/githooks/post_merge_test.go (1452 lines)"
+        ],
+        "goroutine-recover": [
+          "cmd/test-affected/main.go:91"
+        ],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "tests/githooks/post_merge_test.go (1473 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Accept line count growth in local_development_guardrails_steps.go and goroutine recover in test-affected/main.go from PR #1134",
+      "reference": "https://github.com/vbonnet/dear-agent/pull/1134"
+    },
+    {
+      "previous_baseline_sha256": "59aa2a47deaffdf50f235f9ca8dd371906d27606e350cad001ae321e9174a27c",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions_sqlite_test.go (2018 lines)",
+          "agm/internal/tmux/liveness.go (1027 lines)",
+          "agm/internal/tmux/tmux.go (1283 lines)",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1249 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions_sqlite_test.go (1955 lines)",
+          "agm/internal/tmux/liveness.go (1018 lines)",
+          "agm/internal/tmux/tmux.go (1264 lines)",
+          "wayfinder/cmd/wayfinder-session/internal/git/git_test.go (1210 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Retroactively admit file-size growth merged by PRs #1138, #1159, and #1161; decomposition remains tracked by ce-1hu9.34.",
+      "reference": "ce-1hu9.33"
+    },
+    {
+      "previous_baseline_sha256": "9b54b8c59aba242b896c234aec2f6b915576dd0715d766b32b61b43784fc876c",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "cmd/ai-review/spec_contract.go (3088 lines)",
+          "cmd/ai-review/spec_contract_test.go (2345 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "Retroactively admit the two SPEC contract reviewer file-size findings merged by PR #1132; decomposition remains tracked by ce-1hu9.37.",
+      "reference": "ce-1hu9.36; ce-1hu9.37"
+    },
+    {
+      "previous_baseline_sha256": "8154ec64937c7c8d3f4a1abe31c2041a98c99c68570360628f2a2a9e95a78b93",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/test/bdd/steps/local_development_guardrails_steps.go (1007 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
+    },
+    {
+      "previous_baseline_sha256": "d60656b62a749b0bf2a07c19aec1cb29a14742495dadd6445a26cfd4c3dfddff",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [
+          "internal/ops.ResumeSession"
+        ],
+        "file-size": [],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      }
+    },
+    {
+      "previous_baseline_sha256": "4bf3d15a0da437edd824968347bd4c92b8ab6b218910538ea23cbf2bb14babe9",
+      "previous_scanner_version": 2,
+      "scanner_version": 2,
+      "added": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions.go (1709 lines)",
+          "agm/internal/ops/session_create.go (1219 lines)",
+          "agm/internal/tmux/prompt_detector.go (1751 lines)",
+          "agm/internal/tmux/prompt_detector_test.go (1201 lines)",
+          "agm/internal/tmux/readiness.go (1044 lines)",
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1608 lines)",
+          "cmd/ai-review/spec_contract.go (3119 lines)",
+          "cmd/ai-review/spec_contract_test.go (2398 lines)",
+          "tools/specaudit/main_test.go (3756 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "removed": {
+        "dead-package": [],
+        "doc-path": [],
+        "file-size": [
+          "agm/internal/dolt/sessions.go (1665 lines)",
+          "agm/internal/ops/session_create.go (1207 lines)",
+          "agm/internal/tmux/prompt_detector.go (1236 lines)",
+          "agm/test/bdd/steps/spec_governance_tooling_steps.go (1621 lines)",
+          "cmd/ai-review/spec_contract.go (3088 lines)",
+          "cmd/ai-review/spec_contract_test.go (2345 lines)",
+          "tools/specaudit/main_test.go (3807 lines)"
+        ],
+        "goroutine-recover": [],
+        "raw-mem-gate": [],
+        "zero-test": []
+      },
+      "reason": "main advanced under the branch: spec-contract and completion-pipeline files grew past the stale baseline; admitted at merge-main so the newly always-on PR check starts honest",
+      "reference": "PR #1183 / ce-3knl.13.3"
+    }
+  ]
 }

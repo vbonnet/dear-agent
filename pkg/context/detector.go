@@ -41,6 +41,9 @@ func (d *Detector) DetectCLI() CLI {
 	if os.Getenv("CODEX_SESSION_ID") != "" {
 		return CLICodex
 	}
+	if os.Getenv("PI_SESSION_ID") != "" {
+		return CLIPi
+	}
 	if os.Getenv("AGY_CONVERSATION_ID") != "" || os.Getenv("AGY_SESSION_ID") != "" ||
 		os.Getenv("ANTIGRAVITY_SESSION_ID") != "" {
 		return CLIAgy
@@ -79,7 +82,7 @@ func (d *Detector) DetectFromSession(sessionID string, cli CLI) (*Usage, error) 
 			return usage, nil
 		}
 		return d.detectPortableSession(sessionID, cli)
-	case CLIGemini, CLIOpenCode, CLICodex, CLIAgy:
+	case CLIGemini, CLIOpenCode, CLICodex, CLIPi, CLIAgy:
 		return d.detectPortableSession(sessionID, cli)
 	case CLIUnknown:
 		return nil, fmt.Errorf("unsupported CLI type: %s", cli)

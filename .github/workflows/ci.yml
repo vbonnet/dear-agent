@@ -23,7 +23,7 @@ jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +79,7 @@ jobs:
         run: |
           GIT_COMMIT=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          LDFLAGS="-s -w -X main.Version=2.0.0-dev -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=ci"
+          LDFLAGS="-s -w -X github.com/vbonnet/dear-agent/pkg/version.Version=2.0.0-dev -X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${GIT_COMMIT} -X github.com/vbonnet/dear-agent/pkg/version.BuildDate=${BUILD_DATE} -X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=ci"
           mkdir -p build
           go build -ldflags="${LDFLAGS}" -o build/agm ./agm/cmd/agm
           go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
@@ -143,6 +143,10 @@ jobs:
   integration-tests:
     name: Integration Tests (affected)
     runs-on: ubuntu-latest
+    # The sequential runner bounds are 20m for go list plus 55m for go test.
+    # This 100m ultimate backstop leaves 25m around those phases; the BDD gate
+    # requires at least one 20m native interval for setup, cleanup, and reports.
+    timeout-minutes: 100
     # Only meaningful on PRs — we need a base ref to diff against. For
     # pushes to main/develop, the unit-test matrix above is the gate;
     # full integration sweeps belong in a scheduled or release workflow,
@@ -185,7 +189,86 @@ jobs:
           SKIP_E2E: "1"
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
+          go build -o "$RUNNER_TEMP/test-affected" ./cmd/test-affected
+          "$RUNNER_TEMP/test-affected" --base="origin/${BASE_REF}" --tags=integration --run
+
+  agm-codex-contracts:
+    name: AGM Codex Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run credential-free active harness parity
+        run: >-
+          go test -race -count=1 -tags=integration
+          ./agm/test/integration/portable
+          -run 'TestActiveHarnessParityContract|TestHarnessPrerequisitesAreScoped'
+
+      - name: Run active harness registry contract
+        run: >-
+          go test -race -count=1 -tags=contract
+          ./agm/test/contract
+          -run '^TestActiveHarnessRegistryContract$'
+
+      - name: Run isolated source-built Codex lifecycle
+        run: >-
+          go test -race -count=1 -tags=integration
+          ./agm/test/integration/isolated
+          -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
+
+      - name: Enforce critical lifecycle coverage ratchet
+        run: >-
+          go run ./cmd/coverage-ratchet
+          --race
+          --policy agm/test/coverage/critical-lifecycle.json
+
+  agm-tagged-sweep:
+    name: AGM Tagged Sweep
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Compile complete AGM integration-tagged graph
+        run: go test -run '^$' -tags=integration ./agm/...
+
+      - name: Run credential-free contract graph
+        run: go test -race -count=1 -timeout=20m -tags=contract ./agm/test/contract/...
+
+      - name: Run full integration graph with per-test prerequisite skips
+        run: go test -race -count=1 -timeout=20m -tags=integration ./agm/test/integration/...
 
   engram-storage-hardening:
     name: Engram Storage Hardening
@@ -220,8 +303,92 @@ jobs:
   # invocation from security-scan.yml. To make this gate enforced, add
   # "CI / govulncheck" to the branch-protection required-status-checks
   # list (admin step — tracked by BL-061).
-  govulncheck:
-    name: govulncheck
+  #
+  # Scoping (ce-1234-ci-health): "govulncheck" is a required status check,
+  # so it must post on every PR/push or branch protection blocks the PR
+  # forever. detect-go-changes always runs and decides whether the
+  # dependency graph could have changed; the real scan only runs then
+  # (Go compiles + govulncheck's DB download aren't free, and a PR that
+  # touches neither Go code nor go.mod/go.sum can't have altered the
+  # vulnerable-package set). govulncheck-gate always runs and carries the
+  # required-check name, succeeding whenever the scan was skipped or
+  # actually passed. schedule/workflow_dispatch runs always scan for
+  # real — that's the daily drift-catcher for newly published CVEs
+  # against unchanged dependencies.
+  detect-go-changes:
+    name: Detect Go dependency changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed Go files
+        id: changed
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            range="${before}...${{ github.event.after }}"
+          fi
+
+          # ACMRT, not ACMR: a symlink replaced by a regular .go file is
+          # status T, which ACMR drops — the file would enter the package
+          # graph while this detector reported nothing and the required
+          # gate skip-passed.
+          #
+          # Write to a file rather than piping into `grep -q`: under
+          # `set -o pipefail`, grep -q exits at its first match, git diff
+          # takes SIGPIPE and returns 141, and the whole pipeline fails —
+          # which this `if` would misread as "nothing to scan" on exactly
+          # the largest diffs.
+          # -z so pathnames arrive verbatim. Under Git's default output a
+          # path with non-ASCII bytes, a tab, or a newline is quoted and
+          # backslash-escaped — `pkg/é.go` becomes "pkg/\303\251.go", the
+          # `.go` suffix test fails, and govulncheck skip-passes on a PR
+          # that did change Go source.
+          git diff -z --name-only --diff-filter=ACMRT "$range" > /tmp/go_changed.z
+
+          # The scanner's own policy counts as a scan input. A PR that
+          # edits the govulncheck invocation or its vulnerability
+          # allowlist but no Go file would otherwise satisfy the required
+          # gate without ever executing the policy it just changed — a
+          # broken scanner could merge and stay hidden until the next
+          # scheduled run. security-audit.yml carries the mirrored
+          # invocation; ci.yml carries the required one.
+          has_changes=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              *.go|go.mod|go.sum|*/go.mod|*/go.sum \
+              |.github/workflows/ci.yml|.github/workflows/security-audit.yml)
+                has_changes=true
+                break
+                ;;
+            esac
+          done < /tmp/go_changed.z
+
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+
+  govulncheck-scan:
+    name: govulncheck (scan)
+    needs: detect-go-changes
+    if: needs.detect-go-changes.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -270,3 +437,31 @@ jobs:
           echo "No unallowed vulnerabilities."
         env:
           GOWORK: "off"
+
+  govulncheck:
+    # This job's name is the required-status-check context. It always
+    # runs (never itself path-skipped), so branch protection always gets
+    # a result. It mirrors govulncheck-scan's outcome when that job ran,
+    # and succeeds when govulncheck-scan was legitimately skipped (no Go
+    # dependency changes to scan).
+    name: govulncheck
+    needs: [detect-go-changes, govulncheck-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate
+        run: |
+          if [[ "${{ needs.detect-go-changes.result }}" != "success" ]]; then
+            echo "detect-go-changes did not complete successfully: ${{ needs.detect-go-changes.result }}"
+            exit 1
+          fi
+          if [[ "${{ needs.detect-go-changes.outputs.has_changes }}" != "true" ]]; then
+            echo "No Go/go.mod/go.sum changes in this push/PR — nothing to scan."
+            exit 0
+          fi
+          if [[ "${{ needs.govulncheck-scan.result }}" != "success" ]]; then
+            echo "govulncheck-scan reported: ${{ needs.govulncheck-scan.result }}"
+            exit 1
+          fi
+          echo "govulncheck-scan passed."

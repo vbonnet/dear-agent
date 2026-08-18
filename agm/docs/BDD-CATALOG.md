@@ -213,6 +213,11 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 creation, and terminal state detection.
 
 **Key scenarios:**
+- Harness discovery exposes only name, version, and descriptive capabilities;
+  required behavior is expressed through consumer-owned capability interfaces.
+- Pure API delivery requires context-aware readiness and message delivery at
+  compile time, while adapter constructors return concrete types and the finite
+  discovery catalog has no duplicate mutable runtime registry.
 - A Codex CLI composer pane is detected as `ready` only with an explicit empty
   cursor on both the initial and post-turn forms.
 - An idle Codex composer allows direct delivery.
@@ -222,14 +227,90 @@ creation, and terminal state detection.
 - A newer tail-owned initial composer remains ready after stale post-turn
   footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
-- The top-level new command routes in-tmux, non-detached Codex creation into
-  the current pane, validates credentials and the executable, and queues the
-  canonical launch command without waiting behind the AGM process that owns
-  the pane.
-- Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
+- A Codex executable-hook review selector fails startup promptly with explicit
+  operator guidance, is classified as review-required, and receives no
+  automated input; a later live composer supersedes retained selector text.
+- The top-level new command routes in-tmux, non-detached Claude, Codex,
+  OpenCode, Pi, and deprecated Gemini creation into the current pane and queues
+  canonical launch commands without an impossible wait behind the AGM process
+  that owns the pane; Codex also validates credentials and its executable,
+  Pi uses its managed canonical launch contract, while Claude's SessionStart
+  hook persists the conversation UUID after the queued launch begins.
+- Shared creation requires process and composer readiness before registration
+  or startup-prompt delivery even when a CLI or MCP surface runtime owns the
+  launch. Prompt-free current-pane Claude, Codex, OpenCode, Pi, and deprecated
+  Gemini creation explicitly defer readiness until the foreground AGM process
+  exits because each command is queued behind that process.
+- Shared tmux sends serialize exact-pane readiness with delivery under one
+  mutation boundary, and MCP creation atomically revalidates the harness and
+  composer after registration immediately before delivering its startup prompt.
+  A concurrent sender or readiness change cannot reuse the earlier proof. A
+  measured pasted-content marker binds its complete payload, so prompt-like
+  glyphs inside that payload cannot displace the composer anchor that owns it.
+- Pure API single-send preflight resolves the registered delivery surface
+  before any tmux probe, while both single-recipient and fan-out delivery
+  restore the session's persisted model, storage locator, endpoint, and Azure
+  settings without persisting credentials. Every sequential fan-out recipient
+  receives a fresh finite deadline that still inherits caller cancellation.
+  Stable-lock acquisition, reconstruction, and readiness use a separate
+  bounded preflight context; the completed-turn phase then retains the
+  adapter's complete provider budget. Targeted reconstruction loads only the
+  requested session and cannot be delayed or failed by unrelated session
+  directories.
+  Under the same stable session-ID
+  boundary as archive, delivery reloads lifecycle before adapter construction,
+  rejects reaping and archived sessions, and uses a provider-appropriate wait, so archive linearizes before or after
+  a bounded completed turn. Lock acquisition and provider work honor caller
+  cancellation; direct adapter callers retain context-aware store-level
+  serialization and a finite provider ceiling; completion errors, cancellation,
+  and timeout leave history unchanged. Delivery otherwise fails closed unless
+  adapter status is active or idle. A successful API send does not run tmux
+  state resolution or persist `OFFLINE` for the pane-less session.
+- Clearing API history reloads and preserves the current reconstruction
+  metadata while atomically emptying only messages under the store-level
+  transaction lock, including updates made by another process. Completed-turn
+  commits reload the same metadata, and title, directory, and runtime-setting
+  writers serialize on that lock and apply only their requested field.
+- OpenAI-compatible history reload accepts valid JSONL records larger than the
+  standard scanner token limit. Conversation import converts the parsed batch
+  once and persists it with one history transaction, while an empty import
+  performs no history transaction.
+- Shared startup readiness honors its total deadline while a slow launch
+  wrapper still owns the pane, but fails promptly if an already-observed
+  harness process later stops.
+- Shared readiness rejects a retained Claude prompt followed by current
+  working output, recognizes styled Claude ghost placeholders as empty without
+  accepting unstyled human drafts, requires structural tail-owned Gemini and
+  OpenCode composers rather than generic glyphs or borders, requires AGY's bare
+  prompt to own the tail, requires Pi's latest managed state to be ready rather
+  than stale readiness followed by work, and distinguishes harness-specific
+  Node launch arguments from unrelated background Node descendants. Permission,
+  onboarding, model-upgrade, and survey prompts block only while their UI owns
+  the tail; resolved dialogs and ordinary Allow/Deny output before a newer
+  composer do not. Liveness, styled capture, and delivery stay pinned to one
+  resolved pane ID even if session focus changes. Legacy AGY manifest names
+  normalize to canonical `agy`, and the `pi` alias normalizes to canonical
+  `pi-cli`, before shared send readiness.
+- MCP AGY's native onboarding wait remains an unverified transition; shared
+  creation still proves the live AGY process and tail-owned composer before
+  registration or prompt delivery.
+- Claude SessionStart association retries asynchronously across the detached
+  registration race for longer than the maximum launch-readiness window and
+  reports READY only after the payload UUID is persisted; the installable
+  command hook is the sole repository source for that destination.
+- Shared Gemini startup detects first-run directory trust, sends option `1`
+  plus Enter to the exact pane that displayed the dialog, and still requires a
+  later tail-owned Gemini composer before reporting readiness.
+- Active harnesses are exactly Claude Code, Codex CLI, AGY, OpenCode, and Pi.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
+- The Codex factory uses `CodexCLIAdapter`, while the OpenAI API adapter
+  remains independent of Codex tmux state.
+- CLI and MCP lifecycle surfaces delegate to shared operations. Resume uses one
+  stable-ID `internal/ops.ResumeSession` transaction; the CLI retains only
+  identifier and prompt-file input, presentation, and post-operation attach.
+- Harness parity requirement identifiers are unique.
 - Active harness launch commands preserve native startup mode and persistence.
 - Imported AGY conversations preserve unknown native-model provenance through
   the real storage adapter instead of acquiring Claude's legacy default, and
@@ -307,6 +388,13 @@ creation, and terminal state detection.
   snapshot is unreadable or incomplete, preserves known model provenance on
   cold resume, and omits a model override when an imported conversation's
   native selection is unknown.
+- Fresh AGY startup prompts bootstrap lazy provider identity under the shared
+  workspace lock before registration, remain out of process arguments, and are
+  marked consumed so CLI, MCP, adapter, and completion paths deliver them only
+  once; missing prompts and bootstrap failures fail before durable success.
+- AGY direct, fan-out, queued-daemon, structured, and fresh-startup message
+  surfaces preserve attribution plus multiline bodies as one bracketed native
+  composer submission while retaining legacy paste behavior for other harnesses.
 - AGY creation normalizes relative workspaces and shares cancellation-aware
   native identity serialization across CLI, MCP, and adapter lifecycle paths;
   launch, resume, and history reject unsafe provider identifiers before
@@ -317,7 +405,9 @@ creation, and terminal state detection.
   sessions created by a failed operation, and use exact AGY process and native
   transcript truth for status and history.
 - AGM runtime helper commands keep co-located SPEC coverage.
-- AGM backend implementations keep co-located SPEC coverage.
+- AGM production Go sources use the single `session.RealTmux` local-runtime
+  type, expose no parallel manager runtime, and retain its compile-time safety
+  capability proofs.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
 - Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
   Nemotron, and Qwen.
@@ -413,7 +503,7 @@ entrypoints should only add model/harness-specific guidance.
 **Drives:** repository hook manifests and `internal/hookparity`.
 
 **Key scenarios:**
-- Claude Code, Codex CLI, AGY, and OpenCode expose the required PreToolUse
+- Claude Code, Codex CLI, AGY, OpenCode, and Pi expose the required PreToolUse
   guardrails.
 - Stop and SubagentStop feedback hooks are configured.
 - Non-Claude harnesses expose Beads lifecycle hooks through their native hook
@@ -582,7 +672,7 @@ review gates staying explicit and executable.
 `agm/internal/configdirparity`.
 
 **Key scenarios:**
-- Active harnesses have `.claude`, `.codex`, `.agents`, and `.opencode`
+- Active harnesses have `.claude`, `.codex`, `.agents`, `.opencode`, and `.pi`
   directory surfaces.
 - Deprecated Gemini compatibility keeps `.gemini` available without making it
   active parity.
@@ -880,6 +970,8 @@ history adapters, UUID detection, orphan import, transcript context, and search.
 - Every listed conversation and discovery package has a co-located `SPEC.md`.
 - Every package SPEC points back to the executable guardrail feature.
 - Claude-only storage details remain explicit adapters rather than shared contracts.
+- Pi imports preserve provider-qualified native model provenance and leave the
+  model override empty when the native transcript does not record one.
 
 ---
 
@@ -899,6 +991,22 @@ reservations, state detection, and failure tracking.
 substrate behind every harness needs explicit contracts for preserving state,
 avoiding unsafe concurrency, detecting interactive readiness, and recovering
 from stale or wedged sessions.
+
+### AGM Capacity Platform Detection
+
+**File:** [`agm_capacity_platform.feature`](../test/bdd/features/agm_capacity_platform.feature)
+
+**Drives:** the real `agm/internal/capacity` native memory detector on the
+current Linux or macOS test host.
+
+**Key scenarios:**
+- Supported development platforms resolve native total and available memory.
+- Total memory is positive, available memory is non-negative, and available
+  memory never exceeds total memory.
+
+**Why this matters:** `agm capacity` is an operator-facing safety surface. A
+Linux-only `/proc` probe made the command unusable on macOS even though AGM's
+session lifecycle and circuit breaker support both platforms.
 
 ### Observability Package Guardrails
 
@@ -1004,6 +1112,39 @@ model-family context windows, and provider-neutral compaction defaults.
 non-Claude harnesses return not-implemented errors or silently inherit a Claude
 summarizer model.
 
+### Pi Custom Model Context
+
+**File:** [`pi_custom_context.feature`](../test/bdd/features/pi_custom_context.feature)
+
+**Drives:** `agm/internal/pisession` provider provenance and
+`agm/internal/session` native Pi context-window selection from a bounded custom
+model catalog.
+
+**Key scenarios:**
+- A managed Pi transcript preserves the provider-qualified custom model ID.
+- AGM reports the latest native prompt footprint against the exact configured
+  custom model context window.
+- A built-in provider model outside AGM's static window table still honors
+  Pi's topmost user override.
+- A provider added after AGM's audited Pi release still honors an override for
+  the exact provider-qualified route recorded in native history.
+- An OpenRouter route with a nested vendor-qualified model ID retains its own
+  route-specific native context window rather than a direct-provider default.
+- A custom model ID remains opaque when it begins with its own provider name;
+  AGM does not collapse the repeated provider segment during qualification.
+- An explicit null custom context window is rejected instead of receiving the
+  default reserved for an omitted field.
+- An integral exponent-spelled context window resolves to the same exact token
+  count that Pi uses, without accepting nearby fractional values.
+- Provider-less legacy history rejects two matching providers even when their
+  declared windows agree, rather than guessing a route from equal values.
+- Credential command strings in Pi's model catalog remain inert data.
+
+**Why this matters:** Custom providers are a supported Pi route. Using a static
+fallback for their configured windows makes AGM's percentage disagree with Pi,
+while evaluating unrelated credential configuration would cross the harness
+permission boundary.
+
 ### Shared Runtime Policy Package Guardrails
 
 **File:** [`shared_runtime_policy_guardrails.feature`](../test/bdd/features/shared_runtime_policy_guardrails.feature)
@@ -1014,7 +1155,7 @@ enforcement, evaluation, event, markdown, graceful-exit, and health packages.
 
 **Key scenarios:**
 - Every shared runtime policy package carries a reciprocal SPEC reference.
-- Every package contract names all four active harnesses and seven model families.
+- Every package contract names all five active harnesses and seven model families.
 - Production string literals do not embed a harness or model-family route.
 
 **Why this matters:** Shared policy behavior must remain identical across caller
@@ -1205,6 +1346,89 @@ diff-based package guard gives fast changed-package diagnostics, and the
 actual-checkout gate prevents any implementation directory from remaining
 outside strict SPEC and executable BDD enforcement.
 
+### Visible Markdown Classification
+
+**File:** [`markdown_visibility.feature`](../test/bdd/features/markdown_visibility.feature)
+
+**Drives:** provider-neutral whole-document CommonMark classification used by
+SPEC policy tools. It preserves source line alignment while excluding complete
+indented-code, fenced-code, raw-HTML, and inline-comment ranges from normative
+prose. Container-nested fenced blocks are exercised through the same shared
+classifier rather than through a harness adapter.
+
+**Key scenario:** Hidden CommonMark examples, including container-prefixed
+fences, do not become normative requirements while following visible prose
+retains its original line position.
+
+### SPEC Audit Tooling Evidence Boundary
+
+**File:** [`spec_governance_tooling.feature`](../test/bdd/features/spec_governance_tooling.feature)
+
+**Drives:** focused `tools/specaudit` unit tests for the root-module command's
+pinned inventory, validation, and offline HTML rendering behavior. It does not
+exercise skill discovery, skill invocation, provider behavior, or maintainer
+decisions.
+
+The runner compares only build-selected `TestGoFiles` and `XTestGoFiles` at its
+pre-test and post-test observation points to validate exact selected test
+declarations. This check does not cover or make immutable production Go files,
+module files, embed inputs, or dependencies. It also cannot detect a
+mid-run swap that is restored before the post-test observation. The
+implementation test source must already be trusted; the runner's bounded
+process, environment, and cleanup controls reduce accidental leakage and
+residue but are not a filesystem, network, or syscall sandbox.
+
+Each nested selection uses bounded `go test -json` output and is accepted only
+when every requested exact top-level name has exactly one `run` event and one
+terminal `pass`, followed by a package pass. Missing, duplicate, malformed,
+skipped, failed, out-of-order, or unrequested test events fail the BDD step even
+if the child process exits zero. Before each launch, the runner revalidates the
+captured Go and Git executable identities, ownership, and canonical ancestry.
+The default contract rejects world-writable executables and ancestors plus
+group-writable ancestors owned by another user; current-user-owned
+group-writable ancestors remain admissible for standard package-manager
+layouts. Git always uses that strict contract.
+
+GitHub-hosted Ubuntu is one explicit compatibility boundary because its image
+deliberately makes `/opt/hostedtoolcache` writable. The Go executable may use a
+runner-context fallback only when GitHub-defined runner variables name
+the `github-hosted` Linux/X64 environment, the image metadata is well formed,
+`RUNNER_TOOL_CACHE` resolves to exactly `/opt/hostedtoolcache`, no `GOROOT`
+override is present, and the compiled runtime version and GOROOT select exactly
+that tool cache's matching `go/<version>/x64/bin/go`. The runner retains the Go
+file and GOROOT identities, hashes the bounded Go executable, and revalidates
+the complete context, identities, and digest before every launch. This is a
+runner-context compatibility gate, not provider attestation: the writable
+GOROOT toolchain remains a trusted input and ordinary in-place and pre-exec
+races remain. Its task root is canonical, absolute, current-user-owned, and
+identity-bound; cleanup refuses a missing, replaced, wrong-owner, or wrong-mode
+root. None of these controls sandbox trusted test code.
+
+**Key scenarios:**
+- Exact pinned Git-object inventory ignores dirty worktree content.
+- Duplicate IDs, exact bodies, shared BDD paths, identical files, and harness
+  terminology remain deterministic review leads rather than semantic verdicts.
+- Missing and nonreciprocal SPEC/BDD links remain visible diagnostics.
+- Positive findings must match pinned Git-resolved evidence, identify one
+  shared reciprocal feature across current owners, and carry a structurally
+  complete ownership-preservation proposal that remains pending maintainer
+  approval; forged evidence and unsafe positive verdicts fail validation.
+- Offline HTML remains escaped, self-contained, and bounded.
+- The runner observes exact selected test declarations before and after their
+  execution without claiming complete build-input integrity or immutability.
+- The runner requires machine-readable evidence that every requested exact
+  top-level test ran once and passed; process exit status alone is insufficient.
+- Successful inventory, validation, and rendering emit their expected stdout
+  while preserving tracked bytes and status, index identity and content,
+  `HEAD`, refs, and relevant SPEC and feature bytes in the target repository.
+
+**Why this matters:** The audit command cannot credibly supply review evidence
+if dirty bytes can alter pinned evidence, lexical similarity becomes a merge
+verdict, reciprocal BDD drift is hidden, or a report mutates product state
+before maintainer review. The focused checks are not evidence that a skill is
+discoverable, that a maintainer accepted a recommendation, or that every Go
+build input remained unchanged while the selected tests ran.
+
 ### VROOM Runtime Guardrails
 
 **File:** [`vroom_runtime_guardrails.feature`](../test/bdd/features/vroom_runtime_guardrails.feature)
@@ -1345,10 +1569,32 @@ surfaces, migrations, infrastructure, test suites, and Wayfinder shell support.
 - Every specification retains reciprocal executable BDD traceability.
 - Claude Code, Codex, Antigravity, and OpenCode preserve the same contract
   across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen families.
+- End-to-end harness lookup retains exact CLI mappings while running under the
+  macOS system Bash 3.2 baseline.
 
 **Why this matters:** Repository-wide coverage cannot exclude behavior merely
 because it is implemented outside a Go package. Hooks, installers, migrations,
 infrastructure, and protocol services are part of the shipped control plane.
+
+---
+
+### Dangerous Override Governance
+
+**File:** [`dangerous_override_governance.feature`](../test/bdd/features/dangerous_override_governance.feature)
+
+**Drives:** the shared contract behind every escape hatch that switches off a
+safety control — today the Codex hook-trust bypass and the admission brake
+override.
+
+**Key scenarios:**
+- The dangerous-override package carries a co-located strict EARS specification
+  with reciprocal executable traceability.
+
+**Why this matters:** An override is meant to be an exception, and its failure
+mode is becoming routine — the control it disables then dies without anyone
+deciding that. Holding the contract to the same spec discipline as every other
+package is what stops a new override kind from being added beside the gates
+(reason, human approval, ledger, recurring audit) instead of through them.
 
 ---
 
@@ -1362,12 +1608,16 @@ and Wayfinder test-support package boundaries.
 **Key scenarios:**
 - Every residual test and support package retains a co-located strict EARS SPEC.
 - Every SPEC references the executable feature that enforces it.
-- The complete support contract is validated across all four active harnesses
+- The complete support contract is validated across all five active harnesses
   and all seven supported model families.
 - Live harness contracts use canonical guarded session and message commands.
 - Trust hooks run only for trust scenarios, restore process environment, reuse
   shared Go caches, and remove only their exact owned temporary directory,
   including read-only module trees.
+- Real Codex lifecycle tests own their source binary, short tmux socket,
+  provider fixture, persisted state, and exact cleanup.
+- Named test environments validate paths, use a private effective-user short
+  root, activate owned legacy environments in place, and remove exact state.
 
 **Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
 helpers and suites can silently skip harnesses, consume the wrong provider

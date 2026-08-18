@@ -89,7 +89,7 @@ func commandValidationTestsShouldExerciseRepeatableExecutionOrders(ctx context.C
 	if err != nil {
 		return fmt.Errorf("read AGM CLI SPEC: %w", err)
 	}
-	if !strings.Contains(string(spec), "**CLI-24**") {
+	if !strings.Contains(string(spec), "**CLI-24** When AGM command tests execute Cobra commands or mutate command flags") {
 		return fmt.Errorf("AGM CLI SPEC does not require command-state isolation")
 	}
 	return nil

@@ -128,9 +128,9 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	// Output in requested format
 	switch {
 	case captureJSON:
-		return outputCaptureJSON(sessionName, lines)
+		return outputCaptureJSON(m.SessionID, lines)
 	case captureYAML:
-		return outputCaptureYAML(sessionName, lines)
+		return outputCaptureYAML(m.SessionID, lines)
 	default:
 		outputCaptureText(lines)
 		return nil

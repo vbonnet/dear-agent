@@ -2,6 +2,7 @@ package healthchecker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -31,14 +32,36 @@ func (f *Fixer) Preview(results []Result) []Result {
 // Apply executes fixes for all fixable results
 // Returns: (number of fixes applied, updated results, error)
 func (f *Fixer) Apply(ctx context.Context, results []Result) (int, []Result, error) {
+	prepared, err := prepareResults(results)
+	if err != nil {
+		return 0, prepared, err
+	}
+
 	if f.dryRun {
 		return 0, results, nil
 	}
 
-	applied := 0
-	updated := make([]Result, len(results))
-	copy(updated, results)
+	return applyPrepared(ctx, prepared)
+}
 
+// prepareResults returns a safe copy and every indexed validation error.
+// Validation covers the complete batch before any caller can invoke a fix.
+func prepareResults(results []Result) ([]Result, error) {
+	prepared := make([]Result, len(results))
+	var validationErrors []error
+	for i, result := range results {
+		prepared[i] = normalizeResult(result)
+		if err := result.Validate(); err != nil {
+			validationErrors = append(validationErrors, fmt.Errorf("result[%d]: %w", i, err))
+		}
+	}
+
+	return prepared, errors.Join(validationErrors...)
+}
+
+// applyPrepared executes an already-copied, fully validated result batch.
+func applyPrepared(ctx context.Context, updated []Result) (int, []Result, error) {
+	applied := 0
 	for i, r := range updated {
 		if !r.Fixable || r.Fix == nil {
 			continue
@@ -72,6 +95,10 @@ func (f *Fixer) Apply(ctx context.Context, results []Result) (int, []Result, err
 // ApplyOne executes a fix for a single result
 // Returns: (success, updated result, error)
 func (f *Fixer) ApplyOne(ctx context.Context, result Result) (bool, Result, error) {
+	if err := result.Validate(); err != nil {
+		return false, normalizeResult(result), err
+	}
+
 	if f.dryRun {
 		return false, result, nil
 	}
@@ -122,7 +149,12 @@ func (f *Fixer) ApplyWithReport(ctx context.Context, results []Result) (*FixRepo
 		Failures:  []Result{},
 	}
 
-	fixable := FilterFixable(results)
+	prepared, err := prepareResults(results)
+	if err != nil {
+		return report, prepared, err
+	}
+
+	fixable := FilterFixable(prepared)
 	report.Total = len(fixable)
 
 	if f.dryRun {
@@ -130,7 +162,9 @@ func (f *Fixer) ApplyWithReport(ctx context.Context, results []Result) (*FixRepo
 		return report, results, nil
 	}
 
-	applied, updated, err := f.Apply(ctx, results)
+	beforeApply := make([]Result, len(prepared))
+	copy(beforeApply, prepared)
+	applied, updated, err := applyPrepared(ctx, prepared)
 	if err != nil {
 		return report, updated, err
 	}
@@ -139,7 +173,7 @@ func (f *Fixer) ApplyWithReport(ctx context.Context, results []Result) (*FixRepo
 	report.Failed = report.Total - applied
 
 	// Collect successes and failures
-	for i, orig := range results {
+	for i, orig := range beforeApply {
 		if !orig.Fixable {
 			continue
 		}

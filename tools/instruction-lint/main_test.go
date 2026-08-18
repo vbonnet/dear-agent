@@ -3,10 +3,11 @@ package main
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestRunRepository(t *testing.T) {
@@ -55,8 +56,5 @@ func writeCLIFile(t *testing.T, root, relative, content string) {
 
 func runTestGit(t *testing.T, root string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, output)
-	}
+	gittest.Run(t, root, args...)
 }

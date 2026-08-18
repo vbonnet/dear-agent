@@ -67,12 +67,85 @@ func TestRunReviewSkillUsesReachableDeterministicReview(t *testing.T) {
 func TestValidateSingleDocumentHasReachablePass(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "PLAN-design.md")
-	content := "# Implementation Plan\n\n## Context\nThis section records the current system boundaries and constraints that shape the work.\n\n## Design\nThis section records the chosen sequence, validation evidence, dependencies, and important delivery trade-offs.\n"
+	content := `---
+phase: PLAN
+phase_name: Delivery plan
+wayfinder_session_id: test-session
+created_at: 2026-07-22T09:00:00-07:00
+---
+# Implementation Plan
+
+## Context
+This section records the current system boundaries and constraints that shape the work.
+
+## Design
+This section records the chosen sequence, validation evidence, dependencies, and important delivery trade-offs.
+`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateSingleDocument(dir, "PLAN", "PLAN-design.md", "review-architecture"); err != nil {
 		t.Fatalf("validateSingleDocument() blocked a substantive local review: %v", err)
+	}
+}
+
+func TestBuiltinReviewIssuesHandlesLeadingFrontmatter(t *testing.T) {
+	substantive := "# Implementation Plan\n\n## Context\nThis section records the current system boundaries and constraints that shape the work.\n\n## Design\nThis section records the chosen sequence, validation evidence, dependencies, and important delivery trade-offs.\n"
+	frontmatter := "---\nphase: PLAN\nphase_name: Delivery plan\nwayfinder_session_id: test-session\ncreated_at: 2026-07-22T09:00:00-07:00\n---\n"
+
+	tests := []struct {
+		name         string
+		content      string
+		wantErr      string
+		wantIssue    string
+		wantNoIssues bool
+	}{
+		{
+			name:         "canonical frontmatter",
+			content:      frontmatter + substantive,
+			wantNoIssues: true,
+		},
+		{
+			name:      "missing heading after frontmatter",
+			content:   frontmatter + "Implementation Plan\n\n## Context\nEnough context words make this document substantive for structural review.\n\n## Design\nEnough design words describe sequencing, validation, dependencies, and trade-offs.\n",
+			wantIssue: "document must begin with a level-one heading",
+		},
+		{
+			name:    "unclosed frontmatter",
+			content: "---\nphase: PLAN\n" + substantive,
+			wantErr: "unclosed YAML frontmatter",
+		},
+		{
+			name:    "invalid frontmatter",
+			content: "---\nphase: [PLAN\n---\n" + substantive,
+			wantErr: "invalid YAML frontmatter",
+		},
+		{
+			name:         "later delimiter is prose",
+			content:      substantive + "\n---\nA later thematic break remains part of the Markdown body.\n",
+			wantNoIssues: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues, err := builtinReviewIssues("review-architecture", tt.content)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantIssue != "" && !containsString(strings.Join(issues, "; "), tt.wantIssue) {
+				t.Fatalf("issues = %v, want %q", issues, tt.wantIssue)
+			}
+			if tt.wantNoIssues && len(issues) != 0 {
+				t.Fatalf("issues = %v, want none", issues)
+			}
+		})
 	}
 }
 

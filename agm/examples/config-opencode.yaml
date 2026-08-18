@@ -20,14 +20,9 @@ adapters:
 
     # Reconnect configuration (resilient SSE connection)
     reconnect:
-      enabled: true                # Auto-reconnect on disconnect
       initial_delay: 5s            # First reconnect delay
       max_delay: 5m                # Maximum backoff delay
-      backoff_multiplier: 2        # Exponential backoff factor
-
-    # Fallback to Astrocyte tmux monitoring if SSE fails
-    # Recommended: true (provides safety net during outages)
-    fallback_tmux: true
+      multiplier: 2                # Exponential backoff factor
 
   # Future adapters can be added here:
   # gemini:
@@ -218,7 +213,6 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_tmux: false  # No fallback needed
 #
 # multi_agent:
 #   default_agent: opencode
@@ -230,7 +224,6 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_tmux: true  # Recommended for resilience
 #
 # multi_agent:
 #   default_agent: claude
@@ -278,7 +271,7 @@ advanced:
 # 3. Migration from v3:
 #    - v3 config files work without changes (no 'adapters' section)
 #    - Adding 'adapters' section is opt-in
-#    - See docs/MULTI-AGENT-MIGRATION-GUIDE.md for details
+#    - See docs/OPENCODE-INTEGRATION.md for the current monitor contract
 
 # 4. Validation:
 #    Test your configuration before deploying:
@@ -287,7 +280,7 @@ advanced:
 
 # 5. Troubleshooting:
 #    - Check logs: journalctl --user -u agm-daemon -f
-#    - Verify adapter: agm status
+#    - Verify aggregate state: agm session status
 #    - Test connectivity: curl http://localhost:4096/health
 #    - See docs/OPENCODE-INTEGRATION.md for common issues
 

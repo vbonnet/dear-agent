@@ -12,13 +12,14 @@ import (
 func newInstallHarnessCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install-harness <harness>",
-		Short: "Install a coding agent harness (codex, gemini, or opencode)",
+		Short: "Install a coding agent harness (codex, gemini, opencode, or pi)",
 		Long: `Install a coding agent harness CLI.
 
 Supports:
   codex     - OpenAI Codex CLI (installed via npm)
   gemini    - Google Gemini CLI (installed via linuxbrew)
   opencode  - Mistral OpenCode CLI (installed via linuxbrew)
+  pi        - Pi coding agent CLI (installed via npm)
 
 The command checks if the harness is already installed before attempting installation.
 Output is in JSON format for programmatic use.
@@ -27,10 +28,11 @@ Examples:
   agm admin install-harness codex
   agm admin install-harness gemini
   agm admin install-harness opencode
+  agm admin install-harness pi
   agm admin install-harness codex --json`,
 		Args:      cobra.ExactArgs(1),
 		RunE:      runInstallHarness,
-		ValidArgs: []string{"codex", "gemini", "opencode"},
+		ValidArgs: []string{"codex", "gemini", "opencode", "pi"},
 	}
 	cmd.Flags().Bool("json", true, "Output result as JSON (default: true)")
 	cmd.Flags().Bool("quiet", false, "Suppress output (only valid with --json)")

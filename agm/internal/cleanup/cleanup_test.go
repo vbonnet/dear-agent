@@ -116,7 +116,7 @@ func TestSessionResources_BranchCleanup(t *testing.T) {
 
 	store := &mockWorktreeStore{
 		worktrees: []WorktreeRecord{
-			{WorktreePath: wtPath, RepoPath: "/repo/a", Branch: "my-session", SessionName: "my-session"},
+			{WorktreePath: wtPath, RepoPath: "/repo/a", Branch: "recorded-branch", SessionName: "my-session"},
 		},
 	}
 	git := &mockGitOps{}
@@ -126,8 +126,8 @@ func TestSessionResources_BranchCleanup(t *testing.T) {
 	if result.BranchesDeleted != 1 {
 		t.Errorf("Expected 1 branch deleted, got %d", result.BranchesDeleted)
 	}
-	if len(git.deletedBranches) != 1 || git.deletedBranches[0] != "my-session" {
-		t.Errorf("Expected branch 'my-session' deleted, got %v", git.deletedBranches)
+	if len(git.deletedBranches) != 1 || git.deletedBranches[0] != "recorded-branch" {
+		t.Errorf("Expected only recorded branch deleted, got %v", git.deletedBranches)
 	}
 }
 
@@ -212,6 +212,9 @@ func TestSessionResources_WorktreeRemoveError(t *testing.T) {
 	// Untrack should still be called even on removal error
 	if len(store.untracked) != 1 {
 		t.Errorf("Expected worktree to be untracked even on removal error, got %d", len(store.untracked))
+	}
+	if result.BranchesDeleted != 0 || len(git.deletedBranches) != 0 {
+		t.Fatalf("branch deletion must remain blocked after worktree removal failure: result=%+v deleted=%v", result, git.deletedBranches)
 	}
 }
 

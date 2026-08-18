@@ -204,7 +204,10 @@ func TestMockAdapter_GetByFrecency_Limit(t *testing.T) {
 	mock := NewMockAdapter()
 
 	for i := 0; i < 5; i++ {
-		s := NewTestManifest("s"+string(rune('a'+i)), "session")
+		s := NewTestManifest(
+			"s"+string(rune('a'+i)),
+			"session-"+string(rune('a'+i)),
+		)
 		if err := mock.CreateSession(s); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}

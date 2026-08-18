@@ -31,12 +31,12 @@ func TestBuildClaudeCommand_BracketedModelQuoted(t *testing.T) {
 }
 
 // TestBuildClaudeCommand_SessionNameQuoted verifies that a session name containing
-// shell-special characters is quoted in the AGM_SESSION_NAME assignment.
+// shell-special characters is quoted in the private protocol argument.
 func TestBuildClaudeCommand_SessionNameQuoted(t *testing.T) {
 	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "claude-code", Model: "sonnet", SessionName: "my-session", WorkDir: "/tmp/work",
 	})
-	if !strings.Contains(cmd, "AGM_SESSION_NAME='my-session'") {
+	if !strings.Contains(cmd, "--session 'my-session'") {
 		t.Errorf("session name not quoted in command: %s", cmd)
 	}
 }
@@ -52,7 +52,7 @@ func TestBuildClaudeCommand_PersistentOmitsExit(t *testing.T) {
 		t.Errorf("persistent=true: command still has '&& exit': %s", cmd)
 	}
 	// Must still contain all other required parts.
-	for _, want := range []string{"claude", "AGM_SESSION_NAME='sup-session'", "--add-dir '/tmp/work'"} {
+	for _, want := range []string{"agm __exec-claude", "--session 'sup-session'", "--add-dir '/tmp/work'"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("persistent=true: command missing %q: %s", want, cmd)
 		}

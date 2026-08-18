@@ -1,29 +1,27 @@
-# Agent Abstraction
+# Harness Adapters
 
-This package implements the Agent interface abstraction for supporting multiple AI agents in AGM (AI/Agent Gateway Manager).
+This package implements concrete harness adapters, descriptive harness
+metadata, model routing, and shared adapter data types for AGM.
 
 ## Overview
 
-The Agent interface provides a unified API for managing AI harness sessions. The active parity harnesses are `claude-code`, `codex-cli`, `agy`, and `opencode-cli`, with Claude Code as the reference implementation. `gemini-cli` remains deprecated compatibility for old sessions.
+The active parity harnesses are `claude-code`, `codex-cli`, `agy`,
+`opencode-cli`, and `pi-cli`, with Claude Code as the reference implementation.
+`gemini-cli` remains deprecated compatibility for old sessions. Constructors
+return concrete adapters. Heterogeneous discovery uses the small `Harness`
+metadata interface; lifecycle operations define the behavioral capabilities
+they consume.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│         Agent Interface             │
-│  - CreateSession()                  │
-│  - ResumeSession()                  │
-│  - TerminateSession()               │
-│  - GetSessionStatus()               │
-│  - SendMessage()                    │
-│  - GetHistory()                     │
-│  - ExportConversation()             │
-│  - ImportConversation()             │
+│         Harness Metadata            │
+│  - Name()                           │
+│  - Version()                        │
 │  - Capabilities()                   │
-│  - ExecuteCommand()                 │
-│  - Name(), Version()                │
 └───────────────┬─────────────────────┘
-                │ implements
+                │ described by
                 ▼
         ┌───────────────┐
         │ ClaudeAdapter │ (implemented)
@@ -45,30 +43,32 @@ The Agent interface provides a unified API for managing AI harness sessions. The
 ## Components
 
 ### interface.go
-Defines the Agent interface and supporting types:
-- `Agent` - Main interface with 11 methods
+Defines the metadata contract and supporting types:
+- `Harness` - Metadata-only discovery interface
+- `ContextMessageSender` and `ContextSessionStatusGetter` - narrow
+  cancellation-aware capabilities used by pure API delivery
 - `SessionContext` - Parameters for session creation
 - `Message` - Conversation message structure
-- `Capabilities` - Agent feature capabilities
+- `Capabilities` - Harness feature and model metadata
 - `Command` - Generic agent operations
 - `SessionID`, `Status`, `Role`, `ConversationFormat` - Type definitions
 
 ### claude_adapter.go
 ClaudeAdapter implementation:
-- Implements Agent interface for Claude CLI
+- Concrete adapter for Claude CLI
 - Delegates to existing AGM tmux infrastructure
 - Maps SessionIDs to tmux session names
 - Wraps existing session management logic
 
 ### codex_cli_adapter.go
 CodexCLIAdapter implementation:
-- Implements Agent interface for OpenAI Codex CLI
+- Concrete adapter for OpenAI Codex CLI
 - Uses tmux-backed interactive sessions
 - Does not route `codex-cli` through the OpenAI API adapter
 
 ### agy_adapter.go
 AgyAdapter implementation:
-- Implements Agent interface for Antigravity/AGY
+- Concrete adapter for Antigravity/AGY
 - Uses tmux-backed interactive sessions
 - Uses the same model-aware launch command policy as the production lifecycle
 - Normalizes workspaces and shares provider identity serialization with CLI and MCP creation so cross-surface concurrent creates cannot exchange native IDs
@@ -79,7 +79,7 @@ AgyAdapter implementation:
 
 ### opencode_adapter.go
 OpenCodeAdapter implementation:
-- Implements Agent interface for OpenCode
+- Concrete adapter for OpenCode
 - Uses `opencode attach` against a running OpenCode server
 
 ### gemini_cli_adapter.go
@@ -157,7 +157,7 @@ if caps.SupportsSlashCommands {
 }
 
 if caps.SupportsTools {
-    // Agent can use tool calling
+    // Harness can expose tool calling
 }
 
 fmt.Printf("Model: %s\n", caps.ModelName)  // "claude-sonnet-4.5"
@@ -204,19 +204,20 @@ ClaudeAdapter maintains a persistent mapping between UUIDs (SessionID) and tmux 
 }
 ```
 
-This decouples the Agent abstraction from tmux naming conventions, allowing:
-- Agent-agnostic SessionIDs (UUIDs work for all agents)
+This decouples adapter persistence from tmux naming conventions, allowing:
+- Harness-agnostic SessionIDs (UUIDs work across adapters)
 - Tmux session names to change without breaking SessionID references
-- Easy migration to non-tmux backends for API-based agents
+- Pure API sessions to use their provider adapter and non-tmux storage locator
 
 ## Implementation Status
 
 ### Implemented ✅
-- Agent interface definition
-- ClaudeAdapter with all 11 methods
+- Harness metadata and consumer capability definitions
+- ClaudeAdapter concrete lifecycle mechanisms
 - CodexCLIAdapter for tmux-backed Codex CLI sessions
 - AgyAdapter for tmux-backed Antigravity/AGY sessions
 - OpenCodeAdapter for OpenCode attach sessions
+- PiAdapter for tmux-backed Pi CLI sessions
 - GeminiCLIAdapter as deprecated compatibility
 - SessionStore with JSON persistence
 
@@ -242,8 +243,8 @@ go test -v -run 'Test(ActiveHarnesses|GeminiCLIIsDeprecated|CodexFactory)'
 
 Expected output:
 ```
-=== RUN   TestClaudeAdapterImplementsAgentInterface
---- PASS: TestClaudeAdapterImplementsAgentInterface (0.00s)
+=== RUN   TestClaudeAdapterImplementsHarnessContract
+--- PASS: TestClaudeAdapterImplementsHarnessContract (0.00s)
 === RUN   TestActiveHarnessesCanonicalParitySet
 --- PASS: TestActiveHarnessesCanonicalParitySet (0.00s)
 === RUN   TestCodexFactoryUsesCLIAdapter
@@ -279,20 +280,21 @@ ok  	github.com/vbonnet/dear-agent/agm/internal/agent	0.035s
 | `agy` | Active parity | tmux + Antigravity CLI | Replacement path for non-enterprise Gemini CLI users |
 | `opencode-cli` | Active parity | tmux + `opencode attach` | Requires a running OpenCode server |
 | `gemini-cli` | Deprecated compatibility | tmux + Gemini CLI | Kept for old sessions only |
+| `openai` / `gpt` | Legacy compatibility | OpenAI Chat Completions API + local JSONL | Separate from the `codex-cli` harness |
 
 ## Future Extensions
 
-### Additional Agents
-The interface supports any AI provider:
-- GPT-4 via OpenAI API (planned)
-- Local models via Ollama
-- Custom agents via plugin system
+### Additional Harnesses
+
+A new interactive harness adds a concrete adapter plus finite harness and model
+catalog entries. A shared operation depends only on the capability-sized
+interface it owns. The legacy OpenAI API adapter remains a separate pure API
+delivery path rather than an interactive harness catalog entry.
 
 ## References
 
-- Agent interface: `internal/agent/interface.go`
+- Harness metadata contract: `internal/agent/interface.go`
 - ClaudeAdapter: `internal/agent/claude_adapter.go`
 - SessionStore: `internal/agent/session_store.go`
 - Tests: `internal/agent/claude_adapter_test.go`
-- Bead: oss-agm-r2 (Agent abstraction)
-- Next bead: oss-agm-g1 (Implement GeminiAgent)
+- Historical bead: oss-agm-r2 (original adapter abstraction)

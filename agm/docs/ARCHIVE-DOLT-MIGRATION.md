@@ -115,22 +115,23 @@ cd main/agm
 go test ./internal/dolt/... -v
 ```
 
-### Integration Tests
+### Lifecycle and Regression Tests
 
-**File**: `test/integration/lifecycle/archive_test.go`
+Current archive coverage lives with the production operations and CLI rather
+than a legacy manifest-based integration package:
 
-1. **Archive by session ID**: Verifies archiving using session ID identifier
-2. **Archive by tmux name**: Verifies archiving using tmux session name
-3. **Archive by manifest name**: Verifies archiving using manifest name field
-4. **Non-existent session**: Verifies clear error message
-5. **Regression test**: Verifies archived sessions cannot be re-archived
+- `internal/ops/session_archive_test.go` verifies durable stopped-to-archived
+  transitions, visibility, serialization, and trust events.
+- `cmd/agm/archive_test.go` verifies identifier routes and CLI error handling.
+- `test/regression/archive_dolt_stopped_sessions_test.go` preserves the
+  original stopped-session regression.
+- `test/integration/isolated/codex_lifecycle_test.go` verifies archive at the
+  end of a source-built Codex lifecycle.
 
-Run integration tests:
+Run archive-focused tests:
 ```bash
-# Requires running Dolt server
-export DOLT_TEST_INTEGRATION=1
-cd main/agm
-go test ./test/integration/lifecycle/... -tags=integration -v
+go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression \
+  -run 'Archive|ResolveIdentifier'
 ```
 
 ### Manual Testing
@@ -192,7 +193,7 @@ agm session list
 ## Verification Checklist
 
 - [ ] Unit tests pass: `go test ./internal/dolt/... -v`
-- [ ] Integration tests pass: `DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration -v`
+- [ ] Archive production and regression tests pass: `go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression -run 'Archive|ResolveIdentifier'`
 - [ ] Manual test: Archive by session ID works
 - [ ] Manual test: Archive by tmux name works
 - [ ] Manual test: Archive by manifest name works

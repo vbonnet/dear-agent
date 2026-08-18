@@ -1,108 +1,56 @@
 package agent
 
 import (
+	"context"
 	"time"
 )
 
-// Agent defines the interface all AI agents must implement.
-//
-// AGM (Agent Manager) uses this interface to support multiple AI providers
-// (Claude, Gemini, GPT) with a unified session management experience.
+// Harness describes one adapter for heterogeneous discovery and conformance.
+// Lifecycle and message behavior stays on concrete adapters or behind narrow
+// interfaces defined by the consumer that owns the operation.
 //
 // Example usage:
 //
-//	agent := claude.NewAdapter()
-//	sessionID, err := agent.CreateSession(SessionContext{
-//	    Name:             "my-session",
-//	    WorkingDirectory: "~/project",
-//	})
+//	harness, err := GetHarness("codex-cli")
 //	if err != nil {
 //	    return err
 //	}
-//	err = agent.SendMessage(sessionID, Message{
-//	    Role:    RoleUser,
-//	    Content: "Hello, can you help me?",
-//	})
+//	fmt.Printf("%s %s\n", harness.Name(), harness.Version())
 //
-// Implementations must handle agent-specific details (authentication,
-// API endpoints, session storage) while conforming to this interface.
-type Agent interface {
-	// Name returns the agent identifier (e.g., "claude", "gemini", "gpt").
+// Concrete adapters continue to expose harness-specific lifecycle mechanisms,
+// while internal/ops owns cross-surface lifecycle transactions.
+type Harness interface {
+	// Name returns the canonical harness identifier.
 	Name() string
 
-	// Version returns the agent version or model name (e.g., "claude-sonnet-4.5").
+	// Version returns the adapter's reported version or model identifier.
 	Version() string
 
-	// CreateSession creates a new agent session with the given context.
-	//
-	// The session context includes working directory, project info, and
-	// pre-authorized directories. The returned SessionID is agent-specific
-	// (e.g., Claude UUID, Gemini session ID).
-	//
-	// Returns error if session creation fails (authentication, network,
-	// invalid context).
-	CreateSession(ctx SessionContext) (SessionID, error)
-
-	// ResumeSession resumes an existing agent session by SessionID.
-	//
-	// For CLI agents (Claude), this attaches to existing tmux session.
-	// For API agents (Gemini, GPT), this loads conversation history.
-	//
-	// Returns error if session not found or cannot be resumed.
-	ResumeSession(sessionID SessionID) error
-
-	// TerminateSession terminates an agent session.
-	//
-	// For CLI agents, this exits the agent process.
-	// For API agents, this may be a no-op (sessions are stateless).
-	//
-	// Returns error if session cannot be terminated.
-	TerminateSession(sessionID SessionID) error
-
-	// GetSessionStatus returns the current status of a session.
-	//
-	// Returns StatusActive, StatusIdle, StatusSuspended, or StatusTerminated.
-	// Returns error if session not found.
-	GetSessionStatus(sessionID SessionID) (Status, error)
-
-	// SendMessage sends a message to the agent in the given session.
-	//
-	// For CLI agents, this sends keys to tmux pane.
-	// For API agents, this makes API call with message + history.
-	//
-	// Returns error if message cannot be sent.
-	SendMessage(sessionID SessionID, message Message) error
-
-	// GetHistory retrieves conversation history for a session.
-	//
-	// Returns all messages in the session's conversation history.
-	// Returns error if history cannot be retrieved.
-	GetHistory(sessionID SessionID) ([]Message, error)
-
-	// ExportConversation exports conversation in the specified format.
-	//
-	// Supported formats: jsonl (universal), html (Claude), markdown (readable).
-	// Returns serialized conversation data.
-	// Returns error if format unsupported or export fails.
-	ExportConversation(sessionID SessionID, format ConversationFormat) ([]byte, error)
-
-	// ImportConversation imports conversation from serialized data.
-	//
-	// Creates new session from exported conversation data.
-	// Returns new SessionID and error if import fails.
-	ImportConversation(data []byte, format ConversationFormat) (SessionID, error)
-
-	// Capabilities returns the agent's feature capabilities.
-	//
-	// Used for runtime feature detection and graceful degradation.
+	// Capabilities returns descriptive feature and model metadata.
 	Capabilities() Capabilities
+}
 
-	// ExecuteCommand executes a generic command with agent-specific translation.
-	//
-	// Examples: rename_session, set_directory, authorize_directory.
-	// Command translation happens in adapter implementation.
-	// Returns error if command unsupported or execution fails.
-	ExecuteCommand(cmd Command) error
+var (
+	_ Harness = (*ClaudeAdapter)(nil)
+	_ Harness = (*GeminiCLIAdapter)(nil)
+	_ Harness = (*CodexCLIAdapter)(nil)
+	_ Harness = (*OpenCodeAdapter)(nil)
+	_ Harness = (*AgyAdapter)(nil)
+	_ Harness = (*PiAdapter)(nil)
+	_ Harness = (*OpenAIAdapter)(nil)
+)
+
+// ContextMessageSender is implemented by adapters whose delivery surface can
+// honor caller cancellation and deadlines.
+type ContextMessageSender interface {
+	SendMessageContext(ctx context.Context, sessionID SessionID, message Message) error
+}
+
+// ContextSessionStatusGetter is implemented by adapters whose readiness lookup
+// can honor caller cancellation and deadlines. Pure API delivery requires this
+// contract so a contended adapter store cannot pin the outer lifecycle lock.
+type ContextSessionStatusGetter interface {
+	GetSessionStatusContext(ctx context.Context, sessionID SessionID) (Status, error)
 }
 
 // SessionContext provides parameters for creating a new agent session.
@@ -123,6 +71,12 @@ type SessionContext struct {
 	// this session. Harnesses with a registry default may leave it empty.
 	// Optional.
 	Model string
+
+	// InitialPrompt is the optional first user message. Harnesses that create
+	// their durable native identity lazily may require it before CreateSession
+	// can safely persist the session mapping.
+	// Optional for harnesses with eager native identity creation.
+	InitialPrompt string
 
 	// AuthorizedDirs are directories pre-authorized for agent access.
 	// Optional. If empty, agent may prompt for directory authorization.
@@ -172,40 +126,34 @@ const (
 //
 // Used for runtime feature detection and graceful degradation.
 type Capabilities struct {
-	// SupportsSlashCommands indicates if agent supports slash commands
-	// (e.g., /rename, /clear). True for Claude CLI, false for API agents.
+	// SupportsSlashCommands indicates whether the harness supports translated
+	// slash commands such as rename or clear.
 	SupportsSlashCommands bool
 
 	// SupportsHooks indicates if agent supports pre/post-command hooks.
 	// May be AGM feature, not agent-specific.
 	SupportsHooks bool
 
-	// SupportsTools indicates if agent supports tool/function calls.
-	// True for Claude, GPT; Gemini has similar (functions).
+	// SupportsTools indicates whether the harness exposes tool/function calls.
 	SupportsTools bool
 
-	// SupportsVision indicates if agent can process images.
-	// True for modern models (Claude Opus/Sonnet, GPT-4V, Gemini Pro Vision).
+	// SupportsVision indicates whether the selected harness/model accepts images.
 	SupportsVision bool
 
-	// SupportsMultimodal indicates if agent supports audio/video.
-	// Future-proofing for next-gen models.
+	// SupportsMultimodal indicates whether the selected harness/model accepts
+	// additional media such as audio or video.
 	SupportsMultimodal bool
 
-	// SupportsStreaming indicates if agent supports streaming responses.
-	// True for most modern APIs (Claude, GPT, Gemini).
+	// SupportsStreaming indicates whether response streaming is available.
 	SupportsStreaming bool
 
-	// SupportsSystemPrompts indicates if agent supports system prompts.
-	// True for Claude, GPT-4; Gemini (via conversation prefix).
+	// SupportsSystemPrompts indicates whether system prompts are available.
 	SupportsSystemPrompts bool
 
-	// MaxContextWindow is the maximum context window size in tokens.
-	// Varies by model (Claude: 200K, GPT-4: 128K, Gemini: 1M+).
+	// MaxContextWindow is the adapter-reported context limit in tokens.
 	MaxContextWindow int
 
-	// ModelName is the underlying model identifier.
-	// Examples: "claude-sonnet-4.5", "gpt-4-turbo", "gemini-3.5-flash".
+	// ModelName is the selected model identifier.
 	ModelName string
 }
 
@@ -213,8 +161,8 @@ type Capabilities struct {
 //
 // Commands are translated to agent-specific actions by adapters.
 // Examples:
-//   - CommandRename: Claude → "/rename {name}\r", Gemini → API call
-//   - CommandSetDir: Claude → "cd {path}\r", Gemini → update context
+//   - CommandRename: translated to the harness-specific rename operation
+//   - CommandSetDir: translated to the harness-specific directory operation
 type Command struct {
 	// Type is the command type.
 	Type CommandType
@@ -254,9 +202,7 @@ const (
 
 // SessionID is an opaque agent-specific session identifier.
 //
-// For Claude: UUID from history.jsonl (e.g., "550e8400-e29b-41d4-a716-446655440000")
-// For Gemini: API session ID or file path
-// For GPT: Thread ID or conversation ID
+// It may be a native conversation ID or an AGM-owned mapping identifier.
 type SessionID string
 
 // Status represents the state of a session.

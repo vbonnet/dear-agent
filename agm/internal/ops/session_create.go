@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,8 +14,12 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
@@ -22,6 +27,8 @@ import (
 // remote-control setup. It bounds the complete
 // StartRemoteControl->StartThread->SetThreadName sequence for every surface.
 const CodexRemoteBootTimeout = 45 * time.Second
+
+const sharedHarnessReadyTimeout = 60 * time.Second
 
 const (
 	// CreateSurfaceCLI identifies the command-line creation surface.
@@ -47,6 +54,9 @@ type CreateSessionMetadata struct {
 	Workspace        string
 	ModelTier        string
 	Tags             []string
+	ContextPurpose   string
+	ContextNotes     string
+	ParentSessionID  *string
 	PermissionPolicy *manifest.PermissionPolicy
 	Sandbox          *manifest.SandboxConfig
 	IsTest           bool
@@ -54,14 +64,50 @@ type CreateSessionMetadata struct {
 	DisposableTTL    string
 	PermissionMode   string
 	OpenCodeServer   string
+	Pi               *manifest.Pi
+	PiExtension      string
+	PiPolicyJSON     string
+	PiPolicyFile     string
 }
 
-// CreateSessionLaunchResult records launch facts required by runtime
-// completion. HandledLifecycle is used only by the deprecated Gemini wrapper,
-// which exits after managing its own terminal lifecycle.
+// CreateSessionReadiness records what the launch boundary proved about the
+// interactive harness. The zero value is deliberately unverified so adding a
+// runtime can never silently bypass the shared readiness gate.
+type CreateSessionReadiness string
+
+const (
+	// CreateSessionReadinessVerified means the runtime already observed the
+	// expected harness process and its interactive composer.
+	CreateSessionReadinessVerified CreateSessionReadiness = "verified"
+	// CreateSessionReadinessDeferredUntilCallerExit is reserved for prompt-free
+	// current-pane creation. The harness command is queued behind the foreground
+	// AGM process and cannot start until creation returns.
+	CreateSessionReadinessDeferredUntilCallerExit CreateSessionReadiness = "deferred-until-caller-exit"
+)
+
+// CreateSessionLaunchResult records launch facts required by shared readiness
+// and runtime completion. HandledLifecycle is used only by the deprecated
+// Gemini wrapper, which exits after managing its own terminal lifecycle.
 type CreateSessionLaunchResult struct {
 	ModeAppliedAtStartup bool
 	HandledLifecycle     bool
+	Readiness            CreateSessionReadiness
+	// PromptDelivered records that an AGY startup prompt was delivered before
+	// provider-native identity discovery. Completion must not deliver it again.
+	PromptDelivered bool
+}
+
+// AgyCreateIdentityBootstrap is the prompt delivery input required by AGY
+// versions that persist a new provider conversation only after first input.
+type AgyCreateIdentityBootstrap struct {
+	SessionName string
+	Prompt      string
+}
+
+// AgyCreateIdentityBootstrapper lets a surface preserve its safe literal-input
+// implementation while the shared lifecycle continues to own phase ordering.
+type AgyCreateIdentityBootstrapper interface {
+	BootstrapAgyCreateIdentity(context.Context, AgyCreateIdentityBootstrap) error
 }
 
 // CreateSessionCompletion is the single post-registration input presented to
@@ -76,14 +122,35 @@ type CreateSessionCompletion struct {
 
 // CreateSessionRuntime is the harness-runtime seam. Implementations adapt
 // interactive startup and surface-specific completion; they cannot insert,
-// reorder, or skip tmux creation, registration, or rollback.
+// reorder, or skip tmux creation, readiness, registration, or rollback. A
+// runtime must explicitly report readiness it has already verified.
 type CreateSessionRuntime interface {
 	Launch(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
 	Complete(context.Context, CreateSessionCompletion) error
 }
 
-// SessionStorageOpener lazily constructs surface-specific storage after the
-// harness has launched. The returned cleanup runs after rollback.
+// CreateSessionPreparation is the narrow, mutable subset a surface may prepare
+// after the shared lifecycle has reserved the session name but before any
+// workspace, permission, provider, tmux, or harness mutation.
+type CreateSessionPreparation struct {
+	SessionID            string
+	SessionName          string
+	Cwd                  string
+	ExtraAddDirs         []string
+	PermissionPolicy     *manifest.PermissionPolicy
+	Sandbox              *manifest.SandboxConfig
+	BypassCodexHookTrust bool
+}
+
+// CreateSessionPreparer is an optional runtime capability for surface-specific
+// workspace and permission preparation. The shared lifecycle controls its
+// position immediately after durable name admission.
+type CreateSessionPreparer interface {
+	Prepare(context.Context, CreateSessionPreparation) (CreateSessionPreparation, error)
+}
+
+// SessionStorageOpener lazily constructs surface-specific storage before any
+// harness launch side effect. The returned cleanup runs after rollback.
 type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
 
 // CodexThreadCreator adapts the external Codex remote-control dependency.
@@ -109,17 +176,30 @@ type CreateSessionRequest struct {
 	DisableAutoMode        bool                  `json:"-"`
 	MaxBudgetUSD           float64               `json:"-"`
 	ExtraAddDirs           []string              `json:"-"`
+	BypassCodexHookTrust   bool                  `json:"-"`
 	ForwardTelemetry       bool                  `json:"-"`
 	ForwardClaudeOAuth     bool                  `json:"-"`
 	AllowEmptyPrompt       bool                  `json:"-"`
 	AllowUnsafeTitle       bool                  `json:"-"`
 	ReuseExistingTmux      bool                  `json:"-"`
 	RequireStorage         bool                  `json:"-"`
-	RegistrationOptional   bool                  `json:"-"`
+	RegisterBeforeLaunch   bool                  `json:"-"`
 	ManifestDir            string                `json:"-"`
 	ManifestDirOptional    bool                  `json:"-"`
 	SkipCodexRemoteControl bool                  `json:"-"`
 	CodexRemoteBootTimeout time.Duration         `json:"-"`
+
+	// SpawnRetries bounds how many additional times a transient agy spawn
+	// failure (the Antigravity identity-discovery race under provider throttle,
+	// surfaced as an AGM-011 agy.identity error) is retried by
+	// CreateSessionRouted, with exponential backoff seeded by
+	// SpawnRetryBaseDelay. Zero disables retries. Ignored for non-agy harnesses.
+	SpawnRetries        int           `json:"-"`
+	SpawnRetryBaseDelay time.Duration `json:"-"`
+	// FallbackHarness, when set, is the harness CreateSessionRouted re-dispatches
+	// to after an agy spawn exhausts its retries — so a throttled Gemini becomes
+	// usable-with-fallback instead of a hard failure. Typically "codex-cli".
+	FallbackHarness string `json:"-"`
 }
 
 // CreateSessionResult is the output of CreateSession.
@@ -145,17 +225,27 @@ type createSessionState struct {
 	createdTmux        bool
 	createdManifestDir bool
 	registered         bool
+	nameReserved       bool
 	store              dolt.Storage
 	storageCleanup     func()
 }
 
-func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) {
+func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) error {
 	if operationErr != nil {
-		rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered)
+		operationErr = errors.Join(
+			operationErr,
+			rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered),
+		)
+	}
+	if state.nameReserved {
+		if err := releaseCreateSessionNameReservation(state.store, sessionID); err != nil {
+			operationErr = errors.Join(operationErr, ErrStorageError("storage.ReleaseSessionNameReservation", err))
+		}
 	}
 	if state.storageCleanup != nil {
 		state.storageCleanup()
 	}
+	return operationErr
 }
 
 func isSafeNameRune(r rune) bool {
@@ -234,6 +324,20 @@ func validateCreateRequest(opCtx *OpContext, req *CreateSessionRequest) (*create
 	if err := agent.ValidateModel(p.harness, p.model); err != nil {
 		return nil, ErrInvalidInput("model", err.Error())
 	}
+	if req.RegisterBeforeLaunch &&
+		(req.Caller.Surface != CreateSurfaceCLI ||
+			!req.ReuseExistingTmux ||
+			!req.RequireStorage ||
+			req.Prompt != "" ||
+			!supportsDeferredCurrentTmuxReadiness(p.harness)) {
+		return nil, ErrInvalidInput(
+			"register_before_launch",
+			"Pre-launch registration is valid only for a supported, prompt-free current-tmux CLI creation with required storage.",
+		)
+	}
+	if p.harness == "agy" && strings.TrimSpace(req.Prompt) == "" {
+		return nil, ErrInvalidInput("prompt", "A startup prompt is required for a fresh AGY session because AGY persists its native conversation only after first input.")
+	}
 	name, err := resolveSessionName(req.Title, req.Cwd, req.AllowUnsafeTitle)
 	if err != nil {
 		return nil, err
@@ -277,6 +381,14 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, err
 		}
 	}
+	// Validate every initial request-derived terminal value before acquiring
+	// lifecycle state. Surface preparation may change the working directory,
+	// so the resulting launch values are validated again after name admission.
+	if err := validateHarnessLaunchSpec(buildHarnessLaunchSpec(req, params, req.SessionID, nil)); err != nil {
+		return nil, ErrStorageError("prepare harness launch", err)
+	}
+
+	sessionID := createSessionID(req.SessionID)
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string
 	var releaseAgyWorkspaceLock func() error
@@ -302,6 +414,37 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		if agyIdentityTracker == nil {
 			agyIdentityTracker = agysession.NewCreateIdentityTracker()
 		}
+	}
+
+	state := &createSessionState{}
+	defer func() { retErr = state.finish(opCtx, req, params.name, sessionID, retErr) }()
+
+	if err := prepareCreateStorage(callCtx, opCtx, req, state); err != nil {
+		return nil, err
+	}
+	state.nameReserved, err = reserveCreateSessionName(state.store, sessionID, params.name, req.RegisterBeforeLaunch)
+	if err != nil {
+		return nil, err
+	}
+	preparedRequest, preparedParams, prepareErr := prepareCreateSessionAfterReservation(callCtx, opCtx, req, params, sessionID)
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	req, params = preparedRequest, preparedParams
+	if params.harness == "pi-cli" {
+		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		req = prepared
+	}
+	if state.nameReserved {
+		if err := renewCreateSessionNameReservation(state.store, sessionID, params.name); err != nil {
+			return nil, err
+		}
+	}
+
+	if agyIdentityTracker != nil {
 		previousAgyConversationID, err = agyIdentityTracker.Snapshot(callCtx, req.Cwd)
 		if err != nil {
 			return nil, ErrStorageError("agy.identity.snapshot", err)
@@ -312,10 +455,6 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
-	sessionID := createSessionID(req.SessionID)
-	state := &createSessionState{}
-	defer func() { state.finish(opCtx, req, params.name, sessionID, retErr) }()
-
 	if err := createTmuxForSession(opCtx, req, params.name, exists); err != nil {
 		return nil, err
 	}
@@ -324,29 +463,47 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	if err := verifyCreateCodexHookTrust(callCtx, req, params); err != nil {
+		return nil, err
+	}
+	var manifestPath string
+	var m *manifest.Manifest
+	if req.RegisterBeforeLaunch {
+		manifestPath, m, err = prepareAndRegisterCreatedSession(
+			callCtx, req, state, params, sessionID, codexMeta, nil, "", true,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 	launchResult, err := launchCreateSession(callCtx, opCtx, buildHarnessLaunchSpec(req, params, sessionID, codexMeta))
 	if err != nil {
 		return nil, err
 	}
+	if req.RegisterBeforeLaunch {
+		// Queue submission into the current pane is irreversible once accepted:
+		// preserve the durable registration across later caller-side errors.
+		state.registered = false
+		state.createdManifestDir = false
+	}
 	if launchResult.HandledLifecycle {
 		return createSessionResult(req, params, sessionID), nil
 	}
-
-	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
-	if err != nil {
+	if err := establishCreatedHarnessReadiness(callCtx, opCtx, req, params, launchResult); err != nil {
 		return nil, err
 	}
-	state.createdManifestDir = createdManifestDir
-	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
 	if agyIdentityTracker != nil {
-		metadata, identityErr := agyIdentityTracker.Discover(callCtx, req.Cwd, previousAgyConversationID)
-		if identityErr != nil {
-			return nil, ErrStorageError("agy.identity.discover", identityErr)
+		if err := bootstrapAgyCreateIdentity(callCtx, opCtx, params.name, req.Prompt); err != nil {
+			return nil, err
 		}
-		applyAgyCreateIdentity(m, metadata)
+		launchResult.PromptDelivered = true
 	}
-	if registrationAllowed {
-		state.store, state.storageCleanup, state.registered, err = registerCreatedSession(callCtx, opCtx, req, m)
+
+	if !req.RegisterBeforeLaunch {
+		manifestPath, m, err = prepareAndRegisterCreatedSession(
+			callCtx, req, state, params, sessionID, codexMeta,
+			agyIdentityTracker, previousAgyConversationID, false,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -371,6 +528,121 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	return createSessionResult(req, params, sessionID), nil
 }
 
+func prepareCreateSessionAfterReservation(
+	ctx context.Context,
+	opCtx *OpContext,
+	req *CreateSessionRequest,
+	params *createSessionParams,
+	sessionID string,
+) (*CreateSessionRequest, *createSessionParams, error) {
+	preparer, ok := opCtx.CreationRuntime.(CreateSessionPreparer)
+	if !ok {
+		return req, params, nil
+	}
+	prepared, err := preparer.Prepare(ctx, CreateSessionPreparation{
+		SessionID:        sessionID,
+		SessionName:      params.name,
+		Cwd:              req.Cwd,
+		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
+		PermissionPolicy: cloneCreatePermissionPolicy(req.Metadata.PermissionPolicy),
+		Sandbox:          cloneCreateSandboxConfig(req.Metadata.Sandbox),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	preparedRequest := *req
+	preparedRequest.Metadata = req.Metadata
+	preparedRequest.Cwd = prepared.Cwd
+	preparedRequest.ExtraAddDirs = append([]string{}, prepared.ExtraAddDirs...)
+	preparedRequest.Metadata.PermissionPolicy = cloneCreatePermissionPolicy(prepared.PermissionPolicy)
+	preparedRequest.Metadata.Sandbox = cloneCreateSandboxConfig(prepared.Sandbox)
+	preparedRequest.BypassCodexHookTrust = prepared.BypassCodexHookTrust
+
+	preparedParams, err := validateCreateRequest(opCtx, &preparedRequest)
+	if err != nil {
+		return nil, nil, err
+	}
+	if preparedParams.harness == "agy" {
+		canonical, canonicalErr := canonicalizeAgyCreateRequest(&preparedRequest, preparedParams)
+		if canonicalErr != nil {
+			return nil, nil, canonicalErr
+		}
+		preparedRequest = *canonical
+	}
+	if preparedParams.name != params.name ||
+		preparedParams.harness != params.harness ||
+		preparedParams.model != params.model ||
+		preparedParams.persistent != params.persistent {
+		return nil, nil, ErrInvalidInput("preparation", "Surface preparation changed immutable session identity.")
+	}
+	if err := validateHarnessLaunchSpec(buildHarnessLaunchSpec(&preparedRequest, preparedParams, sessionID, nil)); err != nil {
+		return nil, nil, ErrStorageError("prepare harness launch", err)
+	}
+	return &preparedRequest, preparedParams, nil
+}
+
+func verifyCreateCodexHookTrust(ctx context.Context, req *CreateSessionRequest, params *createSessionParams) error {
+	if params.harness != "codex-cli" || !req.BypassCodexHookTrust {
+		return nil
+	}
+	sandbox := req.Metadata.Sandbox
+	if sandbox == nil || !sandbox.Enabled {
+		return ErrInvalidInput("bypass_codex_hook_trust", "An enabled sandbox with verified hook evidence is required.")
+	}
+	err := codexhooks.Verify(ctx, codexhooks.Attestation{
+		SourceRepo:   sandbox.CodexHookSourceRepo,
+		SourceCommit: sandbox.CodexHookSourceCommit,
+		Digest:       sandbox.CodexHookDigest,
+		HookRoot:     sandbox.CodexHookRoot,
+	}, req.Cwd)
+	if err != nil {
+		return ErrInvalidInput("bypass_codex_hook_trust", fmt.Sprintf("Hook evidence failed revalidation immediately before launch: %v", err))
+	}
+	return nil
+}
+
+func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {
+	if err := pisession.ValidateID(sessionID); err != nil {
+		return nil, ErrInvalidInput("session_id", err.Error())
+	}
+	codingAgentDir, err := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	if err != nil {
+		return nil, ErrInvalidInput("PI_CODING_AGENT_DIR", err.Error())
+	}
+	sessionRoot, err := pisession.EnsureRoot(os.Getenv("AGM_PI_SESSION_ROOT"))
+	if err != nil {
+		return nil, ErrStorageError("pi.session-root", err)
+	}
+	extensionPath, err := piadapter.EnsureExtension(os.Getenv("AGM_PI_EXTENSION_ROOT"))
+	if err != nil {
+		return nil, ErrStorageError("pi.authorization-extension", err)
+	}
+	policyJSON, err := piadapter.MarshalPolicy(req.Metadata.permissionPolicyAllow())
+	if err != nil {
+		return nil, ErrStorageError("pi.permission-policy", err)
+	}
+	prepared := *req
+	prepared.Metadata = req.Metadata
+	prepared.Metadata.Pi = &manifest.Pi{
+		SessionID: sessionID, SessionDir: sessionRoot,
+		CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
+	}
+	prepared.Metadata.PiExtension = extensionPath
+	prepared.Metadata.PiPolicyJSON = policyJSON
+	prepared.Metadata.PiPolicyFile, err = piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), sessionID, policyJSON)
+	if err != nil {
+		return nil, ErrStorageError("pi.permission-policy-file", err)
+	}
+	return &prepared, nil
+}
+
+func (metadata CreateSessionMetadata) permissionPolicyAllow() []string {
+	if metadata.PermissionPolicy == nil {
+		return nil
+	}
+	return metadata.PermissionPolicy.Allow
+}
+
 func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata) {
 	if m == nil || metadata == nil {
 		return
@@ -384,6 +656,40 @@ func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata)
 		WorkspacePath:  metadata.WorkspacePath,
 		ConversationDB: metadata.ConversationDBPath,
 		TranscriptPath: metadata.TranscriptPath,
+	}
+}
+
+func waitForCreatedHarnessReady(ctx context.Context, opCtx *OpContext, sessionName, harness string) error {
+	waiter, ok := opCtx.Tmux.(session.HarnessReadinessWaiter)
+	if !ok {
+		return ErrStorageError("tmux.WaitForHarnessReady", fmt.Errorf("tmux backend does not expose harness readiness"))
+	}
+	if err := waiter.WaitForHarnessReady(ctx, sessionName, harness, sharedHarnessReadyTimeout); err != nil {
+		return ErrStorageError("tmux.WaitForHarnessReady", err)
+	}
+	return nil
+}
+
+func establishCreatedHarnessReadiness(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest, params *createSessionParams, launchResult CreateSessionLaunchResult) error {
+	switch launchResult.Readiness {
+	case CreateSessionReadinessVerified:
+		return nil
+	case CreateSessionReadinessDeferredUntilCallerExit:
+		if req.Caller.Surface != CreateSurfaceCLI || !supportsDeferredCurrentTmuxReadiness(params.harness) || !req.ReuseExistingTmux || req.Prompt != "" {
+			return ErrStorageError("create.readiness", fmt.Errorf("deferred readiness is valid only for supported current-tmux harness creation without an initial prompt"))
+		}
+		return nil
+	default:
+		return waitForCreatedHarnessReady(ctx, opCtx, params.name, params.harness)
+	}
+}
+
+func supportsDeferredCurrentTmuxReadiness(harness string) bool {
+	switch harness {
+	case "claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -402,6 +708,19 @@ func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string)
 		return false, ErrStorageError("tmux.rollback", fmt.Errorf("tmux backend must support KillSession before creating a rollback-owned session"))
 	}
 	return false, nil
+}
+
+func prepareCreateStorage(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, state *createSessionState) error {
+	store, cleanup, err := openCreateStorage(callCtx, opCtx)
+	state.store = store
+	state.storageCleanup = cleanup
+	if err != nil {
+		return ErrStorageError("storage.open", err)
+	}
+	if store == nil && req.RequireStorage {
+		return ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
+	}
+	return nil
 }
 
 func createSessionID(requested string) string {
@@ -434,7 +753,18 @@ func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *Creat
 }
 
 func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
-	return HarnessLaunchSpec{
+	bypassCodexHookTrust := req.BypassCodexHookTrust &&
+		req.Metadata.Sandbox != nil &&
+		req.Metadata.Sandbox.Enabled
+	codexHookRoot := ""
+	codexHookTrustReason := ""
+	codexHookTrustActor := ""
+	if bypassCodexHookTrust {
+		codexHookRoot = req.Metadata.Sandbox.CodexHookRoot
+		codexHookTrustReason = req.Metadata.Sandbox.BypassCodexHookTrustReason
+		codexHookTrustActor = OverrideActor()
+	}
+	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
 		SessionName:      params.name,
@@ -447,46 +777,172 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		MaxBudgetUSD:     req.MaxBudgetUSD,
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
-		Codex:            codexMeta,
+
+		BypassCodexHookTrust: bypassCodexHookTrust,
+		CodexHookRoot:        codexHookRoot,
+		CodexHookTrustReason: codexHookTrustReason,
+		CodexHookTrustActor:  codexHookTrustActor,
+		Codex:                codexMeta,
+		Pi:                   req.Metadata.Pi,
+		PiExtension:          req.Metadata.PiExtension,
+		PiPolicyJSON:         req.Metadata.PiPolicyJSON,
+		PiPolicyFile:         req.Metadata.PiPolicyFile,
 	}
+	if bypassCodexHookTrust {
+		spec.CodexHookSourceRepo = req.Metadata.Sandbox.CodexHookSourceRepo
+		spec.CodexHookSourceCommit = req.Metadata.Sandbox.CodexHookSourceCommit
+		spec.CodexHookDigest = req.Metadata.Sandbox.CodexHookDigest
+	}
+	if params.harness == "pi-cli" {
+		spec.PiLaunchID = launchparity.NewPiLaunchID()
+	}
+	return spec
 }
 
-func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
+func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
+	if req.Metadata.Sandbox == nil {
+		return nil
+	}
+	sandbox := *req.Metadata.Sandbox
+	sandbox.ExtraAddDirs = nil
+	sandbox.BypassCodexHookTrust = false
+	if sandbox.Enabled {
+		sandbox.ExtraAddDirs = append([]string{}, req.ExtraAddDirs...)
+		sandbox.BypassCodexHookTrust = req.BypassCodexHookTrust
+	}
+	return &sandbox
+}
+
+func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, created bool, err error) {
 	if req.ManifestDir == "" {
-		return "", true, false, nil
+		return "", false, nil
 	}
 	manifestPath = filepath.Join(req.ManifestDir, "manifest.yaml")
 	_, statErr := os.Stat(req.ManifestDir)
 	created = os.IsNotExist(statErr)
 	if mkdirErr := os.MkdirAll(req.ManifestDir, 0o700); mkdirErr != nil {
 		if !req.ManifestDirOptional {
-			return "", false, false, ErrStorageError("manifest.mkdir", mkdirErr)
+			return "", false, ErrStorageError("manifest.mkdir", mkdirErr)
 		}
-		fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without manifest registration\n", mkdirErr)
-		return "", false, false, nil
+		fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without a filesystem manifest\n", mkdirErr)
+		return "", false, nil
 	}
-	return manifestPath, true, created, nil
+	return manifestPath, created, nil
 }
 
-func registerCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, m *manifest.Manifest) (dolt.Storage, func(), bool, error) {
-	store, cleanup, err := openCreateStorage(callCtx, opCtx)
+func prepareAndRegisterCreatedSession(
+	ctx context.Context,
+	req *CreateSessionRequest,
+	state *createSessionState,
+	params *createSessionParams,
+	sessionID string,
+	codexMeta *manifest.Codex,
+	agyIdentityTracker agysession.CreateIdentityTracker,
+	previousAgyConversationID string,
+	requireRegistration bool,
+) (string, *manifest.Manifest, error) {
+	manifestPath, createdManifestDir, err := prepareCreateManifestDir(req)
 	if err != nil {
-		return store, cleanup, false, ErrStorageError("storage.open", err)
+		return "", nil, err
 	}
+	state.createdManifestDir = createdManifestDir
+	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
+	if agyIdentityTracker != nil {
+		metadata, identityErr := agyIdentityTracker.Discover(ctx, req.Cwd, previousAgyConversationID)
+		if identityErr != nil {
+			return "", nil, ErrStorageError("agy.identity.discover", identityErr)
+		}
+		applyAgyCreateIdentity(m, metadata)
+	}
+	state.registered, err = registerCreatedSession(req, state.store, m)
+	if err != nil {
+		return "", nil, err
+	}
+	if state.registered {
+		state.nameReserved = false
+	}
+	if requireRegistration && !state.registered {
+		return "", nil, ErrStorageError("storage.CreateSession", fmt.Errorf("durable session registration is required before launch"))
+	}
+	return manifestPath, m, nil
+}
+
+func registerCreatedSession(req *CreateSessionRequest, store dolt.Storage, m *manifest.Manifest) (bool, error) {
 	if store == nil {
 		if req.RequireStorage {
-			return nil, cleanup, false, ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
+			return false, ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
 		}
-		return nil, cleanup, false, nil
+		return false, nil
 	}
 	if err := store.CreateSession(m); err != nil {
-		if !req.RegistrationOptional {
-			return store, cleanup, false, ErrStorageError("storage.CreateSession", err)
+		var conflict *dolt.SessionNameConflictError
+		if errors.As(err, &conflict) {
+			return false, sessionExistsError(m.Name)
 		}
-		fmt.Fprintf(os.Stderr, "Warning: failed to register session: %v; the harness remains usable\n", err)
-		return nil, cleanup, false, nil
+		var uncertain *dolt.SessionRegistrationCommitUncertainError
+		if errors.As(err, &uncertain) {
+			return true, ErrStorageError("storage.CreateSession", err)
+		}
+		return false, ErrStorageError("storage.CreateSession", err)
 	}
-	return store, cleanup, true, nil
+	return true, nil
+}
+
+func reserveCreateSessionName(store dolt.Storage, sessionID, name string, required bool) (bool, error) {
+	if name == "" {
+		return false, nil
+	}
+	if store == nil {
+		if !required {
+			return false, nil
+		}
+		return false, ErrStorageError("storage.ReserveSessionName", fmt.Errorf("session storage is required for named sessions"))
+	}
+	reservations, ok := store.(dolt.SessionNameReservationStore)
+	if !ok {
+		if !required {
+			return false, nil
+		}
+		return false, ErrStorageError("storage.ReserveSessionName", fmt.Errorf("session storage does not support atomic name reservations"))
+	}
+	if err := reservations.ReserveSessionName(sessionID, name); err != nil {
+		var conflict *dolt.SessionNameConflictError
+		if errors.As(err, &conflict) {
+			return false, sessionExistsError(name)
+		}
+		var uncertain *dolt.SessionNameReservationCommitUncertainError
+		if errors.As(err, &uncertain) {
+			return true, ErrStorageError("storage.ReserveSessionName", err)
+		}
+		return false, ErrStorageError("storage.ReserveSessionName", err)
+	}
+	return true, nil
+}
+
+func renewCreateSessionNameReservation(store dolt.Storage, sessionID, name string) error {
+	if name == "" {
+		return nil
+	}
+	reservations, ok := store.(dolt.SessionNameReservationStore)
+	if !ok {
+		return ErrStorageError("storage.RenewSessionNameReservation", fmt.Errorf("session storage does not support atomic name reservations"))
+	}
+	if err := reservations.RenewSessionNameReservation(sessionID, name); err != nil {
+		var conflict *dolt.SessionNameConflictError
+		if errors.As(err, &conflict) {
+			return sessionExistsError(name)
+		}
+		return ErrStorageError("storage.RenewSessionNameReservation", err)
+	}
+	return nil
+}
+
+func releaseCreateSessionNameReservation(store dolt.Storage, sessionID string) error {
+	reservations, ok := store.(dolt.SessionNameReservationStore)
+	if !ok {
+		return nil
+	}
+	return reservations.ReleaseSessionNameReservation(sessionID)
 }
 
 func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {
@@ -495,11 +951,49 @@ func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *Crea
 			Manifest: m, ManifestPath: manifestPath, Prompt: req.Prompt, Launch: launchResult,
 		})
 	}
-	if req.Prompt == "" {
+	if req.Prompt == "" || launchResult.PromptDelivered {
 		return nil
 	}
-	if err := opCtx.Tmux.SendKeys(name, req.Prompt); err != nil {
-		return ErrStorageError("tmux.SendKeys(prompt)", err)
+	return sendCreatedInputAtomically(callCtx, opCtx, name, m.Harness, req.Prompt, "create.initial-prompt")
+}
+
+func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessionName, prompt string) error {
+	if err := callCtx.Err(); err != nil {
+		return err
+	}
+	input := AgyCreateIdentityBootstrap{SessionName: sessionName, Prompt: prompt}
+	if bootstrapper, ok := opCtx.CreationRuntime.(AgyCreateIdentityBootstrapper); ok {
+		if err := bootstrapper.BootstrapAgyCreateIdentity(callCtx, input); err != nil {
+			if ctxErr := callCtx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return ErrStorageError("agy.identity.bootstrap-prompt", err)
+		}
+		return nil
+	}
+	return sendCreatedInputAtomically(callCtx, opCtx, sessionName, "agy", prompt, "agy.identity.bootstrap-prompt")
+}
+
+func sendCreatedInputAtomically(callCtx context.Context, opCtx *OpContext, sessionName, harness, input, operation string) error {
+	if err := callCtx.Err(); err != nil {
+		return err
+	}
+	sender, ok := opCtx.Tmux.(session.AtomicInputSender)
+	if !ok {
+		return ErrStorageError(operation, fmt.Errorf("tmux backend does not expose atomic input delivery"))
+	}
+	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, harness, input, session.InputDeliveryOptions{})
+	if err != nil {
+		if ctxErr := callCtx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return ErrStorageError(operation, err)
+	}
+	if !readiness.Ready {
+		return ErrStorageError(operation, fmt.Errorf("harness input is %s", readiness.State))
+	}
+	if readiness.PaneID == "" {
+		return ErrStorageError(operation, fmt.Errorf("harness returned no verified pane"))
 	}
 	return nil
 }
@@ -523,9 +1017,14 @@ func launchCreateSession(callCtx context.Context, opCtx *OpContext, spec Harness
 	if opCtx.CreationRuntime != nil {
 		return opCtx.CreationRuntime.Launch(callCtx, spec)
 	}
-	cmd := BuildHarnessLaunchCommand(spec)
-	if err := opCtx.Tmux.SendKeys(spec.SessionName, cmd.Command); err != nil {
-		return CreateSessionLaunchResult{}, ErrStorageError("tmux.SendKeys(harness)", err)
+	cmd, err := PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return CreateSessionLaunchResult{}, ErrStorageError("prepare harness launch", err)
+	}
+	if submissionErr := opCtx.Tmux.SendKeys(spec.SessionName, cmd.Command); submissionErr != nil {
+		if _, err := ResolveHarnessLaunchSubmission(cmd, submissionErr); err != nil {
+			return CreateSessionLaunchResult{}, ErrStorageError("tmux.SendKeys(harness)", err)
+		}
 	}
 	return CreateSessionLaunchResult{ModeAppliedAtStartup: cmd.ModeAppliedAtStartup}, nil
 }
@@ -582,20 +1081,26 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 		tags = appendUniqueString(tags, "source:"+source)
 	}
 	m := &manifest.Manifest{
-		SchemaVersion:    manifest.SchemaVersion,
-		SessionID:        sessionID,
-		Name:             params.name,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		Workspace:        req.Metadata.Workspace,
-		Context:          manifest.Context{Project: req.Cwd, Tags: tags},
+		SchemaVersion:   manifest.SchemaVersion,
+		SessionID:       sessionID,
+		Name:            params.name,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Workspace:       req.Metadata.Workspace,
+		ParentSessionID: cloneCreateString(req.Metadata.ParentSessionID),
+		Context: manifest.Context{
+			Project: req.Cwd,
+			Purpose: req.Metadata.ContextPurpose,
+			Tags:    tags,
+			Notes:   req.Metadata.ContextNotes,
+		},
 		Tmux:             manifest.Tmux{SessionName: params.name},
 		Harness:          params.harness,
 		Model:            params.model,
 		ModelTier:        req.Metadata.ModelTier,
 		Claude:           manifest.Claude{},
 		PermissionPolicy: cloneCreatePermissionPolicy(req.Metadata.PermissionPolicy),
-		Sandbox:          req.Metadata.Sandbox,
+		Sandbox:          cloneCreateSandbox(req),
 		IsTest:           req.Metadata.IsTest,
 		Disposable:       req.Metadata.Disposable,
 		DisposableTTL:    req.Metadata.DisposableTTL,
@@ -603,6 +1108,11 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 	if codexMeta != nil {
 		meta := *codexMeta
 		m.Codex = &meta
+	}
+	if req.Metadata.Pi != nil {
+		meta := *req.Metadata.Pi
+		m.Pi = &meta
+		m.WorkingDirectory = req.Cwd
 	}
 	mode := req.Metadata.PermissionMode
 	if mode == "" {
@@ -623,6 +1133,14 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 	return m
 }
 
+func cloneCreateString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
 func cloneCreatePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.PermissionPolicy {
 	if policy == nil {
 		return nil
@@ -632,6 +1150,15 @@ func cloneCreatePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.Pe
 	clone.Explicit = append([]string{}, policy.Explicit...)
 	clone.Allow = append([]string{}, policy.Allow...)
 	clone.Targets = append([]manifest.PermissionPolicyTarget{}, policy.Targets...)
+	return &clone
+}
+
+func cloneCreateSandboxConfig(sandbox *manifest.SandboxConfig) *manifest.SandboxConfig {
+	if sandbox == nil {
+		return nil
+	}
+	clone := *sandbox
+	clone.ExtraAddDirs = append([]string{}, sandbox.ExtraAddDirs...)
 	return &clone
 }
 
@@ -666,22 +1193,27 @@ func createCallerSource(req *CreateSessionRequest) string {
 	return CreateSurfaceInternal
 }
 
-func rollbackCreateSession(opCtx *OpContext, req *CreateSessionRequest, store dolt.Storage, name, sessionID string, createdTmux, createdManifestDir, registered bool) {
+func rollbackCreateSession(opCtx *OpContext, req *CreateSessionRequest, store dolt.Storage, name, sessionID string, createdTmux, createdManifestDir, registered bool) error {
+	var cleanupErr error
 	if registered && store != nil && sessionID != "" {
 		if err := store.DeleteSession(sessionID); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to delete session registration %q during create rollback: %v\n", sessionID, err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete session registration %q during create rollback: %w", sessionID, err))
 		}
 	}
 	if createdTmux {
 		if killer, ok := opCtx.Tmux.(session.TmuxSessionKiller); ok {
 			if err := killer.KillSession(name); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to kill tmux session %q during create rollback: %v\n", name, err)
-			}
-		}
-		if createdManifestDir && req.ManifestDir != "" {
-			if err := os.RemoveAll(req.ManifestDir); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove manifest directory %q during create rollback: %v\n", req.ManifestDir, err)
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill tmux session %q during create rollback: %w", name, err))
 			}
 		}
 	}
+	if createdManifestDir && req.ManifestDir != "" {
+		if err := os.RemoveAll(req.ManifestDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove manifest directory %q during create rollback: %v\n", req.ManifestDir, err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove manifest directory %q during create rollback: %w", req.ManifestDir, err))
+		}
+	}
+	return cleanupErr
 }

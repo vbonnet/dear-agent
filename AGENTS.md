@@ -13,6 +13,9 @@ older subsystem documentation:
   the retired path, flags, tests, and documentation in the same change.
 - [Harness Hygiene](docs/policies/harness-hygiene.ai.md): keep one owner per
   rule, turn hard requirements into checks, and continuously earn complexity.
+- [SPEC authoring](docs/spec-authoring.md): write observable contracts once in
+  a harness- and implementation-neutral owner; use applicability for real
+  member variation.
 - [Anti-stall](docs/policies/anti-stall.ai.md): continue through known work and
   stop only at explicit safety, authority, failure, or completion boundaries.
 - [DEAR retrospectives](docs/policies/dear-retro.ai.md): systemic defects get a
@@ -52,6 +55,17 @@ current code, and repair or quarantine the stale living document in scope.
 - Correctness, privacy, and security outrank speed or cost.
 - Go is the default for code we own. Rust or TypeScript require an explicit
   ecosystem justification; do not add Python.
+- Agent-authored code inverts the human-ease tax: Python, prose docs, and
+  simple choices were concessions to human convenience. When agents write
+  and maintain the code, typed languages, living docs, and complex policy
+  languages (e.g. Rego/OPA) become *more* viable, not less. Their complexity
+  must remain continuously earned under the Harness Hygiene review lens;
+  deterministic enforcement and a deterministic Definition of Done remain
+  delivery gates (see
+  [`harness-hygiene.ai.md`](docs/policies/harness-hygiene.ai.md) and
+  [`definition-of-done.ai.md`](docs/policies/definition-of-done.ai.md)).
+  Without that lens and both gates, the tax is just paid by whoever debugs it
+  later.
 - Prefer deep modules and typed commands over long prompts, shell pipelines,
   or duplicated flag catalogs.
 - Use deterministic, positive enforcement: state what was attempted, the safe

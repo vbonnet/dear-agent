@@ -36,9 +36,16 @@ func (m *MockProvider) Create(ctx context.Context, req SandboxRequest) (*Sandbox
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	mergedDir := req.WorkspaceDir + "/merged"
+	workingDir, _, err := MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	if err != nil {
+		return nil, err
+	}
+
 	sb := &Sandbox{
 		ID:         req.SessionID,
-		MergedPath: req.WorkspaceDir + "/merged",
+		MergedPath: mergedDir,
+		WorkingDir: workingDir,
 		UpperPath:  req.WorkspaceDir + "/upper",
 		WorkPath:   req.WorkspaceDir + "/work",
 		Type:       "mock",

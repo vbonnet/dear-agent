@@ -156,6 +156,25 @@ func TestPersistRenamedSessionIdentityMutatesManifestOnlyAfterStorageSuccess(t *
 	}
 }
 
+func TestPersistRenamedSessionIdentityPreservesCommittedRenameAfterCleanupFailure(t *testing.T) {
+	cleanupErr := errors.New("release target-name reservation")
+	store := &recordingSessionIdentityRenamer{
+		result: dolt.RenameSessionIdentityResult{StorageCommitted: true},
+		err:    cleanupErr,
+	}
+	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}
+	err := persistRenamedSessionIdentity(t.Context(), store, m, "new-name", true, func(context.Context, string, string) error {
+		t.Fatal("tmux rollback called after the durable rename committed")
+		return nil
+	})
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("persistRenamedSessionIdentity() error = %v, want cleanup error", err)
+	}
+	if m.Name != "new-name" || m.Tmux.SessionName != "new-name" {
+		t.Fatalf("manifest identity = (%q, %q), want committed new-name", m.Name, m.Tmux.SessionName)
+	}
+}
+
 func TestPersistRenamedSessionIdentityPreservesTmuxWhenStorageIsUncertain(t *testing.T) {
 	store := &recordingSessionIdentityRenamer{err: errors.New("storage outcome uncertain")}
 	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}

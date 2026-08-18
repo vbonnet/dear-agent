@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 func TestRunSendSetModelUsesCallerContextBeforeSlashCommandDelivery(t *testing.T) {
@@ -78,6 +81,7 @@ func TestResolveSetModelInstruction_ActiveHarnesses(t *testing.T) {
 		"codex-cli":    "5.4-mini",
 		"agy":          "3.5-flash",
 		"opencode-cli": "glm-5.2",
+		"pi-cli":       "gpt-fast",
 	}
 	for _, harness := range agent.ActiveHarnesses() {
 		model := tests[harness]
@@ -95,13 +99,27 @@ func TestResolveSetModelInstruction_ActiveHarnesses(t *testing.T) {
 			if instruction.ResolvedModel == "" {
 				t.Fatal("resolved model is empty")
 			}
-			if !strings.HasPrefix(instruction.Command, "/model ") {
-				t.Fatalf("command = %q, want /model prefix", instruction.Command)
+			prefix := "/model "
+			if harness == "pi-cli" {
+				prefix = "/agm-model "
+			}
+			if !strings.HasPrefix(instruction.Command, prefix) {
+				t.Fatalf("command = %q, want %s prefix", instruction.Command, prefix)
 			}
 			if !strings.Contains(instruction.Command, instruction.ResolvedModel) {
 				t.Fatalf("command %q should include resolved model %q", instruction.Command, instruction.ResolvedModel)
 			}
 		})
+	}
+}
+
+func TestNewPiModelConfirmationRequiresExactManagedNotice(t *testing.T) {
+	instruction := setModelInstruction{Harness: "pi-cli", ResolvedModel: "openai/gpt-5.6-luna"}
+	if got, ok := newModelConfirmation(instruction, "", "AGM model: openai/gpt-5.6-luna"); !ok || got == "" {
+		t.Fatalf("exact Pi confirmation = %q, %v", got, ok)
+	}
+	if _, ok := newModelConfirmation(instruction, "", "AGM model: openai/gpt-5.6-terra"); ok {
+		t.Fatal("mismatched Pi model confirmation accepted")
 	}
 }
 
@@ -248,5 +266,56 @@ func TestPersistAgyModelSwitchPreservesOnlyConfirmedProvenance(t *testing.T) {
 	}
 	if stored.Model != instruction.ResolvedModel {
 		t.Fatalf("confirmed model = %q, want %q", stored.Model, instruction.ResolvedModel)
+	}
+}
+
+func TestPersistPiModelSwitchPreservesConfiguredModelUntilTranscriptExists(t *testing.T) {
+	adapter := dolt.NewMockAdapter()
+	t.Cleanup(func() { _ = adapter.Close() })
+	sessionDir := t.TempDir()
+	m := dolt.NewTestManifest("pi-model-switch", "pi-model-switch")
+	m.Harness = "pi-cli"
+	m.Model = "anthropic/claude-sonnet-4-6"
+	m.Pi = &manifest.Pi{SessionID: "pi-model-switch", SessionDir: sessionDir}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatal(err)
+	}
+	instruction := setModelInstruction{Harness: "pi-cli", ResolvedModel: "openai/gpt-5.6-terra"}
+
+	if err := persistAgyModelSwitch(adapter, m, instruction, false); err != nil {
+		t.Fatalf("persist unverified pre-transcript switch: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Model != "anthropic/claude-sonnet-4-6" {
+		t.Fatalf("pre-transcript model = %q, want configured model preserved", stored.Model)
+	}
+
+	transcript := filepath.Join(sessionDir, "persisted.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"type":"session","id":"pi-model-switch","cwd":"/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistAgyModelSwitch(adapter, stored, instruction, false); err != nil {
+		t.Fatalf("persist unverified post-transcript switch: %v", err)
+	}
+	stored, err = adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Model != "" {
+		t.Fatalf("post-transcript unverified model = %q, want native selection", stored.Model)
+	}
+
+	if err := persistAgyModelSwitch(adapter, stored, instruction, true); err != nil {
+		t.Fatalf("persist verified Pi switch: %v", err)
+	}
+	stored, err = adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Model != instruction.ResolvedModel {
+		t.Fatalf("verified Pi model = %q, want %q", stored.Model, instruction.ResolvedModel)
 	}
 }

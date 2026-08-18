@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -87,24 +88,8 @@ func TestStripPrefix(t *testing.T) {
 	}
 }
 
-// withGenerousProviderTimeout extends providerTimeout for the duration of t.
-// The 500ms production default exists to keep the statusline responsive in
-// the editor; under heavy parallel `go test ./...` load (especially in CI)
-// fork+exec of the test's /bin/sh providers can exceed that, producing a
-// flaky 0-segments result that has nothing to do with the behavior under
-// test. Bumping the timeout for tests that exercise actual subprocesses
-// makes the assertion test correctness, not contention.
-func withGenerousProviderTimeout(t *testing.T) {
-	t.Helper()
-	prev := providerTimeout
-	providerTimeout = 10 * time.Second
-	t.Cleanup(func() { providerTimeout = prev })
-}
-
-func TestRunProviders(t *testing.T) {
-	withGenerousProviderTimeout(t)
+func TestRunProvidersInDir(t *testing.T) {
 	dir := t.TempDir()
-	providersDir = dir
 
 	// Create two test provider scripts.
 	script1 := filepath.Join(dir, "10-hello")
@@ -125,7 +110,7 @@ func TestRunProviders(t *testing.T) {
 	raw := []byte(`{"session_id":"test","session_name":"test"}`)
 	sd := sessionData{SessionID: "test", SessionName: "test"}
 
-	segments := runProviders(cfg, raw, sd)
+	segments := runProvidersInDir(dir, 10*time.Second, cfg, raw, sd)
 
 	if len(segments) != 2 {
 		t.Fatalf("got %d segments, want 2: %v", len(segments), segments)
@@ -138,10 +123,8 @@ func TestRunProviders(t *testing.T) {
 	}
 }
 
-func TestRunProviders_Disabled(t *testing.T) {
-	withGenerousProviderTimeout(t)
+func TestRunProvidersInDir_Disabled(t *testing.T) {
 	dir := t.TempDir()
-	providersDir = dir
 
 	script1 := filepath.Join(dir, "10-hello")
 	os.WriteFile(script1, []byte("#!/bin/sh\necho 'Hello'"), 0o755)
@@ -153,7 +136,7 @@ func TestRunProviders_Disabled(t *testing.T) {
 	raw := []byte(`{"session_id":"test"}`)
 	sd := sessionData{SessionID: "test"}
 
-	segments := runProviders(cfg, raw, sd)
+	segments := runProvidersInDir(dir, 10*time.Second, cfg, raw, sd)
 
 	if len(segments) != 1 {
 		t.Fatalf("got %d segments, want 1: %v", len(segments), segments)
@@ -163,10 +146,8 @@ func TestRunProviders_Disabled(t *testing.T) {
 	}
 }
 
-func TestRunProviders_StdinPassthrough(t *testing.T) {
-	withGenerousProviderTimeout(t)
+func TestRunProvidersInDir_StdinPassthrough(t *testing.T) {
 	dir := t.TempDir()
-	providersDir = dir
 
 	// Provider that reads session_name from stdin JSON.
 	script := filepath.Join(dir, "10-echo-name")
@@ -178,7 +159,7 @@ jq -r '.session_name // "unknown"'
 	raw := []byte(`{"session_id":"test","session_name":"my-session"}`)
 	sd := sessionData{SessionID: "test", SessionName: "my-session"}
 
-	segments := runProviders(cfg, raw, sd)
+	segments := runProvidersInDir(dir, 10*time.Second, cfg, raw, sd)
 
 	if len(segments) != 1 {
 		t.Fatalf("got %d segments, want 1: %v", len(segments), segments)
@@ -188,26 +169,185 @@ jq -r '.session_name // "unknown"'
 	}
 }
 
-func TestRunProviders_EmptyDir(t *testing.T) {
+func TestRunProvidersInDir_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	providersDir = dir
 
 	cfg := config{Separator: " │ "}
-	segments := runProviders(cfg, nil, sessionData{})
+	segments := runProvidersInDir(dir, 10*time.Second, cfg, nil, sessionData{})
 
 	if len(segments) != 0 {
 		t.Errorf("expected no segments, got %v", segments)
 	}
 }
 
-func TestRunProviders_NoDir(t *testing.T) {
-	providersDir = "/nonexistent/path"
-
+func TestRunProvidersInDir_NoDir(t *testing.T) {
 	cfg := config{Separator: " │ "}
-	segments := runProviders(cfg, nil, sessionData{})
+	segments := runProvidersInDir("/nonexistent/path", 10*time.Second, cfg, nil, sessionData{})
 
 	if len(segments) != 0 {
 		t.Errorf("expected no segments, got %v", segments)
+	}
+}
+
+func TestRunProvidersInDir_TimesOut(t *testing.T) {
+	dir := t.TempDir()
+	writeUncooperativeProvider(t, dir)
+
+	started := time.Now()
+	segments := runProvidersInDir(dir, 100*time.Millisecond, config{Separator: " │ "}, nil, sessionData{})
+	elapsed := time.Since(started)
+
+	if len(segments) != 0 {
+		t.Fatalf("got %v segments, want timed-out provider omitted", segments)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("provider timeout took %s, want less than 2s", elapsed)
+	}
+}
+
+func TestRunProvidersInDir_PreservesOutputUntilDeadline(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-ready")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf 'ready\n'
+(sleep 1) &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	segments := runProvidersInDir(
+		dir,
+		10*time.Second,
+		config{Separator: " │ "},
+		nil,
+		sessionData{},
+	)
+	if len(segments) != 1 || segments[0] != "ready" {
+		t.Fatalf("segments = %v, want provider output before configured deadline", segments)
+	}
+}
+
+func TestRunProvidersInDir_BoundsInheritedStdinAfterDirectExit(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-retains-stdin")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+sleep 5 <&0 >/dev/null 2>&1 &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	started := time.Now()
+	segments := runProvidersInDir(
+		dir,
+		100*time.Millisecond,
+		config{Separator: " │ "},
+		bytes.Repeat([]byte("x"), 1<<20),
+		sessionData{},
+	)
+	elapsed := time.Since(started)
+	if len(segments) != 0 {
+		t.Fatalf("segments = %v, want empty successful output omitted", segments)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("inherited stdin cleanup took %s, want less than 2s", elapsed)
+	}
+}
+
+func TestRunProvidersInDir_BoundsInheritedStdoutAfterDirectExit(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-retains-stdout")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf 'ready\n'
+(sleep 5) &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	started := time.Now()
+	segments := runProvidersInDir(
+		dir,
+		100*time.Millisecond,
+		config{Separator: " │ "},
+		nil,
+		sessionData{},
+	)
+	elapsed := time.Since(started)
+	if len(segments) != 0 {
+		t.Fatalf("segments = %v, want output with inherited writer past deadline omitted", segments)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("inherited stdout cleanup took %s, want less than 2s", elapsed)
+	}
+}
+
+func TestRunProvidersInDir_PassesInputToInheritedWorkerBeforeDeadline(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-delegates-io")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+exec 3<&0
+(
+  sleep 1
+  count=$(wc -c <&3)
+  printf '%s\n' "$count"
+) &
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	segments := runProvidersInDir(
+		dir,
+		10*time.Second,
+		config{Separator: " │ "},
+		bytes.Repeat([]byte("x"), 1<<20),
+		sessionData{},
+	)
+	if len(segments) != 1 || segments[0] != "1048576" {
+		t.Fatalf("segments = %v, want inherited worker to receive complete input", segments)
+	}
+}
+
+func TestRunProvidersInDir_PreservesSuccessfulOutputWhenProviderClosesInput(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "10-closes-input")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+exec 0<&-
+printf 'ready\n'
+sleep 0.05
+`), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+
+	for range 5 {
+		segments := runProvidersInDir(
+			dir,
+			10*time.Second,
+			config{Separator: " │ "},
+			bytes.Repeat([]byte("x"), 1<<20),
+			sessionData{},
+		)
+		if len(segments) != 1 || segments[0] != "ready" {
+			t.Fatalf("segments = %v, want successful output despite closed stdin", segments)
+		}
+	}
+}
+
+func writeUncooperativeProvider(t *testing.T, dir string) {
+	t.Helper()
+	script := filepath.Join(dir, "10-slow")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+(
+  trap '' HUP
+  sleep 5
+  echo 'late'
+) &
+child=$!
+wait "$child"
+`), 0o755); err != nil {
+		t.Fatalf("write slow provider: %v", err)
 	}
 }
 

@@ -21,6 +21,8 @@ inspection plus guarded manifest commits and cleanup operations.
 
 **GIT-06** When resolving a comparison base, the system shall prefer the canonical remote main branch and report no base when the repository is unknown.
 
+**GIT-07** When a caller supplies a directory inside a Git worktree, the system shall resolve the containing worktree root before inventory, removal, or ownership comparison.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_diagnostics_package_guardrails.feature`

@@ -79,6 +79,56 @@ func TestRun_ArchivePreflightBlocksProtectedSupervisorBeforeTmux(t *testing.T) {
 	}
 }
 
+func TestArchiveRequestAllowsAuthorizedSupervisorReapWithoutForce(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	sessionsDir := t.TempDir()
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "authorized-supervisor-reap-id",
+		Name:          "vroom-orchestrator",
+		Harness:       "codex-cli",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "vroom-orchestrator"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	r := NewWithOptions(m.Name, sessionsDir, ArchiveOptions{
+		SessionID:           m.SessionID,
+		AllowSupervisorReap: true,
+		Outcome:             manifest.OutcomeCrashed,
+	})
+	req := r.archiveRequest()
+	if req.Force {
+		t.Fatal("archiveRequest unexpectedly set Force")
+	}
+	if !req.AllowSupervisorReap {
+		t.Fatal("archiveRequest did not preserve typed supervisor-reap authorization")
+	}
+	if err := r.archiveSession(); err != nil {
+		t.Fatalf("archiveSession() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived || stored.Outcome != manifest.OutcomeCrashed {
+		t.Fatalf("stored lifecycle/outcome = (%q, %q), want (%q, %q)",
+			stored.Lifecycle, stored.Outcome, manifest.LifecycleArchived, manifest.OutcomeCrashed)
+	}
+}
+
 func TestArchiveSession_SharedOperationPreservesOutcomeAndLegacyMove(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agm.db")
 	sessionsDir := t.TempDir()
@@ -154,5 +204,54 @@ func TestArchiveSession_AlreadyArchivedIsIdempotent(t *testing.T) {
 	}
 	if err := New(m.Name, t.TempDir()).archiveSession(); err != nil {
 		t.Fatalf("archiveSession() idempotent error: %v", err)
+	}
+}
+
+func TestRun_UsesStableSessionIDAndResolvedTmuxIdentity(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "stable-reaper-session-id",
+		Name:          "renamed-after-reaper-spawn",
+		Harness:       "codex-cli",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "renamed-tmux-after-reaper-spawn"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	const resolvedTmuxAtSpawn = "resolved-tmux-at-spawn"
+	f := &fakeBoundary{}
+	f.install(t)
+	r := NewWithOptions(resolvedTmuxAtSpawn, t.TempDir(), ArchiveOptions{
+		SessionID: m.SessionID,
+		Force:     true,
+	})
+	if got := r.archiveRequest().Identifier; got != m.SessionID {
+		t.Fatalf("archive request identifier = %q, want stable ID %q", got, m.SessionID)
+	}
+	if err := r.Run(); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("Lifecycle = %q, want archived", stored.Lifecycle)
+	}
+	if r.SessionName != resolvedTmuxAtSpawn {
+		t.Fatalf("tmux identity = %q, want %q", r.SessionName, resolvedTmuxAtSpawn)
 	}
 }

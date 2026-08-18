@@ -1,7 +1,9 @@
 # SPEC: agm/internal/audit/SPEC.md
 # RELATED-SPEC: internal/driftaudit/SPEC.md
+# RELATED-SPEC: pkg/adrlint/SPEC.md
 # RELATED-SPEC: pkg/audit/config/SPEC.md
 # RELATED-SPEC: pkg/audit/verifiers/SPEC.md
+# RELATED-SPEC: tools/adr-lint/SPEC.md
 Feature: Audit package guardrails
   Audit support packages should carry executable SPEC traceability because
   parity governance depends on session audits, drift evidence, audit config,
@@ -16,8 +18,10 @@ Feature: Audit package guardrails
       | package             |
       | agm/internal/audit  |
       | internal/driftaudit |
+      | pkg/adrlint         |
       | pkg/audit/config    |
       | pkg/audit/verifiers |
+      | tools/adr-lint      |
 
   Scenario Outline: Audit specifications define optional host dependencies
     Given audit package "<package>" is configured

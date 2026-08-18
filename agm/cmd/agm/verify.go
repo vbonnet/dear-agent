@@ -198,7 +198,6 @@ func archiveVerifiedSession(adapter *dolt.Adapter, sessionName string) {
 	opCtx := &ops.OpContext{
 		Storage: adapter,
 		Tmux:    tmuxClient,
-		Manager: managerBackend,
 	}
 	_, err := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{
 		Identifier: sessionName,

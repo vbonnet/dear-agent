@@ -13,10 +13,10 @@ func TestPromptUserForContext_EdgeCases(t *testing.T) {
 		wantNil   bool
 	}{
 		{
-			name:      "Magnitude 0 returns nil",
+			name:      "Magnitude 0 returns empty context",
 			magnitude: 0,
 			flags:     RewindFlags{},
-			wantNil:   true,
+			wantNil:   false,
 		},
 		{
 			name:      "Magnitude 1 with no-prompt flag",

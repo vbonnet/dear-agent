@@ -137,7 +137,13 @@ func ClaimSessionRenameIdentityContext(ctx context.Context, name string) (Rename
 		return RenameSessionIdentity{}, err
 	}
 	normalizedName := NormalizeTmuxSessionName(name)
-	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	// Fields are space-separated, not tab-separated: tmux >= 3.7 renders a
+	// literal tab in -F/format output as "_", which would collapse the fields
+	// into one token. Every field here is space-free (session_id is "$N",
+	// session names are normalized to alphanumeric/dash/underscore, and the
+	// identity token is a generated hex value), so a space is an unambiguous
+	// separator that survives the format expansion verbatim.
+	format := "#{session_id} #{session_name} #{" + sessionRenameIdentityOption + "}"
 	condition := fmt.Sprintf("#{==:#{session_name},%s}", normalizedName)
 	setCommand := fmt.Sprintf("set-option -t %s %s %s", strconv.Quote(normalizedName), sessionRenameIdentityOption, generated.Token)
 	output, claimErr := RunWithTimeout(ctx, globalTimeout,
@@ -160,7 +166,7 @@ func ClaimSessionRenameIdentityContext(ctx context.Context, name string) (Rename
 }
 
 func parseClaimedSessionRenameIdentity(output []byte, expectedName, token string) (RenameSessionIdentity, error) {
-	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 3)
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), " ", 3)
 	if len(parts) != 3 || NormalizeTmuxSessionName(parts[1]) != expectedName || parts[2] != token {
 		return RenameSessionIdentity{}, fmt.Errorf("tmux returned malformed rename identity")
 	}
@@ -172,7 +178,9 @@ func parseClaimedSessionRenameIdentity(output []byte, expectedName, token string
 }
 
 func findClaimedSessionRenameIdentity(ctx context.Context, expectedName, token string) (RenameSessionIdentity, error) {
-	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in format
+	// output as "_". Every field here is space-free.
+	format := "#{session_id} #{session_name} #{" + sessionRenameIdentityOption + "}"
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "list-sessions", "-F", format)
 	if err != nil {
 		return RenameSessionIdentity{}, tmuxCommandError("find rename identity", token, output, err)
@@ -198,7 +206,10 @@ func InspectSessionRenameIdentityContext(ctx context.Context, identity RenameSes
 	if !identity.Valid() {
 		return "", false, fmt.Errorf("invalid tmux rename identity %q", identity.ID)
 	}
-	format := "#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in format
+	// output as "_". session_name is normalized and the identity token is
+	// space-free.
+	format := "#{session_name} #{" + sessionRenameIdentityOption + "}"
 	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, format)
 	if runErr != nil {
 		if isMissingSessionOutput(output) {
@@ -206,7 +217,7 @@ func InspectSessionRenameIdentityContext(ctx context.Context, identity RenameSes
 		}
 		return "", false, tmuxCommandError("inspect rename identity", identity.ID, output, runErr)
 	}
-	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), " ", 2)
 	if len(parts) != 2 {
 		return "", false, fmt.Errorf("tmux returned malformed rename identity state for %q", identity.ID)
 	}
@@ -261,9 +272,12 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 	if !identity.Valid() {
 		return HasSessionStrict(identity.CreationName)
 	}
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}\t#{session_name}")
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in format
+	// output as "_". The identity token and normalized session name are
+	// space-free.
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity} #{session_name}")
 	if err == nil {
-		parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+		parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), " ", 2)
 		if len(parts) != 2 {
 			return false, fmt.Errorf("tmux returned malformed session identity for %q", identity.ID)
 		}
@@ -278,8 +292,7 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 func isMissingSessionOutput(output []byte) bool {
 	lowerOutput := strings.ToLower(string(output))
 	return strings.Contains(lowerOutput, "can't find session") ||
-		strings.Contains(lowerOutput, "no current target") ||
-		strings.Contains(lowerOutput, "no server running")
+		strings.Contains(lowerOutput, "no current target")
 }
 
 func tmuxCommandError(operation, sessionName string, output []byte, err error) error {
@@ -467,13 +480,14 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 	// Sanitize session name (tmux only allows alphanumeric, dash, underscore).
 	sanitizedName := sanitizeNewSessionName(name)
 
-	// Clean stale socket if exists
-	if err := CleanStaleSocket(); err != nil {
-		return SessionIdentity{}, fmt.Errorf("failed to clean stale socket: %w", err)
-	}
-
-	// Lock tmux server for session creation + settings (prevent parallel mutations)
+	// Lock cleanup, server creation, and settings together. Releasing the lock
+	// between a stale-socket probe and creation would let another process unlink
+	// the newly-created server socket.
 	err = withTmuxLock(func() error {
+		if err := cleanStaleSocketLocked(); err != nil {
+			return fmt.Errorf("failed to clean stale socket: %w", err)
+		}
+
 		// Create under the random provisional name before storing the same token
 		// and renaming. If either later command fails, the surviving session still
 		// has an ownership marker that strict compensation can prove.
@@ -714,91 +728,122 @@ func deleteBuffer() {
 
 // SendCommand sends a command to tmux pane
 func SendCommand(sessionName string, command string) error {
-	ctx := context.Background()
-	socketPath := GetSocketPath()
+	return sendCommandToTarget(context.Background(), NormalizeTmuxSessionName(sessionName), command)
+}
 
+// SendCommandToPane sends a command to one previously resolved pane. It keeps
+// delivery pinned to the pane whose harness and composer were verified even if
+// the session's active pane changes between readiness and delivery.
+func SendCommandToPane(paneID string, command string) error {
+	return SendCommandToPaneContext(context.Background(), paneID, command)
+}
+
+// SendCommandToPaneContext is the cancellation-aware exact-pane delivery path.
+func SendCommandToPaneContext(ctx context.Context, paneID string, command string) error {
+	if !isPaneID(paneID) {
+		return fmt.Errorf("invalid tmux pane ID %q", paneID)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return sendCommandToTarget(ctx, paneID, command)
+}
+
+func sendCommandToTarget(ctx context.Context, target, command string) error {
 	// Acquire concurrency semaphore to prevent resource exhaustion
 	if err := acquireTmuxSemaphore(ctx); err != nil {
 		return fmt.Errorf("tmux concurrency limit reached: %w", err)
 	}
 	defer releaseTmuxSemaphore()
 
-	// Normalize session name to match tmux's conversion (dots/colons → dashes)
-	normalizedName := NormalizeTmuxSessionName(sessionName)
-
 	// Lock tmux server for buffer operations (prevent interleaved pastes)
 	return withTmuxLock(func() error {
-		// Ensure buffer is cleaned up on any error path.
-		// The -d flag on paste-buffer only deletes on success; if paste fails
-		// or times out, the buffer persists indefinitely. This defer guarantees cleanup.
-		bufferLoaded := false
-		defer func() {
-			if bufferLoaded {
-				deleteBuffer()
-			}
-		}()
-
-		// Step 1: Load command text into tmux paste buffer via stdin
-		// This avoids command-line length limits and special character escaping issues
-		timeout := getAdaptiveTimeout()
-		cmdLoad, cancel1 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "load-buffer", "-b", "agm-cmd", "-")
-		defer cancel1()
-
-		stdin, err := cmdLoad.StdinPipe()
-		if err != nil {
-			return fmt.Errorf("failed to create stdin pipe for load-buffer: %w", err)
-		}
-
-		if err := cmdLoad.Start(); err != nil {
-			return fmt.Errorf("failed to start load-buffer: %w", err)
-		}
-
-		// Write command to buffer via stdin
-		if _, err := stdin.Write([]byte(command)); err != nil {
-			stdin.Close()
-			cmdLoad.Wait()
-			return fmt.Errorf("failed to write to load-buffer stdin: %w", err)
-		}
-		stdin.Close()
-
-		if err := cmdLoad.Wait(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux load-buffer timed out after %v (server may be hung)", timeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: timeout,
-				}
-			}
-			return fmt.Errorf("failed to load command into tmux buffer: %w", err)
-		}
-		bufferLoaded = true
-
-		// Step 2: Paste buffer to session (atomic operation, -d deletes buffer after paste)
-		// Note: paste-buffer targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-		cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", normalizedName, "-d")
-		defer cancel2()
-		if err := cmdPaste.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux paste-buffer timed out after %v (server may be hung)", timeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: timeout,
-				}
-			}
-			return fmt.Errorf("failed to paste buffer to tmux session: %w", err)
-		}
-		bufferLoaded = false // paste-buffer -d already deleted it
-
-		// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
-		// sendEnterReliable waits 100ms, sends -H 0d, then auto-retries
-		// once if the Enter didn't register (replaces the old 50ms + C-m +
-		// retryEnterAfterPaste sequence).
-		if err := sendEnterReliable(socketPath, normalizedName); err != nil {
-			return err
-		}
-
-		return nil
+		return sendCommandToTargetLocked(ctx, target, command)
 	})
+}
+
+// sendCommandToTargetLocked performs exact-target delivery while the caller
+// owns both the tmux concurrency slot and server-mutation lock.
+func sendCommandToTargetLocked(ctx context.Context, target, command string) error {
+	return sendCommandToTargetForHarnessLocked(ctx, target, command, "")
+}
+
+// sendCommandToTargetForHarnessLocked performs exact-target delivery with the
+// native paste semantics required by harness while the caller owns both the
+// tmux concurrency slot and server-mutation lock.
+func sendCommandToTargetForHarnessLocked(ctx context.Context, target, command, harness string) error {
+	socketPath := GetSocketPath()
+
+	// Ensure buffer is cleaned up on any error path.
+	// The -d flag on paste-buffer only deletes on success; if paste fails
+	// or times out, the buffer persists indefinitely. This defer guarantees cleanup.
+	bufferLoaded := false
+	defer func() {
+		if bufferLoaded {
+			deleteBuffer()
+		}
+	}()
+
+	// Step 1: Load command text into tmux paste buffer via stdin
+	// This avoids command-line length limits and special character escaping issues
+	timeout := getAdaptiveTimeout()
+	cmdLoad, cancel1 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "load-buffer", "-b", "agm-cmd", "-")
+	defer cancel1()
+
+	stdin, err := cmdLoad.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe for load-buffer: %w", err)
+	}
+
+	if err := cmdLoad.Start(); err != nil {
+		return fmt.Errorf("failed to start load-buffer: %w", err)
+	}
+
+	// Write command to buffer via stdin
+	if _, err := stdin.Write([]byte(command)); err != nil {
+		stdin.Close()
+		cmdLoad.Wait()
+		return fmt.Errorf("failed to write to load-buffer stdin: %w", err)
+	}
+	stdin.Close()
+
+	if err := cmdLoad.Wait(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux load-buffer timed out after %v (server may be hung)", timeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
+				Duration: timeout,
+			}
+		}
+		return fmt.Errorf("failed to load command into tmux buffer: %w", err)
+	}
+	bufferLoaded = true
+
+	// Step 2: Paste buffer to session (atomic operation, -d deletes buffer after paste)
+	// Note: paste-buffer targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
+	cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", pasteBufferArgs(socketPath, target, harness)...)
+	defer cancel2()
+	if err := cmdPaste.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux paste-buffer timed out after %v (server may be hung)", timeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
+				Duration: timeout,
+			}
+		}
+		return fmt.Errorf("failed to paste buffer to tmux session: %w", err)
+	}
+	bufferLoaded = false // paste-buffer -d already deleted it
+
+	// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
+	// sendEnterReliable waits 100ms, sends -H 0d, then auto-retries
+	// once if the Enter didn't register (replaces the old 50ms + C-m +
+	// retryEnterAfterPaste sequence).
+	if err := sendEnterReliableContext(ctx, socketPath, target); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Version returns tmux version
@@ -988,8 +1033,13 @@ func GetPaneCommands(sessionName string) ([]string, error) {
 func GetPaneCommandsContext(ctx context.Context, sessionName string) ([]string, error) {
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
+	// The two fields are separated by a single space, and pane_start_command
+	// (a full command line) may itself contain spaces, so the fields are split
+	// on the FIRST space only. A tab separator cannot be used: tmux >= 3.7
+	// renders a literal tab in format output as "_", which would fuse
+	// pane_current_command onto pane_start_command as one token.
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", normalizedName,
-		"-F", "#{pane_current_command}\t#{pane_start_command}")
+		"-F", "#{pane_current_command} #{pane_start_command}")
 	if err != nil {
 		timeoutError := &TimeoutError{}
 		if errors.As(err, &timeoutError) {
@@ -1001,7 +1051,7 @@ func GetPaneCommandsContext(ctx context.Context, sessionName string) ([]string, 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var commands []string
 	for _, line := range lines {
-		for field := range strings.SplitSeq(line, "\t") {
+		for _, field := range strings.SplitN(line, " ", 2) {
 			if cmd := strings.TrimSpace(field); cmd != "" {
 				commands = append(commands, cmd)
 			}

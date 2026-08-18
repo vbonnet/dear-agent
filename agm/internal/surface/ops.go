@@ -1,5 +1,7 @@
-// Package surface defines AGM codegen operation definitions that drive
-// CLI, MCP, and Skill surface generation from a single source of truth.
+// Package surface defines AGM logical operation intent for CLI and
+// build-ignored MCP reference generation. The provider-visible MCP server is
+// hand-registered and contract-tested; installed plugin commands are owned by
+// the live Cobra tree.
 package surface
 
 import "github.com/vbonnet/dear-agent/pkg/codegen"
@@ -9,6 +11,7 @@ var Registry = []codegen.Op{
 	// Read operations
 	ListSessions,
 	GetSession,
+	GetSessionOutput,
 	SearchSessions,
 	GetStatus,
 

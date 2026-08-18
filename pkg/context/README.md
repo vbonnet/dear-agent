@@ -483,7 +483,7 @@ fmt.Printf("Percentage: %.1f%%\n", usage.PercentageUsed) // 72.0%
 Identifies which CLI is running based on environment variables.
 
 **Returns**:
-- `CLI`: One of `CLIClaude`, `CLIGemini`, `CLIOpenCode`, `CLICodex`, `CLIUnknown`
+- `CLI`: One of `CLIClaude`, `CLIGemini`, `CLIOpenCode`, `CLICodex`, `CLIPi`, `CLIAgy`, `CLIUnknown`
 
 **Example**:
 ```go
@@ -494,6 +494,8 @@ case context.CLIClaude:
     fmt.Println("Running in Claude Code")
 case context.CLIGemini:
     fmt.Println("Running in Gemini CLI")
+case context.CLIPi:
+    fmt.Println("Running in Pi CLI")
 case context.CLIUnknown:
     fmt.Println("Unknown CLI - will use heuristic")
 }

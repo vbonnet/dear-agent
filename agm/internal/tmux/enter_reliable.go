@@ -148,14 +148,21 @@ func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg 
 // (SendCommand, etc.) call this directly; SendEnterReliable is the exported,
 // lock-acquiring entry point.
 func sendEnterReliable(socketPath, normalizedName string) error {
+	return sendEnterReliableContext(context.Background(), socketPath, normalizedName)
+}
+
+func sendEnterReliableContext(parent context.Context, socketPath, target string) error {
+	if parent == nil {
+		parent = context.Background()
+	}
 	// sendEnter runs `tmux send-keys` under the repo subprocess-safety contract:
 	// timeout context, isolated process group, and a bounded WaitDelay with a
 	// Cancel that SIGKILLs the whole group — a hung tmux can never wedge the loop.
 	sendEnter := func() error {
 		timeout := getAdaptiveTimeout()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
+		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", target, "-H", "0d")
 		cmd.SysProcAttr = procguard.ProcessGroupAttr()
 		cmd.Cancel = func() error {
 			if cmd.Process == nil {
@@ -169,7 +176,7 @@ func sendEnterReliable(socketPath, normalizedName string) error {
 	// capture reuses the exported, policy-compliant pane capture (isolated process
 	// group + bounded WaitDelay per CapturePanePolicy).
 	capture := func() (string, error) {
-		return CapturePaneOutput(normalizedName, 5)
+		return CapturePaneLogicalANSIOutputContext(parent, target, 5)
 	}
 	return verifyingEnter(sendEnter, capture, defaultEnterVerifyConfig())
 }

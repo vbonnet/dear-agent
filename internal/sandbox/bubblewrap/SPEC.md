@@ -5,9 +5,8 @@
 ## Overview
 
 The Bubblewrap provider creates Linux namespace sandboxes for AGM sessions using
-`bwrap`. It favors per-session git worktrees so agents can edit and commit in an
-isolated branch, and it falls back to a symlink-populated merged directory when
-no repository can be resolved.
+`bwrap`. It requires a per-session git worktree so agents can edit and commit in
+an isolated branch without writes traversing host-repository symlinks.
 
 ## Requirements
 
@@ -21,7 +20,7 @@ no repository can be resolved.
 
 **BWRAP-05** When an explicit target repository is configured or a git repository can be resolved from the lower directories, the system shall replace the merged directory with a git worktree on an `agm/<session>` branch.
 
-**BWRAP-06** When no git repository can be resolved, the system shall populate the merged directory with top-level symlinks from the lower directories without writing into the source lower directories.
+**BWRAP-06** When no private git worktree can be materialized, the system shall fail with a structured mount error, remove partial sandbox directories, and never expose host files through a symlink-populated merged directory.
 
 **BWRAP-07** When Bubblewrap arguments are built for execution, the system shall mount lower directories read-only, bind the writable upper directory, isolate all namespaces by default, and include `--die-with-parent`.
 
@@ -36,6 +35,12 @@ no repository can be resolved.
 **BWRAP-12** When Git refuses to remove a locked sandbox worktree during destruction, the system shall preserve the worktree, sandbox directories, and provider registry entry, return the removal error, and allow destruction to be retried after the owner unlocks the worktree.
 
 **BWRAP-13** When Git worktree removal succeeds but sandbox directory cleanup fails during destruction, the system shall retain the provider registry entry and retry only the unfinished directory cleanup phase.
+
+**BWRAP-14** When a request names a working directory inside a lower directory, the provider shall materialize that lower directory instead of a conflicting target repository and return `merged/<relative-directory>` as the harness working directory; if the matched lower directory is not a Git repository, the provider shall reject creation instead of substituting another repository or exposing the host directory through symlinks.
+
+**BWRAP-15** When private Git worktree creation fails after a repository is resolved, the system shall return a structured mount error that preserves the underlying Git failure.
+
+**BWRAP-16** When no explicit target repository is requested, repository discovery shall be constrained to the request's lower directories and shall never materialize a repository discovered only through machine-level AGM configuration.
 
 ## BDD Traceability
 

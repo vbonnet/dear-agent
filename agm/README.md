@@ -1,32 +1,36 @@
 # AI/Agent Session Manager (AGM)
 
-Smart session management for AI agents (Claude, Gemini, Codex) with interactive TUI, multi-agent support, and automatic session tracking.
+Smart session management for AI coding harnesses (Claude Code, Codex CLI,
+Antigravity, OpenCode, and Pi) with interactive TUI, multi-agent support, and
+automatic session tracking.
 
 ## Architecture
 
-### C4 Component Diagram
-
-![AGM Component Diagram](diagrams/rendered/c4-component-agm.png)
+### C4 Component Model
 
 **Component Architecture** showing the multi-CLI session coordination system:
 
 - **CommandTranslator**: Translates AGM commands to CLI-specific syntax
-- **AdapterRegistry**: Manages adapters for Claude, Gemini, Codex, and OpenCode
+- **AdapterRegistry**: Manages active adapters for Claude Code, Codex CLI, Antigravity, OpenCode, and Pi
 - **Dolt Storage**: Persists session metadata in versioned SQL database (Git-like commits)
 - **CoordinationDaemon**: Background process for session lifecycle management
 - **MessageQueue**: Inter-session communication and event routing
 - **SessionManager**: Central orchestration of session operations
+- **SessionTmuxRuntime**: The single local runtime adapter for strict
+  existence, liveness, readiness, and exact-pane control
 
-**Diagram Source**: `diagrams/c4-component-agm.d2`
+See the code-native [D2 source](diagrams/c4-component-agm.d2). Generated
+renders are intentionally not checked in so they cannot drift from the source.
 
 ## Multi-Agent Quick Start
 
 ```bash
 # Create session with specific harness
 agm new --harness claude-code my-coding-session   # Claude Code: code, reasoning
-agm new --harness gemini-cli research-task        # Gemini CLI: research, 1M context
-agm new --harness codex-cli chat-session          # Codex CLI: OpenAI API (GPT-4, GPT-3.5)
+agm new --harness agy --prompt "Start the research task" research-task  # Antigravity: prompt creates native identity
+agm new --harness codex-cli chat-session          # Codex CLI: native interactive CLI and OAuth
 agm new --harness opencode-cli dev-session        # OpenCode CLI: native SSE monitoring
+agm new --harness pi-cli pi-session               # Pi: native JSONL sessions and managed tool authorization
 
 # Resume any session (agent auto-detected)
 agm resume my-coding-session
@@ -36,6 +40,9 @@ agm list
 ```
 
 **Session Naming:** Use alphanumeric, dashes, and underscores only. Avoid dots (`.`), colons (`:`), and spaces - they cause lookup failures. See [Session Naming Guide](docs/SESSION-NAMING-GUIDE.md).
+
+Pi setup, native session identity, permissions, hooks, and known telemetry
+boundaries are documented in [Pi Harness](docs/PI-HARNESS.md).
 
 ## Test Sessions
 
@@ -510,7 +517,8 @@ AGM provides a unified `agm send` command group for all session communication op
 
 ### `agm send msg <recipient> [flags]`
 
-Send messages to one or more AGM sessions with multi-recipient support and parallel delivery.
+Send messages to one or more registered AGM sessions with harness-aware,
+exact-pane delivery.
 
 **Single recipient:**
 ```bash
@@ -520,11 +528,11 @@ agm send msg my-session --prompt "Please review the code"
 # Send prompt from file (for large multi-line prompts)
 agm send msg my-session --prompt-file /path/to/prompt.txt
 
-# Backward compatible (still works)
-agm session send my-session --prompt "Please review the code"
+# Current command path
+agm send msg my-session --prompt "Please review the code"
 ```
 
-**Multi-recipient (2.5x faster with parallel delivery):**
+**Multi-recipient:**
 ```bash
 # Comma-separated list
 agm send msg session1,session2,session3 --prompt "Status check"
@@ -540,10 +548,11 @@ agm send msg --workspace oss --prompt "OSS update available"
 ```
 
 **Features:**
-- **Multi-recipient**: Send to multiple sessions simultaneously
-- **Parallel delivery**: Worker pool with max 5 concurrent deliveries (2.5x speedup)
+- **Multi-recipient**: Send to multiple sessions in one invocation
+- **Serialized delivery**: Complete each atomic readiness-and-send boundary before processing the next recipient
 - **Flexible targeting**: Comma-separated lists, glob patterns, workspace filtering
-- **Auto-interrupt**: Sends ESC to interrupt thinking before sending prompt
+- **Harness-aware readiness**: Require the registered harness process and its current composer before sending
+- **Exact-pane input**: Deliver to the pane that passed readiness while holding one tmux mutation boundary
 - **Literal mode**: Uses tmux `-l` flag to prevent special character interpretation
 - **Per-recipient error isolation**: One failure doesn't block others
 - **Color-coded reporting**: Success/failure status for each recipient

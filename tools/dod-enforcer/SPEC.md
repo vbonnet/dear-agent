@@ -162,6 +162,7 @@ type BeadDoD struct {
     FilesMustExist      []string       `yaml:"files_must_exist"`
     TestsMustPass       bool           `yaml:"tests_must_pass"`
     CommandsMustSucceed []CommandCheck `yaml:"commands_must_succeed"`
+    Extensions          map[string]yaml.Node `yaml:",inline"`
 }
 
 // CommandCheck represents a command that must succeed

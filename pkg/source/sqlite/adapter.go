@@ -183,6 +183,9 @@ func (a *Adapter) Add(ctx context.Context, s source.Source) (source.Ref, error) 
 // Fetch returns up to q.K Sources matching q. Ordering is descending
 // FTS5 rank when Query is non-empty, descending IndexedAt otherwise.
 func (a *Adapter) Fetch(ctx context.Context, q source.FetchQuery) ([]source.Source, error) {
+	if q.K > source.MaxFetchK {
+		return nil, fmt.Errorf("source/sqlite: Fetch: K %d exceeds maximum %d", q.K, source.MaxFetchK)
+	}
 	k := q.K
 	if k <= 0 {
 		k = defaultK

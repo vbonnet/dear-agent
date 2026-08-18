@@ -1,50 +1,36 @@
-// Package agent provides the Agent interface for multi-agent support in AGM.
+// Package agent provides concrete harness adapters, harness identity metadata,
+// model routing, and shared adapter data types for AGM.
 //
 // # Architecture
 //
-// AGM (Agent Manager) uses the Agent interface to support multiple AI providers
-// (Claude, Gemini, GPT) with a unified session management experience.
+// Concrete adapters expose harness-specific lifecycle mechanisms. Shared
+// cross-surface lifecycle ordering belongs to internal/ops, whose consumers
+// define capability-sized interfaces for the mechanisms they need.
 //
-//	┌─────────────────┐
-//	│   AGM CLI       │
-//	│ (new, resume)   │
-//	└────────┬────────┘
-//	         │
-//	┌────────▼────────┐
-//	│ Session Manager │
-//	│ (orchestration) │
-//	└────────┬────────┘
-//	         │
-//	┌────────▼────────┐
-//	│ Agent Interface │ <-- This package
-//	└────────┬────────┘
-//	         │
-//	  ┌──────┴──────┬──────┐
-//	  │             │      │
-//	┌─▼───┐   ┌─────▼──┐  ┌▼────┐
-//	│Claude│  │ Gemini │  │ GPT │
-//	└──────┘  └────────┘  └─────┘
+//	    metadata discovery
+//	           │
+//	           ▼
+//	   Harness interface
+//	name/version/capabilities
+//	           ▲
+//	           │
+//	concrete harness adapters
+//	           │
+//	           ▼
+//	consumer-owned ops interfaces
 //
 // # Usage
 //
-// Agent implementations are in subdirectories:
-//   - internal/agent/gemini/   (Gemini API adapter)
-//   - internal/agent/gpt/      (GPT API adapter)
+// Implementations live in sibling *_adapter.go files. The canonical active and
+// deprecated harness sets are in harnesses.go. GetHarness returns only the
+// descriptive Harness contract; callers needing behavior construct the
+// concrete adapter or use an operation-specific consumer interface.
 //
 // Example:
 //
-//	agent := claude.NewAdapter()
-//	ctx := agent.SessionContext{
-//	    Name:             "my-session",
-//	    WorkingDirectory: "~/project",
-//	}
-//	sessionID, err := agent.CreateSession(ctx)
+//	harness, err := GetHarness("codex-cli")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//
-// # Design References
-//
-//   - ~/src/ai-tools/AGM-MULTI-AGENT-ROADMAP.md (Phase 0, Task 2)
-//   - Bead oss-6tm6 (Priority P1, 480 minutes)
+//	log.Printf("%s %s", harness.Name(), harness.Version())
 package agent

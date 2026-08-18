@@ -3,6 +3,7 @@ package dolt
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -17,17 +18,19 @@ type mockAccessData struct {
 
 // MockAdapter is an in-memory implementation of the Adapter interface for testing
 type MockAdapter struct {
-	mu       sync.RWMutex
-	sessions map[string]*manifest.Manifest
-	access   map[string]*mockAccessData
-	closed   bool
+	mu               sync.RWMutex
+	sessions         map[string]*manifest.Manifest
+	nameReservations map[string]string
+	access           map[string]*mockAccessData
+	closed           bool
 }
 
 // NewMockAdapter creates a new in-memory mock adapter for testing
 func NewMockAdapter() *MockAdapter {
 	return &MockAdapter{
-		sessions: make(map[string]*manifest.Manifest),
-		access:   make(map[string]*mockAccessData),
+		sessions:         make(map[string]*manifest.Manifest),
+		nameReservations: make(map[string]string),
+		access:           make(map[string]*mockAccessData),
 	}
 }
 
@@ -43,14 +46,85 @@ func (m *MockAdapter) CreateSession(session *manifest.Manifest) error {
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
+	}
 
 	// Check for duplicate
 	if _, exists := m.sessions[session.SessionID]; exists {
 		return fmt.Errorf("session already exists: %s", session.SessionID)
 	}
+	if session.Name != "" && session.Lifecycle != manifest.LifecycleArchived {
+		if owner, reserved := m.nameReservations[session.Name]; reserved && owner != session.SessionID {
+			return &SessionNameConflictError{Name: session.Name}
+		}
+		m.nameReservations[session.Name] = session.SessionID
+		defer delete(m.nameReservations, session.Name)
+		for _, existing := range m.sessions {
+			if existing.Lifecycle != manifest.LifecycleArchived && existing.Name == session.Name {
+				return &SessionNameConflictError{Name: session.Name}
+			}
+		}
+	}
 
 	// Store a deep copy to prevent external modifications
 	m.sessions[session.SessionID] = m.copyManifest(session)
+	return nil
+}
+
+// ReserveSessionName atomically leases an active name in the mock store.
+func (m *MockAdapter) ReserveSessionName(sessionID, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return fmt.Errorf("adapter is closed")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if name == "" {
+		return nil
+	}
+	if owner, reserved := m.nameReservations[name]; reserved {
+		if owner == sessionID {
+			return nil
+		}
+		return &SessionNameConflictError{Name: name}
+	}
+	for _, existing := range m.sessions {
+		if existing.Lifecycle != manifest.LifecycleArchived && existing.Name == name {
+			return &SessionNameConflictError{Name: name}
+		}
+	}
+	m.nameReservations[name] = sessionID
+	return nil
+}
+
+// ReleaseSessionNameReservation releases a mock operation lease.
+func (m *MockAdapter) ReleaseSessionNameReservation(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return fmt.Errorf("adapter is closed")
+	}
+	for name, owner := range m.nameReservations {
+		if owner == sessionID {
+			delete(m.nameReservations, name)
+		}
+	}
+	return nil
+}
+
+// RenewSessionNameReservation verifies ownership of a mock operation lease.
+func (m *MockAdapter) RenewSessionNameReservation(sessionID, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return fmt.Errorf("adapter is closed")
+	}
+	if owner, reserved := m.nameReservations[name]; !reserved || owner != sessionID {
+		return &SessionNameConflictError{Name: name}
+	}
 	return nil
 }
 
@@ -83,6 +157,9 @@ func (m *MockAdapter) UpdateSession(session *manifest.Manifest) error {
 
 	if session.SessionID == "" {
 		return fmt.Errorf("session_id is required")
+	}
+	if err := validateSessionLifecycleAndOutcome(session); err != nil {
+		return err
 	}
 
 	// Check session exists
@@ -130,6 +207,14 @@ func (m *MockAdapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest,
 			continue
 		}
 		results = append(results, m.copyManifest(session))
+	}
+	if filter != nil && filter.StableOrder {
+		sort.Slice(results, func(i, j int) bool {
+			if !results[i].CreatedAt.Equal(results[j].CreatedAt) {
+				return results[i].CreatedAt.Before(results[j].CreatedAt)
+			}
+			return results[i].SessionID < results[j].SessionID
+		})
 	}
 
 	// Apply limit and offset
@@ -203,6 +288,7 @@ func (m *MockAdapter) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions = make(map[string]*manifest.Manifest)
+	m.nameReservations = make(map[string]string)
 	m.access = make(map[string]*mockAccessData)
 	m.closed = false
 }
@@ -236,6 +322,8 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 		State:            src.State,
 		StateUpdatedAt:   src.StateUpdatedAt,
 		StateSource:      src.StateSource,
+		FinalOutput:      src.FinalOutput,
+		FinalOutputAt:    src.FinalOutputAt,
 		Context: manifest.Context{
 			Project: src.Context.Project,
 			Purpose: src.Context.Purpose,
@@ -264,6 +352,10 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 			SessionID:      src.Codex.SessionID,
 			TranscriptPath: src.Codex.TranscriptPath,
 		}
+	}
+	if src.OpenAI != nil {
+		openAI := *src.OpenAI
+		dst.OpenAI = &openAI
 	}
 	if src.Agy != nil {
 		dst.Agy = &manifest.Agy{
@@ -437,7 +529,8 @@ func (m *MockAdapter) GetSessionByUUID(conversationUUID string) (*manifest.Manif
 	for _, s := range m.sessions {
 		if s.Claude.UUID == conversationUUID ||
 			(s.Codex != nil && s.Codex.SessionID == conversationUUID) ||
-			(s.Agy != nil && s.Agy.ConversationID == conversationUUID) {
+			(s.Agy != nil && s.Agy.ConversationID == conversationUUID) ||
+			(s.Pi != nil && s.Pi.SessionID == conversationUUID) {
 			return m.copyManifest(s), nil
 		}
 	}

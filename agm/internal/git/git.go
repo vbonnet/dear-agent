@@ -121,6 +121,17 @@ func findGitRoot(startPath string) (string, error) {
 	}
 }
 
+// WorktreeRoot returns the root of the Git worktree containing path. Unlike a
+// caller's current project directory, this path is valid input to worktree
+// inventory and removal operations.
+func WorktreeRoot(path string) (string, error) {
+	root, err := findGitRoot(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve containing worktree for %s: %w", path, err)
+	}
+	return root, nil
+}
+
 // ErrNotInGitRepo is returned when no git repository is found in the directory tree
 var ErrNotInGitRepo = fmt.Errorf("not in a git repository")
 

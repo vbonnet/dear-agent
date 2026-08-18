@@ -1,0 +1,176 @@
+package agent
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+)
+
+// The tests in launch_commands_test.go hand each built command straight to
+// /bin/sh. That proves the string is correct, but not that it survives the way
+// AGM actually delivers it: tmux load-buffer -> paste-buffer -> the pane's
+// shell. A quoting fix that a paste path mangles is no fix at all, and the
+// mangling would only show up against a live tmux server.
+//
+// These tests close that gap. They follow the same shape as the direct-shell
+// suite — a stub harness that records its argv, and a canary proving the
+// legacy quoting is still exploitable through this exact path, so a passing
+// run cannot be vacuous.
+
+// sendThroughTmux starts a private tmux server, sends cmdText to its pane with
+// the same tmux.SendCommand the adapters use, and returns the argv the stub
+// harness observed.
+//
+// The pane runs /bin/sh rather than the user's login shell on purpose: an
+// interactive zsh re-sources the user's rc files and rebuilds PATH, which would
+// put a real harness binary ahead of the stub. `-e PATH=` pins the pane's
+// environment. The real system directories stay on PATH so the payload's
+// `touch` can resolve — a PATH holding only the stub would make the injection
+// fail to find its tool and the test pass for the wrong reason.
+func sendThroughTmux(t *testing.T, sessionName, cmdText, harnessName, paneDir string) []string {
+	t.Helper()
+
+	stubDir := t.TempDir()
+	argvOut := filepath.Join(stubDir, "argv")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvOut + "\n"
+	if err := os.WriteFile(filepath.Join(stubDir, harnessName), []byte(stub), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+
+	// Not t.TempDir(): its path embeds the test name, and a unix socket path is
+	// capped near 104 bytes on macOS. A long test name silently pushes the
+	// socket over the limit and tmux fails with "File name too long" — which
+	// makes the canary unable to run at all while the shorter-named test still
+	// passes, i.e. a green suite that proves nothing. Cleaned up via t.Cleanup
+	// below, so the usetesting lint's actual concern is covered.
+	socketDir, err := os.MkdirTemp("", "agmsock") //nolint:usetesting // see above: t.TempDir() overruns the unix-socket path limit
+	if err != nil {
+		t.Fatalf("socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	socket := filepath.Join(socketDir, "s")
+	panePath := stubDir + string(os.PathListSeparator) + "/usr/bin:/bin:/usr/sbin:/sbin"
+
+	newSession := exec.Command("tmux", "-S", socket,
+		"new-session", "-d", "-s", sessionName,
+		"-c", paneDir,
+		"-e", "PATH="+panePath,
+		"/bin/sh")
+	newSession.Env = append(os.Environ(), "PATH="+panePath)
+	if out, err := newSession.CombinedOutput(); err != nil {
+		t.Fatalf("tmux new-session: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-S", socket, "kill-server").Run()
+	})
+
+	// Every built command ends in `&& exit`, so the pane's shell terminates as
+	// soon as the command runs. tmux.SendCommand does not treat Enter as
+	// fire-and-forget: it captures the pane afterwards to confirm the prompt was
+	// submitted, and retries the send if it cannot tell. Against a pane that has
+	// already exited, that retry hits a destroyed session and the call reports
+	// "prompt submission acknowledgement is uncertain" even though the command
+	// ran correctly — which is what happened on Linux CI while macOS raced the
+	// other way. remain-on-exit keeps the dead pane addressable so the
+	// acknowledgement path stays meaningful.
+	setRemain := exec.Command("tmux", "-S", socket, "set-option", "-t", sessionName, "remain-on-exit", "on")
+	if out, err := setRemain.CombinedOutput(); err != nil {
+		t.Fatalf("tmux set-option remain-on-exit: %v: %s", err, out)
+	}
+
+	// tmux.SendCommand reads the socket from the environment.
+	t.Setenv("AGM_TMUX_SOCKET", socket)
+	// A send error is logged rather than fatal. What this test asserts is what
+	// the harness received, and the stub's argv file is the authoritative
+	// evidence of that; SendCommand's own delivery-acknowledgement heuristic is
+	// a separate concern with its own tests. If the bytes really did not arrive,
+	// the poll below fails with the pane contents attached, which is a better
+	// diagnostic than the send error alone.
+	if err := tmux.SendCommand(sessionName, cmdText); err != nil {
+		t.Logf("tmux.SendCommand reported %v; falling through to what the harness actually received", err)
+	}
+
+	// The pane runs asynchronously; poll for the stub's argv file.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(argvOut); err == nil && len(data) > 0 {
+			return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	pane, _ := exec.Command("tmux", "-S", socket, "capture-pane", "-p", "-t", sessionName).Output()
+	t.Fatalf("stub %q never ran, so the command did not reach it.\ncommand: %s\npane:\n%s",
+		harnessName, cmdText, pane)
+	return nil
+}
+
+func requireTmux(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+}
+
+// TestProductionClaudeCommandNeutralizedThroughTmux sends the same private
+// executor command shape produced by PrepareClaudeCommand through a live tmux
+// paste buffer. The private executor itself is covered in harnessexec tests;
+// this test owns the terminal-delivery boundary.
+func TestProductionClaudeCommandNeutralizedThroughTmux(t *testing.T) {
+	requirePOSIXShell(t)
+	requireTmux(t)
+
+	root, workDir := hostileWorkDir(t)
+	command := harnessexec.BuildClaudeCommand(harnessexec.ClaudeLaunch{
+		Executable:  "claude",
+		SessionName: "ce93lw1-fixed",
+		WorkDir:     workDir,
+		AddDirs:     []string{workDir},
+	})
+	argv := sendThroughTmux(t, "ce93lw1-fixed", command, "claude", root)
+
+	for _, flag := range []string{"--workdir", "--add-dir"} {
+		found := false
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == flag && argv[i+1] == workDir {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("argv = %q, want %s followed by hostile workdir", argv, flag)
+		}
+	}
+	assertNoPwned(t, root)
+}
+
+// TestLegacyQuotingWasExploitableThroughTmux is the canary. It reconstructs the
+// pre-ce-93lw.1 command text and requires that it still gets exploited through
+// this delivery path. If it stops failing, the harness — not the fix — is what
+// changed, and TestInjectionNeutralizedThroughTmux above has become vacuous.
+func TestLegacyQuotingWasExploitableThroughTmux(t *testing.T) {
+	requirePOSIXShell(t)
+	requireTmux(t)
+
+	root, workDir := hostileWorkDir(t)
+	legacy := "claude --add-dir '" + workDir + "' && exit"
+	sendThroughTmux(t, "ce93lw1-legacy", legacy, "claude", root)
+
+	// The payload's `touch pwned` is relative and the pane starts in root.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(root, "pwned")); err == nil {
+			return // legacy quoting is still exploitable here, as it must be
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("legacy quoting was not exploited through tmux: the payload %q no longer "+
+		"attacks the old command form, so TestInjectionNeutralizedThroughTmux proves nothing",
+		injectionPayload)
+}

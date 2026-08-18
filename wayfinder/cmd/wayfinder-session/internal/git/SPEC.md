@@ -18,11 +18,13 @@
 
 **WAYFINDER-GIT-05** When uncommitted files are queried, the system shall report only files contained by the project directory.
 
-**WAYFINDER-GIT-06** When a rewind changes canonical status, history, or retrospective markers in a Git repository, the system shall commit those files without sweeping unrelated staged changes.
+**WAYFINDER-GIT-06** When a rewind changes canonical status, history, retrospective markers, and its complete archive in a Git repository, the system shall commit those files and that exact archive without sweeping unrelated staged changes or sibling archives.
 
-**WAYFINDER-GIT-07** When modified source files are queried, the system shall distinguish source code from Wayfinder artifacts and unrelated paths.
+**WAYFINDER-GIT-07** When a repository ignore rule matches a canonical Wayfinder lifecycle marker or the exact archive returned by a rewind, the system shall force-stage that owned path while continuing to honor ignore rules for user-authored phase artifacts and other archives.
 
-**WAYFINDER-GIT-08** When a worktree lifecycle is exercised, the system shall prevent conflicting paths and preserve repository integrity.
+**WAYFINDER-GIT-08** When modified source files are queried, the system shall distinguish source code from Wayfinder artifacts and unrelated paths.
+
+**WAYFINDER-GIT-09** When a worktree lifecycle is exercised, the system shall prevent conflicting paths and preserve repository integrity.
 
 ## Test Traceability
 

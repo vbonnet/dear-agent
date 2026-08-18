@@ -7,7 +7,7 @@
 //
 // It is distinct from the AGM Dolt session manifests (`agm session gc` /
 // `agm session archive`) and from the `~/.claude/projects/*.jsonl` transcripts.
-// Per ADR-026 this package never deletes anything and never touches `.jsonl`
+// Per CUI-03 and CUI-04 this package never deletes anything and never touches `.jsonl`
 // transcripts; it only flips the boolean `isArchived` field in place.
 //
 // The on-disk files are compact, insertion-ordered JSON written by the desktop
@@ -29,7 +29,7 @@ import (
 )
 
 // ErrUnknownSchema is returned when a session file does not match the shape we
-// recognise. Per ADR-026 such files are refused, never rewritten.
+// recognise. Per CUI-03 such files are refused, never rewritten.
 var ErrUnknownSchema = errors.New("claudeui: unrecognized session schema")
 
 // ErrAmbiguousStore is returned when the store contains more than one
@@ -88,7 +88,7 @@ type schemaProbe struct {
 //
 // device and account are optional selectors; an empty string means
 // "autodetect, and error if ambiguous". This keeps multi-device/account stores
-// safe by refusing rather than guessing (ADR-026 risk table).
+// safe by refusing rather than guessing (CUI-02 and CUI-09).
 func StoreDir(root, device, account string) (dir, deviceID, accountID string, err error) {
 	if _, statErr := os.Stat(root); statErr != nil {
 		if os.IsNotExist(statErr) {

@@ -14,14 +14,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// AgyAdapter implements Agent interface for the Antigravity (agy) CLI.
+// AgyAdapter is the concrete harness adapter for the Antigravity (agy) CLI.
 //
 // It wraps existing AGM tmux-based session management and provides
-// the Agent interface abstraction for agy sessions.
+// AGY session mechanisms used by operation-specific consumers.
 type AgyAdapter struct {
 	sessionStore SessionStore
 }
@@ -30,6 +31,7 @@ var (
 	agyHasSession          = tmux.HasSession
 	agyNewSession          = tmux.NewSession
 	agySendCommand         = tmux.SendCommand
+	agySendPromptLiteral   = tmux.SendPromptLiteralForHarness
 	agyWaitForPrompt       = tmux.WaitForAgyPrompt
 	agyWaitForResumePrompt = tmux.WaitForAgyPromptOnResume
 	agyCheckProcess        = tmux.CheckProcessInPaneTree
@@ -50,7 +52,7 @@ const (
 // NewAgyAdapter creates a new Agy adapter instance.
 //
 // If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
-func NewAgyAdapter(sessionStore SessionStore) (Agent, error) {
+func NewAgyAdapter(sessionStore SessionStore) (*AgyAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {
@@ -148,22 +150,45 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := agyNewSession(tmuxName, workDir); err != nil {
 		return "", fmt.Errorf("failed to create tmux session: %w", err)
 	}
-	agyCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+	agySpec := launchparity.AgyCommandSpec{
 		WorkDir:        workDir,
 		ResolvedModel:  resolvedModel,
 		PermissionMode: permissionMode,
 		ConversationID: conversationID,
 		ExtraAddDirs:   ctx.AuthorizedDirs,
-	}).Command
+	}
+	harnessexecLaunch := harnessexec.AgyLaunch{
+		SessionName:    tmuxName,
+		Model:          resolvedModel,
+		WorkDir:        workDir,
+		Permission:     permissionMode,
+		AddDirs:        ctx.AuthorizedDirs,
+		ConversationID: conversationID,
+	}
+	prepared, err := harnessexec.PrepareAgyCommand(harnessexecLaunch, os.Environ())
+	if err != nil {
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to prepare AGY launch: %w", err))
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		_ = prepared.Cancel()
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("finalize AGY launch: %w", err))
+	}
+	agyCmd := prepared.Command
 
 	// Start Agy in the tmux session
-	if err := agySendCommand(tmuxName, agyCmd); err != nil {
+	if err := sendPastedShellCommandWith(agySendCommand, tmuxName, agyCmd, agyPastedShellValues(agySpec)...); err != nil {
+		_, _ = harnessexec.ResolveSubmission(err, prepared.Cancel)
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to start Agy in tmux session: %w", err))
 	}
 
 	// Wait for Agy to be ready
 	if err := agyWaitForPrompt(context.Background(), tmuxName, 30*time.Second); err != nil {
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("AGY did not become ready after create: %w", err))
+	}
+	if ctx.InitialPrompt != "" {
+		if err := agySendPromptLiteral(tmuxName, ctx.InitialPrompt, false, "agy"); err != nil {
+			return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to deliver AGY initial prompt before identity discovery: %w", err))
+		}
 	}
 	if conversationID == "" {
 		metadata, identityErr := identityTracker.Discover(context.Background(), workDir, previousConversationID)
@@ -273,15 +298,41 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		}
 		created = true
 	}
-	fullCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+	agySpec := launchparity.AgyCommandSpec{
 		WorkDir:        workDir,
 		ResolvedModel:  resolvedModel,
 		PermissionMode: metadata.PermissionMode,
 		ConversationID: metadata.UUID,
 		ExtraAddDirs:   metadata.AuthorizedDirs,
-	}).Command
+	}
+	harnessexecLaunch := harnessexec.AgyLaunch{
+		SessionName:    metadata.TmuxName,
+		Model:          resolvedModel,
+		WorkDir:        workDir,
+		Permission:     metadata.PermissionMode,
+		AddDirs:        metadata.AuthorizedDirs,
+		ConversationID: metadata.UUID,
+	}
+	prepared, err := harnessexec.PrepareAgyCommand(harnessexecLaunch, os.Environ())
+	if err != nil {
+		primaryErr := fmt.Errorf("failed to prepare AGY resume launch: %w", err)
+		if created {
+			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
+		}
+		return primaryErr
+	}
+	if err := prepared.BindOverrideReservations(true); err != nil {
+		_ = prepared.Cancel()
+		primaryErr := fmt.Errorf("finalize AGY resume launch: %w", err)
+		if created {
+			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
+		}
+		return primaryErr
+	}
+	fullCmd := prepared.Command
 
-	if err := agySendCommand(metadata.TmuxName, fullCmd); err != nil {
+	if err := sendPastedShellCommandWith(agySendCommand, metadata.TmuxName, fullCmd, agyPastedShellValues(agySpec)...); err != nil {
+		_, _ = harnessexec.ResolveSubmission(err, prepared.Cancel)
 		primaryErr := fmt.Errorf("failed to send resume command: %w", err)
 		if created {
 			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
@@ -297,6 +348,11 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		return primaryErr
 	}
 	return nil
+}
+
+func agyPastedShellValues(spec launchparity.AgyCommandSpec) []string {
+	values := []string{spec.WorkDir, spec.ResolvedModel, spec.PermissionMode, spec.ConversationID}
+	return append(values, spec.ExtraAddDirs...)
 }
 
 func resolveAgyResumeInputs(sessionID SessionID, metadata *SessionMetadata) (string, string, error) {
@@ -402,7 +458,7 @@ func (a *AgyAdapter) SendMessage(sessionID SessionID, message Message) error {
 		return fmt.Errorf("session not found: %w", err)
 	}
 
-	if err := tmux.SendCommand(metadata.TmuxName, message.Content); err != nil {
+	if err := agySendPromptLiteral(metadata.TmuxName, message.Content, false, "agy"); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
@@ -619,6 +675,10 @@ func (a *AgyAdapter) ExecuteCommand(cmd Command) error {
 			return fmt.Errorf("rename command: %w", err)
 		}
 
+		if err := ValidateSendKeysText("session name", newName); err != nil {
+			return fmt.Errorf("rename command: %w", err)
+		}
+
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/rename %s\r", newName)); err != nil {
 			return fmt.Errorf("failed to send rename command: %w", err)
 		}
@@ -638,7 +698,7 @@ func (a *AgyAdapter) ExecuteCommand(cmd Command) error {
 		if err := ValidateSendDirPath(newPath); err != nil {
 			return fmt.Errorf("setdir command: %w", err)
 		}
-		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+		if err := sendPastedShellCommand(metadata.TmuxName, buildSetDirCommand(newPath), newPath); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
 		}
 		return nil

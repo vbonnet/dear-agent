@@ -1,6 +1,6 @@
 # ADR-018: Graceful Exit as a Framework Default
 
-**Status**: Accepted (2026-05-12)
+Status: Accepted (2026-05-12)
 
 Agents asked to search, research, or pattern-match overshoot when evidence
 is weak. A literature review invents marginal citations. A code-review sweep

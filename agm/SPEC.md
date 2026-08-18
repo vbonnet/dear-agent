@@ -6,9 +6,12 @@
 
 **AGMR-02** When AGM exposes notifications, status, comparison, or backup behavior, the system shall keep those outcomes available to every active harness.
 
+**AGMR-03** When periodic AGM worktree reclamation cannot remove a worktree that it positively classified for removal, the system shall report the failure, preserve the associated local branch, continue attempting removal of the remaining positively classified candidates, and shall neither force-remove the failed worktree nor delete any remote branch.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Test consequence: Deterministic unit and integration tests in `agm/internal/ops/worktree_sweep_test.go` and `agm/internal/ops/worktree_sweep_integration_test.go` prove that a failed non-force removal is reported without deleting its local branch, does not stop later eligible removals, and local-branch cleanup preserves the corresponding remote ref.
 
 <!-- Last audited at: 2026-06-28 -->
 
@@ -16,10 +19,10 @@
 **Status:** Reviewed (5-persona review complete)
 **Last Updated:** 2026-03-06
 
-## 2026-06-23 Audit Addendum: Harness Parity
+## 2026-07-21 Audit Addendum: Harness Parity
 
 AGM supports multiple interactive harnesses. The active parity harnesses are
-`claude-code`, `codex-cli`, `agy`, and `opencode-cli`. Claude Code is the
+`claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`. Claude Code is the
 reference implementation because it is the oldest and most battle-tested
 integration. The shared orchestration layer MUST define behavior in
 harness-neutral terms first, with harness-specific extensions only where a tool
@@ -34,7 +37,7 @@ Core parity capabilities:
 
 | Capability | Baseline | Active harness requirement |
 |---|---|---|
-| Session lifecycle | Claude Code create/send/resume/kill/archive | Equivalent observable outcome for `codex-cli`, `agy`, and `opencode-cli` |
+| Session lifecycle | Claude Code create/send/resume/kill/archive | Equivalent observable outcome for `codex-cli`, `agy`, `opencode-cli`, and `pi-cli` |
 | Hooks | Claude Code native hook events | Native hooks or AGM bridge with equivalent state/safety outcome |
 | Skills/commands | Claude slash commands plus AGM CLI | Non-Claude harnesses MUST have a CLI or harness-neutral command path |
 | AGENTS.md | Claude Code instruction loading | Same repo instruction contract or documented bridge/fallback |
@@ -50,6 +53,9 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - create paths MUST wait for the Codex composer before detached startup-prompt
   delivery; that wait MUST auto-accept the default Codex directory trust prompt
   and keep explicitly requested models through Codex model-upgrade interstitials
+- create and resume readiness MUST fail promptly when Codex requires review of
+  new or changed executable hooks, MUST tell the operator to inspect them
+  interactively, and MUST NOT send input or trust hooks on the operator's behalf
 - resume paths MUST recreate a missing Codex tmux session with the same launch
   contract used by create paths
 - send paths MUST route `codex-cli` through tmux delivery, not the OpenAI API
@@ -63,9 +69,18 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
   non-composer pane output MUST remain non-ready
 - state detection MUST NOT treat Codex trust prompts or menu selectors as idle
   composers
-- archive paths MUST archive the matching Codex saved session by resolving the
-  Codex transcript `session_meta.cwd` to the AGM working directory or sandbox
-  merged path, then invoking the supported `codex archive` control surface
+- archive paths MUST target the persisted Codex session ID when available;
+  otherwise they MUST resolve the Codex transcript `session_meta.cwd` to the
+  AGM working directory or sandbox merged path and MUST NOT guess when neither
+  identity is available
+- archive paths with a persisted Codex session ID MUST first invoke the
+  supported `codex archive --remote unix:// <thread-id>` control surface (or
+  the explicit `AGM_CODEX_REMOTE` override), then retry the public local
+  saved-session command while the caller context remains active if Remote
+  Control is unavailable
+- archive paths that resolve an older session only by transcript cwd MUST use
+  the public local saved-session archive command by default, while honoring an
+  explicit `AGM_CODEX_REMOTE` override
 - import/register paths MUST support orphaned `codex-cli` conversations by
   resolving `~/.codex/sessions/**/rollout-*.jsonl` from
   `session_meta.session_id`, preserving that Codex session ID in AGM storage,
@@ -78,8 +93,10 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 
 For `agy`, AGM treats Antigravity as a real interactive CLI harness:
 
-- create paths MUST launch `agy` in tmux with the AGM working directory and
-  wait for an AGY prompt before detached startup-prompt delivery
+- fresh create paths MUST require a startup prompt, launch bare `agy` in tmux
+  with the AGM working directory, wait for an AGY prompt, deliver the startup
+  prompt exactly once before provider-identity discovery, and keep the prompt
+  out of the launch command and process arguments
 - state detection MUST recognize an idle AGY `>` prompt as ready/sendable
 - state detection MUST NOT treat the AGY trust prompt (`Do you trust the
   contents of this project?`) as ready
@@ -87,6 +104,10 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
   session creation does not race prompt delivery
 - send paths MUST route `agy` through tmux delivery, not through Claude-only
   assumptions or API adapters
+- every direct, fan-out, queued, structured, and startup-prompt send to `agy`
+  MUST preserve embedded line feeds inside one bracketed composer paste and
+  MUST submit exactly once; sender attribution MUST NOT become a standalone
+  request separated from the message body
 - send safety MUST evaluate `agy` readiness with AGY-specific prompt and
   onboarding detection, never by requiring a Claude process
 - manifest and Dolt metadata MUST preserve the AGY conversation ID for both
@@ -101,8 +122,12 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
   launch `agy --conversation <conversation_id>` instead of starting a fresh
   conversation
 - AGM MUST capture and persist the spawned AGY conversation ID after `agm
-  session new --harness agy` so later `resume`, `list`, and `archive`
+  session new --harness agy --prompt <prompt>` so later `resume`, `list`, and `archive`
   operations target the same saved conversation
+- AGM MUST retain the canonical workspace lock while the first prompt causes
+  AGY to persist its native conversation and while that identity is discovered
+  and registered; completion MUST NOT resend a prompt consumed by this
+  identity-bootstrap phase
 - AGM adapter creation MUST normalize the workspace to an absolute path,
   share one cancellation-aware provider identity lock across CLI, MCP, and
   adapter launch surfaces, and reject unsafe native conversation identifiers
@@ -112,6 +137,44 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
 - AGY sessions with AGM `permission_mode=auto` MUST launch and resume with
   `--dangerously-skip-permissions`; AGY does not expose Claude-style in-pane
   permission-mode cycling, so non-auto modes remain the AGY default behavior
+
+For `pi-cli`, AGM treats Pi as a real interactive CLI harness:
+
+- create and resume MUST use the same canonical command builder with AGM's
+  exact Pi session ID, an AGM-owned private session directory, an explicit
+  managed authorization extension, project approval, model, tools, mode, and
+  process-exit policy
+- create and cold-resume readiness MUST carry a unique per-process launch ID;
+  an older managed footer in pane history MUST NOT satisfy a new launch, and
+  existing panes MUST be reused only after Pi-specific process identity
+  (including the npm Node entrypoint without accepting generic Node) or
+  restartable-shell proof; command cancellation MUST stop those scans before
+  delivery or attachment
+- manifests and Dolt rows MUST preserve Pi session ID, private session
+  directory, and exact transcript path; lookup and import MUST read the JSONL
+  header and reject newest-file heuristics, duplicate identities, symlinks,
+  oversized files, or unbounded discovery
+- send safety MUST require the managed `AGM <mode>/ready` status, distinguish
+  permission prompts from readiness, and route mode and model changes through
+  `/agm-mode` and `/agm-model`
+- plan mode MUST expose only read, grep, find, and list tools; default mode MUST
+  apply AGM allowlists and ask only with an interactive UI; non-interactive
+  unmatched calls MUST fail closed; auto mode MAY enable all native tools but
+  MUST NOT bypass repository guardrails
+- Pi Bash allowlists MUST NOT pre-approve compound commands containing
+  unquoted shell control, redirection, or command-substitution syntax
+- Pi MUST load the root `AGENTS.md` directly, discover living AGM and Wayfinder
+  skills through `.pi/settings.json`, and project trusted repository hooks
+  through `.pi/hooks.json` without allowing repository code to replace the
+  AGM-owned authorization extension
+- every projected hook invocation MUST carry shared event, native session,
+  approved-directory, and loop-state metadata; structured successful block
+  decisions MUST be enforced, and blocking Stop feedback MUST return to Pi as
+  a bounded follow-up turn
+- history, import, export, Engram indexing, status, doctor, install, MCP,
+  marketplace, quota, config-directory, hook, and Wayfinder surfaces MUST name
+  Pi explicitly; unavailable quota or rate-limit data MUST remain unavailable
+  rather than inherit Claude values
 
 Claude-specific features remain extension points, not baseline requirements for
 other harnesses. `claude --resume <uuid>`, Shift-Tab permission-mode cycling,
@@ -562,11 +625,11 @@ start with a shell script `scripts/agm-compare.sh` (~80 lines) that:
 Wrapped by a thin CLI command for discoverability:
 
 ```
-agm compare --harnesses claude-code,codex-cli,agy,opencode-cli --repo . --prompt "..."
+agm compare --harnesses claude-code,codex-cli,agy,opencode-cli,pi-cli --repo . --prompt "..."
     [--timeout 30m]
 ```
 
-**Active parity harnesses:** claude-code, codex-cli, agy, opencode-cli.
+**Active parity harnesses:** claude-code, codex-cli, agy, opencode-cli, pi-cli.
 `gemini-cli` is deprecated compatibility only.
 
 `cmd/agm/compare.go` validates inputs and execs the shell script.
