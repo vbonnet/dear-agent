@@ -14,6 +14,12 @@ concurrency:
   group: claude-code-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Deny-all floor. Every job below declares its own least-privilege
+# `permissions:` block, which replaces this one entirely — this exists so a
+# job added later starts with zero scopes instead of inheriting the
+# repository default.
+permissions: {}
+
 jobs:
   claude-review:
     # Skip drafts (no point spending review budget on WIP) and fork PRs.
@@ -42,7 +48,7 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb  # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'

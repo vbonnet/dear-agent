@@ -108,7 +108,12 @@ jobs:
           # First-party actions (actions/*, github/*) and reusable workflows
           # in this repo are excluded — the threat is third-party
           # mutable refs. Everything else must be a 40-char hex SHA.
+          # `grep -rn` output is file:line:content, so a commented-out
+          # `#   uses: ...` example (go-ci-reusable.yml's usage docs) matched
+          # as a live unpinned action. Drop comment lines: only a real `uses:`
+          # key can pull in third-party code.
           violations=$(grep -rEn "uses:[[:space:]]+[^[:space:]]+" .github/workflows/ \
+            | grep -vE "^[^:]+:[0-9]+:[[:space:]]*#" \
             | grep -vE "uses:[[:space:]]+(actions|github)/" \
             | grep -vE "uses:[[:space:]]+\./" \
             | grep -vE "uses:[[:space:]]+[^@]+@[0-9a-f]{40}( |$)" || true)
@@ -149,7 +154,18 @@ jobs:
       - name: Check for pull_request_target usage
         run: |
           set -euo pipefail
-          hits=$(grep -rn "pull_request_target" .github/workflows/ || true)
+          # Match the trigger declaration only. A bare substring grep also hit
+          # this file's own header comment, its own `grep` line, and its own
+          # issue-body heading, plus review.yml's four explanatory comments —
+          # nine self-inflicted findings that kept the audit permanently dirty
+          # and taught readers to ignore it.
+          #
+          # review.yml is the one deliberate, reviewed use (see its header: the
+          # trigger is pinned to trusted base code and never checks out PR
+          # code). It is allowlisted by name so a NEW pull_request_target
+          # anywhere else still fires.
+          hits=$(grep -rEn '^[[:space:]]*pull_request_target:' .github/workflows/ \
+            | grep -vE "^\.github/workflows/review\.yml:" || true)
           if [ -n "$hits" ]; then
             echo "::warning::pull_request_target detected:"
             echo "$hits"
@@ -159,6 +175,22 @@ jobs:
               echo "__EOF__"
             } >> "$GITHUB_ENV"
           fi
+
+      # `gh issue create --label security-audit` fails outright when the label
+      # does not exist ("could not add label: 'security-audit' not found"), and
+      # `set -euo pipefail` turns that into a failed job. The label was never
+      # created, so this workflow has never delivered a finding — it only ever
+      # went red. Same idiom as merge-audit.yml / bypassed-merge-audit.yml.
+      - name: Ensure security-audit label exists
+        if: ${{ env.compromised != '' || env.unpinned != '' || env.perm_findings != '' || env.prt_hits != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh label create security-audit \
+            --color "d93f0b" \
+            --description "CI workflow hygiene finding from the Security Audit" \
+            --repo "$REPO" 2>/dev/null || true
 
       - name: Open / update security-audit issue
         if: ${{ env.compromised != '' || env.unpinned != '' || env.perm_findings != '' || env.prt_hits != '' }}
