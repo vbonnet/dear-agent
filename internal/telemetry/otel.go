@@ -17,13 +17,26 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/metric/noop"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+// OTLP export budget, kept in step with pkg/otelsetup (see the rationale on the
+// matching constants there). otlpExportTimeout bounds a whole export — the
+// initial gRPC attempt and every retry — so a black-holed collector cannot
+// stall MeterProvider.Shutdown for the exporter's 10s default on process exit.
+// Retry stays enabled so a brief collector blip still recovers, with intervals
+// scaled to fit inside the budget.
+const (
+	otlpExportTimeout        = 3 * time.Second
+	otlpRetryInitialInterval = 250 * time.Millisecond
+	otlpRetryMaxInterval     = 1 * time.Second
 )
 
 // Option configures the OTel bootstrap (currently the meter; the signature is
@@ -85,7 +98,16 @@ func InitMeter(serviceName string, opts ...Option) (shutdown func(context.Contex
 	if i := strings.Index(grpcEndpoint, "://"); i >= 0 {
 		grpcEndpoint = grpcEndpoint[i+3:]
 	}
-	exporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpoint(grpcEndpoint))
+	exporter, err := otlpmetricgrpc.New(ctx,
+		otlpmetricgrpc.WithEndpoint(grpcEndpoint),
+		otlpmetricgrpc.WithTimeout(otlpExportTimeout),
+		otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{
+			Enabled:         true,
+			InitialInterval: otlpRetryInitialInterval,
+			MaxInterval:     otlpRetryMaxInterval,
+			MaxElapsedTime:  otlpExportTimeout,
+		}),
+	)
 	if err != nil {
 		// Fall back to no-op rather than crashing the host binary; the
 		// exporter error is deliberately swallowed so a missing collector

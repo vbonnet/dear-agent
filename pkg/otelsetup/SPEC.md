@@ -32,6 +32,11 @@ to local Engram JSONL files when a session ID is present.
 
 **OTELSETUP-11** When JSONL export shuts down, the system shall flush and close the file and make repeated shutdowns harmless.
 
+**OTELSETUP-12** When the configured collector is unreachable or unresponsive, the system shall bound each OTLP export — the initial attempt and every retry together — so shutdown returns within the export budget even when the caller supplies an unbounded context.
+
+**OTELSETUP-13** When an export fails with a retryable error, the system shall retry within the export budget rather than dropping the batch on first failure.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/observability_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
+- Test consequence: deterministic unit coverage in `pkg/otelsetup/tracer_test.go` proves the export budget and retry contract — `TestInitTracer_ShutdownBoundedWhenCollectorBlackHoles` bounds shutdown against a collector that accepts and never answers, and `TestOTLPRetryBudget` proves retry stays enabled and fits inside that budget. The exporter option wiring is a private seam with no user-facing command surface, so it has no Gherkin scenario.
