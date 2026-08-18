@@ -88,6 +88,12 @@ loses a candidate slot. See `docs/adr/ADR-038-codexbar-quota-routing.md`.
 
 **LLM-QUOTA-36** When a spawn is refused, the system shall report the constraining provider, the reason, the window reset time when known, and the override.
 
+**LLM-QUOTA-37** When a spawn names its model by a harness tier alias, the system shall resolve that alias to its provider family through the harness catalog before gating, and shall not report the spawn as unmetered on the grounds that the alias names no vendor.
+
+**LLM-QUOTA-38** When a spawn is allowed, the system shall report whether a quota reading produced that answer, so a spawn allowed without evidence is distinguishable from one measured against available headroom.
+
+**LLM-QUOTA-39** When a spawn is allowed because the guardrail could not evaluate it, the system shall announce the cause on an operator-visible channel.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature`
@@ -96,5 +102,7 @@ loses a candidate slot. See `docs/adr/ADR-038-codexbar-quota-routing.md`.
 - Package tests: `pkg/llm/quota/meter_test.go`
 - Package tests: `pkg/llm/quota/breaker_test.go`
 - Package tests: `pkg/llm/quota/spawngate_test.go`
+- Default-spawn admission tests: `agm/internal/circuitbreaker/default_spawn_quota_test.go`
+- Harness alias resolution tests: `agm/internal/agent/model_family_harness_test.go`
 - Router integration tests: `pkg/llm/router/quota_test.go`
 - Captured live payload: `pkg/llm/quota/testdata/codexbar-dashboard-live.json`

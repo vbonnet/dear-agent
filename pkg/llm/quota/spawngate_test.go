@@ -203,7 +203,7 @@ func TestSpawnGateFailsOpen(t *testing.T) {
 		gate *quota.SpawnGate
 		want string
 	}{
-		{name: "nil gate", gate: nil, want: "disabled"},
+		{name: "nil gate", gate: nil, want: "no quota guardrail is wired"},
 		{
 			name: "no published reading",
 			gate: &quota.SpawnGate{Path: filepath.Join(t.TempDir(), "absent.json"), Now: func() time.Time { return now }},
@@ -238,6 +238,11 @@ func TestSpawnGateFailsOpen(t *testing.T) {
 			if !strings.Contains(got.Reason, tc.want) {
 				t.Errorf("Reason = %q, want it to mention %q", got.Reason, tc.want)
 			}
+			// Fail-open is allowed, but it is not evidence. A caller must be
+			// able to tell this pass from a measured one.
+			if got.Evaluated {
+				t.Error("a fail-open must not report Evaluated")
+			}
 		})
 	}
 }
@@ -265,5 +270,50 @@ func TestModelFamilyHeuristic(t *testing.T) {
 		if got := quota.ModelFamilyHeuristic(model); got != want {
 			t.Errorf("ModelFamilyHeuristic(%q) = %q, want %q", model, got, want)
 		}
+	}
+}
+
+// The built-in heuristic reads vendor tokens out of full model identifiers,
+// and every AGM harness default is a bare tier alias that contains none. This
+// test pins that blindness in place as a documented property rather than a
+// latent surprise: it is why SpawnGate.FamilyForModel exists and why a caller
+// that spawns by alias must wire it. Leaving it nil is what made the guardrail
+// fail open on the default spawn of every provider.
+func TestModelFamilyHeuristicCannotResolveTierAliases(t *testing.T) {
+	for _, alias := range []string{"sonnet", "sonnet-200k", "opus", "haiku", "5.5", "3.5-flash", "glm-5.2"} {
+		if got := quota.ModelFamilyHeuristic(alias); got != "" {
+			t.Errorf("ModelFamilyHeuristic(%q) = %q; if the heuristic learns aliases,"+
+				" update SpawnGate's documented contract with it", alias, got)
+		}
+	}
+}
+
+// An unwired gate must announce that it is not checking anything, so an inert
+// guardrail cannot pass for a working one.
+func TestSpawnGateWarnsOnEveryFailOpen(t *testing.T) {
+	var warnings []string
+	gate := &quota.SpawnGate{
+		Path: filepath.Join(t.TempDir(), "absent.json"),
+		Warn: func(msg string) { warnings = append(warnings, msg) },
+	}
+	got := gate.AllowSpawn("claude-opus-4-8")
+	if !got.Allowed || got.Evaluated {
+		t.Fatalf("want an unevaluated pass, got Allowed=%v Evaluated=%v", got.Allowed, got.Evaluated)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("want one warning, got %d: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0], "without checking") {
+		t.Errorf("warning does not say the spawn went unchecked: %s", warnings[0])
+	}
+}
+
+// A measured verdict — either direction — must report Evaluated, so callers
+// can distinguish evidence from absence of evidence.
+func TestSpawnGateMarksMeasuredVerdictsEvaluated(t *testing.T) {
+	now := time.Now()
+	healthy := publish(t, now, provider("openai", 80, nil))
+	if got := (&quota.SpawnGate{Path: healthy, Now: func() time.Time { return now }}).AllowSpawn("gpt-5.5-pro"); !got.Evaluated {
+		t.Error("a healthy measured pass must report Evaluated")
 	}
 }

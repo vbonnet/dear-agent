@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,18 @@ type SpawnDecision struct {
 	// who is about to be told their spawn was refused.
 	Reason string
 
+	// Evaluated reports whether a quota reading produced this answer.
+	//
+	// False means the guardrail could not evaluate the spawn: no published
+	// reading, a stale or corrupt one, no entry for the family, an
+	// unreadable provider, an operator override, or a model that mapped to
+	// no metered provider. Those spawns are allowed by design, but they are
+	// allowed without evidence. A caller that cannot tell them apart from a
+	// measured pass cannot tell a working guardrail from an inert one — and
+	// an inert guardrail that reports success is the failure mode this
+	// field exists to make visible.
+	Evaluated bool
+
 	// ResetsAt is when the constraining window refills, so a refusal can
 	// say when work resumes. Zero when unknown.
 	ResetsAt time.Time
@@ -53,6 +66,16 @@ type SpawnDecision struct {
 // allows the spawn. It stops work only on a fresh reading that positively
 // says the provider is out of room, because the cost of wrongly halting
 // the fleet is far higher than the cost of one spawn too many.
+//
+// That fail-open must stay exceptional. A gate that fails open on the
+// normal path is not a lenient guardrail, it is an absent one, and it
+// reports success either way. So every fail-open marks its decision
+// Evaluated=false and announces itself through Warn, and FamilyForModel
+// must be wired to a resolver that understands the caller's model aliases:
+// the bare tier aliases every harness defaults to ("sonnet", "5.5",
+// "3.5-flash", "sonnet-200k") carry no vendor token, so a substring
+// heuristic maps none of them and silently skips the guardrail for the
+// default launch of every provider.
 type SpawnGate struct {
 	// Path is the published state file. Empty resolves the default.
 	Path string
@@ -65,8 +88,18 @@ type SpawnGate struct {
 	MaxAge time.Duration
 
 	// FamilyForModel maps a spawn's model id to a provider family. Nil
-	// uses ModelFamilyHeuristic.
+	// falls back to ModelFamilyHeuristic, which recognises only full model
+	// identifiers — callers that spawn by alias must wire a resolver.
 	FamilyForModel func(model string) string
+
+	// Warn receives one line for every spawn the guardrail allowed without
+	// being able to evaluate it. Nil writes to stderr.
+	//
+	// This path is noisy on purpose. A guardrail that quietly fails open is
+	// indistinguishable from one that is working, which is how an inert
+	// guardrail survives review; saying so out loud is what makes the
+	// exception narrow rather than permanent.
+	Warn func(msg string)
 
 	// Now overrides the clock. Nil uses time.Now.
 	Now func() time.Time
@@ -129,58 +162,111 @@ func (g *SpawnGate) family(model string) string {
 //
 // A nil gate allows everything, so callers may hold one unconditionally.
 func (g *SpawnGate) AllowSpawn(model string) SpawnDecision {
-	allow := func(reason string, family string) SpawnDecision {
-		return SpawnDecision{Allowed: true, Family: family, State: BreakerClosed, Reason: reason}
+	// failOpen allows a spawn the guardrail could not evaluate, and says so
+	// on both channels: Evaluated=false for callers, Warn for operators.
+	failOpen := func(reason string, family string) SpawnDecision {
+		g.warn(fmt.Sprintf(
+			"quota guardrail: allowing this spawn without checking %s quota — %s",
+			familyLabel(family), reason))
+		return SpawnDecision{
+			Allowed:   true,
+			Family:    family,
+			State:     BreakerClosed,
+			Reason:    reason,
+			Evaluated: false,
+		}
 	}
-	if g == nil || overrideEngaged() {
-		return allow("quota guardrail disabled", "")
+	if g == nil {
+		return failOpen("no quota guardrail is wired on this spawn path", "")
+	}
+	if overrideEngaged() {
+		return failOpen(fmt.Sprintf("%s disables the guardrail for this process",
+			SpawnGateOverrideEnvVar), "")
 	}
 
 	family := g.family(model)
 	if family == "" {
-		return allow(fmt.Sprintf("model %q is not mapped to a metered provider", model), "")
+		return failOpen(fmt.Sprintf(
+			"model %q is not mapped to a metered provider; if this model does draw"+
+				" down a subscription budget, its family resolver is missing an alias", model), "")
 	}
 
 	state, err := g.loadState()
 	switch {
 	case err != nil:
-		return allow(fmt.Sprintf("no usable quota reading (%v)", err), family)
+		return failOpen(fmt.Sprintf("no usable quota reading (%v)", err), family)
 	case state == nil:
-		return allow("no usable quota reading", family)
+		return failOpen("no usable quota reading", family)
 	}
 
 	if maxAge := g.maxAge(); maxAge > 0 {
 		if age := state.Age(g.now()); age > maxAge {
-			return allow(fmt.Sprintf("quota reading is %s old, past the %s gating limit",
+			return failOpen(fmt.Sprintf("quota reading is %s old, past the %s gating limit",
 				age.Round(time.Second), maxAge), family)
 		}
 	}
 
 	provider, ok := state.Provider(family)
 	if !ok {
-		return allow(fmt.Sprintf("no quota reading for provider family %q", family), family)
+		return failOpen(fmt.Sprintf("no quota reading for provider family %q", family), family)
 	}
 	if !provider.Readable {
-		return allow(fmt.Sprintf("quota for %s is unreadable, not exhausted (%s)",
+		return failOpen(fmt.Sprintf("quota for %s is unreadable, not exhausted (%s)",
 			family, provider.Availability), family)
 	}
 	if BreakerState(provider.BreakerState) != BreakerOpen {
 		return SpawnDecision{
-			Allowed:  true,
-			Family:   family,
-			State:    BreakerState(provider.BreakerState),
-			Reason:   provider.Reason,
-			ResetsAt: resetsAt(provider),
+			Allowed:   true,
+			Family:    family,
+			State:     BreakerState(provider.BreakerState),
+			Reason:    provider.Reason,
+			ResetsAt:  resetsAt(provider),
+			Evaluated: true,
 		}
 	}
 
 	return SpawnDecision{
-		Allowed:  false,
-		Family:   family,
-		State:    BreakerOpen,
-		Reason:   provider.Reason,
-		ResetsAt: resetsAt(provider),
+		Allowed:   false,
+		Family:    family,
+		State:     BreakerOpen,
+		Reason:    provider.Reason,
+		ResetsAt:  resetsAt(provider),
+		Evaluated: true,
 	}
+}
+
+// familyLabel names the provider in a warning, for the case where the gate
+// failed open before it could work out which provider was at stake.
+func familyLabel(family string) string {
+	if family == "" {
+		return "provider"
+	}
+	return family
+}
+
+// warnedCauses remembers which fail-open causes this process has already
+// announced on the default channel.
+//
+// Admission checks each spawn twice (preflight, then again at launch), and a
+// host that has not installed the refresh schedule fails open on every spawn.
+// Printing that on every check would train an operator to filter the warning
+// out, which costs more than the repetition buys — the warning has to survive
+// to be worth emitting. One line per distinct cause per process keeps it
+// loud without making it wallpaper. A caller that wants every occurrence sets
+// Warn and does its own accounting.
+var warnedCauses sync.Map
+
+// warn announces a fail-open. A nil gate still warns: "no gate wired" is
+// precisely the condition an operator needs to hear about.
+func (g *SpawnGate) warn(msg string) {
+	if g != nil && g.Warn != nil {
+		g.Warn(msg)
+		return
+	}
+	if _, seen := warnedCauses.LoadOrStore(msg, struct{}{}); seen {
+		return
+	}
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 func resetsAt(p ProviderState) time.Time {

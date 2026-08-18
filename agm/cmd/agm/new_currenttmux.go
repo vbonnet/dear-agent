@@ -26,7 +26,7 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 			return dupErr
 		}
 		var err error
-		admission, err = enforceCircuitBreakers(sessionName, modelName)
+		admission, err = enforceCircuitBreakers(sessionName, harnessName, modelName)
 		if err != nil {
 			return err
 		}

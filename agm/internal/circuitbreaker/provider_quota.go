@@ -33,10 +33,17 @@ const providerQuotaGateName = "provider_quota"
 func checkProviderQuota(gate ProviderQuotaGate, model string) GateResult {
 	decision := gate.AllowSpawn(model)
 	if decision.Allowed {
+		msg := decision.Reason
+		if !decision.Evaluated {
+			// Distinguish "checked, has room" from "could not check". Both
+			// pass, and only the log tells an operator which guardrail they
+			// actually have.
+			msg = "not evaluated (allowed): " + msg
+		}
 		return GateResult{
 			Gate:    providerQuotaGateName,
 			Passed:  true,
-			Message: decision.Reason,
+			Message: msg,
 		}
 	}
 
@@ -66,10 +73,19 @@ func WithProviderQuota(gate ProviderQuotaGate, model string) CheckOption {
 	}
 }
 
-// DefaultProviderQuotaGate reads the published quota state file. It
-// performs no network I/O and no subprocess launch, so it is safe on the
-// spawn path: refreshing the reading is a scheduled job's work, not a
-// spawning process's.
-func DefaultProviderQuotaGate() ProviderQuotaGate {
-	return &quota.SpawnGate{}
+// DefaultProviderQuotaGate reads the published quota state file. It performs
+// no network I/O and no subprocess launch, so it is safe on the spawn path:
+// refreshing the reading is a scheduled job's work, not a spawning process's.
+//
+// familyForModel maps the spawn's model identifier to a provider family, and
+// wiring it is what makes the gate work at all. AGM spawns name their model by
+// tier alias — "sonnet", "5.5", "3.5-flash", "sonnet-200k" — and an alias only
+// resolves to a provider against its harness's catalog. Passing nil falls back
+// to the quota package's vendor-substring heuristic, which matches none of
+// those aliases and so allows every such spawn as unmetered: the default
+// launch of every first-party provider. Callers own this resolver rather than
+// the gate constructing it because the harness catalog lives in a package that
+// depends on this one.
+func DefaultProviderQuotaGate(familyForModel func(model string) string) ProviderQuotaGate {
+	return &quota.SpawnGate{FamilyForModel: familyForModel}
 }

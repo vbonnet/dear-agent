@@ -115,8 +115,38 @@ func TestWithProviderQuotaIgnoresAnEmptyModelOrNilGate(t *testing.T) {
 // follow. The production gate reads a file that will usually be absent.
 func TestDefaultProviderQuotaGateAllowsWithNoPublishedReading(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	got := checkProviderQuota(DefaultProviderQuotaGate(), "claude-opus-4-8")
+	got := checkProviderQuota(DefaultProviderQuotaGate(nil), "claude-opus-4-8")
 	if !got.Passed {
 		t.Errorf("want a pass with no published reading, got %q", got.Message)
+	}
+}
+
+// A pass the guardrail could not evaluate must not read like a measured one.
+// Telling the two apart in the log is what makes an inert gate visible.
+func TestProviderQuotaGateLabelsAnUnevaluatedPass(t *testing.T) {
+	gate := &stubQuotaGate{decision: quota.SpawnDecision{
+		Allowed:   true,
+		Reason:    "model \"sonnet\" is not mapped to a metered provider",
+		Evaluated: false,
+	}}
+	got := checkProviderQuota(gate, "sonnet")
+	if !got.Passed {
+		t.Fatal("an unevaluated decision still passes")
+	}
+	if !strings.Contains(got.Message, "not evaluated") {
+		t.Errorf("message does not mark the pass as unevaluated: %s", got.Message)
+	}
+}
+
+func TestProviderQuotaGateDoesNotLabelAnEvaluatedPass(t *testing.T) {
+	gate := &stubQuotaGate{decision: quota.SpawnDecision{
+		Allowed:   true,
+		Family:    "anthropic",
+		Reason:    "Weekly has 82.0% left",
+		Evaluated: true,
+	}}
+	got := checkProviderQuota(gate, "sonnet")
+	if strings.Contains(got.Message, "not evaluated") {
+		t.Errorf("a measured pass must not be labelled unevaluated: %s", got.Message)
 	}
 }

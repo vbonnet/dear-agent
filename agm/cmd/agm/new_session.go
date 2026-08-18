@@ -369,7 +369,7 @@ func preflight(sessionName string) (*circuitBreakerAdmission, error) {
 	if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 		return nil, dupErr
 	}
-	admission, err := enforceCircuitBreakers(sessionName, modelName)
+	admission, err := enforceCircuitBreakers(sessionName, harnessName, modelName)
 	if err != nil {
 		return nil, err
 	}

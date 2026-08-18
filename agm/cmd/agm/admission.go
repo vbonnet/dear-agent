@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -30,15 +31,18 @@ import (
 // vroom-dispatch shells out to `agm session new`, so it inherits the same
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
 //
-// model names the model the session will run, so the provider-quota gate
-// can tell which subscription budget this spawn would draw down. An empty
-// model leaves that gate off — it has no budget to check.
+// harness and model name the harness the session will run under and the
+// model it will run, so the provider-quota gate can tell which subscription
+// budget this spawn would draw down. Both are needed: AGM spawns name their
+// model by tier alias ("sonnet", "5.5", "3.5-flash"), and an alias only
+// resolves to a provider against its harness's catalog. An empty model leaves
+// that gate off — it has no budget to check.
 type circuitBreakerAdmission struct {
 	beforeSpawn        func(...*override.Reservation) ([]*override.Reservation, error)
 	afterAuthorization func()
 }
 
-func enforceCircuitBreakers(sessionName, model string) (*circuitBreakerAdmission, error) {
+func enforceCircuitBreakers(sessionName, harness, model string) (*circuitBreakerAdmission, error) {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
 	// The worker cap defaults to disabled. Do not open session storage merely to
@@ -58,7 +62,8 @@ func enforceCircuitBreakers(sessionName, model string) (*circuitBreakerAdmission
 		circuitbreaker.WithDiskReader(dr),
 		circuitbreaker.WithProcCounter(pc),
 		circuitbreaker.WithBrakeReader(br),
-		circuitbreaker.WithProviderQuota(circuitbreaker.DefaultProviderQuotaGate(), model),
+		circuitbreaker.WithProviderQuota(circuitbreaker.DefaultProviderQuotaGate(
+			func(m string) string { return agent.ModelFamilyForHarnessModel(harness, m) }), model),
 	}
 	normalizedBrakeOverrideReason := ""
 	if brakeOverrideReason != "" {
