@@ -37,11 +37,11 @@ review round to discover something a filesystem lookup answers for free.
 
 ## BDD Traceability
 
+- Feature: `agm/test/bdd/features/docref_lint.feature`
 - Test consequence: Deterministic unit tests in `tools/docref-lint` cover the
-  classifier and resolver directly. No BDD feature is added because this is a
-  developer-facing lint with no user-observable session behaviour for the
-  external BDD harness to drive; its observable contract is an exit status and
-  a finding list, which the unit tests assert exactly.
+  classifier and resolver directly, and the feature above binds those
+  regressions to the executable BDD harness. The observable contract is an exit
+  status and a finding list, which the unit tests assert exactly.
 
 ## Test Traceability
 
