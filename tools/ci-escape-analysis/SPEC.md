@@ -4,20 +4,17 @@
 
 **Version**: 2.0
 **Status**: Active
-**Scope**: `tools/ci-escape-analysis` — fact gathering, invocation modes, and issue mutation.
+**Scope**: `tools/ci-escape-analysis` — fact gathering, invocation, and issue mutation.
 
 ## Overview
 
 This command is the plumbing around `pkg/cihealth`. It gathers facts from the
-GitHub CLI, hands them to the classifier, and files the resulting retro.
+GitHub CLI, hands them to the classifier, and files the resulting incident brief.
 
 **The classification contract and the ROI arithmetic are NOT specified here.**
-They are owned by `pkg/cihealth/SPEC.md` (`CIHEALTH-01`..`CIHEALTH-24`) and
-stated once. An earlier revision of this file restated them as `CI-ESCAPE-01`
-..`CI-ESCAPE-07`, which created two normative contracts for one behaviour —
-the sort of pair that drifts the first time a class or a threshold moves.
-Requirements below cover only what this command does that the package cannot:
-talk to GitHub, and mutate issues.
+They are owned by `pkg/cihealth/SPEC.md` and stated once. An earlier revision
+restated them, creating two normative contracts for one behaviour — the sort of
+pair that drifts the first time a class or a threshold moves.
 
 ## EARS Requirements
 
@@ -25,71 +22,45 @@ talk to GitHub, and mutate issues.
 
 **CI-ESCAPE-01** When the system invokes the GitHub CLI, the system shall bound the call with a timeout and shall report an expired call as a failure, so a stalled network call or an interactive prompt cannot hang the workflow.
 
-**CI-ESCAPE-02** When a fact lookup fails, the system shall report the failure on standard error and shall carry the fact into the retro as unknown rather than substituting a zero value or an empty list.
+**CI-ESCAPE-02** When a fact lookup fails, the system shall report the failure on standard error and shall carry the fact into the brief as unknown, rather than substituting a zero, an empty list, or a fabricated check name.
 
-**CI-ESCAPE-03** When the system determines the current state of `main`, the system shall enumerate the repository's active workflows and query each workflow's own latest run, rather than taking a bounded slice of repository-wide runs.
+**CI-ESCAPE-03** When the system determines the state of `main`, the system shall enumerate the repository's active workflows and query each workflow's own latest run, rather than taking a bounded slice of repository-wide runs.
 
-**CI-ESCAPE-04** When the system evaluates whether a workflow is red, the system shall treat every terminal unsuccessful conclusion as red, and shall treat in-flight and successful runs as not red.
+**CI-ESCAPE-04** When the system judges whether a workflow is red, the system shall treat every terminal unsuccessful conclusion as red, shall treat a cancelled run as carrying no evidence and continue to the last run that concluded, and shall consider only runs from events that evaluate `main`.
 
-**CI-ESCAPE-05** When the system identifies the failing check for a red workflow, the system shall select a failed job belonging to that specific workflow run.
+**CI-ESCAPE-05** When a workflow's checked-out definition has no trigger reaching `main`, the system shall exclude it from the health picture; the system shall not otherwise expire health state on the ROI lookback window.
 
-**CI-ESCAPE-06** When the system determines whether a failing check could have run pre-merge, the system shall consider both the workflow's trigger block and the producing job's event guard, and shall default to pre-merge capable when either is unknown.
+**CI-ESCAPE-06** When the system identifies the failing check for a red workflow, the system shall select a failed job belonging to that specific workflow run, and shall report the failure as workflow-level when the run produced no job.
 
-**CI-ESCAPE-07** When the system counts escapes, the system shall count distinct failing commits rather than failing runs, so repeated runs against one unchanged commit are one incident.
+**CI-ESCAPE-07** When the system determines whether a failing check could have run pre-merge, the system shall consider both the workflow's trigger block and the producing job's event guard including its comparison operator, and shall default to pre-merge capable when either is unknown.
 
-**CI-ESCAPE-08** When the system measures prevention cost, the system shall report whether any qualifying pre-merge run was observed and whether the query reached the API page limit.
+**CI-ESCAPE-08** When the system identifies the pull request that introduced a commit on `main`, the system shall require a pull request that merged into `main` with that commit as its merge commit, and shall otherwise report no pull request.
 
-**CI-ESCAPE-18** When the system reads the checks that reported on a merged pull request, the system shall select the latest attempt that completed at or before the merge, so a post-merge re-run cannot rewrite what the merge gate saw.
+**CI-ESCAPE-09** When the system reads the checks that reported on a pull request, the system shall select each attempt as it stood at the merge, shall report an attempt still running at the merge as pending rather than absent, and shall key attempts by producing app as well as by name.
 
-**CI-ESCAPE-19** When the system reads the repository ruleset, the system shall retain the app each required context is pinned to alongside its name.
+**CI-ESCAPE-10** When the system counts escapes, the system shall count distinct failing commits across every conclusion it treats as red, and shall report the count as truncated when the query reaches the API page limit and as unmeasured when it fails.
+
+**CI-ESCAPE-11** When the system measures prevention cost, the system shall report whether any qualifying pre-merge run was observed and whether the query reached the API page limit.
 
 ### Invocation
 
-**CI-ESCAPE-09** When invoked without `-sweep`, the system shall render one retrospective to standard output as a pure function of its flags and the facts it looks up, and shall mutate nothing.
+**CI-ESCAPE-12** When invoked without `-sweep`, the system shall render one brief to standard output as a pure function of its flags and the facts it looks up, shall mutate nothing, and shall accept pre-merge capability and scheduled-detection as explicit inputs.
 
-**CI-ESCAPE-10** When invoked without `-sweep`, the system shall accept pre-merge capability and scheduled-detection as explicit inputs, because there is no sweep context to derive them from.
+**CI-ESCAPE-13** When a cost term is not supplied on the command line, the system shall mark that term as assumed rather than measured.
 
-**CI-ESCAPE-11** When a cost term is not supplied on the command line, the system shall mark that term as assumed rather than measured.
-
-**CI-ESCAPE-12** When invoked in dry-run mode, the system shall render what it would file and shall not create, comment on, or close any issue.
+**CI-ESCAPE-14** When invoked in dry-run mode, the system shall render what it would file and shall not create, comment on, reopen, or close any issue.
 
 ### Issue mutation
 
-**CI-ESCAPE-13** When the system files retrospectives, the system shall label them with a label owned by this command alone, so no other workflow closes or annotates them.
+**CI-ESCAPE-15** When the system files briefs, the system shall label them with a label owned by this command alone, so no other workflow closes or annotates them.
 
-**CI-ESCAPE-14** When sweeping, the system shall file one retrospective per red workflow and shall comment on an existing open retrospective rather than opening a duplicate.
+**CI-ESCAPE-16** When sweeping, the system shall file one brief per red workflow, shall comment on an existing open brief rather than opening a duplicate, and shall reopen and requeue a closed brief when the same check fails again.
 
-**CI-ESCAPE-15** When sweeping, the system shall close every retrospective carrying its label that the current sweep did not re-file, which covers both a recovered workflow and a workflow whose failing check has changed.
+**CI-ESCAPE-17** When sweeping, the system shall close a brief only when a later run of the same failing job succeeded, and shall skip reconciliation entirely when any workflow's run lookup failed, so a transient API failure cannot be read as recovery.
 
-**CI-ESCAPE-16** When sweeping, the system shall label each newly filed retrospective as queued, shall hand off at most one queued retrospective per sweep, and shall remove the queue label from the one it hands off, so simultaneous incidents are worked one at a time rather than all but the first being dropped.
+**CI-ESCAPE-18** When the system files a brief, the system shall mark it queued; when a sweep completes with every mutation successful, the system shall hand off at most one queued brief and remove its queue label, so simultaneous incidents are worked one at a time and a handoff is never recorded for a dispatch the caller will skip.
 
-**CI-ESCAPE-20** When any workflow's run lookup fails, the system shall skip stale reconciliation entirely, so a transient API failure cannot be read as recovery and close a live incident.
-
-**CI-ESCAPE-21** When the system counts escapes, the system shall count every conclusion it treats as red, so detection and the ROI numerator cannot disagree.
-
-**CI-ESCAPE-22** When the system judges whether a workflow is currently red on main, the system shall consider only runs from events that evaluate main, and shall exclude workflows whose checked-out definition has no trigger reaching main; the system shall not expire health state on the ROI lookback window.
-
-**CI-ESCAPE-23** When the system identifies the pull request that introduced a commit on main, the system shall require that the pull request merged into main with that commit as its merge commit, and shall otherwise report no pull request.
-
-**CI-ESCAPE-24** When the check lookup for a pull request fails, the system shall report the checks as unknown rather than as an empty set.
-
-**CI-ESCAPE-25** When the system deduplicates check attempts, the system shall key them by producing app as well as name.
-
-**CI-ESCAPE-26** When the escape-count query reaches the API page limit, the system shall report the count as truncated, and when it fails outright the system shall report the count as unmeasured rather than zero.
-
-**CI-ESCAPE-27** When any retrospective mutation has failed, the system shall not hand off a queued incident, so a handoff is never recorded for a dispatch the caller will skip.
-
-**CI-ESCAPE-28** When a workflow has no qualifying run on main, the system shall treat that as a successful observation and not as a lookup failure.
-
-**CI-ESCAPE-29** When a check was still running at the moment the pull request merged, the system shall report it as pending rather than as absent.
-
-**CI-ESCAPE-30** When a run fails before producing any job, the system shall report the failure as workflow-level rather than naming the workflow as if it were a check context.
-
-**CI-ESCAPE-31** When a check that already has a closed retrospective fails again, the system shall reopen and requeue that retrospective rather than opening a duplicate.
-
-**CI-ESCAPE-32** When deciding that an incident has recovered, the system shall require a successful run of the same failing job, because a workflow can pass on a run that never executed it.
-
-**CI-ESCAPE-17** When any retrospective mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
+**CI-ESCAPE-19** When any brief mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
 
 ## Test Traceability
 

@@ -6,11 +6,6 @@
 **Status:** Baseline
 **Scope:** `pkg/cihealth`.
 
-This file is the single owner of the escape classification contract and the
-prevention-vs-cure arithmetic. `tools/ci-escape-analysis/SPEC.md` specifies only
-that command's fact gathering, invocation modes, and issue mutation, and defers
-here for behaviour.
-
 ## Overview
 
 `cihealth` answers two questions about a failure observed on `main`: how it got
@@ -19,83 +14,69 @@ paying for. Both answers are pure functions over plain structs — fetching the
 facts from GitHub lives in `tools/ci-escape-analysis`, so every judgement this
 package makes is reachable from a table test.
 
-The package also renders the incident brief the main-health watchdog files when
-an escape is detected. The brief is not a completed DEAR retrospective: at
-detection time nothing has been executed and there is no outcome to audit.
+This file is the single owner of the escape classification contract and the
+prevention-versus-cure arithmetic. `tools/ci-escape-analysis/SPEC.md` specifies
+only that command's fact gathering, invocation, and issue mutation, and defers
+here for behaviour.
+
+The package also renders the incident brief the main-health watchdog files. The
+brief is not a completed DEAR retrospective: at detection time nothing has been
+executed and there is no outcome to audit.
 
 ## EARS Requirements
 
-### Classification
+### Classification precedence
 
-**CIHEALTH-01** When the failing check could not have run on a pull request, the system shall classify the failure as `post-merge-only` before evaluating any other condition, so a scheduled detector is never reported as a path-filter gap.
+The order matters. Each requirement is evaluated before the ones after it, so an
+unresolved fact can never be dressed up as a finding about selection.
 
-**CIHEALTH-02** When no pull request introduced the commit, the system shall classify the failure as `bypassed` and direct the reader at branch protection rather than at CI selection.
+**CIHEALTH-01** When the checks that reported on the pull request are not known, the system shall classify the failure as `unknown` before evaluating any other condition, because every other class asserts something about checks that were never read.
 
-**CIHEALTH-03** When the failing check never reported on the pull request, the system shall classify the failure as `never-ran` and shall mark it filter-refinable.
+**CIHEALTH-02** When the failing check could not have run on a pull request, the system shall classify the failure as `post-merge-only`, so a scheduled detector is never reported as a path-filter gap.
 
-**CIHEALTH-04** When the failing check reported `skipped` on the pull request, the system shall classify the failure as `selection-gap` and shall mark it filter-refinable.
+**CIHEALTH-03** When the failure was observed on a scheduled or dispatched run, the system shall classify it as `post-merge-only`, because a detection the clock triggered is not attributable to the commit at the head of `main`.
 
-**CIHEALTH-05** When the failing check reported `failure` on the pull request and is not a required context, the system shall classify the failure as `gating-gap` and shall attribute the escape to enforcement rather than selection.
+**CIHEALTH-04** When the run failed before producing any job, the system shall classify the failure as `inconclusive` and attribute it to the workflow definition rather than to selection.
 
-**CIHEALTH-06** When the failing check reported `failure` on the pull request and is a required context, the system shall classify the failure as `gating-gap` and shall direct the reader at the bypass audit and ruleset history.
+**CIHEALTH-05** When no pull request introduced the commit, the system shall classify the failure as `bypassed` and direct the reader at branch protection rather than at CI selection.
 
-**CIHEALTH-07** When the failing check passed pre-merge and the check is diff-scoped, the system shall classify the failure as `scope-gap` and shall state that the narrower pre-merge scope is deliberate.
+**CIHEALTH-06** When the failing check never reported on the pull request, the system shall classify the failure as `never-ran` and shall mark it filter-refinable.
 
-**CIHEALTH-08** When the failing check passed pre-merge at the same scope it runs at post-merge, the system shall classify the failure as `merge-skew`.
+**CIHEALTH-07** When the failing check reported `skipped`, the system shall classify the failure as `selection-gap` and shall mark it filter-refinable.
 
-**CIHEALTH-09** When the system classifies a failure, the system shall mark `FilterRefinable` true only for `never-ran` and `selection-gap`, because those are the only classes path-filter refinement can fix.
+**CIHEALTH-08** When the failing check reported `failure`, the system shall classify the failure as `gating-gap`, shall distinguish a required context from an advisory one, and shall report the enforcement question as unresolved when the required-context list could not be established.
 
-**CIHEALTH-10** When the system classifies a failure, the system shall emit a summary and at least one suggested action naming the mechanism that addresses that class, and every mechanism named shall exist in this repository.
+**CIHEALTH-09** When the failing check reported any other non-success conclusion, including a check still pending at merge time, the system shall classify the failure as `inconclusive`, because `scope-gap` and `merge-skew` both rest on a pre-merge pass.
 
-**CIHEALTH-19** When the failing check reported a conclusion on the pull request that is neither `success`, `failure`, nor `skipped`, the system shall classify the failure as `inconclusive` and shall not assert that the check passed pre-merge, because `scope-gap` and `merge-skew` both rest on a pre-merge pass.
+**CIHEALTH-10** When the failing check passed pre-merge and is diff-scoped, the system shall classify the failure as `scope-gap` and state that the narrower pre-merge scope is deliberate; when it passed at the same scope, the system shall classify the failure as `merge-skew`.
 
-**CIHEALTH-20** When the failure was observed on a scheduled or dispatched run, the system shall classify it as `post-merge-only` before consulting any pull request, because the commit at the head of `main` is not evidence of what caused a detection the clock triggered.
+### Classification output
 
-**CIHEALTH-21** When the required-context list could not be established, the system shall report the enforcement question as unresolved and shall not assert that the failing check is advisory.
+**CIHEALTH-11** When the system classifies a failure, the system shall mark `FilterRefinable` true only for `never-ran` and `selection-gap`, because those are the only classes path-filter refinement can fix.
+
+**CIHEALTH-12** When the system classifies a failure, the system shall emit a summary and at least one suggested action naming the mechanism that addresses that class, and every mechanism named shall exist in this repository.
+
+**CIHEALTH-13** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
 
 ### ROI pricing
 
-**CIHEALTH-11** When prevention cost has not been measured, the system shall return a zero ratio and an insufficient-data verdict rather than inferring a placement, so a check with no pre-merge runs is never scored as infinitely worth blocking.
+**CIHEALTH-14** When prevention cost or the escape count has not been measured, the system shall return a zero ratio and an insufficient-data verdict rather than inferring a placement, so neither a check with no pre-merge runs nor a failed history query is scored as worth blocking.
 
-**CIHEALTH-12** When prevention cost is measured as zero and the cure-times-frequency product is non-zero, the system shall treat the ratio as unbounded, because a free check should always run.
+**CIHEALTH-15** When prevention cost is measured as zero, the system shall treat the ratio as unbounded if the cure-times-frequency product is non-zero and as zero otherwise, because a free check should always run but a free check that has caught nothing is no evidence.
 
-**CIHEALTH-13** When prevention cost is measured as zero and the cure-times-frequency product is zero, the system shall return a zero ratio rather than an unbounded one.
+**CIHEALTH-16** When prevention cost and the escape count are both measured, the system shall compute the ratio as cure minutes multiplied by escapes divided by prevention minutes, and shall return an always-prevent verdict above ten to one, usually-prevent above three to one, case-by-case above zero, and no-signal at zero.
 
-**CIHEALTH-14** When prevention cost is measured and positive, the system shall compute the ratio as cure minutes multiplied by escapes, divided by prevention minutes.
+**CIHEALTH-17** When the system explains a ratio, the system shall render the arithmetic, shall state each term's provenance as measured, assumed, unmeasured, or a lower bound, and shall state the scope each term was measured over, so a threshold crossing can be attributed to evidence rather than to an assumption.
 
-**CIHEALTH-15** When the ratio exceeds ten to one, the system shall return an always-prevent verdict; above three to one, a usually-prevent verdict; above zero, a case-by-case verdict; and at zero, a no-signal verdict.
+**CIHEALTH-18** When any term of the ratio is not evidence, the system shall mark the verdict provisional and name every such term, rather than rendering a prescriptive band.
 
-**CIHEALTH-16** When the system explains a ratio, the system shall render the arithmetic including both operands, so a retro shows its work rather than asserting a verdict.
+### Rendering
 
-**CIHEALTH-22** When the cure cost is a standing default rather than a measurement of the incident, or the prevention measurement was truncated at the API page limit, the system shall mark the verdict `PROVISIONAL` and shall name every term that is not evidence.
+**CIHEALTH-19** When a brief is rendered, the system shall identify the failing check, the main SHA, and the class; shall list required contexts in a deterministic sorted order labelled as the ruleset read at analysis time; and shall report required contexts as not established when the ruleset could not be read.
 
-**CIHEALTH-23** When the system explains a ratio, the system shall state the provenance of each term — measured, assumed, unmeasured, or a lower bound — so a threshold crossing can be attributed to evidence or to an assumption.
+**CIHEALTH-20** When a brief is rendered, the system shall state that it is not a completed retrospective and shall emit empty `Execute` and `Audit` sections for the fixer to complete, because DEAR requires an executed fix and an audited outcome.
 
-**CIHEALTH-24** When the system reports an escape count, the system shall state the scope that count was taken over, because a count taken per workflow does not license a claim about an individual check.
-
-### Retro rendering
-
-**CIHEALTH-17** When a retro is rendered, the system shall produce a title and a body identifying the failing check, the main SHA, the class, and the ROI arithmetic.
-
-**CIHEALTH-18** When required contexts are listed, the system shall return them in a deterministic sorted order so retro bodies do not churn between runs.
-
-**CIHEALTH-25** When the system renders the incident brief, the system shall state that it is not a completed retrospective and shall emit empty `Execute` and `Audit` sections for the fixer to complete, because DEAR requires an executed fix and an audited outcome.
-
-**CIHEALTH-26** When the class's remedy is not to move or widen the check pre-merge, the system shall omit the prevention-versus-cure verdict, because a placement verdict would contradict the finding it accompanies.
-
-**CIHEALTH-28** When the system reports a prevention cost, the system shall state the scope that cost was measured over, because a figure timed across a whole workflow does not license a claim about one job.
-
-**CIHEALTH-29** When the checks that reported on the pull request are unknown, the system shall classify the failure as `unknown` before evaluating any other condition, because every other class asserts something about checks that were never read.
-
-**CIHEALTH-30** When the system renders required contexts, the system shall state that they are the ruleset as read at analysis time, not as it stood at the merge.
-
-**CIHEALTH-31** When the escape count is truncated, the system shall treat the verdict as provisional and report the numerator as a lower bound; when it is unmeasured, the system shall return an insufficient-data verdict rather than a no-signal one.
-
-**CIHEALTH-32** When a run failed before producing any job, the system shall classify the failure as `inconclusive` and shall attribute it to the workflow definition rather than to selection.
-
-**CIHEALTH-33** When a check was pending at merge time, the system shall classify the failure as `inconclusive` rather than as never having run.
-
-**CIHEALTH-27** When the system decides whether a failing check is a required context, the system shall compare the producing app against the app the ruleset pins the context to, and shall treat an unknown producer as matching.
+**CIHEALTH-21** When the class's remedy is not to move or widen the check pre-merge, the system shall omit the prevention-versus-cure verdict and shall state in that class's own terms why placement is not the decision, because a placement verdict would contradict the finding it accompanies.
 
 ## BDD Traceability
 
@@ -108,4 +89,4 @@ detection time nothing has been executed and there is no outcome to audit.
 ## Non-Goals
 
 - The package performs no network access; the caller supplies every fact.
-- The package does not decide whether to file a retro; the watchdog workflow owns that trigger.
+- The package does not decide whether to file a brief; the watchdog workflow owns that trigger.
