@@ -2,7 +2,9 @@ package telemetry
 
 import (
 	"context"
+	"net"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -136,4 +138,51 @@ func TestSessionStarted_EmptyRole(t *testing.T) {
 	ctx := context.Background()
 	// Must not panic. The no-op global provider is used (no OTLP endpoint set).
 	SessionStarted(ctx, "sess-2", "claude-sonnet-4-6", "anthropic", "WORKING", "")
+}
+
+// TestInitMeter_ShutdownBoundedWhenCollectorBlackHoles is the metrics twin of
+// otelsetup's tracer test: a collector that accepts the TCP connection but
+// never answers must not stall MeterProvider.Shutdown. cc-usage-monitor and
+// merge-velocity flush metrics on exit, so an unbounded export shows up as a
+// hung CLI. The bound comes from otlpmetricgrpc.WithTimeout — disabling retry
+// does not help, because it is the initial attempt that blocks.
+func TestInitMeter_ShutdownBoundedWhenCollectorBlackHoles(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	accepted := make(chan struct{})
+	go func() {
+		defer close(accepted)
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-accepted
+	})
+
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", ln.Addr().String())
+
+	shutdown, err := InitMeter("test-service")
+	if err != nil {
+		t.Fatalf("InitMeter returned error: %v", err)
+	}
+
+	// Record something so the final collect has data to push.
+	ctx := context.Background()
+	newAgentMetrics(otel.GetMeterProvider()).TaskStarted(ctx, "anthropic", "claude-opus-4-8")
+
+	start := time.Now()
+	_ = shutdown(ctx) // export failure against a dead collector is expected
+	elapsed := time.Since(start)
+
+	if limit := otlpExportTimeout + 2*time.Second; elapsed > limit {
+		t.Fatalf("shutdown took %v against a black-holed collector, want <= %v", elapsed, limit)
+	}
 }
