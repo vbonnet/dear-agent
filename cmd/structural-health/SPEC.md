@@ -21,11 +21,11 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-02** When scanning repository files, the system shall skip generated, vendored, build, dependency, worktree, and VCS directories.
 
-**STRUCT-HEALTH-03** When baseline update mode is requested without expansion authorization and no current finding key is absent from the prior baseline, the system shall write only current finding keys already present in the prior baseline and shall exit successfully.
+**STRUCT-HEALTH-03** When baseline update mode is requested without expansion authorization and no current finding key is absent from the prior baseline, the system shall write current finding keys already present in the prior baseline, or replace a file-size key with a same-path key whose line-count budget is no larger, and shall exit successfully.
 
-**STRUCT-HEALTH-04** When a current finding key is absent from the baseline, the system shall classify it as a regression.
+**STRUCT-HEALTH-04** When a current non-file-size finding key is absent from the baseline, the system shall classify it as a regression; file-size findings shall compare the current line-count budget with the admitted budget for the same path.
 
-**STRUCT-HEALTH-05** When a baseline finding key is absent from current findings, the system shall classify it as fixed.
+**STRUCT-HEALTH-05** When a non-file-size baseline finding key is absent from current findings, the system shall classify it as fixed; file-size findings shall report a path as fixed only when no current budget exists for that path.
 
 **STRUCT-HEALTH-06** When JSON output is requested, the system shall emit a machine-readable report.
 
@@ -39,7 +39,7 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-12** When an update is rejected, the system shall leave the destination baseline byte-identical.
 
-**STRUCT-HEALTH-13** When a prior key is replaced by a different current key, the system shall classify the transition as one addition and one removal regardless of total count.
+**STRUCT-HEALTH-13** When a prior non-file-size key is replaced by a different current key, the system shall classify the transition as one addition and one removal regardless of total count; a same-path file-size budget reduction shall also record one addition and one removal while remaining an ordinary tightening rather than a new-finding admission.
 
 **STRUCT-HEALTH-14** When the caller uses `--accept-new`, the system shall require baseline-update mode, at least one added key, a non-blank reason, and a non-blank durable reference.
 
@@ -67,13 +67,17 @@ Schema v1 remains readable for one-way migration; all writes use schema v2.
 
 **STRUCT-HEALTH-26** When baseline persistence targets a symlink, the system shall atomically replace the resolved target while preserving the symlink directory entry and the target file mode.
 
+**STRUCT-HEALTH-27** When a pull request or push targets `main`, the system shall run the `Structural Health (baselined)` check without a label gate or path filter, shall bound that job to 15 minutes, and shall report setup or scan failure as a failed check.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/quality_command_guardrails.feature` enforces that this command keeps co-located SPEC coverage.
+- Test consequence: Deterministic schema test `cmd/structural-health/workflow_contract_test.go` validates STRUCT-HEALTH-27's private CI workflow configuration seam.
 
 ## Test Traceability
 
 - Baseline transition and persistence behavior:
   `cmd/structural-health/baseline_test.go`.
 - Scan, diff, and report behavior: `cmd/structural-health/main_test.go`.
+- Workflow delivery contract: `cmd/structural-health/workflow_contract_test.go`.
 - Repository-level signal: `go run ./cmd/structural-health`.

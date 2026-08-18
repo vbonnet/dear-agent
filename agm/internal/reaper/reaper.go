@@ -85,10 +85,11 @@ type Reaper struct {
 // ArchiveOptions are the lifecycle choices captured by the parent archive
 // command and propagated into the detached reaper process.
 type ArchiveOptions struct {
-	SessionID   string
-	Force       bool
-	KeepSandbox bool
-	Outcome     manifest.SessionOutcome
+	SessionID           string
+	Force               bool
+	KeepSandbox         bool
+	Outcome             manifest.SessionOutcome
+	AllowSupervisorReap bool
 }
 
 // New creates a new Reaper for the given session
@@ -425,10 +426,11 @@ func (r *Reaper) archiveSessionWithStorage(adapter *dolt.Adapter, sessionsDir st
 
 func (r *Reaper) archiveRequest() ops.ArchiveSessionRequest {
 	return ops.ArchiveSessionRequest{
-		Identifier:  r.archiveIdentifier(),
-		Force:       r.Options.Force,
-		KeepSandbox: r.Options.KeepSandbox,
-		Outcome:     r.Options.Outcome,
+		Identifier:          r.archiveIdentifier(),
+		Force:               r.Options.Force,
+		KeepSandbox:         r.Options.KeepSandbox,
+		Outcome:             r.Options.Outcome,
+		AllowSupervisorReap: r.Options.AllowSupervisorReap,
 	}
 }
 

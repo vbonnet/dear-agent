@@ -355,6 +355,39 @@ func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error)
 	return configuredWorkspaceConfigsFromRegistry(enabled, data)
 }
 
+// ConfiguredWorkspaceConfigsIncludingDisabledAt returns every workspace named
+// in the registry, including disabled entries. Destructive inventory must not
+// omit a disabled store that can still contain an unarchived session.
+func ConfiguredWorkspaceConfigsIncludingDisabledAt(workspaceConfigPath string) ([]*Config, error) {
+	path := expandTilde(workspaceConfigPath)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read AGM workspace config: %w", err)
+	}
+	all, hasRegistryEntries, err := parseAllWorkspaceNames(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) == 0 {
+		if hasRegistryEntries {
+			return nil, fmt.Errorf("AGM workspace config has no named workspaces")
+		}
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	return configuredWorkspaceConfigsFromRegistry(all, data)
+}
+
 func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*Config, error) {
 	base, err := configForWorkspace(enabled[0])
 	if err != nil {
@@ -470,6 +503,26 @@ func parseEnabledWorkspaceNames(data []byte) ([]string, bool, error) {
 	return enabled, len(cfg.Workspaces) > 0, nil
 }
 
+func parseAllWorkspaceNames(data []byte) ([]string, bool, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name string `yaml:"name"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+	names := make([]string, 0, len(cfg.Workspaces))
+	for index, workspace := range cfg.Workspaces {
+		name := strings.TrimSpace(workspace.Name)
+		if name == "" {
+			return nil, true, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		}
+		names = append(names, name)
+	}
+	return names, len(cfg.Workspaces) > 0, nil
+}
+
 func validateConfiguredWorkspaceConfigs(configs []*Config, base *Config, explicitDatabase string, databaseIsExplicit bool) ([]*Config, error) {
 	if len(configs) == 0 {
 		return []*Config{base}, nil
@@ -581,6 +634,18 @@ func New(config *Config) (*Adapter, error) {
 	}
 
 	return adapter, nil
+}
+
+// NewWithoutAutoStart opens a Dolt adapter without invoking a configured
+// startup script or retrying after the initial connection failure. It is used
+// by read-only inventory probes where a missing database is expected.
+func NewWithoutAutoStart(config *Config) (*Adapter, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	withoutStart := *config
+	withoutStart.StartScript = ""
+	return New(&withoutStart)
 }
 
 // expandTilde expands ~ prefix to user home directory

@@ -51,10 +51,10 @@ func (f Finding) String() string {
 
 // Result is the outcome of linting a single file.
 type Result struct {
-	File             string    `json:"file"`
-	TotalRequirements int      `json:"total_requirements"` // candidate requirements detected
-	ValidRequirements int      `json:"valid_requirements"`
-	Findings         []Finding `json:"findings"`
+	File              string    `json:"file"`
+	TotalRequirements int       `json:"total_requirements"` // candidate requirements detected
+	ValidRequirements int       `json:"valid_requirements"`
+	Findings          []Finding `json:"findings"`
 }
 
 // NonConforming returns the number of candidate requirements that matched no
@@ -178,7 +178,7 @@ func (l *Linter) Lint(name string, r io.Reader) (Result, error) {
 			continue
 		}
 
-		candidate := stripMarkdown(trimmed)
+		candidate := NormalizeRequirementLine(trimmed)
 		if candidate == "" || !l.isCandidate(candidate) {
 			continue
 		}
@@ -223,9 +223,9 @@ func (l *Linter) LintFile(path string) (Result, error) {
 	return l.Lint(path, f)
 }
 
-// stripMarkdown removes leading markdown list/heading markers and surrounding
-// emphasis so the requirement text can be matched against the patterns.
-func stripMarkdown(s string) string {
+// NormalizeRequirementLine removes supported Markdown presentation syntax so
+// every EARS consumer matches and inventories the same canonical line.
+func NormalizeRequirementLine(s string) string {
 	// Strip list markers: "- ", "* ", "+ ", "1. ", "2) ".
 	s = listMarker.ReplaceAllString(s, "")
 	// Strip heading markers.

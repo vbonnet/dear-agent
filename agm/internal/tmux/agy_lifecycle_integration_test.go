@@ -335,6 +335,61 @@ done
 	if err := os.WriteFile(fixturePath, []byte(fixture), 0o755); err != nil {
 		t.Fatalf("write AGY fixture: %v", err)
 	}
+	agmPath := filepath.Join(binDir, "agm")
+	agmFixture := `#!/bin/sh
+if [ "$1" != "__exec-agy" ]; then
+  printf 'unexpected agm fixture command: %s\n' "$*" >&2
+  exit 127
+fi
+shift
+set -- "$@" --
+agy_args=
+while [ "$1" != "--" ]; do
+  case "$1" in
+    --model)
+      agy_args="$agy_args
+--model
+$2"
+      shift 2
+      ;;
+    --permission)
+      if [ "$2" = "auto" ] || [ "$2" = "dangerously-skip-permissions" ]; then
+        agy_args="$agy_args
+--dangerously-skip-permissions"
+      fi
+      shift 2
+      ;;
+    --conversation)
+      agy_args="$agy_args
+--conversation
+$2"
+      shift 2
+      ;;
+    --add-dir)
+      agy_args="$agy_args
+--add-dir
+$2"
+      shift 2
+      ;;
+    --session|--workdir|--handoff)
+      shift 2
+      ;;
+    *)
+      printf 'unexpected agm fixture arg: %s\n' "$1" >&2
+      exit 127
+      ;;
+  esac
+done
+shift
+IFS='
+'
+set -- $agy_args
+unset IFS
+exec agy "$@"
+`
+	if err := os.WriteFile(agmPath, []byte(agmFixture), 0o755); err != nil {
+		t.Fatalf("write AGM private executor fixture: %v", err)
+	}
 
 	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	t.Setenv("AGY_FIXTURE_ARGS", argsPath)

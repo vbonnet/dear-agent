@@ -97,8 +97,8 @@ Interactive resume attach  →  cmd/agm adapter after internal/ops returns
 - `agm session resume` resolves identifiers and prompt-file input in
   `agm/cmd/agm/resume.go`, delegates health checks, tmux recreation,
   harness-specific readiness, rollback, and persistence to
-  `internal/ops.ResumeSession`, then attaches only after the operation releases
-  the stable-session lock.
+  `ResumeSession` in `agm/internal/ops/`, then attaches only after the operation
+  releases the stable-session lock.
 - `agm send msg` still runs through `agm/cmd/agm/send_msg.go`, including
   queueing, safety checks, pending-file writes, tmux delivery, and a legacy
   API-adapter branch for API-based harness names.

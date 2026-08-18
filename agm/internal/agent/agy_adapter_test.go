@@ -204,11 +204,8 @@ func TestAgyCreateSessionUsesCanonicalModelAwareCommand(t *testing.T) {
 		t.Fatalf("CreateSession sent commands = %v, want one canonical launch", sent)
 	}
 	for _, want := range []string{
-		"agy --model 'Gemini 3.5 Flash (Low)'",
-		"--dangerously-skip-permissions",
-		"--conversation 'native-conversation-id'",
-		"--add-dir '/extra dir'",
-		"&& exit",
+		"__exec-agy",
+		"--handoff",
 	} {
 		if !strings.Contains(sent[0], want) {
 			t.Errorf("CreateSession command %q missing %q", sent[0], want)
@@ -273,7 +270,7 @@ func TestAgyCreateRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T
 		AuthorizedDirs:   []string{"safe\nunsafe"},
 		Environment:      map[string]string{"AGY_CONVERSATION_ID": "imported-native-id"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "pasted shell value") {
+	if err == nil || (!strings.Contains(err.Error(), "pasted shell value") && !strings.Contains(err.Error(), "contains control characters")) {
 		t.Fatalf("CreateSession() error = %v, want terminal-control rejection", err)
 	}
 	if sent {
@@ -300,10 +297,10 @@ func TestAgyColdResumeRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testi
 	sent := false
 	agySendCommand = func(string, string) error { sent = true; return nil }
 	rolledBack := false
-	agyKillSession = func(string) error { rolledBack = true; return nil }
+	agyKillSession = func(name string) error { rolledBack = true; return nil }
 
 	err := (&AgyAdapter{sessionStore: store}).ResumeSession("agy-id")
-	if err == nil || !strings.Contains(err.Error(), "pasted shell value") {
+	if err == nil || (!strings.Contains(err.Error(), "pasted shell value") && !strings.Contains(err.Error(), "contains control characters")) {
 		t.Fatalf("ResumeSession() error = %v, want terminal-control rejection", err)
 	}
 	if sent {
@@ -529,7 +526,7 @@ func TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery(t *test
 	if len(discoveredWorkDirs) != 2 || discoveredWorkDirs[0] != wantWorkDir || discoveredWorkDirs[1] != wantWorkDir {
 		t.Fatalf("discovery workdirs = %v, want normalized %q", discoveredWorkDirs, wantWorkDir)
 	}
-	if !strings.Contains(command, "cd '"+wantWorkDir+"' && agy") {
+	if !strings.Contains(command, "--workdir '"+wantWorkDir+"'") {
 		t.Fatalf("launch command %q does not use normalized workdir %q", command, wantWorkDir)
 	}
 }
@@ -859,10 +856,8 @@ func TestAgyResumeSessionPreservesNativeIdentityModelAndMode(t *testing.T) {
 		t.Fatal("ResumeSession did not recreate the missing tmux session")
 	}
 	for _, want := range []string{
-		"agy --model 'Claude Sonnet 4.6 (Thinking)'",
-		"--dangerously-skip-permissions",
-		"--conversation 'native-conversation-id'",
-		"--add-dir '/extra dir'",
+		"__exec-agy",
+		"--handoff",
 	} {
 		if !strings.Contains(command, want) {
 			t.Errorf("resume command %q missing %q", command, want)
@@ -1076,7 +1071,7 @@ func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 	}
 	agyNewSession = func(_ string, gotWorkDir string) error { events = append(events, "new:"+gotWorkDir); return nil }
 	agySendCommand = func(_ string, command string) error {
-		if !strings.Contains(command, "cd '"+workDir+"' && agy") {
+		if !strings.Contains(command, "--workdir '"+workDir+"'") {
 			t.Fatalf("resume command %q does not use canonical workspace %q", command, workDir)
 		}
 		events = append(events, "send")

@@ -183,10 +183,59 @@ func addGetSessionMetadataToolWithDependencies(
 	})
 }
 
+type GetSessionOutputInput struct {
+	Identifier string `json:"identifier" jsonschema:"Session ID, name, or UUID prefix"`
+	Lines      int    `json:"lines,omitempty" jsonschema:"Trailing pane lines to capture (default 100, max 2000)"`
+}
+
+func addGetSessionOutputTool(server *mcp.Server, _ *Config) {
+	addGetSessionOutputToolWithDependencies(server, newMCPOpContext, ops.GetSessionOutput)
+}
+
+type getSessionOutputOperation func(*ops.OpContext, *ops.GetSessionOutputRequest) (*ops.GetSessionOutputResult, error)
+
+func addGetSessionOutputToolWithDependencies(
+	server *mcp.Server,
+	newOpContext mcpOpContextFactory,
+	getSessionOutput getSessionOutputOperation,
+) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_session_output",
+		Description: "Read the tail of an AGM session's terminal output — live pane while running, durable final capture after completion. Use to collect a worker's result without attaching to its pane.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input GetSessionOutputInput) (*mcp.CallToolResult, any, error) {
+		if input.Identifier == "" {
+			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
+		}
+
+		opCtx, cleanup, err := newOpContext()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+		opCtx.Context = ctx
+
+		result, opErr := getSessionOutput(opCtx, &ops.GetSessionOutputRequest{
+			Identifier: input.Identifier,
+			Lines:      input.Lines,
+		})
+		if opErr != nil {
+			return mcpError(opErr), nil, nil
+		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
 // --- MCP helpers ---
 
 // newMCPOpContext creates an OpContext with Dolt storage for MCP tool handlers.
 // Returns a cleanup function that must be deferred.
+//
+// The context carries a real tmux client: session status is derived from tmux
+// liveness, so a tmux-less context makes every read tool report live sessions
+// as stopped/unknown and orchestrators conclude spawned work never ran
+// (ce-0zng9). The MCP server always runs on the host next to the AGM tmux
+// socket, so the real client is always available here.
 func newMCPOpContext() (*ops.OpContext, func(), error) {
 	doltCfg, err := dolt.DefaultConfig()
 	if err != nil {
@@ -202,6 +251,7 @@ func newMCPOpContext() (*ops.OpContext, func(), error) {
 
 	return &ops.OpContext{
 		Storage:    adapter,
+		Tmux:       session.NewRealTmux(),
 		OutputMode: "json",
 	}, cleanup, nil
 }
@@ -360,15 +410,13 @@ func addKillSessionToolWithDependencies(
 
 // --- Session lifecycle tools ---
 
-// newMCPOpContextWithTmux creates an OpContext with both Dolt storage and a
-// real Tmux interface. Used by tools that need to create sessions or send
-// messages (as opposed to read-only tools that only query Dolt).
+// newMCPOpContextWithTmux extends the shared context with the MCP creation
+// runtime. Used by tools that create sessions or send messages.
 func newMCPOpContextWithTmux() (*ops.OpContext, func(), error) {
 	opCtx, cleanup, err := newMCPOpContext()
 	if err != nil {
 		return nil, cleanup, err
 	}
-	opCtx.Tmux = session.NewRealTmux()
 	opCtx.CreationRuntime = newMCPCreateSessionRuntime(opCtx.Tmux)
 	return opCtx, cleanup, nil
 }
@@ -399,11 +447,16 @@ func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLa
 	if err != nil {
 		return ops.CreateSessionLaunchResult{}, fmt.Errorf("prepare harness launch: %w", err)
 	}
-	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
-	if submissionErr := r.tmux.SendKeys(spec.SessionName, launch.Command); submissionErr != nil {
-		if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
-			return result, err
+	if launch.BindOverrideReservations != nil {
+		if err := launch.FinalizeLaunch(true); err != nil {
+			_ = launch.CancelUndelivered()
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("finalize harness launch: %w", err)
 		}
+	}
+	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
+	submissionErr := r.tmux.SendKeys(spec.SessionName, launch.Command)
+	if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
+		return result, err
 	}
 	if spec.Harness != "agy" {
 		return result, nil
@@ -485,15 +538,20 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 		defer cleanup()
 		opCtx.Context = ctx
 
-		result, opErr := ops.CreateSessionWithContext(ctx, opCtx, createSessionRequestFromMCP(input))
+		result, opErr := ops.CreateSessionRouted(ctx, opCtx, createSessionRequestFromMCP(input))
 		if opErr != nil {
 			span.RecordError(opErr)
 			return mcpError(opErr), nil, nil
 		}
 
+		// Record the harness/model actually created: CreateSessionRouted may have
+		// fallen back from agy to codex, so the requested agm.harness (set at span
+		// start) is not necessarily what ran.
 		span.SetAttributes(
 			attribute.String("agm.session_id", result.SessionID),
 			attribute.String("agm.session_name", result.Name),
+			attribute.String("agm.effective_harness", result.Harness),
+			attribute.String("agm.effective_model", result.Model),
 		)
 
 		return mcpSuccess(result), result, nil
@@ -509,8 +567,22 @@ func createSessionRequestFromMCP(input CreateSessionInput) *ops.CreateSessionReq
 		Harness:            input.Harness,
 		Caller:             ops.CreateSessionCaller{Surface: ops.CreateSurfaceMCP},
 		ForwardClaudeOAuth: true,
+		// Dispatch-driven (MCP) agy spawns are the ones that hit the Antigravity
+		// identity-discovery race under provider throttle. Default them to
+		// retry-with-backoff and fall back to codex so a throttled Gemini keeps
+		// the pipeline moving instead of dropping the work. Ignored for non-agy
+		// harnesses by CreateSessionRouted.
+		SpawnRetries:    mcpAgySpawnRetries,
+		FallbackHarness: mcpAgyFallbackHarness,
 	}
 }
+
+// Defaults that make Dispatch-spawned agy (Gemini/Antigravity) sessions
+// resilient to the provider-throttle identity-discovery race.
+const (
+	mcpAgySpawnRetries    = 3
+	mcpAgyFallbackHarness = "codex-cli"
+)
 
 func addSendMessageTool(server *mcp.Server, _ *Config) {
 	addSendMessageToolWithFactory(server, newMCPOpContextWithTmux)

@@ -50,6 +50,9 @@ func (s *SafeEnricher) Enrich(ctx context.Context, event *TelemetryEvent, ec Enr
 	// Wait for result or timeout
 	select {
 	case res := <-resultCh:
+		if res.event == nil {
+			return event, res.err
+		}
 		return res.event, res.err
 	case <-timeoutCtx.Done():
 		// Timeout - return original event (graceful degradation)

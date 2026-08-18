@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -373,76 +372,60 @@ func startCurrentTmuxGemini(ctx context.Context, spec ops.HarnessLaunchSpec) err
 	return nil
 }
 
-// monitorAndAnswerTrustPrompt monitors tmux output via control mode and answers trust prompt if detected
-// Returns nil if no prompt appears (success), error if prompt appears but we can't answer it
+// monitorAndAnswerTrustPrompt polls the current exact pane and answers a live
+// affirmative trust prompt. Control-mode fragments are not authority evidence.
 func monitorAndAnswerTrustPrompt(ctx context.Context, sessionName string, timeout time.Duration) error {
-	// Start control mode
-	ctrl, err := tmux.StartControlMode(sessionName)
-	if err != nil {
-		return fmt.Errorf("failed to start control mode: %w", err)
+	return monitorAndAnswerTrustPromptWithProbe(ctx, sessionName, timeout, 100*time.Millisecond, tmux.ProbeClaudeInputContext)
+}
+
+func monitorAndAnswerTrustPromptWithProbe(
+	parent context.Context,
+	sessionName string,
+	timeout, pollInterval time.Duration,
+	probeInput func(context.Context, string, bool) (tmux.ClaudeInputProbe, error),
+) error {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	if pollInterval <= 0 {
+		pollInterval = 100 * time.Millisecond
 	}
-	defer func() { _ = ctrl.Close() }()
-
-	// Create output watcher
-	watcher := tmux.NewOutputWatcher(ctrl.Stdout)
-
-	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 	trustPromptDetected := false
 
-	for time.Now().Before(deadline) {
+	for {
 		if err := ctx.Err(); err != nil {
-			return err
-		}
-		// Read next line with short timeout
-		line, err := watcher.GetRawLine(1 * time.Second)
-		if err != nil {
-			// Timeout reading - no more output
-			// If we haven't seen trust prompt, assume it won't appear
-			if !trustPromptDetected {
-				debug.Log("No trust prompt detected (good - additionalDirectories likely worked)")
+			if err == context.DeadlineExceeded {
+				if trustPromptDetected {
+					return fmt.Errorf("trust prompt detected but couldn't find its affirmative option")
+				}
 				return nil
 			}
-			continue
+			return err
 		}
-
-		// Parse %output events
-		if !strings.HasPrefix(line, "%output") {
-			continue
+		probe, probeErr := probeInput(ctx, sessionName, true)
+		if probeErr != nil {
+			return fmt.Errorf("probe current trust dialog: %w", probeErr)
 		}
-
-		content := tmux.ExtractOutputContent(line)
-
-		// Check for trust prompt
-		if strings.Contains(content, "Do you trust the files in this folder?") {
+		if probe.DialogOwnsInput && !trustPromptDetected {
 			trustPromptDetected = true
-			debug.Log("Trust prompt detected!")
+			debug.Log("Trust prompt detected from current exact pane")
 			fmt.Println("📋 Trust prompt appeared - answering automatically...")
 		}
-
-		// If we detected the prompt, look for the selection UI
-		if trustPromptDetected && strings.Contains(content, "Yes, proceed") {
-			debug.Log("Sending Enter to select 'Yes, proceed'")
-
-			// Close control mode before sending keys (mixing control + send-keys doesn't work well)
-			_ = ctrl.Close()
-
-			// Send Enter key via regular tmux
-			if err := tmux.SendCommand(sessionName, "C-m"); err != nil {
-				return fmt.Errorf("failed to answer trust prompt: %w", err)
-			}
-
+		if probe.TrustAnswered {
 			debug.Log("Trust prompt answered successfully")
 			ui.PrintSuccess("Trust prompt answered")
 			return nil
 		}
+		if probe.ComposerOwnsInput {
+			debug.Log("No live trust prompt remains; Claude composer owns input")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
 	}
-
-	if trustPromptDetected {
-		return fmt.Errorf("trust prompt detected but couldn't find 'Yes, proceed' option")
-	}
-
-	// No trust prompt seen - this is success
-	return nil
 }
 
 // addToAdditionalDirectories was removed — it wrote sandbox paths to the global

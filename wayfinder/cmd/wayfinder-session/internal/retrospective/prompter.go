@@ -12,14 +12,17 @@ import (
 // PromptUserForContext prompts user for rewind reason and learnings via stdin/stdout
 //
 // Magnitude-based prompting:
-// - Magnitude 0: Skip prompting (no-op rewind)
+// - Magnitude 0: Skip prompting (same-phase replay)
 // - Magnitude 1+: Prompt for reason (required) and learnings (optional)
 //
 // Handles non-interactive environments (CI/CD) by detecting terminal.
 func PromptUserForContext(magnitude int, flags RewindFlags) (*UserProvidedContext, error) {
-	// Skip if magnitude 0 (no-op rewind)
+	// Same-phase replays need trace evidence but do not prompt for context.
 	if magnitude == 0 {
-		return nil, nil
+		return &UserProvidedContext{
+			Reason:    flags.Reason,
+			Learnings: flags.Learnings,
+		}, nil
 	}
 
 	// Skip if --no-prompt flag set

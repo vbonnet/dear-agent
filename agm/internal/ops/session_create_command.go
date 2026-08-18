@@ -186,6 +186,16 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 			Reservations:             reservations,
 			BindOverrideReservations: prepared.BindOverrideReservations,
 		}, nil
+	case "agy":
+		launch, modeApplied := agyLaunch(spec, "")
+		prepared, err := harnessexec.PrepareAgyCommand(launch, os.Environ())
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		return HarnessLaunchCommand{
+			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+			BindOverrideReservations: prepared.BindOverrideReservations,
+		}, nil
 	default:
 		launch := BuildHarnessLaunchCommand(spec)
 		if spec.SessionName == "" ||
@@ -446,7 +456,14 @@ func PrepareAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) (Har
 	if err := harnessexec.ValidatePastedText("agy conversation id", conversationID); err != nil {
 		return HarnessLaunchCommand{}, fmt.Errorf("validate harness launch: %w", err)
 	}
-	return buildAgyCommand(spec, conversationID), nil
+	launch, modeApplied := agyLaunch(spec, conversationID)
+	prepared, err := harnessexec.PrepareAgyCommand(launch, os.Environ())
+	if err != nil {
+		return HarnessLaunchCommand{}, err
+	}
+	return HarnessLaunchCommand{
+		Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+	}, nil
 }
 
 // PrepareFallbackResumeCommand validates the working directory used by the
@@ -461,14 +478,22 @@ func PrepareFallbackResumeCommand(workdir string) (HarnessLaunchCommand, error) 
 }
 
 func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
+	launch, modeApplied := agyLaunch(spec, conversationID)
+	return HarnessLaunchCommand{Command: harnessexec.BuildAgyCommand(launch), ModeAppliedAtStartup: modeApplied}
+}
+
+func agyLaunch(spec HarnessLaunchSpec, conversationID string) (harnessexec.AgyLaunch, bool) {
 	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
-	command := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
-		WorkDir:        spec.WorkDir,
-		ResolvedModel:  resolvedModel,
-		PermissionMode: spec.PermissionMode,
-		ConversationID: conversationID,
-		ExtraAddDirs:   spec.ExtraAddDirs,
-		Persistent:     spec.Persistent,
-	})
-	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
+	modeApplied := launchparity.AgyPermissionModeFlag(spec.PermissionMode) != ""
+	launch := harnessexec.AgyLaunch{
+		SessionName:            spec.SessionName,
+		Model:                  resolvedModel,
+		WorkDir:                spec.WorkDir,
+		Permission:             spec.PermissionMode,
+		AddDirs:                spec.ExtraAddDirs,
+		ConversationID:         conversationID,
+		Persistent:             spec.Persistent,
+		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
+	}
+	return launch, modeApplied
 }

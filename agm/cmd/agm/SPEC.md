@@ -7,11 +7,11 @@
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: 2026-07-27 -->
+<!-- Last audited at: 2026-08-08 -->
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
-**Last Updated:** 2026-07-27
+**Last Updated:** 2026-08-08
 
 ## Overview
 
@@ -75,7 +75,7 @@ Provide a production-ready CLI that:
 
 **CLI-23** When `agm wiki query-save` receives user-controlled question or answer text, the system shall accept file-backed inputs, reject conflicting inline and file values, and preserve file content without shell evaluation.
 
-**CLI-41** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
+**CLI-56** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
@@ -134,6 +134,8 @@ Provide a production-ready CLI that:
 **CLI-51** When a cold Codex resume becomes ready with newly trusted add directories, the shared resume operation shall persist the deduplicated union with the prior sandbox policy so later resumes retain the repaired grants; a failed launch shall not rewrite the policy.
 
 **CLI-52** When AGM launches a Codex worker, the AGM CLI shall fail closed before harness startup unless the host-authenticated system-managed worker write-boundary guard is an executable regular file, while non-worker and non-Codex sessions shall remain unaffected.
+
+**CLI-55** The `agm sandbox gc` command shall implement the canonical sandbox-inventory contract defined by SGC-14, aggregating non-archived sessions from every configured workspace store and preserving its warning and fail-closed behavior.
 
 **CLI-53** When `agm supervisor run --skip-oauth-check` is requested, the CLI shall reserve the shared supervisor OAuth-check override after preflight, repeat final live admission, commit the privileged use immediately before process launch, and refuse without launching when any authorization gate fails.
 

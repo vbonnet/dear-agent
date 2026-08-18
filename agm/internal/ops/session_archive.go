@@ -35,9 +35,11 @@ type ArchiveSessionRequest struct {
 	// manifest.OutcomeCompleted so every archived record is triage-legible.
 	Outcome manifest.SessionOutcome `json:"outcome,omitempty"`
 	// AllowSupervisorReap bypasses the supervisor-protection guard (but not the
-	// active-tmux or verification guards). Set by gc when reaping a STOPPED
-	// protected-role orphan that has no live tmux pane; never set for live
-	// supervisor sessions.
+	// active-tmux or verification guards). Set only by typed recovery paths that
+	// already proved the supervisor is safe to reap: GC for stopped protected-role
+	// orphans, and async supervisor auth recovery where the parent preflight still
+	// sets AllowActiveTmux and the detached reaper performs the final archive only
+	// after the pane exits.
 	AllowSupervisorReap bool `json:"allow_supervisor_reap,omitempty"`
 	// AllowActiveTmux permits an async reaper preflight to validate every other
 	// archive guard while the pane is intentionally still alive. The final

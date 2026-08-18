@@ -110,10 +110,8 @@ func (h *History) sanitizeEventData(data map[string]any) (map[string]any, error)
 	if err != nil {
 		return nil, fmt.Errorf("resolve project directory: %w", err)
 	}
-	homeDir, err := h.userHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve home directory: %w", err)
-	}
+	//nolint:errcheck // home directory resolution is optional during event data sanitization
+	homeDir, _ := h.userHomeDir()
 
 	encoded, err := json.Marshal(data)
 	if err != nil {

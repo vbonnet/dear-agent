@@ -310,9 +310,16 @@ func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
 		t.Fatalf("tmux commands = %v, want launch then detached prompt", tmuxMock.SentCommands)
 	}
 	launch := tmuxMock.SentCommands[0]
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
 	for _, want := range []string{
-		"agy --model 'Gemini 3.5 Flash (Low)'",
-		"--dangerously-skip-permissions",
+		"__exec-agy",
+		"--session 'agy-detached'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '" + resolvedDir + "'",
+		"--permission 'auto'",
 		"--add-dir '/tmp/extra dir'",
 	} {
 		if !strings.Contains(launch, want) {
@@ -575,12 +582,15 @@ func TestCreateSessionPiRejectsInvalidCodingAgentDirectoryBeforeTmux(t *testing.
 
 func TestBuildAgyResumeCommandPreservesModelConversationAndMode(t *testing.T) {
 	command := BuildAgyResumeCommand(HarnessLaunchSpec{
-		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy resume",
+		Harness: "agy", Model: "claude-sonnet-4.6-thinking", SessionName: "agy-resume", WorkDir: "/tmp/agy resume",
 		PermissionMode: "auto", ExtraAddDirs: []string{"/tmp/agy resume"},
 	}, "117ff898-a964-4a9f-b460-1be4a8a49b17").Command
 	for _, want := range []string{
-		"cd '/tmp/agy resume' && agy --model 'Claude Sonnet 4.6 (Thinking)'",
-		"--dangerously-skip-permissions",
+		"agm __exec-agy",
+		"--session 'agy-resume'",
+		"--model 'Claude Sonnet 4.6 (Thinking)'",
+		"--workdir '/tmp/agy resume'",
+		"--permission 'auto'",
 		"--conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
 		"--add-dir '/tmp/agy resume'",
 		"&& exit",
@@ -1704,6 +1714,25 @@ func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
 		if strings.Contains(cmd, forbidden) {
 			t.Fatalf("fresh remote Codex command unexpectedly contains %q: %q", forbidden, cmd)
 		}
+	}
+}
+
+func TestBuildHarnessCommand_Agy(t *testing.T) {
+	cmd := testHarnessCommand("agy", "3.5-flash-low", "agy-session", "/tmp/work", false)
+	for _, want := range []string{
+		"agm __exec-agy",
+		"--session 'agy-session'",
+		"--model 'Gemini 3.5 Flash (Low)'",
+		"--workdir '/tmp/work'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("AGY command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "OPENAI_API_KEY") || strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") ||
+		strings.Contains(cmd, "GOOGLE_APPLICATION_CREDENTIALS") || strings.Contains(cmd, "GEMINI_API_KEY") {
+		t.Errorf("AGY command leaked credential env: %s", cmd)
 	}
 }
 

@@ -290,7 +290,13 @@ func resolveActivePaneTarget(ctx context.Context, sessionName, socketPath string
 	if err != nil || !exists {
 		return activePaneTarget{}, exists, err
 	}
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalized), "-f", "#{pane_active}", "-F", "#{pane_id}\t#{pane_pid}")
+	// NOTE: the field separator is a space, not a tab. tmux >= 3.7 renders any
+	// control character (including a literal tab) in -F/format output as "_",
+	// so a tab-separated format collapses "%1<tab>54721" into the single token
+	// "%1_54721" and the parse below fails with "invalid active tmux pane
+	// identity". A space survives verbatim and cannot appear in either field:
+	// pane_id is "%N" and pane_pid is an integer.
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalized), "-f", "#{pane_active}", "-F", "#{pane_id} #{pane_pid}")
 	out, err := cmd.Output()
 	if err != nil {
 		return activePaneTarget{}, true, fmt.Errorf("resolve active tmux pane: %w", err)
@@ -888,7 +894,10 @@ func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[strin
 	ctx, cancel := context.WithTimeout(context.Background(), livenessScanTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}")
+	// Space-separated (not tab): tmux >= 3.7 renders a literal tab in
+	// -F/format output as "_". session_name is normalized (no spaces) and
+	// pane_pid is an integer, so the last space splits name from pid cleanly.
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-a", "-F", "#{session_name} #{pane_pid}")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -903,7 +912,7 @@ func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[strin
 		if line == "" {
 			continue
 		}
-		idx := strings.LastIndex(line, "\t")
+		idx := strings.LastIndex(line, " ")
 		if idx < 0 {
 			continue
 		}

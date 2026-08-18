@@ -21,6 +21,7 @@ var (
 	_ HarnessLivenessBatchChecker   = (*RealTmux)(nil)
 	_ HarnessReadinessWaiter        = (*RealTmux)(nil)
 	_ InputReadinessChecker         = (*RealTmux)(nil)
+	_ PaneOutputCapturer            = (*RealTmux)(nil)
 	_ AtomicInputSender             = (*RealTmux)(nil)
 	_ VerifiedPaneSender            = (*RealTmux)(nil)
 )
@@ -45,6 +46,12 @@ func NewRealTmux() *RealTmux {
 // HasSession checks if a tmux session exists
 func (t *RealTmux) HasSession(name string) (bool, error) {
 	return tmux.HasSession(name)
+}
+
+// CapturePaneTail returns the last lines of the session's pane content,
+// including scrollback, from the AGM tmux socket.
+func (t *RealTmux) CapturePaneTail(sessionName string, lines int) (string, error) {
+	return tmux.CapturePaneOutput(sessionName, lines)
 }
 
 // HasSessionStrict checks an exact target without collapsing backend failures

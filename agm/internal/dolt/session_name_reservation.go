@@ -201,9 +201,65 @@ func (a *Adapter) RenewSessionNameReservation(sessionID, name string) error {
 		return fmt.Errorf("get renewed session-name reservation rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
-		return &SessionNameConflictError{Name: name}
+		// Dolt (observed on 2.2.x) can report zero rows affected for an UPDATE
+		// that targets a row INSERTed by a recent, separate transaction, even
+		// though a primary-key SELECT of the same row still returns it, owned and
+		// unexpired. The anomaly affects UPDATEs regardless of predicate — a
+		// primary-key re-UPDATE can spuriously report zero rows just the same, so
+		// it cannot be the arbiter. Reads ARE consistent, so use the authoritative
+		// primary-key SELECT as the source of truth: renew's contract is only
+		// "this session still holds a valid lease on the name", satisfied whenever
+		// the reservation exists, is owned by this session, and is unexpired.
+		// Without this, session creation aborts with AGM-007 for a name the caller
+		// just reserved.
+		owned, ownErr := a.reservationOwnedAndUnexpired(sessionID, name, now)
+		if ownErr != nil {
+			return ownErr
+		}
+		if !owned {
+			return &SessionNameConflictError{Name: name}
+		}
+		// Best-effort extension so a long-running caller keeps a fresh lease. It
+		// is fenced to the session_id verified just above so that if the lease
+		// changed hands between the read and this write (the original releases it
+		// and another creator reserves the same name), it cannot shorten the
+		// replacement owner's later expiry — it only ever touches the lease we
+		// confirmed we hold. A spurious zero-row result is deliberately ignored:
+		// ownership and non-expiry are already proven, the session_id predicate
+		// can itself trigger the same zero-row anomaly, and the TTL set at
+		// reservation time covers the caller's remaining launch/readiness work by
+		// orders of magnitude. Correctness must not depend on this UPDATE.
+		_, _ = a.conn.Exec( //nolint:noctx // best-effort lease extension; see comment
+			`UPDATE agm_session_name_reservations
+			 SET expires_at = ?
+			 WHERE workspace = ? AND name = ? AND session_id = ?`,
+			now.Add(sessionNameReservationTTL), a.workspace, name, sessionID,
+		)
+		return nil
 	}
 	return nil
+}
+
+// reservationOwnedAndUnexpired reports whether the workspace-scoped reservation
+// for name is currently held by sessionID and has not expired as of asOf. It
+// reads by primary key (workspace, name); reads are consistent even when the
+// zero-row UPDATE anomaly is present, so this is the authoritative source of
+// truth RenewSessionNameReservation falls back to.
+func (a *Adapter) reservationOwnedAndUnexpired(sessionID, name string, asOf time.Time) (bool, error) {
+	var owner string
+	var expiresAt time.Time
+	err := a.conn.QueryRow( //nolint:noctx // TODO(context): plumb ctx through this layer
+		`SELECT session_id, expires_at FROM agm_session_name_reservations
+		 WHERE workspace = ? AND name = ?`,
+		a.workspace, name,
+	).Scan(&owner, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("re-read session-name reservation after zero-row renew: %w", err)
+	}
+	return owner == sessionID && expiresAt.After(asOf), nil
 }
 
 // ReactivateSessionResult distinguishes a failed lifecycle mutation from a

@@ -64,7 +64,9 @@
 # dest-dir defaults to ~/go/bin; pass it for hooks and other install roots.
 define install-go-bin
 	@set -e; \
-	dest='$(if $(2),$(2),$(HOME)/go/bin)/$(notdir $(1))'; \
+	dir='$(if $(2),$(2),$(HOME)/go/bin)'; \
+	mkdir -p "$$dir"; \
+	dest="$$dir/$(notdir $(1))"; \
 	stage="$$(mktemp "$$dest.XXXXXX")"; \
 	trap 'rm -f "$$stage"' EXIT; \
 	cp '$(1)' "$$stage"; \

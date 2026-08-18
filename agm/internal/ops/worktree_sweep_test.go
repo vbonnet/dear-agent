@@ -457,21 +457,30 @@ func TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch(t *testing.T) {
 	}
 }
 
-func TestSweep_RemoveFailureIsRecordedNotFatal(t *testing.T) {
+func TestSweep_RemoveFailureIsRecordedAndProcessingContinues(t *testing.T) {
 	f := &fakeSweepDeps{
-		discovered: []DiscoveredWorktree{{Path: "/wt/m", Repo: "r", Branch: "claude/m"}},
-		ancestor:   map[string]bool{"claude/m": true},
-		removeErr:  map[string]error{"/wt/m": errors.New("locked")},
+		discovered: []DiscoveredWorktree{
+			{Path: "/wt/a", Repo: "r", Branch: "claude/a"},
+			{Path: "/wt/b", Repo: "r", Branch: "claude/b"},
+		},
+		ancestor: map[string]bool{
+			"claude/a": true,
+			"claude/b": true,
+		},
+		removeErr: map[string]error{"/wt/a": errors.New("locked")},
 	}
 	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true, ActiveSessionsKnown: true}, f, nil)
 	if err != nil {
 		t.Fatalf("Sweep must be non-fatal: %v", err)
 	}
-	if len(res.Removed) != 0 {
-		t.Fatalf("failed removal must not be counted removed: %v", res.Removed)
+	if len(res.Removed) != 1 || res.Removed[0] != "/wt/b" {
+		t.Fatalf("processing must continue after failure; res.Removed = %v, want [/wt/b]", res.Removed)
 	}
-	if res.Failed["/wt/m"] == "" {
+	if res.Failed["/wt/a"] == "" {
 		t.Fatalf("failure must be recorded in res.Failed")
+	}
+	if len(f.delBranch) != 1 || f.delBranch[0] != "claude/b" {
+		t.Fatalf("failed worktree removal must preserve only its local branch: %v", f.delBranch)
 	}
 }
 

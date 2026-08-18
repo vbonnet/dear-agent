@@ -1,40 +1,40 @@
 // Package retrospective provides rewind event logging for Wayfinder sessions.
 //
-// When users rewind to a previous phase, this package captures why they rewound,
-// what they learned, and the context at rewind time. This retrospective data helps
-// track iteration patterns and improve the Wayfinder methodology.
+// When users rewind to a previous phase, this package captures why they
+// rewound, what they learned, and context at rewind time. The resulting audit
+// trail helps track iteration patterns and improve the Wayfinder methodology.
 //
 // # Architecture
 //
-// The package uses a dual-logging strategy:
-//   - WAYFINDER-HISTORY.jsonl: Structured JSON Lines events for programmatic analysis
-//   - RETRO-retrospective.md: Human-readable markdown for reflection and review
+// The package uses dual logging:
 //
-// # Main Entry Point
+//   - WAYFINDER-HISTORY.jsonl: structured JSON Lines events for programmatic analysis
+//   - RETRO-retrospective.md: human-readable markdown for reflection and review
 //
-// LogRewindEvent() orchestrates the complete logging flow:
-//  1. Calculate rewind magnitude (phases moved backwards)
-//  2. Prompt user for reason/learnings (if magnitude >= 1)
-//  3. Capture context snapshot (git state, deliverables, phase state)
-//  4. Log to both HISTORY (JSON) and RETRO (markdown)
+// # Main entry point
 //
-// # Error Handling
+// LogRewindEvent calculates the rewind magnitude, optionally prompts for
+// context, captures a snapshot, and appends both canonical records. A
+// same-phase replay has magnitude zero and still records the same evidence.
 //
-// All operations use fail-gracefully error handling - logging failures are logged
-// to stderr but never block the rewind operation. This ensures retrospective logging
-// adds observability without compromising core functionality.
+// # Error handling
 //
-// # Example Usage
+// Required status, history, and retrospective persistence failures are returned
+// to the caller. The rewind command can therefore avoid a normal success claim
+// when its audit evidence is incomplete; context probes preserve available
+// diagnostic information.
+//
+// # Example usage
 //
 //	flags := RewindFlags{
-//	    Reason: "Design was too complex",
-//	    Learnings: "Simpler approaches work better",
+//		Reason:    "Design was too complex",
+//		Learnings: "Simpler approaches work better",
 //	}
 //	err := LogRewindEvent(projectDir, "BUILD", "PLAN", flags)
-//	// err is always nil (fail-gracefully design)
+//	// err reports required persistence failure.
 //
 // # Testing
 //
-// The package includes 75%+ unit test coverage and 8 integration test scenarios
-// covering canonical rewinds, prompting, context capture, and error handling.
+// Package tests cover canonical rewinds, same-phase replays, prompting, context
+// capture, and persistence errors.
 package retrospective

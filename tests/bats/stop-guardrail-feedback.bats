@@ -39,6 +39,10 @@ setup() {
     # Isolate the attempt counter and start from a clean env every test.
     export CLAUDE_STATE_DIR="$BATS_TEST_TMPDIR/state"
     unset DEAR_GUARDRAIL_LOOP DEAR_GUARDRAIL_MAX_ITERS GUARDRAIL_CMD
+    # This suite exercises the loop *mechanism*, which the hook disables inside
+    # GitHub Actions. Drop the marker so the mechanism tests below still run
+    # when the suite itself executes in CI; the guard has its own test.
+    unset GITHUB_ACTIONS
 }
 
 # dirty — make the working tree non-clean so the hook engages.
@@ -70,6 +74,29 @@ hook() { run bash -c 'printf "%s" "$1" | "$2"' _ "$1" "$HOOK"; }
     hook "$(payload Stop sess-green)"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
+}
+
+@test "GITHUB_ACTIONS disables the loop (CI review agents are read-only)" {
+    dirty
+    export GUARDRAIL_CMD='echo BUNDLE_BOOM; exit 1'
+    export GITHUB_ACTIONS=true
+    hook "$(payload Stop sess-ci)"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "GITHUB_ACTIONS disables the loop in every harness copy" {
+    # .claude/.agents/.opencode are byte-identical by design; .codex is a
+    # variant. A copy that missed the guard would wedge the PR review agent.
+    dirty
+    export GUARDRAIL_CMD='echo BUNDLE_BOOM; exit 1'
+    export GITHUB_ACTIONS=true
+    for h in .claude/hooks .agents/hooks .opencode/hooks .codex/hooks; do
+        HOOK="$REPO_ROOT/$h/stop-guardrail-feedback"
+        hook "$(payload Stop sess-ci-$$)"
+        [ "$status" -eq 0 ]
+        [ -z "$output" ]
+    done
 }
 
 @test "clean working tree is a no-op even with a RED bundle" {

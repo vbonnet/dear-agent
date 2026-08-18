@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -82,6 +83,32 @@ func runStoreContract(t *testing.T, mk func(t *testing.T) Store) {
 		}
 		if again.State != FindingReopened {
 			t.Errorf("re-emit after resolve should reopen; got %s", again.State)
+		}
+	})
+
+	t.Run("remediation-suggestions-round-trip", func(t *testing.T) {
+		s := mk(t)
+		ctx := context.Background()
+		suggestions := []Remediation{
+			{Strategy: StrategyAuto, Command: "go test ./..."},
+			{Strategy: StrategyPR, Patch: "diff --git a/a b/a", Title: "Fix audit finding", Body: "Details"},
+			{Strategy: StrategyIssue, Title: "Investigate audit finding", Body: "Details"},
+		}
+		for i, suggestion := range suggestions {
+			finding := sampleFinding()
+			finding.Fingerprint = fmt.Sprintf("suggestion-%d", i)
+			finding.Suggested = suggestion
+			stored, err := s.UpsertFinding(ctx, finding)
+			if err != nil {
+				t.Fatalf("UpsertFinding(%d): %v", i, err)
+			}
+			got, err := s.GetFinding(ctx, stored.FindingID)
+			if err != nil {
+				t.Fatalf("GetFinding(%d): %v", i, err)
+			}
+			if got.Suggested != suggestion {
+				t.Errorf("suggestion %d = %+v, want %+v", i, got.Suggested, suggestion)
+			}
 		}
 	})
 

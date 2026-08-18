@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 )
 
 // GitIntegrator handles git operations for wayfinder sessions
@@ -24,13 +26,31 @@ func New(projectDir string) *GitIntegrator {
 	}
 }
 
+// CheckGitRepo returns (true, nil) if projectDir is inside a git repository,
+// (false, nil) if confirmed NOT a git repository (exit 128),
+// or (false, error) if git probe failed due to an error (e.g., missing git, unsafe repo, permissions).
+func (g *GitIntegrator) CheckGitRepo() (bool, error) {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = g.projectDir
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 {
+		outStr := strings.ToLower(string(output))
+		if strings.Contains(outStr, "not a git repository") || strings.Contains(outStr, "must be run in a work tree") {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("git repository check failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+}
+
 // IsGitRepo checks if the project directory is within a git repository
 // Works correctly even when project is a subdirectory of a git repo
 func (g *GitIntegrator) IsGitRepo() bool {
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = g.projectDir
-	err := cmd.Run()
-	return err == nil
+	isRepo, _ := g.CheckGitRepo()
+	return isRepo
 }
 
 // IsGitWorktree reports whether the project directory is inside a Git work
@@ -82,16 +102,22 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 
 // CommitRewind commits the status and retrospective markers produced by a
 // rewind so the documented next start-phase command sees a clean project.
-func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string) error {
+func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string, archiveRef archive.ArchiveRef) error {
 	if !g.IsGitRepo() {
 		return fmt.Errorf("project directory is not a git repository")
+	}
+	archivePath := archiveRef.RelativePath()
+	cleanArchivePath := filepath.ToSlash(filepath.Clean(archivePath))
+	if archivePath == "" || filepath.IsAbs(archivePath) || archivePath != cleanArchivePath || !strings.HasPrefix(cleanArchivePath, ".wayfinder/archives/") {
+		return fmt.Errorf("invalid rewind archive reference %q", archivePath)
 	}
 	message := fmt.Sprintf("wayfinder: rewind %s to %s\n\nWayfinder-Event: rewind", fromPhase, toPhase)
 	return g.commitScoped(message, []string{
 		"WAYFINDER-STATUS.md",
 		history.HistoryFilename,
 		history.LegacyHistoryFilename,
-		"RETRO-retrospective.md",
+		retrospective.RetroFilename,
+		archivePath,
 	})
 }
 
@@ -224,10 +250,10 @@ func (g *GitIntegrator) gitAdd(file string) error {
 
 func isCanonicalMarker(file string) bool {
 	switch file {
-	case "WAYFINDER-STATUS.md", history.HistoryFilename, history.LegacyHistoryFilename:
+	case "WAYFINDER-STATUS.md", history.HistoryFilename, history.LegacyHistoryFilename, retrospective.RetroFilename:
 		return true
 	default:
-		return false
+		return strings.HasPrefix(filepath.ToSlash(filepath.Clean(file)), ".wayfinder/archives/")
 	}
 }
 

@@ -1,7 +1,6 @@
 package audit
 
 import (
-	"context"
 	"fmt"
 )
 
@@ -14,7 +13,7 @@ type Strategy string
 // Remediation strategies.
 const (
 	StrategyUnspecified Strategy = ""      // fall through to severity-policy default
-	StrategyAuto        Strategy = "auto"  // runner may invoke its configured Remediator
+	StrategyAuto        Strategy = "auto"  // suggestion is eligible for external automation
 	StrategyPR          Strategy = "pr"    // proposal for an external PR-producing workflow
 	StrategyIssue       Strategy = "issue" // proposal for an external issue-producing workflow
 	StrategyNoop        Strategy = "noop"  // record the proposal without applying it
@@ -36,17 +35,15 @@ func (s Strategy) IsValid() bool {
 // fix, and the substrate's job is to record. Concrete fields:
 //
 //   - Strategy: how to apply (see Strategy enum).
-//   - Command: proposed shell command for StrategyAuto. The runner
-//     passes it to its configured Remediator; the built-in remediator
-//     does not execute it.
+//   - Command: proposed shell command for StrategyAuto. The audit package
+//     records it but never executes it.
 //   - Patch: proposed unified diff for StrategyPR. The audit package
 //     records it but does not apply it or open a PR.
 //   - Title / Body: PR title/body or issue title/body for StrategyPR
 //     / StrategyIssue. Required for those strategies.
 //
-// The runner validates the strategy ↔ field combination before invoking
-// a Remediator for StrategyAuto. StrategyPR and StrategyIssue are not
-// dispatched by this package.
+// No strategy is dispatched by this package. Side-effecting consumers belong
+// in a separately chartered durable module.
 type Remediation struct {
 	Strategy Strategy
 	Command  string
@@ -55,8 +52,7 @@ type Remediation struct {
 	Body     string
 }
 
-// IsZero reports whether r is the empty value. Cheaper than reflect
-// for a fast-path check in the runner.
+// IsZero reports whether r is the empty value.
 func (r Remediation) IsZero() bool {
 	return r.Strategy == StrategyUnspecified &&
 		r.Command == "" &&
@@ -67,7 +63,6 @@ func (r Remediation) IsZero() bool {
 
 // Validate returns a non-nil error when the strategy ↔ field
 // combination is incoherent (e.g. StrategyAuto with no Command).
-// Called by the runner before dispatching to a Remediator.
 func (r Remediation) Validate() error {
 	if !r.Strategy.IsValid() {
 		return fmt.Errorf("audit: Remediation.Strategy %q invalid", r.Strategy)
@@ -92,47 +87,4 @@ func (r Remediation) Validate() error {
 		}
 	}
 	return nil
-}
-
-// Remediator is a dormant compatibility seam for applying a Finding's
-// suggested remediation. The runner invokes it only for StrategyAuto, and
-// the sole production implementation is the side-effect-free no-op.
-//
-// The current runner cannot treat Apply's result as durable evidence: it
-// ignores ApplyOutcome.Status and ApplyOutcome.Reference, and passes Note to
-// the store only when State is valid and differs from the stored state.
-//
-// Deprecated: Do not add or configure side-effecting implementations. This
-// interface remains exported for compatibility until an idempotent remediation
-// event, persistence, and legacy-migration contract replaces it in ce-1hu9.13.
-type Remediator interface {
-	Apply(ctx context.Context, finding Finding, env Env) (ApplyOutcome, error)
-}
-
-// ApplyOutcome is the legacy result of one Remediator.Apply call. Status and
-// Reference are ignored by Runner. State is considered only when valid and
-// different from the stored finding state; Note is passed to the store only
-// together with such a state change. An ApplyOutcome is therefore not durable
-// evidence that remediation happened.
-//
-// Deprecated: Retained with Remediator for source compatibility pending an
-// idempotent remediation event, persistence, and legacy-migration contract.
-type ApplyOutcome struct {
-	Status string       // compatibility-only label; Runner ignores it
-	State  FindingState // candidate lifecycle state for Runner to validate
-	Note   string       // passed to Store only with a valid state change
-	// Reference is compatibility-only artifact metadata. Runner ignores it.
-	Reference string
-}
-
-// noopRemediator is the runner's default and performs no side effects.
-type noopRemediator struct{}
-
-// NewNoopRemediator returns a Remediator that performs no side effects. Its
-// outcome preserves the input finding state, causing Runner to discard all
-// descriptive fields, so the outcome is not evidence that remediation occurred.
-func NewNoopRemediator() Remediator { return noopRemediator{} }
-
-func (noopRemediator) Apply(_ context.Context, finding Finding, _ Env) (ApplyOutcome, error) {
-	return ApplyOutcome{Status: "no-op", State: finding.State, Note: "noop remediator"}, nil
 }

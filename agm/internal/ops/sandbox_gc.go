@@ -41,6 +41,14 @@ type SandboxGCRequest struct {
 	// MinAge skips sandboxes modified more recently than this
 	// (default DefaultSandboxMinAge).
 	MinAge time.Duration `json:"min_age,omitempty"`
+	// LiveSessionIDs overrides the session-store source used by the periodic
+	// sweep. Nil uses ctx.Storage. This is for CLI surfaces that must aggregate
+	// all configured workspace stores before touching the global sandbox pool.
+	LiveSessionIDs func() (map[string]bool, error) `json:"-"`
+	// Warnings records non-fatal degraded inventory facts, such as a configured
+	// workspace database that does not exist. Warnings are surfaced in JSON and
+	// text output; they do not authorize deleting without a live-session source.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // SandboxGCEntry records the decision for one sandbox dir.
@@ -58,6 +66,7 @@ type SandboxGCResult struct {
 	Reaped    int              `json:"reaped"` // deleted (or would-reap in dry-run)
 	Kept      int              `json:"kept"`   // refused by a safety gate or too young
 	Errors    int              `json:"errors"` // removal attempted and failed
+	Warnings  []string         `json:"warnings,omitempty"`
 	Entries   []SandboxGCEntry `json:"entries,omitempty"`
 }
 
@@ -70,7 +79,11 @@ func SandboxGC(ctx *OpContext, req *SandboxGCRequest) (*SandboxGCResult, error) 
 	if err != nil {
 		return nil, err
 	}
-	checker := sandboxgc.NewChecker(base, liveSessionIDsFromStorage(ctx))
+	liveSessionIDs := req.LiveSessionIDs
+	if liveSessionIDs == nil {
+		liveSessionIDs = liveSessionIDsFromStorage(ctx)
+	}
+	checker := sandboxgc.NewChecker(base, liveSessionIDs)
 	return sandboxGCWithChecker(req, base, checker)
 }
 
@@ -94,6 +107,7 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 	result := &SandboxGCResult{
 		Operation: "sandbox_gc",
 		DryRun:    !req.Reap,
+		Warnings:  append([]string(nil), req.Warnings...),
 	}
 
 	entries, err := os.ReadDir(base)

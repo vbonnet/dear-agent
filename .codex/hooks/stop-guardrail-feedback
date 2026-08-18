@@ -44,6 +44,13 @@ input="$(cat)"
 # Global opt-out for an interactive session that doesn't want the loop.
 [ "${DEAR_GUARDRAIL_LOOP:-1}" = "0" ] && exit 0
 
+# Never run inside GitHub Actions. The loop is an *authoring*-time guardrail —
+# "delivered on your laptop instead of in GitHub CI", per the WHAT above. In an
+# Actions container the dirty-tree and toolchain-present assumptions both fail,
+# so the loop blocks a read-only CI agent MAX_ITERS times and tells it to go fix
+# guardrails it has no toolchain to run. See .claude/hooks/stop-guardrail-feedback.
+[ -n "${GITHUB_ACTIONS:-}" ] && exit 0
+
 event="$(printf '%s' "$input" | hook_json -r '.hook_event_name // empty' 2>/dev/null || true)"
 case "$event" in
   Stop|SubagentStop) ;;

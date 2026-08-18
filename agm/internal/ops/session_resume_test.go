@@ -1252,8 +1252,10 @@ func TestResumeSessionAgyUnknownModelDoesNotInventOverride(t *testing.T) {
 	if strings.Contains(fakeTmux.commands[0], "--model") {
 		t.Fatalf("unknown AGY model gained an override: %q", fakeTmux.commands[0])
 	}
-	if !strings.Contains(fakeTmux.commands[0], "agy --conversation 'agy-conversation-id'") {
-		t.Fatalf("AGY resume command = %q, want native conversation identity", fakeTmux.commands[0])
+	for _, want := range []string{"__exec-agy", "--conversation 'agy-conversation-id'"} {
+		if !strings.Contains(fakeTmux.commands[0], want) {
+			t.Fatalf("AGY resume command = %q, missing %q", fakeTmux.commands[0], want)
+		}
 	}
 }
 
