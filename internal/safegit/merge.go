@@ -248,6 +248,34 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
+	// Gate 0: deterministic PR state. Draft, conflicts, and out-of-date-with-
+	// base are visible from one `gh pr view` and each has one exact fix, so
+	// fail fast with that fix instead of arming auto-merge and letting the
+	// completion wait time out 45 minutes later with no cause named.
+	if err := runGate(ctx, "state", func() error {
+		st, err := FetchPRState(ctx, cfg.PRNumber, cfg.Repo)
+		if err != nil {
+			return err
+		}
+		if s := strings.ToUpper(st.State); s != "OPEN" {
+			return fmt.Errorf("PR #%d is %s; nothing to merge", cfg.PRNumber, s)
+		}
+		blockers := StateBlockers(st, cfg.Repo)
+		if len(blockers) == 0 {
+			return nil
+		}
+		var lines []string
+		for _, b := range blockers {
+			lines = append(lines, fmt.Sprintf("  • %s: %s\n    fix: %s", b.Code, b.Detail, b.Fix))
+		}
+		return fmt.Errorf("PR state blocks merging:\n%s", strings.Join(lines, "\n"))
+	}); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "state: "+err.Error())
+		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `pr-blockers %d --repo %s` for the full diagnosis\n", cfg.PRNumber, cfg.Repo)
+		return fmt.Errorf("state gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ PR state mergeable (open, not draft, no conflicts, up to date)")
+
 	// Gate 1: every provider-effective required CI check must pass.
 	if err := runGate(ctx, "ci", func() error { return checkAllCIContext(ctx, cfg.PRNumber, cfg.Repo) }); err != nil {
 		// P4 flake valve: when flaky_checks are configured, give a failing
@@ -1022,8 +1050,10 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
         nodes {
+          id
           isResolved
           isOutdated
+          path
           comments(first: 1) {
             nodes {
               author { login }
@@ -1038,8 +1068,10 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 }`
 
 type gqlReviewThread struct {
-	IsResolved bool `json:"isResolved"`
-	IsOutdated bool `json:"isOutdated"`
+	ID         string `json:"id"`
+	IsResolved bool   `json:"isResolved"`
+	IsOutdated bool   `json:"isOutdated"`
+	Path       string `json:"path"`
 	Comments   struct {
 		Nodes []struct {
 			Author struct {
@@ -1066,14 +1098,29 @@ type gqlReviewResult struct {
 	} `json:"data"`
 }
 
-func checkReviewThreads(prNum int, repo string) error {
+// ReviewThread is one PR review thread in the shape the merge-blocker
+// classifier consumes. IsOutdated matters: GitHub's required conversation
+// resolution counts unresolved outdated threads even though the UI collapses
+// them and casual queries omit them.
+type ReviewThread struct {
+	ID         string `json:"id"`
+	IsResolved bool   `json:"isResolved"`
+	IsOutdated bool   `json:"isOutdated"`
+	Path       string `json:"path"`
+	Author     string `json:"author"`
+	Body       string `json:"body"`
+}
+
+// ListReviewThreads pages through every review thread on the PR, outdated
+// threads included.
+func ListReviewThreads(prNum int, repo string) ([]ReviewThread, error) {
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid repo %q", repo)
+		return nil, fmt.Errorf("invalid repo %q", repo)
 	}
 	owner, name := parts[0], parts[1]
 
-	var threads []gqlReviewThread
+	var threads []ReviewThread
 	cursor := ""
 	for {
 		args := []string{
@@ -1088,61 +1135,97 @@ func checkReviewThreads(prNum int, repo string) error {
 		}
 		out, err := runCommand(exec.Command("gh", args...))
 		if err != nil {
-			return fmt.Errorf("GraphQL query failed: %w", err)
+			return nil, fmt.Errorf("GraphQL query failed: %w", err)
 		}
 		var result gqlReviewResult
 		if err := json.Unmarshal(out, &result); err != nil {
-			return fmt.Errorf("parsing GraphQL response: %w", err)
+			return nil, fmt.Errorf("parsing GraphQL response: %w", err)
 		}
 		page := result.Data.Repository.PullRequest.ReviewThreads
-		threads = append(threads, page.Nodes...)
+		threads = append(threads, flattenThreads(page.Nodes)...)
 		if !page.PageInfo.HasNextPage {
 			break
 		}
 		if page.PageInfo.EndCursor == "" || page.PageInfo.EndCursor == cursor {
-			return fmt.Errorf("GraphQL review-thread pagination did not advance")
+			return nil, fmt.Errorf("GraphQL review-thread pagination did not advance")
 		}
 		cursor = page.PageInfo.EndCursor
+	}
+	return threads, nil
+}
+
+func flattenThreads(nodes []gqlReviewThread) []ReviewThread {
+	out := make([]ReviewThread, 0, len(nodes))
+	for _, n := range nodes {
+		t := ReviewThread{ID: n.ID, IsResolved: n.IsResolved, IsOutdated: n.IsOutdated, Path: n.Path}
+		if len(n.Comments.Nodes) > 0 {
+			t.Author = n.Comments.Nodes[0].Author.Login
+			t.Body = n.Comments.Nodes[0].Body
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func checkReviewThreads(prNum int, repo string) error {
+	threads, err := ListReviewThreads(prNum, repo)
+	if err != nil {
+		return err
 	}
 	return reviewThreadError(threads)
 }
 
-// parseReviewThreads returns an error if any unresolved, non-outdated review
-// threads exist in the GraphQL response. Exported for testing.
+// parseReviewThreads returns an error if any unresolved review threads exist
+// in the GraphQL response. Exported for testing.
 func parseReviewThreads(data []byte) error {
 	var result gqlReviewResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		return fmt.Errorf("parsing GraphQL response: %w", err)
 	}
 
-	return reviewThreadError(result.Data.Repository.PullRequest.ReviewThreads.Nodes)
+	return reviewThreadError(flattenThreads(result.Data.Repository.PullRequest.ReviewThreads.Nodes))
 }
 
-func reviewThreadError(threads []gqlReviewThread) error {
+// reviewThreadError blocks on every unresolved thread, outdated or not.
+// It used to skip isOutdated threads, but GitHub's required conversation
+// resolution counts them: the gate reported "no unresolved review threads"
+// while the provider kept the PR BLOCKED, and agents went hunting for phantom
+// code problems (retro 2026-08-18-pr-merge-blocker-guessing). Outdated
+// threads are labeled so the fix is obvious.
+func reviewThreadError(threads []ReviewThread) error {
 	var unresolved []string
+	outdated := 0
 	for i, t := range threads {
-		if t.IsResolved || t.IsOutdated {
+		if t.IsResolved {
 			continue
 		}
-		label := fmt.Sprintf("thread #%d", i+1)
-		if len(t.Comments.Nodes) > 0 {
-			c := t.Comments.Nodes[0]
-			author := c.Author.Login
+		tag := ""
+		if t.IsOutdated {
+			outdated++
+			tag = " (outdated)"
+		}
+		label := fmt.Sprintf("thread #%d%s", i+1, tag)
+		if t.Author != "" || t.Body != "" {
+			author := t.Author
 			if author == "" {
 				author = "unknown"
 			}
-			body := c.Body
+			body := t.Body
 			if len([]rune(body)) > 80 {
 				body = string([]rune(body)[:80]) + "…"
 			}
-			label = fmt.Sprintf("  • @%s: %q", author, body)
+			label = fmt.Sprintf("  • @%s%s: %q", author, tag, body)
 		}
 		unresolved = append(unresolved, label)
 	}
 
 	if len(unresolved) > 0 {
-		return fmt.Errorf("%d unresolved review thread(s):\n%s",
-			len(unresolved), strings.Join(unresolved, "\n"))
+		note := ""
+		if outdated > 0 {
+			note = fmt.Sprintf(" (%d outdated: collapsed in the GitHub UI but still counted by required conversation resolution)", outdated)
+		}
+		return fmt.Errorf("%d unresolved review thread(s)%s:\n%s",
+			len(unresolved), note, strings.Join(unresolved, "\n"))
 	}
 	return nil
 }
