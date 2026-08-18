@@ -652,6 +652,7 @@ func TestWorkflowLevelFailureIsNotAMissingCheck(t *testing.T) {
 		MainSHA:              "abc1234def",
 		PRNumber:             4,
 		PRChecksKnown:        true,
+		PRKnown:              true,
 		RequiredKnown:        true,
 		WorkflowLevelFailure: true,
 	})

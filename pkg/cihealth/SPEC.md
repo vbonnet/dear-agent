@@ -30,15 +30,15 @@ executed and there is no outcome to audit.
 The order matters. Each requirement is evaluated before the ones after it, so an
 unresolved fact can never be dressed up as a finding about selection.
 
-**CIHEALTH-01** When the checks that reported on the pull request are not known, the system shall classify the failure as `unknown` before evaluating any other condition, because every other class asserts something about checks that were never read.
+**CIHEALTH-01** When the pull request that introduced the commit, or the checks that reported on it, are not known, the system shall classify the failure as `unknown` before drawing any conclusion from the pull request or its checks — including the absence of a pull request — because a failed lookup reports the same zero as a direct push.
 
 **CIHEALTH-02** When the failing check could not have run on a pull request, the system shall classify the failure as `post-merge-only`, so a scheduled detector is never reported as a path-filter gap.
 
 **CIHEALTH-03** When the failure was observed on a scheduled or dispatched run, the system shall classify it as `post-merge-only`, because a detection the clock triggered is not attributable to the commit at the head of `main`.
 
-**CIHEALTH-04** When the run failed before producing any job, the system shall classify the failure as `inconclusive` and attribute it to the workflow definition rather than to selection.
+**CIHEALTH-04** When the run failed before producing any job, the system shall classify the failure as `inconclusive` and attribute it to the workflow definition rather than to selection; this is decided without reference to the pull request, which a startup failure never reached.
 
-**CIHEALTH-05** When no pull request introduced the commit, the system shall classify the failure as `bypassed` and direct the reader at branch protection rather than at CI selection.
+**CIHEALTH-05** When the pull request lookup succeeded and found no pull request, the system shall classify the failure as `bypassed` and direct the reader at branch protection rather than at CI selection.
 
 **CIHEALTH-06** When the failing check never reported on the pull request, the system shall classify the failure as `never-ran` and shall mark it filter-refinable.
 

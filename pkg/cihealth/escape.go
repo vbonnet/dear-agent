@@ -217,17 +217,6 @@ func Classify(e Escape) Finding {
 		}
 	}
 
-	if e.PRNumber == 0 {
-		return Finding{
-			Class:   ClassBypassed,
-			Summary: fmt.Sprintf("No pull request introduced %s — a direct push or an administrative bypass. Pre-merge selection never had a chance to run.", shortSHA(e.MainSHA)),
-			SuggestedActions: []string{
-				"Confirm against bypassed-merge-audit.yml whether this was an authorised bypass.",
-				"If it was not, the gap is in branch protection, not in CI selection.",
-			},
-		}
-	}
-
 	// A run that never produced a job has no failing check to reason about.
 	// Falling through would compare the workflow's display name against the
 	// pull request's job checks, find nothing, and report `never-ran` with
@@ -243,16 +232,29 @@ func Classify(e Escape) Finding {
 		}
 	}
 
-	// Guard before any statement about what did or did not report. Without it,
-	// a denied check-runs query produces an empty slice, `never-ran`, and a
-	// recommendation to widen a path filter that was never involved.
+	// Guard before any statement about the pull request or its checks, and in
+	// particular before the bypass branch below. A denied association lookup
+	// also reports PRNumber 0, so placing this after that branch let an API
+	// error be published as an administrative bypass — which is exactly the
+	// accusation this exists to prevent.
 	if !e.PRKnown || !e.PRChecksKnown {
 		return Finding{
 			Class:   ClassUnknown,
 			Summary: fmt.Sprintf("The pull request that introduced %s, or the checks that reported on it, could not be read — so how %q got past pre-merge is unresolved. This is a gap in the evidence, not a finding about the pull request.", shortSHA(e.MainSHA), e.FailingCheck),
 			SuggestedActions: []string{
 				"Fix the failure on main first; the classification can be redone once the lookup succeeds.",
-				fmt.Sprintf("Re-run the analysis by hand to establish the class: `ci-escape-analysis -repo <repo> -check %q -sha %s -pr %d`.", e.FailingCheck, shortSHA(e.MainSHA), e.PRNumber),
+				fmt.Sprintf("Re-run the analysis by hand to establish the class: `ci-escape-analysis -repo <repo> -check %q -sha <sha>`.", e.FailingCheck),
+			},
+		}
+	}
+
+	if e.PRNumber == 0 {
+		return Finding{
+			Class:   ClassBypassed,
+			Summary: fmt.Sprintf("No pull request introduced %s — a direct push or an administrative bypass. Pre-merge selection never had a chance to run.", shortSHA(e.MainSHA)),
+			SuggestedActions: []string{
+				"Confirm against bypassed-merge-audit.yml whether this was an authorised bypass.",
+				"If it was not, the gap is in branch protection, not in CI selection.",
 			},
 		}
 	}
