@@ -19,7 +19,7 @@ pass is testable without GitHub or provider access.
 
 **PRV-03** When optional configuration is omitted, the system shall apply the documented defaults for inspection limit, review event, provider commands, secondary attempts, provider timeout, state path, and clock.
 
-**PRV-04** When an inspected pull request is a draft, the system shall skip it and report the draft skip reason.
+**PRV-04** When pull requests are listed, the system shall exclude drafts in the GitHub query so the inspection limit is spent on reviewable pull requests, and shall skip any draft that still reaches the review path.
 
 **PRV-05** When the recorded state already holds the inspected pull request head SHA, the system shall skip the pull request and report the already-reviewed skip reason.
 
@@ -44,6 +44,14 @@ pass is testable without GitHub or provider access.
 **PRV-15** When state is persisted, the system shall create the state directory with owner-only permissions and replace the state file atomically with owner-only permissions.
 
 **PRV-16** When a review body is composed, the system shall include the repository, pull request number, review timestamp, and one section per provider.
+
+**PRV-17** When a provider failure reports denied access or failed authentication, the system shall stop retrying that provider for the pull request.
+
+**PRV-18** When a review provider is invoked through the isolated runner, the system shall remove the GitHub credential variables from its environment and run it outside the operator's checkout.
+
+**PRV-19** When a review prompt is built, the system shall declare the pull request title and diff to be untrusted data that the provider must not act on.
+
+**PRV-20** When a non-dry-run pass starts, the system shall claim an exclusive state lock, shall refuse to run while another pass holds it, and shall reclaim a lock older than the configured staleness window.
 
 ## BDD Traceability
 

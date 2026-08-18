@@ -81,6 +81,7 @@ flags:
 		GeminiTries:     *geminiTries,
 		ProviderTimeout: *providerTimeout,
 		RetryDelay:      *retryDelay,
+		ProviderRunner:  prreviewer.IsolatedRunner{},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

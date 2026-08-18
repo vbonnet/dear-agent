@@ -33,6 +33,8 @@ handling, loop control, and process exit codes.
 
 **XPR-10** When a review pass returns an error that is not the shutdown cancellation, the command shall report the error on standard error and exit with status 1.
 
+**XPR-11** When the review pass is configured, the command shall dispatch providers through the isolated runner so contributor content never reaches a provider holding the operator's GitHub credentials.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
