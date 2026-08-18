@@ -78,6 +78,7 @@ All errors use stable codes that agents can match on programmatically.
 | AGM-014 | 409 | `session/active_kill` | Session is active | Killing a live harness without stuck confirmation | Retry with `--confirmed-stuck` only when verified stuck |
 | AGM-015 | 409 | `session/lock_timeout` | Session lock timeout | Another lifecycle mutation owns the stable session lock | Wait for it to finish and retry |
 | AGM-016 | 409 | `session/not_ready` | Session not ready | The exact target harness cannot safely receive input | Wait for the harness composer to become ready and retry |
+| AGM-017 | 503 | `session/output_unavailable` | Session output unavailable | The tmux backend could not answer for the session — the socket was unreachable, or a live capture failed while the session is still running — so no durable capture can stand in for the current task | Transient — retry; if it persists, check the tmux socket and permissions |
 | AGM-100 | 200 | `dry_run` | Dry run | `--dry-run` flag is set | Remove flag to execute |
 
 ## RFC 7807 Error Format
