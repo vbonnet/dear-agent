@@ -38,7 +38,7 @@ pair that drifts the first time a class or a threshold moves.
 
 **CI-ESCAPE-09** When the system reads the checks that reported on a pull request, the system shall select each attempt as it stood at the merge, shall report an attempt still running at the merge as pending rather than absent, and shall key attempts by producing app as well as by name.
 
-**CI-ESCAPE-10** When the system counts escapes, the system shall count distinct failing commits across every conclusion it treats as red, and shall report the count as truncated when the query reaches the API page limit and as unmeasured when it fails.
+**CI-ESCAPE-10** When the system counts escapes, the system shall count distinct failing commits across every conclusion it treats as red, shall exclude runs from the events the classifier treats as post-merge detections, and shall report the count as truncated when the query reaches the API page limit and as unmeasured when it fails.
 
 **CI-ESCAPE-11** When the system measures prevention cost, the system shall report whether any qualifying pre-merge run was observed and whether the query reached the API page limit.
 
@@ -56,13 +56,13 @@ pair that drifts the first time a class or a threshold moves.
 
 **CI-ESCAPE-16** When sweeping, the system shall close a brief only when a later run of the same failing job succeeded, and shall skip reconciliation entirely when any workflow's run lookup failed, so a transient API failure cannot be read as recovery.
 
-**CI-ESCAPE-17** When the system files a brief, the system shall mark it queued; when a sweep completes with every mutation successful, the system shall hand off at most one queued brief and remove its queue label, so simultaneous incidents are worked one at a time and a handoff is never recorded for a dispatch the caller will skip.
+**CI-ESCAPE-17** When the system files a brief, the system shall mark it queued; when a sweep completes with every mutation successful, the system shall hand off at most one queued brief by naming its title and number, and shall leave the queue label in place for the caller to clear once the dispatch has run, so simultaneous incidents are worked one at a time and a dispatch that never ran leaves its incident queued rather than stranded.
 
 **CI-ESCAPE-18** When any brief mutation fails, the system shall continue processing the remaining workflows and shall exit non-zero, so a failed alert is never reported as a successful sweep.
 
 ## Test Traceability
 
-- Command tests: `tools/ci-escape-analysis/triggers_test.go`
+- Command tests: `tools/ci-escape-analysis/triggers_test.go`, `tools/ci-escape-analysis/escapes_test.go`
 - Classification and ROI contract: `pkg/cihealth/SPEC.md`
 
 ## BDD Traceability

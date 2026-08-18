@@ -71,11 +71,17 @@ jobs:
     outputs:
       # `incident` is the one queued incident this sweep handed off, or empty.
       # The sweep files a brief per red workflow and labels each as queued;
-      # dequeuing takes the oldest, drops the label, and names it here. So a
-      # red workflow that is already being worked does not re-dispatch an agent
-      # every four hours, and simultaneous incidents are picked up one per
-      # sweep instead of all but the first being dropped.
+      # the handoff takes the oldest and names it here. So a red workflow that
+      # is already being worked does not re-dispatch an agent every four hours,
+      # and simultaneous incidents are picked up one per sweep instead of all
+      # but the first being dropped.
+      #
+      # The queue label is NOT dropped here. It is cleared by the triage job
+      # once the agent has actually run, so every way that job can end without
+      # running leaves the incident queued for the next sweep instead of
+      # stranding it open and unqueued forever.
       incident: ${{ steps.sweep.outputs.incident }}
+      incident_number: ${{ steps.sweep.outputs.incident_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -100,31 +106,53 @@ jobs:
         run: |
           set -euo pipefail
           go run ./tools/ci-escape-analysis --repo "${{ github.repository }}" --sweep | tee sweep.log
-          # The sweep prints at most one NEW INCIDENT line: the incident it
-          # dequeued. Everything else stays queued for a later sweep.
+          # The sweep prints at most one NEW INCIDENT pair: the incident it
+          # handed off. Everything else waits for a later sweep.
           incident=$(grep -m1 '^NEW INCIDENT: ' sweep.log | cut -d' ' -f3- || true)
+          number=$(grep -m1 '^NEW INCIDENT NUMBER: ' sweep.log | cut -d' ' -f4 || true)
           echo "incident=${incident}" >> "$GITHUB_OUTPUT"
+          echo "incident_number=${number}" >> "$GITHUB_OUTPUT"
 
-  # Triggering the fix. This deliberately does NOT post "@claude" on the issue
-  # and hope: an issue opened by GITHUB_TOKEN does not fire the `issues` event
-  # (GitHub's own recursion guard), and the bot's author_association would fail
-  # claude.yml's OWNER/MEMBER/COLLABORATOR check anyway. So the watchdog runs
-  # the fix agent itself, with the retro as its brief.
-  fix:
-    name: Trigger a fix
+  # Triggering the triage. This deliberately does NOT post "@claude" on the
+  # issue and hope: an issue opened by GITHUB_TOKEN does not fire the `issues`
+  # event (GitHub's own recursion guard), and the bot's author_association would
+  # fail claude.yml's OWNER/MEMBER/COLLABORATOR check anyway. So the watchdog
+  # runs the agent itself, with the brief as its input.
+  #
+  # It triages; it does not deliver. A GitHub-hosted runner is not a guarded
+  # delivery environment, and two independent facts say so:
+  #
+  #   1. AGENTS.md requires branches to be published with `safe-push` and pull
+  #      requests to be opened with `safe-pr` against an active Wayfinder
+  #      project, and states there is no bypass mode. Neither wrapper is on this
+  #      runner, no approved Wayfinder project exists for an incident that was
+  #      filed minutes ago, and manufacturing a WAYFINDER-STATUS.md here to get
+  #      past the check would be the bypass the policy says does not exist.
+  #   2. A push or pull request made with GITHUB_TOKEN does not trigger further
+  #      workflow runs — the same recursion guard cited above. A repair PR
+  #      opened from this job would carry none of the required checks and could
+  #      not pass the merge gate anyway.
+  #
+  # So asking this job for a PR would ask for something it cannot honestly
+  # produce. It produces a diagnosis on the brief instead, and the incident
+  # stays queued-for-a-human until a prepared worker delivers the repair.
+  # Bootstrapping guarded delivery here (installing the wrappers, and a
+  # least-privilege App credential whose events do trigger workflows) is
+  # tracked separately; it is a credential and policy change, not a workflow
+  # edit.
+  triage:
+    name: Triage the incident
     needs: sweep
     if: needs.sweep.outputs.incident != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      # The agent's whole job is to push a branch and open a pull request, so
-      # `contents: read` would end every successful repair at an authorization
-      # denial. `issues: write` covers the documented fallback of commenting
-      # its findings on the retro. `actions: read` lets it read the failing
-      # run's logs — the retro carries a check name and a URL, not the
-      # diagnostic output.
-      contents: write
-      pull-requests: write
+      # Read-only on code, because this job does not publish. `issues: write`
+      # is the delivery surface: the diagnosis is a comment on the brief.
+      # `actions: read` lets the agent read the failing run's logs — the brief
+      # carries a check name and a URL, not the diagnostic output.
+      contents: read
+      pull-requests: read
       issues: write
       actions: read
       id-token: write
@@ -134,12 +162,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Dispatch fix agent
+      - name: Dispatch triage agent
+        id: triage
         # Pinned by commit SHA, not by the mutable `v1` tag. This job grants
-        # the action contents/pull-requests/issues write and an OIDC token, so
-        # a moved tag would hand a substituted action the ability to push
-        # arbitrary changes. The repository's own workflow-hygiene check wants
-        # third-party actions pinned; a write-capable one is where it matters.
+        # the action issues write and an OIDC token, so a moved tag would hand
+        # a substituted action the repository's Claude credentials and a
+        # writable issue surface. The repository's own workflow-hygiene check
+        # wants third-party actions pinned.
         uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -164,52 +193,73 @@ jobs:
             Terms it marks ASSUMED or LOWER BOUND are not evidence, and a verdict
             marked PROVISIONAL is not an instruction.
 
+            This runner is NOT a guarded delivery environment. `safe-push` and
+            `safe-pr` are not installed, there is no active Wayfinder project for
+            this incident, and AGENTS.md states there is no bypass mode. A push or
+            pull request made with this job's token would also trigger no workflow
+            runs, so it could carry none of the required checks. Therefore: do not
+            push a branch, do not open a pull request, do not commit to any other
+            repository. Your deliverable is a comment on the brief. Say so plainly
+            if you find the fix — a named diff a human can apply is worth more than
+            a branch nobody can merge.
+
             Your job, in order:
-            1. Fix the actual failure so main goes green. That is the priority.
-            2. Then act on the brief's classification, and ONLY on it:
+            1. Diagnose the actual failure: what broke, and the smallest change
+               that makes main green. Quote the evidence you read. That is the
+               priority.
+            2. Then recommend the prevention the brief's classification calls
+               for, and ONLY that one:
                - `never-ran`: the producing workflow's own `on.pull_request.paths`
-                 filter excluded the change. Widen it there, or move the filter to a
-                 job-level `if:` so a skip is visible instead of silent.
-               - `selection-gap`: a job-level condition skipped the check. Widen that
-                 condition; if the skip came from the affected-test selector
-                 (`cmd/test-affected`, ADR-028), fix the selector's dependency walk.
-               - `merge-skew`: do NOT touch path filters. Re-run the job to separate
-                 flake from semantic merge skew, and say which it was.
+                 filter excluded the change. Name the widening, or the move of the
+                 filter to a job-level `if:` so a skip is visible instead of silent.
+               - `selection-gap`: a job-level condition skipped the check. Name the
+                 condition to widen; if the skip came from the affected-test
+                 selector (`cmd/test-affected`, ADR-028), name the missing edge in
+                 its dependency walk.
+               - `merge-skew`: do NOT propose a path-filter change. Re-run the job
+                 to separate flake from semantic merge skew, and say which it was.
                - `inconclusive`: the pre-merge run never concluded. Establish why
                  (superseded push, timeout, malformed workflow) before anything else.
-               - `scope-gap`: the diff-scoping is working as designed. Only widen the
-                 pre-merge scope if the brief's ROI ratio cleared 10:1 AND was not
-                 marked PROVISIONAL.
-               - `post-merge-only`: not an escape. Fix the finding, change no filters.
+               - `scope-gap`: the diff-scoping is working as designed. Only propose
+                 widening the pre-merge scope if the brief's ROI ratio cleared 10:1
+                 AND was not marked PROVISIONAL.
+               - `post-merge-only`: not an escape. Address the finding itself and
+                 propose no filter change.
                - `gating-gap` or `bypassed`: this is a ruleset/branch-protection
                  question, not a CI-filtering one. Write up what should change and
                  stop — ruleset edits are a control surface and need a human.
 
-            3. Complete the brief: fill in `Execute` with what you changed and the
-               PR link, and `Audit` with whether main went green and whether the
-               prevention actually landed.
-            4. If the defect was systemic, write the DEAR retro itself into the
-               configured research repository (`.dear-agent.yml` > `research`, i.e.
-               engram-research) per the DEAR retrospectives policy. This issue is an
-               incident alert and lives in the code repo; the durable retro does not
-               belong here, and `forbidden-paths` blocks committing one.
+            3. Post one comment on the brief holding: the diagnosis, the exact
+               change that fixes the failure, the prevention from step 2, and what
+               you could not establish. Do not fill in `Execute` or `Audit` — those
+               record work that landed, and nothing has landed until a human
+               delivers it. Say explicitly that delivery is outstanding.
+            4. If the defect looks systemic, say so in that comment and say why. Do
+               NOT write a DEAR retro into the research repository from here: you
+               have neither a checkout of it nor credentials for it, and this
+               repository's `forbidden-paths` blocks committing one locally. The
+               durable retro is written by whoever delivers the fix.
 
-            Open one focused PR for this one incident. Do not modify the repository
-            ruleset. Do not self-merge. If the fix is not obvious within your budget,
-            comment your findings on the brief and stop rather than guessing.
+            Do not modify the repository ruleset. If the diagnosis is not solid
+            within your budget, comment what you established and what you did not,
+            and stop rather than guessing.
 
-      # The sweep drops the queue label when it hands an incident off, so if
-      # this job fails, times out, or is cancelled the incident would sit open
-      # and unqueued forever — later sweeps only comment on it and never
-      # restore the label. Put it back so the next sweep can dispatch again.
-      - name: Requeue the incident if the fix agent did not run
-        if: failure() || cancelled()
+      # Acknowledging the dispatch, and the ONLY place the queue label comes
+      # off. The earlier design dropped it in the sweep and put it back here on
+      # failure, which relies on this step being reached — and it is not reached
+      # when the agent step consumes the job's `timeout-minutes`, because that
+      # terminates the job. Recovery cannot live inside the thing it recovers
+      # from. Clearing the label only after the agent has run inverts the
+      # default: a timeout, a cancellation, a failed step, or a dead runner all
+      # leave the incident queued, and the next sweep dispatches it again.
+      #
+      # Safe against double dispatch: the workflow-level concurrency group
+      # covers this job too, so no sweep runs while this one is still going.
+      - name: Acknowledge the dispatch
+        if: steps.triage.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INCIDENT: ${{ needs.sweep.outputs.incident }}
+          NUMBER: ${{ needs.sweep.outputs.incident_number }}
         run: |
           set -euo pipefail
-          number=$(gh issue list --repo "${{ github.repository }}"             --label main-health-watchdog --state open --limit 50             --json number,title --jq ".[] | select(.title == \"$INCIDENT\") | .number")
-          if [ -n "$number" ]; then
-            gh issue edit "$number" --repo "${{ github.repository }}" --add-label main-health-queued
-          fi
+          gh issue edit "$NUMBER" --repo "${{ github.repository }}" --remove-label main-health-queued

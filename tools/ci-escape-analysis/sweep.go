@@ -22,10 +22,12 @@ const retroLabel = "main-health-watchdog"
 // queuedLabel marks an incident that has been filed but not yet handed to the
 // fix agent. It is what makes "one incident per dispatch" a queue rather than a
 // drop: when a sweep opens several incidents at once, all of them are queued,
-// one is dequeued and dispatched, and the rest wait for later sweeps. Gating on
-// "newly created" alone silently abandoned every incident after the first,
-// because a later sweep only comments on an issue that already exists and so
-// never reports it as new again.
+// one is announced and dispatched, and the rest wait for later sweeps. The
+// label survives the announcement and is cleared by the fix job once the agent
+// has actually run, so a dispatch that never happened leaves the incident
+// queued rather than stranded. Gating on "newly created" alone silently
+// abandoned every incident after the first, because a later sweep only comments
+// on an issue that already exists and so never reports it as new again.
 const queuedLabel = "main-health-queued"
 
 // mainRunPageLimit is how many of a workflow's runs on main are fetched while
@@ -85,16 +87,23 @@ type mainRun struct {
 	Event        string `json:"event"`
 }
 
+// postMergeDetectionEvents are the run events that produce a detection rather
+// than an escape: a clock or a human started them, not a commit landing on
+// main. Classify turns exactly these into `post-merge-only`, so the escape
+// count has to exclude exactly these too — counting a scheduled failure as an
+// escape prices a gate against evidence the classifier already refused.
+// Stated once, and read by both, so the two cannot drift apart.
+var postMergeDetectionEvents = map[string]bool{
+	"schedule":            true,
+	"workflow_dispatch":   true,
+	"repository_dispatch": true,
+}
+
 // scheduledDetection reports whether the run was started by a clock or a human
 // rather than by the commit. Those runs compare the repo against a world that
 // moves on its own, so the head of main is not evidence of what caused them.
 func (r mainRun) scheduledDetection() bool {
-	switch r.Event {
-	case "schedule", "workflow_dispatch", "repository_dispatch":
-		return true
-	default:
-		return false
-	}
+	return postMergeDetectionEvents[r.Event]
 }
 
 // sweep finds every workflow currently red on main, files or updates a DEAR
@@ -169,13 +178,12 @@ func sweep(opts sweepOptions, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Dequeue LAST, and only on a clean sweep. The workflow runs this under
+	// Announce LAST, and only on a clean sweep. The workflow runs this under
 	// `set -euo pipefail`, so a nonzero exit skips the step that writes the
-	// incident to $GITHUB_OUTPUT — dequeuing before the error check would drop
-	// the queue label, strand the incident with nothing dispatched, and no
-	// later sweep would ever restore it.
+	// incident to $GITHUB_OUTPUT; announcing before the error check would name
+	// an incident the caller never dispatches.
 	if !opts.DryRun {
-		if err := dequeueIncident(opts.Repo, stdout, stderr); err != nil {
+		if err := announceQueuedIncident(opts.Repo, stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "ci-escape-analysis: %v\n", err)
 			return 1
 		}
@@ -282,11 +290,23 @@ func latestRunPerWorkflowOnMain(opts sweepOptions, stderr io.Writer) (map[string
 	return latest, complete, nil
 }
 
-// dequeueIncident hands the oldest queued incident to the fix agent by printing
-// it, and drops the queue label so the next sweep moves on to the one behind
-// it. At most one per sweep: an agent told to fix several unrelated workflows
-// must either combine them into one pull request or abandon some.
-func dequeueIncident(repo string, stdout, stderr io.Writer) error {
+// announceQueuedIncident hands the oldest queued incident to the fix agent by
+// printing it and its number. At most one per sweep: an agent told to triage
+// several unrelated workflows must either conflate them or abandon some.
+//
+// It deliberately does NOT drop the queue label. The label is the record that
+// this incident still needs an agent, and the only event that can honestly
+// clear it is a dispatch that actually completed — which this process cannot
+// observe, because it exits before the fix job starts. Dropping it here made
+// every way that job can end without running (its own `timeout-minutes`, a
+// cancelled run, a dead runner) strand the incident open and unqueued forever,
+// since later sweeps only comment on an incident they have already filed. The
+// fix job removes the label itself once the agent has run; nothing else can,
+// so any other ending leaves the incident queued for the next sweep.
+//
+// Safe against double dispatch because the workflow's concurrency group covers
+// the whole run: no later sweep starts while the fix job is still going.
+func announceQueuedIncident(repo string, stdout, stderr io.Writer) error {
 	out, ok := gh(stderr, "issue", "list", "--repo", repo,
 		"--label", retroLabel, "--label", queuedLabel, "--state", "open",
 		"--limit", "50", "--json", "number,title,createdAt",
@@ -303,13 +323,8 @@ func dequeueIncident(repo string, stdout, stderr io.Writer) error {
 		return nil // nothing waiting
 	}
 
-	if err := runGH("dequeuing incident", stderr, "issue", "edit", number,
-		"--repo", repo, "--remove-label", queuedLabel); err != nil {
-		// Do not announce an incident that is still queued: the next sweep
-		// would announce it again and dispatch a second agent onto it.
-		return err
-	}
 	fmt.Fprintf(stdout, "NEW INCIDENT: %s\n", title)
+	fmt.Fprintf(stdout, "NEW INCIDENT NUMBER: %s\n", number)
 	return nil
 }
 
@@ -466,7 +481,7 @@ func buildRetro(opts sweepOptions, run mainRun, required []cihealth.RequiredCont
 			// multi-job workflow reports one run whichever job failed, so
 			// attributing every one of those runs to the check that happens
 			// to be failing now would inflate the numerator.
-			EscapesScope: fmt.Sprintf("distinct failing commits for workflow %q over %d days", run.WorkflowName, opts.WindowDays),
+			EscapesScope: escapesScope(run.WorkflowName, opts.WindowDays),
 			// Measured from observed pre-merge runs, never inferred from the
 			// trigger alone: a workflow that declares pull_request but has no
 			// pull-request runs in the window would otherwise divide by zero
@@ -558,7 +573,7 @@ func jqInSet(field string, set map[string]bool) string {
 // upsertRetro files a new incident brief or comments on the existing one. The
 // title is stable per failing check, which is what makes recurrence countable.
 // A new brief is created carrying the queue label; dispatch is decided later by
-// dequeueIncident, not here.
+// announceQueuedIncident, not here.
 func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Writer) error {
 	existing, open, known := findRetro(repo, retro.Title(), stderr)
 	if !known {
@@ -578,9 +593,9 @@ func upsertRetro(repo string, retro cihealth.Retro, run mainRun, stderr io.Write
 		// Label first, THEN reopen. The other order leaves a window where the
 		// issue is open but unqueued if the label edit fails: every later
 		// sweep takes the already-open branch and only comments, while
-		// dequeueIncident cannot see it, so the recurrence is permanently
-		// denied a fixer. A closed-but-queued issue is harmless by contrast —
-		// dequeueIncident only considers open ones.
+		// announceQueuedIncident cannot see it, so the recurrence is
+		// permanently denied a fixer. A closed-but-queued issue is harmless by
+		// contrast — announceQueuedIncident only considers open ones.
 		if err := runGH("requeuing retro", stderr, "issue", "edit", fmt.Sprint(existing),
 			"--repo", repo, "--add-label", queuedLabel); err != nil {
 			return err

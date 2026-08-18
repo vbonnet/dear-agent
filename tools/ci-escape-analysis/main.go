@@ -139,7 +139,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	escapeScope := fmt.Sprintf("escapes supplied on the command line for %d days", *windowDays)
 	if escapes < 0 {
 		escapes, escapesTruncated, escapesMeasured = countEscapes(*repo, *workflow, *windowDays, stderr)
-		escapeScope = fmt.Sprintf("distinct failing commits for workflow %q over %d days", *workflow, *windowDays)
+		escapeScope = escapesScope(*workflow, *windowDays)
 	}
 
 	// An explicitly supplied POSITIVE prevention cost is a measurement by
@@ -385,6 +385,24 @@ func lookupRequiredContexts(repo string, stderr io.Writer) ([]cihealth.RequiredC
 	return contexts, true
 }
 
+// escapesScope names what the escape count actually counted, so the brief does
+// not read as "every red run of this workflow". Both the exclusion of
+// post-merge detections and the workflow-rather-than-check scope change the
+// number, and a reader pricing a gate on it has to be able to see that.
+func escapesScope(workflow string, windowDays int) string {
+	return fmt.Sprintf("distinct failing commits for workflow %q over %d days, excluding scheduled and dispatched runs", workflow, windowDays)
+}
+
+// escapeRun is one run of the failing workflow on main, as `gh run list`
+// reports it. `event` is fetched because a run's event decides whether it is
+// escape evidence at all — see postMergeDetectionEvents.
+type escapeRun struct {
+	CreatedAt  time.Time `json:"createdAt"`
+	HeadSHA    string    `json:"headSha"`
+	Conclusion string    `json:"conclusion"`
+	Event      string    `json:"event"`
+}
+
 // countEscapes is the Frequency term: how many distinct commits this workflow
 // went red on inside the window.
 //
@@ -393,31 +411,68 @@ func lookupRequiredContexts(repo string, stderr io.Writer) ([]cihealth.RequiredC
 // as a separate escape lets one unresolved incident inflate the numerator until
 // it crosses a threshold and argues for a pre-merge gate that no additional
 // change ever escaped.
+//
+// The selection is done in Go rather than in a jq expression embedded in a Go
+// string. That is the whole reason this analysis is not a shell script: the
+// numerator decides where a gate gets placed, so its rules have to be readable
+// and unit-tested rather than trusted.
 func countEscapes(repo, workflow string, windowDays int, stderr io.Writer) (count float64, truncated, measured bool) {
 	if workflow == "" {
 		return 0, false, false
 	}
-	// Every red conclusion, not just `failure`. Detection treats a timed-out or
-	// startup-failed workflow as red; counting only `failure` here would hand
-	// such an incident a frequency of zero and a NO SIGNAL verdict, so the
-	// numerator would disagree with the thing that raised the alarm.
 	out, ok := gh(stderr, "run", "list", "--repo", repo, "--workflow", workflow,
 		"--branch", "main", "--limit", fmt.Sprint(runPageLimit),
-		"--json", "createdAt,headSha,conclusion",
-		"--jq", fmt.Sprintf(`"\(length) \([.[] | select(.createdAt > (now - %d*86400 | todate)) | select(%s) | .headSha] | unique | length)"`,
-			windowDays, jqInSet(".conclusion", redConclusions)))
+		"--json", "createdAt,headSha,conclusion,event")
 	if !ok {
 		// A failed query is not evidence that nothing failed. Returning zero
 		// here renders as "no escapes recorded — leave the placement alone".
 		return 0, false, false
 	}
-	var fetched int
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %f", &fetched, &count); err != nil {
+	var runs []escapeRun
+	if err := json.Unmarshal(out, &runs); err != nil {
+		fmt.Fprintf(stderr, "ci-escape-analysis: decoding run list for %q: %v\n", workflow, err)
 		return 0, false, false
 	}
 	// `--limit` is a fetch cap, not pagination: hitting it means older failures
 	// inside the window were never seen, so the numerator is a lower bound.
-	return count, fetched >= runPageLimit, true
+	return escapeCommits(runs, time.Now(), windowDays), len(runs) >= runPageLimit, true
+}
+
+// escapeCommits counts the distinct commits that this workflow went red on
+// inside the window, from runs that are escape evidence.
+//
+// Every red conclusion counts, not just `failure`: detection treats a timed-out
+// or startup-failed workflow as red, and counting only `failure` here would
+// hand such an incident a frequency of zero and a NO SIGNAL verdict, so the
+// numerator would disagree with the thing that raised the alarm.
+//
+// Scheduled, dispatched, and repository-dispatched runs are excluded. Classify
+// calls those `post-merge-only` — not escapes — because they compare the
+// repository against a world that moves on its own. A workflow with both push
+// and schedule triggers (CI, CodeQL, Language Policy) would otherwise have its
+// drift detections counted as escapes, inflating the frequency used to price a
+// later push failure and moving its ROI across a placement threshold.
+func escapeCommits(runs []escapeRun, now time.Time, windowDays int) float64 {
+	cutoff := now.Add(-time.Duration(windowDays) * 24 * time.Hour)
+	commits := map[string]bool{}
+	for _, r := range runs {
+		if !r.CreatedAt.After(cutoff) {
+			continue
+		}
+		if !redConclusions[r.Conclusion] {
+			continue
+		}
+		if postMergeDetectionEvents[r.Event] {
+			continue
+		}
+		if r.HeadSHA == "" {
+			// No commit to attribute the failure to, so it cannot be counted
+			// as a distinct escaping change without inventing one.
+			continue
+		}
+		commits[r.HeadSHA] = true
+	}
+	return float64(len(commits))
 }
 
 // estimatePrevention is the Prevention Cost term: the wall-clock this workflow

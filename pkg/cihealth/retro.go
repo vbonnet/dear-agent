@@ -39,7 +39,7 @@ type Retro struct {
 // `govulncheck` is a job in both CI and Security Audit — so keying on the check
 // alone coalesces two workflows' incidents into one issue. The sweep promises
 // one brief per red workflow, and the second workflow would silently inherit
-// the first's issue: already open, already dequeued, never dispatched.
+// the first's issue: already open, already announced, never dispatched.
 func (r Retro) Title() string {
 	if r.WorkflowName == "" {
 		return fmt.Sprintf("main red — %s", r.FailingCheck)
