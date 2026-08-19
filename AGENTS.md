@@ -108,6 +108,10 @@ make lint-specs         # strict EARS validation
 make preflight-full     # full local publication gate
 ```
 
+Shell, jq, and OpenTofu sources have their own gates. See
+[Testing non-Go sources](docs/testing-non-go-sources.md) for the pattern each
+file type follows and the tests to add alongside a new one.
+
 Targeted Go tests remain valid for iteration. Tests that create Engram sessions
 must use `ENGRAM_TEST_MODE=1` and `ENGRAM_TEST_WORKSPACE=test`. CI runs the
 single root module with `GOWORK=off`.
