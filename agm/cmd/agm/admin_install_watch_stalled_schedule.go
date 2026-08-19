@@ -35,10 +35,18 @@ makes no commits for too long, or loops on the same error. The plist therefore
 uses KeepAlive (restart on crash) rather than StartInterval, with RunAtLoad so
 the monitor comes up at login and after a reboot.
 
+Completion watching is on by default, so the installed daemon is not stall-only.
+It also emits one {"event_type":"completion"} object per session that finishes a
+unit of work, delivers each to the notify dispatchers (~/.agm/notify.yaml, or
+the stderr log dispatcher when that file is absent), and relays the result tail
+into the orchestrator session. Sessions whose names contain orchestrator,
+overseer, or meta- are excluded by default.
+
 Alert routing: the daemon runs with --orchestrator (default "vroom-orchestrator"),
 so every recovery action — permission-prompt alerts, no-commit nudges, error-loop
-diagnostics, and max-retry escalations — is delivered to the orchestrator
-supervisor session via 'agm send', landing stall alerts in the VROOM mesh.
+diagnostics, and max-retry escalations — plus every surfaced completion is
+delivered to the orchestrator supervisor session via 'agm send', landing stall
+alerts and worker results in the VROOM mesh.
 
 The plist is written to ~/Library/LaunchAgents/ and loaded immediately with
 'launchctl load'. Output (one JSON object per event) is logged to

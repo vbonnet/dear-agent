@@ -1,8 +1,8 @@
 # Safe Git Specification
 
-<!-- Last audited at: 2026-08-03 -->
+<!-- Last audited at: 2026-08-18 -->
 
-**Version:** 1.1
+**Version:** 1.3
 **Status:** Baseline
 **Scope:** `internal/safegit`.
 
@@ -63,6 +63,14 @@ used by agents instead of raw git or raw GitHub merge commands.
 **SAFEGIT-23** When the discovered policy is authoritatively empty and the provider reports that no required checks exist, the system shall accept the empty projection and shall preserve conservative validation of every reported check at the merge gate.
 
 **SAFEGIT-24** When a shared required-check consumer classifies a pull request whose effective policy is authoritatively empty, the system shall project every reported check so repair classification and the merge gate apply the same conservative verdict.
+
+**SAFEGIT-25** When a push request contains a bundled short-option cluster whose letters include `f` (`-uf`, `-fu`, `-vfq`), the system shall classify it as a force flag, since git accepts clustered short options and `-f` is `git push`'s only short option spelled with an `f`.
+
+**SAFEGIT-26** When a short-option cluster contains a value-taking option (`-o`), the system shall stop scanning at that letter, since the remainder of the word is the option's value rather than further options.
+
+**SAFEGIT-27** When a push request contains a bare `--` separator, the system shall classify no later token as a flag, since git treats every token after the end-of-options separator as a repository or refspec; a leading-`+` force refspec after `--` shall still be rejected.
+
+**SAFEGIT-28** When a push request contains any prefix of a history-overwriting long option (`--m`, `--forc`, `--force-w`), the system shall classify it as a force flag, since git's parse-options resolves unambiguous abbreviations; the system shall match by prefix rather than reproduce git's ambiguity rules, because over-blocking an abbreviation git itself rejects is safe while under-blocking overwrites remote history.
 
 ## BDD Traceability
 

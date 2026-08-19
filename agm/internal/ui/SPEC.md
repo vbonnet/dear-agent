@@ -1,6 +1,6 @@
 # AGM Operator UI Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-08-14 -->
 
 ## Overview
 
@@ -27,3 +27,5 @@ themes, hierarchy views, tables, JSON output, and cleanup selection.
 
 - Feature: `agm/test/bdd/features/agm_product_surface_guardrails.feature`
 - Package tests: `agm/internal/ui/*_test.go`
+- Shared configuration/default tests: `agm/internal/config/config_strict_test.go`
+- Root projection test: `agm/cmd/agm/new_sandbox_test.go`

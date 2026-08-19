@@ -360,7 +360,11 @@ func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (strin
 // touching tmux: test-environment setup, duplicate-name check, and circuit
 // breakers.
 func preflight(sessionName string) (*circuitBreakerAdmission, error) {
+	hostHome := os.Getenv("HOME")
 	if err := setupTestEnvironment(); err != nil {
+		return nil, err
+	}
+	if err := rebindAuthorityAfterTestEnvironment(hostHome); err != nil {
 		return nil, err
 	}
 	if testMode {
@@ -374,6 +378,24 @@ func preflight(sessionName string) (*circuitBreakerAdmission, error) {
 		return nil, err
 	}
 	return admission, nil
+}
+
+// rebindAuthorityAfterTestEnvironment recaptures the runtime authority when
+// test-environment activation moved HOME. Configuration — and with it the
+// authority that binds sandbox creation — is loaded in PersistentPreRunE,
+// before --test/AGM_TEST_SANDBOX relocates HOME. Leaving the host roots in
+// place would provision the isolated run's sandbox inside production storage
+// and scan the host HOME for lower dirs.
+func rebindAuthorityAfterTestEnvironment(hostHome string) error {
+	isolatedHome := os.Getenv("HOME")
+	if isolatedHome == "" || isolatedHome == hostHome {
+		return nil
+	}
+	if err := cfg.RebindRuntimeAuthorityToIsolatedHome(isolatedHome); err != nil {
+		return fmt.Errorf("rebind runtime authority to isolated HOME %q: %w", isolatedHome, err)
+	}
+	debug.Log("Rebound runtime authority to isolated HOME: %s", isolatedHome)
+	return nil
 }
 
 // resolveTmuxSession checks for an existing tmux session and either prompts to
