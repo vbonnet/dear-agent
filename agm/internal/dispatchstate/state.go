@@ -34,13 +34,6 @@ const (
 	quotaStaleAfter = 30 * time.Minute
 )
 
-// DefaultRelayFallback is the session the installed watch-stalled schedule
-// relays to when nothing overrides it. It lives here, next to the
-// resolution rule, so every surface that reports the effective target
-// (CLI getter, MCP getter, the schedule installer) answers the same thing
-// instead of each keeping a copy that can drift.
-const DefaultRelayFallback = "vroom-orchestrator"
-
 // RelayTargetResult reports a resolved completion relay target and which
 // source it came from (file, environment, or fallback). Reason carries a
 // state-read failure that the caller worked around, so a degraded resolve

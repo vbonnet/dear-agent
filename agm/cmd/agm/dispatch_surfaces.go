@@ -65,23 +65,26 @@ var completionRelayTargetGetCmd = skipRootInit(&cobra.Command{
 	Short: "Read the effective completion relay target",
 	Long: `Read the effective completion relay target.
 
-This reports the recipient a running watcher would relay a completion to
-right now, resolved through the same precedence the watcher uses: the live
-relay-target state file, then AGM_COMPLETION_RELAY_TARGET, then the
-installed schedule's default (` + defaultStallOrchestrator + `). Reporting
-the override alone would answer "no target" on a default install whose
-watcher is in fact relaying, which is the misleading answer.
+This reports the override a running watcher would prefer right now,
+resolved through the same precedence the watcher uses: the live
+relay-target state file, then AGM_COMPLETION_RELAY_TARGET.
 
-A watcher started with a different --orchestrator uses that value as its
-fallback instead, so a "fallback" source here names the installed default
-rather than that process's flag.`,
+A "fallback" source with an empty target does NOT mean completions go
+nowhere. It means no override is set, so routing discovers a live
+Dispatch/orchestrator/supervisor session at delivery time and, if none is
+reachable, records the alert durably for retry. That recipient cannot be
+named here, because it depends on which sessions are live when the
+completion happens; read it with 'agm alerts list' after the fact.
+
+A watcher started with an explicit --orchestrator prefers that session
+instead of discovering one, and the live relay target still outranks it.`,
 	Args: cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return err
 		}
-		result := dispatchstate.ResolveRelayTarget(home, defaultStallOrchestrator, os.Getenv)
+		result := dispatchstate.ResolveRelayTarget(home, "", os.Getenv)
 		return json.NewEncoder(os.Stdout).Encode(result)
 	},
 })

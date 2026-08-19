@@ -3,9 +3,9 @@ package ops
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/eventbus"
+	"strings"
 )
 
 // RecoveryAction represents an action taken to recover from a stall.
@@ -24,7 +24,10 @@ type StallRecovery struct {
 	autoApprovePatterns []string             // Safe patterns to auto-approve
 	retryTracker        *RetryTracker        // Tracks retry attempts with bounded retries
 	bus                 eventbus.Broadcaster // Optional: publishes StallRecovered/StallEscalated events
-	orchestratorTarget  func(string) string
+	router              *AlertRouter         // Optional: nil builds the default router lazily
+	// orchestratorTarget resolves the live relay target. Nil falls back to
+	// the name this recovery was constructed with.
+	orchestratorTarget func(string) string
 }
 
 // NewStallRecovery creates a new stall recovery handler with retry tracking.
@@ -44,13 +47,6 @@ func NewStallRecovery(ctx *OpContext, orchestratorName string) *StallRecovery {
 		},
 		retryTracker: NewRetryTracker(getRetryBaseDir()),
 	}
-}
-
-// SetOrchestratorTargetResolver overrides how a stalled session's
-// orchestrator target is resolved, so the target can be looked up live
-// instead of being fixed at construction.
-func (sr *StallRecovery) SetOrchestratorTargetResolver(resolve func(string) string) {
-	sr.orchestratorTarget = resolve
 }
 
 // Recover takes corrective action for a detected stall with retry tracking.
@@ -102,24 +98,29 @@ func (sr *StallRecovery) Recover(ctx context.Context, event StallEvent) (Recover
 }
 
 // recoverPermissionPromptStall handles recovery from permission prompt stalls.
-func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "alert_orchestrator",
 	}
 
-	// Send alert to orchestrator
-	target := sr.resolveOrchestrator()
-	if target == "" {
-		return action, fmt.Errorf("no orchestrator session configured")
-	}
-
 	msg := fmt.Sprintf("⚠️ PERMISSION_PROMPT stall detected: %s has been stuck for %v%s",
 		event.SessionName, formatDuration(event.Duration), errorContext)
-
-	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: target,
-		Message:   msg,
+	rec, err := sr.alertRouter().Route(ctx, AlertRequest{
+		Kind:          "stall.permission_prompt",
+		Source:        "agm-watch-stalled",
+		Title:         "Permission prompt stall",
+		Body:          msg,
+		Subject:       event.SessionName,
+		Severity:      AlertSeverityCritical,
+		Actionability: AlertAgentActionable,
+		Target:        sr.resolveOrchestrator(),
+		OccurredAt:    event.DetectedAt,
+		Meta: map[string]any{
+			"stall_type": event.StallType,
+			"duration":   event.Duration.String(),
+			"evidence":   event.Evidence,
+		},
 	})
 
 	if err != nil {
@@ -127,8 +128,14 @@ func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event S
 		return action, err
 	}
 
-	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent alert to %s", target)
+	// A queued alert reached nobody, and a suppressed duplicate of a queued
+	// alert reached nobody either. Reporting either as sent would let
+	// Recover publish StallRecovered over an unresolved critical stall.
+	action.Sent = rec.Delivered()
+	action.Description = fmt.Sprintf("Alert status %s target %s", rec.Status, rec.Target)
+	if !action.Sent {
+		return action, fmt.Errorf("permission-prompt alert not delivered (status %s): %s", rec.Status, alertFailureReason(rec))
+	}
 	return action, nil
 }
 
@@ -158,26 +165,27 @@ func (sr *StallRecovery) recoverNoCommitStall(_ context.Context, event StallEven
 }
 
 // recoverErrorLoopStall handles recovery from error loop stalls.
-func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverErrorLoopStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "log_diagnostic",
 	}
 
-	target := sr.resolveOrchestrator()
-	if target == "" {
-		// Just log locally if no orchestrator
-		action.Description = fmt.Sprintf("Error loop detected: %s%s", event.Evidence, errorContext)
-		action.Sent = true
-		return action, nil
-	}
-
-	// Send diagnostic to orchestrator
 	msg := fmt.Sprintf("🔄 ERROR_LOOP detected in %s:\n%s%s", event.SessionName, event.Evidence, errorContext)
-
-	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: target,
-		Message:   msg,
+	rec, err := sr.alertRouter().Route(ctx, AlertRequest{
+		Kind:          "stall.error_loop",
+		Source:        "agm-watch-stalled",
+		Title:         "Error loop diagnostic",
+		Body:          msg,
+		Subject:       event.SessionName,
+		Severity:      AlertSeverityWarning,
+		Actionability: AlertAgentActionable,
+		Target:        sr.resolveOrchestrator(),
+		OccurredAt:    event.DetectedAt,
+		Meta: map[string]any{
+			"stall_type": event.StallType,
+			"evidence":   event.Evidence,
+		},
 	})
 
 	if err != nil {
@@ -185,8 +193,14 @@ func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEve
 		return action, err
 	}
 
-	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent diagnostic to %s", target)
+	// Queued is the router's word for "delivery failed"; counting it as
+	// sent would mark the recovery successful and stop the retry tracker
+	// from ever advancing toward max-retry escalation.
+	action.Sent = rec.Delivered()
+	action.Description = fmt.Sprintf("Diagnostic status %s target %s", rec.Status, rec.Target)
+	if !action.Sent {
+		return action, fmt.Errorf("error-loop diagnostic not delivered (status %s): %s", rec.Status, alertFailureReason(rec))
+	}
 	return action, nil
 }
 
@@ -229,15 +243,10 @@ func (sr *StallRecovery) recordFailure(sessionName string, errorMsg string) erro
 }
 
 // escalateFailure escalates a session to the orchestrator after max retries exceeded.
-func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, retryState *RetryState) (RecoveryAction, error) {
+func (sr *StallRecovery) escalateFailure(ctx context.Context, event StallEvent, retryState *RetryState) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "escalate",
-	}
-
-	target := sr.resolveOrchestrator()
-	if target == "" {
-		return action, fmt.Errorf("no orchestrator session configured for escalation")
 	}
 
 	// Create escalation message with full context
@@ -250,9 +259,16 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 		retryState.LastAttempt,
 	)
 
-	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: target,
-		Message:   msg,
+	rec, err := sr.alertRouter().Route(ctx, AlertRequest{
+		Kind:          "stall.escalation",
+		Source:        "agm-watch-stalled",
+		Title:         "Stall recovery escalation",
+		Body:          msg,
+		Subject:       event.SessionName,
+		Severity:      AlertSeverityCritical,
+		Actionability: AlertAgentActionable,
+		Target:        sr.resolveOrchestrator(),
+		OccurredAt:    event.DetectedAt,
 	})
 
 	if err != nil {
@@ -260,19 +276,15 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 		return action, err
 	}
 
-	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Escalated to %s after %d failed attempts", target, retryState.AttemptCount)
+	action.Sent = rec.Delivered()
+	action.Description = fmt.Sprintf("Escalated status %s target %s after %d failed attempts", rec.Status, rec.Target, retryState.AttemptCount)
+	if !action.Sent {
+		return action, fmt.Errorf("escalation not delivered (status %s): %s", rec.Status, alertFailureReason(rec))
+	}
 
 	sr.publishEscalated(event, retryState.AttemptCount)
 	// Record as final failure - don't record more attempts after escalation
 	return action, nil
-}
-
-func (sr *StallRecovery) resolveOrchestrator() string {
-	if sr.orchestratorTarget != nil {
-		return sr.orchestratorTarget(sr.orchestratorName)
-	}
-	return sr.orchestratorName
 }
 
 // SetBus sets the event bus broadcaster for publishing recovery/escalation events.
@@ -312,4 +324,55 @@ func (sr *StallRecovery) publishEscalated(event StallEvent, attemptCount int) {
 		return
 	}
 	sr.bus.Broadcast(busEvent)
+}
+
+// alertFailureReason renders why an alert did not reach a recipient.
+func alertFailureReason(rec AlertRecord) string {
+	if rec.Error != "" {
+		return rec.Error
+	}
+	return "no reason recorded"
+}
+
+// SetAlertRouter overrides the router stall recovery delivers through.
+//
+// Tests must set it. The default router writes to the host-wide
+// ~/.agm/alerts/queue.jsonl, so without injection `go test ./agm/internal/ops`
+// appends synthetic alerts to the developer's real queue, and tests
+// suppress one another through that shared persisted state.
+func (sr *StallRecovery) SetAlertRouter(router *AlertRouter) {
+	sr.router = router
+}
+
+// alertRouter returns the injected router, or builds the default one.
+func (sr *StallRecovery) alertRouter() *AlertRouter {
+	if sr.router != nil {
+		return sr.router
+	}
+	sr.router = NewAlertRouter(sr.ctx)
+	return sr.router
+}
+
+// SetOrchestratorTargetResolver overrides how a stalled session's alert
+// target is resolved, so the target can be looked up live instead of being
+// fixed at construction.
+func (sr *StallRecovery) SetOrchestratorTargetResolver(resolve func(string) string) {
+	sr.orchestratorTarget = resolve
+}
+
+// resolveOrchestrator reports the preferred recipient for this recovery's
+// alerts.
+//
+// This is the seam where the two halves of routing meet: it yields the
+// live relay target (state file, then AGM_COMPLETION_RELAY_TARGET, then
+// the --orchestrator fallback), and the alert router then treats that as
+// its explicit first candidate, checking it for liveness before falling
+// through to discovery and finally to the durable queue. An operator
+// retargeting relay therefore steers stall alerts too, without the router
+// losing its ability to find someone else when that target is dead.
+func (sr *StallRecovery) resolveOrchestrator() string {
+	if sr.orchestratorTarget != nil {
+		return sr.orchestratorTarget(sr.orchestratorName)
+	}
+	return sr.orchestratorName
 }

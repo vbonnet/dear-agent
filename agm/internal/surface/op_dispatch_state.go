@@ -13,7 +13,7 @@ var GetCompletionRelayTarget = codegen.Op{
 	HandlerFunc:  "GetCompletionRelayTarget",
 	MCP: &codegen.MCPSurface{
 		ToolName:    "agm_get_completion_relay_target",
-		Description: "Read the live AGM completion relay target. Use before relying on completion notifications from AGM-created sessions.",
+		Description: "Read the live AGM completion relay target override. An empty target with source fallback means no override is set, and routing then discovers a live supervisor at delivery time.",
 	},
 }
 

@@ -699,16 +699,17 @@ func checkRelayTarget(ctx context.Context, newOpContext mcpOpContextFactory, ide
 func addCompletionRelayTargetToolsWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_get_completion_relay_target",
-		Description: "Read the live AGM completion relay target. Use before relying on completion notifications from AGM-created sessions.",
+		Description: "Read the live AGM completion relay target override. An empty target with source fallback means no override is set, and routing then discovers a live supervisor at delivery time.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ GetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
-		// Resolve against the installed default so this reports the
-		// recipient a running watcher would actually use, not just whether
-		// an override happens to be set.
-		result := dispatchstate.ResolveRelayTarget(home, dispatchstate.DefaultRelayFallback, os.Getenv)
+		// Report the override only. Under runtime discovery there is no
+		// installed default to name: with no override, routing picks a live
+		// supervisor at delivery time, so claiming a fixed fallback here
+		// would be a confident wrong answer rather than a helpful one.
+		result := dispatchstate.ResolveRelayTarget(home, "", os.Getenv)
 		return mcpSuccess(result), result, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{

@@ -186,7 +186,7 @@ type GetCompletionRelayTargetMCPInput struct {
 func AddGetCompletionRelayTargetTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), error)) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_get_completion_relay_target",
-		Description: "Read the live AGM completion relay target. Use before relying on completion notifications from AGM-created sessions.",
+		Description: "Read the live AGM completion relay target override. An empty target with source fallback means no override is set, and routing then discovers a live supervisor at delivery time.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetCompletionRelayTargetMCPInput) (*mcp.CallToolResult, any, error) {
 		opCtx, cleanup, err := newOpCtx()
 		if err != nil {

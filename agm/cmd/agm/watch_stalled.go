@@ -129,7 +129,7 @@ func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfac
 			TransitionType: event.TransitionType,
 			OutputBytes:    len(event.Output),
 		}
-		// One plan per event: it carries the single relay-target read this
+		// One plan per event: it carries the single target resolution this
 		// event is both filtered against and delivered to.
 		plan := surfacer.planFor(event)
 		if !dryRun && plan.surface {
@@ -195,6 +195,13 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
 			return nil
 		case <-ticker.C:
+			// Drain first: an alert queued on an earlier scan reached nobody,
+			// and this loop is the only thing that reliably notices a
+			// supervisor has come back. Without it, an alert raised during a
+			// transient outage would sit in the file until someone looked.
+			if !stalledDryRun {
+				drainQueuedAlerts(ctx, opCtx)
+			}
 			if completions != nil {
 				emitCompletions(ctx, completions, surfacer, stalledDryRun)
 			}
@@ -280,4 +287,23 @@ func formatDurationForJSON(d time.Duration) string {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh%dm", h, m)
+}
+
+// drainQueuedAlerts re-attempts delivery for alerts still recorded as
+// queued. It is best-effort: a drain failure must never stop the watch loop
+// that stall detection depends on.
+func drainQueuedAlerts(ctx context.Context, opCtx *ops.OpContext) {
+	delivered, err := ops.NewAlertRouter(opCtx).DrainQueued(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error draining queued alerts: %v\n", err)
+		return
+	}
+	if delivered > 0 {
+		data, _ := json.Marshal(map[string]any{
+			"timestamp":  time.Now().Format(time.RFC3339),
+			"event_type": "alerts_drained",
+			"delivered":  delivered,
+		})
+		fmt.Println(string(data))
+	}
 }
