@@ -72,3 +72,31 @@ generated-file refresh, a vendored dependency update. Say so explicitly in the
 PR description, and keep the mechanical part in its own commit so a reviewer can
 skip the bulk and read the rest. "It was all one task" is not the same as
 atomic — discovering two problems in one session does not make them one change.
+
+## Verification
+
+Before opening the PR, both must hold:
+
+- `git diff --shortstat origin/main...HEAD` is at or under **400 changed lines**,
+  and `git diff --name-only origin/main...HEAD | wc -l` is at or under **15**.
+- The branch does not contain both a pure rename/move of a source file and
+  net-new logic built on it. Check with
+  `git diff -M --numstat origin/main...HEAD` — a record showing `0 0` with
+  `old => new` is a pure move.
+
+If either fails, split before opening rather than after. Splitting a branch you
+have not yet published costs one `git reset --soft`; splitting a PR that is
+already open and reviewed costs a restack, which this repository does not
+support end to end (see CONTRIBUTING.md).
+
+If you open it anyway, say in the PR description which of the atomic cases
+applies and why. An unexplained over-budget PR is the failure this skill exists
+to prevent — the CI split-request job will ask, and the weekly audit will record
+the answer.
+
+## References
+
+- `CONTRIBUTING.md` section "Small, stacked PRs": the budget and the split order.
+- `.github/workflows/pr-size-scope.yml`: the deterministic gate and the
+  split-request job that asks when it trips.
+- `cmd/pr-size-audit`: the weekly sweep that reports merged offenders.
