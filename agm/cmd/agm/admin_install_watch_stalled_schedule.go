@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,7 @@ const watchStalledPlistFile = "schedules/com.dear-agent.watch-stalled.plist"
 
 // defaultStallOrchestrator is the VROOM mesh session that owns worker
 // monitoring; stall alerts route here unless --orchestrator overrides it.
-const defaultStallOrchestrator = "vroom-orchestrator"
+const defaultStallOrchestrator = dispatchstate.DefaultRelayFallback
 
 var (
 	watchStalledOrchestrator string

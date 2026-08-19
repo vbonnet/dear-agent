@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -317,6 +320,16 @@ func killSessionRequestFromMCP(input KillSessionInput) (*ops.KillSessionRequest,
 type SendMessageInput struct {
 	SessionID string `json:"session_id" jsonschema:"Session ID, name, or UUID prefix of the target session (required)"`
 	Message   string `json:"message" jsonschema:"Message text to send to the session (required)"`
+}
+
+type SetCompletionRelayTargetInput struct {
+	SessionID string `json:"session_id" jsonschema:"Live Dispatch/AGM session ID or name that should receive completion relays (required)"`
+}
+
+type GetCompletionRelayTargetInput struct{}
+
+type QuotaStatusInput struct {
+	Provider string `json:"provider,omitempty" jsonschema:"Provider quota to read. Defaults to codex."`
 }
 
 func addArchiveSessionTool(server *mcp.Server, _ *Config) {
@@ -632,6 +645,114 @@ func addSendMessageToolWithFactory(server *mcp.Server, newOpContext mcpOpContext
 			attribute.String("agm.recipient", result.Recipient),
 		)
 
+		return mcpSuccess(result), result, nil
+	})
+}
+
+func addCompletionRelayTargetTools(server *mcp.Server, _ *Config) {
+	addCompletionRelayTargetToolsWithFactory(server, newMCPOpContext)
+}
+
+// relayTargetSetResult is what the setter returns: the persisted state plus
+// whether the identifier was checked against the session store.
+type relayTargetSetResult struct {
+	dispatchstate.RelayTargetResult
+	// Verified is true when the identifier resolved to a known session.
+	Verified bool `json:"verified"`
+	// Warning explains an unverified write; empty when Verified is true.
+	Warning string `json:"warning,omitempty"`
+}
+
+// checkRelayTarget reports whether identifier names a session AGM knows.
+//
+// An unresolvable target is rejected rather than persisted, because the
+// setter's whole purpose is to stop losing notifications: a typo, an
+// expired ID, or a session from another workspace would otherwise be
+// accepted with a success response and then send every subsequent
+// completion and stall alert into "Session not found".
+//
+// A session store that cannot be opened is deliberately not a rejection.
+// This state lives outside that store precisely so relay can be retargeted
+// while it is unreachable, so the write proceeds and the caller is told
+// the target went unverified. The returned error means "definitely not a
+// session"; a returned warning means "could not check".
+func checkRelayTarget(ctx context.Context, newOpContext mcpOpContextFactory, identifier string) (string, error) {
+	opCtx, cleanup, err := newOpContext()
+	if err != nil {
+		return "target not verified: session store unavailable (" + err.Error() + ")", nil
+	}
+	defer cleanup()
+	opCtx.Context = ctx
+	if _, err := ops.GetSession(opCtx, &ops.GetSessionRequest{Identifier: identifier}); err != nil {
+		// Only a definitive "no such session" rejects the write. Any other
+		// failure (store down, lock timeout) is a check we could not run,
+		// and must not block retargeting.
+		var opErr *ops.OpError
+		if errors.As(err, &opErr) && opErr.Code == ops.ErrCodeSessionNotFound {
+			return "", err
+		}
+		return "target not verified: session lookup failed (" + err.Error() + ")", nil
+	}
+	return "", nil
+}
+
+func addCompletionRelayTargetToolsWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_completion_relay_target",
+		Description: "Read the live AGM completion relay target. Use before relying on completion notifications from AGM-created sessions.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ GetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		// Resolve against the installed default so this reports the
+		// recipient a running watcher would actually use, not just whether
+		// an override happens to be set.
+		result := dispatchstate.ResolveRelayTarget(home, dispatchstate.DefaultRelayFallback, os.Getenv)
+		return mcpSuccess(result), result, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_set_completion_relay_target",
+		Description: "Set the live Dispatch/AGM session that receives completion relays from the watcher. Takes effect without restarting the watcher.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
+		if strings.TrimSpace(input.SessionID) == "" {
+			return mcpError(ops.ErrInvalidInput("session_id", "Session identifier is required.")), nil, nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		warning, notFound := checkRelayTarget(ctx, newOpContext, input.SessionID)
+		if notFound != nil {
+			return mcpError(notFound), nil, nil
+		}
+		persisted, err := dispatchstate.SetRelayTarget(home, input.SessionID)
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		result := relayTargetSetResult{
+			RelayTargetResult: persisted,
+			Verified:          warning == "",
+			Warning:           warning,
+		}
+		return mcpSuccess(result), result, nil
+	})
+}
+
+func addQuotaStatusTool(server *mcp.Server, _ *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_quota_status",
+		Description: "Read the latest provider quota status captured by CodexBar. Use to pace Dispatch work when a provider is throttled or near-empty.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input QuotaStatusInput) (*mcp.CallToolResult, any, error) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		provider := input.Provider
+		if provider == "" {
+			provider = "codex"
+		}
+		result := dispatchstate.ReadQuotaStatus(home, provider, time.Now())
 		return mcpSuccess(result), result, nil
 	})
 }

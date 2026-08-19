@@ -95,6 +95,7 @@ Recommended: cache to file for fast startup:
 			fmt.Sprintf("write completion to ~/.cache/%s instead of stdout", def.cacheFile))
 		parent.AddCommand(sub)
 	}
+	parent.AddCommand(completionRelayTargetCmd)
 
 	return parent
 }

@@ -3,9 +3,9 @@ package ops
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/eventbus"
-	"strings"
 )
 
 // RecoveryAction represents an action taken to recover from a stall.
@@ -24,6 +24,7 @@ type StallRecovery struct {
 	autoApprovePatterns []string             // Safe patterns to auto-approve
 	retryTracker        *RetryTracker        // Tracks retry attempts with bounded retries
 	bus                 eventbus.Broadcaster // Optional: publishes StallRecovered/StallEscalated events
+	orchestratorTarget  func(string) string
 }
 
 // NewStallRecovery creates a new stall recovery handler with retry tracking.
@@ -43,6 +44,13 @@ func NewStallRecovery(ctx *OpContext, orchestratorName string) *StallRecovery {
 		},
 		retryTracker: NewRetryTracker(getRetryBaseDir()),
 	}
+}
+
+// SetOrchestratorTargetResolver overrides how a stalled session's
+// orchestrator target is resolved, so the target can be looked up live
+// instead of being fixed at construction.
+func (sr *StallRecovery) SetOrchestratorTargetResolver(resolve func(string) string) {
+	sr.orchestratorTarget = resolve
 }
 
 // Recover takes corrective action for a detected stall with retry tracking.
@@ -101,7 +109,8 @@ func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event S
 	}
 
 	// Send alert to orchestrator
-	if sr.orchestratorName == "" {
+	target := sr.resolveOrchestrator()
+	if target == "" {
 		return action, fmt.Errorf("no orchestrator session configured")
 	}
 
@@ -109,7 +118,7 @@ func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event S
 		event.SessionName, formatDuration(event.Duration), errorContext)
 
 	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: sr.orchestratorName,
+		Recipient: target,
 		Message:   msg,
 	})
 
@@ -119,7 +128,7 @@ func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event S
 	}
 
 	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent alert to %s", sr.orchestratorName)
+	action.Description = fmt.Sprintf("Sent alert to %s", target)
 	return action, nil
 }
 
@@ -155,7 +164,8 @@ func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEve
 		ActionType:  "log_diagnostic",
 	}
 
-	if sr.orchestratorName == "" {
+	target := sr.resolveOrchestrator()
+	if target == "" {
 		// Just log locally if no orchestrator
 		action.Description = fmt.Sprintf("Error loop detected: %s%s", event.Evidence, errorContext)
 		action.Sent = true
@@ -166,7 +176,7 @@ func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEve
 	msg := fmt.Sprintf("🔄 ERROR_LOOP detected in %s:\n%s%s", event.SessionName, event.Evidence, errorContext)
 
 	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: sr.orchestratorName,
+		Recipient: target,
 		Message:   msg,
 	})
 
@@ -176,7 +186,7 @@ func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEve
 	}
 
 	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent diagnostic to %s", sr.orchestratorName)
+	action.Description = fmt.Sprintf("Sent diagnostic to %s", target)
 	return action, nil
 }
 
@@ -225,7 +235,8 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 		ActionType:  "escalate",
 	}
 
-	if sr.orchestratorName == "" {
+	target := sr.resolveOrchestrator()
+	if target == "" {
 		return action, fmt.Errorf("no orchestrator session configured for escalation")
 	}
 
@@ -240,7 +251,7 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 	)
 
 	result, err := SendMessage(sr.ctx, &SendMessageRequest{
-		Recipient: sr.orchestratorName,
+		Recipient: target,
 		Message:   msg,
 	})
 
@@ -250,11 +261,18 @@ func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, re
 	}
 
 	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Escalated to %s after %d failed attempts", sr.orchestratorName, retryState.AttemptCount)
+	action.Description = fmt.Sprintf("Escalated to %s after %d failed attempts", target, retryState.AttemptCount)
 
 	sr.publishEscalated(event, retryState.AttemptCount)
 	// Record as final failure - don't record more attempts after escalation
 	return action, nil
+}
+
+func (sr *StallRecovery) resolveOrchestrator() string {
+	if sr.orchestratorTarget != nil {
+		return sr.orchestratorTarget(sr.orchestratorName)
+	}
+	return sr.orchestratorName
 }
 
 // SetBus sets the event bus broadcaster for publishing recovery/escalation events.

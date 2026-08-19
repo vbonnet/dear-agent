@@ -83,6 +83,31 @@ func TestRecoverErrorLoopStall_WithOrchestrator(t *testing.T) {
 	}
 }
 
+func TestRecoverErrorLoopStall_UsesResolvedOrchestratorTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	mockStore := &mockStorage{
+		sessions: []*manifest.Manifest{
+			testManifest("worker-2", manifest.StateWorking, time.Now()),
+			testManifest("dispatch-live", manifest.StateReady, time.Now()),
+		},
+	}
+	recovery := NewStallRecovery(&OpContext{Storage: mockStore}, "vroom-orchestrator")
+	recovery.SetOrchestratorTargetResolver(func(string) string { return "dispatch-live" })
+	event := StallEvent{
+		SessionName: "worker-2",
+		StallType:   "error_loop",
+		Evidence:    "Error: permission denied appears 3 times",
+	}
+
+	action, err := recovery.recoverErrorLoopStall(context.Background(), event, "")
+	if err != nil {
+		t.Fatalf("recoverErrorLoopStall() error = %v", err)
+	}
+	if action.Description != "Sent diagnostic to dispatch-live" {
+		t.Errorf("Description = %q, want live Dispatch target", action.Description)
+	}
+}
+
 func TestRecoverErrorLoopStall_NoOrchestrator(t *testing.T) {
 	recovery := NewStallRecovery(&OpContext{}, "")
 	event := StallEvent{
