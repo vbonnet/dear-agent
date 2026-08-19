@@ -251,8 +251,8 @@ func validateDeclarativeRuntimeAsset(root, dir, asset string) error {
 	if err != nil {
 		return fmt.Errorf("stat declarative runtime asset %s: %w", path, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("declarative runtime asset %s must be a regular discoverable file, not a symlink", path)
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("declarative runtime asset %s must be a regular discoverable file", path)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
