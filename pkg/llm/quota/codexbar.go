@@ -83,6 +83,11 @@ type CodexBarReader struct {
 	// under its own id as the family, so unmapped providers stay visible
 	// instead of vanishing.
 	FamilyAliases map[string]string
+
+	// SkipPace omits the second invocation that collects burn-rate
+	// readings. Routing needs only remaining percent; a caller that does
+	// not run the cost guardrail can halve the read cost by setting this.
+	SkipPace bool
 }
 
 // Read runs `codexbar dashboard --identity redacted` and parses the result.
@@ -107,7 +112,14 @@ func (r CodexBarReader) Read(ctx context.Context) (*Snapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("quota: run %s dashboard: %w", command, redactExecError(err))
 	}
-	return ParseCodexBarDashboard(out, r.aliases())
+	snapshot, err := ParseCodexBarDashboard(out, r.aliases())
+	if err != nil {
+		return nil, err
+	}
+	if !r.SkipPace {
+		r.readPace(ctx, snapshot, command, runner, timeout)
+	}
+	return snapshot, nil
 }
 
 func (r CodexBarReader) aliases() map[string]string {

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.quota-refresh — half-hourly provider-quota reading.
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.quota-refresh.plist
+  Installed by `agm admin install-quota-schedule`, which substitutes
+  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd
+  does not expand ~ or shell variables).
+
+  Schedule: every 30 minutes (StartInterval = 1800 seconds).
+  Logs:     <home>/Library/Logs/dear-agent/quota-refresh.log
+  Publishes: <home>/.local/state/dear-agent/quota/latest.json
+
+  This job is what makes the cost guardrail real. Reading the meter takes
+  seconds, so nothing on the spawn path may do it; instead every consumer —
+  the provider_quota circuit-breaker gate, `agm quota`, and the orchestrator
+  — reads the file this job publishes.
+
+  The interval is half the guardrail's 90-minute staleness limit, so a single
+  missed run still leaves a usable reading. If this job stops, readings go
+  stale and the guardrail fails open: it stops halting spawns rather than
+  halting them on data it cannot trust.
+
+  Trigger an immediate refresh outside the schedule with:
+    launchctl kickstart gui/$UID/com.dear-agent.quota-refresh
+
+  To remove the job, use 'agm admin uninstall-quota-schedule'.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.quota-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>quota</string>
+        <string>--refresh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/quota-refresh.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/quota-refresh.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+    <key>WorkingDirectory</key>
+    <string>__USER_HOME__</string>
+</dict>
+</plist>

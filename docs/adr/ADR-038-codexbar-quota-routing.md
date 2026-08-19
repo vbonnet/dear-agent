@@ -1,4 +1,4 @@
-# ADR-038: CodexBar-backed quota-aware model routing
+# ADR-038: CodexBar-backed quota-aware routing and cost guardrail
 
 Status: Accepted (2026-08-11)
 
@@ -108,6 +108,59 @@ when `codexbar` is already on `PATH`, `on` forces it, `off` disables it. dear-ag
 never installs or auto-starts CodexBar — that stays an operator decision, gated
 by the audit above.
 
+### The cost guardrail
+
+Routing preference is not a budget control. Reordering a candidate chain
+changes which provider a role prefers; it cannot stop a fleet from spending a
+subscription down to zero, because every candidate is still allowed. The
+guardrail is the part that says no.
+
+It gates **spawns**, not requests. An agent session spends for as long as it
+lives, so refusing to start one is the control that actually bounds cost;
+refusing a call inside a session already running mostly just breaks that
+session. `agm/internal/circuitbreaker` already owns spawn admission for every
+sanctioned path, so the guardrail is a new gate there — `provider_quota` —
+rather than a second mechanism beside it.
+
+Two signals trip it:
+
+- **Headroom.** Remaining quota at or below the halt floor (3%).
+- **Burn rate.** CodexBar's `pace` reading says the current rate will not reach
+  the window's reset. Headroom alone cannot distinguish "50% left, spending
+  normally" from "50% left, gone in six hours" — that difference is the whole
+  point of a runaway-cost guardrail. Below the spike floor (20% headroom) an
+  overspend halts; above it, there is still room to correct, so it throttles.
+
+`pace` lives on CodexBar's `usage` surface rather than `dashboard`, so
+collecting it costs a second invocation. That surface has no
+`--identity redacted` mode, so the parser declares only `provider` and `pace`:
+account addresses are dropped during decoding rather than ignored afterwards.
+
+The **fail-safe direction is inverted relative to its neighbours**, and
+deliberately. Every other gate in that package fails closed — an unreadable
+disk or process table refuses the spawn, because those guard against the
+resource fill that took the host down. This one fails open. A missing quota
+reading is not evidence that a budget is spent, and halting the whole fleet
+because a meter is uninstalled, signed out, or merely stale would be a far
+worse failure than one spawn too many.
+
+### The published state file
+
+Reading the meter takes seconds, so no consumer may do it inline. One
+scheduled job (`agm admin install-quota-schedule`, every 30 minutes) publishes
+`~/.local/state/dear-agent/quota/latest.json` atomically; the guardrail,
+`agm quota`, and the orchestrator all read that file in O(1).
+
+The file is versioned and carries the verdicts, not just raw percentages, so
+consumers do not each re-derive policy. It records `readable` separately from
+`remainingPercent` so a consumer cannot mistake an unreadable provider for an
+exhausted one.
+
+The interval is half the 90-minute gating age, so one missed run still leaves
+a usable reading. If the job dies, readings go stale and the guardrail stops
+halting spawns — safe, but it means a dead job silently removes the guardrail.
+`agm quota` prints STALE so the condition is visible rather than silent.
+
 ## Alternatives
 
 **Per-request token accounting in this repo.** Cannot see usage from Claude
@@ -124,6 +177,16 @@ storage layouts.
 **Hard-coded provider weights.** Simplest, but blind to resets, to usage from
 outside dear-agent, and to per-account plan differences — which is exactly the
 information that makes the meter worth having.
+
+**Gating requests instead of spawns.** Bounds nothing useful: a session that
+has already started keeps spending, and failing its calls mid-flight breaks
+work rather than preventing it.
+
+**A dollar-denominated guardrail on top of `pkg/costtrack`.** That machinery
+already exists and stays as it is. It cannot see subscription plans, which is
+where the binding limits are: Claude Max, Codex Pro, and Google AI Ultra
+enforce rolling and weekly windows that no per-token accounting in this repo
+observes, and no dollar figure is attached to them at all.
 
 **Blocking the routing path on a fresh reading.** Correctness for latency at a
 5–30 s exchange rate. Rejected; the meter refreshes in the background and

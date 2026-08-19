@@ -99,8 +99,55 @@ type ProviderQuota struct {
 	// windows, weekly caps, and any provider-specific extras.
 	Windows []Window
 
+	// Pace is the burn-rate reading: how consumption compares to the
+	// straight-line pace that would exactly exhaust the window at its
+	// reset. Nil when the source did not report one.
+	//
+	// Remaining percent alone cannot distinguish "60% left, three days to
+	// reset, spending normally" from "60% left, three days to reset,
+	// burning it in six hours". Pace is what makes a spend spike
+	// detectable before the budget is actually gone.
+	Pace *Pace
+
 	// UpdatedAt is when the source last refreshed this provider.
 	UpdatedAt time.Time
+}
+
+// Pace describes consumption relative to the window's own clock.
+type Pace struct {
+	// Stage is the source's own classification, e.g. "farAhead",
+	// "ahead", "onTrack", "behind".
+	Stage string
+
+	// DeltaPercent is how far ahead of the straight-line pace the
+	// provider is, in percentage points. Positive means overspending.
+	DeltaPercent float64
+
+	// ExpectedUsedPercent is what a straight-line burn would have
+	// consumed by now.
+	ExpectedUsedPercent float64
+
+	// WillLastToReset is the source's verdict on whether the current
+	// burn rate reaches the window reset. False is the spike signal.
+	WillLastToReset bool
+
+	// ExhaustsIn estimates time until the window is empty at the current
+	// rate. Zero when the source did not project one.
+	ExhaustsIn time.Duration
+
+	// Summary is the source's one-line explanation, kept verbatim so an
+	// operator sees the same sentence the meter's own UI shows.
+	Summary string
+}
+
+// Overspending reports whether the pace reading indicates consumption
+// that outruns the window's reset. A nil Pace is not overspending —
+// absence of a reading is never treated as a problem.
+func (p *Pace) Overspending() bool {
+	if p == nil {
+		return false
+	}
+	return !p.WillLastToReset
 }
 
 // Window is one sub-budget within a provider — a single rate-limit or
