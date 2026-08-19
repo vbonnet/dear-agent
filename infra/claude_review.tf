@@ -24,30 +24,15 @@
 #
 # ROLLOUT (this is guidance for repos.auto.tfvars, which is gitignored and not
 # committed to this public repo — see repos.auto.tfvars.example for the
-# mechanical schema). Default the fleet split like this:
+# mechanical schema). Keep repository identities and classifications in that
+# private inventory. The fleet policy is:
 #
-#   Non-PII repos (safe default: enable_claude_review = true)
-#     dear-agent        — excluded from the fan-out (see above); already live
-#                          via its own committed workflow file.
-#     ai-tools
-#     codebase-analyzer
-#     gdoc-sync
-#     vbonnet.ai
-#
-#   Deliberate private-repo opt-in (enable_claude_review = true; owner
-#   sign-off recorded 2026-07-19 — code from this repo ships to Anthropic's
-#   API on every PR, same as the public repos above, but the repo itself is
-#   private):
-#     engram-research
-#
-#   PII repos (opt-in only, still OFF — enabling ships code to Anthropic's
-#   API for review; that's a data-handling decision for a human, not a
-#   default this IaC should make):
-#     engram-kb
-#     brain-v2
-#     ai-conversation-logs
-#   Leave `enable_claude_review` unset (defaults to false) for these until a
-#   human explicitly decides to opt one in.
+#   * dear-agent is excluded from fan-out and owns the reference workflow.
+#   * Public and otherwise non-sensitive repositories may opt in by default.
+#   * Every private repository requires recorded owner approval because review
+#     sends pull-request code to Anthropic's API.
+#   * Repositories containing PII remain off until a human explicitly approves
+#     that data-handling decision.
 ###############################################################################
 
 locals {

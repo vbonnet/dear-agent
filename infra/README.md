@@ -4,9 +4,10 @@ OpenTofu Infrastructure-as-Code for GitHub repositories under `vbonnet/` and
 the `dear-labs` organization. Manages security defaults, branch protection, and
 org-level rulesets.
 
-> **Supersedes `vbonnet/infra-iac`** — that standalone repo was the initial
-> attempt; this directory is the canonical home going forward. Archive
-> `infra-iac` once you've run `./import.sh` and `tofu apply` here.
+> **Supersedes the standalone IaC repository** — that repository was the
+> initial attempt; this directory is the canonical home going forward. Archive
+> the superseded repository only after completing the independently verified saved-plan
+> workflow here.
 
 ## Layout
 
@@ -14,7 +15,7 @@ org-level rulesets.
 infra/
 ├── providers.tf              # Two GitHub providers: personal + dear-labs org
 ├── variables.tf              # personal_owner, org_name (token via env only)
-├── locals.tf                 # Repo inventory with per-repo required CI checks
+├── locals.tf                 # Canonical dear-agent ruleset projection + safety checks
 ├── managed_repos.tf          # for_each instantiation of ./modules/managed-repo (active repos)
 ├── repos.tf                  # github_repository.archived (frozen, ignore_changes=all)
 ├── moved.tf                  # state migration: inline resources → module (ce-32o5)
@@ -29,9 +30,10 @@ infra/
 
 The active vbonnet/* fleet — `github_repository`, Dependabot security updates,
 and the branch-protection ruleset — is encapsulated in the **`modules/managed-repo`**
-module and instantiated once via `for_each` over `local.active_repos` in
+module and instantiated once via `for_each` over `var.active_repos` in
 `managed_repos.tf`. Fleet-wide policy changes live in the module; the per-repo
-inventory lives in `locals.tf`. The module is provider-agnostic, so the same
+inventory is supplied privately through `var.active_repos` and
+`var.archived_repos`. The module is provider-agnostic, so the same
 policy can be applied to dear-labs org repos via the `github.dearlabs` provider
 alias once they exist (see `modules/managed-repo/README.md`).
 
@@ -91,14 +93,33 @@ export AWS_SECRET_ACCESS_KEY="<R2 token Secret Access Key>"
 ### Migrating existing local state → R2
 
 If you already have a local `terraform.tfstate` from an earlier apply, push it
-to the remote backend once:
+to the remote backend once. Before any production import, plan, or apply,
+provision the complete gitignored `repos.auto.tfvars` (or both inventory
+`TF_VAR_*` values), `backend.hcl`, the real managed OAuth value, the R2
+credentials, and a GitHub token with both `repo` and `admin:org` scopes. Stop
+before state mutation if any prerequisite is unavailable.
 
 ```bash
 cd infra/
 export GITHUB_TOKEN="$(gh auth token)"
 export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...
+export TF_VAR_claude_code_oauth_token=...               # real managed value
+test -s backend.hcl
+if [ ! -s repos.auto.tfvars ]; then
+  : "${TF_VAR_active_repos:?set active inventory}"
+  : "${TF_VAR_archived_repos:?set archived inventory}"
+fi
 tofu init -backend-config=backend.hcl -migrate-state   # prompts y/n to copy state up
-tofu plan                                              # expect 0 changes
+umask 077
+plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/dear-agent-infra.XXXXXX")"
+plan_file="$plan_dir/infra.tfplan"
+trap 'rm -f -- "$plan_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
+tofu plan -out="$plan_file"                            # expect 0 changes
+printf 'plan_sha256=%s\n' "$(shasum -a 256 "$plan_file" | awk '{print $1}')"
+tofu show -no-color "$plan_file"                       # independent verifier attests exact plan + digest
+: "${ATTESTED_PLAN_SHA256:?independent exact-plan attestation required}"
+test "$(shasum -a 256 "$plan_file" | awk '{print $1}')" = "$ATTESTED_PLAN_SHA256"
+tofu apply "$plan_file"
 ```
 
 If no local state exists (e.g. the previous apply ran in an ephemeral sandbox
@@ -111,21 +132,151 @@ and the state was lost), skip the migrate and follow **First-time setup** below 
 cd infra/
 export GITHUB_TOKEN="$(gh auth token)"
 export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...   # R2 token (see Remote state)
+export TF_VAR_claude_code_oauth_token=...                  # real managed value
 cp backend.hcl.example backend.hcl                        # edit ACCOUNT_ID + bucket
+test -s backend.hcl
+if [ ! -s repos.auto.tfvars ]; then
+  : "${TF_VAR_active_repos:?set active inventory}"
+  : "${TF_VAR_archived_repos:?set archived inventory}"
+fi
 tofu init -backend-config=backend.hcl                     # initializes the R2 backend
 chmod +x import.sh
-./import.sh        # import existing repos + branch protection into state
-tofu plan          # review: expect ~0 changes for existing resources
-tofu apply         # only after a human reviews the plan
+./import.sh                                             # prove/import existing bindings
+umask 077
+plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/dear-agent-infra.XXXXXX")"
+plan_file="$plan_dir/infra.tfplan"
+trap 'rm -f -- "$plan_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
+tofu plan -out="$plan_file"
+printf 'plan_sha256=%s\n' "$(shasum -a 256 "$plan_file" | awk '{print $1}')"
+tofu show -no-color "$plan_file"                       # independent verifier attests exact plan + digest
+: "${ATTESTED_PLAN_SHA256:?independent exact-plan attestation required}"
+test "$(shasum -a 256 "$plan_file" | awk '{print $1}')" = "$ATTESTED_PLAN_SHA256"
+tofu apply "$plan_file"                                # applies the attested artifact
 ```
+
+The importer fails closed when GitHub cannot list rulesets or when more than
+one ruleset matches. For dear-agent it additionally requires existing ruleset
+ID `18061003`, accepting either its legacy `branch-protection` name or the
+current name declared in `.github/rulesets/main.json`; it never infers that a
+second ruleset is safe to create. If that ruleset address already exists in
+OpenTofu state, the importer also proves that its repository and immutable ID
+resolve to `dear-agent:18061003`; a stale binding aborts recovery.
 
 ## Day-to-day usage
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-tofu plan          # always review before applying
-tofu apply
+export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...
+export TF_VAR_claude_code_oauth_token=...               # real managed value
+test -s backend.hcl
+if [ ! -s repos.auto.tfvars ]; then
+  : "${TF_VAR_active_repos:?set active inventory}"
+  : "${TF_VAR_archived_repos:?set archived inventory}"
+fi
+tofu init -reconfigure -backend-config=backend.hcl
+umask 077
+plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/dear-agent-infra.XXXXXX")"
+plan_file="$plan_dir/infra.tfplan"
+trap 'rm -f -- "$plan_file"; rmdir "$plan_dir" 2>/dev/null || true' EXIT
+tofu plan -out="$plan_file"
+printf 'plan_sha256=%s\n' "$(shasum -a 256 "$plan_file" | awk '{print $1}')"
+tofu show -no-color "$plan_file"                       # independent verifier attests exact plan + digest
+: "${ATTESTED_PLAN_SHA256:?independent exact-plan attestation required}"
+test "$(shasum -a 256 "$plan_file" | awk '{print $1}')" = "$ATTESTED_PLAN_SHA256"
+tofu apply "$plan_file"                                # applies the attested artifact
 ```
+
+Production reconciliation requires the complete gitignored `repos.auto.tfvars` (or both
+`TF_VAR_active_repos` and `TF_VAR_archived_repos`). The GitHub token needs
+`repo` for the personal fleet and `admin:org` for the full root's dear-labs
+organization ruleset. A placeholder OAuth value is safe only in the
+credential-free pull-request fixture plan; using it in production would
+overwrite managed repository secrets. Saved plans can contain sensitive values:
+keep them outside the repository with restrictive permissions and remove them
+after the apply and verification are complete.
+
+Production plans follow a dark-factory two-process path: the planning process
+emits a saved artifact and SHA-256 digest, and an independent verifier attests
+that exact digest against the merged declaration, complete private inventory,
+and expected provider delta. Routine additive or in-place, reversible,
+unambiguous plans proceed without human approval and the apply must consume the
+attested artifact unchanged. Stop for human authorization only when the exact
+plan contains a destroy, replacement, state migration, irreversible change, or
+ambiguous effect. A changed digest invalidates the attestation and requires a
+fresh independent verification.
+
+The secret-bearing drift and inventory audits run only from trusted default-
+branch code. Scheduled runs happen automatically; an operator can request an
+immediate default-branch run with a repository dispatch (a manual branch/ref
+selector is intentionally unavailable):
+
+```bash
+gh api --method POST repos/vbonnet/dear-agent/dispatches -f event_type=tofu-drift
+gh api --method POST repos/vbonnet/dear-agent/dispatches -f event_type=branch-protection-audit
+gh api --method POST repos/vbonnet/dear-agent/dispatches -f event_type=infra-repo-reconcile
+```
+
+## Post-apply verification
+
+Run every check below after each production apply. These commands are
+assertions: any non-zero exit means the deployment is incomplete and must not
+be reported as reconciled.
+
+```bash
+set -euo pipefail
+ruleset_address='module.managed_repos["dear-agent"].github_repository_ruleset.branch_protection'
+state="$(tofu state show -no-color "$ruleset_address")"
+printf '%s\n' "$state" | grep -Eq '^[[:space:]]*repository[[:space:]]*=[[:space:]]*"dear-agent"$'
+# Assert both identifiers. `ruleset_id` is the provider's GitHub ID attribute
+# and `id` is the resource address the module output reads, so asserting only
+# one would let a rename or rebind of the other pass unnoticed.
+printf '%s\n' "$state" | grep -Eq '^[[:space:]]*ruleset_id[[:space:]]*=[[:space:]]*18061003$'
+printf '%s\n' "$state" | grep -Eq '^[[:space:]]*id[[:space:]]*=[[:space:]]*"18061003"$'
+
+# Exit 0 means state, configuration, and refreshed provider state agree.
+tofu plan -detailed-exitcode -no-color
+
+cd ..
+go run ./cmd/merge-audit \
+  --repos vbonnet/dear-agent \
+  --ruleset .github/rulesets/main.json \
+  --days 1 \
+  --dry-run \
+  --json \
+  | jq -e '[.[] | select(.type == "ruleset-drift")] | length == 0'
+
+gh api repos/vbonnet/dear-agent/rules/branches/main \
+  | jq -e '
+      [.[] | select(.ruleset_id == 18061003)] as $rules
+      | ($rules | map(.ruleset_id) | unique) == [18061003]
+        and (($rules | map(.type) | sort) == [
+          "deletion",
+          "non_fast_forward",
+          "pull_request",
+          "required_linear_history",
+          "required_status_checks"
+        ])
+    '
+```
+
+Use the next fresh pull request as an enforcement canary. The commands below
+prove every canonical context was emitted and every required check reached a
+mergeable result; GitHub returns non-zero while a required context is pending or
+failed.
+
+```bash
+set -euo pipefail
+canary_pr="<fresh-pr-number>"
+gh pr checks "$canary_pr" --repo vbonnet/dear-agent --required --watch
+missing_contexts="$(comm -23 \
+  <(jq -r '.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' .github/rulesets/main.json | sort) \
+  <(gh pr view "$canary_pr" --repo vbonnet/dear-agent --json statusCheckRollup --jq '.statusCheckRollup[].name' | sort -u))"
+test -z "$missing_contexts"
+```
+
+Also confirm strict up-to-date enforcement blocks an intentionally behind
+canary branch and that the normal squash merge succeeds only after the branch
+is current and all eight required contexts are green.
 
 ## What this manages
 
@@ -159,8 +310,22 @@ single `branch-protection` **repository ruleset** (defined in
 | Required approvers | 0 (PR required, solo reviewer sufficient) |
 | Required CI checks | per-repo (see `locals.tf`) |
 
-Required CI checks are configured per repo. Repos with no CI (`required_checks = []`)
-still get the PR-required + no-force-push rules — they just have no check gate.
+For `dear-agent`, [`.github/rulesets/main.json`](../.github/rulesets/main.json)
+is the canonical desired ruleset: `infra/locals.tf` decodes that committed JSON
+and the managed-repo module preserves its name, strictness, zero-bypass policy,
+and check context plus optional GitHub App integration ID. OpenTofu does not
+become a second policy source. An independent verifier must attest the saved
+plan's exact digest and scope, and the apply must consume that unchanged plan
+file, before the declaration becomes provider-visible.
+
+Other managed repositories retain their inventory-defined policy until each has
+its own committed canonical declaration. Existing private inventory and
+`TF_VAR_active_repos` values may keep `required_checks = ["Build & Test"]`.
+Migrate without a fleet-wide type break by adding
+`required_check_identities = [{ context = "Build & Test", integration_id = 15368 }]`;
+when present, that structured list is authoritative and preserves GitHub's full
+check identity. Repos with no CI (`required_checks = []`) still get the
+PR-required + no-force-push rules — they just have no check gate.
 
 ### dear-labs org (`dear_labs.tf`)
 
@@ -198,10 +363,10 @@ names are known.
 - **dear-labs runs in active mode.** `evaluate` (audit-only) mode is
   Enterprise-only and 422s on non-Enterprise accounts. The org has no repos
   yet, so active enforcement blocks nothing until repos are added.
-- **Archived repos are frozen.** `ai-tools`, `comp-520`, `comp-520-peephole-compiler`
-  are declared with `ignore_changes = all` because GitHub rejects mutations.
-  `engram` is likewise archived and is therefore **excluded** from
-  `active_repos` — a ruleset cannot be applied to an archived repo.
+- **Archived repos are frozen.** They are declared through the private
+  `archived_repos` inventory with `ignore_changes = all` because GitHub rejects
+  mutations. They are excluded from `active_repos`; a ruleset cannot be applied
+  to an archived repository.
 - **Personal Pro account, no merge queues.** The repository ruleset defined in
   `modules/managed-repo` works on GitHub Pro and runs in `active` enforcement —
   `evaluate` mode is Enterprise-only. Merge-queue rulesets require an
@@ -221,15 +386,25 @@ names are known.
 
 ## Adding a new repo
 
-1. Add an entry to `local.active_repos` in `locals.tf`.
-2. Run `./import.sh` (or manually `tofu import`) to import the existing repo.
-3. `tofu plan` → review → `tofu apply`.
+1. Add an entry to the private `active_repos` inventory in
+   `repos.auto.tfvars` (or its secure `TF_VAR_active_repos` equivalent).
+2. Run the fail-closed `./import.sh` to prove and import existing bindings.
+3. Save a `tofu plan`, obtain independent exact-digest verification, then apply
+   that same saved plan.
 
 ## Adding CI checks to a repo
 
-Update `required_checks` in `locals.tf`. Derive the exact check names from:
+Keep existing `required_checks` context names, then add the optional structured
+identity field one repository at a time. Preserve `integration_id` when GitHub
+returns it:
 
 ```bash
 gh api /repos/vbonnet/<repo>/commits/main/check-runs \
-  --jq '[.check_runs[].name] | unique[]'
+  --jq '[.check_runs[] | {context: .name, integration_id: .app.id}] | unique'
 ```
+
+Before removing legacy names, run a read-only plan with the real private
+`repos.auto.tfvars` (or the production `TF_VAR_active_repos` secret) and have an
+independent verifier confirm that every ruleset update is in-place. The public
+example cannot prove that private migration; do not apply until that exact plan
+and digest have been independently attested.

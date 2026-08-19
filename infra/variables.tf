@@ -23,9 +23,18 @@ variable "org_name" {
 variable "active_repos" {
   description = "Non-archived managed repositories, keyed by repo name. Populated from the gitignored repos.auto.tfvars."
   type = map(object({
-    visibility      = string
-    default_branch  = optional(string, "main")
+    visibility     = string
+    default_branch = optional(string, "main")
+    # Legacy context-only check names remain valid while private inventories and
+    # TF_VAR_active_repos are migrated. Prefer required_check_identities below
+    # whenever GitHub supplies an app identity.
     required_checks = optional(list(string), [])
+    # The structured replacement for required_checks. When non-null it is the
+    # authoritative exact GitHub check identity; legacy names are ignored.
+    required_check_identities = optional(list(object({
+      context        = string
+      integration_id = optional(number)
+    })), null)
     # Installs the CLAUDE_CODE_OAUTH_TOKEN secret. Set claude_review_rollout
     # temporarily to stage the hand-maintained workflow through a normal PR;
     # reset it after merge so GitHub's deleted rollout branch is not recreated.

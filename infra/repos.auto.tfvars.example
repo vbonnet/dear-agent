@@ -4,17 +4,20 @@
 # The real file holds private repo names + per-repo security posture and must
 # NEVER be committed to this PUBLIC repo. `tofu` auto-loads any *.auto.tfvars.
 #
-# CI note: because the real file is gitignored, CI (tofu-plan / drift /
-# reconcile) does not have it — provide the inventory to CI via secrets
-# TF_VAR_active_repos / TF_VAR_archived_repos (JSON), or run those jobs from a
-# private context that has the file.
+# CI note: the pull-request fixture plan uses the dedicated public inventory in
+# testdata/ci.tfvars.fixture. Real drift/reconcile jobs need the complete private
+# inventory through TF_VAR_active_repos / TF_VAR_archived_repos (JSON), or a
+# private context that has the real gitignored file.
 
 active_repos = {
   "example-public-repo" = {
     visibility      = "public"
     default_branch  = "main"
-    # Exact GitHub Actions check-run names required on main.
+    # Legacy context-only names remain supported while private inventory and
+    # TF_VAR_active_repos are migrated. Prefer the structured identity list
+    # below whenever GitHub reports an integration ID.
     required_checks = ["Build & Test"]
+    required_check_identities = [{ context = "Build & Test", integration_id = 15368 }]
     # Installs the Claude Code review workflow through a normal rollout PR
     # (advisory, never required). Reset this to false after that PR merges so
     # its deleted rollout branch is not recreated. See claude_review.tf for

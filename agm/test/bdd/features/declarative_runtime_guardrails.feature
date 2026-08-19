@@ -23,6 +23,8 @@
 # RELATED-SPEC: configs/workflows/SPEC.md
 # RELATED-SPEC: deploy/SPEC.md
 # RELATED-SPEC: deploy/launchd/SPEC.md
+# RELATED-SPEC: infra/SPEC.md
+# RELATED-SPEC: infra/modules/managed-repo/SPEC.md
 # RELATED-SPEC: internal/tofuimport/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/go/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
@@ -134,6 +136,15 @@ Feature: Declarative runtime guardrails
     And import identities should resolve before any state is mutated
     And an existing state address should be verified, not assumed
     And an unrecognized provider failure should stop the run
+
+  Scenario: The checked-in ruleset is the source OpenTofu projects from
+    Given the canonical ruleset projection is configured
+    When AGM validates canonical ruleset authority
+    Then the projection should read the checked-in canonical ruleset
+    And the projection should preserve zero bypass actors
+    And the projection should preserve required-check app identities
+    And policy outside the supported subset should fail closed
+    And pull request validation should stay credential-free
 
   Scenario: CI schedules credential-free Codex contract evidence
     Given the repository CI workflow is configured

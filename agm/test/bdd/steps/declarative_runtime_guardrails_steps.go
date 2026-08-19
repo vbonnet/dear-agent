@@ -58,6 +58,11 @@ type declarativeRuntimeRouteState struct {
 	// importScript is infra/import.sh, whose contract is that it decides
 	// nothing itself.
 	importScript string
+	// rulesetLocals is infra/locals.tf, which projects the checked-in
+	// canonical ruleset onto the provider resource. tofuPlan is the workflow
+	// that validates that projection on a pull request.
+	rulesetLocals string
+	tofuPlan      string
 }
 
 // RegisterDeclarativeRuntimeGuardrailSteps registers runtime configuration coverage steps.
@@ -101,6 +106,147 @@ func RegisterDeclarativeRuntimeGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^import identities should resolve before any state is mutated$`, importIdentitiesResolveBeforeMutation)
 	ctx.Step(`^an existing state address should be verified, not assumed$`, existingStateAddressIsVerified)
 	ctx.Step(`^an unrecognized provider failure should stop the run$`, unrecognizedProviderFailureStopsRun)
+	ctx.Step(`^the canonical ruleset projection is configured$`, canonicalRulesetProjectionIsConfigured)
+	ctx.Step(`^AGM validates canonical ruleset authority$`, agmValidatesCanonicalRulesetAuthority)
+	ctx.Step(`^the projection should read the checked-in canonical ruleset$`, projectionReadsCheckedInCanonicalRuleset)
+	ctx.Step(`^the projection should preserve zero bypass actors$`, projectionPreservesZeroBypassActors)
+	ctx.Step(`^the projection should preserve required-check app identities$`, projectionPreservesRequiredCheckAppIdentities)
+	ctx.Step(`^policy outside the supported subset should fail closed$`, policyOutsideSupportedSubsetFailsClosed)
+	ctx.Step(`^pull request validation should stay credential-free$`, pullRequestValidationStaysCredentialFree)
+}
+
+func canonicalRulesetProjectionIsConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, source := range []struct {
+		path []string
+		into *string
+	}{
+		{[]string{"infra", "locals.tf"}, &state.rulesetLocals},
+		{[]string{".github", "workflows", "tofu-plan.yml"}, &state.tofuPlan},
+	} {
+		data, readErr := os.ReadFile(filepath.Join(append([]string{packageSpecBDDRepoRoot()}, source.path...)...))
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", filepath.Join(source.path...), readErr)
+		}
+		*source.into = string(data)
+	}
+	return nil
+}
+
+func agmValidatesCanonicalRulesetAuthority(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.rulesetLocals == "" || state.tofuPlan == "" {
+		return fmt.Errorf("canonical ruleset projection sources were not loaded")
+	}
+	return nil
+}
+
+// projectionReadsCheckedInCanonicalRuleset pins the single source of authority.
+// A second hand-written copy of the policy in HCL is exactly the drift this
+// projection exists to remove.
+func projectionReadsCheckedInCanonicalRuleset(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.rulesetLocals, ".github/rulesets/main.json") {
+		return fmt.Errorf("projection does not read the checked-in canonical ruleset")
+	}
+	return nil
+}
+
+func projectionPreservesZeroBypassActors(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// The bypass set must be carried through from the canonical document, not
+	// re-declared in HCL, or the zero-bypass invariant could hold in the JSON
+	// and not in the provider.
+	if !strings.Contains(state.rulesetLocals, "bypass_actors = local.dear_agent_main_ruleset.bypass_actors") {
+		return fmt.Errorf("projection does not carry bypass actors through from the canonical document")
+	}
+	canonical, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), ".github", "rulesets", "main.json"))
+	if err != nil {
+		return fmt.Errorf("read canonical ruleset: %w", err)
+	}
+	var document struct {
+		BypassActors []any `json:"bypass_actors"`
+	}
+	if unmarshalErr := json.Unmarshal(canonical, &document); unmarshalErr != nil {
+		return fmt.Errorf("parse canonical ruleset: %w", unmarshalErr)
+	}
+	if len(document.BypassActors) != 0 {
+		return fmt.Errorf("canonical ruleset declares %d bypass actors; the invariant is zero", len(document.BypassActors))
+	}
+	return nil
+}
+
+// projectionPreservesRequiredCheckAppIdentities keeps a required context from
+// being satisfiable by any app that posts that name.
+func projectionPreservesRequiredCheckAppIdentities(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.rulesetLocals, "integration_id = try(check.integration_id, null)") {
+		return fmt.Errorf("projection drops the GitHub App identity from required checks")
+	}
+	return nil
+}
+
+// policyOutsideSupportedSubsetFailsClosed is the property that makes the narrow
+// projection safe: Terraform's structural conversion would otherwise discard an
+// unmodelled nested key, so the canonical document could declare policy the
+// provider never receives and nothing would say so.
+func policyOutsideSupportedSubsetFailsClosed(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, required := range []string{
+		"unsupported_rule_types",
+		"unsupported_condition_keys",
+		"unsupported_pull_request_parameter_keys",
+		"unsupported_status_check_parameter_keys",
+		"unsupported_policy_paths",
+	} {
+		if !strings.Contains(state.rulesetLocals, required) {
+			return fmt.Errorf("projection does not detect %s", required)
+		}
+	}
+	return nil
+}
+
+// pullRequestValidationStaysCredentialFree matters because this workflow runs
+// contributor-authored OpenTofu. The previous revision handed it
+// secrets.GITHUB_TOKEN and pull-request write permission.
+func pullRequestValidationStaysCredentialFree(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// Match the expression form, not the word: the workflow's own comment
+	// explains what it stopped doing and names the secret it no longer takes.
+	if strings.Contains(state.tofuPlan, "${{ secrets.") {
+		return fmt.Errorf("pull request plan workflow consumes repository secrets")
+	}
+	if strings.Contains(state.tofuPlan, "pull-requests: write") {
+		return fmt.Errorf("pull request plan workflow grants write permission")
+	}
+	if !strings.Contains(state.tofuPlan, "testdata/ci.tfvars.fixture") {
+		return fmt.Errorf("pull request plan workflow does not use the fixture inventory")
+	}
+	if !strings.Contains(state.tofuPlan, "persist-credentials: false") {
+		return fmt.Errorf("pull request plan workflow leaves checkout credentials on disk")
+	}
+	return nil
 }
 
 func openTofuImporterIsConfigured(ctx context.Context) error {
@@ -457,7 +603,7 @@ func openTofuGatesRequireNoCredentials(ctx context.Context) error {
 	if strings.Contains(state.terraformLint, "tofu plan") {
 		return fmt.Errorf("OpenTofu lint gate must not plan; planning needs credentials it deliberately lacks")
 	}
-	if strings.Contains(state.terraformLint, "secrets.") {
+	if strings.Contains(state.terraformLint, "${{ secrets.") {
 		return fmt.Errorf("OpenTofu lint gate must not consume repository secrets")
 	}
 	return nil

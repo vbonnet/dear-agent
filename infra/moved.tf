@@ -10,10 +10,10 @@
 # resources and the module use the same for_each over var.active_repos, so
 # OpenTofu matches source instance ["X"] to module.managed_repos["X"] by key.
 #
-# Apply workflow (per README): run `tofu plan` and CONFIRM it shows only moves
-# and 0 resource changes before applying. Once a clean apply has run against
-# every environment and state no longer references the old addresses, these
-# blocks can be deleted.
+# Apply workflow (per README): save a plan and CONFIRM it shows only moves and
+# 0 resource changes before applying that exact plan file. Once a clean apply
+# has run against every environment and state no longer references the old
+# addresses, these blocks can be deleted.
 ###############################################################################
 
 moved {

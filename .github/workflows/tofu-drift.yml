@@ -1,9 +1,10 @@
 name: Tofu Drift Detection
 
 # Scheduled REAL drift detection: unlike tofu-plan.yml (which runs on PRs with
-# `-backend=false -refresh=false` — syntax/provider validation only, no live
-# comparison), this job initialises the real R2 backend and refreshes against
-# live GitHub, so out-of-band changes to repo settings / rulesets are caught.
+# an ephemeral local backend, public fixture inventory, and `-refresh=false` —
+# configuration/module validation only, no live comparison), this job
+# initialises the real R2 backend and refreshes against live GitHub, so
+# out-of-band changes to repo settings / rulesets are caught.
 #
 # Exit codes from `tofu plan -detailed-exitcode`:
 #   0 = no changes (no drift)   1 = error   2 = drift detected
@@ -17,26 +18,25 @@ name: Tofu Drift Detection
 #   R2_ACCESS_KEY_ID        R2 S3 access key id.
 #   R2_SECRET_ACCESS_KEY    R2 S3 secret access key.
 #   CLAUDE_CODE_OAUTH_TOKEN OAuth token applied to opted-in review repos.
+#   INFRA_ACTIVE_REPOS      Complete private active_repos JSON value.
+#   INFRA_ARCHIVED_REPOS    Complete private archived_repos JSON value.
 # These are the same credentials used for a local `tofu apply`; nothing new is
 # invented here.
 #
-# When the credentials are absent the enforcement cannot run at all. It used
-# to `exit 1` on the scheduled path, which painted `main` red every single day
-# and made main-health-watchdog file a fresh incident each time — for a
-# condition that no commit caused and no code change can fix. The daily red
-# carried exactly one bit ("still not provisioned") and drowned the failures
-# that did mean something.
-#
-# The preflight is now its own job. When the secrets are missing it warns
-# loudly, writes the reason into the run summary, and leaves the enforcement
-# job SKIPPED — visibly not-run, which is honest, rather than a green run that
+# When the credentials are absent the enforcement cannot run at all. Failing the
+# scheduled run painted `main` red every day and made main-health-watchdog file
+# a fresh incident each time, for a condition no commit caused and no code
+# change can fix (PR #1290). The preflight is therefore its own job: with the
+# secrets missing it warns, records the reason in the run summary, and leaves
+# the enforcement job SKIPPED — visibly not-run, rather than a green run that
 # would claim a check happened. Provisioning the secrets turns enforcement back
 # on with no further change.
 
 on:
   schedule:
     - cron: "17 8 * * *" # daily 08:17 UTC; offset minute to avoid the top-of-hour stampede
-  workflow_dispatch: {}
+  repository_dispatch:
+    types: [tofu-drift]
 
 concurrency:
   group: tofu-drift
@@ -63,9 +63,11 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          INFRA_ACTIVE_REPOS: ${{ secrets.INFRA_ACTIVE_REPOS }}
+          INFRA_ARCHIVED_REPOS: ${{ secrets.INFRA_ARCHIVED_REPOS }}
         run: |
           missing=()
-          for v in R2_ACCOUNT_ID R2_STATE_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY INFRA_GITHUB_TOKEN CLAUDE_CODE_OAUTH_TOKEN; do
+          for v in R2_ACCOUNT_ID R2_STATE_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY INFRA_GITHUB_TOKEN CLAUDE_CODE_OAUTH_TOKEN INFRA_ACTIVE_REPOS INFRA_ARCHIVED_REPOS; do
             [ -z "${!v}" ] && missing+=("$v")
           done
           if [ ${#missing[@]} -eq 0 ]; then
@@ -96,6 +98,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
@@ -106,10 +110,13 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
         run: |
+          set -euo pipefail
           tofu init \
-            -backend-config="bucket=${{ secrets.R2_STATE_BUCKET }}" \
-            -backend-config="endpoints={s3=\"https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com\"}"
+            -backend-config="bucket=${R2_STATE_BUCKET}" \
+            -backend-config="endpoints={s3=\"https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com\"}"
 
       - name: tofu plan -detailed-exitcode (refresh against live)
         id: plan
@@ -121,31 +128,38 @@ jobs:
           TF_VAR_personal_owner: vbonnet
           TF_VAR_org_name: dear-labs
           TF_VAR_claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          TF_VAR_active_repos: ${{ secrets.INFRA_ACTIVE_REPOS }}
+          TF_VAR_archived_repos: ${{ secrets.INFRA_ARCHIVED_REPOS }}
         run: |
+          set -u
+          output="${RUNNER_TEMP}/tofu-drift.txt"
+          trap 'rm -f -- "$output"' EXIT
           set +e
-          tofu plan -detailed-exitcode -no-color 2>&1 | tee /tmp/drift.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          tofu plan -detailed-exitcode -no-color >"$output" 2>&1
+          code=$?
+          set -e
+          echo "exitcode=${code}" >> "$GITHUB_OUTPUT"
 
       - name: Evaluate result
         env:
-          GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CODE: ${{ steps.plan.outputs.exitcode }}
         run: |
+          set -euo pipefail
           echo "plan exit code: ${CODE}"
           case "${CODE}" in
             0) echo "No drift. Live infrastructure matches the IaC." ;;
             2)
               echo "::warning::DRIFT DETECTED — live settings differ from IaC."
               # De-dupe: reuse an open drift issue if one exists, else open one.
-              body="$(printf 'Scheduled `tofu plan -detailed-exitcode` found drift between live GitHub settings and infra/ IaC on %s (run %s).\n\n```\n%s\n```\n\nResolve by either `tofu apply` (adopt IaC) or updating infra/ to match an intentional change.' \
-                "$(date -u +%Y-%m-%dT%H:%MZ)" "${GITHUB_RUN_ID}" "$(tail -c 8000 /tmp/drift.txt)")"
-              existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --label infra-drift --json number --jq '.[0].number' 2>/dev/null || true)"
+              body="$(printf 'Scheduled drift detection found a difference between live GitHub settings and infra/ IaC on %s (run %s). Detailed plan output is intentionally withheld because the private inventory must not enter public logs or issues. Resolve by updating IaC for an intentional provider change, or by generating, reviewing, and applying an exact saved production plan in a private trusted environment. Never apply diagnostic output directly.' \
+                "$(date -u +%Y-%m-%dT%H:%MZ)" "${GITHUB_RUN_ID}")"
+              existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --label infra-drift --json number --jq '.[0].number // empty')"
               if [ -n "${existing}" ]; then
                 gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body "${body}"
               else
                 gh issue create --repo "${GITHUB_REPOSITORY}" --title "infra drift detected" \
-                  --label infra-drift --body "${body}" || \
-                gh issue create --repo "${GITHUB_REPOSITORY}" --title "infra drift detected" --body "${body}"
+                  --label infra-drift --body "${body}"
               fi
               exit 1
               ;;

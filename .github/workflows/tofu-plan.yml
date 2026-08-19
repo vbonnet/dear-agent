@@ -1,9 +1,25 @@
-name: Tofu Plan
+name: Tofu Fixture Plan
+
+# Proves the canonical ruleset projection actually plans, using a checked-in
+# fixture inventory instead of the private one.
+#
+# Before this revision the job ran `tofu plan` with `-backend=false
+# -refresh=false` against the real variables and posted the output as a pull
+# request comment, which meant a contributor-controlled configuration ran with
+# `secrets.GITHUB_TOKEN` and write permission on the pull request. It now runs
+# entirely on a fixture: an ephemeral local backend, a tracked fixture tfvars,
+# and a placeholder for the OAuth value. No credential reaches it, and the
+# resulting plan file is never applied.
+#
+# Formatting, validation and linting are NOT repeated here. `terraform-lint.yml`
+# owns those, and one rule wants one owner.
 
 on:
   pull_request:
     paths:
       - "infra/**"
+      - ".github/rulesets/main.json"
+      - ".github/workflows/tofu-plan.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -11,11 +27,10 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   plan:
-    name: Tofu Plan
+    name: Tofu Fixture Plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -26,52 +41,49 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           tofu_version: latest
+          # The wrapper rewrites stdout and swallows exit codes, which would
+          # let a failing plan report success.
+          tofu_wrapper: false
 
-      - name: tofu init (no backend)
-        run: tofu init -backend=false
-
-      - name: tofu validate
-        run: tofu validate
-
-      - name: tofu plan
-        id: plan
-        continue-on-error: true
-        run: tofu plan -refresh=false -no-color 2>&1 | tee /tmp/plan-output.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TF_VAR_personal_owner: vbonnet
-          TF_VAR_org_name: dear-labs
-          # This PR workflow executes contributor-controlled Terraform, so it
-          # must never receive the personal OAuth credential. The plan is
-          # backendless and refreshless; a non-empty placeholder exercises the
-          # module validation without exposing the real secret.
-          TF_VAR_claude_code_oauth_token: plan-only-placeholder
-
-      - name: Format plan comment
-        if: always()
-        run: |
-          {
-            echo "### Tofu Plan"
-            echo ""
-            echo "\`\`\`hcl"
-            cat /tmp/plan-output.txt
-            echo "\`\`\`"
-            echo ""
-            echo "_Plan run against \`infra/\` with \`-backend=false -refresh=false\` (syntax + provider validation only; no live state comparison)._"
-          } > /tmp/plan-comment.md
-
-      - name: Post plan as PR comment
-        if: always()
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88  # v3.0.5
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
-          header: tofu-plan
-          path: /tmp/plan-comment.md
+          go-version-file: go.mod
+          cache: true
 
-      - name: Fail if plan errored
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
+      - name: tofu init (ephemeral local backend)
+        # The projection tests below plan for real, which needs a backend. A
+        # local one in the runner's workspace keeps that credential-free and
+        # discards the state with the runner.
+        run: |
+          cp -f testdata/ci_backend_override.tf.fixture ci_backend_override.tf
+          tofu init -reconfigure -input=false
+
+      - name: Canonical ruleset projection assertions
+        # The terratest-shaped gate: plan a fixture, then assert on what the
+        # plan says. These are the cases that prove a malformed canonical
+        # document is refused rather than silently projected into a weaker
+        # ruleset.
+        env:
+          DEAR_AGENT_RUN_TOFU_MUTATION_TESTS: "1"
+        run: |
+          go test -count=1 -run '^(TestCanonicalRulesetProjectionPlansCleanly|TestCanonicalRulesetProjectionRejectsInvalidRequiredReviewers|TestCanonicalRulesetProjectionRequiresDefaultBranchTarget)$' .
+
+      - name: tofu fixture plan (never apply)
+        run: |
+          echo "::notice::This credential-free fixture plan is not a production plan and must never be applied."
+          tofu plan \
+            -refresh=false \
+            -input=false \
+            -lock=false \
+            -no-color \
+            -var-file=testdata/ci.tfvars.fixture \
+            -var=claude_code_oauth_token=plan-only-placeholder \
+            -out="${RUNNER_TEMP}/tofu-fixture.tfplan"

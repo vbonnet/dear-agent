@@ -91,12 +91,20 @@ catches a regression before CI does. That file is the pattern for any future
 OpenTofu root: shell out to the real tool, skip cleanly when it is absent, and
 assert on its exit status rather than reimplementing its rules.
 
-Terratest is not used. Its value is assertions over a real plan or apply, which
-needs the credentials and private inventory this public repository deliberately
-does not carry. Assertions over a saved plan belong with the fixture that
-supplies an inventory. Checkov is likewise not used: its Terraform policies
-target cloud resources, and this root manages only GitHub repositories and
-rulesets, so it would add an unpinned dependency for no coverage.
+Assertions over a real plan live in
+[`infra/ruleset_projection_test.go`](../infra/ruleset_projection_test.go), run
+by [`tofu-plan.yml`](../.github/workflows/tofu-plan.yml). That is the
+terratest-shaped gate: plan a checked-in fixture inventory against an ephemeral
+local backend, then assert on what the plan says. It is what catches a
+malformed canonical ruleset document being silently projected into a weaker
+provider resource, which neither `validate` nor `tflint` can see.
+
+Terratest itself is not used. Its remaining value over this is assertions over
+a real `apply`, which needs credentials and the private inventory this public
+repository deliberately does not carry. Checkov is not used either: its
+Terraform policies target cloud resources, and this root manages only GitHub
+repositories and rulesets, so it would add an unpinned dependency for no
+coverage.
 
 ## jq
 
