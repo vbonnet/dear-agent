@@ -114,13 +114,27 @@ func run(args []string) int {
 	})
 }
 
+// auditTimeout bounds a whole audit run. It is generous because the run scales
+// with the managed fleet and each repository costs several GitHub queries; it
+// exists to convert a hang into a reported incomplete audit, not to police
+// normal duration.
+const auditTimeout = 30 * time.Minute
+
 func runWithDependencies(args []string, deps runDependencies) int {
 	opts, exitCode := parseOptions(args, deps.stderr)
 	if exitCode != 0 {
 		return exitCode
 	}
 
-	ctx := context.Background()
+	// Every GitHub query below shells out to `gh`. An unbounded run in the
+	// scheduled workflow would hold a runner until the job timeout kills it,
+	// and a killed job reports no findings at all — the audit's worst
+	// outcome, since MAC-06 exists precisely so an unanswerable audit never
+	// reads as clean. A deadline lets the run end as an explicit incomplete
+	// audit instead.
+	ctx, cancel := context.WithTimeout(context.Background(), auditTimeout)
+	defer cancel()
+
 	repos, err := resolveRepositories(ctx, opts)
 	if err != nil {
 		return fail("%v", err)
