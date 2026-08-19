@@ -649,7 +649,10 @@ health before the PR hits CI (shift-left gate). Use --skip-preflight only for
 emergencies; prefer fixing the underlying issues instead.
 On create, safe-pr stops after provider-visible PR creation. Once checks and
 review are ready, use safe-merge for routine agent-authored merge admission.
-A PR created with --draft remains a human handoff.
+A PR created with --draft is left for its owner to advance. For an ordinary
+PR that is the authoring agent; for the autonomous-merge carve-out categories
+(security, product behavior, money, agent governance, agent control surfaces)
+it is a human.
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.

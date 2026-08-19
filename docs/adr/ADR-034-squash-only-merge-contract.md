@@ -12,7 +12,7 @@ merge command. The routine path for agent-authored pull requests is:
 safe-push -> safe-pr create -> provider checks/review -> safe-merge
 ```
 
-Human-required work remains draft until a human advances it. The separately
+Carve-out work (security, product behavior, money, agent governance, agent control surfaces) remains draft until a human advances it; an ordinary draft may be advanced by the agent that owns it. The separately
 governed exceptions remain unchanged: ADR-030 permits GitHub-native auto-merge
 for scoped Dependabot patch/minor updates, and `safe-merge break-glass` remains
 a TTY-only human emergency path.

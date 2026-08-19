@@ -8,8 +8,9 @@
 // push-then-PR-open race drops the CI trigger. The required checks then never
 // report, and the safe-merge babysit loop skips the PR as "pending" on every
 // pass — there is no red, no green, and no signal. The PR ages indefinitely
-// with nothing flagging it. Drafts are human handoffs and remain outside this
-// automated recovery path.
+// with nothing flagging it. Drafts remain outside this automated recovery
+// path: they are advanced by their owner, which is a human only for the
+// autonomous-merge carve-out categories.
 //
 // This package holds the pure detection logic so it is exhaustively unit
 // testable with no GitHub access; sources.go wires it to the gh CLI and the
