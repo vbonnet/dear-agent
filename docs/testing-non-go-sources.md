@@ -42,16 +42,33 @@ To silence a finding, use ShellCheck's own `# shellcheck disable=SCxxxx`
 directive next to the line. It lands in the diff and is reviewable, unlike a
 side-channel waiver.
 
-**`bats`** is the behavioral gate, in
-[`.github/workflows/shell-matrix.yml`](../.github/workflows/shell-matrix.yml),
-which already runs every `tests/bats/*.bats` file across bash 4, bash 5, zsh,
-dash, and ash. A new script gets a `tests/bats/<name>.bats` file next to the
-existing ones; no workflow change is needed.
+**`bats`** is the behavioral gate. A new script gets a
+`tests/bats/<name>.bats` file next to the existing ones. It runs in two places,
+and neither is a superset of the other:
+
+- [`shell-matrix.yml`](../.github/workflows/shell-matrix.yml) runs the whole
+  directory across bash 4, bash 5, zsh, dash, and ash, in minimal containers.
+  This proves interpreter portability.
+- The `bats` job in [`shell-lint.yml`](../.github/workflows/shell-lint.yml)
+  runs it once on `ubuntu-latest` with the Go toolchain present. A test needing
+  a repository binary calls `command -v go || skip` so the matrix run stays
+  green, which means this is the run where such a case actually executes.
+
+[`tests/bats/infra-import.bats`](../tests/bats/infra-import.bats) is the
+worked example. It stubs every external command onto `PATH` and asserts on the
+recorded call sequence, so it can prove things prose logs cannot: that exactly
+three imports ran and no fourth, that evidence was collected before the first
+mutation, and that an ambiguous or stale identity aborts before any state
+changes.
 
 Both gates sit behind the 20-line limit in
 [`.github/workflows/language-policy.yml`](../.github/workflows/language-policy.yml).
 A script that wants to grow past it should move its logic into a Go command
-instead of taking a waiver.
+instead of taking a waiver. [`infra/import.sh`](../infra/import.sh) is the
+worked example: its decisions live in
+[`internal/tofuimport`](../internal/tofuimport) behind
+[`cmd/tofu-import-plan`](../cmd/tofu-import-plan), leaving the script to
+collect evidence and execute a plan.
 
 ## OpenTofu and Terraform
 
