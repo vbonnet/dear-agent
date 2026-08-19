@@ -61,7 +61,7 @@ actual SDK registration path.
 
 **MCS-19** When a build lacks release-version metadata, the system shall expose a nonempty development fallback identity without claiming a numbered release.
 
-**MCS-20** When `agm_list_ops` discovery is audited, it shall advertise every compiled logical tool exactly once and no uncompiled operation.
+**MCS-20** When `agm_list_ops` discovery is audited, the system shall advertise every compiled logical tool exactly once and no uncompiled operation.
 
 ## BDD Traceability
 

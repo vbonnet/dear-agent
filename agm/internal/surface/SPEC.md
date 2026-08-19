@@ -94,7 +94,7 @@ operations and does not advertise uncompiled operations.
 
 **AGM-SURFACE-08** While the Cobra tree owns installed plugin command contracts, the operation registry shall not declare a second Skill surface for those commands.
 
-**AGM-SURFACE-09** When the compiled kill-session MCP handler is registered, its request schema shall expose both the recent-activity `force` bypass and the active-harness `confirmed_stuck` confirmation used by the shared operation.
+**AGM-SURFACE-09** When the compiled kill-session MCP handler is registered, the system shall expose both the recent-activity `force` bypass and the active-harness `confirmed_stuck` confirmation used by the shared operation in its request schema.
 
 **AGM-SURFACE-10** When provider-visible MCP tools are registered, the system shall route production and contract tests through one private registration seam containing the exact compiled tool set; SDK discovery order shall not be treated as a wire contract.
 
