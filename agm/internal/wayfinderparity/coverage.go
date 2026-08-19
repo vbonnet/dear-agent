@@ -26,9 +26,9 @@ type HarnessSurface struct {
 
 var expectedDiscoverySurfaces = map[string]string{
 	"claude-code":  "native Claude plugin root skill",
-	"codex-cli":    ".agents/skills/wayfinder/SKILL.md native skill discovery",
-	"agy":          "neutral marketplace plus AGENTS.md fallback",
-	"opencode-cli": ".opencode/skills/wayfinder/SKILL.md native skill discovery",
+	"codex-cli":    "neutral marketplace plus AGENTS.md/SKILL fallback",
+	"agy":          "neutral marketplace plus AGENTS.md/SKILL fallback",
+	"opencode-cli": "neutral marketplace plus AGENTS.md/SKILL fallback",
 	"pi-cli":       ".pi/settings.json native skill discovery plus AGENTS.md",
 }
 
@@ -119,8 +119,6 @@ func ValidateAssets(root string) error {
 		"wayfinder/.claude-plugin/plugin.json",
 		"wayfinder/ARCHITECTURE.md",
 		"wayfinder/cmd/wayfinder-session/SPEC.md",
-		".agents/skills/wayfinder/SKILL.md",
-		".opencode/skills/wayfinder/SKILL.md",
 	} {
 		if err := requireContainedRegularFile(resolvedRoot, root, rel); err != nil {
 			return err

@@ -4,9 +4,9 @@
 
 ## Overview
 
-The `.agents` directory owns AGY-specific instructions and hook wiring plus the
-single AGENTS-compatible repository skill tree consumed by AGY and Codex. It
-imports the shared repository policy from `AGENTS.md`.
+The `.agents` directory is the repo-local configuration surface for the AGY
+Antigravity harness. It owns AGY-specific instructions, hook wiring, and skill
+fallback assets while importing the shared repository policy from `AGENTS.md`.
 
 ## Requirements
 
@@ -16,11 +16,9 @@ imports the shared repository policy from `AGENTS.md`.
 
 **AGENTS-DIR-03** When AGY session lifecycle hooks run, the system shall use AGY-specific Beads hook event names.
 
-**AGENTS-DIR-04** When AGENTS-compatible repository skills are published, the system shall keep their single canonical discovery tree under `.agents/skills`.
+**AGENTS-DIR-04** When AGY skill fallback assets are published, the system shall keep them under `.agents/skills`.
 
 **AGENTS-DIR-05** When configuration-directory parity is validated, the system shall map the active `agy` harness to `.agents`.
-
-**AGENTS-DIR-06** When Codex loads repository skills, the system shall use `.agents/skills` directly and shall not publish duplicate `.codex/skills` entrypoints.
 
 ## BDD Traceability
 

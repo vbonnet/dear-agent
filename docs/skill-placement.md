@@ -79,17 +79,16 @@ skill actually discovers and triggers.
 | Surface | Reaches | Mechanism |
 |---|---|---|
 | `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
-| `agm/plugins/`, `.agents/skills/` | Pi | `.pi/settings.json`; the AGM root supplies its lifecycle skill and the shared tree supplies portable skills |
-| `.agents/skills/` | Codex CLI and AGY | single AGENTS-compatible repository discovery tree; published entrypoints point to their canonical source |
-| `.opencode/skills/` | OpenCode | native repository skill discovery; published skills point to their canonical source |
+| `agm/plugins/`, `wayfinder/skills/`, `.agents/skills/` | Pi | `.pi/settings.json`; the AGM and Wayfinder roots supply their lifecycle skills and the shared tree supplies portable skills |
+| `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
 | `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
 
-`.dear-agent/marketplace.json` is the neutral catalog: it names each executable
-discovery surface—Claude's plugin marketplace, the shared `.agents/skills`
-tree for Codex and AGY, OpenCode's native skill directory, and Pi's configured
-skill paths.
+`.dear-agent/marketplace.json` is the neutral catalog: it declares
+`native-claude-plugin-marketplace` for Claude Code and `agents-md-skill-fallback`
+for Codex, AGY, and OpenCode. Pi instead loads only the paths declared in
+`.pi/settings.json`.
 
 ### The canonical packaging pattern
 

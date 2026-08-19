@@ -177,8 +177,7 @@ func ValidateHarnessSurfaces(root string) error {
 func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSurface) error {
 	if surface.Mode != "native-codex-skill" &&
 		surface.Mode != "native-opencode-skill" &&
-		surface.Mode != "native-pi-skill-path" &&
-		surface.Mode != "agents-md-skill-fallback" {
+		surface.Mode != "native-pi-skill-path" {
 		return nil
 	}
 	for _, plugin := range catalog.Plugins {
@@ -603,12 +602,6 @@ func ExpectedMarketplaceMode(harness string) string {
 	switch agent.NormalizeHarnessName(harness) {
 	case "claude-code":
 		return "native-claude-plugin-marketplace"
-	case "codex-cli":
-		return "native-codex-skill"
-	case "opencode-cli":
-		return "native-opencode-skill"
-	case "pi-cli":
-		return "native-pi-skill-path"
 	default:
 		return "agents-md-skill-fallback"
 	}

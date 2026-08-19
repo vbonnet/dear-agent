@@ -44,8 +44,8 @@
     },
     {
       "name": "codex-cli",
-      "mode": "native-codex-skill",
-      "catalog": ".agents/skills"
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
     },
     {
       "name": "agy",
@@ -54,13 +54,13 @@
     },
     {
       "name": "opencode-cli",
-      "mode": "native-opencode-skill",
-      "catalog": ".opencode/skills"
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
     },
     {
       "name": "pi-cli",
-      "mode": "native-pi-skill-path",
-      "catalog": ".pi/settings.json"
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
     }
   ]
 }

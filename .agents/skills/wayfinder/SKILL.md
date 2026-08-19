@@ -1,1 +1,0 @@
-../../../wayfinder/SKILL.md

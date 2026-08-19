@@ -196,10 +196,8 @@ func TestValidateAssetsRejectsSymlinkedAsset(t *testing.T) {
 		"wayfinder/.claude-plugin/plugin.json",
 		"wayfinder/ARCHITECTURE.md",
 		"wayfinder/cmd/wayfinder-session/SPEC.md",
-		".agents/skills/wayfinder/SKILL.md",
-		".opencode/skills/wayfinder/SKILL.md",
 	}
-	// Everything real except the OpenCode wrapper, which is a repository-local
+	// Everything real except the last asset, which is a repository-local
 	// symlink to a file a clean clone would not carry.
 	for _, rel := range assets[:len(assets)-1] {
 		path := filepath.Join(root, rel)

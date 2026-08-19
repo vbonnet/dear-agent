@@ -1,6 +1,7 @@
 {
   "skills": [
     "../.agents/skills",
-    "../agm/plugins"
+    "../agm/plugins",
+    "../wayfinder/skills"
   ]
 }
