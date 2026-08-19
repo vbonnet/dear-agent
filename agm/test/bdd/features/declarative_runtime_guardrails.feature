@@ -29,6 +29,7 @@
 # RELATED-SPEC: pkg/codeintel/rules/go/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/typescript/SPEC.md
+# RELATED-SPEC: tests/jq/SPEC.md
 # RELATED-SPEC: wayfinder/.claude-plugin/SPEC.md
 Feature: Declarative runtime guardrails
   Runtime configuration is executable product behavior. Plugin manifests,
@@ -124,6 +125,13 @@ Feature: Declarative runtime guardrails
     And the changed-line verdict should come from a tested command
     And OpenTofu sources should be formatted, validated and linted
     And the OpenTofu gates should require no credentials
+
+  Scenario: Checked-in jq policy programs are replayed against fixtures
+    Given the jq policy gate is configured
+    When AGM validates jq policy coverage
+    Then every checked-in jq program should have a fixture case
+    And jq fixtures should assert output and refusal alike
+    And the jq gate should fail rather than skip when jq is absent from CI
 
   Scenario: CI schedules credential-free Codex contract evidence
     Given the repository CI workflow is configured

@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "An extra key means the inventory was written against a different schema than this validator reads.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

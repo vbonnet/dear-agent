@@ -1,0 +1,73 @@
+name: jq Lint
+
+# Gate for the checked-in jq programs under .github/.
+#
+# These programs encode policy decisions: which ruleset documents are well
+# formed, which required checks are missing, which repository inventories are
+# safe to act on. They run inside workflows and inside infra/import.sh, where a
+# silent behavior change surfaces as a mis-audited ruleset rather than as a
+# test failure.
+#
+# The gate is tests/jq, a Go test that replays every recorded input against its
+# expected output or expected error. It also fails when a checked-in .jq file
+# has no fixture at all, so a new program cannot arrive untested. Executing a
+# case compiles the program, so there is no separate syntax job to keep honest.
+#
+# The same test runs under `make test-affected` and in the ordinary CI test
+# job. This workflow exists to run on changes to the programs themselves and to
+# record the jq version the fixtures were replayed against, since that version
+# is part of the evidence.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "**/*.jq"
+      - "tests/jq/**"
+      - ".github/rulesets/main.json"
+      - ".github/workflows/jq-lint.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "**/*.jq"
+      - "tests/jq/**"
+      - ".github/rulesets/main.json"
+      - ".github/workflows/jq-lint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  jq-fixtures:
+    name: jq fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Record the jq version under test
+        # ubuntu-latest ships jq 1.7.x, the series the fixtures were recorded
+        # against. A runner image that dropped jq would make tests/jq skip
+        # rather than fail, so assert it is present here.
+        run: |
+          set -euo pipefail
+          command -v jq
+          jq --version
+
+      - name: Replay jq fixtures
+        run: go test -count=1 -v ./tests/jq/

@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/identity-segment.jq",
+  "description": "A non-string segment (a number or null from a malformed inventory) is not a name and must not be coerced into one.",
+  "filter": "include \"identity-segment\"; map(is_identity_segment)",
+  "library_paths": [
+    ".github/infra"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "A key carrying a newline would split into two repositories downstream, where `jq -r` emits one record per line.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}

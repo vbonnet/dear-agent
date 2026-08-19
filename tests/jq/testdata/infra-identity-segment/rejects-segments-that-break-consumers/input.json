@@ -1,0 +1,12 @@
+[
+  "a\nb",
+  "owner/repo",
+  "a\"b",
+  "-lead",
+  ".lead",
+  "",
+  "a b",
+  "a$b",
+  "a\\b",
+  "caf\u00e9"
+]

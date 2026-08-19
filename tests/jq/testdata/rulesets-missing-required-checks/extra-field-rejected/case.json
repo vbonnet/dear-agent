@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "An unrecognized field means the evidence was produced by a different collector than this filter reads."
+}

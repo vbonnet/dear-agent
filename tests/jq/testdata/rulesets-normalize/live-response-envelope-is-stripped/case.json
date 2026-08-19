@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A live GitHub ruleset response carries read-only envelope fields; they are stripped so the comparison is about policy, not metadata."
+}
