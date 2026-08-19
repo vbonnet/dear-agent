@@ -900,9 +900,10 @@ defaults:
 ### Validation
 
 AGM validates configuration on startup:
-- Invalid YAML syntax → Falls back to defaults
-- Invalid values → Warning logged, defaults used
-- Missing file → Defaults used (no error)
+- Invalid YAML, unknown fields, malformed values, or extra documents → Startup error; no usable configuration
+- Missing explicitly selected file → Startup error
+- Missing implicit `~/.config/agm/config.yaml` → Defaults used (no error)
+- Omitted fields in a valid mapping → Established defaults preserved
 
 ## Related Documentation
 

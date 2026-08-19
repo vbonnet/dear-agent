@@ -28,7 +28,7 @@ Examples:
   agm admin clean                 # Interactive cleanup with smart suggestions
   agm admin clean --dry-run       # Preview what would be cleaned`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		uiCfg := ui.LoadConfig()
+		uiCfg := ui.GetGlobalConfig()
 
 		// Get Dolt storage adapter
 		adapter, err := getStorage()
