@@ -140,6 +140,11 @@ func TestPush_RejectsForceBeforeRunning(t *testing.T) {
 }
 
 func TestForcePushViolation_AllowsFeatureBranches(t *testing.T) {
+	// A repository with a resolvable origin/HEAD. Passing "" would use the
+	// ambient working directory, and an actions/checkout clone has no
+	// refs/remotes/origin/HEAD, so the default-branch check fails closed and
+	// the test would be measuring the checkout rather than the policy.
+	repo := newPolicyRepo(t)
 	cases := []struct {
 		name string
 		args []string
@@ -151,7 +156,7 @@ func TestForcePushViolation_AllowsFeatureBranches(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if target, blocked := ForcePushViolation("", "feature/current", tc.args); blocked {
+			if target, blocked := ForcePushViolation(repo, "feature/current", tc.args); blocked {
 				t.Fatalf("ForcePushViolation(%q) blocked %q", tc.args, target)
 			}
 		})
@@ -159,6 +164,7 @@ func TestForcePushViolation_AllowsFeatureBranches(t *testing.T) {
 }
 
 func TestForcePushViolation_BlocksProtectedBranches(t *testing.T) {
+	repo := newPolicyRepo(t)
 	cases := []struct {
 		name string
 		args []string
@@ -176,7 +182,7 @@ func TestForcePushViolation_BlocksProtectedBranches(t *testing.T) {
 			if tc.name == "implicit current main" {
 				current = "main"
 			}
-			if _, blocked := ForcePushViolation("", current, tc.args); !blocked {
+			if _, blocked := ForcePushViolation(repo, current, tc.args); !blocked {
 				t.Fatalf("ForcePushViolation(%q) allowed protected force-push", tc.args)
 			}
 		})

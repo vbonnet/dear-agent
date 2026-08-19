@@ -30,6 +30,15 @@ var alwaysProtected = []string{"main", "master"}
 // must refuse the force push rather than trust it: a repository whose default
 // is `trunk` or `develop` and whose refs/remotes/origin/HEAD is absent or
 // stale would otherwise leave its real default unprotected.
+//
+// Note the operational edge this creates deliberately. An actions/checkout
+// clone is shallow and single-branch and has no refs/remotes/origin/HEAD, so
+// every force push is refused inside CI until someone runs
+// `git remote set-head origin --auto`. That is the intended trade: guessing
+// the default from whichever conventional branch happens to exist would let a
+// repository defaulting to `trunk` have `trunk` force-pushed, which is the
+// exact hole this check closes. A guardrail against unrecoverable history
+// loss should not rest on a probable answer.
 func ProtectedTargets(repoDir string) (protected map[string]bool, known bool) {
 	protected = map[string]bool{}
 	for _, b := range alwaysProtected {

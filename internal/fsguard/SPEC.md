@@ -149,6 +149,8 @@ state why.
 
 **FSG-64** When `git push` is invoked with a force form and its resolved destination is a branch that is neither protected nor the repository's default, the system shall allow the push, because rewriting a pull-request branch affects no shared history.
 
+**FSG-69** When the repository's default branch cannot be established from `refs/remotes/origin/HEAD`, the system shall refuse every force push and shall name `git remote set-head origin --auto` as the remedy, rather than inferring a default from whichever conventional branch happens to exist. A shallow single-branch checkout, such as the one `actions/checkout` produces, has no such ref, so force pushes are refused there until the ref is established.
+
 **FSG-65** When a `git push` inside `~/src/` carries a force form, the system shall block it only when the resolved destination is a protected branch, and shall refuse when the destination cannot be resolved or the repository's default branch cannot be established. Resolution is delegated to `safegit.ForcePushViolation`, so this guard, `safe-push`, and the PreToolUse bypass hooks share one decision.
 
 **FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`. Where a value-taking short option precedes it (e.g. `-ofoo`), the system shall stop scanning at that option, because the remainder of the word is its value.
