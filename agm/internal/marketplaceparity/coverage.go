@@ -209,10 +209,11 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 			entrypointRoot = ".agents/skills"
 		}
 		declaredRoot := filepath.Join(root, filepath.FromSlash(entrypointRoot))
-		if _, err := resolvedPathWithin(root, declaredRoot); err != nil {
+		resolvedDeclaredRoot, err := resolvedPathWithin(root, declaredRoot)
+		if err != nil {
 			return "", fmt.Errorf("native skill root %q: %w", entrypointRoot, err)
 		}
-		return requireNativeSkillEntrypoint(root, filepath.Join(declaredRoot, skillName, "SKILL.md"), pluginName, skillName)
+		return requireNativeSkillEntrypoint(root, filepath.Join(resolvedDeclaredRoot, skillName, "SKILL.md"), pluginName, skillName)
 	}
 
 	declaredSettingsPath := filepath.Join(root, filepath.FromSlash(surface.Catalog))
@@ -250,25 +251,27 @@ func requireNativeSkillEntrypoint(root, entrypoint, pluginName, skillName string
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("plugin %q exported skill %q native entrypoint %q is not a regular file", pluginName, skillName, entrypoint)
 	}
-	if _, err := resolvedPathWithin(root, entrypoint); err != nil {
+	resolved, err := resolvedPathWithin(root, entrypoint)
+	if err != nil {
 		return "", fmt.Errorf("plugin %q exported skill %q native entrypoint %q: %w", pluginName, skillName, entrypoint, err)
 	}
-	return entrypoint, nil
+	return resolved, nil
 }
 
 func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error) {
 	source := filepath.Join(root, filepath.FromSlash(plugin.Source))
-	if _, err := resolvedPathWithin(root, source); err != nil {
+	resolvedSource, err := resolvedPathWithin(root, source)
+	if err != nil {
 		return nil, fmt.Errorf("plugin %q source %q: %w", plugin.Name, plugin.Source, err)
 	}
-	manifest, err := loadClaudePluginManifest(source, plugin.Name)
+	manifest, err := loadClaudePluginManifest(resolvedSource, plugin.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	byName := make(map[string]exportedSkill)
 	for _, declared := range manifest.Skills {
-		skillFiles, err := exportedSkillFiles(source, plugin.Name, declared)
+		skillFiles, err := exportedSkillFiles(resolvedSource, plugin.Name, declared)
 		if err != nil {
 			return nil, err
 		}
@@ -306,7 +309,7 @@ func loadClaudePluginManifest(source, pluginName string) (claudePluginManifest, 
 		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest: %w", pluginName, err)
 	}
 	if manifest.Name != pluginName {
-		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest names %q", pluginName, manifest.Name)
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest has mismatched name %q", pluginName, manifest.Name)
 	}
 	if len(manifest.Skills) == 0 {
 		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest exports no skills", pluginName)
@@ -316,14 +319,11 @@ func loadClaudePluginManifest(source, pluginName string) (claudePluginManifest, 
 
 func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 	declaredPath := filepath.Clean(filepath.Join(source, filepath.FromSlash(declared)))
-	relSource, err := filepath.Rel(source, declaredPath)
-	if err != nil || relSource == ".." || strings.HasPrefix(relSource, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("skill-capable plugin %q skill export %q escapes its source", pluginName, declared)
-	}
-	if err := requireResolvedWithin(source, declaredPath); err != nil {
+	resolvedDeclaredPath, err := resolvedPathWithin(source, declaredPath)
+	if err != nil {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", pluginName, declared, err)
 	}
-	info, err := os.Stat(declaredPath)
+	info, err := os.Stat(resolvedDeclaredPath)
 	if err != nil {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", pluginName, declared, err)
 	}
@@ -334,16 +334,26 @@ func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", pluginName, declared)
 	}
 
+	// Walk the resolved tree (declaredPath itself may be a symlinked directory,
+	// which WalkDir would otherwise treat as a single non-directory entry and
+	// never descend into), but report each SKILL.md back at its declared,
+	// unresolved location: exportedSkillFromFile derives each skill's
+	// CanonicalPath from that discovery path, and it must reflect the plugin's
+	// declared source layout rather than wherever a symlink physically points.
 	var skillFiles []string
-	if err := filepath.WalkDir(declaredPath, func(path string, entry os.DirEntry, walkErr error) error {
+	if err := filepath.WalkDir(resolvedDeclaredPath, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if !entry.IsDir() && entry.Name() == "SKILL.md" {
-			if err := requireResolvedWithin(source, path); err != nil {
-				return err
+			if _, err := resolvedPathWithin(source, path); err != nil {
+				return fmt.Errorf("resolved exported skill path %q: %w", path, err)
 			}
-			skillFiles = append(skillFiles, path)
+			relative, err := filepath.Rel(resolvedDeclaredPath, path)
+			if err != nil {
+				return fmt.Errorf("resolve exported skill path %q: %w", path, err)
+			}
+			skillFiles = append(skillFiles, filepath.Join(declaredPath, relative))
 		}
 		return nil
 	}); err != nil {
@@ -353,14 +363,6 @@ func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 		return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", pluginName, declared)
 	}
 	return skillFiles, nil
-}
-
-func requireResolvedWithin(root, path string) error {
-	_, err := resolvedPathWithin(root, path)
-	if err != nil {
-		return fmt.Errorf("resolved exported skill path %q: %w", path, err)
-	}
-	return nil
 }
 
 func resolvedPathWithin(root, path string) (string, error) {
@@ -384,7 +386,11 @@ func exportedSkillFromFile(root, pluginName, skillFile string) (exportedSkill, e
 	if err != nil {
 		return exportedSkill{}, fmt.Errorf("skill-capable plugin %q exported skill %q: %w", pluginName, skillFile, err)
 	}
-	canonical, err := filepath.Rel(root, skillFile)
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return exportedSkill{}, fmt.Errorf("resolve root: %w", err)
+	}
+	canonical, err := filepath.Rel(resolvedRoot, skillFile)
 	if err != nil {
 		return exportedSkill{}, fmt.Errorf("resolve plugin %q exported skill %q: %w", pluginName, skillFile, err)
 	}
@@ -437,7 +443,11 @@ func validateNativeSkillEntrypoint(root, entrypoint, pluginName string, skill ex
 	if name != skill.Name {
 		return fmt.Errorf("plugin %q exported skill %q native entrypoint names %q", pluginName, skill.Name, name)
 	}
-	canonicalPath := filepath.Join(root, filepath.FromSlash(skill.CanonicalPath))
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve root: %w", err)
+	}
+	canonicalPath := filepath.Join(resolvedRoot, filepath.FromSlash(skill.CanonicalPath))
 	info, err := os.Stat(canonicalPath)
 	if err != nil {
 		return fmt.Errorf("plugin %q exported skill %q canonical entrypoint %q: %w", pluginName, skill.Name, skill.CanonicalPath, err)
@@ -479,9 +489,10 @@ func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 	if canonicalWorkflowIsCancelled(directives) {
 		return false
 	}
+	loadPatterns := canonicalLoadDirectivePatterns(token)
 	for index, directive := range directives {
 		lower := strings.ToLower(directive)
-		if !hasPositiveCanonicalLoadDirective(lower, token) {
+		if !hasPositiveCanonicalLoadDirective(lower, loadPatterns) {
 			continue
 		}
 		for _, following := range directives[index:] {
@@ -525,9 +536,22 @@ func workflowDirectives(section string) []string {
 	return directives
 }
 
-func hasPositiveCanonicalLoadDirective(directive, token string) bool {
-	for _, verb := range []string{"read", "load"} {
-		pattern := regexp.MustCompile(`\b` + verb + `\s+` + regexp.QuoteMeta(token))
+var canonicalLoadDirectiveVerbs = []string{"read", "load"}
+
+// canonicalLoadDirectivePatterns compiles one "<verb> <token>" regex per verb
+// so hasPositiveCanonicalLoadDirective can reuse them across every directive
+// in a Workflow section instead of recompiling per directive.
+func canonicalLoadDirectivePatterns(token string) []*regexp.Regexp {
+	patterns := make([]*regexp.Regexp, len(canonicalLoadDirectiveVerbs))
+	for i, verb := range canonicalLoadDirectiveVerbs {
+		patterns[i] = regexp.MustCompile(`\b` + verb + `\s+` + regexp.QuoteMeta(token))
+	}
+	return patterns
+}
+
+func hasPositiveCanonicalLoadDirective(directive string, patterns []*regexp.Regexp) bool {
+	for i, pattern := range patterns {
+		verb := canonicalLoadDirectiveVerbs[i]
 		for _, match := range pattern.FindAllStringIndex(directive, -1) {
 			verbLocation := []int{match[0], match[0] + len(verb)}
 			if directiveVerbIsPositive(directive, verbLocation) {

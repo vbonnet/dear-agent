@@ -234,11 +234,15 @@ func validatePiSkillRoot(root, declared string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("pi skill discovery path %q is not a directory", declared)
 	}
-	entrypoints, err := filepath.Glob(filepath.Join(resolvedSkillRoot, "*", "SKILL.md"))
+	entries, err := os.ReadDir(resolvedSkillRoot)
 	if err != nil {
-		return fmt.Errorf("glob Pi skill entrypoints under %q: %w", declared, err)
+		return fmt.Errorf("read Pi skill discovery path %q: %w", declared, err)
 	}
-	for _, entrypoint := range entrypoints {
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		entrypoint := filepath.Join(resolvedSkillRoot, entry.Name(), "SKILL.md")
 		resolvedEntrypoint, resolveErr := filepath.EvalSymlinks(entrypoint)
 		if resolveErr != nil || !containedWithin(resolvedRoot, resolvedEntrypoint) {
 			continue
