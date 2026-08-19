@@ -2,8 +2,6 @@ package config
 
 import (
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 // FuzzConfigUnmarshal feeds random bytes to the YAML config parser.
@@ -33,11 +31,12 @@ timeout:
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		cfg := Default()
-		// Must never panic -- errors are acceptable
-		_ = yaml.Unmarshal(data, cfg)
-
-		// Also exercise validate on whatever was parsed
-		_ = validate(cfg)
+		// Exercise the production document framing, authority-shape, and strict
+		// schema pipeline. Parse errors are acceptable; panics are not.
+		if err := decodeConfig(data, cfg); err == nil {
+			normalizeUISettings(&cfg.UISettings)
+			_ = validate(cfg)
+		}
 	})
 }
 

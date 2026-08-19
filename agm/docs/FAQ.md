@@ -578,10 +578,11 @@ agm doctor
 **Optimize config:**
 ```yaml
 # ~/.config/agm/config.yaml
-advanced:
-  health_check_cache: "10s"    # Increase cache duration
-  tmux_timeout: "3s"           # Reduce timeout
-  uuid_detection_window: "3m"  # Reduce detection window
+health_check:
+  cache_duration: "10s"    # Increase cache duration
+
+timeout:
+  tmux_commands: "3s"      # Reduce timeout
 ```
 
 **Cleanup old sessions:**

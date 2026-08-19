@@ -56,8 +56,47 @@
     <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin</string>
     <key>HOME</key>
     <string>__HOME__</string>
+    <!--
+      DOLT_PORT is required, not optional. With more than one enabled workspace
+      in the AGM registry and no per-workspace dolt.port, the live-session
+      inventory refuses to guess a port and aborts the whole sweep
+      (agm/internal/dolt.configuredWorkspaceConfigsFromRegistry). That is the
+      correct fail-closed choice for a destructive inventory — reaping a
+      sandbox whose owning session lives in a store we could not read would be
+      data loss — but it means the sweep does nothing at all until a port is
+      supplied. Between 2026-07-05 and 2026-08-07 this job exited non-zero on
+      every hourly tick for that reason and ~/.agm/sandboxes reached 239 GB.
+
+      Scope of the port fix, precisely: it lets the inventory resolve for
+      workspaces that live on this port. It does NOT make the sweep tolerant of
+      unreachable stores. Per sandboxGCLiveSessionIDsFromDolt, only a
+      *recognised missing-database* error degrades to a logged warning; any
+      other store-open failure (connection refused, timeout, auth) aborts the
+      entire sweep by design.
+
+      Critically, a degraded workspace no longer permits deletion. A skipped
+      store contributes none of its live session IDs, so its sandboxes would
+      otherwise look unowned and be reaped — deleting a live session's sandbox
+      precisely because the store proving it is live could not be read. The
+      sweep therefore refuses to reap whenever any workspace was skipped
+      (effectiveSandboxGCReap) and downgrades that tick to a scan. Setting this
+      port is consequently not a destructive guess: a wrong or incomplete
+      topology costs a scan-only tick and a loud warning, never a deletion.
+    -->
     <key>DOLT_PORT</key>
     <string>3307</string>
+
+    <!--
+      Declares which runner produced each record this sweep writes. The disk
+      watchdog reads the same log to answer "is this hourly schedule still
+      alive?", and it invokes `agm sandbox gc --reap` itself on every breached
+      tick; without a producer tag it would accept its own remediation as proof
+      that this job is alive and report a dead schedule as healthy for as long
+      as disk pressure lasted (cmd/disk-watchdog, DW-29). An older agm ignores
+      an unknown variable, so setting it is safe on a mixed-version host.
+    -->
+    <key>AGM_GC_SOURCE</key>
+    <string>launchd-sandbox-gc</string>
   </dict>
 
   <!-- One tick per hour. Each tick is idempotent; every reap re-verifies all

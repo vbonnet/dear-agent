@@ -8,6 +8,8 @@
 
 **MANAGED-REPO-02** When merge policy is configured, the system shall preserve squash-only protected-branch behavior.
 
+**MANAGED-REPO-03** When required status checks are configured, the system shall require a pull-request branch to be up to date with the base branch before merge unless the caller explicitly opts out.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`

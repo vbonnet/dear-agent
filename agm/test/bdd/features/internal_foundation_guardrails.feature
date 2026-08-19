@@ -11,6 +11,7 @@
 # RELATED-SPEC: internal/logrotate/SPEC.md
 # RELATED-SPEC: internal/sqlite/SPEC.md
 # RELATED-SPEC: internal/tracking/SPEC.md
+# RELATED-SPEC: internal/vroomgate/SPEC.md
 Feature: Internal foundation guardrails
   Shared benchmark, persistence, safety, and host-operation packages should
   carry executable specifications. Their policy contracts must remain stable

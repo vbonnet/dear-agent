@@ -620,6 +620,8 @@ func runAttemptMergeCleanupHelper(
 	script := `#!/bin/sh
 set -eu
 case "$*" in
+  "pr view 42 --repo owner/repo --json number,title,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,baseRefName,headRefName,headRefOid")
+    printf '%s\n' '{"number":42,"title":"t","url":"u","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","baseRefName":"main","headRefName":"cleanup-topic","headRefOid":"abc123"}' ;;
   "pr view 42 --repo owner/repo --json baseRefName")
     printf '%s\n' '{"baseRefName":"main"}' ;;
   "api --paginate --slurp repos/owner/repo/rules/branches/main?per_page=100")
@@ -634,6 +636,15 @@ case "$*" in
     printf '%s\n' '{"headRefOid":"abc123","commits":[{"committedDate":"2000-01-01T00:00:00Z"}]}' ;;
   "pr view 42 --repo owner/repo --json headRefName,headRefOid")
     printf '%s\n' '{"headRefName":"cleanup-topic","headRefOid":"abc123"}' ;;
+  "pr view 42 --repo owner/repo --json mergeStateStatus")
+    if [ "${SAFEGIT_ATTEMPT_MERGE_BEHIND:-}" = "1" ]; then
+      printf '%s\n' '{"mergeStateStatus":"BEHIND"}'
+    else
+      printf '%s\n' '{"mergeStateStatus":"CLEAN"}'
+    fi ;;
+  "api -X PUT repos/owner/repo/pulls/42/update-branch -f expected_head_sha=abc123")
+    printf '%s\n' update >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
+    printf '%s\n' '{"message":"Updating pull request branch."}' ;;
   "pr merge 42 --repo owner/repo --squash --auto --delete-branch --match-head-commit abc123")
 	printf '%s\n' provider >> "$SAFEGIT_ATTEMPT_MERGE_MARKER"
 	if [ "${SAFEGIT_ATTEMPT_MERGE_PROVIDER_FAILURE:-}" = "1" ]; then

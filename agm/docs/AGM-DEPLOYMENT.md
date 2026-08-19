@@ -138,8 +138,8 @@ ui:
   theme: "agm"
   fuzzy_search: true
 
-advanced:
-  tmux_timeout: "5s"
+timeout:
+  tmux_commands: "5s"
 EOF
 
 # 4. Enable bash completion
@@ -212,8 +212,8 @@ defaults:
 ui:
   theme: "agm"
 
-advanced:
-  tmux_timeout: "5s"
+timeout:
+  tmux_commands: "5s"
 EOF
 
 # 5. Install bash completion system-wide
@@ -399,9 +399,11 @@ ui:
   theme: "agm"
   fuzzy_search: true
 
-advanced:
-  tmux_timeout: "5s"
-  health_check_cache: "1s"  # Short cache for development
+timeout:
+  tmux_commands: "5s"
+
+health_check:
+  cache_duration: "1s"  # Short cache for development
 ```
 
 **Production:**
@@ -416,10 +418,11 @@ ui:
   theme: "agm"
   fuzzy_search: false  # Exact matching only
 
-advanced:
-  tmux_timeout: "10s"  # Longer timeout for stability
-  health_check_cache: "5m"  # Longer cache for performance
-  lock_timeout: "60s"
+timeout:
+  tmux_commands: "10s"  # Longer timeout for stability
+
+health_check:
+  cache_duration: "5m"  # Longer cache for performance
 ```
 
 ### Configuration Precedence
@@ -632,9 +635,8 @@ docker run -it --rm \
 ```bash
 # Solution: Enable caching
 # In ~/.config/agm/config.yaml:
-advanced:
-  health_check_cache: "5m"
-  discovery_cache: "1m"
+health_check:
+  cache_duration: "5m"
 ```
 
 **Problem:** High memory usage

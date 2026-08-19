@@ -1,7 +1,10 @@
 package ops
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +51,60 @@ func TestNewDryRunPreview(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Parameters, parameters) {
 		t.Fatalf("dry-run parameters = %#v", got.Parameters)
+	}
+}
+
+// TestErrorCatalogPublishesTheActualProblemType guards the cross-surface
+// promise AGENTIC-API.md makes: the codes and types it lists are stable
+// identifiers agents match on programmatically. A catalog row whose `type`
+// cell disagrees with the envelope the code actually emits is worse than an
+// absent row — a client written against it matches a string that never
+// appears on the wire.
+func TestErrorCatalogPublishesTheActualProblemType(t *testing.T) {
+	catalog, err := os.ReadFile(filepath.Join("..", "..", "docs", "AGENTIC-API.md"))
+	if err != nil {
+		t.Fatalf("read error catalog: %v", err)
+	}
+
+	published := map[string]string{
+		ErrCodeOutputUnavailable: ErrOutputUnavailable("s", "r", nil).Type,
+		ErrCodeSessionNotReady:   ErrSessionNotReady("s", "r").Type,
+		ErrCodeTmuxNotRunning:    ErrTmuxNotRunning().Type,
+	}
+
+	for line := range strings.SplitSeq(string(catalog), "\n") {
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 {
+			continue
+		}
+		code := strings.TrimSpace(cells[1])
+		wantType, tracked := published[code]
+		if !tracked {
+			continue
+		}
+		gotType := strings.Trim(strings.TrimSpace(cells[3]), "`")
+		if gotType != wantType {
+			t.Errorf("catalog publishes %s as type %q, but the envelope serializes %q", code, gotType, wantType)
+		}
+		delete(published, code)
+	}
+	for code := range published {
+		t.Errorf("stable error code %s is emitted but missing from the catalog", code)
+	}
+}
+
+// TestErrOutputUnavailable_DiagnosesTheConfiguredSocket pins the recovery
+// command to the socket this process actually talks to. AGM_TMUX_SOCKET can
+// point it at a different server, and a suggestion hard-coded to the default
+// sends the operator to probe a backend that had nothing to do with the
+// failure — it can answer healthy while the configured one is down.
+func TestErrOutputUnavailable_DiagnosesTheConfiguredSocket(t *testing.T) {
+	custom := filepath.Join(t.TempDir(), "custom-agm.sock")
+	t.Setenv("AGM_TMUX_SOCKET", custom)
+
+	err := ErrOutputUnavailable("worker-1", "socket unreachable", nil)
+	joined := strings.Join(err.Suggestions, "\n")
+	if !strings.Contains(joined, custom) {
+		t.Fatalf("AGM-017 suggestions do not name the configured socket %q: %v", custom, err.Suggestions)
 	}
 }

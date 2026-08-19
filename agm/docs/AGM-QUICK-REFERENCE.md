@@ -175,8 +175,8 @@ ui:
   theme: "agm"              # agm, agm-light, dracula
   fuzzy_search: true
 
-advanced:
-  tmux_timeout: "5s"
+timeout:
+  tmux_commands: "5s"
 ```
 
 ---

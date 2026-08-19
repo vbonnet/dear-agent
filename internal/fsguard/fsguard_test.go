@@ -138,6 +138,17 @@ func TestInspectCommand(t *testing.T) {
 		{"git force-with-lease blocked", "git -C ~/src/dear-agent push --force-with-lease", home, false,
 			"force-push"},
 		{"git -f blocked", "git -C ~/src/dear-agent push -f origin main", home, false, "force-push"},
+		{"git -uf cluster blocked", "git -C ~/src/dear-agent push -uf origin main", home, false,
+			"force-push"},
+		{"git -fu cluster blocked", "git -C ~/src/dear-agent push -fu origin main", home, false,
+			"force-push"},
+		{"git -vfq cluster blocked", "git -C ~/src/dear-agent push -vfq origin main", home, false,
+			"force-push"},
+		{"git -u push still allowed", "git -C ~/src/dear-agent push -u origin main", home, true, ""},
+		{"git mirror push blocked", "git -C ~/src/dear-agent push --mirror origin", home, false,
+			"force-push"},
+		{"git force refspec blocked", "git -C ~/src/dear-agent push origin +main", home, false,
+			"force-push"},
 		{"git commit in worktree allowed", "git -C ~/worktrees/x commit -m y", home, true, ""},
 
 		// Destructive push forms the weaker local parser missed — now via
@@ -404,5 +415,111 @@ func TestNewResolvesHome(t *testing.T) {
 	g := New()
 	if g.Home == "" {
 		t.Fatal("New() returned empty Home")
+	}
+}
+
+// TestInspectCommand_HardeningRound2 covers the classification holes found in
+// review after the first hardening round. Each case is a command a shell
+// accepts and that reaches a protected path, which the guard previously
+// allowed because it mis-parsed the operands.
+func TestInspectCommand_HardeningRound2(t *testing.T) {
+	t.Parallel()
+	g := testGuard()
+	src := "/home/tester/src/dear-agent"
+	wt := "/home/tester/worktrees/dear-agent/feat"
+
+	tests := []struct {
+		name        string
+		command     string
+		cwd         string
+		wantAllowed bool
+		wantSubstr  string
+	}{
+		{
+			// The cd is conditional, so bash may leave the shell in ~/src and
+			// remove the protected relative file. Tracking only the post-cd
+			// directory classified the removal against /tmp.
+			name:    "conditional cd keeps the prior directory in play",
+			command: "false && cd /tmp; rm AGENTS.md",
+			cwd:     src, wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "cd in a pipeline does not move the parent shell",
+			command: "cd /tmp | true; rm AGENTS.md",
+			cwd:     src, wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			// An unconditional cd definitely ran, so the earlier directory is
+			// no longer a candidate and this must stay allowed.
+			name:    "unconditional cd resolves the uncertainty",
+			command: "cd /tmp; rm scratch.txt",
+			cwd:     src, wantAllowed: true,
+		},
+		{
+			name:    "conditional cd into a safe dir still allows safe targets",
+			command: "true && cd " + wt + "; rm main.go",
+			cwd:     wt, wantAllowed: true,
+		},
+		{
+			// The tokenizer keeps `3<` as one token; matching only bare `<`
+			// left `in` as cp's apparent destination.
+			name:    "descriptor-prefixed input redirect is stripped",
+			command: "cp /tmp/a ~/src/dear-agent/f 3< in",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "plain input redirect is stripped",
+			command: "cp /tmp/a ~/src/dear-agent/f < in",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			// GNU accepts a value-taking short option as the last letter of a
+			// cluster; `bak` is its value, not the final operand.
+			name:    "clustered cp option consumes its separate value",
+			command: "cp /tmp/a ~/src/dear-agent/f -aS bak",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "glued cluster value is still not an operand",
+			command: "cp /tmp/a ~/src/dear-agent/f -aSbak",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "rsync consumes its rsync-path value",
+			command: "rsync /tmp/a ~/src/dear-agent/d --rsync-path false",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			// --tmpdir's value is optional and only ever glued with '='. The
+			// template is not its value, so this safe command must not be
+			// blocked when run from a protected checkout.
+			name:    "valueless mktemp --tmpdir keeps its template",
+			command: "mktemp --tmpdir scratch.XXXXXX",
+			cwd:     src, wantAllowed: true,
+		},
+		{
+			name:    "mktemp --tmpdir=DIR still selects the directory",
+			command: "mktemp --tmpdir=/tmp scratch.XXXXXX",
+			cwd:     src, wantAllowed: true,
+		},
+		{
+			name:    "mktemp -p still consumes its required value",
+			command: "mktemp -p /tmp scratch.XXXXXX",
+			cwd:     src, wantAllowed: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			allowed, msg := g.InspectCommand(tc.command, tc.cwd)
+			if allowed != tc.wantAllowed {
+				t.Fatalf("InspectCommand(%q, %q) allowed=%v, want %v (msg=%q)",
+					tc.command, tc.cwd, allowed, tc.wantAllowed, msg)
+			}
+			if tc.wantSubstr != "" && !strings.Contains(msg, tc.wantSubstr) {
+				t.Errorf("message %q does not contain %q", msg, tc.wantSubstr)
+			}
+		})
 	}
 }

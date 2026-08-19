@@ -27,8 +27,17 @@
   orchestrator supervisor session. The orchestrator (COO of the mesh) owns
   worker monitoring, so stall alerts land where work is steered.
 
+  Completion watching is ON by default (--watch-completions), so this daemon is
+  no longer stall-only. It also emits one {"event_type":"completion"} object per
+  session that finishes a unit of work, delivers each to the notify dispatchers
+  (~/.agm/notify.yaml, or the stderr log dispatcher when that file is absent),
+  and relays the result tail into the --orchestrator session. Turn it off with
+  --watch-completions=false; exclude sessions by name substring with
+  --completion-exclude (default: orchestrator,overseer,meta-).
+
   Logs:   <home>/Library/Logs/dear-agent/watch-stalled.log
-          (one JSON object per detected stall / recovery action — pipe to jq)
+          (one JSON object per detected stall / recovery action / completion —
+          pipe to jq)
 
   Trigger an immediate restart of the monitor with:
     launchctl kickstart -k gui/$UID/com.dear-agent.watch-stalled

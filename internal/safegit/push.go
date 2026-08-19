@@ -1,7 +1,7 @@
 // Package safegit builds and runs git pushes that cannot hang on the macOS
 // keychain credential helper, and cannot force-push.
 //
-// The hang it prevents
+// # The hang it prevents
 //
 // On this host the git credential helper chain is, for any host not explicitly
 // remapped, the *generic* chain from the system gitconfig:
@@ -26,7 +26,7 @@
 // only *appends* the CLI helper; it never resets osxkeychain off the front of
 // the chain, so it inherits the same hang for every non-github.com context.
 //
-// The fix
+// # The fix
 //
 // CredentialResetArgs emits an empty `-c credential.helper=` (which clears the
 // entire accumulated helper list, osxkeychain included) followed by a single
@@ -81,49 +81,31 @@ func CredentialResetArgs(ghPath string) []string {
 //
 // Detected forms:
 //   - -f / --force / --force-with-lease / --force-if-includes (flags)
+//   - -uf, -fu, -vfq, ... (short-option clusters containing -f)
 //   - --mirror (rewrites remote refs wholesale, equivalent to force-push)
 //   - +<refspec>  (a leading '+' in a refspec means "force this ref")
 //
-// The leading-plus test is applied only to refspecs. `git push` is
+// Options are only recognized before a bare `--`. Git treats every token after
+// the end-of-options separator as a repository or refspec, so `git push origin
+// -- -f` pushes a branch named "-f" and is not a force push — while a `+ref`
+// after `--` still forces that ref and is still rejected.
+//
+// The leading-plus test applies only to refspecs. `git push` is
 // `git push [options] [repository [refspec...]]`, so the first positional names
 // the remote, and a remote may legally be called `+prod`; testing it as a
 // refspec would reject the entirely non-destructive `git push +prod main`.
 func ForceFlag(args []string) (string, bool) {
-	sawRepository := false
 	endOfOptions := false
-	for i := 0; i < len(args); i++ {
-		a := args[i]
+	sawRepository := false
+	for _, a := range args {
 		if !endOfOptions {
-			switch {
-			case a == "--":
+			if a == "--" {
 				endOfOptions = true
 				continue
-			case strings.HasPrefix(a, "--force-with-lease=") ||
-				strings.HasPrefix(a, "--force-if-includes"):
-				return a, true
-			case isDestructiveLongOpt(a):
-				return a, true
-			case strings.HasPrefix(a, "--"):
-				continue // some other long option
-			case pushOptsWithValue[a]:
-				i++ // the value is not a positional, so it is not the repository
-				continue
-			case strings.HasPrefix(a, "-") && a != "-":
-				// Short-option cluster. Walk it in order: `-f` is push's only
-				// short option spelled with an 'f', so reaching one means a
-				// force push, but an option that takes a value swallows the
-				// remainder of the word (`-ofoo`), and letters after it are
-				// that value rather than further options.
-				for _, c := range a[1:] {
-					if c == 'f' {
-						return a, true
-					}
-					if shortPushOptsWithValue[c] {
-						break
-					}
-				}
-				if len(a) == 2 && shortPushOptsWithValue[rune(a[1])] {
-					i++ // `-o value`: the value is not the repository
+			}
+			if strings.HasPrefix(a, "-") && a != "-" {
+				if forcesPush(a) {
+					return a, true
 				}
 				continue
 			}
@@ -132,50 +114,71 @@ func ForceFlag(args []string) (string, bool) {
 			sawRepository = true // the repository operand, not a refspec
 			continue
 		}
+		// A refspec. A '+' prefix on a refspec forces that ref.
 		if strings.HasPrefix(a, "+") {
-			// A '+' prefix on a refspec forces that ref; block it.
 			return a, true
 		}
 	}
 	return "", false
 }
 
-// pushOptsWithValue lists the `git push` options whose value is routinely
-// passed as a separate token (`git push -o ci.skip origin main`), so the value
-// is not miscounted as the repository operand. Options normally written in the
-// `--opt=value` form (`--repo`, `--exec`, `--receive-pack`) are deliberately
-// absent: if one is ever spelled with a separate token, its value takes the
-// repository slot and every later `+ref` is still tested, which over-blocks
-// rather than under-blocks.
-var pushOptsWithValue = map[string]bool{
-	"-o": true, "--push-option": true,
-}
-
-// shortPushOptsWithValue are the `git push` short options that consume a value,
-// either glued to the letter (`-ofoo`) or as the next token (`-o foo`).
-var shortPushOptsWithValue = map[rune]bool{'o': true}
-
-// destructiveLongOpts are the long options that make a push destructive. Git
-// accepts unambiguous abbreviations — `git push --mir` really does mirror — so
-// any argument that is a prefix of one of these is treated as that option. An
-// ambiguous abbreviation git would itself reject is blocked here too, which
-// over-rejects rather than letting a history-rewriting push through.
-var destructiveLongOpts = []string{
-	"--force", "--force-with-lease", "--force-if-includes", "--mirror",
-}
-
-// isDestructiveLongOpt reports whether a is one of destructiveLongOpts or an
-// abbreviation of one. `--no-force…` is excluded: it disables forcing.
-func isDestructiveLongOpt(a string) bool {
-	if len(a) < 3 || !strings.HasPrefix(a, "--") || strings.HasPrefix(a, "--no-") {
+// forcesPush reports whether one option token (leading '-', not the bare "-"
+// or "--") forces the push.
+//
+// Short options are the subtle half. Git's parse-options — like POSIX getopt —
+// lets callers bundle short options into a single argv token, so `-uf` is
+// `-u -f` and forces the push just as surely as a standalone `-f`. Comparing
+// the whole token against "-f" therefore misses every cluster; the letters
+// have to be walked individually.
+func forcesPush(opt string) bool {
+	if strings.HasPrefix(opt, "--") {
+		// Strip a glued value: --force-with-lease=<ref> is still a force.
+		name, _, _ := strings.Cut(opt, "=")
+		if name == "--" {
+			return false
+		}
+		// Git's parse-options resolves any unambiguous ABBREVIATION of a long
+		// option, so `--m` reaches --mirror and `--force-w` reaches
+		// --force-with-lease (verified against git 2.55.0: both parse, while
+		// --zzzz reports "unknown option"). Matching the spelled-out names
+		// exactly therefore leaves the same hole the short-cluster fix closes.
+		//
+		// A guard must not try to reproduce git's ambiguity rules: treating
+		// every prefix of a forbidden option as forbidden can only over-block,
+		// and the tokens it over-blocks (--f, --fo) are ones git itself
+		// rejects as ambiguous. Under-blocking would overwrite remote history.
+		for _, forbidden := range forcingLongOpts {
+			if strings.HasPrefix(forbidden, name) {
+				return true
+			}
+		}
+		// Any other long option, including the negating --no-force forms,
+		// which are not prefixes of anything forbidden.
 		return false
 	}
-	for _, opt := range destructiveLongOpts {
-		if strings.HasPrefix(opt, a) {
+	for _, c := range opt[1:] {
+		if c == 'f' {
+			// -f is `git push`'s only short option spelled with an 'f'.
 			return true
+		}
+		if c == 'o' {
+			// -o/--push-option is git push's only value-taking short option,
+			// and its value may be glued on (`-ofoo`), so the remaining
+			// letters are that value rather than further options.
+			break
 		}
 	}
 	return false
+}
+
+// forcingLongOpts are the long options that can overwrite remote history. Any
+// unambiguous prefix of one of these reaches it through git's parse-options,
+// so they are matched by prefix rather than by equality.
+var forcingLongOpts = []string{
+	"--force",
+	"--force-with-lease",
+	"--force-if-includes",
+	"--mirror",
 }
 
 // PushArgs assembles the full git argv for a safe push: an optional `-C

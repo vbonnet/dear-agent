@@ -1,6 +1,7 @@
 package fsguard
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -229,35 +230,80 @@ func scanQuote(runes []rune, start int) (content string, next int, ok bool) {
 // isRedirOp reports whether tok is a redirection operator, allowing the
 // file-descriptor prefix the tokenizer keeps glued on (`2>&1` -> `2>&`).
 func isRedirOp(tok string) bool {
+	return redirOps[stripFDPrefix(tok)]
+}
+
+// isInputRedirOp reports whether tok is an input redirection, with or without
+// a file-descriptor prefix. The tokenizer keeps `3<` as one token, so matching
+// only the bare operators left `cp a ~/src/<repo>/f 3< in` with `in` as the
+// apparent destination and the protected write unexamined.
+func isInputRedirOp(tok string) bool {
+	return inputRedirOps[stripFDPrefix(tok)]
+}
+
+// stripFDPrefix removes a leading file-descriptor number from a redirection
+// token, so `2>`, `3<`, and `>` all reduce to their operator.
+func stripFDPrefix(tok string) string {
 	i := 0
 	for i < len(tok) && tok[i] >= '0' && tok[i] <= '9' {
 		i++
 	}
-	return redirOps[tok[i:]]
+	return tok[i:]
 }
 
-// splitSegments groups tokens into simple-command segments, dropping the
-// control operators that separate them. Subshell parentheses survive as
-// single-token marker segments so checkSegments can restore the tracked
-// working directory on `)` — a `cd` inside `( … )` does not outlive it.
-func splitSegments(tokens []string) [][]string {
-	var segments [][]string
+// segment is one simple command plus the control operator that introduced it.
+// The operator is what tells checkSegments whether a `cd` in this segment is
+// certain to have run.
+type segment struct {
+	tokens []string
+	// sep is the control operator immediately before this segment ("" for the
+	// first) and nextSep the one immediately after it (""" for the last).
+	// `&&` and `||` make a segment conditional; `|` on either side puts it in
+	// a pipeline, whose subshell directory change does not outlive it.
+	sep     string
+	nextSep string
+}
+
+// conditional reports whether this segment may not execute, or executes in a
+// subshell, so a `cd` in it cannot be assumed to have moved the shell.
+func (s segment) conditional() bool {
+	return s.sep == "&&" || s.sep == "||" || s.sep == "|" || s.nextSep == "|"
+}
+
+// splitSegments groups tokens into simple-command segments, recording the
+// control operator that separated each from the previous one. Subshell
+// parentheses survive as single-token marker segments so checkSegments can
+// restore the tracked working directory on `)` — a `cd` inside `( … )` does
+// not outlive it.
+func splitSegments(tokens []string) []segment {
+	var segments []segment
 	var current []string
+	pending := ""
+	flush := func() {
+		if len(current) > 0 {
+			segments = append(segments, segment{tokens: current, sep: pending})
+			current = nil
+			pending = ""
+		}
+	}
 	for _, tok := range tokens {
 		if separators[tok] {
-			if len(current) > 0 {
-				segments = append(segments, current)
-				current = nil
-			}
+			flush()
 			if tok == "(" || tok == ")" {
-				segments = append(segments, []string{tok})
+				segments = append(segments, segment{tokens: []string{tok}})
+				pending = ""
+				continue
 			}
+			pending = tok
 			continue
 		}
 		current = append(current, tok)
 	}
-	if len(current) > 0 {
-		segments = append(segments, current)
+	flush()
+	// Record each segment's trailing operator: a `cd` on the left of a pipe
+	// runs in a subshell just as surely as one on the right.
+	for i := range segments[:max(len(segments)-1, 0)] {
+		segments[i].nextSep = segments[i+1].sep
 	}
 	return segments
 }
@@ -324,6 +370,11 @@ var optsWithValue = map[string]map[string]bool{
 		"--checksum-seed": true, "--compress-level": true,
 		"--skip-compress": true, "--password-file": true,
 		"--remote-option": true, "-M": true,
+		// --rsync-path=PROGRAM and the daemon-side options all take a value
+		// in the space-separated form too; an unconsumed value becomes the
+		// apparent final operand and displaces the real destination.
+		"--rsync-path": true, "--address": true, "--config": true,
+		"--dparam": true, "--secrets-file": true,
 		"--max-delete": true, "--max-alloc": true, "--stop-after": true,
 		"--stop-at": true, "--time-limit": true, "--write-devices": true,
 		"--early-input": true, "--copy-as": true, "--iconv-from": true,
@@ -354,6 +405,51 @@ var destValueOpts = map[string]map[string]bool{
 // writes under /tmp even when the shell sits in a protected checkout.
 var tmpDirOpts = map[string]map[string]bool{
 	"mktemp": {"-p": true, "--tmpdir": true},
+}
+
+// optionalValueOpts lists options whose value is optional and therefore only
+// ever supplied glued with `=`. mktemp's help spells it `--tmpdir[=DIR]`, and
+// `mktemp --tmpdir scratch.XXXXXX` creates the template under $TMPDIR — the
+// template is not the option's value. Consuming the next token here would both
+// lose the template and classify it against the cwd, blocking a safe command
+// run from a protected checkout.
+var optionalValueOpts = map[string]map[string]bool{
+	"mktemp": {"--tmpdir": true},
+}
+
+// defaultTempDir is the directory a valueless --tmpdir selects.
+func defaultTempDir() string {
+	if dir := os.Getenv("TMPDIR"); dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
+
+// shortClusterValue classifies a single-dash short-option cluster. matched
+// reports that tok is such a cluster for cmd; skipValue reports that the
+// following token is a value rather than an operand.
+//
+// A value-taking letter swallows the rest of its own word, so `-Sbak` carries
+// its value glued and consumes nothing further, while `-aS` ends on the
+// value-taking letter and takes the next token.
+func shortClusterValue(cmd, tok string) (skipValue, matched bool) {
+	if len(tok) < 2 || tok[0] != '-' || tok[1] == '-' {
+		return false, false
+	}
+	letters := shortOptsWithValue[cmd]
+	if letters == "" {
+		return false, false
+	}
+	runes := []rune(tok[1:])
+	for i, c := range runes {
+		if !strings.ContainsRune(letters, c) {
+			continue
+		}
+		// Last letter in the word: the value is the next token. Otherwise the
+		// remainder of this word is the value.
+		return i == len(runes)-1, true
+	}
+	return false, false
 }
 
 // optionValue reports whether tok names one of opts, either exactly (its value
@@ -391,6 +487,8 @@ var targetDirCmds = map[string]bool{
 // own text is mistaken for the destination.
 var shortOptsWithValue = map[string]string{
 	"cp": "St", "mv": "St", "ln": "St", "install": "Stmog",
+	"mkdir": "m", "shred": "ns", "truncate": "sr", "touch": "dtr",
+	"rsync": "feBMT",
 }
 
 // targetDirOption reports whether tok is cmd's -t/--target-directory option.
@@ -514,10 +612,21 @@ func consumeOption(cmd, tok string) (skipValue, handled bool) {
 		return glued == "", true
 	}
 	if glued, ok := optionValue(tmpDirOpts[cmd], tok); ok {
+		// An optional-value option in its bare form takes nothing: its value
+		// only ever arrives glued with `=`.
+		if glued == "" && optionalValueOpts[cmd][tok] {
+			return false, true
+		}
 		return glued == "", true
 	}
 	if isOption(tok) {
-		return optsWithValue[cmd][tok], true
+		if optsWithValue[cmd][tok] {
+			return true, true
+		}
+		if skip, ok := shortClusterValue(cmd, tok); ok {
+			return skip, true
+		}
+		return false, true
 	}
 	return false, false
 }
@@ -530,6 +639,11 @@ func replacingOptionTargets(cmd string, rest []string) []string {
 	return scanOptionTargets(rest, func(a string) (string, bool) {
 		if inline, ok := targetDirOption(cmd, a); ok {
 			return inline, true
+		}
+		if optionalValueOpts[cmd][a] {
+			// Bare --tmpdir: the destination is $TMPDIR, and it still
+			// replaces the positional template as the write target.
+			return defaultTempDir(), true
 		}
 		return optionValue(tmpDirOpts[cmd], a)
 	})
@@ -581,7 +695,7 @@ func stripRedirections(segment []string) []string {
 	out := make([]string, 0, len(segment))
 	for i := 0; i < len(segment); i++ {
 		tok := segment[i]
-		if !isRedirOp(tok) && !inputRedirOps[tok] {
+		if !isRedirOp(tok) && !isInputRedirOp(tok) {
 			out = append(out, tok)
 			continue
 		}
@@ -805,6 +919,19 @@ func parseGit(args []string) (cFlag, sub string, subArgs []string) {
 	return cFlag, "", nil
 }
 
+// forcePushFlag reports the first force-push form in a `git push` argument
+// list, if any.
+//
+// The classification is delegated to safegit.ForceFlag so this guard and
+// safe-push share one definition of "force push". A local exact-token match
+// missed bundled short-option clusters (`-uf` is `-u -f`), which is exactly
+// the shape an agent reaches for when a plain `-u` push is rejected. The flag
+// is returned rather than a bare bool so the block message can name the form
+// that triggered it.
+func forcePushFlag(subArgs []string) (string, bool) {
+	return safegit.ForceFlag(subArgs)
+}
+
 // checkGit applies the ~/src-specific git rules to a git invocation's
 // arguments (everything after the literal "git"). currentDir is the effective
 // working directory, used when the command has no -C flag.
@@ -832,7 +959,7 @@ func (g *Guard) checkGit(args []string, currentDir string) (allowed bool, messag
 		// than a weaker local copy: it also rejects --mirror, --force-if-includes,
 		// and leading-plus force refspecs (e.g. +main), any of which can rewrite
 		// remote history just like --force.
-		if flag, ok := safegit.ForceFlag(subArgs); ok {
+		if flag, ok := forcePushFlag(subArgs); ok {
 			return false, "You're trying to force-push to ~/src (via " + flag +
 				"), which can clobber the golden reference. Force-push, --mirror, " +
 				"and +refspec are all blocked. Use a plain `git -C ~/src/" + repo +
@@ -878,6 +1005,15 @@ func (g *Guard) inspect(command, cwd string, depth int) (allowed bool, message s
 // so `cd ~/src/dear-agent && echo x > README.md` resolves the bare target
 // inside the protected checkout rather than against the original cwd.
 func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, message string) {
+	return g.checkRedirectionsAt(tokens, func(target string) (bool, string) {
+		return g.Classify(target, cwd)
+	})
+}
+
+// checkRedirectionsAt is checkRedirections with the directory resolution
+// supplied by the caller, so a segment whose cwd is uncertain can be checked
+// against every candidate directory.
+func (g *Guard) checkRedirectionsAt(tokens []string, classify func(string) (bool, string)) (allowed bool, message string) {
 	for idx, tok := range tokens {
 		if !isRedirOp(tok) || idx+1 >= len(tokens) {
 			continue
@@ -891,7 +1027,7 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 			(isAllDigits(target) && strings.ContainsRune(tok, '&')) {
 			continue
 		}
-		if ok, msg := g.Classify(target, cwd); !ok {
+		if ok, msg := classify(target); !ok {
 			return false, msg
 		}
 	}
@@ -902,21 +1038,41 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 // chained `cd ~/src/repo && git commit` is attributed to the right directory.
 func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed bool, message string) {
 	currentDir := g.expand(cwd, cwd)
+	// alsoCheck holds directories a relative target might *also* resolve
+	// against, because a `cd` that would have moved the shell there may not
+	// have run. `false && cd /tmp; rm AGENTS.md` leaves the shell in the
+	// original directory, and tracking only the post-`cd` path would classify
+	// the removal against /tmp and miss the protected file. A `cd` in a
+	// pipeline has the same mismatch: it runs in a subshell.
+	var alsoCheck []string
 	var subshellDirs []string // saved cwd per open `(`
-	for _, segment := range splitSegments(tokens) {
+	classify := func(target string) (bool, string) {
+		if ok, msg := g.Classify(target, currentDir); !ok {
+			return false, msg
+		}
+		for _, dir := range alsoCheck {
+			if ok, msg := g.Classify(target, dir); !ok {
+				return false, msg
+			}
+		}
+		return true, ""
+	}
+	for _, seg := range splitSegments(tokens) {
 		// A `cd` inside `( … )` is undone when the subshell exits, so restore
 		// the caller's directory on `)`; otherwise `(cd /tmp); rm AGENTS.md`
 		// would classify the removal against /tmp while it really runs in cwd.
-		if len(segment) == 1 && (segment[0] == "(" || segment[0] == ")") {
-			if segment[0] == "(" {
+		if len(seg.tokens) == 1 && (seg.tokens[0] == "(" || seg.tokens[0] == ")") {
+			if seg.tokens[0] == "(" {
 				subshellDirs = append(subshellDirs, currentDir)
 			} else if n := len(subshellDirs); n > 0 {
 				currentDir = subshellDirs[n-1]
 				subshellDirs = subshellDirs[:n-1]
+				alsoCheck = nil
 			}
 			continue
 		}
-		if ok, msg := g.checkRedirections(segment, currentDir); !ok {
+		segment := seg.tokens
+		if ok, msg := g.checkRedirectionsAt(segment, classify); !ok {
 			return false, msg
 		}
 		args := stripRunners(realArgs(stripRedirections(segment)))
@@ -934,7 +1090,17 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 		// its parent's cwd, so tracking it would move the guard's idea of the
 		// directory away from where the following commands actually run.
 		if args[0] == "cd" && len(args) > 1 {
-			currentDir = g.expand(args[1], currentDir)
+			next := g.expand(args[1], currentDir)
+			if seg.conditional() {
+				// The shell may still be in the previous directory, so keep
+				// it as a candidate rather than replacing it.
+				alsoCheck = append(alsoCheck, currentDir)
+			} else {
+				// An unconditional `cd` definitely ran; earlier uncertainty
+				// is resolved and the candidate set collapses.
+				alsoCheck = nil
+			}
+			currentDir = next
 			continue
 		}
 		if cmd == "git" {
@@ -956,7 +1122,7 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 			continue
 		}
 		for _, target := range writeTargets(cmd, args[1:]) {
-			if ok, msg := g.Classify(target, currentDir); !ok {
+			if ok, msg := classify(target); !ok {
 				return false, msg
 			}
 		}

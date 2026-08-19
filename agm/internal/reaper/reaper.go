@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
@@ -105,7 +104,12 @@ func NewWithOptions(sessionName, sessionsDir string, options ArchiveOptions) *Re
 		SessionsDir: sessionsDir,
 		SocketPath:  tmux.GetSocketPath(),
 		Options:     options,
-		logger:      logging.DefaultLogger(),
+		// slog.Default(), not logging.DefaultLogger(): the latter is pinned to
+		// os.Stderr, so every line of the reaping sequence bypassed the
+		// --log-file the detached reaper is spawned with. ops.ArchiveSession
+		// already logs through the process default, so the reaper's own phase
+		// log was the only part of an async archive missing from its log file.
+		logger: slog.Default(),
 	}
 }
 

@@ -44,40 +44,51 @@ func TestForceFlag(t *testing.T) {
 		{"force-with-lease", []string{"--force-with-lease", "origin", "main"}, "--force-with-lease", true},
 		{"force-with-lease=ref", []string{"--force-with-lease=main", "origin"}, "--force-with-lease=main", true},
 		{"force-if-includes", []string{"--force-if-includes", "origin"}, "--force-if-includes", true},
+		// Git's parse-options resolves unambiguous abbreviations of long
+		// options, verified against git 2.55.0: `--m` and `--force-w` both
+		// parse, while `--zzzz` reports "unknown option". Matching only the
+		// spelled-out names left the same hole as the short-cluster bug.
+		{"abbrev mirror", []string{"--m", "origin", "main"}, "--m", true},
+		{"abbrev mirror longer", []string{"--mirr", "origin", "main"}, "--mirr", true},
+		{"abbrev force", []string{"--forc", "origin", "main"}, "--forc", true},
+		{"abbrev force-with-lease", []string{"--force-w", "origin", "main"}, "--force-w", true},
+		{"abbrev force-if-includes", []string{"--force-if", "origin"}, "--force-if", true},
+		{"abbrev force-with-lease with value", []string{"--force-w=main", "origin"}, "--force-w=main", true},
+		// --no-force… negations are not prefixes of anything forbidden.
+		{"no-force-with-lease stays allowed", []string{"--no-force-with-lease", "origin", "main"}, "", false},
+		// Unrelated long options must not be caught by prefix matching.
+		{"repo option allowed", []string{"--repo=x", "origin"}, "", false},
+		{"porcelain allowed", []string{"--porcelain", "origin", "main"}, "", false},
 		{"refspec containing force substring is not a flag", []string{"origin", "feature/force-cleanup"}, "", false},
 		{"mirror", []string{"--mirror"}, "--mirror", true},
 		{"force refspec +HEAD:main", []string{"origin", "+HEAD:main"}, "+HEAD:main", true},
 		{"force refspec wildcard", []string{"origin", "+refs/heads/*:refs/heads/*"}, "+refs/heads/*:refs/heads/*", true},
 		{"plain refspec HEAD:main not force", []string{"origin", "HEAD:main"}, "", false},
 
-		// `git push [options] [repository [refspec...]]`: a leading '+' forces
-		// only in a refspec position. A remote may legally be named +prod.
-		{"plus-prefixed remote is not force", []string{"+prod", "main"}, "", false},
-		{"plus refspec after plus remote still force", []string{"+prod", "+main"}, "+main", true},
-		{"plus remote with -u is not force", []string{"-u", "+prod", "main"}, "", false},
-		{"push-option value does not shift repository", []string{"-o", "ci.skip", "origin", "+main"}, "+main", true},
-		{"equals-form repo option keeps refspec force", []string{"--repo=origin", "origin", "+main"}, "+main", true},
-		{"force refspec after end-of-options", []string{"--", "origin", "+main"}, "+main", true},
-		{"force flag still caught before repository", []string{"--force", "+prod", "main"}, "--force", true},
+		// Short-option clusters. git (like POSIX getopt) accepts bundled short
+		// options in a single argv token, so `-uf` really is `-u -f` and must be
+		// rejected exactly like a standalone `-f`.
+		{"cluster -uf forces", []string{"-uf", "origin", "main"}, "-uf", true},
+		{"cluster -fu forces", []string{"-fu", "origin", "main"}, "-fu", true},
+		{"cluster -vfq forces", []string{"-vfq", "origin", "main"}, "-vfq", true},
+		{"cluster -uf with lease-style tail forces", []string{"-qnuf"}, "-qnuf", true},
 
-		// `-f` is push's only short option spelled with an 'f', so a cluster
-		// containing one forces just as a bare -f does.
-		{"clustered -uf is force", []string{"-uf", "origin", "main"}, "-uf", true},
-		{"clustered -fu is force", []string{"-fu", "origin", "main"}, "-fu", true},
-		{"clustered -qnv is not force", []string{"-qnv", "origin", "main"}, "", false},
-		{"long --follow-tags is not force", []string{"--follow-tags", "origin", "main"}, "", false},
+		// Negative cases: clusters and options with no force in them.
+		{"cluster -uv not force", []string{"-uv", "origin", "main"}, "", false},
+		{"short upstream not force", []string{"-u", "origin", "main"}, "", false},
+		{"short verbose not force", []string{"-v", "origin", "main"}, "", false},
+		{"long set-upstream not force", []string{"--set-upstream", "origin", "main"}, "", false},
+		{"long follow-tags not force", []string{"--follow-tags", "origin", "main"}, "", false},
+		{"no-force is not force", []string{"--no-force", "origin", "main"}, "", false},
+		{"push-option value glued with f is not force", []string{"-oforce", "origin", "main"}, "", false},
+		{"push-option value separate is not force", []string{"-o", "ci.skip", "origin", "main"}, "", false},
 
-		// A value-taking short option swallows the rest of its word, so an 'f'
-		// there is part of the value, not a force flag.
-		{"attached push-option value is not force", []string{"-ofoo", "origin", "main"}, "", false},
-		{"attached push-option keeps refspec test", []string{"-ofoo", "origin", "+main"}, "+main", true},
-
-		// Git accepts unambiguous long-option abbreviations, so `--mir` really
-		// does mirror.
-		{"abbreviated --mir is force", []string{"--mir", "origin"}, "--mir", true},
-		{"abbreviated --forc is force", []string{"--forc", "origin", "main"}, "--forc", true},
-		{"--no-force-with-lease is not force", []string{"--no-force-with-lease", "origin", "main"}, "", false},
-		{"--porcelain is not force", []string{"--porcelain", "origin", "main"}, "", false},
+		// End-of-options separator: everything after `--` is a repository or
+		// refspec, so a branch literally named `-f` is not a force flag.
+		{"dashdash then branch named -f is not force", []string{"origin", "--", "-f"}, "", false},
+		{"dashdash then cluster-shaped branch is not force", []string{"--", "origin", "-uf"}, "", false},
+		{"dashdash still blocks force refspec", []string{"--", "origin", "+main"}, "+main", true},
+		{"force before dashdash still blocks", []string{"-uf", "--", "origin", "main"}, "-uf", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,5 +136,37 @@ func TestPush_RejectsForceBeforeRunning(t *testing.T) {
 	err := Push("", []string{"--force", "origin", "main"}, time.Second)
 	if err == nil || !strings.Contains(err.Error(), "force-pushes") {
 		t.Fatalf("expected force rejection, got %v", err)
+	}
+}
+
+// TestForceFlag_AbbreviatedLongOptionWithValue pins the behaviour an
+// abbreviation carrying its optional value depends on: git accepts
+// `--force-with-l=main`, and matching the whole token against the full option
+// name would never match because of the `=main` suffix.
+func TestForceFlag_AbbreviatedLongOptionWithValue(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"abbreviated lease with value", []string{"--force-with-l=main", "origin", "topic"}, true},
+		{"abbreviated lease bare", []string{"--force-with-l", "origin", "topic"}, true},
+		{"full lease with value", []string{"--force-with-lease=main", "origin", "topic"}, true},
+		{"abbreviated force", []string{"--forc", "origin", "topic"}, true},
+		{"abbreviated mirror", []string{"--mirr", "origin"}, true},
+		{"abbreviated if-includes with value", []string{"--force-if-inc=x", "origin"}, true},
+		{"unrelated option with value", []string{"--repo=origin", "origin", "topic"}, false},
+		{"negated force", []string{"--no-force-with-lease", "origin", "topic"}, false},
+		{"plain push", []string{"origin", "topic"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			flag, got := ForceFlag(tc.args)
+			if got != tc.want {
+				t.Fatalf("ForceFlag(%v) = (%q, %v), want %v", tc.args, flag, got, tc.want)
+			}
+		})
 	}
 }

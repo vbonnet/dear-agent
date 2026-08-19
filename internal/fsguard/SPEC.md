@@ -91,7 +91,11 @@ state why.
 
 **FSG-57** When a short-option cluster contains a letter that consumes a value (e.g. the `-S` of `cp -Stext`), the system shall stop interpreting later letters in that word as options, because they are that option's value; only a `t` reached before any such letter names a target directory.
 
-**FSG-58** When a command contains an input redirection (`<`, `<<`, `<<<`), the system shall exclude the operator and its target from the command's operands without classifying that target as a write target, since input redirections only read.
+**FSG-58** When a command contains an input redirection (`<`, `<<`, `<<<`), with or without a file-descriptor prefix (`3<`), the system shall exclude the operator and its target from the command's operands without classifying that target as a write target, since input redirections only read.
+
+**FSG-60** When a short-option cluster ends on a letter that takes a value (e.g. the `-aS` of `cp SRC DEST -aS bak`), the system shall consume the following token as that option's value rather than as an operand, so the value cannot displace the real destination. When the value-taking letter is not last, the remainder of the same word is its value and no further token is consumed.
+
+**FSG-61** When an option's value is optional and therefore only supplied glued with `=` (mktemp's `--tmpdir[=DIR]`), the system shall not consume the following token as its value. A valueless `--tmpdir` shall resolve to `$TMPDIR`, or the platform temporary directory when unset, and shall still replace the positional template as the write target.
 
 **FSG-59** When a `chmod` mode is symbolic and begins with an operator (e.g. the `-w` of `chmod -w FILE`), the system shall treat it as the leading spec operand rather than as an option, so the following positional remains a write target.
 
@@ -137,9 +141,9 @@ state why.
 
 **FSG-28** When a git subcommand that is read-only (`log`, `diff`, `status`, `show`, `blame`, `describe`, `rev-parse`, `rev-list`, `cat-file`, `ls-files`, `ls-tree`, `shortlog`, `stash list`, `tag`, `fetch`, `remote`, `submodule`) is invoked within `~/src/`, the system shall allow it.
 
-**FSG-29** When `git push` is invoked within `~/src/` without any force flag or force refspec, the system shall allow it (a plain `git -C ~/src/<repo> push origin main`).
+**FSG-29** When `git push` is invoked within `~/src/` without a force flag, the system shall allow it.
 
-**FSG-30** When `git push` is invoked within `~/src/` with any destructive form — `--force`/`-f`, `--force-with-lease[=…]`, `--force-if-includes`, `--mirror`, or a leading-plus force refspec (e.g. `+main`) — the system shall block it. Detection reuses the `safegit.ForceFlag` parser so the guard and `safe-push` share one definition of "destructive push" rather than maintaining a weaker copy.
+**FSG-30** When `git push` is invoked with a force flag, the system shall block it regardless of working directory. Force classification is delegated to `safegit.ForceFlag`, so this guard and `safe-push` share one definition: `--force`, `-f`, any short-option cluster containing `f` (`-uf`), `--force-with-lease[=<ref>]`, `--force-if-includes`, `--mirror`, and a leading-`+` force refspec, with tokens after a bare `--` treated as repository/refspec rather than flags. An abbreviated long option is matched after its `=value` is separated, so `--force-with-l=main` is recognized.
 
 **FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`. Where a value-taking short option precedes it (e.g. `-ofoo`), the system shall stop scanning at that option, because the remainder of the word is its value.
 
