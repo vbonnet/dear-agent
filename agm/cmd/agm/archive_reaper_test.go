@@ -148,3 +148,41 @@ func TestBuildReaperArgsSeparatesStableAndTmuxIdentities(t *testing.T) {
 		}
 	}
 }
+
+// panickingReader panics on Read, standing in for whatever could go wrong on
+// the far side of the startup pipe.
+type panickingReader struct{}
+
+func (panickingReader) Read([]byte) (int, error) { panic("reader exploded") }
+
+// TestAwaitReaperStartupRecoversFromReaderPanic proves the handshake goroutine
+// converts a panic into the bounded failure the caller already handles,
+// instead of taking the whole agm process down for a startup handshake.
+//
+// A nil *os.File does not work here: it returns ErrInvalid rather than
+// panicking, so the test would pass without the recovery in place.
+func TestAwaitReaperStartupRecoversFromReaderPanic(t *testing.T) {
+	err := awaitReaperStartup(panickingReader{}, 5*time.Second)
+	if err == nil {
+		t.Fatal("awaitReaperStartup() = nil error, want the recovered panic")
+	}
+	if !strings.Contains(err.Error(), "startup acknowledgement reader panicked") {
+		t.Errorf("error = %q, want it to name the recovered panic", err)
+	}
+	if !strings.Contains(err.Error(), "reader exploded") {
+		t.Errorf("error = %q, want it to carry the panic value", err)
+	}
+}
+
+// TestAwaitReaperStartupCapsTheAcknowledgement proves a peer that never sends
+// a newline cannot grow the read buffer without bound.
+func TestAwaitReaperStartupCapsTheAcknowledgement(t *testing.T) {
+	flood := strings.NewReader(strings.Repeat("x", maxStartupAckBytes*4))
+	err := awaitReaperStartup(flood, 5*time.Second)
+	if err == nil {
+		t.Fatal("awaitReaperStartup() = nil error, want a bounded failure")
+	}
+	if !strings.Contains(err.Error(), "closed before readiness") {
+		t.Errorf("error = %q, want the capped read to surface as a closed stream", err)
+	}
+}

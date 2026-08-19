@@ -115,10 +115,10 @@ func TestPrintSessionHealthText_MultipleWithWarnings(t *testing.T) {
 				PanePID: 0, // No resource data
 			},
 			{
-				Name:    "session-b",
-				Health:  "warning",
-				Status:  "active",
-				State:   "USER_PROMPT",
+				Name:   "session-b",
+				Health: "warning",
+				Status: "active",
+				State:  "USER_PROMPT",
 				Warnings: []string{
 					"No manifest update in 15m",
 					"Session waiting on permission prompt",

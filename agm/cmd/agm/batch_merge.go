@@ -10,10 +10,10 @@ import (
 )
 
 var (
-	batchMergeSessions    string
-	batchMergeRepoDir     string
+	batchMergeSessions     string
+	batchMergeRepoDir      string
 	batchMergeTargetBranch string
-	batchMergeDryRun      bool
+	batchMergeDryRun       bool
 )
 
 var batchMergeCmd = &cobra.Command{

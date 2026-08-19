@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	fixAll     bool
-	fixClear   bool
+	fixAll   bool
+	fixClear bool
 )
 
 var fixCmd = &cobra.Command{

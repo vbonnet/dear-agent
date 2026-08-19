@@ -175,9 +175,9 @@ func TestFormatDuration(t *testing.T) {
 
 func TestParseGoVersion(t *testing.T) {
 	tests := []struct {
-		in         string
-		wantMajor  int
-		wantMinor  int
+		in        string
+		wantMajor int
+		wantMinor int
 	}{
 		{"go1.26", 1, 26},
 		{"1.26.4", 1, 26},
