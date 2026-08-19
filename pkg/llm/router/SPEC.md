@@ -38,9 +38,16 @@ attempt history.
 
 **LLM-ROUTER-13** When a circuit-breaker fallback produces a response, the system shall identify the actual provider and model in response metadata and preserve the originally selected candidate separately.
 
+**LLM-ROUTER-14** When a quota meter is configured, the system shall order a role's candidates by remaining provider quota before attempting them, and shall retain every configured candidate.
+
+**LLM-ROUTER-15** When a quota meter is absent or reports no usable reading for a candidate, the system shall attempt candidates in their configured order and shall omit quota fields from request and response metadata.
+
+**LLM-ROUTER-16** When a quota-classified candidate is attempted, the system shall record its quota class, family, remaining percentage, and constraining window in request and response metadata.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature`
 - Package tests: `pkg/llm/router/config_test.go`
 - Package tests: `pkg/llm/router/router_test.go`
 - Package tests: `pkg/llm/router/executor_test.go`
+- Package tests: `pkg/llm/router/quota_test.go`

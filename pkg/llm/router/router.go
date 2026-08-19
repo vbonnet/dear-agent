@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/provider"
+	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 )
 
 // FactoryFunc constructs a provider for a given (family, model) pair.
@@ -33,6 +34,13 @@ type Options struct {
 	// values pick sensible defaults: 3 consecutive failures trips,
 	// 30 s cooldown.
 	CircuitBreaker provider.CircuitBreakerConfig
+
+	// Quota, when set, reorders a role's candidate chain so providers
+	// with more remaining quota are tried first. Nil — and any meter
+	// with no usable reading — leaves the configured order untouched.
+	// The meter never removes a candidate; the chain still ends where
+	// roles.yaml says it ends.
+	Quota *quota.Meter
 }
 
 // Router routes a role to a concrete provider call, falling through the
@@ -43,6 +51,7 @@ type Router struct {
 	resolver *provider.Resolver
 	factory  FactoryFunc
 	cbCfg    provider.CircuitBreakerConfig
+	quota    *quota.Meter
 
 	mu        sync.Mutex
 	providers map[string]*entry // key: family|model
@@ -74,6 +83,7 @@ func New(opts Options) (*Router, error) {
 		resolver:  resolver,
 		factory:   factory,
 		cbCfg:     opts.CircuitBreaker,
+		quota:     opts.Quota,
 		providers: make(map[string]*entry),
 	}, nil
 }
@@ -93,14 +103,15 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 	if err != nil {
 		return nil, err
 	}
-	candidates := spec.Candidates()
-	if len(candidates) == 0 {
+	configured := spec.Candidates()
+	if len(configured) == 0 {
 		return nil, fmt.Errorf("router: role %q has no model candidates", resolvedRole)
 	}
+	candidates, decisions := r.quota.OrderModels(configured)
 
 	var attempts []string
 	var lastErr error
-	for _, modelID := range candidates {
+	for i, modelID := range candidates {
 		family, model, rerr := r.resolver.Resolve(modelID)
 		if rerr != nil {
 			lastErr = fmt.Errorf("resolve %q: %w", modelID, rerr)
@@ -118,23 +129,23 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 		// the cost record's Component with the role for budget tracking.
 		callReq := *req
 		callReq.Model = model
-		callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
+		callReq.Metadata = mergeMetadata(callReq.Metadata, mergeMetadata(map[string]any{
 			"router_role":            resolvedRole,
 			"router_candidate_model": modelID,
-		})
+		}, quotaMetadata(decisions[i])))
 
 		resp, source, callErr := prov.GenerateWithSource(ctx, &callReq)
 		if callErr == nil && resp == nil {
 			callErr = fmt.Errorf("provider %s/%s returned a nil response", family, model)
 		}
 		if callErr == nil {
-			resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+			resp.Metadata = mergeMetadata(resp.Metadata, mergeMetadata(map[string]any{
 				"router_provider":        source.Provider,
 				"router_model":           source.Model,
 				"router_candidate_model": modelID,
 				"router_role":            resolvedRole,
 				"router_fallback":        source.Fallback,
-			})
+			}, quotaMetadata(decisions[i])))
 			return resp, nil
 		}
 
@@ -253,6 +264,22 @@ func summariseErr(err error) string {
 	msg = strings.ReplaceAll(msg, "\n", " ")
 	msg = strings.ReplaceAll(msg, "\t", " ")
 	return msg
+}
+
+// quotaMetadata renders a quota verdict for request and response
+// metadata. An unknown verdict contributes nothing, so an unmetered
+// deployment produces byte-identical metadata to before quota routing
+// existed.
+func quotaMetadata(d quota.Decision) map[string]any {
+	if !d.Known() {
+		return nil
+	}
+	return map[string]any{
+		"router_quota_class":     string(d.Class),
+		"router_quota_family":    d.Family,
+		"router_quota_remaining": d.RemainingPercent,
+		"router_quota_window":    d.ConstrainedWindow,
+	}
 }
 
 func mergeMetadata(base, extra map[string]any) map[string]any {
