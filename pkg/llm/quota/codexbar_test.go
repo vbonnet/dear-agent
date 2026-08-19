@@ -77,6 +77,35 @@ func TestParseCodexBarDashboardMapsSourceIDsToFamilies(t *testing.T) {
 	}
 }
 
+// TestParseCodexBarDashboardExcludesForeignWindowsFromGeminiFamily guards
+// against Antigravity's "Claude/GPT" third-party-proxy sub-budgets, bucketed
+// under the "gemini" family alongside genuine Gemini windows, dragging down
+// (or propping up) MostConstrained() for a Gemini candidate. The live
+// dashboard capture in testdata reproduces this mix (codex review on #1218).
+func TestParseCodexBarDashboardExcludesForeignWindowsFromGeminiFamily(t *testing.T) {
+	snapshot, err := quota.ParseCodexBarDashboard(liveFixture(t), nil)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gemini, ok := snapshot.Provider("gemini")
+	if !ok {
+		t.Fatal("gemini missing")
+	}
+	for _, w := range gemini.Windows {
+		lower := strings.ToLower(w.Label)
+		if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") {
+			t.Errorf("gemini family retained a foreign window: %+v", w)
+		}
+	}
+	worst, ok := gemini.MostConstrained()
+	if !ok {
+		t.Fatal("MostConstrained reported no windows")
+	}
+	if strings.Contains(strings.ToLower(worst.Label), "claude") || strings.Contains(strings.ToLower(worst.Label), "gpt") {
+		t.Errorf("MostConstrained picked a foreign window: %+v", worst)
+	}
+}
+
 func TestParseCodexBarDashboardReadsSubBudgets(t *testing.T) {
 	snapshot, err := quota.ParseCodexBarDashboard(liveFixture(t), nil)
 	if err != nil {
@@ -154,27 +183,27 @@ func TestParseCodexBarDashboardClassification(t *testing.T) {
 	}{
 		{
 			name:    "disabled provider",
-			payload: `{"providers":[{"id":"claude","enabled":false,"windows":[]}]}`,
+			payload: `{"schemaVersion":1,"providers":[{"id":"claude","enabled":false,"windows":[]}]}`,
 			want:    quota.AvailabilityDisabled,
 		},
 		{
 			name:    "oauth token missing is an auth failure",
-			payload: `{"providers":[{"id":"claude","enabled":true,"windows":[],"error":{"message":"Claude OAuth access token missing. Run ` + "`claude`" + ` to authenticate."}}]}`,
+			payload: `{"schemaVersion":1,"providers":[{"id":"claude","enabled":true,"windows":[],"error":{"message":"Claude OAuth access token missing. Run ` + "`claude`" + ` to authenticate."}}]}`,
 			want:    quota.AvailabilityAuthRequired,
 		},
 		{
 			name:    "not logged in is an auth failure",
-			payload: `{"providers":[{"id":"gemini","enabled":true,"windows":[],"error":{"message":"Not logged in to Gemini. Run 'gemini' in Terminal to authenticate."}}]}`,
+			payload: `{"schemaVersion":1,"providers":[{"id":"gemini","enabled":true,"windows":[],"error":{"message":"Not logged in to Gemini. Run 'gemini' in Terminal to authenticate."}}]}`,
 			want:    quota.AvailabilityAuthRequired,
 		},
 		{
 			name:    "unsupported provider is merely unavailable",
-			payload: `{"providers":[{"id":"openai","enabled":true,"windows":[],"error":{"message":"No available fetch strategy for openai."}}]}`,
+			payload: `{"schemaVersion":1,"providers":[{"id":"openai","enabled":true,"windows":[],"error":{"message":"No available fetch strategy for openai."}}]}`,
 			want:    quota.AvailabilityUnavailable,
 		},
 		{
 			name:    "silence is unavailable",
-			payload: `{"providers":[{"id":"codex","enabled":true,"windows":[]}]}`,
+			payload: `{"schemaVersion":1,"providers":[{"id":"codex","enabled":true,"windows":[]}]}`,
 			want:    quota.AvailabilityUnavailable,
 		},
 	}
@@ -198,7 +227,7 @@ func TestParseCodexBarDashboardPrefersReadableSourceForFamily(t *testing.T) {
 	// gemini and antigravity both map to the gemini family. When the
 	// Gemini CLI is signed out and Antigravity holds the subscription,
 	// the readable one must win.
-	payload := `{"providers":[
+	payload := `{"schemaVersion":1,"providers":[
 	  {"id":"gemini","enabled":true,"windows":[],"error":{"message":"Not logged in to Gemini."}},
 	  {"id":"antigravity","enabled":true,"windows":[{"kind":"session","label":"Gemini Models","remainingPercent":80,"usedPercent":20}]}
 	]}`
@@ -219,7 +248,7 @@ func TestParseCodexBarDashboardPrefersReadableSourceForFamily(t *testing.T) {
 }
 
 func TestParseCodexBarDashboardTakesMostConstrainedWhenBothSourcesReadable(t *testing.T) {
-	payload := `{"providers":[
+	payload := `{"schemaVersion":1,"providers":[
 	  {"id":"gemini","enabled":true,"windows":[{"kind":"weekly","label":"Gemini weekly","remainingPercent":90,"usedPercent":10}]},
 	  {"id":"antigravity","enabled":true,"windows":[{"kind":"weekly","label":"Antigravity weekly","remainingPercent":12,"usedPercent":88}]}
 	]}`
@@ -238,7 +267,7 @@ func TestParseCodexBarDashboardTakesMostConstrainedWhenBothSourcesReadable(t *te
 }
 
 func TestParseCodexBarDashboardKeepsUnmappedProviderUnderItsOwnID(t *testing.T) {
-	payload := `{"providers":[{"id":"NewVendor","enabled":true,"windows":[{"kind":"weekly","remainingPercent":40,"usedPercent":60}]}]}`
+	payload := `{"schemaVersion":1,"providers":[{"id":"NewVendor","enabled":true,"windows":[{"kind":"weekly","remainingPercent":40,"usedPercent":60}]}]}`
 	snapshot, err := quota.ParseCodexBarDashboard([]byte(payload), nil)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -249,7 +278,7 @@ func TestParseCodexBarDashboardKeepsUnmappedProviderUnderItsOwnID(t *testing.T) 
 }
 
 func TestParseCodexBarDashboardHonoursCustomAliases(t *testing.T) {
-	payload := `{"providers":[{"id":"zai","enabled":true,"windows":[{"kind":"weekly","remainingPercent":40,"usedPercent":60}]}]}`
+	payload := `{"schemaVersion":1,"providers":[{"id":"zai","enabled":true,"windows":[{"kind":"weekly","remainingPercent":40,"usedPercent":60}]}]}`
 	snapshot, err := quota.ParseCodexBarDashboard([]byte(payload), map[string]string{"zai": "openrouter"})
 	if err != nil {
 		t.Fatalf("parse: %v", err)

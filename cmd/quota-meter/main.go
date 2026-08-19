@@ -14,14 +14,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/quota"
-	"github.com/vbonnet/dear-agent/pkg/workflow/roles"
+	"github.com/vbonnet/dear-agent/pkg/llm/router"
 )
 
 func main() {
@@ -49,7 +52,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	fs.Float64Var(&cfg.avoidBelow, "avoid-below", quota.DefaultAvoidBelowRemainingPercent, "remaining percent at or below which a provider is avoided")
 	fs.Float64Var(&cfg.deprioBelow, "deprioritize-below", quota.DefaultDeprioritizeBelowRemainingPercent, "remaining percent at or below which a provider is deprioritized")
 	fs.BoolVar(&cfg.showRoles, "roles", false, "also show the quota-aware candidate order for every configured role")
-	fs.StringVar(&cfg.rolesFile, "roles-file", "", "path to roles.yaml (default: $DEAR_AGENT_ROLES → ./.dear-agent/roles.yaml → ~/.config/dear-agent/roles.yaml → built-in)")
+	fs.StringVar(&cfg.rolesFile, "roles-file", "", "path to the router roles config workflow-run uses (default: $DEAR_AGENT_ROLES → ./.dear-agent/roles.yaml → ~/.config/dear-agent/roles.yaml)")
 	fs.BoolVar(&cfg.asJSON, "json", false, "emit JSON instead of text")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -194,17 +197,19 @@ func buildProvider(p quota.ProviderQuota, meter *quota.Meter) providerReport {
 }
 
 func buildRoles(meter *quota.Meter, rolesFile string) ([]roleReport, string) {
-	registry, source, err := loadRegistry(rolesFile)
+	cfg, source, err := loadRouterConfig(rolesFile)
 	if err != nil {
 		return []roleReport{{Role: "(none)", Notes: []string{fmt.Sprintf("load roles: %v", err)}}}, source
 	}
+	names := make([]string, 0, len(cfg.Roles))
+	for name := range cfg.Roles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var out []roleReport
-	for _, name := range registry.RoleNames() {
-		role, ok := registry.Lookup(name)
-		if !ok {
-			continue
-		}
-		configured := tierModels(role)
+	for _, name := range names {
+		configured := cfg.Roles[name].Candidates()
 		if len(configured) == 0 {
 			continue
 		}
@@ -225,31 +230,54 @@ func buildRoles(meter *quota.Meter, rolesFile string) ([]roleReport, string) {
 	return out, source
 }
 
-func loadRegistry(path string) (*roles.Registry, string, error) {
-	if path != "" {
-		reg, err := roles.LoadFile(path)
-		if err != nil {
-			return nil, path, err
-		}
-		return reg, path, nil
+// loadRouterConfig reads the same roles config schema workflow-run's
+// buildExecutor feeds to router.New, so the preview this command shows
+// matches what actually runs. It previously loaded pkg/workflow/roles'
+// tier-object schema (primary: {model: ...}), which is not what
+// router.LoadConfig accepts (primary: <model string>) — a router role file
+// parsed as a roles.Registry silently produced no candidates instead of
+// previewing the real chain.
+func loadRouterConfig(explicitPath string) (*router.Config, string, error) {
+	path := resolveRolesPath(explicitPath)
+	if path == "" {
+		return nil, "", errors.New("no roles file found ($DEAR_AGENT_ROLES, ./.dear-agent/roles.yaml, ~/.config/dear-agent/roles.yaml)")
 	}
-	// cwd/home are best-effort search roots for AutoLoad, which already
-	// falls back across multiple candidate locations; an empty string from
-	// either lookup just narrows that search, so their errors aren't fatal.
-	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
-	return roles.AutoLoad(os.Getenv("DEAR_AGENT_ROLES"), cwd, home)
+	cfg, err := router.LoadConfig(path)
+	if err != nil {
+		return nil, path, err
+	}
+	return cfg, path, nil
 }
 
-// tierModels lists a role's models in configured precedence order.
-func tierModels(role roles.Role) []string {
-	var out []string
-	for _, tier := range []*roles.Tier{role.Primary, role.Secondary, role.Tertiary} {
-		if tier != nil && tier.Model != "" {
-			out = append(out, tier.Model)
+// resolveRolesPath mirrors the search order the -roles-file flag help text
+// documents: an explicit path first, then $DEAR_AGENT_ROLES, then
+// cwd-relative .dear-agent/roles.yaml, then the operator's
+// ~/.config/dear-agent/roles.yaml. Returns "" when nothing exists.
+func resolveRolesPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	var candidates []string
+	if env := os.Getenv("DEAR_AGENT_ROLES"); env != "" {
+		candidates = append(candidates, env)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, ".dear-agent", "roles.yaml"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".config", "dear-agent", "roles.yaml"))
+	}
+	for _, p := range candidates {
+		// #nosec G703 -- p is one of a fixed set of operator-controlled
+		// locations (env var, cwd-relative, home-relative), the same
+		// existence check pkg/workflow/roles.AutoLoad performs; this only
+		// decides which path to hand to router.LoadConfig, it never reads
+		// file contents itself.
+		if _, err := os.Stat(p); err == nil {
+			return p
 		}
 	}
-	return out
+	return ""
 }
 
 func equalSlices(a, b []string) bool {

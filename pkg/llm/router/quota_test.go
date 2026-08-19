@@ -221,6 +221,50 @@ func TestRouterRecordsTheQuotaVerdictInMetadata(t *testing.T) {
 	}
 }
 
+// TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback guards against
+// attributing the failed primary candidate's quota verdict to a response
+// that the circuit breaker's fallback provider actually served: the
+// fallback is a different (family, model) than decisions[i] was evaluated
+// against, so its quota class/remaining would describe the wrong provider
+// (codex review on #1218).
+func TestRouterOmitsQuotaMetadataOnCircuitBreakerFallback(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "claude-opus-4-7"},
+	}}
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	meter := meterWith(t, map[string]float64{"anthropic": 90})
+
+	r, err := New(Options{
+		Config: cfg,
+		Quota:  meter,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Metadata["router_fallback"] != true {
+		t.Fatalf("expected a fallback response, got metadata = %#v", resp.Metadata)
+	}
+	for key := range resp.Metadata {
+		if len(key) > 12 && key[:12] == "router_quota" {
+			t.Errorf("fallback response carried the primary candidate's quota metadata: %q = %v", key, resp.Metadata[key])
+		}
+	}
+}
+
 func TestRouterOmitsQuotaMetadataWhenUnmetered(t *testing.T) {
 	r := newQuotaRouter(t, nil, quotaProviders())
 	resp, err := r.Generate(context.Background(), "implementer", &provider.GenerateRequest{})

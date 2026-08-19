@@ -139,13 +139,25 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 			callErr = fmt.Errorf("provider %s/%s returned a nil response", family, model)
 		}
 		if callErr == nil {
+			// decisions[i] is the quota verdict for the configured candidate
+			// (family, model) at position i. When the circuit breaker's own
+			// fallback served the request instead, source.Provider/Model name
+			// a different provider than decisions[i] was evaluated against —
+			// attaching it here would mislabel the fallback's response with
+			// the failed primary's quota class and remaining percent. Quota
+			// metadata is only meaningful for the exact candidate it was
+			// computed for, so omit it on a fallback response.
+			quotaMD := quotaMetadata(decisions[i])
+			if source.Fallback {
+				quotaMD = nil
+			}
 			resp.Metadata = mergeMetadata(resp.Metadata, mergeMetadata(map[string]any{
 				"router_provider":        source.Provider,
 				"router_model":           source.Model,
 				"router_candidate_model": modelID,
 				"router_role":            resolvedRole,
 				"router_fallback":        source.Fallback,
-			}, quotaMetadata(decisions[i])))
+			}, quotaMD))
 			return resp, nil
 		}
 

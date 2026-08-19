@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/quota"
-	"github.com/vbonnet/dear-agent/pkg/workflow/roles"
 )
 
 // stubReader returns a canned snapshot without touching a meter binary.
@@ -214,11 +213,8 @@ func TestBuildRolesShowsTheQuotaAwareOrder(t *testing.T) {
 	body := `version: 1
 roles:
   reviewer:
-    description: "test"
-    primary:
-      model: gpt-5.5-pro
-    secondary:
-      model: gemini-3.1-pro
+    primary: gpt-5.5-pro
+    secondary: gemini-3.1-pro
 `
 	if err := os.WriteFile(registry, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -251,21 +247,6 @@ func TestBuildRolesReportsALoadFailure(t *testing.T) {
 	}
 	if !strings.Contains(reports[0].Notes[0], "load roles") {
 		t.Errorf("note = %q, want it to name the load failure", reports[0].Notes[0])
-	}
-}
-
-func TestTierModelsKeepsConfiguredPrecedence(t *testing.T) {
-	role := roles.Role{
-		Primary:   &roles.Tier{Model: "a"},
-		Secondary: &roles.Tier{Model: ""},
-		Tertiary:  &roles.Tier{Model: "c"},
-	}
-	got := tierModels(role)
-	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
-		t.Errorf("tierModels = %v, want [a c] with the empty tier skipped", got)
-	}
-	if len(tierModels(roles.Role{})) != 0 {
-		t.Error("a role with no tiers should yield no models")
 	}
 }
 

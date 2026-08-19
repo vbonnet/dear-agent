@@ -182,12 +182,28 @@ func TestEvaluateNegativeMaxAgeAcceptsAnyAge(t *testing.T) {
 	}
 }
 
-func TestEvaluateUndatedSnapshotIsNotStale(t *testing.T) {
+// TestEvaluateUndatedSnapshotIsStale guards against a missing/unparseable
+// generatedAt reading as fresh: its age cannot be established, so it must
+// be treated as stale (unknown) rather than allowed to route indefinitely
+// (codex review on #1218; this inverts the package's prior assumption).
+func TestEvaluateUndatedSnapshotIsStale(t *testing.T) {
 	now := time.Now()
 	got := quota.Evaluate(snapshotAt(time.Time{}, readable("openai", window("Weekly", 50))),
 		"openai", now, quota.Policy{MaxSnapshotAge: time.Minute})
+	if got.Class != quota.ClassUnknown || !got.Stale {
+		t.Errorf("Class = %q Stale=%t, want unknown+stale for an undated reading", got.Class, got.Stale)
+	}
+}
+
+// TestEvaluateUndatedSnapshotIgnoredWhenMaxAgeDisabled confirms an undated
+// snapshot is still usable when the operator has explicitly disabled the
+// freshness gate (MaxSnapshotAge <= 0 means "accept any age").
+func TestEvaluateUndatedSnapshotIgnoredWhenMaxAgeDisabled(t *testing.T) {
+	now := time.Now()
+	got := quota.Evaluate(snapshotAt(time.Time{}, readable("openai", window("Weekly", 50))),
+		"openai", now, quota.Policy{MaxSnapshotAge: -1})
 	if got.Class != quota.ClassHealthy {
-		t.Errorf("Class = %q, want healthy for an undated reading", got.Class)
+		t.Errorf("Class = %q, want healthy when the freshness gate is disabled", got.Class)
 	}
 }
 

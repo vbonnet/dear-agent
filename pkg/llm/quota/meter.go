@@ -108,7 +108,17 @@ func (m *Meter) Refresh(ctx context.Context) (*Snapshot, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.readAt = m.now()
+	if err == nil || m.snapshot != nil {
+		// Only record this attempt's time when it leaves the cache in a
+		// usable state: a successful read, or a failed one that still has
+		// an earlier snapshot to serve. Recording it on a failure with no
+		// prior snapshot would make Snapshot() consider the empty cache
+		// "fresh" and wait out the full refresh interval before retrying,
+		// so a transient startup failure could leave an entire short-lived
+		// workflow running without quota-aware routing (codex review on
+		// #1218).
+		m.readAt = m.now()
+	}
 	m.readErr = err
 	if err == nil {
 		m.snapshot = snapshot
@@ -204,7 +214,29 @@ func (m *Meter) decide(snapshot *Snapshot, now time.Time, modelID string) Decisi
 			Reason:       "model is not mapped to a provider family",
 		}
 	}
-	return Evaluate(snapshot, family, now, m.policy)
+	return Evaluate(snapshot, canonicalProviderFamily(family), now, m.policy)
+}
+
+// providerFamilyAliases canonicalizes provider.Resolver's supported
+// forced-prefix spellings ("claude:", "google:", "local:") onto the
+// family names a CodexBar snapshot actually stores providers under. The
+// resolver returns a forced prefix verbatim as the family (by design, so
+// it round-trips through Factory.NewProvider), but DefaultFamilyAliases
+// stores the same providers under "anthropic", "gemini", and "ollama".
+// Without this, a role that forces one of these prefixes never matches
+// its own quota reading and always evaluates as unknown (codex review on
+// #1218).
+var providerFamilyAliases = map[string]string{
+	"claude": "anthropic",
+	"google": "gemini",
+	"local":  "ollama",
+}
+
+func canonicalProviderFamily(family string) string {
+	if canonical, ok := providerFamilyAliases[family]; ok {
+		return canonical
+	}
+	return family
 }
 
 // OrderModels returns the candidates reordered so that providers with
@@ -243,7 +275,18 @@ func (m *Meter) OrderModels(models []string) ([]string, []Decision) {
 		index[i] = i
 	}
 	sort.SliceStable(index, func(a, b int) bool {
-		return Band(decisions[index[a]]) < Band(decisions[index[b]])
+		da, db := decisions[index[a]], decisions[index[b]]
+		if !da.Known() || !db.Known() {
+			// An unknown decision must never cross a configured position:
+			// Band scores ClassUnknown as 0 (same as the top real band) so
+			// it never demotes anything, but comparing that 0 against a
+			// known candidate's band would let unknown leapfrog ahead of a
+			// known candidate that isn't in the top band (codex review on
+			// #1218). Report the pair as equivalent instead, so the stable
+			// sort preserves their original configured order.
+			return false
+		}
+		return Band(da) < Band(db)
 	})
 
 	sortedModels := make([]string, len(ordered))

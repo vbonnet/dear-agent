@@ -176,11 +176,11 @@ type codexBarProvider struct {
 		Message string `json:"message"`
 	} `json:"error"`
 	Windows []struct {
-		Kind             string  `json:"kind"`
-		Label            string  `json:"label"`
-		RemainingPercent float64 `json:"remainingPercent"`
-		UsedPercent      float64 `json:"usedPercent"`
-		ResetAt          string  `json:"resetAt"`
+		Kind             string   `json:"kind"`
+		Label            string   `json:"label"`
+		RemainingPercent *float64 `json:"remainingPercent"`
+		UsedPercent      float64  `json:"usedPercent"`
+		ResetAt          string   `json:"resetAt"`
 	} `json:"windows"`
 }
 
@@ -199,7 +199,13 @@ func ParseCodexBarDashboard(data []byte, aliases map[string]string) (*Snapshot, 
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, fmt.Errorf("quota: parse codexbar dashboard json: %w", err)
 	}
-	if payload.SchemaVersion != 0 && payload.SchemaVersion != supportedDashboardSchema {
+	if payload.SchemaVersion != supportedDashboardSchema {
+		// A missing schemaVersion unmarshals to the same zero value as an
+		// explicit 0, and previously passed here unchecked: an older or
+		// malformed dashboard's missing fields (e.g. a window without
+		// remainingPercent) then read as zero values — genuine exhaustion
+		// rather than the unsupported payload it actually was. Require the
+		// declared version to match exactly.
 		return nil, fmt.Errorf("quota: codexbar dashboard schema %d is not supported (this build reads %d)",
 			payload.SchemaVersion, supportedDashboardSchema)
 	}
@@ -234,6 +240,22 @@ func ParseCodexBarDashboard(data []byte, aliases map[string]string) (*Snapshot, 
 	return snapshot, nil
 }
 
+// windowForeignToFamily reports whether a CodexBar window's label
+// indicates it does not represent the given family's own quota. This
+// matters because Antigravity reports "Claude/GPT" sub-budgets for its
+// third-party model proxy alongside genuine Gemini windows, both bucketed
+// under the "gemini" family by DefaultFamilyAliases (antigravity → gemini).
+// Evaluating that family's MostConstrained() without this filter can pick
+// a Claude/GPT reading to gate a Gemini candidate, or the reverse — the
+// live dashboard capture in testdata reproduces exactly this mix.
+func windowForeignToFamily(label, family string) bool {
+	if family != "gemini" {
+		return false
+	}
+	lower := strings.ToLower(label)
+	return strings.Contains(lower, "claude") || strings.Contains(lower, "gpt")
+}
+
 // convertProvider maps one CodexBar provider entry onto a ProviderQuota,
 // classifying why a reading is missing when it is.
 func convertProvider(p codexBarProvider, aliases map[string]string) ProviderQuota {
@@ -251,10 +273,20 @@ func convertProvider(p codexBarProvider, aliases map[string]string) ProviderQuot
 		quota.Plan = p.Identity.Plan
 	}
 	for _, w := range p.Windows {
+		if w.RemainingPercent == nil {
+			// A window without an explicit remainingPercent unmarshals the
+			// field as 0, which is indistinguishable from genuine
+			// exhaustion. Drop it instead of letting convertProvider treat
+			// the provider as AvailabilityOK on a phantom empty window.
+			continue
+		}
+		if windowForeignToFamily(w.Label, family) {
+			continue
+		}
 		quota.Windows = append(quota.Windows, Window{
 			ID:               w.Kind,
 			Label:            w.Label,
-			RemainingPercent: w.RemainingPercent,
+			RemainingPercent: *w.RemainingPercent,
 			UsedPercent:      w.UsedPercent,
 			ResetAt:          parseTime(w.ResetAt),
 		})

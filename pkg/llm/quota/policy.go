@@ -120,7 +120,18 @@ func Evaluate(snapshot *Snapshot, family string, now time.Time, policy Policy) D
 		decision.Reason = "no quota reading available"
 		return decision
 	}
-	if maxAge := policy.maxAge(); maxAge > 0 {
+	maxAge := policy.maxAge()
+	if maxAge > 0 {
+		if snapshot.GeneratedAt.IsZero() {
+			// A missing/unparseable generatedAt is an unknown age, not a
+			// fresh one: Snapshot.Age reports 0 for display purposes, but
+			// treating that as "fresh" here would let an undated reading
+			// (and any provider percentage retained under it) route
+			// indefinitely (codex review on #1218).
+			decision.Stale = true
+			decision.Reason = "quota snapshot has no generation time, cannot confirm freshness"
+			return decision
+		}
 		if age := snapshot.Age(now); age > maxAge {
 			decision.Stale = true
 			decision.Reason = fmt.Sprintf("quota reading is %s old, past the %s limit", age.Round(time.Second), maxAge)
@@ -132,6 +143,19 @@ func Evaluate(snapshot *Snapshot, family string, now time.Time, policy Policy) D
 	if !ok {
 		decision.Reason = fmt.Sprintf("no quota reading for family %q", family)
 		return decision
+	}
+	if maxAge > 0 && !quota.UpdatedAt.IsZero() {
+		// The dashboard as a whole can be freshly generated while one
+		// provider's own refresh failed and its windows were carried over
+		// from an earlier read; convertProvider still marks that provider
+		// AvailabilityOK as long as it has windows. Apply the same age
+		// limit to the provider's own UpdatedAt so a stale carried-over
+		// reading expires even though the snapshot's GeneratedAt is fresh.
+		if age := now.Sub(quota.UpdatedAt); age > maxAge {
+			decision.Stale = true
+			decision.Reason = fmt.Sprintf("%s reading is %s old, past the %s limit", family, age.Round(time.Second), maxAge)
+			return decision
+		}
 	}
 	decision.Availability = quota.Availability
 	if !quota.Availability.Known() {

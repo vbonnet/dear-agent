@@ -25,6 +25,9 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/mod/semver"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 	llmprovider "github.com/vbonnet/dear-agent/pkg/llm/provider"
 	"github.com/vbonnet/dear-agent/pkg/llm/quota"
 	"github.com/vbonnet/dear-agent/pkg/llm/router"
@@ -188,7 +191,7 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		return nil, fmt.Errorf("bad -quota %q; expect auto, on, or off", mode)
 	}
 
-	meter := quota.New(quota.Options{Reader: quota.CodexBarReader{}})
+	meter := quota.New(quota.Options{Reader: credentialFilteredReader{inner: quota.CodexBarReader{}}})
 
 	// Warm the cache once so the first AI node routes on real data. The
 	// read is slow enough to be worth doing here and never on the
@@ -200,8 +203,89 @@ func buildQuotaMeter(mode string, logger *slog.Logger) (*quota.Meter, error) {
 		logger.Warn("quota routing: no reading, routing as configured", "error", err)
 		return meter, nil
 	}
+	if snapshot.SourceVersion != "" && !meetsMinCodexBarVersion(snapshot.SourceVersion) {
+		// ADR-038 limits the audited dependency to 0.49.0+ (earlier builds
+		// carry a recorded SQLite cost-store defect). The installed binary
+		// answered the dashboard call, so it exists and is on PATH — this
+		// is the only point that actually observes its reported version,
+		// which -quota=auto's LookPath-only check never does. Disable
+		// quota routing rather than route on an unaudited build; the -quota
+		// tri-state's own fail-safe (an unreadable/disabled meter yields no
+		// verdicts) applies unchanged.
+		logger.Warn("quota routing: disabled, codexbar version is below the audited floor",
+			"installed", snapshot.SourceVersion, "floor", minAuditedCodexBarVersion)
+		return nil, nil
+	}
 	logger.Info("quota routing: enabled", "source", snapshot.Source, "providers", len(snapshot.Providers))
 	return meter, nil
+}
+
+// minAuditedCodexBarVersion is the floor ADR-038 sets: earlier builds carry
+// a recorded SQLite cost-store defect and were never part of the security
+// review.
+const minAuditedCodexBarVersion = "0.49.0"
+
+// meetsMinCodexBarVersion reports whether installed is at or above
+// minAuditedCodexBarVersion. An unparseable installed version is treated as
+// not meeting the floor — silently trusting an unrecognized version string
+// would defeat the point of a floor check.
+func meetsMinCodexBarVersion(installed string) bool {
+	v := installed
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	if !semver.IsValid(v) {
+		return false
+	}
+	floor := "v" + minAuditedCodexBarVersion
+	return semver.Compare(v, floor) >= 0
+}
+
+// credentialFilteredReader wraps a quota.Reader and drops any provider
+// quota entry the router will actually reach through a directly-billed
+// credential (an API key or Vertex AI/ADC) rather than a CLI-authenticated
+// subscription. CodexBar's dashboard reads CLI/subscription identities; the
+// default factory routes OpenAI exclusively through OPENAI_API_KEY and
+// Anthropic through an API key or Vertex credentials
+// (pkg/llm/provider/factory.go), so an unfiltered reading attaches an
+// unrelated billing pool's quota to that family's routing decisions — e.g.
+// low Codex OAuth quota demoting an OpenAI API account that still has full
+// capacity (codex review on #1218).
+type credentialFilteredReader struct {
+	inner quota.Reader
+}
+
+func (r credentialFilteredReader) Read(ctx context.Context) (*quota.Snapshot, error) {
+	snapshot, err := r.inner.Read(ctx)
+	if err != nil || snapshot == nil {
+		return snapshot, err
+	}
+	filtered := make([]quota.ProviderQuota, 0, len(snapshot.Providers))
+	for _, p := range snapshot.Providers {
+		if usesDirectlyBilledCredentials(p.Family) {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	snapshot.Providers = filtered
+	return snapshot, nil
+}
+
+// usesDirectlyBilledCredentials reports whether the router will reach
+// family through a credential CodexBar's CLI/subscription reading cannot
+// represent: an API key or Vertex AI/ADC. Families with no detected
+// credential, or a local/no-auth family such as ollama, are left alone —
+// neither conflicts with a CodexBar reading the way a directly-billed
+// account does.
+func usesDirectlyBilledCredentials(family string) bool {
+	switch auth.DetectAuthMethod(family) {
+	case auth.AuthAPIKey, auth.AuthVertexAI:
+		return true
+	case auth.AuthLocal, auth.AuthNone:
+		return false
+	default:
+		return false
+	}
 }
 
 // hasAINode returns true if any node in the (possibly-nested) DAG is an
