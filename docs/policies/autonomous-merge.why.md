@@ -14,7 +14,8 @@ a subtle, high-blast-radius mistake lands unreviewed. The carve-out
   reverted a security control — exactly what the carve-out is for.
 - **Admin-bypass merges laundering red.** PRs merged via `--admin` over pending
   required checks; `new-from-merge-base` lint made bypassed red look green on
-  `main`. This is why the policy forbids `--admin`/`--force`/`--no-verify`.
+  `main`. This is why the policy forbids `--admin`, force-pushes to protected
+  branches, and `--no-verify`.
 - **Fail-open guard + config-path collision.** Security-guard changes look like
   routine cleanups but change what the guard actually blocks — hold for a human.
 
@@ -23,9 +24,12 @@ a subtle, high-blast-radius mistake lands unreviewed. The carve-out
   money/billing? If yes → open the PR, do NOT merge, flag for human review.
 - Otherwise → merge autonomously once green and all threads are resolved via
   `safe-merge --pr <number>`.
-- Never reach for `--admin`, `--force`, `--no-verify`,
+- Never reach for `--admin`, force-pushes to `main`/`master`/default,
+  `--no-verify`,
   `safe-merge --skip-review-check`, or `safe-merge break-glass` in a routine
   agent flow — fix the cause or escalate. The audited, TTY-only break-glass
   path remains human-operated.
+- Force-pushing non-default PR branches is allowed when rebasing stale work;
+  prefer `--force-with-lease`.
 
 See also: [definition-of-done](definition-of-done.why.md).

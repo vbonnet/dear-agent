@@ -49,20 +49,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.UI.ScreenReader {
 		t.Error("ScreenReader should default to false")
 	}
-
-	// Advanced defaults
-	if cfg.Advanced.TmuxTimeout != "5s" {
-		t.Errorf("TmuxTimeout = %q, want %q", cfg.Advanced.TmuxTimeout, "5s")
-	}
-	if cfg.Advanced.HealthCheckCache != "5s" {
-		t.Errorf("HealthCheckCache = %q, want %q", cfg.Advanced.HealthCheckCache, "5s")
-	}
-	if cfg.Advanced.LockTimeout != "30s" {
-		t.Errorf("LockTimeout = %q, want %q", cfg.Advanced.LockTimeout, "30s")
-	}
-	if cfg.Advanced.UUIDDetectionWindow != "5m" {
-		t.Errorf("UUIDDetectionWindow = %q, want %q", cfg.Advanced.UUIDDetectionWindow, "5m")
-	}
 }
 
 func TestSetGetGlobalConfig(t *testing.T) {

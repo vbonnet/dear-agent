@@ -25,6 +25,9 @@ type StallRecovery struct {
 	retryTracker        *RetryTracker        // Tracks retry attempts with bounded retries
 	bus                 eventbus.Broadcaster // Optional: publishes StallRecovered/StallEscalated events
 	router              *AlertRouter         // Optional: nil builds the default router lazily
+	// orchestratorTarget resolves the live relay target. Nil falls back to
+	// the name this recovery was constructed with.
+	orchestratorTarget func(string) string
 }
 
 // NewStallRecovery creates a new stall recovery handler with retry tracking.
@@ -111,7 +114,7 @@ func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event
 		Subject:       event.SessionName,
 		Severity:      AlertSeverityCritical,
 		Actionability: AlertAgentActionable,
-		Target:        sr.orchestratorName,
+		Target:        sr.resolveOrchestrator(),
 		OccurredAt:    event.DetectedAt,
 		Meta: map[string]any{
 			"stall_type": event.StallType,
@@ -177,7 +180,7 @@ func (sr *StallRecovery) recoverErrorLoopStall(ctx context.Context, event StallE
 		Subject:       event.SessionName,
 		Severity:      AlertSeverityWarning,
 		Actionability: AlertAgentActionable,
-		Target:        sr.orchestratorName,
+		Target:        sr.resolveOrchestrator(),
 		OccurredAt:    event.DetectedAt,
 		Meta: map[string]any{
 			"stall_type": event.StallType,
@@ -264,7 +267,7 @@ func (sr *StallRecovery) escalateFailure(ctx context.Context, event StallEvent, 
 		Subject:       event.SessionName,
 		Severity:      AlertSeverityCritical,
 		Actionability: AlertAgentActionable,
-		Target:        sr.orchestratorName,
+		Target:        sr.resolveOrchestrator(),
 		OccurredAt:    event.DetectedAt,
 	})
 
@@ -348,4 +351,28 @@ func (sr *StallRecovery) alertRouter() *AlertRouter {
 	}
 	sr.router = NewAlertRouter(sr.ctx)
 	return sr.router
+}
+
+// SetOrchestratorTargetResolver overrides how a stalled session's alert
+// target is resolved, so the target can be looked up live instead of being
+// fixed at construction.
+func (sr *StallRecovery) SetOrchestratorTargetResolver(resolve func(string) string) {
+	sr.orchestratorTarget = resolve
+}
+
+// resolveOrchestrator reports the preferred recipient for this recovery's
+// alerts.
+//
+// This is the seam where the two halves of routing meet: it yields the
+// live relay target (state file, then AGM_COMPLETION_RELAY_TARGET, then
+// the --orchestrator fallback), and the alert router then treats that as
+// its explicit first candidate, checking it for liveness before falling
+// through to discovery and finally to the durable queue. An operator
+// retargeting relay therefore steers stall alerts too, without the router
+// losing its ability to find someone else when that target is dead.
+func (sr *StallRecovery) resolveOrchestrator() string {
+	if sr.orchestratorTarget != nil {
+		return sr.orchestratorTarget(sr.orchestratorName)
+	}
+	return sr.orchestratorName
 }

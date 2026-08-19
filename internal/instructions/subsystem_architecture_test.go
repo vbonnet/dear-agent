@@ -86,6 +86,9 @@ func TestAGMMCPArchitectureMatchesRegisteredTools(t *testing.T) {
 		"agm_send_message",
 		"agm_get_session_output",
 		"agm_list_ops",
+		"agm_get_quota_status",
+		"agm_get_completion_relay_target",
+		"agm_set_completion_relay_target",
 		"engram_list_wayfinder_sessions",
 		"engram_get_wayfinder_session",
 	}
@@ -99,6 +102,7 @@ func TestAGMMCPArchitectureMatchesRegisteredTools(t *testing.T) {
 		"SendMessage",
 		"GetSessionOutput",
 		"ListOps",
+		"QuotaStatus",
 		"ListWayfinderSessions",
 		"GetWayfinderSession",
 	}

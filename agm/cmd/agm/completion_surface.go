@@ -145,7 +145,14 @@ func (cs *completionSurfacer) planFor(event ops.CompletionEvent) relayPlan {
 	if cs.notificationsDisabled {
 		return relayPlan{surface: false}
 	}
-	target := cs.router.ResolveTarget(cs.orchestrator)
+	// The two halves of routing compose here: cs.relayTarget() yields the
+	// live relay target (state file, then AGM_COMPLETION_RELAY_TARGET, then
+	// the --orchestrator fallback), and the router treats that as its
+	// explicit first candidate, checking it for liveness before falling
+	// through to discovery. Passing cs.orchestrator alone would ignore an
+	// operator's live retarget; passing the relay target without the router
+	// would lose the discovery fallback when that target is dead.
+	target := cs.router.ResolveTarget(cs.relayTarget())
 	if target != "" && eventIsSession(event, target) {
 		return relayPlan{surface: false, target: target}
 	}
@@ -250,6 +257,13 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 	}
 
 	return errs
+}
+
+// relayTarget reads the live relay target that Dispatch can rewrite at any
+// moment. It is read once per event by planFor; see relayPlan for why a
+// second read would reopen the self-relay window.
+func (cs *completionSurfacer) relayTarget() string {
+	return resolveCompletionRelayTarget(cs.orchestrator)
 }
 
 func (cs *completionSurfacer) Close() {

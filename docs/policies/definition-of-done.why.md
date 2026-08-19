@@ -22,6 +22,8 @@ divergent branches instead of a moving `main`.
 - Close the bead only on merge, with the PR link in the closing note.
 - Blocked from merging? Escalate the blocker up the chain; keep the pipeline
   moving on the next unblocked item. Parking silently is not "done."
-- Never reach "done" via `--admin` / `--force` / `--no-verify`.
+- Never reach "done" via `--admin`, force-pushing protected/default branches,
+  or `--no-verify`. Force-pushing non-default PR branches after a clean rebase
+  is allowed; prefer `--force-with-lease`.
 
 See also: [autonomous-merge](autonomous-merge.why.md), [broken-windows](broken-windows.why.md).

@@ -225,3 +225,40 @@ func injectIsolatedRouter(t *testing.T, recovery *StallRecovery) *AlertRouter {
 	recovery.SetAlertRouter(router)
 	return router
 }
+
+// The live relay-target resolver must actually steer stall routing: the
+// target it resolves becomes the alert router's explicit first candidate,
+// so an operator retargeting completion relay retargets stall alerts too.
+// This is the seam where relay-target resolution and alert routing meet.
+func TestRecoverErrorLoopStall_UsesResolvedOrchestratorTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	mockStore := &mockStorage{
+		sessions: []*manifest.Manifest{
+			testManifest("worker-2", manifest.StateWorking, time.Now()),
+			testManifest("dispatch-live", manifest.StateReady, time.Now()),
+			testManifest("vroom-orchestrator", manifest.StateReady, time.Now()),
+		},
+	}
+	recovery := NewStallRecovery(&OpContext{Storage: mockStore}, "vroom-orchestrator")
+	recovery.SetOrchestratorTargetResolver(func(string) string { return "dispatch-live" })
+	sent := injectDeliverableRouter(t, recovery)
+
+	event := StallEvent{
+		SessionName: "worker-2",
+		StallType:   "error_loop",
+		Evidence:    "Error: permission denied appears 3 times",
+	}
+	action, err := recovery.recoverErrorLoopStall(context.Background(), event, "")
+	if err != nil {
+		t.Fatalf("recoverErrorLoopStall() error = %v", err)
+	}
+	if !action.Sent {
+		t.Error("action.Sent = false after a successful dispatch")
+	}
+	// The resolved target wins over the construction-time name, and it
+	// wins over discovery, which would otherwise have preferred the
+	// conventionally named vroom-orchestrator.
+	if len(*sent) != 1 || (*sent)[0] != "dispatch-live" {
+		t.Fatalf("sent = %v, want delivery to the live relay target", *sent)
+	}
+}

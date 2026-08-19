@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
@@ -87,7 +89,11 @@ func init() {
 	watchStalledCmd.Flags().IntVar(&stalledErrorRepeatThreshold, "error-repeat-threshold", 3,
 		"How many repeats of an error = loop")
 	watchStalledCmd.Flags().StringVar(&stalledOrchestratorName, "orchestrator", "",
-		"Orchestrator session name for alerts (optional)")
+		"Default session for alerts and completion relays (optional). This is the "+
+			"fallback, not a pin: the live relay target (set via 'agm completion "+
+			"relay-target set' or agm_set_completion_relay_target, else "+
+			"AGM_COMPLETION_RELAY_TARGET) takes precedence so a running watcher can "+
+			"be retargeted without a restart.")
 	watchStalledCmd.Flags().BoolVar(&stalledDryRun, "dry-run", false,
 		"Detect stalls without taking recovery actions")
 	watchStalledCmd.Flags().StringVar(&stalledNotifyConfigPath, "notify-config", "",
@@ -163,6 +169,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	detector.ErrorRepeatThreshold = stalledErrorRepeatThreshold
 
 	recovery := ops.NewStallRecovery(opCtx, stalledOrchestratorName)
+	recovery.SetOrchestratorTargetResolver(resolveCompletionRelayTarget)
 
 	var completions *ops.CompletionWatcher
 	var surfacer *completionSurfacer
@@ -239,6 +246,28 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+}
+
+// resolveCompletionRelayTarget reports where completions and stall alerts
+// should be delivered right now. fallback is the --orchestrator default,
+// which the live relay-target state deliberately outranks; see the flag
+// help for why the flag is a fallback rather than a pin.
+func resolveCompletionRelayTarget(fallback string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("completion relay: cannot locate home dir; using fallback target",
+			"fallback", fallback, "error", err)
+		return strings.TrimSpace(fallback)
+	}
+	result := dispatchstate.ResolveRelayTarget(home, fallback, os.Getenv)
+	if result.Reason != "" {
+		// A state read that failed for any reason other than "not set" is
+		// a degraded resolve, not an absent override: say so rather than
+		// letting it look identical to no target having been configured.
+		slog.Warn("completion relay: live relay-target state unreadable; falling back",
+			"reason", result.Reason, "source", result.Source, "target", result.Target)
+	}
+	return result.Target
 }
 
 // formatDurationForJSON returns a human-readable duration string.

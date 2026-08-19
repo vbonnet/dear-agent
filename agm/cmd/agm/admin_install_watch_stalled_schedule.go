@@ -13,9 +13,16 @@ import (
 const watchStalledPlistLabel = "com.dear-agent.watch-stalled"
 const watchStalledPlistFile = "schedules/com.dear-agent.watch-stalled.plist"
 
-// defaultStallOrchestrator leaves routing discoverable at runtime. The alert
-// router prefers a live Dispatch/orchestrator/supervisor session and queues
-// when none exists, avoiding an install-time hardcoded dead target.
+// defaultStallOrchestrator is the --orchestrator value the generated
+// schedule carries. It is empty on purpose: routing discovers a live
+// Dispatch/orchestrator/supervisor session at run time and queues durably
+// when none is reachable, so baking a name in at install time would pin
+// the schedule to a session that may since have died.
+//
+// There is deliberately no named default anywhere for this: under runtime
+// discovery, "who receives an alert" is only knowable at delivery time, so
+// a constant naming one session would be a confident wrong answer on any
+// host where that session is not the live supervisor.
 const defaultStallOrchestrator = ""
 
 var (

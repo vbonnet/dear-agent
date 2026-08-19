@@ -134,7 +134,89 @@ func TestPushArgs_NoRepoDirOmitsDashC(t *testing.T) {
 func TestPush_RejectsForceBeforeRunning(t *testing.T) {
 	// Force is rejected up front, so this never shells out to git.
 	err := Push("", []string{"--force", "origin", "main"}, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "force-pushes") {
+	if err == nil || !strings.Contains(err.Error(), "protected/default") {
 		t.Fatalf("expected force rejection, got %v", err)
+	}
+}
+
+func TestForcePushViolation_AllowsFeatureBranches(t *testing.T) {
+	// A repository with a resolvable origin/HEAD. Passing "" would use the
+	// ambient working directory, and an actions/checkout clone has no
+	// refs/remotes/origin/HEAD, so the default-branch check fails closed and
+	// the test would be measuring the checkout rather than the policy.
+	repo := newPolicyRepo(t)
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"force-with-lease branch", []string{"--force-with-lease", "origin", "feature/rebased"}},
+		{"short force branch", []string{"-f", "origin", "fix/stale-pr"}},
+		{"force refspec to feature", []string{"origin", "+HEAD:refs/heads/feature/rebased"}},
+		{"implicit current feature", []string{"--force-with-lease", "origin"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if target, blocked := ForcePushViolation(repo, "feature/current", tc.args); blocked {
+				t.Fatalf("ForcePushViolation(%q) blocked %q", tc.args, target)
+			}
+		})
+	}
+}
+
+func TestForcePushViolation_BlocksProtectedBranches(t *testing.T) {
+	repo := newPolicyRepo(t)
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"force main", []string{"--force", "origin", "main"}},
+		{"force master", []string{"--force-with-lease", "origin", "master"}},
+		{"force lease equals main", []string{"--force-with-lease=main", "origin"}},
+		{"force refspec to main", []string{"origin", "+HEAD:refs/heads/main"}},
+		{"mirror", []string{"--mirror"}},
+		{"implicit current main", []string{"--force-with-lease", "origin"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			current := "feature/current"
+			if tc.name == "implicit current main" {
+				current = "main"
+			}
+			if _, blocked := ForcePushViolation(repo, current, tc.args); !blocked {
+				t.Fatalf("ForcePushViolation(%q) allowed protected force-push", tc.args)
+			}
+		})
+	}
+}
+
+// TestForceFlag_AbbreviatedLongOptionWithValue pins the behaviour an
+// abbreviation carrying its optional value depends on: git accepts
+// `--force-with-l=main`, and matching the whole token against the full option
+// name would never match because of the `=main` suffix.
+func TestForceFlag_AbbreviatedLongOptionWithValue(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"abbreviated lease with value", []string{"--force-with-l=main", "origin", "topic"}, true},
+		{"abbreviated lease bare", []string{"--force-with-l", "origin", "topic"}, true},
+		{"full lease with value", []string{"--force-with-lease=main", "origin", "topic"}, true},
+		{"abbreviated force", []string{"--forc", "origin", "topic"}, true},
+		{"abbreviated mirror", []string{"--mirr", "origin"}, true},
+		{"abbreviated if-includes with value", []string{"--force-if-inc=x", "origin"}, true},
+		{"unrelated option with value", []string{"--repo=origin", "origin", "topic"}, false},
+		{"negated force", []string{"--no-force-with-lease", "origin", "topic"}, false},
+		{"plain push", []string{"origin", "topic"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			flag, got := ForceFlag(tc.args)
+			if got != tc.want {
+				t.Fatalf("ForceFlag(%v) = (%q, %v), want %v", tc.args, flag, got, tc.want)
+			}
+		})
 	}
 }

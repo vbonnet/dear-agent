@@ -178,6 +178,64 @@ func AddGetStatusTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), e
 	})
 }
 
+// GetCompletionRelayTargetMCPInput is the MCP input schema for get_completion_relay_target.
+type GetCompletionRelayTargetMCPInput struct {
+}
+
+// AddGetCompletionRelayTargetTool registers the agm_get_completion_relay_target MCP tool.
+func AddGetCompletionRelayTargetTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), error)) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_completion_relay_target",
+		Description: "Read the live AGM completion relay target override. An empty target with source fallback means no override is set, and routing then discovers a live supervisor at delivery time.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetCompletionRelayTargetMCPInput) (*mcp.CallToolResult, any, error) {
+		opCtx, cleanup, err := newOpCtx()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+
+		req := &GetCompletionRelayTargetInput{}
+
+		result, opErr := GetCompletionRelayTarget(opCtx, req)
+		if opErr != nil {
+			return mcpError(opErr), nil, nil
+		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
+// GetQuotaStatusMCPInput is the MCP input schema for get_quota_status.
+type GetQuotaStatusMCPInput struct {
+	Provider string `json:"provider,omitempty" jsonschema:"description=Provider quota to read. Defaults to codex."`
+}
+
+// AddGetQuotaStatusTool registers the agm_get_quota_status MCP tool.
+func AddGetQuotaStatusTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), error)) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_quota_status",
+		Description: "Read the latest provider quota status captured by CodexBar. Use to pace Dispatch work when a provider is throttled or near-empty.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetQuotaStatusMCPInput) (*mcp.CallToolResult, any, error) {
+		opCtx, cleanup, err := newOpCtx()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+
+		req := &QuotaStatusInput{
+
+			Provider: input.Provider,
+		}
+
+		result, opErr := GetQuotaStatus(opCtx, req)
+		if opErr != nil {
+			return mcpError(opErr), nil, nil
+		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
 // ArchiveSessionMCPInput is the MCP input schema for archive_session.
 type ArchiveSessionMCPInput struct {
 	Identifier string `json:"identifier" jsonschema:"description=Session ID, name, or UUID prefix,required"`
@@ -236,6 +294,37 @@ func AddKillSessionTool(server *mcp.Server, newOpCtx func() (*OpContext, func(),
 		}
 
 		result, opErr := KillSession(opCtx, req)
+		if opErr != nil {
+			return mcpError(opErr), nil, nil
+		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
+// SetCompletionRelayTargetMCPInput is the MCP input schema for set_completion_relay_target.
+type SetCompletionRelayTargetMCPInput struct {
+	SessionID string `json:"session_id" jsonschema:"description=Live Dispatch/AGM session ID or name that should receive completion relays (required),required"`
+}
+
+// AddSetCompletionRelayTargetTool registers the agm_set_completion_relay_target MCP tool.
+func AddSetCompletionRelayTargetTool(server *mcp.Server, newOpCtx func() (*OpContext, func(), error)) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_set_completion_relay_target",
+		Description: "Set the live Dispatch/AGM session that receives completion relays from the watcher. Takes effect without restarting the watcher.",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input SetCompletionRelayTargetMCPInput) (*mcp.CallToolResult, any, error) {
+		opCtx, cleanup, err := newOpCtx()
+		if err != nil {
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+
+		req := &SetCompletionRelayTargetInput{
+
+			SessionID: input.SessionID,
+		}
+
+		result, opErr := SetCompletionRelayTarget(opCtx, req)
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
 		}
