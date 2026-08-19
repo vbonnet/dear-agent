@@ -91,22 +91,44 @@ func VerifyContentAddressedHelperInvocation(runningExecutable, deployed, expecte
 	if runningExecutable != pinned {
 		return errors.New("running helper executable is not the revision-bound content-addressed path")
 	}
+	_, err = verifyDeployedHelperDigestIdentity(pinned, expectedSHA256, policy)
+	return err
+}
+
+// VerifyRunningHelperImage is VerifyContentAddressedHelperInvocation for a
+// process asserting about itself. It resolves the running executable rather
+// than accepting it, because everything the path-based check authenticates is
+// the file at a pathname: exec mapped its image before this process could look
+// at it, so an atomic replacement landing in between would let an older image
+// continue while the newer, expected bytes are the ones hashed. Where the
+// platform exposes a handle on the running image the two are bound; where it
+// does not, the digest-derived pathname is the only binding available and the
+// residual is recorded as HHP-23 rather than reported as proof.
+func VerifyRunningHelperImage(deployed, expectedSHA256 string, policy HelperTrustPolicy) error {
+	running, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve running helper executable: %w", err)
+	}
+	pinned, err := ContentAddressedHelperPath(deployed, expectedSHA256)
+	if err != nil {
+		return err
+	}
+	running, err = cleanAbsolutePath(running, "running helper executable")
+	if err != nil {
+		return err
+	}
+	if running != pinned {
+		return errors.New("running helper executable is not the revision-bound content-addressed path")
+	}
 	verified, err := verifyDeployedHelperDigestIdentity(pinned, expectedSHA256, policy)
 	if err != nil {
 		return err
 	}
-	// Everything above authenticates the file at the pinned pathname. exec
-	// mapped its image before this process could look at it, so on a platform
-	// that exposes the running image, bind the two: otherwise an atomic
-	// replacement landing between exec and this read would let an older image
-	// continue while the new, expected bytes are the ones being hashed. Where
-	// no such handle exists the content-addressed pathname is the binding, and
-	// the residual is recorded in internal/hookparity/SPEC.md.
-	running, available, err := runningImageIdentity()
+	image, available, err := runningImageIdentity()
 	if err != nil {
 		return err
 	}
-	if available && !os.SameFile(running, verified) {
+	if available && !os.SameFile(image, verified) {
 		return errors.New("running helper image is not the authenticated revision-bound artifact")
 	}
 	return nil

@@ -42,12 +42,10 @@ const (
 var errIncompleteReminderMarker = errors.New("reminder marker content is incomplete")
 
 var verifyOperatorOwnedHelperDigest = func(expectedSHA256 string) error {
-	runningHelper, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve running helper executable: %w", err)
-	}
-	return hookparity.VerifyContentAddressedHelperInvocation(
-		runningHelper,
+	// VerifyRunningHelperImage resolves the running executable itself rather
+	// than taking it as an argument, so there is no parameter that could
+	// describe an image other than this process's own.
+	return hookparity.VerifyRunningHelperImage(
 		operatorOwnedHelper,
 		expectedSHA256,
 		hookparity.ProductionHelperTrustPolicy(),
