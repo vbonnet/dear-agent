@@ -12,7 +12,8 @@ if [[ -x "$ROOT/bin/cleanup-worktrees" ]]; then
 fi
 
 # Not exec: the EXIT trap must run so the temporary build is not leaked.
-TMP="$(mktemp -d)"
+# An explicit template because BSD mktemp ignores TMPDIR without one.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/cleanup-worktrees.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 (cd -- "$ROOT" && go build -o "$TMP/cleanup-worktrees" ./cmd/cleanup-worktrees)
 "$TMP/cleanup-worktrees" "$@"

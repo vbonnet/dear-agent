@@ -97,6 +97,12 @@ cleanup that classified on a denylist.
 
 **CLEANUP-WT-30** When any removal failed, the system shall exit with code 3 so an automated caller can detect partial cleanup.
 
+**CLEANUP-WT-31** When the shim `scripts/cleanup-worktrees.sh` runs and a prebuilt `bin/cleanup-worktrees` is executable, the system shall run that binary; otherwise it shall build the command from the module root so an absolute invocation resolves this repository's `go.mod` from any working directory.
+
+**CLEANUP-WT-32** When the shim runs, the system shall forward every argument to the command unaltered, shall leave the caller's working directory unchanged, and shall exit with the command's own status so an automated caller can still observe exit code 3.
+
+**CLEANUP-WT-33** When the shim builds the command, the system shall place the build under `$TMPDIR` and shall remove it before exiting, so a repeated invocation cannot accumulate compiled binaries.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
@@ -104,6 +110,8 @@ cleanup that classified on a denylist.
 ## Test Traceability
 
 - Unit package: `cmd/cleanup-worktrees`
+- Shim, end to end through the script: `cmd/cleanup-worktrees/shim_test.go`
+- Shim, shell contract across the interpreter matrix: `tests/bats/cleanup-worktrees.bats`
 
 ## Non-Goals
 
