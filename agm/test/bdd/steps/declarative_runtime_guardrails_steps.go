@@ -63,6 +63,10 @@ type declarativeRuntimeRouteState struct {
 	// that validates that projection on a pull request.
 	rulesetLocals string
 	tofuPlan      string
+	// rulesetAudit is the scheduled branch-protection audit workflow;
+	// mergeAuditSpec is the contract its Go half must keep.
+	rulesetAudit   string
+	mergeAuditSpec string
 }
 
 // RegisterDeclarativeRuntimeGuardrailSteps registers runtime configuration coverage steps.
@@ -113,6 +117,135 @@ func RegisterDeclarativeRuntimeGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the projection should preserve required-check app identities$`, projectionPreservesRequiredCheckAppIdentities)
 	ctx.Step(`^policy outside the supported subset should fail closed$`, policyOutsideSupportedSubsetFailsClosed)
 	ctx.Step(`^pull request validation should stay credential-free$`, pullRequestValidationStaysCredentialFree)
+	ctx.Step(`^the ruleset audit surfaces are configured$`, rulesetAuditSurfacesAreConfigured)
+	ctx.Step(`^AGM validates ruleset audit authority$`, agmValidatesRulesetAuditAuthority)
+	ctx.Step(`^the audit should compare live state against the canonical policy$`, auditComparesLiveStateAgainstCanonicalPolicy)
+	ctx.Step(`^the audit should normalize both sides through the tested jq policy library$`, auditNormalizesThroughTestedJQLibrary)
+	ctx.Step(`^the audit should withhold private repository identities$`, auditWithholdsPrivateRepositoryIdentities)
+	ctx.Step(`^incomplete evidence should never read as a clean audit$`, incompleteEvidenceNeverReadsAsClean)
+}
+
+func rulesetAuditSurfacesAreConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, source := range []struct {
+		path []string
+		into *string
+	}{
+		{[]string{".github", "workflows", "branch-protection-audit.yml"}, &state.rulesetAudit},
+		{[]string{"cmd", "merge-audit", "SPEC.md"}, &state.mergeAuditSpec},
+	} {
+		data, readErr := os.ReadFile(filepath.Join(append([]string{packageSpecBDDRepoRoot()}, source.path...)...))
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", filepath.Join(source.path...), readErr)
+		}
+		*source.into = string(data)
+	}
+	return nil
+}
+
+func agmValidatesRulesetAuditAuthority(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.rulesetAudit == "" || state.mergeAuditSpec == "" {
+		return fmt.Errorf("ruleset audit surfaces were not loaded")
+	}
+	return nil
+}
+
+func auditComparesLiveStateAgainstCanonicalPolicy(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.rulesetAudit, ".github/rulesets/main.json") {
+		return fmt.Errorf("audit does not compare against the checked-in canonical ruleset")
+	}
+	return nil
+}
+
+// auditNormalizesThroughTestedJQLibrary is what makes the comparison
+// trustworthy: both sides go through the same jq programs, and those programs
+// are covered by tests/jq fixtures. A hand-rolled comparison in the workflow
+// would be untested and could report drift, or miss it, on field ordering
+// alone.
+func auditNormalizesThroughTestedJQLibrary(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	root := packageSpecBDDRepoRoot()
+	for _, program := range []string{
+		".github/rulesets/normalize.jq",
+		".github/rulesets/missing-required-checks.jq",
+	} {
+		if !strings.Contains(state.rulesetAudit, program) {
+			return fmt.Errorf("audit does not use %s", program)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, program)); statErr != nil {
+			return fmt.Errorf("audit references a missing jq program %s: %w", program, statErr)
+		}
+	}
+	covered, err := jqProgramsNamedByFixtures(filepath.Join(root, "tests", "jq", "testdata"))
+	if err != nil {
+		return err
+	}
+	for _, program := range []string{
+		".github/rulesets/normalize.jq",
+		".github/rulesets/missing-required-checks.jq",
+	} {
+		if !covered[program] {
+			return fmt.Errorf("audit depends on %s, which has no fixture coverage", program)
+		}
+	}
+	return nil
+}
+
+// auditWithholdsPrivateRepositoryIdentities matters because this repository is
+// public and the audit reads a private inventory. Findings must describe drift
+// without naming the repositories it was found in.
+func auditWithholdsPrivateRepositoryIdentities(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// Findings and progress lines must describe drift without naming the
+	// repository, and the aggregate issue this workflow opens is public.
+	for _, required := range []string{
+		"managed repository identity withheld",
+		"identity withheld",
+		"intentionally withheld from this public issue",
+	} {
+		if !strings.Contains(state.rulesetAudit, required) {
+			return fmt.Errorf("audit workflow does not withhold private repository identities: missing %q", required)
+		}
+	}
+	return nil
+}
+
+// incompleteEvidenceNeverReadsAsClean is the contract that separates a real
+// audit from a decorative one: a query that failed must not report compliance.
+func incompleteEvidenceNeverReadsAsClean(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range []string{"MAC-06", "MAC-07", "MAC-09"} {
+		if !strings.Contains(state.mergeAuditSpec, "**"+id+"**") {
+			return fmt.Errorf("merge-audit SPEC no longer records %s", id)
+		}
+	}
+	if !strings.Contains(state.mergeAuditSpec, "rather than silently declaring compliance") {
+		return fmt.Errorf("merge-audit SPEC no longer forbids declaring compliance on a failed query")
+	}
+	if !strings.Contains(state.mergeAuditSpec, "never emit a partial or empty findings payload") {
+		return fmt.Errorf("merge-audit SPEC no longer forbids an empty payload after an audit error")
+	}
+	return nil
 }
 
 func canonicalRulesetProjectionIsConfigured(ctx context.Context) error {

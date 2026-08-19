@@ -32,8 +32,9 @@ everything else is codified (workflow files + OpenTofu).
    This prints a token. It's already been added as the `CLAUDE_CODE_OAUTH_TOKEN`
    secret on `vbonnet/dear-agent` (confirmed present, added 2026-07-19). For
    every other repo in the rollout, this same token value becomes
-   `TF_VAR_claude_code_oauth_token` for `tofu apply` (see below) — GitHub
-   secrets are per-repo, there's no fleet-wide secret on a personal account.
+   `TF_VAR_claude_code_oauth_token` for the reviewed OpenTofu apply (see below)
+   — GitHub secrets are per-repo, there's no fleet-wide secret on a personal
+   account.
 
 2. **Install the Claude GitHub App in every opted-in rollout repository.**
    The OAuth token authenticates the workflow to Anthropic, but the App grants
@@ -53,26 +54,24 @@ everything else is codified (workflow files + OpenTofu).
    this change — edit each repo's `AGENTS.md` by hand if you want
    repo-specific guidance for Codex.
 
-5. **Roll out to other repos** — see `infra/claude_review.tf` for the default
-   split. Non-PII repos default to `enable_claude_review = true`
-   (ai-tools, codebase-analyzer, gdoc-sync, vbonnet.ai).
-   **`engram-research` is also enabled** — a deliberate private-repo opt-in
-   (owner sign-off 2026-07-19), not part of the default non-PII set: it's
-   private, and enabling review still ships its code to Anthropic's API on
-   every PR, same as the public repos. The remaining PII repos (engram-kb,
-   brain-v2, ai-conversation-logs) stay a commented opt-in block —
-   enabling review on those is a data-handling call this IaC deliberately
-   does not make for you. Once `repos.auto.tfvars` reflects your choice:
-   ```
-   cd infra
-   export GITHUB_TOKEN="$(gh auth token)"
-   export TF_VAR_claude_code_oauth_token="<token from step 1>"
-   tofu init -backend-config=backend.hcl
-   tofu plan   # review before applying
-   tofu apply  # opens or updates a rollout PR; review and merge that PR normally
-   ```
-   After the rollout PR merges, set `claude_review_rollout = false` and apply
-   again. GitHub deletes merged PR branches, so this removes the transient
+5. **Roll out to other repos** — see `infra/claude_review.tf` for the policy
+   split. Public and otherwise non-sensitive repositories may opt in by
+   default. Every private repository requires recorded owner approval because
+   enabling review sends its pull-request code to Anthropic's API. Repositories
+   containing PII remain opt-in only; enabling review there is a data-handling
+   decision this IaC deliberately does not make for you. Keep repository
+   identities and their classifications in the private inventory rather than
+   documenting them in this public repository. Once the complete private
+   `repos.auto.tfvars`
+   reflects your choice, follow the production workflow in
+   [`infra/README.md`](../infra/README.md). It requires the R2 backend
+   credentials, a GitHub token with the documented full-root scopes, the real
+   inventory, and the real managed OAuth value. Review a saved full-root plan,
+   then apply those exact plan bytes; this root can reconcile repositories,
+   rulesets, secrets, rollout branches/PRs, and the organization baseline, not
+   only the selected Claude rollout.
+   After the rollout PR merges, set `claude_review_rollout = false` and repeat
+   the saved-plan workflow. GitHub deletes merged PR branches, so this removes the transient
    branch/PR resources from Terraform state without recreating them; the secret
    remains managed by `enable_claude_review = true`.
 

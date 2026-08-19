@@ -19,6 +19,7 @@
 # RELATED-SPEC: cmd/dear-agent-bumblebee/templates/SPEC.md
 # RELATED-SPEC: cmd/shellcheck-diff/SPEC.md
 # RELATED-SPEC: cmd/tofu-import-plan/SPEC.md
+# RELATED-SPEC: cmd/merge-audit/SPEC.md
 # RELATED-SPEC: config/SPEC.md
 # RELATED-SPEC: configs/workflows/SPEC.md
 # RELATED-SPEC: deploy/SPEC.md
@@ -145,6 +146,14 @@ Feature: Declarative runtime guardrails
     And the projection should preserve required-check app identities
     And policy outside the supported subset should fail closed
     And pull request validation should stay credential-free
+
+  Scenario: The ruleset audit fails closed on incomplete evidence
+    Given the ruleset audit surfaces are configured
+    When AGM validates ruleset audit authority
+    Then the audit should compare live state against the canonical policy
+    And the audit should normalize both sides through the tested jq policy library
+    And the audit should withhold private repository identities
+    And incomplete evidence should never read as a clean audit
 
   Scenario: CI schedules credential-free Codex contract evidence
     Given the repository CI workflow is configured
