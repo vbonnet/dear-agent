@@ -131,6 +131,48 @@ test independently. When a change is large, split it into a GitHub stacked PR
 series: land mechanical refactors, renames, generated updates, or pure test
 scaffolding first, then put the risky behavior change in a focused follow-up PR.
 
+#### Size budget
+
+Aim for **at most 400 changed lines and at most 15 changed files** in one PR.
+
+That is a *target to design toward*, not a limit to creep up to. It is derived
+from what this repository already does: across the 200 most recent merges to
+`main`, the median PR was 238 changed lines, and 59% already met both numbers.
+It is a description of a normal change here, not an aspiration.
+
+The CI thresholds are **ceilings, not targets**. `.github/workflows/pr-size-scope.yml`
+comments once a PR crosses 1,000 changed lines, 50 changed files, or 4 top-level
+areas. A PR at 999 lines is not "within budget" — it is four times over budget
+and one line under the alarm. Do not treat the alarm as the goal.
+
+Two reasons the budget is about review quality, not tidiness:
+
+- **Human review stops happening.** Past a few hundred lines a reviewer skims
+  rather than reads, and approval starts meaning "nothing obviously alarming"
+  instead of "I checked this."
+- **Agent review degrades too.** A large diff spends the reviewer's attention on
+  bulk rather than on the few lines that carry the risk, so specific defects get
+  missed in exactly the PRs where a miss is most expensive.
+
+When a change genuinely cannot fit — a mechanical rename across many call sites,
+a generated-file refresh, a vendored update — say so explicitly in the PR
+description, and separate the mechanical part from anything hand-written so a
+reviewer can skip the bulk and concentrate on the rest.
+
+##### How to split, in order
+
+1. **Mechanical first.** Renames, moves, generated output, formatting. These
+   should be reviewable by confirming nothing changed but names and locations.
+2. **Enabling refactor next.** New seams, extracted interfaces, signature
+   changes — still no behavior change.
+3. **Behavior last.** The actual new logic, built on names and seams that are
+   already on `main`.
+
+Land each step before opening the next, so every PR is based on `main` and gets
+the full review protocol (see the caveat below). If you have already written the
+whole thing in one branch, `git reset --soft <base>` and re-commit it in that
+order rather than opening one PR that mixes all three.
+
 Each PR in the stack must stand on its own: it should have a clear purpose,
 pass the relevant tests, and be independently understandable from its diff and
 description. Do not bundle unrelated concerns into one monster PR just because
