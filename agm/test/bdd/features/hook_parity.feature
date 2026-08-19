@@ -1,6 +1,9 @@
 # SPEC: internal/hookparity/SPEC.md
+# RELATED-SPEC: .opencode/SPEC.md
+# RELATED-SPEC: .opencode/hooks/SPEC.md
 # RELATED-SPEC: .codex/hooks/SPEC.md
 # RELATED-SPEC: .pi/guardrails/SPEC.md
+# RELATED-SPEC: agm/internal/permissionparity/piadapter/SPEC.md
 # RELATED-SPEC: scripts/git-hooks/SPEC.md
 # RELATED-SPEC: agm/internal/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-context-monitor/SPEC.md
@@ -22,8 +25,8 @@
 # RELATED-SPEC: pkg/version/SPEC.md
 # RELATED-SPEC: tests/buildstamp/SPEC.md
 Feature: Hook harness parity
-  Active interactive harnesses should receive the same repository guardrails
-  through their native hook configuration surfaces.
+  Active interactive harnesses should receive equivalent SPEC review outcomes
+  through their native capabilities without inventing unsupported events.
 
   Scenario Outline: Active harness hook manifests expose shared guardrails
     Given hook harness "<harness>" is configured
@@ -42,16 +45,10 @@ Feature: Hook harness parity
       | codex-cli    | pretool-bypass-guard       |
       | codex-cli    | pretool-pr-guard           |
       | codex-cli    | stop-guardrail-feedback    |
-      | agy          | pretool-spawn-routing      |
-      | agy          | pretool-bead-close-guard   |
-      | agy          | pretool-bypass-guard       |
-      | agy          | pretool-pr-guard           |
-      | agy          | stop-guardrail-feedback    |
       | opencode-cli | pretool-spawn-routing      |
       | opencode-cli | pretool-bead-close-guard   |
       | opencode-cli | pretool-bypass-guard       |
       | opencode-cli | pretool-pr-guard           |
-      | opencode-cli | stop-guardrail-feedback    |
       | pi-cli       | pretool-spawn-routing      |
       | pi-cli       | pretool-bead-close-guard   |
       | pi-cli       | pretool-bypass-guard       |
@@ -69,18 +66,58 @@ Feature: Hook harness parity
       | codex-cli    | UserPromptSubmit |
       | codex-cli    | PreCompact       |
       | codex-cli    | PostCompact      |
-      | agy          | SessionStart     |
-      | agy          | UserPromptSubmit |
-      | agy          | PreCompact       |
-      | agy          | PostCompact      |
-      | opencode-cli | SessionStart     |
-      | opencode-cli | UserPromptSubmit |
-      | opencode-cli | PreCompact       |
-      | opencode-cli | PostCompact      |
       | pi-cli       | SessionStart     |
       | pi-cli       | UserPromptSubmit |
       | pi-cli       | PreCompact       |
       | pi-cli       | PostCompact      |
+
+  Scenario Outline: Active harness capabilities expose bounded SPEC review
+    Given hook harness "<harness>" is configured
+    When AGM validates hook parity for that harness
+    Then hook harness "<harness>" should expose bounded SPEC contract review
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+      | pi-cli       |
+
+  Scenario Outline: Capability gaps omit unsupported legacy projections
+    Given hook harness "<harness>" is configured
+    When AGM validates hook parity for that harness
+    Then hook harness "<harness>" should omit unsupported legacy hook projections
+
+    Examples:
+      | harness      |
+      | agy          |
+      | opencode-cli |
+
+  Scenario: Provider projections share the canonical SPEC authoring route
+    Given staged SPEC contract feedback is configured
+    When AGM exercises the shared reminder across all projected harness adapters
+    Then every reminder should route to the canonical authoring page and single-source skill
+
+  Scenario: Sibling continuations preserve fresh bounded SPEC feedback
+    Given terminal SPEC feedback identity is configured
+    When AGM exercises sibling continuations and repeated SPEC identities across native terminal adapters
+    Then fresh SPEC identities should block once while repeats yield without claiming compliance
+
+  Scenario: Installed helper status compares reproducible expected bytes
+    Given installed SPEC helper status is configured
+    When AGM rebuilds the expected helper with distinct wall-clock inputs
+    Then the expected helper bytes should remain identical for unchanged source and provenance
+
+  Scenario: Idle-session fallback bounds recursive SPEC feedback and adapter cleanup
+    Given OpenCode idle-session SPEC feedback is configured
+    When AGM exercises repeated, synthetic, capacity, deletion, and supervisor lifecycle events
+    Then OpenCode feedback and adapter cleanup should remain bounded and identity-safe
+
+  Scenario: Pi terminal aggregation and supervisor cleanup have end-to-end resource bounds
+    Given Pi terminal hook aggregation is configured
+    When AGM exercises Pi terminal handler and supervisor lifecycle bounds
+    Then Pi should fail closed within its budgets while preserving aggregation and identity-safe cleanup
 
   Scenario Outline: Repository post-merge hook exposes lifecycle safeguards
     Given the repository post-merge hook is configured

@@ -2,16 +2,20 @@ package codexhooks
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/internal/hookparity"
 )
 
 func TestHardenHookCommandsReplacesCallerPath(t *testing.T) {
@@ -149,7 +153,7 @@ func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) 
 				}},
 			}},
 		}
-		if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
+		if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project", strings.Repeat("a", 64)); err != nil {
 			t.Fatalf("neutralizeWorkspaceExecutingHooks(%s): %v", eventName, err)
 		}
 		groups := hooks[eventName].([]any)
@@ -162,6 +166,100 @@ func TestNeutralizeWorkspaceExecutingHooksPreservesHandlerIndexes(t *testing.T) 
 		if handler["command"] != "/bin/true" {
 			t.Fatalf("%s command = %q, want /bin/true", eventName, handler["command"])
 		}
+	}
+}
+
+func TestNeutralizeWorkspaceExecutingHooksRejectsUnpinnedSPECContractHelper(t *testing.T) {
+	previous := resolvePinnedSpecContractHook
+	resolvePinnedSpecContractHook = func(string) (string, error) { return "", os.ErrPermission }
+	t.Cleanup(func() { resolvePinnedSpecContractHook = previous })
+
+	hooks := map[string]any{
+		"Stop": []any{map[string]any{
+			"hooks": []any{map[string]any{
+				"type":    "command",
+				"command": "go run ./cmd/spec-contract-hook --root . --provider codex --event Stop",
+			}},
+		}},
+	}
+	if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project", strings.Repeat("a", 64)); err == nil ||
+		!strings.Contains(err.Error(), "revision-bound SPEC contract hook") ||
+		!strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("neutralizeWorkspaceExecutingHooks() error = %v, want revision-bound helper rejection", err)
+	}
+}
+
+func TestNeutralizeWorkspaceExecutingHooksKeepsContentAddressedInodeAfterStableReplacement(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stable := filepath.Join(root, "spec-contract-hook")
+	body := []byte("reviewed helper\n")
+	writeFile(t, stable, string(body), 0o755)
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	pinned, err := hookparity.ContentAddressedHelperPath(stable, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(stable, pinned); err != nil {
+		t.Fatal(err)
+	}
+	pinnedBefore, err := os.Stat(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previousResolver := resolvePinnedSpecContractHook
+	previousDigest := expectedSpecContractHookSHA256
+	resolvePinnedSpecContractHook = func(gotDigest string) (string, error) {
+		if gotDigest != digest {
+			t.Fatalf("resolved helper digest = %q, want %q", gotDigest, digest)
+		}
+		policy := hookparity.HelperTrustPolicy{OwnerUID: uint32(os.Getuid()), TrustedRoot: root}
+		if err := hookparity.VerifyDeployedHelperDigest(pinned, digest, policy); err != nil {
+			return "", err
+		}
+		return pinned, nil
+	}
+	expectedSpecContractHookSHA256 = digest
+	t.Cleanup(func() {
+		resolvePinnedSpecContractHook = previousResolver
+		expectedSpecContractHookSHA256 = previousDigest
+	})
+
+	hooks := map[string]any{
+		"Stop": []any{map[string]any{
+			"hooks": []any{map[string]any{
+				"type":    "command",
+				"command": "go run ./cmd/spec-contract-hook --root . --provider codex --event Stop",
+			}},
+		}},
+	}
+	if err := neutralizeWorkspaceExecutingHooks(hooks, "/reviewed/project", digest); err != nil {
+		t.Fatal(err)
+	}
+	command := hooks["Stop"].([]any)[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string)
+	if !strings.HasPrefix(command, pinned+" --expected-helper-sha256 "+digest) {
+		t.Fatalf("materialized command = %q, want exact content-addressed helper", command)
+	}
+
+	replacement := filepath.Join(root, "replacement")
+	writeFile(t, replacement, "new revision\n", 0o755)
+	if err := os.Rename(replacement, stable); err != nil {
+		t.Fatal(err)
+	}
+	pinnedAfter, err := os.Stat(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stableAfter, err := os.Stat(stable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(pinnedBefore, pinnedAfter) || os.SameFile(pinnedAfter, stableAfter) ||
+		!strings.HasPrefix(command, pinned+" ") {
+		t.Fatalf("stable replacement changed the command's pinned helper identity")
 	}
 }
 
@@ -209,6 +307,62 @@ func TestLaunchConfigOverridesDisablesMutableWorkspaceExecutingHooks(t *testing.
 		sessionKey := sessionFlagsHookSource + ":" + eventKey + ":0:0"
 		if _, ok := state[sessionKey].(map[string]any)["trusted_hash"]; !ok {
 			t.Fatalf("%s session hook state = %#v, want trusted hash", eventName, state[sessionKey])
+		}
+	}
+}
+
+func TestUnattendedCodexBypassPreservesDigestAttestedSPECContractStopAdapters(t *testing.T) {
+	useTrustedHookJSONFixture(t)
+	hookRoot := t.TempDir()
+	writeFile(t, filepath.Join(hookRoot, ".codex", "hooks.json"), `{
+		"hooks":{
+			"Stop":[{"hooks":[{"type":"command","command":"go run ./cmd/spec-contract-hook --root . --provider codex --event Stop"},{"type":"command","command":"scripts/stop-feedback"}]}],
+			"SubagentStop":[{"hooks":[{"type":"command","command":"go run ./cmd/spec-contract-hook --root . --provider codex --event SubagentStop"},{"type":"command","command":"scripts/subagent-feedback"}]}]
+		}
+	}`, 0o444)
+	hookRoot, digest := sealMaterializedFixture(t, hookRoot)
+	projectRoot := gittest.NewRepo(t)
+	overrides, err := LaunchConfigOverrides(hookRoot, digest, projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(strings.Join(overrides, "\n")), &parsed); err != nil {
+		t.Fatalf("generated overrides are not valid TOML: %v", err)
+	}
+	hooks := parsed["hooks"].(map[string]any)
+	state := hooks["state"].(map[string]any)
+	canonicalProjectRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventName := range []string{"Stop", "SubagentStop"} {
+		groups := hooks[eventName].([]any)
+		handlers := groups[0].(map[string]any)["hooks"].([]any)
+		adapter := handlers[0].(map[string]any)
+		command := adapter["command"].(string)
+		pinnedHelper := trustedSpecContractHookPath + "." + expectedSpecContractHookSHA256
+		if !strings.Contains(command, pinnedHelper+" --expected-helper-sha256 "+expectedSpecContractHookSHA256) ||
+			!strings.Contains(command, canonicalProjectRoot) ||
+			strings.Contains(command, "go run") ||
+			strings.Contains(command, "/bin/true") ||
+			adapter["statusMessage"] != "Checking staged SPEC contracts with operator-owned helper" {
+			t.Fatalf("%s bypass adapter = %#v, want operator-owned SPEC helper", eventName, adapter)
+		}
+		noOp := handlers[1].(map[string]any)
+		if !strings.Contains(noOp["command"].(string), "/bin/true") || noOp["statusMessage"] != "Workspace-executing hook disabled for attested bypass" {
+			t.Fatalf("%s ordinary terminal handler = %#v, want explicit no-op", eventName, noOp)
+		}
+		eventKey := hookEventKeyLabels[eventName]
+		for handlerIndex := range handlers {
+			projectKey := filepath.Join(canonicalProjectRoot, ".codex", "hooks.json") + ":" + eventKey + ":0:" + strconv.Itoa(handlerIndex)
+			if state[projectKey].(map[string]any)["enabled"] != false {
+				t.Fatalf("%s project hook state = %#v, want disabled", eventName, state[projectKey])
+			}
+			sessionKey := sessionFlagsHookSource + ":" + eventKey + ":0:" + strconv.Itoa(handlerIndex)
+			if _, ok := state[sessionKey].(map[string]any)["trusted_hash"]; !ok {
+				t.Fatalf("%s session hook state = %#v, want trusted hash", eventName, state[sessionKey])
+			}
 		}
 	}
 }
@@ -520,6 +674,8 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	previousJSONValidator := validateTrustedHookJSONExecutable
 	previousSystemValidator := validateTrustedSystemExecutable
 	previousDependencyValidator := validateTrustedHookDependency
+	previousSPECResolver := resolvePinnedSpecContractHook
+	previousSPECDigest := expectedSpecContractHookSHA256
 	trustedHookJSONPath = "/bin/sh"
 	validateAttestedExecutablePath = func(got string) error {
 		if got != attestedHookPath {
@@ -535,11 +691,17 @@ func useTrustedHookJSONFixture(t *testing.T) {
 	}
 	validateTrustedSystemExecutable = func(string) error { return nil }
 	validateTrustedHookDependency = func(string) error { return nil }
+	resolvePinnedSpecContractHook = func(expectedDigest string) (string, error) {
+		return trustedSpecContractHookPath + "." + expectedDigest, nil
+	}
+	expectedSpecContractHookSHA256 = strings.Repeat("a", 64)
 	t.Cleanup(func() {
 		trustedHookJSONPath = previousJSONPath
 		validateAttestedExecutablePath = previousPathValidator
 		validateTrustedHookJSONExecutable = previousJSONValidator
 		validateTrustedSystemExecutable = previousSystemValidator
 		validateTrustedHookDependency = previousDependencyValidator
+		resolvePinnedSpecContractHook = previousSPECResolver
+		expectedSpecContractHookSHA256 = previousSPECDigest
 	})
 }

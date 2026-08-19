@@ -99,6 +99,8 @@ instruction-policy:
       owner: harness-policy
     - match: .opencode/hooks/stop-*
       owner: harness-hooks
+    - match: .opencode/plugins/**
+      owner: harness-policy
     - match: .deepsec/AGENTS.md
       owner: deepsec
     - match: .deepsec/data/**/SETUP.md

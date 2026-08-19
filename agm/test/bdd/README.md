@@ -5,7 +5,7 @@ SPEC invariants as behaviour, and `godog` (Cucumber for Go) runs them against
 the real `internal/ops` and `internal/contracts` packages — no mock adapters,
 no API keys.
 
-## The one rule: every feature file runs
+## The one rule: every direct-child feature file runs
 
 `TestFeatures` (in `main_test.go`) executes **every** `.feature` file under
 `features/` with **no tag filter**. A scenario whose steps are not implemented
@@ -19,7 +19,10 @@ Dead/aspirational specs cannot accumulate here again.
 
 ## What's covered
 
-Every feature under `features/` is executable and cataloged. The suite spans
+Every canonically named direct-child feature in `features/` is executable and
+cataloged; nested files and basenames outside the shared ASCII letter, digit,
+dot, underscore, and hyphen grammar are rejected so Godog discovery cannot
+outpace the flat parseable catalog and governance registries. The suite spans
 the original trust, scan-loop, and stall contracts plus repository-wide
 harness, model-family, command, package, and SPEC traceability guardrails.
 
@@ -34,7 +37,7 @@ Alongside the godog runner, `spec_invariants_test.go` holds:
 
 ```
 test/bdd/
-├── features/                 # Gherkin feature files (all of them run)
+├── features/                 # Flat Gherkin feature files (all of them run)
 │   └── *.feature             # every file is executed
 ├── steps/                    # godog step definitions (one file per feature)
 │   └── *_steps.go            # registered executable step groups

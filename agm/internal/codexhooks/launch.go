@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/hookparity"
 )
 
 var sessionFlagsHookSource = func() string {
@@ -24,8 +26,9 @@ var sessionFlagsHookSource = func() string {
 }()
 
 const (
-	attestedHookPath          = "/usr/local/libexec:/usr/bin:/bin:/usr/sbin:/sbin"
-	attestedHookCommandPrefix = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
+	attestedHookPath            = "/usr/local/libexec:/usr/bin:/bin:/usr/sbin:/sbin"
+	attestedHookCommandPrefix   = "/usr/bin/env PATH=" + attestedHookPath + " /bin/sh -c "
+	trustedSpecContractHookPath = "/usr/local/libexec/dear-agent-spec-contract-hook"
 	// Linux limits one execve argument to 128 KiB even when ARG_MAX is larger.
 	// Keep the generated hooks override below half that ceiling so the private
 	// executor can reject it before committing any launch reservation.
@@ -33,6 +36,10 @@ const (
 )
 
 var (
+	// expectedSpecContractHookSHA256 is injected only by the governed AGM build
+	// after it builds the revision-matched helper artifact. An empty or malformed
+	// value deliberately disables unattended SPEC adapter projection.
+	expectedSpecContractHookSHA256    string
 	trustedHookJSONPath               = "/usr/local/libexec/dear-agent-codex-hook-json"
 	trustedExecutableSearchPath       = attestedHookPath
 	validateAttestedExecutablePath    = validateTrustedExecutableSearchPath
@@ -40,6 +47,25 @@ var (
 	validateTrustedSystemExecutable   = validateTrustedHookExecutable
 	validateTrustedHookDependency     = validateTrustedExecutableCommand
 	validateTrustedExecutableLeaf     = validateTrustedHookExecutable
+	resolvePinnedSpecContractHook     = func(expectedDigest string) (string, error) {
+		if expectedDigest != expectedSpecContractHookSHA256 {
+			return "", fmt.Errorf("requested helper digest does not match the governed AGM build")
+		}
+		pinned, err := hookparity.ContentAddressedHelperPath(
+			trustedSpecContractHookPath, expectedDigest,
+		)
+		if err != nil {
+			return "", err
+		}
+		if err := hookparity.VerifyDeployedHelperDigest(
+			pinned,
+			expectedDigest,
+			hookparity.ProductionHelperTrustPolicy(),
+		); err != nil {
+			return "", err
+		}
+		return pinned, nil
+	}
 )
 
 var neutralizedAttestedHookEvents = map[string]struct{}{
@@ -65,15 +91,15 @@ func LaunchConfigOverrides(hookRoot, expectedDigest, workDir string) ([]string, 
 	if !filepath.IsAbs(workDir) || filepath.Clean(workDir) != workDir {
 		return nil, fmt.Errorf("codex working directory must be a clean absolute path")
 	}
-	hooks, err := embeddedMaterializedHooks(hookRoot, expectedDigest)
-	if err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	projectRoot, err := gitRoot(ctx, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Codex project root for immutable hooks: %w", err)
+	}
+	hooks, err := embeddedMaterializedHooks(hookRoot, expectedDigest, projectRoot)
+	if err != nil {
+		return nil, err
 	}
 	projectHookRoots, err := projectHookSourceRoots(ctx, workDir, projectRoot)
 	if err != nil {
@@ -97,7 +123,7 @@ func LaunchConfigOverrides(hookRoot, expectedDigest, workDir string) ([]string, 
 	return []string{override}, nil
 }
 
-func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any, error) {
+func embeddedMaterializedHooks(hookRoot, expectedDigest, projectRoot string) (map[string]any, error) {
 	if !filepath.IsAbs(hookRoot) || filepath.Clean(hookRoot) != hookRoot {
 		return nil, fmt.Errorf("materialized hook root must be a clean absolute path")
 	}
@@ -124,7 +150,7 @@ func embeddedMaterializedHooks(hookRoot, expectedDigest string) (map[string]any,
 	if err := validateMaterializedSystemExecutables(assets); err != nil {
 		return nil, err
 	}
-	if err := neutralizeWorkspaceExecutingHooks(hooks); err != nil {
+	if err := neutralizeWorkspaceExecutingHooks(hooks, projectRoot, expectedSpecContractHookSHA256); err != nil {
 		return nil, err
 	}
 	if err := validateTrustedHookDependencies(hooks, assets); err != nil {
@@ -196,11 +222,16 @@ func readMaterializedHookManifest(assets map[string]asset) (map[string]any, erro
 }
 
 // neutralizeWorkspaceExecutingHooks preserves each project-layer handler's
-// index so hooksWithPinnedTrustState can disable the mutable copy, but replaces
-// its session handler with an OS-owned no-op. Context-refresh and stop-time
-// guardrail hooks intentionally execute workspace tools or code; they may run
-// after ordinary Codex path review, but never under AGM's unattended bypass.
-func neutralizeWorkspaceExecutingHooks(hooks map[string]any) error {
+// index so hooksWithPinnedTrustState can disable the mutable copy. Ordinary
+// workspace commands become OS-owned no-ops. The recognizable terminal SPEC
+// adapter is instead projected through the separately installed, root-owned
+// helper with the canonical repository root. The helper receives the
+// revision-bound digest and revalidates its deployed bytes immediately before
+// every invocation; hooksWithPinnedTrustState then pins that complete command.
+func neutralizeWorkspaceExecutingHooks(hooks map[string]any, projectRoot, expectedDigest string) error {
+	if !filepath.IsAbs(projectRoot) || filepath.Clean(projectRoot) != projectRoot {
+		return fmt.Errorf("SPEC contract project root must be a clean absolute path")
+	}
 	for eventName := range neutralizedAttestedHookEvents {
 		rawGroups, exists := hooks[eventName]
 		if !exists {
@@ -231,12 +262,33 @@ func neutralizeWorkspaceExecutingHooks(hooks map[string]any) error {
 						eventName, groupIndex, handlerIndex,
 					)
 				}
+				command, _ := handler["command"].(string)
+				if isSPECContractAdapter(command, eventName) {
+					pinnedHelper, err := resolvePinnedSpecContractHook(expectedDigest)
+					if err != nil {
+						return fmt.Errorf("validate revision-bound SPEC contract hook (run make install-spec-contract-hook from the same reviewed revision): %w", err)
+					}
+					handler["command"] = pinnedHelper +
+						" --expected-helper-sha256 " + expectedDigest +
+						" --root " + shellSingleQuote(projectRoot) +
+						" --provider codex --event " + eventName
+					handler["statusMessage"] = "Checking staged SPEC contracts with operator-owned helper"
+					continue
+				}
 				handler["command"] = "/bin/true"
 				handler["statusMessage"] = "Workspace-executing hook disabled for attested bypass"
 			}
 		}
 	}
 	return nil
+}
+
+func isSPECContractAdapter(command, eventName string) bool {
+	if eventName != "Stop" && eventName != "SubagentStop" {
+		return false
+	}
+	adapter := strings.Contains(command, "cmd/spec-contract-hook") || strings.Contains(command, trustedSpecContractHookPath)
+	return adapter && strings.Contains(command, "--provider codex") && strings.Contains(command, "--event "+eventName)
 }
 
 func hardenHookCommands(hooks map[string]any, assets map[string]asset) error {
