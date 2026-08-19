@@ -61,6 +61,8 @@ cost and intent remain traceable.
 
 **SAFEPR-23** When safe-pr invokes Git to inspect, acquire, reclaim, or release worktree protection inside a transaction, the system shall make the Git helper inherit the operating-system transaction lock so killing the parent cannot expose an incomplete lock-management operation to a replacement owner.
 
+**SAFEPR-24** When any pass-through GitHub argument contains a Claude Code session identifier or session permalink, the system shall refuse the mutation and shall report each matched reference with its line number.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
