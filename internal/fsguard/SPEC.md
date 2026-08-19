@@ -93,15 +93,17 @@ state why.
 
 **FSG-58** When a command contains an input redirection (`<`, `<<`, `<<<`), with or without a file-descriptor prefix (`3<`), the system shall exclude the operator and its target from the command's operands without classifying that target as a write target, since input redirections only read.
 
-**FSG-60** When a short-option cluster ends on a letter that takes a value (e.g. the `-aS` of `cp SRC DEST -aS bak`), the system shall consume the following token as that option's value rather than as an operand, so the value cannot displace the real destination. When the value-taking letter is not last, the remainder of the same word is its value and no further token is consumed.
+**FSG-66** When a short-option cluster ends on a letter that takes a value (e.g. the `-aS` of `cp SRC DEST -aS bak`), the system shall consume the following token as that option's value rather than as an operand, so the value cannot displace the real destination. When the value-taking letter is not last, the remainder of the same word is its value and no further token is consumed.
 
-**FSG-61** When an option's value is optional and therefore only supplied glued with `=` (mktemp's `--tmpdir[=DIR]`), the system shall not consume the following token as its value. A valueless `--tmpdir` shall resolve to `$TMPDIR`, or the platform temporary directory when unset, and shall still replace the positional template as the write target.
+**FSG-67** When an option's value is optional and therefore only supplied glued with `=` (mktemp's `--tmpdir[=DIR]`), the system shall not consume the following token as its value. A valueless `--tmpdir` shall resolve to `$TMPDIR`, or the platform temporary directory when unset, and shall still replace the positional template as the write target.
 
 **FSG-59** When a `chmod` mode is symbolic and begins with an operator (e.g. the `-w` of `chmod -w FILE`), the system shall treat it as the leading spec operand rather than as an option, so the following positional remains a write target.
 
 **FSG-60** When a redirection target consists only of digits, the system shall treat it as a file descriptor only for a descriptor-duplicating operator (e.g. `2>&1`); for a plain `>` or `>>` it shall classify it as the relative filename it is (`echo x > 2`).
 
 **FSG-61** When `mktemp` selects its directory with `-p`/`--tmpdir`, the system shall classify that directory as the write target and shall not classify the template against the current working directory, because the template is created under the selected directory.
+
+**FSG-68** When a `cd` may not have executed — it follows `&&` or `||`, or it sits on either side of a pipe and therefore runs in a subshell — the system shall keep the previous working directory as an additional candidate and shall classify later relative targets against every candidate, blocking when any candidate resolves inside a protected location. When a `cd` is unconditional the system shall collapse the candidate set, because that `cd` is known to have run.
 
 **FSG-53** When a `cd` occurs inside a subshell (`( … )`), the system shall restore the enclosing working directory once the subshell closes, because the shell does not carry that `cd` past `)`.
 
@@ -143,13 +145,17 @@ state why.
 
 **FSG-29** When `git push` is invoked within `~/src/` without a force flag, the system shall allow it.
 
-**FSG-30** When `git push` is invoked with a force flag, the system shall block it regardless of working directory. Force classification is delegated to `safegit.ForceFlag`, so this guard and `safe-push` share one definition: `--force`, `-f`, any short-option cluster containing `f` (`-uf`), `--force-with-lease[=<ref>]`, `--force-if-includes`, `--mirror`, and a leading-`+` force refspec, with tokens after a bare `--` treated as repository/refspec rather than flags. An abbreviated long option is matched after its `=value` is separated, so `--force-with-l=main` is recognized.
+**FSG-30** When `git push` is invoked with a force form and its resolved destination is `main`, `master`, the repository's default branch, or a branch listed in `safegit.protectedbranch`, the system shall block it. Force detection is delegated to `safegit.ForceFlag`, so this guard and `safe-push` share one definition: `--force`, `-f`, any short-option cluster containing `f` (`-uf`), `--force-with-lease[=<ref>]`, `--force-if-includes`, `--mirror`, and a leading-`+` force refspec, with tokens after a bare `--` treated as repository/refspec rather than flags, and an abbreviated long option matched after its `=value` is separated.
+
+**FSG-64** When `git push` is invoked with a force form and its resolved destination is a branch that is neither protected nor the repository's default, the system shall allow the push, because rewriting a pull-request branch affects no shared history.
+
+**FSG-69** When the repository's default branch cannot be established from `refs/remotes/origin/HEAD`, the system shall refuse every force push and shall name `git remote set-head origin --auto` as the remedy, rather than inferring a default from whichever conventional branch happens to exist. A shallow single-branch checkout, such as the one `actions/checkout` produces, has no such ref, so force pushes are refused there until the ref is established.
+
+**FSG-65** When a `git push` inside `~/src/` carries a force form, the system shall block it only when the resolved destination is a protected branch, and shall refuse when the destination cannot be resolved or the repository's default branch cannot be established. Resolution is delegated to `safegit.ForcePushViolation`, so this guard, `safe-push`, and the PreToolUse bypass hooks share one decision.
 
 **FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`. Where a value-taking short option precedes it (e.g. `-ofoo`), the system shall stop scanning at that option, because the remainder of the word is its value.
 
 **FSG-62** When a `git push` long option is an abbreviation of a destructive option (e.g. `--mir` for `--mirror`, `--forc` for `--force`), the system shall treat it as that option, because Git itself accepts unambiguous abbreviations; `--no-`-prefixed forms shall be excluded.
-
-**FSG-49** When a leading-plus token occupies the repository operand position of a `git push` (a remote legitimately named `+prod`, as in `git -C ~/src/<repo> push +prod main`), the system shall allow it rather than reading it as a force refspec, because `git push` is `git push [options] [repository [refspec...]]` and only refspec operands carry force semantics.
 
 **FSG-31** When `git merge`, `git pull`, `git fetch`, `git clone`, or `git worktree` is invoked within `~/src/`, the system shall allow it.
 
