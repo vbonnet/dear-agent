@@ -419,11 +419,39 @@ func reportPostCleanup(pc *ops.CleanupResult) {
 	if pc.BranchDeleted {
 		fmt.Printf("Deleted session branch\n")
 	}
+	if pc.BranchKeptOpenPR {
+		reason := pc.BranchKeptReason
+		if reason == "" {
+			reason = "has an open PR"
+		}
+		fmt.Printf("Kept session branch (%s)\n", reason)
+	}
+	if pc.SandboxBranchKept {
+		fmt.Printf("Kept sandbox branch (has work that is not on any remote or in a merged PR)\n")
+	}
 	if pc.SandboxBranchDeleted {
 		fmt.Printf("Deleted sandbox branch\n")
 	}
 	if pc.SandboxRemoved {
 		fmt.Printf("Removed sandbox directory\n")
+	}
+	// A sandbox that existed but could not be removed must never be a silent
+	// count omission — surface it as a visible, impossible-to-miss warning
+	// (fix for ce-93lw.27 gap #3: this used to only under-report a count).
+	if pc.SandboxRemovalFailed {
+		detail := pc.SandboxRemovalReason
+		if detail == "" {
+			detail = "no reason was reported"
+		}
+		// The periodic GC is an opt-in launch agent that an operator must
+		// bootstrap by hand, and it does not exist at all off macOS. Promising
+		// an automatic retry here would leave the sandbox leaking on every
+		// host where it was never activated.
+		ui.PrintError(fmt.Errorf("sandbox directory existed but could not be removed: %s", detail),
+			"Sandbox cleanup failed during archive",
+			"  • Retry manually: agm sandbox gc --reap\n"+
+				"  • The periodic sandbox GC sweep will retry only if the launch agent is installed and bootstrapped\n"+
+				"  • Full cleanup history: ~/.agm/logs/cleanup.jsonl")
 	}
 }
 

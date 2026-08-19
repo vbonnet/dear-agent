@@ -3,8 +3,10 @@ package cleanup
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +39,9 @@ type mockGitOps struct {
 	deletedBranches  []string
 	removeErr        error
 	deleteErr        error
+	// preserveBranches names branches PreserveBranch protects, so a test can
+	// drive the branch-preservation gate without a gh binary or a remote.
+	preserveBranches map[string]bool
 }
 
 func (m *mockGitOps) RemoveWorktree(_, worktreePath string, _ bool) error {
@@ -45,6 +50,15 @@ func (m *mockGitOps) RemoveWorktree(_, worktreePath string, _ bool) error {
 	}
 	m.removedWorktrees = append(m.removedWorktrees, worktreePath)
 	return nil
+}
+
+// PreserveBranch defaults to allowing deletion so existing cases keep their
+// meaning; preserveBranches names the branches this fake protects.
+func (m *mockGitOps) PreserveBranch(_, branchName string) (bool, string) {
+	if m.preserveBranches[branchName] {
+		return true, "test fixture preserves this branch"
+	}
+	return false, ""
 }
 
 func (m *mockGitOps) DeleteBranch(_, branchName string, _ bool) error {
@@ -240,5 +254,38 @@ func TestSessionResources_ListError(t *testing.T) {
 
 	if len(result.Errors) != 1 {
 		t.Errorf("Expected 1 error from list failure, got %d", len(result.Errors))
+	}
+}
+
+// TestSessionResources_PreservedBranchSurvivesTrackedCleanup is the
+// branch-leak regression for the tracked path. Archive cleanup can decide to
+// keep a branch because it has an open PR, and then this function runs on the
+// same session: it saw the worktree directory was gone, attributed the
+// recorded branch, and force-deleted the very ref the caller had just
+// reported as preserved.
+func TestSessionResources_PreservedBranchSurvivesTrackedCleanup(t *testing.T) {
+	store := &mockWorktreeStore{
+		worktrees: []WorktreeRecord{
+			{WorktreePath: filepath.Join(t.TempDir(), "gone"), RepoPath: "/repo", Branch: "keep-me", SessionName: "s"},
+			{WorktreePath: filepath.Join(t.TempDir(), "also-gone"), RepoPath: "/repo", Branch: "reap-me", SessionName: "s"},
+		},
+	}
+	git := &mockGitOps{preserveBranches: map[string]bool{"keep-me": true}}
+
+	result := SessionResources(context.Background(), "s", store, git, slog.Default())
+
+	for _, b := range git.deletedBranches {
+		if b == "keep-me" {
+			t.Fatal("tracked cleanup deleted a branch the preservation gate protects")
+		}
+	}
+	if len(git.deletedBranches) != 1 || git.deletedBranches[0] != "reap-me" {
+		t.Errorf("deletedBranches = %v, want only reap-me", git.deletedBranches)
+	}
+	if result.BranchesDeleted != 1 {
+		t.Errorf("BranchesDeleted = %d, want 1", result.BranchesDeleted)
+	}
+	if len(result.BranchesPreserved) != 1 || !strings.Contains(result.BranchesPreserved[0], "keep-me") {
+		t.Errorf("BranchesPreserved = %v, want it to name keep-me", result.BranchesPreserved)
 	}
 }
