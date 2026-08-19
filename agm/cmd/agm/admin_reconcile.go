@@ -274,43 +274,56 @@ func reconcileLifecycleMismatchWithLocker(
 	}
 	var changed bool
 	err := withLock(mm.SessionID, func() error {
-		m, err := adapter.GetSession(mm.SessionID)
-		if err != nil {
-			return err
-		}
-		if m.Tmux.SessionName == "" {
-			return nil
-		}
-		exists, err := hasSession(m.Tmux.SessionName)
-		if err != nil {
-			return fmt.Errorf("revalidating tmux session %q: %w", m.Tmux.SessionName, err)
-		}
-		switch mm.Kind {
-		case "zombie":
-			if !exists ||
-				(m.Lifecycle != manifest.LifecycleArchived &&
-					m.Lifecycle != manifest.LifecycleReaping) {
-				return nil
-			}
-			m.Lifecycle = ""
-		case "orphan":
-			if exists || m.Lifecycle == manifest.LifecycleArchived {
-				return nil
-			}
-			m.Lifecycle = manifest.LifecycleArchived
-		default:
-			return fmt.Errorf("unsupported reconcile mismatch kind %q", mm.Kind)
-		}
-		if err := adapter.UpdateSession(m); err != nil {
-			return err
-		}
-		changed = true
-		return nil
+		applied, err := applyReconcileLifecycleMismatch(adapter, mm, hasSession)
+		changed = applied
+		return err
 	})
 	if err != nil {
 		return false, err
 	}
 	return changed, nil
+}
+
+// applyReconcileLifecycleMismatch revalidates and applies one mismatch's fix
+// under the caller's session lock. Split out of
+// reconcileLifecycleMismatchWithLocker to keep that function's cyclomatic
+// complexity within the repository's gocyclo ceiling.
+func applyReconcileLifecycleMismatch(
+	adapter reconcileLifecycleStorage,
+	mm mismatch,
+	hasSession reconcileTmuxSessionCheck,
+) (bool, error) {
+	m, err := adapter.GetSession(mm.SessionID)
+	if err != nil {
+		return false, err
+	}
+	if m.Tmux.SessionName == "" {
+		return false, nil
+	}
+	exists, err := hasSession(m.Tmux.SessionName)
+	if err != nil {
+		return false, fmt.Errorf("revalidating tmux session %q: %w", m.Tmux.SessionName, err)
+	}
+	switch mm.Kind {
+	case "zombie":
+		if !exists ||
+			(m.Lifecycle != manifest.LifecycleArchived &&
+				m.Lifecycle != manifest.LifecycleReaping) {
+			return false, nil
+		}
+		m.Lifecycle = ""
+	case "orphan":
+		if exists || m.Lifecycle == manifest.LifecycleArchived {
+			return false, nil
+		}
+		m.Lifecycle = manifest.LifecycleArchived
+	default:
+		return false, fmt.Errorf("unsupported reconcile mismatch kind %q", mm.Kind)
+	}
+	if err := adapter.UpdateSession(m); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func countNonArchived(sessions []*manifest.Manifest) int {
