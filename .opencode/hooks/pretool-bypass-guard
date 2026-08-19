@@ -50,14 +50,48 @@ if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?commit' \
     "Fix the pre-commit hook failure — hooks catch real problems; bypassing them hides defects"
 fi
 
-# git push --force to protected/default branches, or with no explicit target.
+# git push force forms, blocked when they can reach a protected destination.
+#
+# Preferred path: `safe-push --check` runs the same internal/safegit policy the
+# Go tools use, so shell and Go cannot drift into two different answers. It is
+# used only when the installed binary advertises the flag, because an older one
+# would forward --check to git and actually push.
+#
+# Fallback path: parse the destination rather than matching command text. Two
+# independent regexes could not agree on `git push -f origin HEAD:main`, and
+# the lease form used to be exempted wholesale even when it named main.
 if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?push' \
-   && printf '%s' "$cmd" | grep -qE -- '(^|[[:space:]])(-f|--force)([[:space:]]|$)' \
-   && ! printf '%s' "$cmd" | grep -q -- '--force-with-lease' \
-   && { printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(main|master|refs/heads/(main|master))([[:space:]]|$)' \
-        || ! printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(origin|upstream)[[:space:]]+([^[:space:]]+:)?(refs/heads/)?[^[:space:]-][^[:space:]]*'; }; then
-  block "git push" "--force" \
-    "Use normal PR/merge flow for main/master/default; force-push only non-default PR branches, preferably with --force-with-lease"
+   && printf '%s' "$cmd" | grep -qE -- '(^|[[:space:]])(-[[:alnum:]]*f[[:alnum:]]*|--force|--force-with-lease|--force-if-includes|--mirror|--all|--tags)([=[:space:]]|$)'; then
+  push_args="$(printf '%s' "$cmd" | sed -E 's/^.*[[:space:]]push([[:space:]]+|$)//')"
+  push_verdict=allow
+  if command -v safe-push >/dev/null 2>&1 && safe-push --help 2>/dev/null | grep -q -- '--check'; then
+    safe-push --check $push_args >/dev/null 2>&1 || push_verdict=block
+  else
+    push_verdict="$(printf '%s' "$push_args" | awk '
+      BEGIN { seen_remote = 0; refspecs = 0 }
+      {
+        for (i = 1; i <= NF; i++) {
+          a = $i
+          if (a == "--" || a ~ /^-/) continue
+          if (!seen_remote) { seen_remote = 1; continue }
+          refspecs++
+          d = a; sub(/^\+/, "", d)
+          if (index(d, ":") > 0) sub(/^[^:]*:/, "", d)
+          sub(/^\+/, "", d); sub(/^refs\/heads\//, "", d)
+          if (d == "main" || d == "master" || d == "HEAD" || d == "@" || index(d, "*") > 0) {
+            print "block"; exit
+          }
+        }
+        # No refspec means git resolves the destination from configuration,
+        # which is not knowable from the command text.
+        if (refspecs == 0) print "block"; else print "allow"
+      }')"
+    [ -n "$push_verdict" ] || push_verdict=block
+  fi
+  if [ "$push_verdict" = block ]; then
+    block "git push" "--force" \
+      "Use normal PR/merge flow for main/master/default; force-push only non-default PR branches, preferably with --force-with-lease"
+  fi
 fi
 
 exit 0

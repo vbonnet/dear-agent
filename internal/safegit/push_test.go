@@ -44,11 +44,51 @@ func TestForceFlag(t *testing.T) {
 		{"force-with-lease", []string{"--force-with-lease", "origin", "main"}, "--force-with-lease", true},
 		{"force-with-lease=ref", []string{"--force-with-lease=main", "origin"}, "--force-with-lease=main", true},
 		{"force-if-includes", []string{"--force-if-includes", "origin"}, "--force-if-includes", true},
+		// Git's parse-options resolves unambiguous abbreviations of long
+		// options, verified against git 2.55.0: `--m` and `--force-w` both
+		// parse, while `--zzzz` reports "unknown option". Matching only the
+		// spelled-out names left the same hole as the short-cluster bug.
+		{"abbrev mirror", []string{"--m", "origin", "main"}, "--m", true},
+		{"abbrev mirror longer", []string{"--mirr", "origin", "main"}, "--mirr", true},
+		{"abbrev force", []string{"--forc", "origin", "main"}, "--forc", true},
+		{"abbrev force-with-lease", []string{"--force-w", "origin", "main"}, "--force-w", true},
+		{"abbrev force-if-includes", []string{"--force-if", "origin"}, "--force-if", true},
+		{"abbrev force-with-lease with value", []string{"--force-w=main", "origin"}, "--force-w=main", true},
+		// --no-force… negations are not prefixes of anything forbidden.
+		{"no-force-with-lease stays allowed", []string{"--no-force-with-lease", "origin", "main"}, "", false},
+		// Unrelated long options must not be caught by prefix matching.
+		{"repo option allowed", []string{"--repo=x", "origin"}, "", false},
+		{"porcelain allowed", []string{"--porcelain", "origin", "main"}, "", false},
 		{"refspec containing force substring is not a flag", []string{"origin", "feature/force-cleanup"}, "", false},
 		{"mirror", []string{"--mirror"}, "--mirror", true},
 		{"force refspec +HEAD:main", []string{"origin", "+HEAD:main"}, "+HEAD:main", true},
 		{"force refspec wildcard", []string{"origin", "+refs/heads/*:refs/heads/*"}, "+refs/heads/*:refs/heads/*", true},
 		{"plain refspec HEAD:main not force", []string{"origin", "HEAD:main"}, "", false},
+
+		// Short-option clusters. git (like POSIX getopt) accepts bundled short
+		// options in a single argv token, so `-uf` really is `-u -f` and must be
+		// rejected exactly like a standalone `-f`.
+		{"cluster -uf forces", []string{"-uf", "origin", "main"}, "-uf", true},
+		{"cluster -fu forces", []string{"-fu", "origin", "main"}, "-fu", true},
+		{"cluster -vfq forces", []string{"-vfq", "origin", "main"}, "-vfq", true},
+		{"cluster -uf with lease-style tail forces", []string{"-qnuf"}, "-qnuf", true},
+
+		// Negative cases: clusters and options with no force in them.
+		{"cluster -uv not force", []string{"-uv", "origin", "main"}, "", false},
+		{"short upstream not force", []string{"-u", "origin", "main"}, "", false},
+		{"short verbose not force", []string{"-v", "origin", "main"}, "", false},
+		{"long set-upstream not force", []string{"--set-upstream", "origin", "main"}, "", false},
+		{"long follow-tags not force", []string{"--follow-tags", "origin", "main"}, "", false},
+		{"no-force is not force", []string{"--no-force", "origin", "main"}, "", false},
+		{"push-option value glued with f is not force", []string{"-oforce", "origin", "main"}, "", false},
+		{"push-option value separate is not force", []string{"-o", "ci.skip", "origin", "main"}, "", false},
+
+		// End-of-options separator: everything after `--` is a repository or
+		// refspec, so a branch literally named `-f` is not a force flag.
+		{"dashdash then branch named -f is not force", []string{"origin", "--", "-f"}, "", false},
+		{"dashdash then cluster-shaped branch is not force", []string{"--", "origin", "-uf"}, "", false},
+		{"dashdash still blocks force refspec", []string{"--", "origin", "+main"}, "+main", true},
+		{"force before dashdash still blocks", []string{"-uf", "--", "origin", "main"}, "-uf", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

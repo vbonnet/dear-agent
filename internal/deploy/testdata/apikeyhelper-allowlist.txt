@@ -26,7 +26,7 @@
 
 # Makefile
 01c7bc626a04c009  # Do NOT also point Claude
-bae947e2bde676c4  # install-token-refresher-launchagent: install-token-refresher
+f7c3d7a846ee023d  # install-token-refresher-launchagent: install-token-refresher
 c8f96be19438874a  # \
 8cead35022de0ee3  # \
 42c9733c8ff71839  # \
@@ -53,3 +53,6 @@ f3cc557cd162a916  # It assumed a retired `apiKeyHelper` (not to be restored) dro
 
 # pkg/llm/auth/README.md
 944063075ab88c36  # It must **not** be wired in as a Claude Code `apiKeyHelper`
+
+# internal/vroomgate/gate.go
+70a97b99a0f6f039  # internal/vroomgate/gate.go

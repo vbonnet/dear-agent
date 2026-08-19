@@ -1,6 +1,9 @@
 package fsguard
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -132,13 +135,22 @@ func TestInspectCommand(t *testing.T) {
 		{"git fetch allowed", "git -C ~/src/dear-agent fetch origin", home, true, ""},
 		{"git worktree allowed", "git -C ~/src/dear-agent worktree add ~/worktrees/x -b x", home, true, ""},
 		{"git push allowed", "git -C ~/src/dear-agent push", home, true, ""},
-		{"git force push to feature allowed", "git -C ~/src/dear-agent push --force-with-lease origin feature/rebased", home, true, ""},
-		{"git force refspec to feature allowed", "git -C ~/src/dear-agent push origin +HEAD:refs/heads/feature/rebased", home, true, ""},
 		{"git force push to main blocked", "git -C ~/src/dear-agent push --force origin main", home, false,
 			"protected/default"},
 		{"git force-with-lease main blocked", "git -C ~/src/dear-agent push --force-with-lease=main origin", home, false,
 			"protected/default"},
 		{"git -f blocked", "git -C ~/src/dear-agent push -f origin main", home, false, "force-push"},
+		{"git -uf cluster blocked", "git -C ~/src/dear-agent push -uf origin main", home, false,
+			"force-push"},
+		{"git -fu cluster blocked", "git -C ~/src/dear-agent push -fu origin main", home, false,
+			"force-push"},
+		{"git -vfq cluster blocked", "git -C ~/src/dear-agent push -vfq origin main", home, false,
+			"force-push"},
+		{"git -u push still allowed", "git -C ~/src/dear-agent push -u origin main", home, true, ""},
+		{"git mirror push blocked", "git -C ~/src/dear-agent push --mirror origin", home, false,
+			"force-push"},
+		{"git force refspec blocked", "git -C ~/src/dear-agent push origin +main", home, false,
+			"force-push"},
 		{"git commit in worktree allowed", "git -C ~/worktrees/x commit -m y", home, true, ""},
 
 		// cd tracking for git.
@@ -263,5 +275,64 @@ func TestNewResolvesHome(t *testing.T) {
 	g := New()
 	if g.Home == "" {
 		t.Fatal("New() returned empty Home")
+	}
+}
+
+// TestInspectCommand_ForcePushToPRBranchInSrc covers the policy change: a
+// force-push to a non-default PR branch inside ~/src is allowed, while one to
+// the default branch is not.
+//
+// It builds a real repository rather than using the fake home the other cases
+// share, because the policy resolves the remote's default branch from the
+// checkout. That resolution fails closed, so a path that is not a repository
+// is refused, which is correct but not what these cases are about.
+func TestInspectCommand_ForcePushToPRBranchInSrc(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := filepath.Join(home, "src", "dear-agent")
+	if err := os.MkdirAll(filepath.Dir(repo), 0o755); err != nil {
+		t.Fatalf("creating src: %v", err)
+	}
+	origin := filepath.Join(home, "origin.git")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(cmd.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git(home, "init", "--bare", "--initial-branch=main", origin)
+	git(home, "init", "--initial-branch=main", repo)
+	git(repo, "commit", "--allow-empty", "-m", "base")
+	git(repo, "remote", "add", "origin", origin)
+	git(repo, "push", "-u", "origin", "main")
+	git(repo, "remote", "set-head", "origin", "main")
+
+	g := &Guard{Home: home}
+	tests := []struct {
+		name        string
+		command     string
+		wantAllowed bool
+	}{
+		{"force-with-lease to a PR branch", "git -C " + repo + " push --force-with-lease origin feature/rebased", true},
+		{"force refspec to a PR branch", "git -C " + repo + " push origin +HEAD:refs/heads/feature/rebased", true},
+		{"force to the default branch", "git -C " + repo + " push --force origin main", false},
+		{"force refspec to the default branch", "git -C " + repo + " push origin +HEAD:refs/heads/main", false},
+		{"mirror is still refused", "git -C " + repo + " push --mirror origin", false},
+		{"wildcard refspec is refused", "git -C " + repo + " push --force origin refs/heads/*:refs/heads/*", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			allowed, msg := g.InspectCommand(tc.command, home)
+			if allowed != tc.wantAllowed {
+				t.Fatalf("InspectCommand(%q) allowed=%v, want %v (msg=%q)",
+					tc.command, allowed, tc.wantAllowed, msg)
+			}
+		})
 	}
 }

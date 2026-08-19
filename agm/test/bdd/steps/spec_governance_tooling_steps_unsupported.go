@@ -19,6 +19,7 @@ func RegisterSpecGovernanceToolingSteps(ctx *godog.ScenarioContext) {
 		specGovernanceReciprocalDiagnosticStep,
 		specGovernanceFindingValidationStep,
 		specGovernanceOfflineRenderingStep,
+		specGovernanceFindingFilterStep,
 		specGovernanceReadOnlyBoundaryStep,
 		specGovernanceResultStep,
 	} {

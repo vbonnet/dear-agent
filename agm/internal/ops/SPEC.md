@@ -187,7 +187,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-97** When `ArchiveSession` resolves a session, the system shall lock its immutable session ID, reload mutable lifecycle state under that lock, and serialize the archive mutation with delivery; for a pure API session, archive and delivery shall use a provider-appropriate bounded lock wait that exceeds the ordinary lifecycle wait while honoring caller cancellation, so either an in-flight completed turn commits before archive or delivery observes archive before provider work.
 
-**OPS-98** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is exactly the current host sandbox base's identified `merged` child; incomplete, mismatched, legacy, or out-of-base metadata shall preserve every sandbox path.
+**OPS-98** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is the current host sandbox base's identified `merged` child; a recorded boundary spelled differently from that child shall be authorized only when both spellings are proven to be one existing host directory, and shall then be addressed in the host cleanup base's spelling so every downstream allowlist gate and reaper validates the same path; incomplete, mismatched, unresolvable, legacy, or out-of-base metadata shall preserve every sandbox path.
 
 ### Shared Session Resume Lifecycle
 
@@ -284,3 +284,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 - Feature: `agm/test/bdd/features/trust_protocol.feature`
 - Feature: `agm/test/bdd/features/scan_loop.feature`
 - Feature: `agm/test/bdd/features/stall_detection.feature`
+- Test consequence: the OPS-98 sandbox-ownership boundary is verified by deterministic unit tests rather than new scenarios — `agm/internal/ops/sandbox_ownership_test.go` covers the centralized-storage and symlinked-HOME spellings, the exact spelling, and the foreign, absent, wrong-session and out-of-base paths that stay disowned.
+
+## Package Test Traceability
+
+- `agm/internal/ops/sandbox_ownership_test.go`

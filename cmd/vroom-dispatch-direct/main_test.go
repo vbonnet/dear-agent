@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/internal/vroomgate"
 )
 
 func TestMentionsID(t *testing.T) {
@@ -264,12 +265,30 @@ func TestSelectCandidates(t *testing.T) {
 }
 
 func TestHumanGatedSkipsGmailOAuthBead(t *testing.T) {
-	if !humanGated["ce-6as.10"] {
+	if !vroomgate.IsHumanGated("ce-6as.10") {
 		t.Fatal("ce-6as.10 (interactive Gmail OAuth re-consent) must be human-gated")
 	}
 	beads := []bead{{ID: "ce-6as.10", Title: "Gmail OAuth re-consent", Priority: 0}}
 	if got := selectCandidates(beads, nil, nil, 2); len(got) != 0 {
 		t.Errorf("human-gated ce-6as.10 must never be a dispatch candidate, got %+v", got)
+	}
+}
+
+// TestHumanGatedBeadsAreNeverCandidates walks the whole shared gate list rather
+// than a hardcoded copy of it: enumerating vroomgate.IDs() covers every gated
+// bead (not just a representative one) and, because the list is derived rather
+// than duplicated, lifting an individual gate never forces a test edit.
+func TestHumanGatedBeadsAreNeverCandidates(t *testing.T) {
+	ids := vroomgate.IDs()
+	if len(ids) == 0 {
+		t.Fatal("the shared human gate list is empty; dispatch would be ungated")
+	}
+	var beads []bead
+	for _, id := range ids {
+		beads = append(beads, bead{ID: id, Title: "gated " + id, Priority: 0})
+	}
+	if got := selectCandidates(beads, nil, nil, 2); len(got) != 0 {
+		t.Errorf("human-gated beads must never be dispatch candidates, got %+v", got)
 	}
 }
 
@@ -686,7 +705,7 @@ func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
 		{ID: "ce-3", Title: "three", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, false, &out, &errOut, nil)
 	if got != 2 {
 		t.Errorf("dispatched = %d, want 2 (skip the poisoned bead, keep going)\nstderr:\n%s", got, errOut.String())
 	}
@@ -716,7 +735,7 @@ func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, false, &out, &errOut, nil)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on backpressure", got)
 	}
@@ -743,12 +762,100 @@ func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, false, &out, &errOut, nil)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on unknown error", got)
 	}
 	if spawnCalls != 1 {
 		t.Errorf("spawn attempts = %d, want 1 (unknown errors stop the run)", spawnCalls)
+	}
+}
+
+// TestDispatchCandidates_CapsSuccessfulDispatches checks the -max-dispatch cap
+// bounds the run and defers the rest rather than dispatching them.
+func TestDispatchCandidates_CapsSuccessfulDispatches(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	var spawnedNames []string
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawnedNames = append(spawnedNames, name)
+		return nil
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 0},
+		{ID: "ce-2", Title: "two", Priority: 0},
+		{ID: "ce-3", Title: "three", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 2, false, &out, &errOut, nil)
+	if got != 2 {
+		t.Errorf("dispatched = %d, want 2 (-max-dispatch=2)", got)
+	}
+	if len(spawnedNames) != 2 || spawnedNames[0] != "worker-ce-1" || spawnedNames[1] != "worker-ce-2" {
+		t.Errorf("spawned = %v, want the 2 highest-priority beads only", spawnedNames)
+	}
+	if !strings.Contains(errOut.String(), "deferring 1 remaining eligible bead") {
+		t.Errorf("stderr should report the deferred remainder, got:\n%s", errOut.String())
+	}
+}
+
+// TestDispatchCandidates_CapCountsOnlySuccesses is the starvation regression:
+// with -max-dispatch=1 and a poisoned highest-priority bead, a cap applied by
+// truncating the candidate list up front would spend the entire budget on the
+// bead that can never spawn, dispatch nothing, and repeat that on every
+// scheduled run — permanently starving the queue (the ce-b1zw failure mode).
+// The cap must count successful dispatches, so the run walks past the skip.
+func TestDispatchCandidates_CapCountsOnlySuccesses(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	var spawnedNames []string
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawnedNames = append(spawnedNames, name)
+		if name == "worker-ce-poison" {
+			return fmt.Errorf("exit status 1\ncould not open a new TTY")
+		}
+		return nil
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	candidates := []bead{
+		{ID: "ce-poison", Title: "poisoned P0", Priority: 0},
+		{ID: "ce-good", Title: "healthy P0", Priority: 0},
+		{ID: "ce-later", Title: "P1", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 1, false, &out, &errOut, nil)
+	if got != 1 {
+		t.Fatalf("dispatched = %d, want 1 (the skipped bead must not consume the cap)\nstderr:\n%s", got, errOut.String())
+	}
+	if len(spawnedNames) != 2 || spawnedNames[1] != "worker-ce-good" {
+		t.Errorf("spawned = %v, want the poisoned bead skipped and ce-good dispatched", spawnedNames)
+	}
+}
+
+// TestDispatchCandidates_UncappedByDefault pins VDD-11: 0 (the flag default)
+// and any non-positive value leave dispatch unlimited.
+func TestDispatchCandidates_UncappedByDefault(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error { return nil }
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 0},
+		{ID: "ce-2", Title: "two", Priority: 0},
+		{ID: "ce-3", Title: "three", Priority: 1},
+	}
+	for _, maxDispatch := range []int{0, 5} {
+		var out, errOut bytes.Buffer
+		if got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", maxDispatch, false, &out, &errOut, nil); got != 3 {
+			t.Errorf("maxDispatch=%d: dispatched = %d, want 3", maxDispatch, got)
+		}
 	}
 }
 
@@ -773,7 +880,7 @@ func TestDispatchCandidates_DryRunHasNoWorkerCap(t *testing.T) {
 		{ID: "ce-4", Title: "four", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, nil)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, true, &out, &errOut, nil)
 	if got != len(candidates) {
 		t.Fatalf("dry-run dispatched %d candidates, want all %d; output:\n%s", got, len(candidates), out.String())
 	}
@@ -791,7 +898,7 @@ func TestDispatchCandidates_StopsOnCanceledContext(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(ctx, candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, nil)
+	got := dispatchCandidates(ctx, candidates, testWorkerLaunchConfig(), "/repo", 0, true, &out, &errOut, nil)
 	if got != 0 {
 		t.Fatalf("dispatchCandidates dispatched %d candidates after context cancellation; output:\n%s", got, out.String())
 	}

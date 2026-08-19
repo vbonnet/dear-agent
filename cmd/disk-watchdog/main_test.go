@@ -16,13 +16,14 @@ import (
 )
 
 func TestSweepMergedWorktrees_InvokesExecuteJSON(t *testing.T) {
-	var gotName string
-	var gotArgs []string
+	var calls []string
 	cfg := config{
 		agmBin: "agm",
 		runCommand: func(_ context.Context, name string, args ...string) ([]byte, error) {
-			gotName = name
-			gotArgs = args
+			calls = append(calls, name+" "+strings.Join(args, " "))
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":3,"reaped":1,"kept":2,"errors":0}`), nil
+			}
 			return []byte(`{"worktrees":[],"removed":["/x/a","/x/b"],"failed":{"/x/c":"boom"}}`), nil
 		},
 	}
@@ -30,22 +31,28 @@ func TestSweepMergedWorktrees_InvokesExecuteJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweepMergedWorktrees: %v", err)
 	}
-	if gotName != "agm" {
-		t.Errorf("binary = %q, want agm", gotName)
+	want := []string{
+		"agm sandbox gc --reap --json",
+		"agm worktree sweep --execute -o json",
 	}
-	want := []string{"worktree", "sweep", "--execute", "-o", "json"}
-	if strings.Join(gotArgs, " ") != strings.Join(want, " ") {
-		t.Errorf("args = %v, want %v", gotArgs, want)
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls = %v, want %v", calls, want)
 	}
 	if len(r.Removed) != 2 || len(r.Failed) != 1 {
 		t.Errorf("parsed result wrong: %+v", r)
+	}
+	if r.SandboxGC == nil || r.SandboxGC.Reaped != 1 {
+		t.Errorf("sandbox gc summary = %+v, want reaped=1", r.SandboxGC)
 	}
 }
 
 func TestSweepMergedWorktrees_ErrorPropagates(t *testing.T) {
 	cfg := config{
 		agmBin: "agm",
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":0,"reaped":0,"kept":0,"errors":0}`), nil
+			}
 			return nil, errors.New("exit 1")
 		},
 	}
@@ -57,7 +64,10 @@ func TestSweepMergedWorktrees_ErrorPropagates(t *testing.T) {
 func TestSweepMergedWorktrees_GarbageOutputIsError(t *testing.T) {
 	cfg := config{
 		agmBin: "agm",
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if strings.Join(args, " ") == "sandbox gc --reap --json" {
+				return []byte(`{"scanned":0,"reaped":0,"kept":0,"errors":0}`), nil
+			}
 			return []byte("not json"), nil
 		},
 	}
@@ -71,7 +81,7 @@ func TestEmitReport_HealthyAndAlarm(t *testing.T) {
 
 	var healthy bytes.Buffer
 	emitReport(&healthy, supervisor.ResourceSnapshot{DiskFreeBytes: 500 * supervisor.GiB, DiskUsedFraction: 0.4},
-		supervisor.PressureNone, nil, nil, cfg)
+		supervisor.PressureNone, nil, nil, cfg, nil)
 	if !strings.Contains(healthy.String(), "Status: OK") {
 		t.Errorf("healthy report missing OK status:\n%s", healthy.String())
 	}
@@ -79,7 +89,7 @@ func TestEmitReport_HealthyAndAlarm(t *testing.T) {
 	var alarm bytes.Buffer
 	emitReport(&alarm, supervisor.ResourceSnapshot{DiskFreeBytes: 2 * supervisor.GiB, DiskUsedFraction: 0.99},
 		supervisor.PressureCritical, []string{"disk free 2.0GiB < 5GiB (critical)"},
-		&sweepResult{Removed: []string{"/x/a"}}, cfg)
+		&sweepResult{Removed: []string{"/x/a"}}, cfg, nil)
 	got := alarm.String()
 	if !strings.Contains(got, "Status: ALARM (critical)") {
 		t.Errorf("alarm report missing status:\n%s", got)
@@ -93,7 +103,7 @@ func TestEmitJSON_Shape(t *testing.T) {
 	cfg := config{path: "/", thresholds: supervisor.DefaultDiskAlertThresholds}
 	var buf bytes.Buffer
 	err := emitJSON(&buf, supervisor.ResourceSnapshot{DiskFreeBytes: 10 * supervisor.GiB, DiskUsedFraction: 0.9},
-		supervisor.PressureWarn, []string{"disk free 10.0GiB < 20GiB (warn)"}, nil, cfg)
+		supervisor.PressureWarn, []string{"disk free 10.0GiB < 20GiB (warn)"}, nil, cfg, nil)
 	if err != nil {
 		t.Fatalf("emitJSON: %v", err)
 	}
@@ -117,6 +127,9 @@ func TestRun_HealthyHostExitsZero(t *testing.T) {
 	var buf bytes.Buffer
 	code, err := run([]string{
 		"--dry-run", "--json",
+		// The reaper-liveness check reads an absolute default path under $HOME;
+		// disable it so this test stays hermetic and asserts only disk state.
+		"--gc-max-age", "0",
 		// ~1 byte each: a sub-byte value would truncate to 0 and re-inherit the
 		// real defaults, which could trip on a genuinely low-disk CI host.
 		"--free-warn-gb", "0.000000001",
@@ -293,6 +306,8 @@ func TestRun_HealthyTickReleasesAStaleBrake(t *testing.T) {
 		"--brake", path,
 		"--trail", filepath.Join(t.TempDir(), "trail.jsonl"),
 		"--agm", filepath.Join(t.TempDir(), "no-such-agm"),
+		// Hermetic: do not consult the real ~/.agm/logs/gc.jsonl.
+		"--gc-max-age", "0",
 		"--free-warn-gb", "0.0001",
 		"--free-critical-gb", "0.0001",
 		"--inode-warn", "0.999999",

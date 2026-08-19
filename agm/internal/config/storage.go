@@ -5,38 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-// GetStoragePath resolves the absolute path where AGM data should be stored
-// based on the storage configuration mode (dotfile vs centralized)
+// GetStoragePath returns the physical storage root retained by Load.
 func GetStoragePath(cfg *Config) (string, error) {
-	// Dotfile mode: use legacy dotfile location
-	if cfg.Storage.Mode == "" || cfg.Storage.Mode == "dotfile" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to get home directory: %w", err)
-		}
-		return filepath.Join(homeDir, ".agm"), nil
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		return "", err
 	}
-
-	// Centralized mode: resolve workspace and build path
-	if cfg.Storage.Mode == "centralized" {
-		workspacePath, err := DetectWorkspace(cfg.Storage.Workspace)
-		if err != nil {
-			return "", fmt.Errorf("failed to detect workspace: %w", err)
-		}
-
-		relativePath := cfg.Storage.RelativePath
-		if relativePath == "" {
-			relativePath = ".agm" // Default
-		}
-
-		storagePath := filepath.Join(workspacePath, relativePath)
-		return storagePath, nil
+	storage, err := authority.Storage()
+	if err != nil {
+		return "", err
 	}
-
-	return "", fmt.Errorf("invalid storage mode: %s (must be 'dotfile' or 'centralized')", cfg.Storage.Mode)
+	return storage.Path()
 }
 
 // DetectWorkspace implements workspace detection with multiple strategies
@@ -48,6 +29,14 @@ func GetStoragePath(cfg *Config) (string, error) {
 // 5. Search common locations
 // 6. Error (interactive prompt not supported in AGM)
 func DetectWorkspace(nameOrPath string) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return detectWorkspaceAt(nameOrPath, homeDir)
+}
+
+func detectWorkspaceAt(nameOrPath, homeDir string) (string, error) {
 	// Priority 1: Absolute path provided
 	if filepath.IsAbs(nameOrPath) {
 		if _, err := os.Stat(nameOrPath); err == nil {
@@ -75,11 +64,6 @@ func DetectWorkspace(nameOrPath string) (string, error) {
 	}
 
 	// Priority 5: Search common locations
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
 	commonLocations := []string{
 		filepath.Join(homeDir, "src", "ws", "oss", "repos", nameOrPath),
 		filepath.Join(homeDir, "src", "ws", nameOrPath, "repos", nameOrPath),
@@ -142,21 +126,30 @@ func hasWorkspaceMarker(dir, targetName string) bool {
 // EnsureSymlinkBootstrap creates a symlink from dotfile location to centralized storage
 // This is called when centralized mode is enabled to ensure transparent redirection
 func EnsureSymlinkBootstrap(cfg *Config) error {
-	// Only create symlink in centralized mode
-	if cfg.Storage.Mode != "centralized" {
+	authority, err := cfg.RuntimeAuthority()
+	if err != nil {
+		return fmt.Errorf("failed to resolve runtime authority: %w", err)
+	}
+	if !authority.centralized {
 		return nil
 	}
-
-	homeDir, err := os.UserHomeDir()
+	home, err := authority.Home()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return fmt.Errorf("failed to resolve retained home: %w", err)
 	}
-
+	homeDir, err := home.Path()
+	if err != nil {
+		return fmt.Errorf("failed to resolve retained home path: %w", err)
+	}
+	storage, err := authority.Storage()
+	if err != nil {
+		return fmt.Errorf("failed to resolve retained storage: %w", err)
+	}
+	centralizedPath, err := storage.Path()
+	if err != nil {
+		return fmt.Errorf("failed to resolve retained storage path: %w", err)
+	}
 	dotfilePath := filepath.Join(homeDir, ".agm")
-	centralizedPath, err := GetStoragePath(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to resolve centralized storage path: %w", err)
-	}
 
 	// Step 1: Check if dotfile path exists
 	info, err := os.Lstat(dotfilePath)
@@ -176,14 +169,17 @@ func EnsureSymlinkBootstrap(cfg *Config) error {
 			return fmt.Errorf("failed to read symlink: %w", err)
 		}
 
-		// Resolve target to absolute path for comparison
-		absTarget, err := filepath.Abs(target)
-		if err != nil {
-			absTarget = target // Use as-is if abs fails
+		absoluteTarget := target
+		if !filepath.IsAbs(absoluteTarget) {
+			absoluteTarget = filepath.Join(filepath.Dir(dotfilePath), absoluteTarget)
 		}
-
-		if absTarget == centralizedPath {
+		absoluteTarget = filepath.Clean(absoluteTarget)
+		resolvedTarget, resolveErr := resolvePhysicalDirectory(absoluteTarget)
+		if resolveErr == nil && resolvedTarget == centralizedPath {
 			// Already configured correctly
+			if err := os.MkdirAll(centralizedPath, 0o700); err != nil {
+				return fmt.Errorf("failed to ensure centralized target: %w", err)
+			}
 			return nil
 		}
 
@@ -291,9 +287,17 @@ func copyFile(src, dst string, mode os.FileMode) error {
 
 // VerifyStorageIntegrity checks that storage is configured correctly
 func VerifyStorageIntegrity(cfg *Config) error {
-	storagePath, err := GetStoragePath(cfg)
+	authority, err := cfg.RuntimeAuthority()
 	if err != nil {
-		return fmt.Errorf("failed to resolve storage path: %w", err)
+		return fmt.Errorf("failed to resolve runtime authority: %w", err)
+	}
+	storage, err := authority.Storage()
+	if err != nil {
+		return fmt.Errorf("failed to resolve retained storage: %w", err)
+	}
+	storagePath, err := storage.Path()
+	if err != nil {
+		return fmt.Errorf("failed to resolve retained storage path: %w", err)
 	}
 
 	// Check if storage path exists
@@ -311,17 +315,28 @@ func VerifyStorageIntegrity(cfg *Config) error {
 	}
 
 	// Check if writable
-	testFile := filepath.Join(storagePath, ".agm-test-write")
-	if err := os.WriteFile(testFile, []byte("test"), 0o600); err != nil {
+	testFile, err := os.CreateTemp(storagePath, ".agm-test-write-*")
+	if err != nil {
 		return fmt.Errorf("storage path is not writable: %w", err)
 	}
-	os.Remove(testFile)
+	testPath := testFile.Name()
+	if err := testFile.Close(); err != nil {
+		_ = os.Remove(testPath)
+		return fmt.Errorf("close storage write probe: %w", err)
+	}
+	if err := os.Remove(testPath); err != nil {
+		return fmt.Errorf("remove storage write probe: %w", err)
+	}
 
 	// If centralized mode, verify symlink
-	if cfg.Storage.Mode == "centralized" {
-		homeDir, err := os.UserHomeDir()
+	if authority.centralized {
+		home, err := authority.Home()
 		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
+			return fmt.Errorf("failed to resolve retained home: %w", err)
+		}
+		homeDir, err := home.Path()
+		if err != nil {
+			return fmt.Errorf("failed to resolve retained home path: %w", err)
 		}
 
 		dotfilePath := filepath.Join(homeDir, ".agm")
@@ -334,19 +349,12 @@ func VerifyStorageIntegrity(cfg *Config) error {
 			return fmt.Errorf("expected symlink at %s but found regular directory", dotfilePath)
 		}
 
-		target, err := os.Readlink(dotfilePath)
+		resolvedTarget, err := filepath.EvalSymlinks(dotfilePath)
 		if err != nil {
-			return fmt.Errorf("failed to read symlink target: %w", err)
+			return fmt.Errorf("failed to resolve symlink target: %w", err)
 		}
-
-		// Resolve to absolute path
-		absTarget, err := filepath.Abs(target)
-		if err == nil {
-			target = absTarget
-		}
-
-		if !strings.HasSuffix(target, storagePath) && target != storagePath {
-			return fmt.Errorf("symlink points to wrong location: %s (expected: %s)", target, storagePath)
+		if filepath.Clean(resolvedTarget) != storagePath {
+			return fmt.Errorf("symlink points to wrong location: %s (expected: %s)", resolvedTarget, storagePath)
 		}
 	}
 

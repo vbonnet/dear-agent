@@ -1,10 +1,10 @@
 # AGM MCP Server - Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-08 -->
 
 ## Overview
 
-The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations without accessing conversation content.
+The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations. Every tool exposes metadata only, with one deliberate exception: `agm_get_session_output` returns captured pane content and is therefore the single conversation-content surface (see Privacy & Security).
 
 One private production registration seam owns the exact compiled tool set.
 The logical-registry-to-compiled-wire relationship and its finite compatibility
@@ -15,7 +15,7 @@ actual SDK registration path.
 
 1. **Discoverability**: Enable MCP clients to discover and query AGM sessions
 2. **Performance**: Achieve p99 <100ms response times for 1000+ sessions
-3. **Privacy**: Expose only metadata, never conversation content
+3. **Privacy**: Expose only metadata, with the single audited exception of `agm_get_session_output`, whose captured pane content may include prompts, responses, file paths, and rendered credentials. No other tool returns conversation content.
 4. **Integration**: Seamless integration with supported harness clients via MCP protocol
 
 ## EARS Requirements
@@ -52,10 +52,17 @@ actual SDK registration path.
 
 **MCS-16** When list, search, get, archive, or kill handlers invoke a shared operation, the system shall propagate the MCP request context separately from input-to-request adaptation.
 
+**MCS-17** When an MCP client completes initialization, the system shall advertise the version identity of the running AGM artifact in `serverInfo.version`.
+
+**MCS-18** When the server reports startup identity, the system shall use the same version identity that it advertises to an initialized MCP client.
+
+**MCS-19** When a build lacks release-version metadata, the system shall expose a nonempty development fallback identity without claiming a numbered release.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Test consequence: Deterministic integration test `TestMCPInitializeReportsSharedBuildVersion` observes `serverInfo.version` and the independently negotiated protocol through a real in-memory SDK initialization handshake; no new BDD feature is required because the external session BDD harness does not expose MCP initialization metadata.
 
 ## Use Cases
 
@@ -217,6 +224,43 @@ actual SDK registration path.
 - Returns error if session not found
 - No caching (relies on list cache)
 
+### Tool 3b: agm_get_session_output
+
+**Purpose**: Read the tail of a session's terminal output so orchestrators can collect worker results without attaching to panes
+
+**Input Schema**:
+```json
+{
+  "identifier": "session ID, name, or UUID prefix (required)",
+  "lines": "optional trailing pane lines to capture (default 100, max 2000)"
+}
+```
+
+**Output Schema**:
+```json
+{
+  "session_id": "uuid",
+  "name": "string",
+  "status": "active|zombie|stopped|archived|unknown",
+  "state": "string",
+  "source": "live-pane|final-capture",
+  "output": "string",
+  "captured_at": "RFC3339"
+}
+```
+
+**Constraints**:
+- `identifier` is required
+- Reads the live tmux pane for `active`/`zombie` sessions; falls back to the
+  durable `final_output` persisted on the session record when the pane is gone
+- Fallback is not guaranteed whenever `final_output` is populated. The durable
+  capture describes an *earlier* completion, so it is served only when the pane
+  is provably absent. If liveness cannot be confirmed — a tmux socket outage,
+  permission failure, or a failed capture on a still-running pane — the
+  operation returns a retryable error rather than answering with output from a
+  previous task
+- Returns an error when neither source has any output
+
 ### Tool 4: agm_create_session
 
 **Purpose**: Create and register a new AGM session through the same lifecycle used by the CLI
@@ -284,6 +328,7 @@ mcp_server:
     - agm_list_sessions
     - agm_search_sessions
     - agm_get_session_metadata
+    - agm_get_session_output
     - agm_archive_session
     - agm_kill_session
     - agm_create_session
@@ -322,19 +367,45 @@ mcp_server:
 - Agent type
 - Tmux session name
 
+### Terminal Output (Exposed Only Through `agm_get_session_output`)
+
+`agm_get_session_output` is a deliberate, bounded exception to the rules below,
+not an oversight. Rendered terminal panes routinely contain prompts, model
+responses, and file paths, so the guarantees in this section are scoped rather
+than absolute. The exception's boundary:
+
+- **Opt-in per call.** Output is returned only when a caller names a session and
+  explicitly invokes `agm_get_session_output`. No metadata, list, or search tool
+  returns it — `agm_get_session_metadata` exposes only `final_output_at`, the
+  timestamp proving a capture exists, never its contents.
+- **Rendered pane only.** The source is the tmux pane (live) or the ≤16 KiB tail
+  captured at completion. Conversation history files, transcripts, and provider
+  API state are never read — principle 2 below is unchanged.
+- **Why it exists.** Without it an orchestrator cannot collect a worker's result
+  without attaching to its pane, which is what forced result-polling (ce-0zng9).
+
 ### Protected Data (Never Exposed)
+
+Except through `agm_get_session_output` as scoped above, where the value appears
+in rendered terminal output:
 
 - Conversation turns
 - User prompts
 - Agent responses
-- API keys
-- Credentials
 - File paths from conversation
 - Any conversation content
+- API keys and credentials, to the extent a harness rendered them into its pane
+
+The server never *reads* credential stores, config, or history files. But it
+cannot sanitize a pane: anything a harness printed to the terminal — including a
+secret it echoed — is inside the rendered capture. Treat
+`agm_get_session_output` results with the same care as the terminal itself.
 
 ### Security Principles
 
-1. **Metadata and Lifecycle Only**: Expose session metadata and explicit lifecycle operations, never conversation content
+1. **Metadata, Lifecycle, and Explicitly Requested Output**: Expose session
+   metadata and lifecycle operations freely; expose terminal output only through
+   the dedicated opt-in tool above
 2. **No Content Access**: Never read conversation history files
 3. **Local Only**: Server runs locally, no network exposure
 4. **Shared Mutation Boundary**: Lifecycle mutations delegate to `internal/ops` validation and rollback
@@ -368,7 +439,7 @@ mcp_server:
 
 ### MCP Stdio Transport
 
-- **Protocol**: Model Context Protocol v1.2.0
+- **Protocol**: Model Context Protocol version negotiated by the pinned SDK
 - **Transport**: stdio (stdin/stdout)
 - **Logging**: stderr only (critical requirement)
 - **Format**: JSON-RPC 2.0
@@ -414,28 +485,16 @@ mcp_server:
 - No stack traces to clients (log to stderr)
 - Graceful degradation (return empty results on non-fatal errors)
 
-## Versioning
+## Implementation Identity and Protocol
 
-### Version Information
+The server's implementation identity is the running AGM artifact version. The
+build system supplies release provenance through the repository's shared
+version package; an unstamped developer build uses that package's nonempty
+development fallback. The first process header, structured startup log, and
+MCP `serverInfo.version` all expose this same identity.
 
-```go
-var (
-    Version   = "1.0.0-dev"
-    GitCommit = "unknown"
-    BuildDate = "unknown"
-    BuiltBy   = "unknown"
-)
-```
-
-- Set via ldflags at build time
-- Printed to stderr on startup
-- Exposed in MCP server implementation
-
-### API Versioning
-
-- MCP Protocol: v1.2.0 (go-sdk)
-- AGM MCP Server: v1.0.0
-- No breaking changes planned for v1.x
+Implementation identity is not the MCP wire protocol version. The pinned MCP
+SDK independently negotiates protocol support with each client.
 
 ## Future Enhancements (V2+)
 
@@ -478,7 +537,7 @@ var (
 
 ### MCP Specification Compliance
 
-- Implements MCP v1.2.0 protocol
+- Negotiates supported MCP protocol versions through the pinned SDK
 - Uses official `github.com/modelcontextprotocol/go-sdk`
 - Follows stdio transport requirements
 - Adheres to JSON-RPC 2.0 format

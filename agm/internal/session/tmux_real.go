@@ -21,6 +21,7 @@ var (
 	_ HarnessLivenessBatchChecker   = (*RealTmux)(nil)
 	_ HarnessReadinessWaiter        = (*RealTmux)(nil)
 	_ InputReadinessChecker         = (*RealTmux)(nil)
+	_ PaneOutputCapturer            = (*RealTmux)(nil)
 	_ AtomicInputSender             = (*RealTmux)(nil)
 	_ VerifiedPaneSender            = (*RealTmux)(nil)
 )
@@ -47,6 +48,12 @@ func (t *RealTmux) HasSession(name string) (bool, error) {
 	return tmux.HasSession(name)
 }
 
+// CapturePaneTail returns the last lines of the session's pane content,
+// including scrollback, from the AGM tmux socket.
+func (t *RealTmux) CapturePaneTail(sessionName string, lines int) (string, error) {
+	return tmux.CapturePaneOutput(sessionName, lines)
+}
+
 // HasSessionStrict checks an exact target without collapsing backend failures
 // into a missing-session result.
 func (t *RealTmux) HasSessionStrict(ctx context.Context, name string) (bool, error) {
@@ -59,21 +66,33 @@ func (t *RealTmux) ListSessions() ([]string, error) {
 }
 
 // ListSessionsWithInfo returns all active tmux sessions with attachment info
+func (t *RealTmux) ListSessionsWithInfoStrict() ([]SessionInfo, error) {
+	tmuxSessions, err := tmux.ListSessionsWithInfoStrict()
+	if err != nil {
+		return nil, err
+	}
+	return convertSessionInfo(tmuxSessions), nil
+}
+
 func (t *RealTmux) ListSessionsWithInfo() ([]SessionInfo, error) {
 	tmuxSessions, err := tmux.ListSessionsWithInfo()
 	if err != nil {
 		return nil, err
 	}
-	// Convert tmux.SessionInfo to session.SessionInfo
-	sessions := make([]SessionInfo, len(tmuxSessions))
-	for i, s := range tmuxSessions {
-		sessions[i] = SessionInfo{
+	return convertSessionInfo(tmuxSessions), nil
+}
+
+// convertSessionInfo maps tmux.SessionInfo onto the session-package type.
+func convertSessionInfo(in []tmux.SessionInfo) []SessionInfo {
+	out := make([]SessionInfo, len(in))
+	for i, s := range in {
+		out[i] = SessionInfo{
 			Name:            s.Name,
 			AttachedClients: s.AttachedClients,
 			AttachedList:    s.AttachedList,
 		}
 	}
-	return sessions, nil
+	return out
 }
 
 // CreateSession creates a new tmux session

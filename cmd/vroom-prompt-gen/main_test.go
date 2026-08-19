@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/vroomgate"
 	"github.com/vbonnet/dear-agent/internal/vroomprompt"
 )
 
@@ -119,6 +120,25 @@ func TestSelectCandidates(t *testing.T) {
 	}
 }
 
+// TestSelectCandidatesHonoursSharedHumanGate is the drift regression: this
+// generator used to keep its own copy of the human-gated list, so a bead gated
+// in vroom-dispatch-direct still got a prompt file materialised here and stayed
+// dispatchable through the orchestrator. Both binaries now read the one list in
+// internal/vroomgate, and this walks all of it rather than a hardcoded sample.
+func TestSelectCandidatesHonoursSharedHumanGate(t *testing.T) {
+	ids := vroomgate.IDs()
+	if len(ids) == 0 {
+		t.Fatal("the shared human gate list is empty; prompt generation would be ungated")
+	}
+	var beads []bead
+	for _, id := range ids {
+		beads = append(beads, bead{ID: id, Title: "gated " + id, Priority: 0})
+	}
+	if got := selectCandidates(beads, nil, nil, "/tmp/prompts"); len(got) != 0 {
+		t.Errorf("human-gated beads must never get a generated prompt, got %+v", got)
+	}
+}
+
 func TestSelectCandidatesSorted(t *testing.T) {
 	beads := []bead{
 		{ID: "ce-zzzz", Title: "z"},
@@ -146,6 +166,8 @@ func TestRenderPrompt(t *testing.T) {
 	for _, want := range []string{
 		"# Worker: ce-test — Do the thing",
 		"Bead ce-test (P1). Make it work.",
+		"provider-visible PR created through safe-pr",
+		"Never arm auto-merge",
 		"bd --db ~/beads/context-engine/.beads --dolt-auto-commit on",
 		"NEVER write to ~/src/**",
 		"claude-opus-4-8",
@@ -154,6 +176,9 @@ func TestRenderPrompt(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered prompt missing %q\n---\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "auto-merge armed") {
+		t.Fatalf("rendered prompt retained retired safe-pr auto-arming guidance:\n%s", out)
 	}
 	// The summary line should be just the first paragraph, not the whole desc.
 	summaryLine := strings.Split(out, "\n")[2]

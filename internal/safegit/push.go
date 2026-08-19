@@ -79,48 +79,129 @@ func CredentialResetArgs(ghPath string) []string {
 //
 // Detected forms:
 //   - -f / --force / --force-with-lease / --force-if-includes (flags)
+//   - -uf, -fu, -vfq, ... (short-option clusters containing -f)
 //   - --mirror (rewrites remote refs wholesale, equivalent to force-push)
 //   - +<refspec>  (a leading '+' in a refspec means "force this ref")
+//
+// Options are only recognized before a bare `--`. Git treats every token after
+// the end-of-options separator as a repository or refspec, so `git push origin
+// -- -f` pushes a branch named "-f" and is not a force push — while a `+ref`
+// after `--` still forces that ref and is still rejected.
 func ForceFlag(args []string) (string, bool) {
+	endOfOptions := false
 	for _, a := range args {
-		switch {
-		case a == "-f" || a == "--force" || a == "--force-with-lease" || a == "--mirror":
-			return a, true
-		case strings.HasPrefix(a, "--force-with-lease=") ||
-			strings.HasPrefix(a, "--force-if-includes"):
-			return a, true
-		case strings.HasPrefix(a, "+") && !strings.HasPrefix(a, "--"):
-			// A '+' prefix on a refspec forces that ref; block it.
+		if !endOfOptions {
+			if a == "--" {
+				endOfOptions = true
+				continue
+			}
+			if strings.HasPrefix(a, "-") && a != "-" {
+				if forcesPush(a) {
+					return a, true
+				}
+				continue
+			}
+		}
+		// A repository or refspec. A '+' prefix on a refspec forces that ref.
+		if strings.HasPrefix(a, "+") {
 			return a, true
 		}
 	}
 	return "", false
 }
 
-// ProtectedBranches returns branch names that must not be force-pushed. main
-// and master are always protected; origin/HEAD is added when available.
-func ProtectedBranches(repoDir string) map[string]bool {
-	protected := map[string]bool{"main": true, "master": true}
-	if repoDir == "" {
-		repoDir = "."
+// forcesPush reports whether one option token (leading '-', not the bare "-"
+// or "--") forces the push.
+//
+// Short options are the subtle half. Git's parse-options — like POSIX getopt —
+// lets callers bundle short options into a single argv token, so `-uf` is
+// `-u -f` and forces the push just as surely as a standalone `-f`. Comparing
+// the whole token against "-f" therefore misses every cluster; the letters
+// have to be walked individually.
+func forcesPush(opt string) bool {
+	if strings.HasPrefix(opt, "--") {
+		// Strip a glued value: --force-with-lease=<ref> is still a force.
+		name, _, _ := strings.Cut(opt, "=")
+		if name == "--" {
+			return false
+		}
+		// Git's parse-options resolves any unambiguous ABBREVIATION of a long
+		// option, so `--m` reaches --mirror and `--force-w` reaches
+		// --force-with-lease (verified against git 2.55.0: both parse, while
+		// --zzzz reports "unknown option"). Matching the spelled-out names
+		// exactly therefore leaves the same hole the short-cluster fix closes.
+		//
+		// A guard must not try to reproduce git's ambiguity rules: treating
+		// every prefix of a forbidden option as forbidden can only over-block,
+		// and the tokens it over-blocks (--f, --fo) are ones git itself
+		// rejects as ambiguous. Under-blocking would overwrite remote history.
+		for _, forbidden := range forcingLongOpts {
+			if strings.HasPrefix(forbidden, name) {
+				return true
+			}
+		}
+		// Any other long option, including the negating --no-force forms,
+		// which are not prefixes of anything forbidden.
+		return false
 	}
-	cmd := exec.Command("git", "-C", repoDir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
-	out, err := cmd.Output()
-	if err == nil {
-		branch := strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
-		if branch != "" {
-			protected[branch] = true
+	for _, c := range opt[1:] {
+		if c == 'f' {
+			// -f is `git push`'s only short option spelled with an 'f'.
+			return true
+		}
+		if c == 'o' {
+			// -o/--push-option is git push's only value-taking short option,
+			// and its value may be glued on (`-ofoo`), so the remaining
+			// letters are that value rather than further options.
+			break
 		}
 	}
+	return false
+}
+
+// forcingLongOpts are the long options that can overwrite remote history. Any
+// unambiguous prefix of one of these reaches it through git's parse-options,
+// so they are matched by prefix rather than by equality.
+var forcingLongOpts = []string{
+	"--force",
+	"--force-with-lease",
+	"--force-if-includes",
+	"--mirror",
+}
+
+// ProtectedBranches returns the branch names that must not be force-pushed.
+//
+// Deprecated: use ProtectedTargets, which also reports whether the
+// repository's default branch could be established. This wrapper drops that
+// signal and is kept only for callers that predate it.
+func ProtectedBranches(repoDir string) map[string]bool {
+	protected, _ := ProtectedTargets(repoDir)
 	return protected
 }
 
-// ForcePushViolation reports whether pushArgs force-push to a protected branch.
-// Force-pushing non-default PR branches is allowed; --mirror remains blocked.
+// ForcePushViolation reports whether pushArgs force-push to a branch the
+// policy protects. Force-pushing a PR branch is allowed; every other outcome
+// is a refusal.
+//
+// The check fails closed in three ways, each of which was a live bypass:
+//
+//   - The whole-repository forms (--mirror, --all, --tags) are refused
+//     outright, because what they update is not knowable from the operands.
+//   - A destination set that cannot be positively enumerated is refused. A
+//     wildcard refspec, a configured remote.<name>.push, push.default=matching,
+//     or an unknown current branch all land here. Assuming "it must be the
+//     current branch" is what allowed `safe-push -f origin` to rewrite main
+//     from a feature branch tracking origin/main.
+//   - A repository whose default branch cannot be established is refused,
+//     because a default of `trunk` or `develop` would otherwise be protected
+//     only by the conventional-name list.
+//
+// The returned string names what blocked the push, so the caller can say so.
 func ForcePushViolation(repoDir, currentBranch string, pushArgs []string) (string, bool) {
 	for _, a := range pushArgs {
-		if a == "--mirror" {
-			return a, true
+		name, _, _ := strings.Cut(a, "=")
+		if wholeRepoPushOptions[name] {
+			return name, true
 		}
 	}
 	flag, ok := ForceFlag(pushArgs)
@@ -130,8 +211,20 @@ func ForcePushViolation(repoDir, currentBranch string, pushArgs []string) (strin
 	if currentBranch == "" {
 		currentBranch = currentPushBranch(repoDir)
 	}
-	protected := ProtectedBranches(repoDir)
-	for _, branch := range forcePushTargets(currentBranch, pushArgs) {
+	protected, defaultKnown := ProtectedTargets(repoDir)
+	if !defaultKnown {
+		return "the repository default branch is unknown " +
+			"(run `git remote set-head origin --auto`)", true
+	}
+	targets, resolved := pushDestinations(repoDir, currentBranch, pushArgs)
+	if !resolved {
+		return "the push destination could not be determined from " + flag, true
+	}
+	// A `--force-with-lease=<ref>` names the ref the caller intends to force,
+	// which is a destination in its own right even when the operands do not
+	// repeat it.
+	targets = append(targets, leaseRefs(pushArgs)...)
+	for _, branch := range targets {
 		if protected[branch] {
 			return branch, true
 		}
@@ -139,99 +232,12 @@ func ForcePushViolation(repoDir, currentBranch string, pushArgs []string) (strin
 	return flag, false
 }
 
-func forcePushTargets(currentBranch string, pushArgs []string) []string {
-	var targets []string
-	skipNext := false
-	for i, arg := range pushArgs {
-		if skipNext {
-			skipNext = false
-			continue
-		}
-		if isBareForceFlag(arg) {
-			continue
-		}
-		if ref, ok := leaseRefTarget(arg); ok {
-			if ref != "" {
-				targets = append(targets, ref)
-			}
-			continue
-		}
-		if strings.HasPrefix(arg, "-") {
-			if optionConsumesNext(arg) && i+1 < len(pushArgs) {
-				skipNext = true
-			}
-			continue
-		}
-		if arg == "origin" || arg == "upstream" {
-			continue
-		}
-		if target := pushTargetBranch(strings.TrimPrefix(arg, "+")); target != "" {
-			targets = append(targets, target)
-		}
-	}
-	if len(targets) == 0 && currentBranch != "" {
-		targets = append(targets, currentBranch)
-	}
-	return targets
-}
-
-// isBareForceFlag reports whether arg is a force-family flag with no embedded
-// ref; these never name a push target themselves.
-func isBareForceFlag(arg string) bool {
-	switch arg {
-	case "--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror":
-		return true
-	}
-	return false
-}
-
-// leaseRefTarget extracts the branch from --force-with-lease=<ref>[:expect] or
-// --force-if-includes=<ref>. ok reports that arg was one of those forms even
-// when the embedded ref does not name a usable branch.
-func leaseRefTarget(arg string) (string, bool) {
-	if !strings.HasPrefix(arg, "--force-with-lease=") && !strings.HasPrefix(arg, "--force-if-includes=") {
-		return "", false
-	}
-	ref := strings.TrimPrefix(strings.TrimPrefix(arg, "--force-with-lease="), "--force-if-includes=")
-	ref = strings.TrimPrefix(ref, "refs/heads/")
-	if ref == "" || strings.Contains(ref, ":") {
-		return "", true
-	}
-	return ref, true
-}
-
-func optionConsumesNext(arg string) bool {
-	switch arg {
-	case "-u", "--set-upstream", "--repo", "--receive-pack", "--exec", "--push-option", "-o":
-		return true
-	}
-	return false
-}
-
-func pushTargetBranch(refspec string) string {
-	if strings.Contains(refspec, "*") {
-		return ""
-	}
-	if strings.Contains(refspec, ":") {
-		parts := strings.Split(refspec, ":")
-		if len(parts) != 2 || parts[1] == "" {
-			return ""
-		}
-		return strings.TrimPrefix(parts[1], "refs/heads/")
-	}
-	return strings.TrimPrefix(refspec, "refs/heads/")
-}
-
 func currentPushBranch(repoDir string) string {
-	if repoDir == "" {
-		repoDir = "."
-	}
-	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
+	out, err := gitQuery(repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return ""
 	}
-	branch := strings.TrimSpace(string(out))
+	branch := strings.TrimSpace(out)
 	if branch == "HEAD" {
 		return ""
 	}
