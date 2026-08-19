@@ -1,9 +1,10 @@
 package safegit
 
 import (
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // newPolicyRepo builds a repo with an origin remote and a resolvable
@@ -13,43 +14,25 @@ func newPolicyRepo(t *testing.T) string {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
 	repo := filepath.Join(root, "repo")
-	run := func(dir string, args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(cmd.Environ(),
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	run(root, "init", "--bare", "--initial-branch=main", origin)
-	run(root, "init", "--initial-branch=main", repo)
-	run(repo, "commit", "--allow-empty", "-m", "base")
-	run(repo, "remote", "add", "origin", origin)
-	run(repo, "push", "-u", "origin", "main")
-	run(repo, "remote", "set-head", "origin", "main")
+	gittest.Run(t, root, "init", "--bare", "--initial-branch=main", origin)
+	gittest.HardenRepo(t, origin)
+	gittest.Run(t, root, "init", "--initial-branch=main", repo)
+	gittest.HardenRepo(t, repo)
+	gittest.Run(t, repo, "commit", "--allow-empty", "-m", "base")
+	gittest.Run(t, repo, "remote", "add", "origin", origin)
+	gittest.Run(t, repo, "push", "-u", "origin", "main")
+	gittest.Run(t, repo, "remote", "set-head", "origin", "main")
 	return repo
 }
 
 func checkoutBranch(t *testing.T, repo, branch string) {
 	t.Helper()
-	cmd := exec.Command("git", "checkout", "-b", branch)
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("checkout %s: %v\n%s", branch, err, out)
-	}
+	gittest.Run(t, repo, "checkout", "-b", branch)
 }
 
 func setConfig(t *testing.T, repo, key, value string) {
 	t.Helper()
-	cmd := exec.Command("git", "config", key, value)
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("config %s: %v\n%s", key, err, out)
-	}
+	gittest.Run(t, repo, "config", key, value)
 }
 
 // TestForcePushViolation_FailsClosedOnUnresolvableDestination covers the
@@ -170,11 +153,7 @@ func TestForcePushViolation_ResolvesImplicitDestination(t *testing.T) {
 // whose default is neither main nor master and whose origin/HEAD is absent.
 func TestForcePushViolation_RefusesWhenDefaultBranchUnknown(t *testing.T) {
 	repo := newPolicyRepo(t)
-	cmd := exec.Command("git", "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
-	cmd.Dir = repo
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("removing origin/HEAD: %v\n%s", err, out)
-	}
+	gittest.Run(t, repo, "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
 	checkoutBranch(t, repo, "feature")
 	target, blocked := ForcePushViolation(repo, "", []string{"-f", "origin", "feature"})
 	if !blocked {
