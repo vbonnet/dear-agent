@@ -132,14 +132,18 @@ func CheckHumanTyping(sessionName, socketPath string) *Violation {
 //  2. empty / whitespace-only text after ❯;
 //  3. an AGM sender header ([From:/[from:]) after ❯ (automated message);
 //  4. a permission / navigation UI pattern after ❯ (permissionPromptPattern);
-//  5. text after ❯ containing no alphanumeric input rune — the flipped default:
-//     pure UI chrome (box-drawing, braille spinner glyphs, separators, arrows,
-//     symbol-only decoration) is not human typing. Previously this fired.
+//  5. text after ❯ that is composed entirely of recognized UI chrome runes
+//     (box-drawing, braille spinner glyphs, separators, navigation arrows) —
+//     the flipped default: only *positively identified* decoration is not
+//     human typing.
 //
-// Human-typing signature (fires): text after ❯ that is none of the above and
-// contains at least one Unicode letter or digit — i.e., positively looks like
-// typed input. The check is Unicode-aware so non-ASCII human input still fires
-// while box-drawing/braille/symbol chrome (categories So/Sk) is excluded.
+// Human-typing signature (fires): any text after ❯ that is none of the above.
+// Note this deliberately fires on symbol/emoji/punctuation-only drafts (e.g.
+// "👍", "&&", "???") that contain no letter or digit — an earlier version of
+// this check exempted any string without an alphanumeric rune, which silently
+// classified genuine symbol-only human input as UI chrome and suppressed the
+// advisory (codex review on ce-py3x). Only runes on the chrome allowlist are
+// exempt now, so unrecognized symbols and emoji are treated as typed input.
 //
 // Biasing toward "not typing" on ambiguity is safe: the guard is advisory and
 // the send path stashes the composer (Claude Code C-s auto-unstashes on the next
@@ -172,18 +176,20 @@ func detectHumanTyping(paneContent string) *Violation {
 			return nil
 		}
 
-		// (5) flipped default: require a positive human-input signature. Content
-		// with no letter or digit is UI chrome (box-drawing, spinner glyphs,
-		// separators, symbols), not typed input — treat it as not typing rather
-		// than assuming the worst about an unrecognized state.
-		if !hasHumanInputRune(after) {
+		// (5) flipped default: only exempt content positively identified as UI
+		// chrome (box-drawing, spinner glyphs, separators, navigation arrows).
+		// Anything else — including symbol/emoji-only drafts with no letter or
+		// digit — is treated as typed input rather than assumed to be chrome.
+		if isUIChromeOnly(after) {
 			return nil
 		}
 
-		// Truncate evidence for display
+		// Truncate evidence for display, by rune so a multi-byte UTF-8
+		// character is never split (gemini review on ce-py3x: byte slicing
+		// here could produce malformed UTF-8 once non-ASCII input is allowed).
 		evidence := after
-		if len(evidence) > 50 {
-			evidence = evidence[:50] + "..."
+		if runes := []rune(evidence); len(runes) > 50 {
+			evidence = string(runes[:50]) + "..."
 		}
 
 		return &Violation{
@@ -197,17 +203,49 @@ func detectHumanTyping(paneContent string) *Violation {
 	return nil // (1) no prompt found = not typing
 }
 
-// hasHumanInputRune reports whether s contains at least one Unicode letter or
-// digit — the positive signature of typed human input. It is Unicode-aware so
-// non-ASCII keyboard input counts, while pure UI chrome (box-drawing, braille
-// spinner frames, arrows, separators, other symbols) does not.
-func hasHumanInputRune(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			return true
-		}
+// isUIChromeRune reports whether r is a specific, known pane-decoration glyph:
+// box-drawing borders, block elements, braille spinner frames, navigation
+// arrows, and the small set of standalone punctuation used as separators or
+// trailing ellipses. This is a narrow, explicit allowlist rather than "any
+// non-letter/digit rune" — the latter also exempted genuine symbol/emoji-only
+// human input such as "👍", "&&", or "???", which a review found let a person's
+// draft go undetected because it had no letter or digit (codex on ce-py3x).
+func isUIChromeRune(r rune) bool {
+	if unicode.IsSpace(r) {
+		return true
+	}
+	switch {
+	case r >= '─' && r <= '╿': // box drawing
+		return true
+	case r >= '▀' && r <= '▟': // block elements
+		return true
+	case r >= '⠀' && r <= '⣿': // braille patterns (spinner glyphs)
+		return true
+	case r >= '←' && r <= '⇿': // arrows
+		return true
+	}
+	switch r {
+	case '»', '«', '❯', '⏵', '⏸', '⏹', '.', '-', '‐', '‑', '‒', '–', '—', '·', '•':
+		return true
 	}
 	return false
+}
+
+// isUIChromeOnly reports whether s is composed entirely of recognized UI
+// chrome runes (isUIChromeRune) and at least one non-whitespace rune. An
+// empty or whitespace-only string is not chrome — callers handle that case
+// separately (empty prompt = not typing, via the "" check above).
+func isUIChromeOnly(s string) bool {
+	sawNonSpace := false
+	for _, r := range s {
+		if !isUIChromeRune(r) {
+			return false
+		}
+		if !unicode.IsSpace(r) {
+			sawNonSpace = true
+		}
+	}
+	return sawNonSpace
 }
 
 // --- Session Uninitialized Guard ---
