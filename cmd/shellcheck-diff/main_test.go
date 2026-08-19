@@ -92,12 +92,20 @@ func TestParseFindingsRejectsUnusableDocuments(t *testing.T) {
 		{
 			name:    "a finding without a level is rejected",
 			raw:     `{"comments":[{"file":"a.sh","line":1}]}`,
-			wantErr: "no level",
+			wantErr: `unknown ShellCheck severity ""`,
 		},
 		{
 			name:    "a finding on line zero is rejected",
 			raw:     `{"comments":[{"file":"a.sh","line":0,"level":"warning"}]}`,
 			wantErr: "non-positive line",
+		},
+		{
+			// An unrecognized level means ShellCheck's output contract
+			// changed. Dropping such a finding when filtering would shrink
+			// the gate silently, so it is rejected up front instead.
+			name:    "an unrecognized severity level is rejected",
+			raw:     `{"comments":[{"file":"a.sh","line":1,"level":"critical","code":1}]}`,
+			wantErr: `unknown ShellCheck severity "critical"`,
 		},
 	}
 	for _, tt := range tests {
@@ -110,6 +118,23 @@ func TestParseFindingsRejectsUnusableDocuments(t *testing.T) {
 				t.Fatalf("error %q does not mention %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestSelectBlockingTreatsAnUnknownLevelAsMostSevere guards the defensive
+// branch: parseFindings rejects unknown levels, so a Finding can only reach
+// selectBlocking with one by bypassing the parser. It must then over-report,
+// never silently vanish.
+func TestSelectBlockingTreatsAnUnknownLevelAsMostSevere(t *testing.T) {
+	findings := []Finding{{File: "a.sh", Line: 1, Level: "critical", Code: 9999}}
+	touched := TouchedLines{"a.sh": {1: true}}
+
+	warningThreshold, err := severityRank("warning")
+	if err != nil {
+		t.Fatalf("severityRank: %v", err)
+	}
+	if blocking := selectBlocking(findings, touched, warningThreshold); len(blocking) != 1 {
+		t.Fatalf("an unknown level must block, got %+v", blocking)
 	}
 }
 

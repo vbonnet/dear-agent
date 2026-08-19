@@ -12,9 +12,19 @@
 package infra
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
+)
+
+// Every subprocess below is bounded. `tofu` can block on an interactive prompt
+// or a slow provider download, and an unbounded test would hang the CI job
+// rather than fail it.
+const (
+	fmtTimeout      = 30 * time.Second
+	validateTimeout = 3 * time.Minute
 )
 
 // requireTool skips the test when the binary is not installed. CI installs both
@@ -32,7 +42,10 @@ func requireTool(t *testing.T, name string) string {
 func TestTerraformIsCanonicallyFormatted(t *testing.T) {
 	tofu := requireTool(t, "tofu")
 
-	out, err := exec.Command(tofu, "fmt", "-check", "-recursive", "-list=true", ".").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), fmtTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, tofu, "fmt", "-check", "-recursive", "-list=true", ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("tofu fmt -check reported unformatted files (run `tofu fmt -recursive infra`):\n%s", out)
 	}
@@ -44,13 +57,18 @@ func TestTerraformIsCanonicallyFormatted(t *testing.T) {
 func TestTerraformConfigurationValidates(t *testing.T) {
 	tofu := requireTool(t, "tofu")
 
+	// The provider download in `init` dominates this budget, so both steps
+	// share one deadline rather than each getting a generous private one.
+	ctx, cancel := context.WithTimeout(context.Background(), validateTimeout)
+	defer cancel()
+
 	// -backend=false keeps this credential-free: it initialises providers and
 	// modules without contacting the real state backend.
-	if out, err := exec.Command(tofu, "init", "-backend=false", "-input=false", "-no-color").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, tofu, "init", "-backend=false", "-input=false", "-no-color").CombinedOutput(); err != nil {
 		t.Fatalf("tofu init -backend=false failed: %v\n%s", err, out)
 	}
 
-	out, err := exec.Command(tofu, "validate", "-no-color").CombinedOutput()
+	out, err := exec.CommandContext(ctx, tofu, "validate", "-no-color").CombinedOutput()
 	if err != nil {
 		t.Fatalf("tofu validate failed: %v\n%s", err, out)
 	}

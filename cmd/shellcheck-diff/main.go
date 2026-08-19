@@ -90,8 +90,15 @@ func run(args []string, stdout io.Writer) error {
 func selectBlocking(findings []Finding, touched TouchedLines, threshold int) []Finding {
 	var blocking []Finding
 	for _, f := range findings {
+		// parseFindings has already rejected any unrecognized level, so the
+		// error here is unreachable. Treat it as most-severe anyway rather
+		// than skipping: a future caller that bypasses parseFindings should
+		// over-report, never silently drop a finding.
 		rank, err := severityRank(f.Level)
-		if err != nil || rank > threshold {
+		if err != nil {
+			rank = 0
+		}
+		if rank > threshold {
 			continue
 		}
 		if touched.Contains(f.File, f.Line) {

@@ -41,8 +41,12 @@ func parseFindings(raw []byte) ([]Finding, error) {
 		if f.Line < 1 {
 			return nil, fmt.Errorf("finding %d in %s has a non-positive line %d", i, f.File, f.Line)
 		}
-		if f.Level == "" {
-			return nil, fmt.Errorf("finding %d in %s has no level", i, f.File)
+		// Validate the level here rather than when filtering. An
+		// unrecognized level is evidence that ShellCheck's output contract
+		// changed; dropping such a finding later would silently shrink the
+		// gate exactly when it is least understood.
+		if _, err := severityRank(f.Level); err != nil {
+			return nil, fmt.Errorf("finding %d in %s: %w", i, f.File, err)
 		}
 	}
 	return *doc.Comments, nil

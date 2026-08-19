@@ -22,7 +22,7 @@ to.
 
 **SHDIFF-05** When the findings document is the legacy bare-array `-f json` format, the command shall reject it by name rather than silently report zero findings.
 
-**SHDIFF-06** When a finding omits its file, level, or a positive line number, the command shall reject the document rather than skip that finding.
+**SHDIFF-06** When a finding omits its file or a positive line number, or carries a severity level ShellCheck does not define, the command shall reject the document rather than skip that finding.
 
 **SHDIFF-07** When a hunk header carries no parsable destination range, the command shall fail rather than attribute the hunk to no lines.
 
