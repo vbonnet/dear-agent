@@ -26,6 +26,7 @@ package jqtest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -34,6 +35,15 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+)
+
+// Both subprocesses below are bounded. A jq program that reads stdin forever,
+// or a git call that blocks on a credential prompt, would hang the whole
+// suite rather than fail one case.
+const (
+	jqTimeout  = 30 * time.Second
+	gitTimeout = 10 * time.Second
 )
 
 // caseSpec is the contents of a case.json file.
@@ -127,7 +137,10 @@ func runCase(t *testing.T, jq, root, dir string, spec caseSpec) {
 		t.Fatalf("read input.json: %v", err)
 	}
 
-	cmd := exec.Command(jq, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), jqTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, jq, args...)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -242,7 +255,10 @@ func loadSpec(t *testing.T, root, dir string) caseSpec {
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		t.Fatalf("resolve repository root: %v", err)
 	}
