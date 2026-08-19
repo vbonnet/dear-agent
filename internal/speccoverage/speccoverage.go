@@ -5,6 +5,7 @@ package speccoverage
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/internal/earslint"
 	"github.com/vbonnet/dear-agent/internal/repoinventory"
+	"github.com/vbonnet/dear-agent/internal/specguard"
 )
 
 // Surface maps one parity-critical implementation area to its executable BDD
@@ -48,6 +50,7 @@ const (
 	FindingKindMissingPackagePath        FindingKind = "missing-package-path"
 	FindingKindMissingSpecPath           FindingKind = "missing-spec-path"
 	FindingKindMissingFeaturePath        FindingKind = "missing-feature-path"
+	FindingKindInvalidSpecOwner          FindingKind = "invalid-spec-owner"
 	FindingKindSpecRead                  FindingKind = "spec-read"
 	FindingKindMissingEARS               FindingKind = "missing-ears-requirements"
 	FindingKindMissingAudit              FindingKind = "missing-audit-marker"
@@ -315,14 +318,6 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 	return findings
 }
 
-func featureSpecPath(featureText string) (string, bool) {
-	paths, ok := featureSpecPaths(featureText)
-	if !ok {
-		return "", false
-	}
-	return paths[0], true
-}
-
 func featureSpecPaths(featureText string) ([]string, bool) {
 	var paths []string
 	hasPrimary := false
@@ -362,10 +357,13 @@ func bddFeaturePaths(root string) ([]string, error) {
 
 	var features []string
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".feature") {
+		if entry.IsDir() {
 			continue
 		}
-		features = append(features, filepath.ToSlash(filepath.Join("agm", "test", "bdd", "features", entry.Name())))
+		feature := filepath.ToSlash(filepath.Join(repoinventory.ExecutableBDDFeatureRoot, entry.Name()))
+		if repoinventory.IsExecutableBDDFeaturePath(feature) {
+			features = append(features, feature)
+		}
 	}
 	slices.Sort(features)
 	return features, nil
@@ -442,40 +440,97 @@ func ValidateChangedGoPackageSpecs(ctx context.Context, root, baseRef string) ([
 
 var specBDDFeaturePattern = regexp.MustCompile(`agm/test/bdd/features/[A-Za-z0-9._-]+\.feature`)
 
+const sharedSpecOwnerName = "SPEC.owner"
+
 // ValidateAllGoPackageSpecs requires every Go package, including test-only
 // packages, to have strict SPEC.md and reciprocal executable BDD coverage.
 func ValidateAllGoPackageSpecs(root string) ([]Finding, error) {
-	packageDirs, err := allImplementationDirs(root, goSourceFile)
+	inventory, err := scanCoverageInventory(root)
 	if err != nil {
 		return nil, err
 	}
-	return validateAllImplementationDirs(root, packageDirs)
+	packageDirs, err := inventory.dirs(goSourceFile)
+	if err != nil {
+		return nil, err
+	}
+	return validateAllImplementationDirs(root, packageDirs, inventory.byPath)
 }
 
 // ValidateAllImplementationSpecs requires every implementation directory,
-// regardless of source language, to have strict SPEC.md and BDD coverage.
+// regardless of source language, to have strict owned SPEC and BDD coverage.
+// A directory may point at one canonical shared contract with SPEC.owner when
+// a co-located SPEC.md would duplicate behavior owned elsewhere.
 func ValidateAllImplementationSpecs(root string) ([]Finding, error) {
-	implementationDirs, err := allImplementationDirs(root, implementationSourceFile)
+	inventory, err := scanCoverageInventory(root)
 	if err != nil {
 		return nil, err
 	}
-	return validateAllImplementationDirs(root, implementationDirs)
+	implementationDirs, err := inventory.dirs(implementationSourceFile)
+	if err != nil {
+		return nil, err
+	}
+	return validateAllImplementationDirs(root, implementationDirs, inventory.byPath)
 }
 
 // ValidateAllRepositorySpecs requires every SPEC.md artifact, including specs
 // in doc-only and hidden policy directories, to retain strict EARS and
 // reciprocal executable BDD traceability.
 func ValidateAllRepositorySpecs(root string) ([]Finding, error) {
-	specDirs, err := allImplementationDirs(root, func(file repoinventory.File) (bool, error) {
+	inventory, err := scanCoverageInventory(root)
+	if err != nil {
+		return nil, err
+	}
+	specDirs, err := inventory.dirs(func(file repoinventory.File) (bool, error) {
 		return file.Name() == "SPEC.md", nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return validateAllImplementationDirs(root, specDirs)
+	findings, err := validateAllImplementationDirs(root, specDirs, inventory.byPath)
+	if err != nil {
+		return nil, err
+	}
+	ownerDirs, err := inventory.dirs(func(file repoinventory.File) (bool, error) {
+		return file.Name() == sharedSpecOwnerName, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	implementationDirs, err := inventory.dirs(implementationSourceFile)
+	if err != nil {
+		return nil, err
+	}
+	implementationSet := make(map[string]bool, len(implementationDirs))
+	for _, dir := range implementationDirs {
+		implementationSet[dir] = true
+	}
+	specSet := make(map[string]bool, len(specDirs))
+	for _, dir := range specDirs {
+		specSet[dir] = true
+	}
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open repository root: %w", err)
+	}
+	defer func() { _ = rootFS.Close() }()
+	for _, dir := range ownerDirs {
+		ownerPath := filepath.ToSlash(filepath.Join(dir, sharedSpecOwnerName))
+		if !implementationSet[dir] {
+			findings = append(findings, Finding{
+				Kind: FindingKindInvalidSpecOwner, Surface: "repository SPEC owner coverage", Path: ownerPath,
+				Message: "SPEC.owner does not belong to a discovered implementation directory",
+			})
+			continue
+		}
+		if specSet[dir] {
+			continue
+		}
+		findings = append(findings, validateRepositoryImplementationSpec(rootFS, inventory.byPath, dir)...)
+	}
+	return findings, nil
 }
 
-func validateAllImplementationDirs(root string, dirs []string) ([]Finding, error) {
+func validateAllImplementationDirs(root string, dirs []string, files map[string]repoinventory.File) ([]Finding, error) {
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("open repository root: %w", err)
@@ -484,28 +539,39 @@ func validateAllImplementationDirs(root string, dirs []string) ([]Finding, error
 
 	var findings []Finding
 	for _, dir := range dirs {
-		findings = append(findings, validateRepositoryImplementationSpec(rootFS, dir)...)
+		findings = append(findings, validateRepositoryImplementationSpec(rootFS, files, dir)...)
 	}
 	return findings, nil
 }
 
-func allImplementationDirs(root string, isSource func(repoinventory.File) (bool, error)) ([]string, error) {
+type coverageInventory struct {
+	files  []repoinventory.File
+	byPath map[string]repoinventory.File
+}
+
+func scanCoverageInventory(root string) (coverageInventory, error) {
 	files, err := repoinventory.Scan(root)
 	if err != nil {
-		return nil, fmt.Errorf("discover repository implementation files: %w", err)
+		return coverageInventory{}, fmt.Errorf("discover repository implementation files: %w", err)
 	}
-	seen := map[string]bool{}
+	byPath := make(map[string]repoinventory.File, len(files))
 	for _, file := range files {
+		byPath[file.Path] = file
+	}
+	return coverageInventory{files: files, byPath: byPath}, nil
+}
+
+func (inventory coverageInventory) dirs(isSource func(repoinventory.File) (bool, error)) ([]string, error) {
+	seen := map[string]bool{}
+	for _, file := range inventory.files {
 		include, err := isSource(file)
 		if err != nil {
 			return nil, err
 		}
-		if !include {
-			continue
+		if include {
+			seen[filepath.ToSlash(filepath.Dir(file.Path))] = true
 		}
-		seen[filepath.ToSlash(filepath.Dir(file.Path))] = true
 	}
-
 	dirs := make([]string, 0, len(seen))
 	for dir := range seen {
 		dirs = append(dirs, dir)
@@ -519,36 +585,19 @@ func goSourceFile(file repoinventory.File) (bool, error) {
 }
 
 func implementationSourceFile(file repoinventory.File) (bool, error) {
-	switch strings.ToLower(file.Name()) {
-	case "dockerfile", "makefile":
-		return true, nil
-	}
-	switch strings.ToLower(filepath.Ext(file.Name())) {
-	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
-		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",
-		".json", ".toml", ".plist", ".service", ".dockerfile":
-		return true, nil
-	}
-	if filepath.Ext(file.Name()) != "" {
-		return false, nil
-	}
-	return file.Mode.IsRegular() && file.Executable(), nil
+	return repoinventory.IsImplementationSource(file.Path, file.Mode.IsRegular(), file.Executable()), nil
 }
 
-func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
-	specPath := filepath.ToSlash(filepath.Join(dir, "SPEC.md"))
-	specData, err := root.ReadFile(filepath.FromSlash(specPath))
-	if err != nil {
-		return []Finding{{
-			Kind:    FindingKindMissingCoLocatedSpec,
-			Surface: "repository implementation SPEC coverage",
-			Path:    specPath,
-			Message: fmt.Sprintf("implementation directory %q does not have a co-located SPEC.md: %v", dir, err),
-		}}
+func validateRepositoryImplementationSpec(root *os.Root, files map[string]repoinventory.File, dir string) []Finding {
+	resolved, findings := resolveImplementationSpec(root, files, dir, "repository implementation SPEC coverage")
+	if len(findings) > 0 {
+		return findings
 	}
+	specPath := resolved.path
+	specData := resolved.data
 
 	specText := string(specData)
-	findings := validateSpecEARS(Surface{
+	findings = validateSpecEARS(Surface{
 		Name:     "repository implementation SPEC coverage",
 		SpecPath: specPath,
 	}, specText)
@@ -566,7 +615,7 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 	}
 
 	for _, featurePath := range featurePaths {
-		featureData, err := root.ReadFile(filepath.FromSlash(featurePath))
+		featureData, err := readGovernedInventoryFile(root, files, featurePath, 0)
 		if err != nil {
 			findings = append(findings, Finding{
 				Kind:    FindingKindMissingReferencedBDD,
@@ -595,6 +644,95 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 		}
 	}
 	return findings
+}
+
+type implementationSpec struct {
+	path string
+	data []byte
+}
+
+func resolveImplementationSpec(root *os.Root, files map[string]repoinventory.File, dir, surface string) (implementationSpec, []Finding) {
+	localPath := filepath.ToSlash(filepath.Join(dir, "SPEC.md"))
+	ownerPath := filepath.ToSlash(filepath.Join(dir, sharedSpecOwnerName))
+	_, hasLocal := files[localPath]
+	_, hasOwner := files[ownerPath]
+	if hasLocal && hasOwner {
+		return implementationSpec{}, []Finding{{
+			Kind: FindingKindInvalidSpecOwner, Surface: surface, Path: ownerPath,
+			Message: "implementation directory declares both a co-located SPEC.md and SPEC.owner; choose exactly one normative owner",
+		}}
+	}
+	if hasLocal {
+		localData, err := readGovernedInventoryFile(root, files, localPath, 0)
+		if err != nil {
+			return implementationSpec{}, []Finding{{
+				Kind: FindingKindSpecRead, Surface: surface, Path: localPath,
+				Message: fmt.Sprintf("read governed co-located SPEC.md: %v", err),
+			}}
+		}
+		return implementationSpec{path: localPath, data: localData}, nil
+	}
+	if !hasOwner {
+		return implementationSpec{}, []Finding{{
+			Kind: FindingKindMissingCoLocatedSpec, Surface: surface, Path: localPath,
+			Message: fmt.Sprintf("implementation directory %q has neither a co-located SPEC.md nor an explicit %s", dir, sharedSpecOwnerName),
+		}}
+	}
+
+	ownerData, err := readGovernedInventoryFile(root, files, ownerPath, specguard.MaxSpecOwnerBytes)
+	if err != nil {
+		return implementationSpec{}, []Finding{{
+			Kind: FindingKindInvalidSpecOwner, Surface: surface, Path: ownerPath,
+			Message: fmt.Sprintf("read governed %s: %v", sharedSpecOwnerName, err),
+		}}
+	}
+	target, err := specguard.ParseSpecOwner(ownerData, localPath)
+	if err != nil {
+		return implementationSpec{}, []Finding{{
+			Kind: FindingKindInvalidSpecOwner, Surface: surface, Path: ownerPath,
+			Message: err.Error(),
+		}}
+	}
+	targetData, err := readGovernedInventoryFile(root, files, target, 0)
+	if err != nil {
+		return implementationSpec{}, []Finding{{
+			Kind: FindingKindSpecRead, Surface: surface, Path: target,
+			Message: fmt.Sprintf("read canonical shared SPEC.md declared by %s: %v", ownerPath, err),
+		}}
+	}
+	if chainedTarget, chainErr := specguard.ParseSpecOwner(targetData, target); chainErr == nil {
+		return implementationSpec{}, []Finding{{
+			Kind: FindingKindInvalidSpecOwner, Surface: surface, Path: ownerPath,
+			Message: fmt.Sprintf("SPEC.owner target %q is another ownership pointer to %q", target, chainedTarget),
+		}}
+	}
+	return implementationSpec{path: target, data: targetData}, nil
+}
+
+func readGovernedInventoryFile(root *os.Root, files map[string]repoinventory.File, filePath string, limit int64) ([]byte, error) {
+	file, ok := files[filePath]
+	if !ok {
+		return nil, fmt.Errorf("path is absent from the governed repository inventory")
+	}
+	if !file.Mode.IsRegular() || file.Mode&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("governed path is not a regular non-symlink file")
+	}
+	handle, err := root.Open(filepath.FromSlash(filePath))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = handle.Close() }()
+	if limit <= 0 {
+		return io.ReadAll(handle)
+	}
+	data, err := io.ReadAll(io.LimitReader(handle, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("governed file exceeds the %d-byte limit", limit)
+	}
+	return data, nil
 }
 
 func bddFeatureReferencesSpec(featureText, specPath string) bool {
@@ -638,6 +776,22 @@ func ChangedGoFiles(ctx context.Context, root, baseRef string) ([]string, error)
 
 // ValidateGoPackageSpecsForFiles validates an already-known changed-file set.
 func ValidateGoPackageSpecsForFiles(root string, files []string) []Finding {
+	inventory, err := scanCoverageInventory(root)
+	if err != nil {
+		return []Finding{{
+			Kind: FindingKindSpecRead, Surface: "changed Go package SPEC coverage",
+			Message: err.Error(),
+		}}
+	}
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return []Finding{{
+			Kind: FindingKindSpecRead, Surface: "changed Go package SPEC coverage",
+			Message: fmt.Sprintf("open repository root: %v", err),
+		}}
+	}
+	defer func() { _ = rootFS.Close() }()
+
 	seen := map[string]bool{}
 	var findings []Finding
 	for _, file := range files {
@@ -650,38 +804,17 @@ func ValidateGoPackageSpecsForFiles(root string, files []string) []Finding {
 			continue
 		}
 		seen[dir] = true
-		specPath := filepath.Join(root, filepath.FromSlash(dir), "SPEC.md")
-		if _, err := os.Stat(specPath); err != nil {
-			findings = append(findings, Finding{
-				Kind:    FindingKindMissingCoLocatedSpec,
-				Surface: "changed Go package SPEC coverage",
-				Path:    filepath.ToSlash(filepath.Join(dir, "SPEC.md")),
-				Message: fmt.Sprintf("changed production Go package %q does not have a co-located SPEC.md", dir),
-			})
+		resolved, resolutionFindings := resolveImplementationSpec(rootFS, inventory.byPath, dir, "changed Go package SPEC coverage")
+		if len(resolutionFindings) > 0 {
+			findings = append(findings, resolutionFindings...)
 			continue
 		}
-		findings = append(findings, validateChangedPackageSpec(root, dir)...)
+		findings = append(findings, validateSpecEARS(Surface{
+			Name:     "changed Go package SPEC coverage",
+			SpecPath: resolved.path,
+		}, string(resolved.data))...)
 	}
 	return findings
-}
-
-func validateChangedPackageSpec(root, dir string) []Finding {
-	specPath := filepath.ToSlash(filepath.Join(dir, "SPEC.md"))
-	spec, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(specPath)))
-	if err != nil {
-		return []Finding{{
-			Kind:    FindingKindSpecRead,
-			Surface: "changed Go package SPEC coverage",
-			Path:    specPath,
-			Message: fmt.Sprintf("read co-located SPEC.md: %v", err),
-		}}
-	}
-
-	specText := string(spec)
-	return validateSpecEARS(Surface{
-		Name:     "changed Go package SPEC coverage",
-		SpecPath: specPath,
-	}, specText)
 }
 
 func requiresPackageSpec(file string) bool {
