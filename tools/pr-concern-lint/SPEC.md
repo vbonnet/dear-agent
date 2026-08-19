@@ -33,9 +33,7 @@ merge. Only usage and operational failures exit non-zero.
 
 ## BDD Traceability
 
-- No BDD change, with reason: this command has no interactive workflow; its
-  observable behaviour is the exit status and the two output forms, covered by
-  the deterministic unit consequences below.
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
 
 ## Test Traceability
 

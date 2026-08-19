@@ -40,11 +40,7 @@ call-site fix-ups a rename drags along cannot reach the new-logic threshold.
 
 ## BDD Traceability
 
-- No BDD change, with reason: this package is a pure diff-classification
-  library with no user-visible workflow of its own. Its observable behaviour
-  reaches users only through the `pr-concern-lint` command and the
-  size-and-scope workflow comment, covered by the deterministic unit
-  consequences below.
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
 
 ## Test Traceability
 
