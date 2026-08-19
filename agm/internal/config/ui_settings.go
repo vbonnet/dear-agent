@@ -6,7 +6,6 @@ package config
 type UISettings struct {
 	Defaults DefaultsConfig `yaml:"defaults"`
 	UI       UIConfig       `yaml:"ui"`
-	Advanced AdvancedConfig `yaml:"advanced"`
 }
 
 // DefaultsConfig holds default behavior toggles for the AGM UI.
@@ -29,15 +28,6 @@ type UIConfig struct {
 	ScreenReader     bool   `yaml:"screen_reader"`
 }
 
-// AdvancedConfig retains the legacy accepted schema surface. These values
-// have no runtime consumer; active timeout and health controls live in Config.
-type AdvancedConfig struct {
-	TmuxTimeout         string `yaml:"tmux_timeout"`
-	HealthCheckCache    string `yaml:"health_check_cache"`
-	LockTimeout         string `yaml:"lock_timeout"`
-	UUIDDetectionWindow string `yaml:"uuid_detection_window"`
-}
-
 // DefaultUISettings returns the shared UI defaults projected from Config.
 func DefaultUISettings() UISettings {
 	return UISettings{
@@ -54,12 +44,6 @@ func DefaultUISettings() UISettings {
 			ShowProjectPaths: true,
 			ShowTags:         true,
 			FuzzySearch:      true,
-		},
-		Advanced: AdvancedConfig{
-			TmuxTimeout:         "5s",
-			HealthCheckCache:    "5s",
-			LockTimeout:         "30s",
-			UUIDDetectionWindow: "5m",
 		},
 	}
 }
