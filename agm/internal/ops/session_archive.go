@@ -522,39 +522,42 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 // invoking cleanup. A refused reap keeps the sandbox for the periodic
 // `agm sandbox gc` sweep to retry once the blocker is gone.
 //
-// Returns (removed, existed): existed is false only when there was no
-// sandbox directory to remove in the first place (not a failure); every
+// Returns (removed, existed, reason): existed is false only when there was
+// no sandbox directory to remove in the first place (not a failure); every
 // other refusal or removal failure reports existed=true so callers can
-// distinguish "nothing to do" from a real, worth-surfacing failure.
-func cleanupSandboxDir(sessionID, mergedPath string) (removed bool, existed bool) {
+// distinguish "nothing to do" from a real, worth-surfacing failure. reason
+// carries the underlying refusal so the cleanup audit log records what
+// actually blocked the reap, rather than a generic line that sends the
+// operator to a log file with no detail in it.
+func cleanupSandboxDir(sessionID, mergedPath string) (removed bool, existed bool, reason string) {
 	base, err := sandboxgc.DefaultBase()
 	if err != nil {
 		slog.Warn("Failed to get home dir for sandbox cleanup", "error", err)
 		// We cannot even determine whether a sandbox exists — treat as a
 		// real failure rather than silently reporting "nothing to remove".
-		return false, true
+		return false, true, fmt.Sprintf("cannot resolve the sandbox base directory: %v", err)
 	}
 	return cleanupSandboxDirWithChecker(sessionID, mergedPath, base, sandboxgc.NewChecker(base, nil))
 }
 
-func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) (removed bool, existed bool) {
+func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) (removed bool, existed bool, reason string) {
 	sandboxDir := filepath.Join(base, sessionID)
 	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
 		slog.Warn("Refusing sandbox cleanup with a mismatched safety checker", "session", sessionID)
-		return false, true
+		return false, true, "safety checker base does not match the cleanup base"
 	}
 	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
 		slog.Warn("Refusing sandbox cleanup outside the allowlisted base", "session", sessionID, "error", err)
-		return false, true
+		return false, true, fmt.Sprintf("sandbox path is outside the allowlisted base: %v", err)
 	}
 	expectedMergedPath := filepath.Join(sandboxDir, "merged")
 	if mergedPath != expectedMergedPath {
 		slog.Warn("Refusing sandbox cleanup with an unattributed merged path",
 			"session", sessionID, "path", mergedPath, "expected", expectedMergedPath)
-		return false, true
+		return false, true, fmt.Sprintf("merged path %s is not the expected %s", mergedPath, expectedMergedPath)
 	}
 	if _, err := os.Lstat(sandboxDir); os.IsNotExist(err) {
-		return false, false
+		return false, false, ""
 	}
 
 	// Preserve .claude/settings.local.json from the upper layer before removal.
@@ -569,11 +572,11 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 	if err := checker.Reap(sandboxDir); err != nil {
 		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
 			"session", sessionID, "path", sandboxDir, "error", err)
-		return false, true
+		return false, true, err.Error()
 	}
 
 	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
-	return true, true
+	return true, true, ""
 }
 
 func ownedSandboxPathForArchive(m *manifest.Manifest) string {

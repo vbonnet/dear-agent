@@ -1,6 +1,6 @@
 # agm/internal/session — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-08-17 -->
+<!-- Last audited at: 2026-07-22 -->
 
 ## Purpose
 
@@ -46,9 +46,13 @@ exact-pane capabilities.
 
 **SESS-15** When `VerifyCompletion` checks a session's working directory for unmerged commits, the system shall resolve the base branch via the same `origin/HEAD` → `origin/main` → `main` resolution used by the worktree sweep and archive-ui safety checks (`gitpkg.ResolveBaseRef`), rather than a hard-coded literal `"main"` ref.
 
-**SESS-16** When the base branch cannot be resolved, or counting commits against the resolved base fails, the system shall fail CLOSED: it shall record a synthetic entry in `UnmergedCommits` describing the failure so `Critical()` treats the session as having unmerged work, rather than silently reporting a clean branch. A repository or worktree with zero commits is the one exception — there is nothing that could be unmerged, so the check is a no-op.
+**SESS-16** When the base branch cannot be resolved, or counting commits against the resolved base fails, the system shall fail CLOSED: it shall record the failure in `VerificationFailures`, distinct from `UnmergedCommits`, so `Critical()` blocks the archive while the reported error names the probe that failed and its recovery rather than a commit count that does not correspond to any commit. A repository or worktree with zero commits is the one exception — there is nothing that could be unmerged, so the check is a no-op. Zero commits shall be established by git exiting non-zero; a failure to run git at all is a probe failure and fails closed like the rest.
 
 **SESS-17** When `UnmergedCommits` is non-empty, the system shall check for a confirmed OPEN pull request on the current branch (via `gitpkg.OpenPRForBranch`) and record it in `HasOpenPR`/`OpenPRNumber`. `Critical()` shall not treat unmerged commits as blocking when `HasOpenPR` is true — an open PR is positive evidence the work is tracked and in flight, not abandoned — but shall continue to block when no open PR is confirmed. The PR check is itself fail-closed: any inability to positively confirm an open PR (gh missing, unauthenticated, network error, timeout) leaves `HasOpenPR` false, so a flaky or absent `gh` can never manufacture a bypass.
+
+**SESS-18** When a confirmed open PR would downgrade the unmerged-commit block, the system shall additionally require that the branch carries no commits absent from every remote, recording the answer in `HasUnpushedCommits`. A pull request is evidence about the commits it contains, not about commits made after it was opened, and the archive cleanup that follows a passing gate force-removes the worktree. The pushed-state probe fails closed: an error leaves `HasUnpushedCommits` true and the block standing.
+
+**SESS-19** When `VerifyCompletion` runs a git subprocess, the system shall bound it with a context and a timeout, so a hung git cannot block the archive gate indefinitely.
 
 ## Key Invariants
 

@@ -1,12 +1,20 @@
 package session
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 )
+
+// gitProbeTimeout bounds the git subprocesses this verification runs. A
+// pre-archive gate that hangs blocks the archive indefinitely with no signal,
+// which is worse than a bounded failure the fail-closed path can report.
+const gitProbeTimeout = 15 * time.Second
 
 // CompletionVerification holds the results of pre-archive verification checks.
 // It inspects git history for signs of incomplete work.
@@ -29,6 +37,19 @@ type CompletionVerification struct {
 	// UnmergedCommits is non-empty — a clean branch never needs a PR check.
 	HasOpenPR    bool `json:"has_open_pr,omitempty"`
 	OpenPRNumber int  `json:"open_pr_number,omitempty"`
+
+	// HasUnpushedCommits reports that HEAD carries commits that exist on no
+	// remote. An open PR does not prove those newer local commits are in it,
+	// so this suppresses the open-PR downgrade below: the branch stays
+	// blocking, and the reason says why.
+	HasUnpushedCommits bool `json:"has_unpushed_commits,omitempty"`
+
+	// VerificationFailures records probes that could not answer, as opposed
+	// to real unmerged commits. Both fail closed and both block, but they
+	// need different recovery: an unresolvable base ref is fixed by fetching
+	// or establishing the default branch, not by looking for a commit that
+	// does not exist. Kept separate so the message can say so.
+	VerificationFailures []string `json:"verification_failures,omitempty"`
 }
 
 // Critical returns true if any blocking issue was found that should prevent
@@ -38,7 +59,20 @@ type CompletionVerification struct {
 // the branch: "resolved" means merged, has an open PR, or is explicitly
 // force-archived — not merely "git can't currently prove it's merged".
 func (v *CompletionVerification) Critical() bool {
-	return len(v.UncommittedFiles) > 0 || (len(v.UnmergedCommits) > 0 && !v.HasOpenPR) || v.MissingTests
+	return len(v.UncommittedFiles) > 0 || v.unmergedIsBlocking() || len(v.VerificationFailures) > 0 || v.MissingTests
+}
+
+// unmergedIsBlocking reports whether the unmerged-commit block stands.
+//
+// An open PR downgrades it only when every local commit is also on a remote.
+// A PR is evidence about the commits it contains, not about commits made
+// after it was opened, and archive cleanup force-removes the worktree once
+// this gate passes, so unpushed work would be destroyed on that evidence.
+func (v *CompletionVerification) unmergedIsBlocking() bool {
+	if len(v.UnmergedCommits) == 0 {
+		return false
+	}
+	return !v.HasOpenPR || v.HasUnpushedCommits
 }
 
 // CriticalErrors returns human-readable descriptions of each blocking issue.
@@ -47,8 +81,19 @@ func (v *CompletionVerification) CriticalErrors() []string {
 	if n := len(v.UncommittedFiles); n > 0 {
 		errs = append(errs, fmt.Sprintf("uncommitted changes in %d file(s)", n))
 	}
-	if n := len(v.UnmergedCommits); n > 0 && !v.HasOpenPR {
-		errs = append(errs, fmt.Sprintf("branch has %d unmerged commit(s)", n))
+	if v.unmergedIsBlocking() {
+		switch {
+		case v.HasOpenPR && v.HasUnpushedCommits:
+			errs = append(errs, fmt.Sprintf(
+				"branch has %d unmerged commit(s) and carries commits that exist on no remote, "+
+					"so open PR #%d does not cover them (push the branch, or archive with --force)",
+				len(v.UnmergedCommits), v.OpenPRNumber))
+		default:
+			errs = append(errs, fmt.Sprintf("branch has %d unmerged commit(s)", len(v.UnmergedCommits)))
+		}
+	}
+	for _, f := range v.VerificationFailures {
+		errs = append(errs, "could not verify branch state: "+f)
 	}
 	if v.MissingTests {
 		errs = append(errs, "code changes detected without corresponding test changes")
@@ -139,6 +184,8 @@ func collectUncommittedFiles(dir string, result *CompletionVerification) bool {
 // tests can stub it out and stay hermetic (no gh/network dependency).
 var openPRForBranch = gitpkg.OpenPRForBranch
 
+var hasUnpushedCommits = gitpkg.HasUnpushedCommits
+
 // collectUnmergedCommits populates result.UnmergedCommits by comparing HEAD
 // against the resolved base branch (origin/HEAD → origin/main → main, via
 // gitpkg.ResolveBaseRef — the same resolution the worktree sweep and
@@ -161,25 +208,37 @@ var openPRForBranch = gitpkg.OpenPRForBranch
 // "known=false" on any gh/network/auth error), so a flaky or missing gh
 // never manufactures a bypass.
 func collectUnmergedCommits(dir string, result *CompletionVerification) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
+	defer cancel()
+
 	// No commits yet (freshly initialized repo/worktree): nothing could be
-	// unmerged. This is the one legitimate reason to skip the check — every
-	// other failure below fails closed.
-	if err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "HEAD").Run(); err != nil {
+	// unmerged. That is the one legitimate reason to skip the check, and it
+	// is signalled by git exiting non-zero, not by git failing to run. A
+	// missing binary, a permission error, or a timeout is a probe failure and
+	// fails closed like everything else below.
+	if err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--verify", "--quiet", "HEAD").Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return
+		}
+		result.VerificationFailures = append(result.VerificationFailures,
+			fmt.Sprintf("could not run git in %s: %v", dir, err))
 		return
 	}
 
 	base := gitpkg.ResolveBaseRef(dir)
 	if base == "" {
-		result.UnmergedCommits = append(result.UnmergedCommits,
-			"unable to resolve base branch (origin/HEAD, origin/main, main all unavailable) — treating branch as unmerged")
+		result.VerificationFailures = append(result.VerificationFailures,
+			"base branch is unresolvable (origin/HEAD, origin/main, and main are all unavailable); "+
+				"fetch the remote or set the default branch, then retry")
 		checkOpenPR(dir, result)
 		return
 	}
 
 	n, err := gitpkg.CommitsAhead(dir, "HEAD", base)
 	if err != nil || n < 0 {
-		result.UnmergedCommits = append(result.UnmergedCommits,
-			fmt.Sprintf("unable to verify commits against %s: %v — treating branch as unmerged", base, err))
+		result.VerificationFailures = append(result.VerificationFailures,
+			fmt.Sprintf("could not count commits against %s: %v", base, err))
 		checkOpenPR(dir, result)
 		return
 	}
@@ -187,7 +246,7 @@ func collectUnmergedCommits(dir string, result *CompletionVerification) {
 		return
 	}
 
-	logOut, logErr := exec.Command("git", "-C", dir, "log", base+"..HEAD", "--oneline").Output()
+	logOut, logErr := exec.CommandContext(ctx, "git", "-C", dir, "log", base+"..HEAD", "--oneline").Output()
 	if logErr != nil {
 		// CommitsAhead just proved n>0 commits exist; a failure listing them
 		// here is transient/inconsistent, not evidence of a clean branch —
@@ -209,7 +268,10 @@ func collectUnmergedCommits(dir string, result *CompletionVerification) {
 // resolve the branch or the PR state leaves HasOpenPR false (fail closed —
 // unmerged commits stay blocking unless a PR is positively confirmed open).
 func checkOpenPR(dir string, result *CompletionVerification) {
-	branchOut, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
+	defer cancel()
+
+	branchOut, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return
 	}
@@ -217,10 +279,25 @@ func checkOpenPR(dir string, result *CompletionVerification) {
 	if branch == "" || branch == "HEAD" {
 		return // detached HEAD — no branch to look up a PR for
 	}
-	if num, known := openPRForBranch(dir, branch); known {
-		result.HasOpenPR = true
-		result.OpenPRNumber = num
+	num, known := openPRForBranch(dir, branch)
+	if !known {
+		return
 	}
+	result.HasOpenPR = true
+	result.OpenPRNumber = num
+
+	// An open PR is evidence about the commits it contains. Commits made
+	// after it was opened, or never pushed at all, are not covered by it, and
+	// the archive cleanup that runs once this gate passes force-removes the
+	// worktree. Probe for them, fail closed, and let Critical keep the block.
+	unpushed, err := hasUnpushedCommits(dir, branch)
+	if err != nil {
+		result.HasUnpushedCommits = true
+		result.VerificationFailures = append(result.VerificationFailures,
+			fmt.Sprintf("could not verify whether %s is fully pushed: %v", branch, err))
+		return
+	}
+	result.HasUnpushedCommits = unpushed
 }
 
 // readRecentCommitMessages returns the last 50 commit subject lines.

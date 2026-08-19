@@ -569,3 +569,99 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
 	}
 }
+
+// newSandboxBranchRepo builds a one-commit repo for the sandbox branch guard
+// tests.
+func newSandboxBranchRepo(t *testing.T) string {
+	t.Helper()
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	return repoDir
+}
+
+// stubPreserveBranch drives the shared branch-preservation oracle so these
+// tests can exercise the guard without a gh binary or a remote.
+func stubPreserveBranch(t *testing.T, fn func(repoPath, branch string) (bool, string)) {
+	t.Helper()
+	original := preserveBranch
+	preserveBranch = fn
+	t.Cleanup(func() { preserveBranch = original })
+}
+
+// TestCleanupAfterArchive_SandboxBranchWithOpenPRSurvives is the branch-leak
+// regression for the conventional sandbox path. The agm/<sessionID> branch
+// used to be force-deleted unconditionally at step 3b, outside the guard that
+// covered the session branch, so the common sandbox session had its open-PR
+// ref destroyed on every archive.
+func TestCleanupAfterArchive_SandboxBranchWithOpenPRSurvives(t *testing.T) {
+	repoDir := newSandboxBranchRepo(t)
+	sessionID := "sess-open-pr"
+	sandboxBranch := "agm/" + sessionID
+	runGit(t, repoDir, "branch", sandboxBranch)
+
+	stubPreserveBranch(t, func(_, branch string) (bool, string) {
+		if branch == sandboxBranch {
+			return true, "open PR #42"
+		}
+		return false, ""
+	})
+
+	result := cleanupAfterArchive(sessionID, "session", "", repoDir, "", "", false, false, nil)
+
+	if result.SandboxBranchDeleted {
+		t.Fatal("sandbox branch with an open PR was deleted")
+	}
+	if !result.SandboxBranchKept {
+		t.Error("expected SandboxBranchKept to record the preservation")
+	}
+	if !branchExists(repoDir, sandboxBranch) {
+		t.Fatalf("sandbox branch %s no longer exists after cleanup", sandboxBranch)
+	}
+}
+
+// TestCleanupAfterArchive_SandboxBranchWithUnpushedCommitsSurvives covers the
+// other half: commits that exist on no remote are unrecoverable once the ref
+// is gone, whether or not a PR was ever opened.
+func TestCleanupAfterArchive_SandboxBranchWithUnpushedCommitsSurvives(t *testing.T) {
+	repoDir := newSandboxBranchRepo(t)
+	sessionID := "sess-unpushed"
+	sandboxBranch := "agm/" + sessionID
+	runGit(t, repoDir, "branch", sandboxBranch)
+
+	stubPreserveBranch(t, func(_, branch string) (bool, string) {
+		if branch == sandboxBranch {
+			return true, "carries commits that exist on no remote"
+		}
+		return false, ""
+	})
+
+	result := cleanupAfterArchive(sessionID, "session", "", repoDir, "", "", false, false, nil)
+
+	if result.SandboxBranchDeleted {
+		t.Fatal("sandbox branch carrying unpushed commits was deleted")
+	}
+	if !branchExists(repoDir, sandboxBranch) {
+		t.Fatalf("sandbox branch %s no longer exists after cleanup", sandboxBranch)
+	}
+}
+
+// TestCleanupAfterArchive_SandboxBranchStillReapableWhenSafe proves the guard
+// did not simply disable sandbox branch cleanup.
+func TestCleanupAfterArchive_SandboxBranchStillReapableWhenSafe(t *testing.T) {
+	repoDir := newSandboxBranchRepo(t)
+	sessionID := "sess-landed"
+	sandboxBranch := "agm/" + sessionID
+	runGit(t, repoDir, "branch", sandboxBranch)
+
+	stubPreserveBranch(t, func(string, string) (bool, string) { return false, "" })
+
+	result := cleanupAfterArchive(sessionID, "session", "", repoDir, "", "", false, false, nil)
+
+	if !result.SandboxBranchDeleted {
+		t.Fatal("a landed, fully pushed sandbox branch should still be reclaimed")
+	}
+	if branchExists(repoDir, sandboxBranch) {
+		t.Errorf("sandbox branch %s still exists after cleanup", sandboxBranch)
+	}
+}

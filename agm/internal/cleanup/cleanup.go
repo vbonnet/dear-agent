@@ -31,6 +31,11 @@ type WorktreeStore interface {
 type GitOps interface {
 	RemoveWorktree(repoPath, worktreePath string, force bool) error
 	DeleteBranch(repoPath, branchName string, force bool) error
+	// PreserveBranch reports whether a branch must survive cleanup, and
+	// why. Deleting a branch here is unrecoverable, so this gate sits in
+	// the interface rather than inside DeleteBranch: a caller that swaps in
+	// its own GitOps must make the preservation decision explicitly.
+	PreserveBranch(repoPath, branchName string) (preserve bool, reason string)
 }
 
 // RealGitOps implements GitOps using real git commands.
@@ -46,10 +51,22 @@ func (RealGitOps) DeleteBranch(repoPath, branchName string, force bool) error {
 	return gitpkg.DeleteBranch(repoPath, branchName, force)
 }
 
+// PreserveBranch defers to the shared branch-preservation oracle, so tracked
+// cleanup, archive cleanup, and the worktree sweep all answer this question
+// the same way.
+func (RealGitOps) PreserveBranch(repoPath, branchName string) (bool, string) {
+	v := gitpkg.PreserveLocalBranch(repoPath, branchName)
+	return v.Preserve, v.Reason
+}
+
 // Result holds the outcome of a session cleanup operation.
 type Result struct {
-	WorktreesRemoved     int      `json:"worktrees_removed"`
-	BranchesDeleted      int      `json:"branches_deleted"`
+	WorktreesRemoved int `json:"worktrees_removed"`
+	BranchesDeleted  int `json:"branches_deleted"`
+	// BranchesPreserved names each branch cleanup declined to delete, with
+	// the reason, so a preserved branch is visible rather than merely absent
+	// from the deleted count.
+	BranchesPreserved    []string `json:"branches_preserved,omitempty"`
 	TmpFilesRemoved      int      `json:"tmp_files_removed"`
 	InterruptFlagCleared bool     `json:"interrupt_flag_cleared"`
 	Errors               []string `json:"errors,omitempty"`
@@ -116,9 +133,20 @@ func SessionResources(ctx context.Context, sessionName string, store WorktreeSto
 		}
 	}
 
-	// 2. Delete only branches positively attributed by removed worktree records.
+	// 2. Delete only branches positively attributed by removed worktree
+	// records, and only when nothing worth keeping lives on them. Attribution
+	// alone is not authorization: the archive path can decide to preserve a
+	// branch with an open PR and then reach this function, which used to
+	// force-delete the very ref the caller had just reported as kept.
 	for repoPath, branches := range branchesByRepo {
 		for branch := range branches {
+			if preserve, reason := git.PreserveBranch(repoPath, branch); preserve {
+				logger.Info("Preserving branch during session cleanup",
+					"branch", branch, "repo", repoPath, "reason", reason)
+				result.BranchesPreserved = append(result.BranchesPreserved,
+					fmt.Sprintf("%s (%s)", branch, reason))
+				continue
+			}
 			if err := git.DeleteBranch(repoPath, branch, true); err != nil {
 				// Branch may not exist or already be deleted — this is expected.
 				logger.Debug("Could not delete branch", "branch", branch, "repo", repoPath, "error", err)

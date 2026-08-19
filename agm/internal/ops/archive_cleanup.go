@@ -42,16 +42,37 @@ type CleanupResult struct {
 	// it via the (often unread) SandboxRemoved count — a silently-failed
 	// sandbox reap otherwise under-reports and leaks disk.
 	SandboxRemovalFailed bool `json:"sandbox_removal_failed,omitempty"`
-	BranchDeleted        bool `json:"branch_deleted"`
+	// SandboxRemovalReason carries the underlying refusal (live process,
+	// remaining mount, filesystem error) so the caller can print something
+	// actionable instead of pointing at a log that only holds generic text.
+	SandboxRemovalReason string `json:"sandbox_removal_reason,omitempty"`
+	BranchDeleted        bool   `json:"branch_deleted"`
 	// BranchKeptOpenPR is true when the session branch was NOT force-deleted
 	// because it has a confirmed open PR — the branch is in-flight work, not
 	// abandoned, so deleting the local ref (while the remote/PR head
 	// survives) would be needlessly destructive.
-	BranchKeptOpenPR     bool `json:"branch_kept_open_pr,omitempty"`
-	SandboxBranchDeleted bool `json:"sandbox_branch_deleted"`
+	BranchKeptOpenPR bool `json:"branch_kept_open_pr,omitempty"`
+	// BranchKeptReason records why a branch was preserved when the reason is
+	// something other than a plain open PR, such as commits that exist on no
+	// remote. Empty when nothing was preserved.
+	BranchKeptReason     string `json:"branch_kept_reason,omitempty"`
+	SandboxBranchDeleted bool   `json:"sandbox_branch_deleted"`
+	// SandboxBranchKept is true when the agm/<sessionID> branch survived
+	// because it carries an open PR or unpushed commits. This branch used to
+	// be deleted unconditionally, outside the guard that covered the session
+	// branch.
+	SandboxBranchKept bool `json:"sandbox_branch_kept,omitempty"`
 }
 
-type sandboxCleanupFunc func(sessionID, mergedPath string) (removed bool, existed bool)
+// preserveBranch is the shared branch-preservation oracle, indirected through
+// a package variable so tests can drive the classification without a gh
+// binary or a remote.
+var preserveBranch = func(repoPath, branch string) (bool, string) {
+	v := gitpkg.PreserveLocalBranch(repoPath, branch)
+	return v.Preserve, v.Reason
+}
+
+type sandboxCleanupFunc func(sessionID, mergedPath string) (removed bool, existed bool, reason string)
 
 // CleanupAfterArchive performs best-effort resource cleanup after a session
 // has been archived. It removes the git worktree, prunes orphaned worktrees,
@@ -188,8 +209,22 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	// ref is needlessly destructive (the retro's "resolved := merged |
 	// has-open-PR | explicitly-abandoned" rule applied to cleanup, not just
 	// the archive gate).
+	//
+	// hasOpenPR is the caller's verdict, taken from the pre-archive
+	// verification. It is not the only reason to keep a branch: the shared
+	// oracle also preserves a branch whose commits exist on no remote, and
+	// fails closed when the PR state cannot be established. Both must hold
+	// for a deletion to proceed.
+	keepBranch, keepReason := false, ""
+	if branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe {
+		if hasOpenPR {
+			keepBranch, keepReason = true, "open PR"
+		} else if preserve, reason := preserveBranch(cleanupRepoPath, branchName); preserve {
+			keepBranch, keepReason = true, reason
+		}
+	}
 	switch {
-	case branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe && !hasOpenPR:
+	case branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe && !keepBranch:
 		err := forceDeleteBranch(cleanupRepoPath, branchName)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
@@ -205,17 +240,19 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			slog.Debug("Branch not deleted (may not exist)",
 				"branch", branchName, "error", err)
 		}
-	case branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe && hasOpenPR:
+	case branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe && keepBranch:
 		result.BranchKeptOpenPR = true
+		result.BranchKeptReason = keepReason
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
 			Action:      "keep_branch_open_pr",
 			Target:      branchName,
 			Success:     true,
+			Error:       keepReason,
 		})
-		slog.Info("Preserving local branch with an open PR during archive cleanup",
-			"branch", branchName)
+		slog.Info("Preserving local branch during archive cleanup",
+			"branch", branchName, "reason", keepReason)
 	case branchName != "" && cleanupRepoPath != "":
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
@@ -227,42 +264,70 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	}
 
 	// 3b. Delete the agm/<sessionID> sandbox branch if it exists.
-	if sessionID != "" && cleanupRepoPath != "" {
+	//
+	// This is the common sandbox-session path, and it used to bypass the
+	// branch guard entirely: hasOpenPR was resolved for the session branch,
+	// so a sandbox session on the conventional agm/<sessionID> branch had its
+	// open-PR ref force-deleted regardless. Ask the oracle about this exact
+	// branch instead.
+	if sessionID != "" && cleanupRepoPath != "" && branchExists(cleanupRepoPath, "agm/"+sessionID) {
 		sandboxBranch := "agm/" + sessionID
-		err := forceDeleteBranch(cleanupRepoPath, sandboxBranch)
-		logAction(logger, CleanupAction{
-			SessionID:   sessionID,
-			SessionName: sessionName,
-			Action:      "delete_sandbox_branch",
-			Target:      sandboxBranch,
-			Success:     err == nil,
-			Error:       errStr(err),
-		})
-		if err == nil {
-			result.SandboxBranchDeleted = true
+		if preserve, reason := preserveBranch(cleanupRepoPath, sandboxBranch); preserve {
+			result.SandboxBranchKept = true
+			logAction(logger, CleanupAction{
+				SessionID:   sessionID,
+				SessionName: sessionName,
+				Action:      "keep_sandbox_branch",
+				Target:      sandboxBranch,
+				Success:     true,
+				Error:       reason,
+			})
+			slog.Info("Preserving sandbox branch during archive cleanup",
+				"branch", sandboxBranch, "reason", reason)
 		} else {
-			slog.Debug("Sandbox branch not deleted (may not exist)",
-				"branch", sandboxBranch, "error", err)
+			err := forceDeleteBranch(cleanupRepoPath, sandboxBranch)
+			logAction(logger, CleanupAction{
+				SessionID:   sessionID,
+				SessionName: sessionName,
+				Action:      "delete_sandbox_branch",
+				Target:      sandboxBranch,
+				Success:     err == nil,
+				Error:       errStr(err),
+			})
+			if err == nil {
+				result.SandboxBranchDeleted = true
+			} else {
+				slog.Debug("Sandbox branch not deleted (may not exist)",
+					"branch", sandboxBranch, "error", err)
+			}
 		}
 	}
 
 	// 4. Remove the sandbox directory (unless --keep-sandbox).
 	if sandboxPath != "" && !keepSandbox {
 		var removed, existed bool
+		var reason string
 		if cleanSandbox != nil {
-			removed, existed = cleanSandbox(sessionID, sandboxPath)
+			removed, existed, reason = cleanSandbox(sessionID, sandboxPath)
 		}
 		failed := existed && !removed
+		// Record the underlying refusal, not a generic sentence. The archive
+		// command points the operator at this log file for the detail, so a
+		// placeholder here leaves them with nothing to diagnose.
+		if failed && reason == "" {
+			reason = "sandbox existed but removal failed for an unreported reason"
+		}
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
 			Action:      "remove_sandbox",
 			Target:      sandboxPath,
 			Success:     removed,
-			Error:       boolErrStr(failed, "sandbox existed but removal failed — periodic sandbox gc will retry"),
+			Error:       boolErrStr(failed, reason),
 		})
 		result.SandboxRemoved = removed
 		result.SandboxRemovalFailed = failed
+		result.SandboxRemovalReason = reason
 	} else if keepSandbox && sandboxPath != "" {
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
@@ -336,6 +401,14 @@ func pruneWorktrees(repoPath string) error {
 		return fmt.Errorf("git worktree prune: %w\n%s", err, string(output))
 	}
 	return nil
+}
+
+// branchExists reports whether a local branch is present. The sandbox-branch
+// step asks first so a session that never had one is neither reported as
+// deleted nor as preserved.
+func branchExists(repoPath, branch string) bool {
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	return cmd.Run() == nil
 }
 
 // forceDeleteBranch force-deletes a local branch using `git branch -D`.

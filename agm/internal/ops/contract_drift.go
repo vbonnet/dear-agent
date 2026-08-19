@@ -26,7 +26,7 @@ const (
 // DriftFinding represents a single contract drift detection result.
 type DriftFinding struct {
 	SPECFile string        `json:"spec_file"`
-	Section  string        `json:"section"`  // "SLO" or "Invariant"
+	Section  string        `json:"section"` // "SLO" or "Invariant"
 	Metric   string        `json:"metric"`
 	Expected string        `json:"expected"` // value from SPEC
 	Actual   string        `json:"actual"`   // value from contracts
@@ -66,10 +66,10 @@ type specSLORow struct {
 // specSection maps a SPEC filename to its contract section name.
 var specSectionMap = map[string]string{
 	"SPEC-session-lifecycle.md": "session_lifecycle",
-	"SPEC-trust-protocol.md":   "trust_protocol",
-	"SPEC-scan-loop.md":        "scan_loop",
-	"SPEC-stall-detection.md":  "stall_detection",
-	"SPEC-audit-trail.md":      "audit_trail",
+	"SPEC-trust-protocol.md":    "trust_protocol",
+	"SPEC-scan-loop.md":         "scan_loop",
+	"SPEC-stall-detection.md":   "stall_detection",
+	"SPEC-audit-trail.md":       "audit_trail",
 }
 
 // sloFieldMap maps (section, normalised metric keyword) → contract field getter.
@@ -78,11 +78,15 @@ type contractGetter func(c *contracts.SLOContracts) string
 
 var sloFieldMap = map[string]map[string]contractGetter{
 	"session_lifecycle": {
-		"resume":       func(c *contracts.SLOContracts) string { return fmtDur(c.SessionLifecycle.ResumeReadyTimeout.Duration) },
-		"bloat_size":   func(c *contracts.SLOContracts) string { return fmtBytes(c.SessionLifecycle.BloatSizeThresholdBytes) },
-		"bloat_prog":   func(c *contracts.SLOContracts) string { return strconv.Itoa(c.SessionLifecycle.BloatProgressEntryThreshold) },
-		"scan_limit":   func(c *contracts.SLOContracts) string { return strconv.Itoa(c.SessionLifecycle.SessionScanLimit) },
-		"kill_grace":   func(c *contracts.SLOContracts) string { return fmtDur(c.SessionLifecycle.ProcessKillGracePeriod.Duration) },
+		"resume":     func(c *contracts.SLOContracts) string { return fmtDur(c.SessionLifecycle.ResumeReadyTimeout.Duration) },
+		"bloat_size": func(c *contracts.SLOContracts) string { return fmtBytes(c.SessionLifecycle.BloatSizeThresholdBytes) },
+		"bloat_prog": func(c *contracts.SLOContracts) string {
+			return strconv.Itoa(c.SessionLifecycle.BloatProgressEntryThreshold)
+		},
+		"scan_limit": func(c *contracts.SLOContracts) string { return strconv.Itoa(c.SessionLifecycle.SessionScanLimit) },
+		"kill_grace": func(c *contracts.SLOContracts) string {
+			return fmtDur(c.SessionLifecycle.ProcessKillGracePeriod.Duration)
+		},
 	},
 	"trust_protocol": {
 		"base_score": func(c *contracts.SLOContracts) string { return strconv.Itoa(c.TrustProtocol.BaseScore) },
@@ -91,26 +95,28 @@ var sloFieldMap = map[string]map[string]contractGetter{
 		"delta":      func(c *contracts.SLOContracts) string { return fmtDeltaRange(c.TrustProtocol.EventDeltas) },
 	},
 	"scan_loop": {
-		"scan_interval":    func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.DefaultScanInterval.Duration) },
-		"stuck":            func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.StuckTimeout.Duration) },
-		"scan_gap":         func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.ScanGapTimeout.Duration) },
-		"commit_lookback":  func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.WorkerCommitLookback.Duration) },
-		"metrics_window":   func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.MetricsWindow.Duration) },
-		"capture_depth":    func(c *contracts.SLOContracts) string { return strconv.Itoa(c.ScanLoop.TmuxCaptureDepth) },
-		"list_limit":       func(c *contracts.SLOContracts) string { return strconv.Itoa(c.ScanLoop.SessionListLimit) },
+		"scan_interval":   func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.DefaultScanInterval.Duration) },
+		"stuck":           func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.StuckTimeout.Duration) },
+		"scan_gap":        func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.ScanGapTimeout.Duration) },
+		"commit_lookback": func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.WorkerCommitLookback.Duration) },
+		"metrics_window":  func(c *contracts.SLOContracts) string { return fmtDur(c.ScanLoop.MetricsWindow.Duration) },
+		"capture_depth":   func(c *contracts.SLOContracts) string { return strconv.Itoa(c.ScanLoop.TmuxCaptureDepth) },
+		"list_limit":      func(c *contracts.SLOContracts) string { return strconv.Itoa(c.ScanLoop.SessionListLimit) },
 	},
 	"stall_detection": {
-		"permission":       func(c *contracts.SLOContracts) string { return fmtDur(c.StallDetection.PermissionTimeout.Duration) },
-		"no_commit":        func(c *contracts.SLOContracts) string { return fmtDur(c.StallDetection.NoCommitTimeout.Duration) },
-		"error_repeat":     func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.ErrorRepeatThreshold) },
-		"capture_depth":    func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.TmuxCaptureDepth) },
-		"error_msg_len":    func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.ErrorMessageMaxLength) },
-		"scan_limit":       func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.SessionScanLimit) },
+		"permission":    func(c *contracts.SLOContracts) string { return fmtDur(c.StallDetection.PermissionTimeout.Duration) },
+		"no_commit":     func(c *contracts.SLOContracts) string { return fmtDur(c.StallDetection.NoCommitTimeout.Duration) },
+		"error_repeat":  func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.ErrorRepeatThreshold) },
+		"capture_depth": func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.TmuxCaptureDepth) },
+		"error_msg_len": func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.ErrorMessageMaxLength) },
+		"scan_limit":    func(c *contracts.SLOContracts) string { return strconv.Itoa(c.StallDetection.SessionScanLimit) },
 	},
 	"audit_trail": {
 		"line_buffer": func(c *contracts.SLOContracts) string { return fmtBytes(int64(c.AuditTrail.MaxLineBufferBytes)) },
-		"dir_perm":    func(c *contracts.SLOContracts) string { return fmt.Sprintf("%04o", c.AuditTrail.LogDirectoryPermissions) },
-		"file_perm":   func(c *contracts.SLOContracts) string { return fmt.Sprintf("%04o", c.AuditTrail.LogFilePermissions) },
+		"dir_perm": func(c *contracts.SLOContracts) string {
+			return fmt.Sprintf("%04o", c.AuditTrail.LogDirectoryPermissions)
+		},
+		"file_perm": func(c *contracts.SLOContracts) string { return fmt.Sprintf("%04o", c.AuditTrail.LogFilePermissions) },
 	},
 }
 

@@ -45,10 +45,10 @@ func TestTrustPenalty(t *testing.T) {
 		{100, false},
 		{60, false},
 		{30, false},
-		{29, true},  // probation
-		{20, true},  // probation
-		{19, true},  // blocked
-		{0, true},   // blocked
+		{29, true}, // probation
+		{20, true}, // probation
+		{19, true}, // blocked
+		{0, true},  // blocked
 	}
 
 	for _, tt := range tests {

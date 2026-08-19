@@ -71,13 +71,13 @@ type GCSessionEntry struct {
 
 // GCResult is the output of GC.
 type GCResult struct {
-	Operation string            `json:"operation"`
-	DryRun    bool              `json:"dry_run,omitempty"`
-	Scanned   int               `json:"scanned"`
-	Archived  int               `json:"archived"`
-	Skipped   int               `json:"skipped"`
-	Errors    int               `json:"errors"`
-	Sessions  []GCSessionEntry  `json:"sessions,omitempty"`
+	Operation string           `json:"operation"`
+	DryRun    bool             `json:"dry_run,omitempty"`
+	Scanned   int              `json:"scanned"`
+	Archived  int              `json:"archived"`
+	Skipped   int              `json:"skipped"`
+	Errors    int              `json:"errors"`
+	Sessions  []GCSessionEntry `json:"sessions,omitempty"`
 }
 
 // GC performs safe garbage collection of sessions.

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,6 +217,16 @@ func stubOpenPR(t *testing.T, fn func(repoPath, branch string) (int, bool)) {
 	t.Cleanup(func() { openPRForBranch = original })
 }
 
+// stubUnpushed drives the pushed-state probe. Test repositories have no
+// remote, so the real probe reports every commit as unpushed; a test that
+// wants to exercise the open-PR downgrade must say the branch is pushed.
+func stubUnpushed(t *testing.T, fn func(worktreePath, branch string) (bool, error)) {
+	t.Helper()
+	original := hasUnpushedCommits
+	hasUnpushedCommits = fn
+	t.Cleanup(func() { hasUnpushedCommits = original })
+}
+
 func TestVerifyCompletion_UnmergedBranchBlocks(t *testing.T) {
 	stubOpenPR(t, func(string, string) (int, bool) { return 0, false })
 
@@ -272,6 +283,8 @@ func TestVerifyCompletion_UnmergedWithOpenPRNotCritical(t *testing.T) {
 		}
 		return 0, false
 	})
+	// Fully pushed: the PR demonstrably covers every local commit.
+	stubUnpushed(t, func(string, string) (bool, error) { return false, nil })
 
 	dir := setupTestRepo(t)
 	commitFile(t, dir, "main.go", "package main\n", "Initial commit")
@@ -341,21 +354,108 @@ func TestVerifyCompletion_FailClosedOnUnresolvableBase(t *testing.T) {
 
 	result := VerifyCompletion(dir)
 
-	if len(result.UnmergedCommits) == 0 {
-		t.Fatal("expected a fail-closed synthetic UnmergedCommits entry when the base ref can't be resolved")
+	if len(result.VerificationFailures) == 0 {
+		t.Fatal("expected a VerificationFailures entry when the base ref cannot be resolved")
+	}
+	if len(result.UnmergedCommits) != 0 {
+		t.Errorf("a probe failure must not be reported as a commit count, got %v", result.UnmergedCommits)
 	}
 	if !result.Critical() {
 		t.Error("expected Critical()=true when the unmerged check fails closed")
 	}
+	// The distinction is the point: the operator must be told that base
+	// resolution failed and that fetching is the recovery, not sent looking
+	// for a commit that does not exist.
 	errs := result.CriticalErrors()
-	found := false
-	for _, e := range errs {
-		if e == "branch has 1 unmerged commit(s)" {
-			found = true
+	joined := strings.Join(errs, " | ")
+	if !strings.Contains(joined, "could not verify branch state") {
+		t.Errorf("expected the failure to be labelled as a verification failure, got %v", errs)
+	}
+	if !strings.Contains(joined, "base branch is unresolvable") {
+		t.Errorf("expected the failure to name base resolution as the cause, got %v", errs)
+	}
+	if strings.Contains(joined, "unmerged commit(s)") {
+		t.Errorf("a base-resolution failure must not masquerade as a commit count, got %v", errs)
+	}
+}
+
+// TestVerifyCompletion_OpenPRDoesNotCoverUnpushedCommits is the branch-leak
+// regression: an open PR is evidence about the commits it contains, not about
+// commits made after it was opened. Archive cleanup force-removes the
+// worktree once this gate passes, so unpushed work must keep it closed.
+func TestVerifyCompletion_OpenPRDoesNotCoverUnpushedCommits(t *testing.T) {
+	stubOpenPR(t, func(_, branch string) (int, bool) {
+		if branch == "feature" {
+			return 7, true
+		}
+		return 0, false
+	})
+	stubUnpushed(t, func(string, string) (bool, error) { return true, nil })
+
+	dir := setupTestRepo(t)
+	commitFile(t, dir, "main.go", "package main\n", "Initial commit")
+	run := func(args ...string) {
+		t.Helper()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
-	if !found {
-		t.Errorf("expected the fail-closed synthetic entry to surface as a critical error, got %v", errs)
+	run("branch", "-M", "main")
+	run("checkout", "-b", "feature")
+	commitFile(t, dir, "feature.go", "package main\n", "Feature work")
+	commitFile(t, dir, "feature_test.go", "package main\n", "Feature tests")
+
+	result := VerifyCompletion(dir)
+
+	if !result.HasOpenPR {
+		t.Fatal("expected HasOpenPR=true")
+	}
+	if !result.HasUnpushedCommits {
+		t.Fatal("expected HasUnpushedCommits=true")
+	}
+	if !result.Critical() {
+		t.Fatal("expected Critical()=true: an open PR does not cover commits that exist on no remote")
+	}
+	joined := strings.Join(result.CriticalErrors(), " | ")
+	if !strings.Contains(joined, "exist on no remote") {
+		t.Errorf("expected the error to name unpushed commits as the reason, got %q", joined)
+	}
+}
+
+// TestVerifyCompletion_UnpushedProbeFailureFailsClosed proves a broken
+// pushed-state probe keeps the block rather than granting the downgrade.
+func TestVerifyCompletion_UnpushedProbeFailureFailsClosed(t *testing.T) {
+	stubOpenPR(t, func(_, branch string) (int, bool) {
+		if branch == "feature" {
+			return 9, true
+		}
+		return 0, false
+	})
+	stubUnpushed(t, func(string, string) (bool, error) {
+		return false, errors.New("rev-list exploded")
+	})
+
+	dir := setupTestRepo(t)
+	commitFile(t, dir, "main.go", "package main\n", "Initial commit")
+	run := func(args ...string) {
+		t.Helper()
+		out, err := gittest.Command(t, dir, args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("branch", "-M", "main")
+	run("checkout", "-b", "feature")
+	commitFile(t, dir, "feature.go", "package main\n", "Feature work")
+
+	result := VerifyCompletion(dir)
+
+	if !result.HasUnpushedCommits {
+		t.Error("a failed pushed-state probe must be treated as unpushed work")
+	}
+	if !result.Critical() {
+		t.Error("expected Critical()=true when the pushed-state probe fails")
 	}
 }
 

@@ -220,7 +220,7 @@ func TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox(t *testing.T) {
 		},
 		Remove: os.RemoveAll,
 	}
-	removed, existed := cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker)
+	removed, existed, _ := cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker)
 	if !removed {
 		t.Fatal("cleanupSandboxDirWithChecker() removed=false, want owned sandbox removed")
 	}
@@ -262,7 +262,7 @@ func TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath(t *testing.T) {
 			return os.RemoveAll(path)
 		},
 	}
-	gotRemoved, gotExisted := cleanupSandboxDirWithChecker(sessionID, unownedPath, base, checker)
+	gotRemoved, gotExisted, _ := cleanupSandboxDirWithChecker(sessionID, unownedPath, base, checker)
 	if gotRemoved {
 		t.Fatal("cleanupSandboxDirWithChecker() removed=true for unattributed merged path")
 	}
@@ -301,7 +301,7 @@ func TestCleanupSandboxDirWithChecker_AbsentSandboxIsNotAFailure(t *testing.T) {
 		Unmount:       func(string) error { return nil },
 		Remove:        os.RemoveAll,
 	}
-	removed, existed := cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker)
+	removed, existed, _ := cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker)
 	if removed {
 		t.Fatal("cleanupSandboxDirWithChecker() removed=true for a sandbox that was never created")
 	}
@@ -403,7 +403,7 @@ func TestArchiveSession_ReloadedSandboxOwnershipControlsCleanup(t *testing.T) {
 				ExternalSessionArchiver: testExternalArchiver(func(context.Context, *manifest.Manifest) []ExternalArchiveOutcome {
 					return []ExternalArchiveOutcome{{Provider: "test", Status: ExternalArchiveSkipped}}
 				}),
-				archiveSandboxCleaner: func(id, merged string) (bool, bool) {
+				archiveSandboxCleaner: func(id, merged string) (bool, bool, string) {
 					cleanupCalls++
 					return cleanupSandboxDirWithChecker(id, merged, base, checker)
 				},
