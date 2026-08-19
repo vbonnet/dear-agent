@@ -38,13 +38,9 @@ import (
 	"time"
 )
 
-// Both subprocesses below are bounded. A jq program that reads stdin forever,
-// or a git call that blocks on a credential prompt, would hang the whole
-// suite rather than fail one case.
-const (
-	jqTimeout  = 30 * time.Second
-	gitTimeout = 10 * time.Second
-)
+// jqTimeout bounds each case. A jq program that reads stdin forever would hang
+// the whole suite rather than fail one case.
+const jqTimeout = 30 * time.Second
 
 // caseSpec is the contents of a case.json file.
 type caseSpec struct {
@@ -253,16 +249,29 @@ func loadSpec(t *testing.T, root, dir string) caseSpec {
 	return spec
 }
 
+// repoRoot walks up from this package until it finds the module root.
+//
+// Deliberately not `git rev-parse --show-toplevel`: internal/gittest's guard
+// requires test code to route Git through it so a host hook cannot fire, and
+// the right answer to that is not an exemption but not needing Git at all.
+// Walking to go.mod is hermetic, needs no subprocess, and gives the same
+// answer in a worktree, a tarball, or a container.
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
+	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("resolve repository root: %v", err)
+		t.Fatalf("resolve working directory: %v", err)
 	}
-	return strings.TrimSpace(string(out))
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no go.mod found above %s", dir)
+		}
+		dir = parent
+	}
 }
 
 func caseName(t *testing.T, root, dir string) string {

@@ -26,7 +26,7 @@ visible.
 
 **JQF-07** Where a jq source is a library of definitions with no final expression, the gate shall exercise it through an inline filter that includes it, and shall still count it as covered.
 
-**JQF-08** When a jq program does not terminate, the gate shall abort that case on a deadline rather than block the suite.
+**JQF-08** When a jq program does not terminate, the gate shall abort that case on a deadline rather than block the suite, and the gate shall resolve the repository root without invoking Git.
 
 **JQF-09** When jq is not installed, the gate shall skip rather than fail, and continuous integration shall assert jq is present so the skip cannot hide a regression.
 
