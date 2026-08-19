@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -91,28 +92,63 @@ var permissionPromptPattern = regexp.MustCompile(
 
 // --- Human Typing Guard ---
 
-// CheckHumanTyping detects unsent text in the Claude prompt line.
-// Text after the ❯ prompt without an AGM sender header indicates a human is typing.
-// Uses a single ANSI capture to both detect content and rule out Claude Code
-// ghost/placeholder text (dim attribute \x1b[2m) in one tmux round-trip.
+// CheckHumanTyping reports whether a human is actively typing at the Claude
+// prompt line. It uses a single ANSI capture to both read the composer text and
+// classify the pane's dim/grey ghost-text state in one tmux round-trip.
+//
+// The detection is an ALLOWLIST of known-safe pane states, not a denylist of
+// human-typing patterns (ce-py3x; retro 2026-06-17-vroom-overnight-human-typing-
+// guard; policy docs/policies/harness-hygiene "invert to allowlist known-safe").
+// The historical denylist presumed any text after ❯ was human typing unless it
+// matched a hand-added exemption, so every novel Claude Code UI state read as
+// typing — one such untracked state blocked the Overseer overnight (a crash-
+// prevention control acting as total-work-prevention). The ghost/dim-and-grey
+// state is one allowlist entry, handled here at the ANSI layer via
+// isGhostTextAfterPrompt; the remaining known-safe states and the flipped
+// default (unrecognized ⇒ not typing) live in detectHumanTyping.
 func CheckHumanTyping(sessionName, socketPath string) *Violation {
 	ansiContent, err := capturePaneWithEscape(sessionName, socketPath, 10)
 	if err != nil {
 		return nil // Can't capture = can't detect, allow through
 	}
-	v := detectHumanTyping(stripANSI(ansiContent))
-	if v == nil {
-		return nil
-	}
-	// The plain-text check found content: confirm it is not ghost text.
-	// Ghost text is dim-attributed (\x1b[2m) after ❯ in the ANSI capture.
+	// Ghost/dim/grey text after ❯ is a known-safe state (placeholder, not human
+	// input). Classify it from the ANSI capture before the plain-text pass so
+	// dim-styled content never reaches the human-input signature check.
 	if isGhostTextAfterPrompt(ansiContent) {
 		return nil
 	}
-	return v
+	return detectHumanTyping(stripANSI(ansiContent))
 }
 
 // detectHumanTyping is the pure-logic detection function (testable without tmux).
+//
+// It is an ALLOWLIST classifier: a violation is reported only when the composer
+// positively matches the human-input signature; every other pane state — known
+// or unknown — is treated as not typing. This inverts the previous denylist,
+// whose default was "assume typing" and which therefore misread each new UI
+// state as a human at the keyboard (ce-py3x). Known-safe states (return nil):
+//
+//  1. no ❯ prompt line present;
+//  2. empty / whitespace-only text after ❯;
+//  3. an AGM sender header ([From:/[from:]) after ❯ (automated message);
+//  4. a permission / navigation UI pattern after ❯ (permissionPromptPattern);
+//  5. text after ❯ that is composed entirely of recognized UI chrome runes
+//     (box-drawing, braille spinner glyphs, separators, navigation arrows) —
+//     the flipped default: only *positively identified* decoration is not
+//     human typing.
+//
+// Human-typing signature (fires): any text after ❯ that is none of the above.
+// Note this deliberately fires on symbol/emoji/punctuation-only drafts (e.g.
+// "👍", "&&", "???") that contain no letter or digit — an earlier version of
+// this check exempted any string without an alphanumeric rune, which silently
+// classified genuine symbol-only human input as UI chrome and suppressed the
+// advisory (codex review on ce-py3x). Only runes on the chrome allowlist are
+// exempt now, so unrecognized symbols and emoji are treated as typed input.
+//
+// Biasing toward "not typing" on ambiguity is safe: the guard is advisory and
+// the send path stashes the composer (Claude Code C-s auto-unstashes on the next
+// submit), so a missed detection is recoverable — a false positive that blocks
+// autonomous work is not.
 func detectHumanTyping(paneContent string) *Violation {
 	lines := strings.Split(paneContent, "\n")
 
@@ -127,23 +163,33 @@ func detectHumanTyping(paneContent string) *Violation {
 		// Extract text after the prompt character
 		after := strings.TrimSpace(line[idx+len("❯"):])
 		if after == "" {
-			return nil // Empty prompt, no one is typing
+			return nil // (2) empty prompt, no one is typing
 		}
 
-		// Check if it's an AGM sender header (automated message, not human)
+		// (3) AGM sender header (automated message, not human)
 		if strings.HasPrefix(after, "[From:") || strings.HasPrefix(after, "[from:") {
 			return nil
 		}
 
-		// Check if it's a permission prompt option (not human typing)
+		// (4) permission / navigation UI pattern (not human typing)
 		if permissionPromptPattern.MatchString(after) {
 			return nil
 		}
 
-		// Truncate evidence for display
+		// (5) flipped default: only exempt content positively identified as UI
+		// chrome (box-drawing, spinner glyphs, separators, navigation arrows).
+		// Anything else — including symbol/emoji-only drafts with no letter or
+		// digit — is treated as typed input rather than assumed to be chrome.
+		if isUIChromeOnly(after) {
+			return nil
+		}
+
+		// Truncate evidence for display, by rune so a multi-byte UTF-8
+		// character is never split (gemini review on ce-py3x: byte slicing
+		// here could produce malformed UTF-8 once non-ASCII input is allowed).
 		evidence := after
-		if len(evidence) > 50 {
-			evidence = evidence[:50] + "..."
+		if runes := []rune(evidence); len(runes) > 50 {
+			evidence = string(runes[:50]) + "..."
 		}
 
 		return &Violation{
@@ -154,7 +200,52 @@ func detectHumanTyping(paneContent string) *Violation {
 		}
 	}
 
-	return nil // No prompt found = not typing
+	return nil // (1) no prompt found = not typing
+}
+
+// isUIChromeRune reports whether r is a specific, known pane-decoration glyph:
+// box-drawing borders, block elements, braille spinner frames, navigation
+// arrows, and the small set of standalone punctuation used as separators or
+// trailing ellipses. This is a narrow, explicit allowlist rather than "any
+// non-letter/digit rune" — the latter also exempted genuine symbol/emoji-only
+// human input such as "👍", "&&", or "???", which a review found let a person's
+// draft go undetected because it had no letter or digit (codex on ce-py3x).
+func isUIChromeRune(r rune) bool {
+	if unicode.IsSpace(r) {
+		return true
+	}
+	switch {
+	case r >= '─' && r <= '╿': // box drawing
+		return true
+	case r >= '▀' && r <= '▟': // block elements
+		return true
+	case r >= '⠀' && r <= '⣿': // braille patterns (spinner glyphs)
+		return true
+	case r >= '←' && r <= '⇿': // arrows
+		return true
+	}
+	switch r {
+	case '»', '«', '❯', '⏵', '⏸', '⏹', '.', '-', '‐', '‑', '‒', '–', '—', '·', '•':
+		return true
+	}
+	return false
+}
+
+// isUIChromeOnly reports whether s is composed entirely of recognized UI
+// chrome runes (isUIChromeRune) and at least one non-whitespace rune. An
+// empty or whitespace-only string is not chrome — callers handle that case
+// separately (empty prompt = not typing, via the "" check above).
+func isUIChromeOnly(s string) bool {
+	sawNonSpace := false
+	for _, r := range s {
+		if !isUIChromeRune(r) {
+			return false
+		}
+		if !unicode.IsSpace(r) {
+			sawNonSpace = true
+		}
+	}
+	return sawNonSpace
 }
 
 // --- Session Uninitialized Guard ---
