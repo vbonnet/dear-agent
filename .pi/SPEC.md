@@ -5,8 +5,9 @@
 ## Overview
 
 The `.pi` directory is the repo-local configuration surface for Pi. Pi reads
-the root `AGENTS.md` directly; this directory adds native discovery for the AGM
-and Wayfinder skills without copying their living source files.
+the root `AGENTS.md` directly; this directory adds native discovery for the
+AGM, Wayfinder, and research-pipeline skills without copying their living
+source files.
 
 Project-local Pi resources are executable trust boundaries. AGM launches Pi
 with explicit project approval only after selecting the caller-provided working
@@ -17,7 +18,7 @@ directory so a project resource cannot replace the control-plane policy path.
 
 **PI-DIR-01** When Pi loads repository resources, the system shall use the root `AGENTS.md` as the shared instruction source rather than publishing a divergent Pi-only copy.
 
-**PI-DIR-02** When Pi loads skills, the system shall discover the living AGM and Wayfinder skill trees through `.pi/settings.json`.
+**PI-DIR-02** When Pi loads skills, the system shall discover the living AGM, Wayfinder, and research-pipeline skill trees through `.pi/settings.json`.
 
 **PI-DIR-03** When AGM launches Pi, the system shall keep its mandatory authorization extension in AGM-owned private storage and pass it with an explicit `--extension` argument.
 
@@ -30,5 +31,6 @@ directory so a project resource cannot replace the control-plane policy path.
 ## BDD Traceability
 
 - `agm/test/bdd/features/config_directory_parity.feature` validates Pi's active configuration-directory mapping.
-- `agm/test/bdd/features/wayfinder_parity.feature` validates Pi's Wayfinder discovery and execution surfaces.
+- `agm/test/bdd/features/wayfinder_parity.feature` and `agm/internal/wayfinderparity/coverage_test.go` validate Pi's configured Wayfinder and required skill roots.
+- `agm/internal/marketplaceparity/coverage_test.go` (`TestValidateCatalog`) inventories every exported skill, including research-pipeline, against Pi's configured roots.
 - `agm/test/bdd/features/permission_parity.feature` validates the separate managed authorization surface.

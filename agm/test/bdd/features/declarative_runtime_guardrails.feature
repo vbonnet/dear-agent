@@ -1,6 +1,10 @@
 # SPEC: .github/workflows/SPEC.md
 # RELATED-SPEC: agm/test/coverage/SPEC.md
 # RELATED-SPEC: .agents/skills/beads/agents/SPEC.md
+# RELATED-SPEC: .agents/skills/research-pipeline/agents/SPEC.md
+# RELATED-SPEC: .opencode/skills/research-pipeline/SPEC.md
+# RELATED-SPEC: research-pipeline/.claude-plugin/SPEC.md
+# RELATED-SPEC: research-pipeline/skills/research-pipeline/SPEC.md
 # RELATED-SPEC: .github/SPEC.md
 # RELATED-SPEC: .github/act/SPEC.md
 # RELATED-SPEC: .github/rulesets/SPEC.md
@@ -38,10 +42,12 @@ Feature: Declarative runtime guardrails
     Examples:
       | directory                                                                    |
       | .agents/skills/beads/agents                                                  |
+      | .agents/skills/research-pipeline/agents                                      |
       | .github                                                                      |
       | .github/act                                                                  |
       | .github/rulesets                                                             |
       | .github/workflows                                                            |
+      | .opencode/skills/research-pipeline                                           |
       | agm/.claude-plugin                                                           |
       | agm/.github/workflows                                                        |
       | agm/agm-plugin/.claude-plugin                                                |
@@ -62,6 +68,8 @@ Feature: Declarative runtime guardrails
       | pkg/codeintel/rules/go                                                       |
       | pkg/codeintel/rules/python                                                   |
       | pkg/codeintel/rules/typescript                                               |
+      | research-pipeline/.claude-plugin                                             |
+      | research-pipeline/skills/research-pipeline                                   |
       | wayfinder/.claude-plugin                                                     |
 
   Scenario Outline: Declarative contracts are invariant across active routes
