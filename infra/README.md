@@ -110,6 +110,9 @@ if [ ! -s repos.auto.tfvars ]; then
   : "${TF_VAR_archived_repos:?set archived inventory}"
 fi
 tofu init -backend-config=backend.hcl -migrate-state   # prompts y/n to copy state up
+# Subshell, so the cleanup trap fires when this block finishes rather
+# than when the interactive shell it was pasted into eventually exits.
+(
 umask 077
 plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/dear-agent-infra.XXXXXX")"
 plan_file="$plan_dir/infra.tfplan"
@@ -120,6 +123,7 @@ tofu show -no-color "$plan_file"                       # independent verifier at
 : "${ATTESTED_PLAN_SHA256:?independent exact-plan attestation required}"
 test "$(shasum -a 256 "$plan_file" | awk '{print $1}')" = "$ATTESTED_PLAN_SHA256"
 tofu apply "$plan_file"
+)
 ```
 
 If no local state exists (e.g. the previous apply ran in an ephemeral sandbox
@@ -142,6 +146,9 @@ fi
 tofu init -backend-config=backend.hcl                     # initializes the R2 backend
 chmod +x import.sh
 ./import.sh                                             # prove/import existing bindings
+# Subshell, so the cleanup trap fires when this block finishes rather
+# than when the interactive shell it was pasted into eventually exits.
+(
 umask 077
 plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/dear-agent-infra.XXXXXX")"
 plan_file="$plan_dir/infra.tfplan"
@@ -152,6 +159,7 @@ tofu show -no-color "$plan_file"                       # independent verifier at
 : "${ATTESTED_PLAN_SHA256:?independent exact-plan attestation required}"
 test "$(shasum -a 256 "$plan_file" | awk '{print $1}')" = "$ATTESTED_PLAN_SHA256"
 tofu apply "$plan_file"                                # applies the attested artifact
+)
 ```
 
 The importer fails closed when GitHub cannot list rulesets or when more than
@@ -174,6 +182,9 @@ if [ ! -s repos.auto.tfvars ]; then
   : "${TF_VAR_archived_repos:?set archived inventory}"
 fi
 tofu init -reconfigure -backend-config=backend.hcl
+# Subshell, so the cleanup trap fires when this block finishes rather
+# than when the interactive shell it was pasted into eventually exits.
+(
 umask 077
 plan_dir="$(mktemp -d "${TMPDIR:-/tmp}/dear-agent-infra.XXXXXX")"
 plan_file="$plan_dir/infra.tfplan"
@@ -184,6 +195,7 @@ tofu show -no-color "$plan_file"                       # independent verifier at
 : "${ATTESTED_PLAN_SHA256:?independent exact-plan attestation required}"
 test "$(shasum -a 256 "$plan_file" | awk '{print $1}')" = "$ATTESTED_PLAN_SHA256"
 tofu apply "$plan_file"                                # applies the attested artifact
+)
 ```
 
 Production reconciliation requires the complete gitignored `repos.auto.tfvars` (or both
