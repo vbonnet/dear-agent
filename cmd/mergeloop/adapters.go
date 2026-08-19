@@ -41,6 +41,10 @@ type ghPR struct {
 	} `json:"files"`
 }
 
+// ghChangedFilePageSize is the page size gh hard-codes for a pull request's
+// `files` connection. A response at exactly this size may be truncated.
+const ghChangedFilePageSize = 100
+
 func (g *ghLister) ListOpen(ctx context.Context, repo string, maxOpen int) ([]mergeloop.PR, error) {
 	args := []string{
 		"pr", "list", "--state", "open",
@@ -112,6 +116,10 @@ func toPR(r ghPR, required []mergeloop.Check) mergeloop.PR {
 	for _, f := range r.Files {
 		pr.ChangedFiles = append(pr.ChangedFiles, f.Path)
 	}
+	// gh generates `files(first: 100)` for this connection and never paginates
+	// it, so a full page means the list may be incomplete. Report that rather
+	// than letting classification treat a partial list as exhaustive.
+	pr.ChangedFilesTruncated = len(r.Files) >= ghChangedFilePageSize
 	return pr
 }
 
