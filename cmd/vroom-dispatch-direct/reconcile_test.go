@@ -416,7 +416,7 @@ func TestDispatchCandidates_RecordsLedgerOnSuccess(t *testing.T) {
 	ledger := &dispatchLedger{Beads: map[string]*ledgerEntry{}}
 	candidates := []bead{{ID: "ce-new", Title: "fresh work", Priority: 1}}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, ledger)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, false, &out, &errOut, ledger)
 
 	if got != 1 {
 		t.Fatalf("dispatched = %d, want 1", got)
@@ -436,7 +436,7 @@ func TestDispatchCandidates_DryRunDoesNotTouchLedger(t *testing.T) {
 	ledger := &dispatchLedger{Beads: map[string]*ledgerEntry{}}
 	candidates := []bead{{ID: "ce-new", Title: "fresh work", Priority: 1}}
 	var out, errOut bytes.Buffer
-	dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, ledger)
+	dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, true, &out, &errOut, ledger)
 
 	if len(ledger.Beads) != 0 {
 		t.Errorf("dry-run must not write ledger entries, got %+v", ledger.Beads)
@@ -454,7 +454,7 @@ func TestDispatchCandidates_NilLedgerIsSafe(t *testing.T) {
 
 	candidates := []bead{{ID: "ce-new", Title: "fresh work", Priority: 1}}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", 0, false, &out, &errOut, nil)
 	if got != 1 {
 		t.Fatalf("dispatched = %d, want 1", got)
 	}

@@ -28,26 +28,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/internal/vroomgate"
 	"github.com/vbonnet/dear-agent/internal/vroomprompt"
 )
-
-// humanGated lists beads that must never be auto-dispatched to a worker: they
-// require a human in the loop (credential rotation, backups, repointing live
-// skills, destructive ops) or are otherwise gated by operator decision. Kept in
-// sync with the orchestrator skill's skip list (ce-5z0o).
-var humanGated = map[string]bool{
-	"ce-pqha":    true,
-	"ce-8qi":     true,
-	"ce-kgd":     true,
-	"ce-9uo":     true,
-	"ce-xulg.14": true,
-	"ce-126c":    true,
-	"ce-cd14":    true,
-	"ce-cd14.2":  true,
-	"ce-cd14.1":  true,
-	"ce-rrry":    true,
-	"ce-clm6":    true,
-}
 
 // bead mirrors the fields of a `bd ready --json` array element that we consume.
 type bead struct {
@@ -222,7 +205,7 @@ func selectCandidates(beads []bead, existing map[string]bool, prs []pullRequest,
 		if b.ID == "" {
 			continue
 		}
-		if humanGated[b.ID] {
+		if vroomgate.IsHumanGated(b.ID) {
 			continue
 		}
 		if existing[b.ID] {
