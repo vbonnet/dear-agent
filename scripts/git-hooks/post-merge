@@ -370,7 +370,13 @@ maybe_rebuild_agm_pair() {
   agm_pair_handled=0
   [ -d "${repo_root}/agm/cmd/agm" ] || return 0
   [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
-  resolve_build_trigger agm/ cmd/spec-contract-hook/ pkg/ internal/ go.mod go.sum
+  # Makefile and this hook jointly define the helper build profile whose digest
+  # is compiled into AGM (see resolve_agm_pair_provenance, which mirrors Make's
+  # build-spec-contract-hook stamp). A merge that changes a build flag in both
+  # places without touching helper source would otherwise skip the pair rebuild,
+  # leaving the installed AGM pinned to the previous digest and making the next
+  # privileged helper install fail unattended Codex launch.
+  resolve_build_trigger agm/ cmd/spec-contract-hook/ pkg/ internal/ go.mod go.sum Makefile scripts/git-hooks/post-merge
   [ "${_affected}" = "1" ] || return 0
   agm_pair_handled=1
 
@@ -450,7 +456,13 @@ maybe_rebuild_agm_pair_locked() {
   [ -d "${repo_root}/agm/cmd/agm" ] || return 0
   [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
 
-  resolve_build_trigger agm/ cmd/spec-contract-hook/ pkg/ internal/ go.mod go.sum
+  # Makefile and this hook jointly define the helper build profile whose digest
+  # is compiled into AGM (see resolve_agm_pair_provenance, which mirrors Make's
+  # build-spec-contract-hook stamp). A merge that changes a build flag in both
+  # places without touching helper source would otherwise skip the pair rebuild,
+  # leaving the installed AGM pinned to the previous digest and making the next
+  # privileged helper install fail unattended Codex launch.
+  resolve_build_trigger agm/ cmd/spec-contract-hook/ pkg/ internal/ go.mod go.sum Makefile scripts/git-hooks/post-merge
 
   [ "${_affected}" = "1" ] || return 0
   agm_pair_handled=1

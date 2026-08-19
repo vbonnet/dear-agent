@@ -115,6 +115,39 @@ func TestChangedSpecRequiresStrictEARSNeutralOwnerAndReciprocalBDD(t *testing.T)
 		assertDecisionAndCode(t, result, DecisionBlock, "bdd-primary-owner-count")
 	})
 
+	// A file that merely ends in ".feature" outside the runner's tree is
+	// referenced by no SPEC and cannot be executed, so governing it would emit
+	// findings nobody can act on. The runner boundary, not the suffix, decides.
+	t.Run("nonexecutable standalone feature is ungoverned", func(t *testing.T) {
+		for _, ungoverned := range []string{
+			"docs/example.feature",
+			"agm/test/bdd/features/nested/example.feature",
+			"internal/example/testdata/example.feature",
+		} {
+			t.Run(ungoverned, func(t *testing.T) {
+				fixture := newGuardRepository(t)
+				fixture.write(ungoverned, "Feature: Example\n  Scenario: Works\n    Given a condition\n")
+				fixture.git("add", "--", ungoverned)
+				result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+				if hasCode(result, "bdd-primary-owner-count") {
+					t.Fatalf("nonexecutable feature %q was governed: %+v", ungoverned, result.Findings)
+				}
+			})
+		}
+	})
+
+	// The boundary must not become an escape hatch: an executable feature with
+	// no primary owner is still governed.
+	t.Run("executable standalone feature stays governed", func(t *testing.T) {
+		fixture := newGuardRepository(t)
+		fixture.write("agm/test/bdd/features/example.feature", "Feature: Example\n  Scenario: Works\n    Given an observable condition\n    Then the outcome is preserved\n")
+		fixture.git("add", "--", "agm/test/bdd/features/example.feature")
+		result := Evaluate(context.Background(), Request{Repository: fixture.root, Mode: ModeStaged})
+		if !hasCode(result, "bdd-primary-owner-count") {
+			t.Fatalf("executable feature escaped governance: %+v", result.Findings)
+		}
+	})
+
 	t.Run("Given and When only are not runnable BDD", func(t *testing.T) {
 		fixture := newGuardRepository(t)
 		fixture.write("pkg/example/SPEC.md", validSpec("agm/test/bdd/features/example.feature"))

@@ -59,6 +59,8 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-21** When a plain Codex source hook runs without an AGM or Claude repository-root environment variable, the adapter command shall resolve the canonical Git worktree root from the native session working directory before invoking repository source.
 
+**HHP-23** When a helper verifies its own revision-bound digest, the system shall require the running executable to be the digest-derived content-addressed path, shall authenticate that path's bytes and trusted identity, and on a platform that exposes a handle on the running image shall additionally require that image to be the same file whose bytes were hashed, so an atomic replacement between exec and verification cannot leave an older image running against newer expected bytes. Where no such handle exists the content-addressed pathname is the only available binding, and that residual shall be recorded rather than reported as proof.
+
 **HHP-22** When automation needs the installed-helper status exit contract, the system shall provide a directly runnable built status artifact that emits one aggregate JSON result with separate stable and content-addressed details and preserves exit 0 only when both identities are current, 1 when either is missing, stale, or untrusted, and 2 for inspection or usage failure; a Make convenience target may expose Make's documented recipe-failure translation.
 
 **HHP-23** When Pi aggregates terminal handlers, the SPEC adapter shall return a bounded deterministic feedback identity and the persistent Pi extension shall allow one follow-up for each fresh identity despite sibling continuation state, suppress repeats, retain a finite per-turn continuation budget, and reset that budget on a real interactive or RPC turn.

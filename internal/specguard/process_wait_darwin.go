@@ -98,7 +98,15 @@ func gitProcessGroupEPERMComplete(processGroupID int, directChildExitObserved, t
 	for {
 		members, err := unix.SysctlKinfoProcSlice("kern.proc.pgrp", processGroupID)
 		if err != nil {
-			return false, err
+			if !errors.Is(err, syscall.ESRCH) {
+				return false, err
+			}
+			// A vanished process group is absence of evidence, not evidence of
+			// cleanup: this classifier is complete only when it observes the
+			// pinned leader zombie. Returning true here would assert group
+			// termination the caller never proved, so treat ESRCH as an empty
+			// member set and let the bounded drain and leader check decide.
+			members = nil
 		}
 		if gitDarwinProcessGroupTerminal(members, processGroupID) {
 			return true, nil

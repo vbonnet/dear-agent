@@ -72,6 +72,10 @@ installed, registered, or running.
 
 **SPEC-GUARD-24** When staged validation observes `assume-unchanged` or `skip-worktree` on a governed path, or those index flags change during evaluation, the guard shall block before accepting a snapshot whose dirty contract state Git may suppress. Sparse checkouts that mark governed paths `skip-worktree` are explicitly unsupported.
 
+**SPEC-GUARD-26** When findings exceed the reporting limit, the guard shall sort before truncating so the retained subset is a function of the finding set rather than of map iteration order, and where no deterministic subset can be retained it shall emit only the overflow finding; a repeated evaluation of one immutable snapshot shall therefore produce one identical feedback digest rather than a subset that reads as a fresh attempt on every terminal retry.
+
+**SPEC-GUARD-27** When a standalone `.feature` change is classified, the guard shall govern only paths inside the repository's executable BDD suite, matching the boundary it already enforces on a SPEC's declared reciprocal traceability, so a documentation or fixture file that merely carries the suffix is neither governed nor reported.
+
 **SPEC-GUARD-25** When a SPEC declares reciprocal BDD traceability, the guard shall admit only safe direct-child feature paths with the shared bounded basename grammar in the repository's executable `agm/test/bdd/features` suite and shall reject nested, unparseable, documentation-example, or other non-executed `.feature` files as contract evidence.
 
 ## BDD Traceability

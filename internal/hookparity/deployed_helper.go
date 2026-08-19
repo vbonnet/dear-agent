@@ -91,7 +91,25 @@ func VerifyContentAddressedHelperInvocation(runningExecutable, deployed, expecte
 	if runningExecutable != pinned {
 		return errors.New("running helper executable is not the revision-bound content-addressed path")
 	}
-	return VerifyDeployedHelperDigest(pinned, expectedSHA256, policy)
+	verified, err := verifyDeployedHelperDigestIdentity(pinned, expectedSHA256, policy)
+	if err != nil {
+		return err
+	}
+	// Everything above authenticates the file at the pinned pathname. exec
+	// mapped its image before this process could look at it, so on a platform
+	// that exposes the running image, bind the two: otherwise an atomic
+	// replacement landing between exec and this read would let an older image
+	// continue while the new, expected bytes are the ones being hashed. Where
+	// no such handle exists the content-addressed pathname is the binding, and
+	// the residual is recorded in internal/hookparity/SPEC.md.
+	running, available, err := runningImageIdentity()
+	if err != nil {
+		return err
+	}
+	if available && !os.SameFile(running, verified) {
+		return errors.New("running helper image is not the authenticated revision-bound artifact")
+	}
+	return nil
 }
 
 // VerifyDeployedHelperDigest admits one deployed helper only when its trusted
@@ -100,16 +118,24 @@ func VerifyContentAddressedHelperInvocation(runningExecutable, deployed, expecte
 // expected artifact digest and therefore do not have a local artifact path to
 // compare through InspectDeployedHelper.
 func VerifyDeployedHelperDigest(deployed, expectedSHA256 string, policy HelperTrustPolicy) error {
+	_, err := verifyDeployedHelperDigestIdentity(deployed, expectedSHA256, policy)
+	return err
+}
+
+// verifyDeployedHelperDigestIdentity is VerifyDeployedHelperDigest plus the
+// authenticated leaf identity, so a caller that must also bind the running
+// image can compare against the exact file whose bytes were hashed.
+func verifyDeployedHelperDigestIdentity(deployed, expectedSHA256 string, policy HelperTrustPolicy) (os.FileInfo, error) {
 	deployed, err := cleanAbsolutePath(deployed, "deployed helper")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	trustedRoot, err := cleanAbsolutePath(policy.TrustedRoot, "trusted root")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := validateExpectedHelperSHA256(expectedSHA256); err != nil {
-		return err
+		return nil, err
 	}
 
 	// #nosec G703 -- deployed is a validated clean absolute path; this read-only
@@ -117,28 +143,28 @@ func VerifyDeployedHelperDigest(deployed, expectedSHA256 string, policy HelperTr
 	info, err := os.Lstat(deployed)
 	if err != nil {
 		if reason, ancestryErr := validateTrustedAncestry(filepath.Dir(deployed), trustedRoot, policy.OwnerUID); ancestryErr != nil {
-			return ancestryErr
+			return nil, ancestryErr
 		} else if reason != "" {
-			return errors.New(reason)
+			return nil, errors.New(reason)
 		}
-		return fmt.Errorf("inspect deployed helper: %w", err)
+		return nil, fmt.Errorf("inspect deployed helper: %w", err)
 	}
 	if reason := validateHelperLeaf(info, policy.OwnerUID); reason != "" {
-		return errors.New(reason)
+		return nil, errors.New(reason)
 	}
 	if reason, ancestryErr := validateTrustedAncestry(filepath.Dir(deployed), trustedRoot, policy.OwnerUID); ancestryErr != nil {
-		return ancestryErr
+		return nil, ancestryErr
 	} else if reason != "" {
-		return errors.New(reason)
+		return nil, errors.New(reason)
 	}
 	actualSHA256, err := verifiedFileSHA256(deployed, info, policy.OwnerUID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if actualSHA256 != expectedSHA256 {
-		return errors.New("deployed helper digest does not match the revision-bound expected artifact")
+		return nil, errors.New("deployed helper digest does not match the revision-bound expected artifact")
 	}
-	return nil
+	return info, nil
 }
 
 // InspectHelperDeployment performs one coherent audit of the stable cooperative

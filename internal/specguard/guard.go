@@ -412,7 +412,13 @@ func validateSnapshot(ctx context.Context, snapshot gitSnapshot, changed map[str
 			}
 			affectedSpecs[target] = true
 			ownerAffectedSpecs[target] = true
-		case isFeaturePath(filePath):
+		// A standalone feature change is governed only inside the boundary the
+		// repository runner can actually execute, which is the same boundary
+		// ParseSpec enforces on a SPEC citation. A documentation or fixture
+		// file that merely ends in ".feature" is referenced by no SPEC and
+		// cannot be run, so reporting bdd-primary-owner-count against it would
+		// be a finding nobody can resolve.
+		case repoinventory.IsExecutableBDDFeaturePath(filePath):
 			affectedFeatures[filePath] = true
 		}
 	}
@@ -735,28 +741,47 @@ func contains(values []string, wanted string) bool {
 }
 
 type findingCollector struct {
-	findings []Finding
-	limit    int
-	overflow bool
+	findings        []Finding
+	limit           int
+	overflow        bool
+	ceilingExceeded bool
 }
 
+// findingCollectionCeiling bounds what is retained before sorting. Truncating
+// at the reporting limit during collection would keep whichever findings the
+// map iterations happened to produce first, so two evaluations of the same
+// immutable snapshot could emit different subsets and therefore different
+// feedback digests — which reads to Claude and Codex as a fresh attempt on
+// every Stop retry rather than a repeat. Collect a deterministic superset,
+// sort, then truncate.
+const findingCollectionCeiling = 64 * defaultMaxFindings
+
 func (collector *findingCollector) add(finding Finding) {
-	if len(collector.findings) < collector.limit {
-		collector.findings = append(collector.findings, finding)
+	if len(collector.findings) >= findingCollectionCeiling {
+		// Past the ceiling no deterministic subset can be reconstructed, so the
+		// result collapses to the one finding that is the same every time.
+		collector.ceilingExceeded = true
 		return
 	}
-	collector.overflow = true
+	collector.findings = append(collector.findings, finding)
+	if len(collector.findings) > collector.limit {
+		collector.overflow = true
+	}
+}
+
+func (collector *findingCollector) overflowFinding() Finding {
+	return Finding{
+		Code:    "finding-limit",
+		Message: fmt.Sprintf("guard findings exceeded the %d-entry safety limit", collector.limit),
+	}
 }
 
 func (collector *findingCollector) sorted() []Finding {
+	if collector.ceilingExceeded {
+		return []Finding{collector.overflowFinding()}
+	}
 	if collector.findings == nil {
 		collector.findings = []Finding{}
-	}
-	if collector.overflow && len(collector.findings) != 0 {
-		collector.findings[len(collector.findings)-1] = Finding{
-			Code:    "finding-limit",
-			Message: fmt.Sprintf("guard findings exceeded the %d-entry safety limit", collector.limit),
-		}
 	}
 	sort.Slice(collector.findings, func(i, j int) bool {
 		left, right := collector.findings[i], collector.findings[j]
@@ -771,6 +796,12 @@ func (collector *findingCollector) sorted() []Finding {
 		}
 		return left.Message < right.Message
 	})
+	// Truncation happens after sorting, so the retained subset is a pure
+	// function of the finding set rather than of map iteration order.
+	if collector.overflow && collector.limit > 0 {
+		collector.findings = collector.findings[:collector.limit]
+		collector.findings[collector.limit-1] = collector.overflowFinding()
+	}
 	return collector.findings
 }
 
