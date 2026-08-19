@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/dispatchstate"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
@@ -87,7 +89,11 @@ func init() {
 	watchStalledCmd.Flags().IntVar(&stalledErrorRepeatThreshold, "error-repeat-threshold", 3,
 		"How many repeats of an error = loop")
 	watchStalledCmd.Flags().StringVar(&stalledOrchestratorName, "orchestrator", "",
-		"Orchestrator session name for alerts (optional)")
+		"Default session for alerts and completion relays (optional). This is the "+
+			"fallback, not a pin: the live relay target (set via 'agm completion "+
+			"relay-target set' or agm_set_completion_relay_target, else "+
+			"AGM_COMPLETION_RELAY_TARGET) takes precedence so a running watcher can "+
+			"be retargeted without a restart.")
 	watchStalledCmd.Flags().BoolVar(&stalledDryRun, "dry-run", false,
 		"Detect stalls without taking recovery actions")
 	watchStalledCmd.Flags().StringVar(&stalledNotifyConfigPath, "notify-config", "",
@@ -123,8 +129,11 @@ func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfac
 			TransitionType: event.TransitionType,
 			OutputBytes:    len(event.Output),
 		}
-		if !dryRun && surfacer.shouldSurface(event) {
-			if errs := surfacer.Surface(ctx, event); len(errs) > 0 {
+		// One plan per event: it carries the single target resolution this
+		// event is both filtered against and delivered to.
+		plan := surfacer.planFor(event)
+		if !dryRun && plan.surface {
+			if errs := surfacer.Surface(ctx, event, plan); len(errs) > 0 {
 				parts := make([]string, len(errs))
 				for i, surfaceErr := range errs {
 					parts[i] = surfaceErr.Error()
@@ -160,6 +169,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	detector.ErrorRepeatThreshold = stalledErrorRepeatThreshold
 
 	recovery := ops.NewStallRecovery(opCtx, stalledOrchestratorName)
+	recovery.SetOrchestratorTargetResolver(resolveCompletionRelayTarget)
 
 	var completions *ops.CompletionWatcher
 	var surfacer *completionSurfacer
@@ -185,6 +195,13 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
 			return nil
 		case <-ticker.C:
+			// Drain first: an alert queued on an earlier scan reached nobody,
+			// and this loop is the only thing that reliably notices a
+			// supervisor has come back. Without it, an alert raised during a
+			// transient outage would sit in the file until someone looked.
+			if !stalledDryRun {
+				drainQueuedAlerts(ctx, opCtx)
+			}
 			if completions != nil {
 				emitCompletions(ctx, completions, surfacer, stalledDryRun)
 			}
@@ -231,6 +248,28 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// resolveCompletionRelayTarget reports where completions and stall alerts
+// should be delivered right now. fallback is the --orchestrator default,
+// which the live relay-target state deliberately outranks; see the flag
+// help for why the flag is a fallback rather than a pin.
+func resolveCompletionRelayTarget(fallback string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("completion relay: cannot locate home dir; using fallback target",
+			"fallback", fallback, "error", err)
+		return strings.TrimSpace(fallback)
+	}
+	result := dispatchstate.ResolveRelayTarget(home, fallback, os.Getenv)
+	if result.Reason != "" {
+		// A state read that failed for any reason other than "not set" is
+		// a degraded resolve, not an absent override: say so rather than
+		// letting it look identical to no target having been configured.
+		slog.Warn("completion relay: live relay-target state unreadable; falling back",
+			"reason", result.Reason, "source", result.Source, "target", result.Target)
+	}
+	return result.Target
+}
+
 // formatDurationForJSON returns a human-readable duration string.
 func formatDurationForJSON(d time.Duration) string {
 	if d == 0 {
@@ -248,4 +287,23 @@ func formatDurationForJSON(d time.Duration) string {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh%dm", h, m)
+}
+
+// drainQueuedAlerts re-attempts delivery for alerts still recorded as
+// queued. It is best-effort: a drain failure must never stop the watch loop
+// that stall detection depends on.
+func drainQueuedAlerts(ctx context.Context, opCtx *ops.OpContext) {
+	delivered, err := ops.NewAlertRouter(opCtx).DrainQueued(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error draining queued alerts: %v\n", err)
+		return
+	}
+	if delivered > 0 {
+		data, _ := json.Marshal(map[string]any{
+			"timestamp":  time.Now().Format(time.RFC3339),
+			"event_type": "alerts_drained",
+			"delivered":  delivered,
+		})
+		fmt.Println(string(data))
+	}
 }

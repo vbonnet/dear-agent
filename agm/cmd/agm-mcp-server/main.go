@@ -193,6 +193,8 @@ func registerMCPTools(server *mcp.Server, cfg *Config) {
 	addKillSessionTool(server, cfg)
 	addCreateSessionTool(server, cfg)
 	addSendMessageTool(server, cfg)
+	addCompletionRelayTargetTools(server, cfg)
+	addQuotaStatusTool(server, cfg)
 	addListOpsTool(server, cfg)
 	addListWayfinderSessionsTool(server, cfg)
 	addGetWayfinderSessionTool(server, cfg)

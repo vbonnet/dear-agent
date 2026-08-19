@@ -1,8 +1,12 @@
 package fsguard
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // testGuard uses a fixed, fake home so classification is pure string logic and
@@ -133,10 +137,10 @@ func TestInspectCommand(t *testing.T) {
 		{"git fetch allowed", "git -C ~/src/dear-agent fetch origin", home, true, ""},
 		{"git worktree allowed", "git -C ~/src/dear-agent worktree add ~/worktrees/x -b x", home, true, ""},
 		{"git push allowed", "git -C ~/src/dear-agent push", home, true, ""},
-		{"git force push blocked", "git -C ~/src/dear-agent push --force", home, false,
-			"force-push"},
-		{"git force-with-lease blocked", "git -C ~/src/dear-agent push --force-with-lease", home, false,
-			"force-push"},
+		{"git force push to main blocked", "git -C ~/src/dear-agent push --force origin main", home, false,
+			"protected/default"},
+		{"git force-with-lease main blocked", "git -C ~/src/dear-agent push --force-with-lease=main origin", home, false,
+			"protected/default"},
 		{"git -f blocked", "git -C ~/src/dear-agent push -f origin main", home, false, "force-push"},
 		{"git -uf cluster blocked", "git -C ~/src/dear-agent push -uf origin main", home, false,
 			"force-push"},
@@ -415,6 +419,56 @@ func TestNewResolvesHome(t *testing.T) {
 	g := New()
 	if g.Home == "" {
 		t.Fatal("New() returned empty Home")
+	}
+}
+
+// TestInspectCommand_ForcePushToPRBranchInSrc covers the policy change: a
+// force-push to a non-default PR branch inside ~/src is allowed, while one to
+// the default branch is not.
+//
+// It builds a real repository rather than using the fake home the other cases
+// share, because the policy resolves the remote's default branch from the
+// checkout. That resolution fails closed, so a path that is not a repository
+// is refused, which is correct but not what these cases are about.
+func TestInspectCommand_ForcePushToPRBranchInSrc(t *testing.T) {
+	// Not parallel: gittest.HardenRepo uses t.Setenv to pin the process Git
+	// configuration, which testing forbids in a parallel test.
+	home := t.TempDir()
+	repo := filepath.Join(home, "src", "dear-agent")
+	if err := os.MkdirAll(filepath.Dir(repo), 0o755); err != nil {
+		t.Fatalf("creating src: %v", err)
+	}
+	origin := filepath.Join(home, "origin.git")
+	gittest.Run(t, home, "init", "--bare", "--initial-branch=main", origin)
+	gittest.HardenRepo(t, origin)
+	gittest.Run(t, home, "init", "--initial-branch=main", repo)
+	gittest.HardenRepo(t, repo)
+	gittest.Run(t, repo, "commit", "--allow-empty", "-m", "base")
+	gittest.Run(t, repo, "remote", "add", "origin", origin)
+	gittest.Run(t, repo, "push", "-u", "origin", "main")
+	gittest.Run(t, repo, "remote", "set-head", "origin", "main")
+
+	g := &Guard{Home: home}
+	tests := []struct {
+		name        string
+		command     string
+		wantAllowed bool
+	}{
+		{"force-with-lease to a PR branch", "git -C " + repo + " push --force-with-lease origin feature/rebased", true},
+		{"force refspec to a PR branch", "git -C " + repo + " push origin +HEAD:refs/heads/feature/rebased", true},
+		{"force to the default branch", "git -C " + repo + " push --force origin main", false},
+		{"force refspec to the default branch", "git -C " + repo + " push origin +HEAD:refs/heads/main", false},
+		{"mirror is still refused", "git -C " + repo + " push --mirror origin", false},
+		{"wildcard refspec is refused", "git -C " + repo + " push --force origin refs/heads/*:refs/heads/*", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			allowed, msg := g.InspectCommand(tc.command, home)
+			if allowed != tc.wantAllowed {
+				t.Fatalf("InspectCommand(%q) allowed=%v, want %v (msg=%q)",
+					tc.command, allowed, tc.wantAllowed, msg)
+			}
+		})
 	}
 }
 
