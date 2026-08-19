@@ -69,3 +69,9 @@ dotted bead id can never brick a dispatch run (ce-b1zw).
 **VDD-26** When VROOM launches AGM for a prepared worker, the dispatcher shall bind the exact add-directory payload and, for Codex, the system-managed worker guard path to that session name through a one-launch trusted handoff.
 
 **VDD-27** When an operator supplies `-prepare-worker`, the dispatcher shall prepare that bead's same production workspace without dispatching and print the session name, add directories, and applicable managed guard path as JSON for recovery of an existing session.
+
+**VDD-28** When `-max-dispatch` is set to a positive N, the system shall dispatch at most N candidates in that run, counting only successful dispatches toward N so a deterministically-skipped bead cannot consume the budget, shall leave the remaining eligible candidates for a later run, and shall report the total eligible count rather than the capped count in the run summary.
+
+**VDD-29** When `-max-dispatch` is 0 or unset, the system shall preserve unlimited dispatch (every eligible candidate, bounded only by spawn backpressure), and when it is negative the system shall exit with an error rather than treating the misconfigured cap as unlimited.
+
+**VDD-30** While determining whether a bead is human-gated, the system shall consult the shared `internal/vroomgate` list rather than a command-local copy.
