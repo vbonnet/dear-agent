@@ -1,3 +1,5 @@
+package fsguard
+
 // Command-argument classification: which tokens of a simple command name a
 // path the guard must check.
 //
@@ -5,7 +7,6 @@
 // ratchet. This half answers "given `cp -aS bak SRC DEST`, what does it
 // write?"; bash.go keeps the shell-level concerns (tokenizing, segmenting,
 // tracking `cd`, and applying the policy).
-package fsguard
 
 import (
 	"os"
