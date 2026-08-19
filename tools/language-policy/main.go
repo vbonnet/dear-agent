@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	ruleName    = "bash-20-line-limit"
-	lineLimit   = 20
-	storePath   = ".github/language-policy/exceptions.jsonl"
-	storeDir    = ".github/language-policy"
-	usageString = `language-policy — enforce the repository shell-script policy.
+	ruleName     = "bash-20-line-limit"
+	lineLimit    = 20
+	storePath    = ".github/language-policy/exceptions.jsonl"
+	baselinePath = ".github/language-policy/baseline.json"
+	storeDir     = ".github/language-policy"
+	usageString  = `language-policy — enforce the repository shell-script policy.
 
 Usage:
   language-policy check [--files-from <file>] [--all] [--github]
@@ -128,26 +129,31 @@ func runCheck(args []string) error {
 		return err
 	}
 
+	tests, err := BuildTestIndex(*repoRoot)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	res, err := scan(*repoRoot, store, paths, now)
+	res, err := scan(*repoRoot, store, tests, paths, now)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("rule=%s limit=%d checked=%d compliant=%d waived=%d violations=%d\n",
-		ruleName, lineLimit, len(paths), res.compliant, res.waived, len(res.violations))
+	fmt.Printf("rule=%s limit=%d checked=%d compliant=%d tested=%d waived=%d violations=%d\n",
+		ruleName, lineLimit, len(paths), res.compliant, res.tested, res.waived, len(res.violations))
 	return report(res.violations, *github)
 }
 
 // scanResult is the outcome of checking a set of paths.
 type scanResult struct {
 	compliant  int
+	tested     int
 	waived     int
 	violations []violation
 }
 
 // scan checks each in-scope path against the limit and the waiver store.
-func scan(repoRoot string, store *Store, paths []string, now time.Time) (scanResult, error) {
+func scan(repoRoot string, store *Store, tests *TestIndex, paths []string, now time.Time) (scanResult, error) {
 	var res scanResult
 	for _, p := range paths {
 		if !InScope(p) {
@@ -177,11 +183,14 @@ func scan(repoRoot string, store *Store, paths []string, now time.Time) (scanRes
 		switch {
 		case n <= lineLimit:
 			res.compliant++
+		case tests.Covered(p):
+			// A long script that is tested is not the risk this rule exists
+			// to catch. Crediting a test makes the escape hatch productive:
+			// the way out is to cover the script, not to file a waiver.
+			res.tested++
+		case store.Active(ruleName, p, now):
+			res.waived++
 		default:
-			if store.Active(ruleName, p, now) {
-				res.waived++
-				continue
-			}
 			res.violations = append(res.violations, violation{path: normalizePath(p), count: n})
 		}
 	}
@@ -193,14 +202,14 @@ func scan(repoRoot string, store *Store, paths []string, now time.Time) (scanRes
 func report(violations []violation, github bool) error {
 	for _, v := range violations {
 		if github {
-			fmt.Printf("::error file=%s::%s is %d countable lines (limit %d) with no active waiver\n",
-				v.path, v.path, v.count, lineLimit)
+			fmt.Printf("::error file=%s::%s is %d countable lines (limit %d), untested, and has no active waiver. Add a test under %s/, shorten it, or file a waiver.\n",
+				v.path, v.path, v.count, lineLimit, testDir)
 		} else {
-			fmt.Printf("  %-60s %3d lines (+%d over limit)\n", v.path, v.count, v.count-lineLimit)
+			fmt.Printf("  %-60s %3d lines (+%d over limit, untested)\n", v.path, v.count, v.count-lineLimit)
 		}
 	}
 	if len(violations) > 0 {
-		return fmt.Errorf("%d shell script(s) exceed the %d-line limit without an active waiver", len(violations), lineLimit)
+		return fmt.Errorf("%d shell script(s) exceed the %d-line limit while untested and unwaived", len(violations), lineLimit)
 	}
 	return nil
 }
@@ -243,11 +252,70 @@ func runSweep(args []string) error {
 	// Report the waiver census before the error return below, so a failing
 	// sweep still tells the reader how large the backlog is.
 	defer fmt.Printf("sweep: %d waiver(s) total, %d expired, %d script(s) scanned\n", len(store.All), len(expired), len(paths))
-	res, err := scan(*repoRoot, store, paths, now)
+	tests, terr := BuildTestIndex(*repoRoot)
+	if terr != nil {
+		return terr
+	}
+	res, err := scan(*repoRoot, store, tests, paths, now)
 	if err != nil {
 		return err
 	}
-	return report(res.violations, *github)
+
+	dead := reportDeadWaivers(*repoRoot, store, *github)
+	if err := report(res.violations, *github); err != nil {
+		return err
+	}
+	calibration(res, len(store.All), dead, *github)
+	return nil
+}
+
+// reportDeadWaivers names waivers whose target no longer exists and returns how
+// many there were. Reporting them is what lets the store shrink instead of only
+// ever growing: 26 of the original 110 pointed at deleted files.
+func reportDeadWaivers(repoRoot string, store *Store, github bool) int {
+	n := 0
+	for _, e := range store.All {
+		st, serr := os.Stat(filepath.Join(repoRoot, e.Path))
+		if serr == nil && st.Mode().IsRegular() {
+			continue
+		}
+		n++
+		if github {
+			fmt.Printf("::warning::waiver for %s references a file that no longer exists; remove it\n", e.Path)
+		} else {
+			fmt.Printf("dead waiver (file gone): %s\n", e.Path)
+		}
+	}
+	return n
+}
+
+// calibration is the policy-agnostic canary this rule lacked.
+//
+// A rule whose waiver count exceeds the number of files that actually comply
+// is not enforcing anything; it is a list of exemptions with a rule attached.
+// This repository reached 110 waivers against 22 compliant scripts before
+// anyone noticed, because nothing was watching the ratio. Any future rule with
+// an exemption list gets the same canary for free by reusing this check.
+func calibration(res scanResult, waiverCount, deadCount int, github bool) {
+	passing := res.compliant + res.tested
+	fmt.Printf("calibration: compliant=%d tested=%d passing=%d waivers=%d dead_waivers=%d\n",
+		res.compliant, res.tested, passing, waiverCount, deadCount)
+	if waiverCount > passing {
+		// Reported, not failed. The ratchet in verify-store is what enforces
+		// (the count may not grow); failing here as well would leave the
+		// nightly permanently red with no path to green except clearing the
+		// whole backlog at once, and a permanently red signal is a muted one.
+		msg := fmt.Sprintf(
+			"policy %s is still inverted: %d waivers against %d passing scripts. "+
+				"Each waiver clears by adding a test under %s/ or shortening the script. "+
+				"Lower max_waivers in %s as they clear.",
+			ruleName, waiverCount, passing, testDir, baselinePath)
+		if github {
+			fmt.Printf("::warning::%s\n", msg)
+		} else {
+			fmt.Printf("WARNING: %s\n", msg)
+		}
+	}
 }
 
 // binaryStoreExtensions are the shapes a resurrected binary waiver store would
@@ -301,7 +369,20 @@ func runVerifyStore(args []string) error {
 	if err := CheckSorted(store.All); err != nil {
 		return fmt.Errorf("%s: %w", storePath, err)
 	}
-	fmt.Printf("verify-store: %s OK (%d waivers, text, sorted, no duplicates)\n", storePath, len(store.All))
+	bf, err := os.Open(filepath.Join(*repoRoot, baselinePath))
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", baselinePath, err)
+	}
+	baseline, berr := LoadBaseline(bf)
+	_ = bf.Close()
+	if berr != nil {
+		return fmt.Errorf("%s: %w", baselinePath, berr)
+	}
+	if err := baseline.CheckRatchet(ruleName, len(store.All)); err != nil {
+		return err
+	}
+
+	fmt.Printf("verify-store: %s OK (%d waivers, text, sorted, no duplicates, within ratchet)\n", storePath, len(store.All))
 	return nil
 }
 

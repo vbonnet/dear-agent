@@ -19,6 +19,12 @@ func newFixtureRepo(t *testing.T, store string, extraFiles map[string]string) st
 	if err := os.WriteFile(filepath.Join(root, storePath), []byte(store), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	// A generous ceiling: fixtures exercise store shape, not the ratchet,
+	// which has its own tests.
+	if err := os.WriteFile(filepath.Join(root, baselinePath),
+		[]byte(`{"rules":{"bash-20-line-limit":{"max_waivers":1000,"goal":"fixture"}}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile baseline: %v", err)
+	}
 	for name, content := range extraFiles {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile %s: %v", name, err)
