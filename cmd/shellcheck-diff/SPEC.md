@@ -12,25 +12,25 @@ to.
 
 ## EARS Requirements
 
-**SCD-01** When a finding sits on a line the diff added or rewrote and its severity is at or above the configured threshold, the command shall report it and exit non-zero.
+**SHDIFF-01** When a finding sits on a line the diff added or rewrote and its severity is at or above the configured threshold, the command shall report it and exit non-zero.
 
-**SCD-02** When a finding sits on a line the diff did not touch, the command shall not report it, regardless of its severity.
+**SHDIFF-02** When a finding sits on a line the diff did not touch, the command shall not report it, regardless of its severity.
 
-**SCD-03** When a finding's severity is below the configured threshold, the command shall not report it, regardless of whether the change touched its line.
+**SHDIFF-03** When a finding's severity is below the configured threshold, the command shall not report it, regardless of whether the change touched its line.
 
-**SCD-04** When the findings document is absent, unreadable, or not a ShellCheck JSON1 document, the command shall fail with a diagnostic rather than report a clean result.
+**SHDIFF-04** When the findings document is absent, unreadable, or not a ShellCheck JSON1 document, the command shall fail with a diagnostic rather than report a clean result.
 
-**SCD-05** When the findings document is the legacy bare-array `-f json` format, the command shall reject it by name rather than silently report zero findings.
+**SHDIFF-05** When the findings document is the legacy bare-array `-f json` format, the command shall reject it by name rather than silently report zero findings.
 
-**SCD-06** When a finding omits its file, level, or a positive line number, the command shall reject the document rather than skip that finding.
+**SHDIFF-06** When a finding omits its file, level, or a positive line number, the command shall reject the document rather than skip that finding.
 
-**SCD-07** When a hunk header carries no parsable destination range, the command shall fail rather than attribute the hunk to no lines.
+**SHDIFF-07** When a hunk header carries no parsable destination range, the command shall fail rather than attribute the hunk to no lines.
 
-**SCD-08** When the diff records a deletion whose destination is `/dev/null`, the command shall attribute no lines to that path.
+**SHDIFF-08** When the diff records a deletion whose destination is `/dev/null`, the command shall attribute no lines to that path.
 
-**SCD-09** When either `--diff` or `--findings` is omitted, the command shall fail with a usage error.
+**SHDIFF-09** When either `--diff` or `--findings` is omitted, the command shall fail with a usage error.
 
-**SCD-10** When no finding qualifies, the command shall report the number of findings inspected and exit zero.
+**SHDIFF-10** When no finding qualifies, the command shall report the number of findings inspected and exit zero.
 
 ## BDD Traceability
 
