@@ -2,51 +2,9 @@ package codegen
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 )
-
-// GenerateConfig configures the code generator.
-type GenerateConfig struct {
-	Ops           []Op                    // Operations to generate surfaces for
-	RequestTypes  map[string]reflect.Type // Map of RequestType name -> reflect.Type
-	ResponseTypes map[string]reflect.Type // Map of ResponseType name -> reflect.Type
-	OutDir        string                  // Output directory
-	Package       string                  // Package name for generated Go files
-	CLIBinary     string                  // CLI binary name (e.g., "agm") for skill templates
-	BuildIgnore   bool                    // If true, prepend //go:build ignore to generated Go files
-}
-
-// Generate produces CLI, MCP, Skill, and parity test files from Op definitions.
-func Generate(cfg GenerateConfig) error {
-	irs, err := BuildIRs(cfg.Ops, cfg.RequestTypes, cfg.ResponseTypes)
-	if err != nil {
-		return err
-	}
-
-	if err := os.MkdirAll(cfg.OutDir, 0o755); err != nil {
-		return fmt.Errorf("creating output directory: %w", err)
-	}
-
-	if err := GenerateCLI(irs, cfg.OutDir, cfg.Package, cfg.BuildIgnore); err != nil {
-		return fmt.Errorf("generating CLI: %w", err)
-	}
-
-	if err := GenerateMCP(irs, cfg.OutDir, cfg.Package, cfg.BuildIgnore); err != nil {
-		return fmt.Errorf("generating MCP: %w", err)
-	}
-
-	if err := GenerateSkills(irs, cfg.OutDir, cfg.CLIBinary); err != nil {
-		return fmt.Errorf("generating Skills: %w", err)
-	}
-
-	if err := GenerateParity(irs, cfg.OutDir, cfg.Package, cfg.BuildIgnore); err != nil {
-		return fmt.Errorf("generating Parity: %w", err)
-	}
-
-	return nil
-}
 
 // BuildIRs constructs OpIR slices from Ops and reflected types.
 func BuildIRs(ops []Op, reqTypes, respTypes map[string]reflect.Type) ([]OpIR, error) {
