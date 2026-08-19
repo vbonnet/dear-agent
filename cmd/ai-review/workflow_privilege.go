@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func privilegedWorkflowEscalationTriggers(ctx context.Context, base, head string, changedPaths []string) []string {
@@ -52,24 +57,104 @@ func privilegedWorkflowEscalationTriggersWithEvidence(ctx context.Context, trees
 			triggers = append(triggers, fmt.Sprintf("privileged workflow evidence cannot be authenticated within bounds (%s)", paths[0]))
 			continue
 		}
-		equal, err := semanticallyEqualWorkflowEvidence(basePeers, headPeers)
-		if err != nil {
-			triggers = append(triggers, fmt.Sprintf("privileged workflow evidence is malformed or ambiguous (%s)", paths[0]))
-			continue
-		}
-		if equal {
-			continue
-		}
-		for _, peer := range peers {
-			reason, privileged := workflowPrivilegeReason(peer.blob)
-			if !privileged {
-				continue
-			}
-			triggers = append(triggers, fmt.Sprintf("privileged workflow authority change (%s; %s in %s)", paths[0], reason, peer.path))
-			break
+		if trigger, changed := changedWorkflowTrigger(paths[0], basePeers, headPeers, peers); changed {
+			triggers = append(triggers, trigger)
 		}
 	}
 	return triggers
+}
+
+// changedWorkflowTrigger reports the escalation trigger, if any, for one
+// changed workflow identity. A workflow whose canonical content is unchanged
+// across the revisions carries no trigger at all.
+func changedWorkflowTrigger(path string, basePeers, headPeers, peers []workflowBlobEvidence) (string, bool) {
+	equal, err := semanticallyEqualWorkflowEvidence(basePeers, headPeers)
+	if err != nil {
+		return fmt.Sprintf("privileged workflow evidence is malformed or ambiguous (%s)", path), true
+	}
+	if equal {
+		return "", false
+	}
+	for _, peer := range peers {
+		reason, privileged := workflowPrivilegeReason(peer.blob)
+		if !privileged {
+			continue
+		}
+		return fmt.Sprintf("privileged workflow authority change (%s; %s in %s)", path, reason, peer.path), true
+	}
+	scheduleChanged, err := changedWorkflowSchedule(basePeers, headPeers)
+	if err != nil {
+		return fmt.Sprintf("privileged workflow evidence is malformed or ambiguous (%s)", path), true
+	}
+	if scheduleChanged {
+		return fmt.Sprintf("workflow schedule change alters unattended, billed execution (%s)", path), true
+	}
+	return "", false
+}
+
+// changedWorkflowSchedule reports whether a workflow's `on: schedule` block
+// differs across the revisions. Schedule frequency is not authority the
+// permission classifier can see: an otherwise read-only workflow moved from
+// weekly to every few minutes still holds no write scope, yet it multiplies
+// billed runner minutes and unattended executions. Only workflows whose
+// canonical content already changed reach this check, so an unrelated edit to
+// a long-standing scheduled workflow stays on the automated path.
+func changedWorkflowSchedule(base, head []workflowBlobEvidence) (bool, error) {
+	baseSchedules, err := canonicalWorkflowSchedules(base)
+	if err != nil {
+		return false, err
+	}
+	headSchedules, err := canonicalWorkflowSchedules(head)
+	if err != nil {
+		return false, err
+	}
+	return !slices.Equal(baseSchedules, headSchedules), nil
+}
+
+// canonicalWorkflowSchedules returns the declared schedules only. Peers with no
+// schedule contribute nothing, so adding or deleting an unscheduled workflow
+// compares equal and stays on the automated path, while adding, retiming, or
+// removing a cron entry does not.
+func canonicalWorkflowSchedules(peers []workflowBlobEvidence) ([]string, error) {
+	values := make([]string, 0, len(peers))
+	for _, peer := range peers {
+		schedule, err := canonicalWorkflowSchedule(peer.blob)
+		if err != nil {
+			return nil, err
+		}
+		if schedule == "" {
+			continue
+		}
+		values = append(values, peer.path+"\x00"+schedule)
+	}
+	sort.Strings(values)
+	return values, nil
+}
+
+func canonicalWorkflowSchedule(blob []byte) (string, error) {
+	root, _, err := parseWorkflowYAML(blob)
+	if err != nil {
+		return "", err
+	}
+	on, ok := mappingNodeValue(root, "on")
+	if !ok || on.Kind != yaml.MappingNode {
+		// A scalar or sequence `on` cannot carry cron entries, and a missing
+		// `on` is already an authority reason upstream.
+		return "", nil
+	}
+	// Fold the key for the same reason workflow_call does: the provider treats
+	// authority-bearing event identifiers as one equivalence class, so folded
+	// duplicates are ambiguous rather than benign.
+	schedule, ok, ambiguous := mappingNodeValueASCIIFold(on, "schedule")
+	if ambiguous {
+		return "", errors.New("workflow schedule evidence is ambiguous")
+	}
+	if !ok {
+		return "", nil
+	}
+	var canonical strings.Builder
+	appendCanonicalWorkflowNode(&canonical, schedule)
+	return canonical.String(), nil
 }
 
 func semanticallyEqualWorkflowEvidence(base, head []workflowBlobEvidence) (bool, error) {

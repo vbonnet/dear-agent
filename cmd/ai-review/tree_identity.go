@@ -11,9 +11,26 @@ import (
 )
 
 const (
-	maxTreeIdentityEntries           = 2 * maxHeadPaths
-	maxTreeIdentityPathComponents    = 256
-	maxTreeIdentityPeers             = 32
+	maxTreeIdentityEntries        = 2 * maxHeadPaths
+	maxTreeIdentityPathComponents = 256
+	maxTreeIdentityPeers          = 32
+	// maxTreeIdentityRecordBytes bounds one `ls-tree -z` record: mode, type,
+	// object id, tab, path, NUL. The fixed metadata is 53 bytes, so this
+	// admits a ~970-byte path, comfortably above the 256-component bound at
+	// any realistic component length.
+	maxTreeIdentityRecordBytes = 1024
+	// maxTreeIdentityBytes bounds a *complete* repository inventory rather
+	// than a diff. maxGitMetadataBytes is a diff-sized budget, and applying it
+	// to `ls-tree -r -t` made an undeclared byte cap bind long before
+	// maxTreeIdentityEntries: a file-plus-directory record averages ~88 bytes
+	// here, so 4 MiB capped out near 48,000 entries against a declared
+	// 200,000, and every review would have failed once the repository grew
+	// past that. This bound admits at least maxTreeIdentityBytes /
+	// maxTreeIdentityRecordBytes = 65,536 records at the worst permitted
+	// record size and roughly 760,000 at this repository's average, so
+	// maxTreeIdentityEntries is the constraint that binds and gets reported
+	// for any realistic inventory.
+	maxTreeIdentityBytes             = 64 * 1024 * 1024
 	maxSpecControlIdentityComponents = 64 * 1024
 )
 
@@ -66,7 +83,7 @@ func loadTreeIdentityIndex(ctx context.Context, revision string) (treeIdentityIn
 	if !validObjectID(revision) {
 		return treeIdentityIndex{}, errors.New("invalid tree identity revision")
 	}
-	out, err := gitOutputBounded(ctx, maxGitMetadataBytes, "ls-tree", "--full-tree", "-r", "-t", "-z", revision)
+	out, err := gitOutputBounded(ctx, maxTreeIdentityBytes, "ls-tree", "--full-tree", "-r", "-t", "-z", revision)
 	if err != nil {
 		return treeIdentityIndex{}, err
 	}
@@ -128,7 +145,10 @@ func parseTreeIdentityEntry(raw []byte, maxComponents int) (treeIdentityEntry, e
 	metadata, rawPath, ok := bytes.Cut(raw, []byte{'\t'})
 	parts := strings.Fields(string(metadata))
 	path := string(rawPath)
-	if !ok || len(parts) != 3 || !validObjectID(parts[2]) || !safeGitPath(path) ||
+	// The record bound is what makes maxTreeIdentityBytes a consequence of the
+	// declared entry limit rather than an independent, unreported cap.
+	if len(raw)+1 > maxTreeIdentityRecordBytes ||
+		!ok || len(parts) != 3 || !validObjectID(parts[2]) || !safeGitPath(path) ||
 		strings.Count(path, "/")+1 > maxComponents ||
 		!validTreeIdentityMode(parts[0], parts[1]) {
 		return treeIdentityEntry{}, errors.New("tree identity inventory contains unauthenticated metadata")

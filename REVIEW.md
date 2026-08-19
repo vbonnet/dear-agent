@@ -58,8 +58,8 @@ diff touches any of the following:
 - **Agent permissions** — any edit to `permissions.allow`, `permissions.ask`, or `permissions.deny`.
 - **Pre/post-tool hooks** — any change to hook scripts or hook registration in `settings.json`. Canonical `SPEC.md` contracts under protected hook owners do not escalate solely because of that ownership and continue through the ordinary semantic-governance rules, as do exact lowercase `_test.go` files under authenticated Go-package hook owners; noncanonical aliases, production sources, scripts, registrations, and ambiguous tree evidence remain protected.
 - **Security boundaries** — write guards, deny rules, `~/src` enforcement, PII manifests.
-- **Protected review policy, production enforcement, and provider rules** — this policy, the trusted AI-review workflow, production reviewer implementation, and ruleset declarations. Go files with the exact lowercase ASCII `_test.go` suffix under `cmd/ai-review/` stay in the automated review loop because those files cannot enter the production reviewer binary; a rename crossing that boundary still escalates through its production-side path.
-- **Privileged workflow authority** — executable changes to a workflow whose authenticated base or head can consume custom secrets, mint OIDC, write source/review/gate/deployment/signing state, use a privileged default-branch trigger, target an environment, delegate unresolved reusable-workflow or runner authority, or run on self-hosted infrastructure. Unclassifiable workflow evidence also fails closed.
+- **Protected review policy, production enforcement, and provider rules** — this policy, the trusted AI-review workflow, production reviewer implementation, ruleset declarations, and repository-local action manifests (`.github/actions/`, or any `action.yml`/`action.yaml`). A local action runs inside its caller's job with the caller's secrets and token, and no workflow path changes when only the action does, so the action owner stays protected. Go files with the exact lowercase ASCII `_test.go` suffix under `cmd/ai-review/` stay in the automated review loop because those files cannot enter the production reviewer binary; that carveout is local to this trigger, so such a file still escalates on an independent permission, migration, or infrastructure trigger, and a rename crossing the boundary still escalates through its production-side path.
+- **Privileged workflow authority** — executable changes to a workflow whose authenticated base or head can consume custom secrets, mint OIDC, write source/review/gate/deployment/signing state, label or otherwise control pull-request review state, use a privileged default-branch trigger, target an environment, delegate unresolved reusable-workflow or runner authority, or run on self-hosted infrastructure. `issues: write` counts as review control: GitHub models pull requests as issues, so that scope adds and removes the merge-gate labels the merge loop treats as a human-only block. A change to a workflow's `schedule` block also escalates, because cron frequency governs unattended, billed execution and no permission scope reveals it. Unclassifiable workflow evidence also fails closed.
 - **Infrastructure that is expensive to reverse** — database schema changes, infrastructure-as-code, launchd plist installs, and systemd service installs.
 - **Explicit `HUMAN REVIEW REQUIRED` label** in the PR description or commit message.
 
@@ -158,8 +158,9 @@ change.
 The reviewer binary and workflow definition are loaded from the protected base
 revision; the PR revision is only ever diffed, never executed.
 
-Changes to `REVIEW.md`, `.github/workflows/review.yml`, `.github/rulesets/`, or
-production and governance files under `cmd/ai-review/` are deterministic §3
+Changes to `REVIEW.md`, `.github/workflows/review.yml`, `.github/rulesets/`,
+repository-local action manifests, or production and governance files under
+`cmd/ai-review/` are deterministic §3
 escalation triggers, so the candidate revision cannot approve changes to its
 own review authority. Protected owner and dependency paths use normalized
 Unicode case-fold identities and symmetric ancestor/descendant matching, so a

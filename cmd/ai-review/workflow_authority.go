@@ -27,11 +27,26 @@ var criticalWorkflowWriteScopes = map[string]bool{
 	// https://docs.github.com/en/enterprise-cloud@latest/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file
 	"security-events": true,
 	"statuses":        true,
+	// issues: write is review-control authority, not a low-blast reporting
+	// permission. GitHub models pull requests as issues, so the issues API
+	// adds and removes *pull request* labels; the labels in
+	// [mergeloop.DefaultBlockLabels] are the human-only merge block. A
+	// workflow holding this scope can therefore strip needs-security-review
+	// (or any peer) before the merge loop classifies the PR, which is exactly
+	// the bypass this classifier exists to close.
+	// Sources (verified 2026-08-18):
+	// https://docs.github.com/en/rest/issues/labels
+	// https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps
+	"issues": true,
 }
 
+// lowBlastWorkflowWriteScopes are write scopes that cannot reach source,
+// review, gate, deployment, signing, or merge-gate state. A scope belongs here
+// only when no API it unlocks can mutate a pull request's labels, checks,
+// statuses, reviews, or contents. TestMergeGateLabelScopesAreNeverLowBlast
+// keeps that invariant honest against the merge loop's own block labels.
 var lowBlastWorkflowWriteScopes = map[string]bool{
 	"discussions": true,
-	"issues":      true,
 }
 
 // workflowPrivilegeReason classifies only authority-bearing behavior. Routine

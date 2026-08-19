@@ -33,9 +33,18 @@ var escalationRules = []escalationRule{
 			// Git tree paths are case-sensitive, but supported case-insensitive
 			// checkouts can make an added case variant shadow the canonical
 			// trust-root bytes. Match case-fold aliases as protected too.
+			// A repository-local composite/docker/JavaScript action runs
+			// inside its caller's job, with the caller's secrets and
+			// GITHUB_TOKEN. The action file carries no evidence of that
+			// borrowed authority, and the workflow authority classifier only
+			// inspects changed .github/workflows/* identities, so an
+			// action-only change would otherwise ride the automated path
+			// while executing at its privileged caller's level.
 			return normalizedPathRelated(p, "REVIEW.md") ||
 				normalizedPathRelated(p, ".github/workflows/review.yml") ||
-				normalizedPathRelated(p, ".github/rulesets")
+				normalizedPathRelated(p, ".github/rulesets") ||
+				normalizedPathRelated(p, ".github/actions") ||
+				isLocalActionDefinition(p)
 		},
 	},
 	{
@@ -57,7 +66,7 @@ var escalationRules = []escalationRule{
 	},
 	{
 		reason: "pre/post-tool hook change or hook registration",
-		exempt: isCanonicalHookOwnerSpec,
+		exempt: isHookOwnerAutomatedPath,
 		match: func(p string) bool {
 			lower := normalizedPathIdentity(p)
 			base := basename(lower)
@@ -93,6 +102,7 @@ var escalationRules = []escalationRule{
 	},
 	{
 		reason: "security boundary change (write guard, deny rules, PII manifest)",
+		exempt: isAIReviewGoTestPath,
 		match: func(p string) bool {
 			lower := normalizedPathIdentity(p)
 			// Match the packages that *own* the boundary, not just filename
@@ -182,6 +192,15 @@ func isAIReviewGoTestPath(path string) bool {
 	// package build. Fold the owner directory for checkout-alias safety, but
 	// never fold the suffix: *_TEST.go and *_teſt.go can be production inputs.
 	return strings.HasPrefix(lower, "cmd/ai-review/") && strings.HasSuffix(path, "_test.go")
+}
+
+// isLocalActionDefinition reports a repository-local action manifest. Local
+// actions are not confined to .github/actions — a workflow may reference any
+// in-tree directory ("uses: ./tools/deploy") — so the manifest basename is the
+// portable owner marker.
+func isLocalActionDefinition(path string) bool {
+	base := basename(normalizedPathIdentity(path))
+	return base == "action.yml" || base == "action.yaml"
 }
 
 func isCanonicalHookOwnerSpec(path string) bool {
@@ -284,12 +303,11 @@ func EscalationTriggers(changedPaths []string, prBody, commitMessages string) []
 		if p == "" {
 			continue
 		}
-		// Go test files cannot enter the production reviewer binary. Keep a
-		// pure test-hardening change autonomous while --no-renames ensures that
-		// either production side of a boundary-crossing rename is still seen.
-		if isAIReviewGoTestPath(p) || isHookGoTestPath(p) {
-			continue
-		}
+		// Go test files cannot enter the production reviewer binary, so the
+		// owning rule exempts them (REVIEW.md §3, AIREV-31). The carveout is
+		// rule-local on purpose: an exact _test.go beneath a hook or reviewer
+		// owner must still fire an independent migration, permission, or
+		// infrastructure trigger, which a loop-wide skip would erase.
 		for _, rule := range escalationRules {
 			if rule.exempt != nil && rule.exempt(p) {
 				continue

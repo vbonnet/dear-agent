@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
+	"github.com/vbonnet/dear-agent/internal/mergeloop"
 )
 
 const ordinaryReadOnlyWorkflow = `name: CI
@@ -51,11 +53,10 @@ func TestWorkflowPrivilegeReason_CurrentClaudeWorkflow(t *testing.T) {
 }
 
 func TestWorkflowPrivilegeReason_LowBlastWritesStayAutomated(t *testing.T) {
-	workflow := `name: issue audit
+	workflow := `name: discussion audit
 on: push
 permissions:
   contents: read
-  issues: write
   discussions: write
 jobs:
   audit:
@@ -63,10 +64,63 @@ jobs:
     steps:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh issue list
+        run: gh api /repos/vbonnet/dear-agent/discussions
 `
 	if reason, privileged := workflowPrivilegeReason([]byte(workflow)); privileged {
-		t.Fatalf("issue-write-only workflow escalated: %s", reason)
+		t.Fatalf("discussion-write-only workflow escalated: %s", reason)
+	}
+}
+
+// TestMergeGateLabelScopesAreNeverLowBlast is the there-is-no-bypass proof for
+// the autonomous merge gate.
+//
+// [mergeloop.Policy.policyBlock] treats [mergeloop.DefaultBlockLabels] as the
+// human-only block on autonomous merge, and labels are mutable repository
+// state. Any workflow token scope that can mutate a pull request's labels can
+// therefore erase that block before the merge loop ever classifies the PR. The
+// only durable defence is that a change granting such a scope can never ride
+// the automated review path itself, so this test pins every label-mutating
+// scope to the critical set and proves the classifier agrees end to end.
+func TestMergeGateLabelScopesAreNeverLowBlast(t *testing.T) {
+	if len(mergeloop.DefaultBlockLabels) == 0 {
+		t.Fatal("merge loop declares no block labels; the gate this test protects is gone")
+	}
+	// GitHub models pull requests as issues, so the issues API labels PRs and
+	// the pull-requests scope labels them directly. Both are review control.
+	labelMutatingScopes := []string{"issues", "pull-requests"}
+	for _, scope := range labelMutatingScopes {
+		if lowBlastWorkflowWriteScopes[scope] {
+			t.Errorf("%s: write can add or remove the merge-gate labels %v but is classified low-blast",
+				scope, mergeloop.DefaultBlockLabels)
+		}
+		if !criticalWorkflowWriteScopes[scope] {
+			t.Errorf("%s: write can add or remove the merge-gate labels %v but is not classified critical",
+				scope, mergeloop.DefaultBlockLabels)
+		}
+		workflow := `name: gate bypass
+on: push
+permissions:
+  contents: read
+  ` + scope + `: write
+jobs:
+  strip:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr edit 1 --remove-label ` + mergeloop.DefaultBlockLabels[0] + `
+`
+		reason, privileged := workflowPrivilegeReason([]byte(workflow))
+		if !privileged {
+			t.Errorf("workflow granting %s: write stayed on the automated path (reason=%q)", scope, reason)
+		}
+	}
+	// The remaining low-blast scopes must be provably unable to reach labels.
+	// Adding one here without that proof is the bypass, so the set is pinned.
+	wantLowBlast := map[string]bool{"discussions": true}
+	if !maps.Equal(lowBlastWorkflowWriteScopes, wantLowBlast) {
+		t.Errorf("low-blast write scopes = %v, want %v; a new entry needs a documented proof that it cannot mutate pull-request labels, checks, statuses, reviews, or contents",
+			lowBlastWorkflowWriteScopes, wantLowBlast)
 	}
 }
 
@@ -157,22 +211,34 @@ func TestWorkflowPrivilegeReason_CurrentTreeGolden(t *testing.T) {
 		}
 	}
 	slices.Sort(privileged)
+	// The audit workflows below hold issues: write, which labels pull
+	// requests and so carries merge-gate authority (see
+	// TestMergeGateLabelScopesAreNeverLowBlast).
 	want := []string{
 		"branch-protection-audit.yml",
+		"bypassed-merge-audit.yml",
+		"ci-health-monitor.yml",
 		"claude-code-review.yml",
 		"claude.yml",
 		"codeql.yml",
 		"deepsec.yml",
 		"dependabot-automerge.yml",
+		"dependency-freshness.yml",
 		"gemini-review.yml",
 		"go-ci-reusable.yml",
 		"go-toolchain-bump.yml",
 		"infra-repo-reconcile.yml",
+		"main-health-watchdog.yml",
+		"merge-audit.yml",
+		"monthly-audit.yml",
 		"pr-review-agent.yml",
+		"pr-size-scope.yml",
 		"release.yml",
 		"review.yml",
 		"routing-enforcement.yml",
 		"sbom-scan.yml",
+		"security-audit.yml",
+		"stale-branch-audit.yml",
 		"tofu-drift.yml",
 		"tofu-plan.yml",
 	}
@@ -347,6 +413,15 @@ jobs:
 
 func TestPrivilegedWorkflowEscalationTriggers_BaseAndHead(t *testing.T) {
 	ordinaryChanged := strings.Replace(ordinaryReadOnlyWorkflow, "go test ./...", "go test -race ./...", 1)
+	// Cron frequency is a cost and unattended-execution signal that no
+	// permission scope reveals, so it is compared across the revisions rather
+	// than classified from a single blob.
+	scheduledReadOnlyWorkflow := strings.Replace(ordinaryReadOnlyWorkflow, "on:\n  pull_request:\n",
+		"on:\n  pull_request:\n  schedule:\n    - cron: '0 6 * * 1'\n", 1)
+	frequentScheduleWorkflow := strings.Replace(scheduledReadOnlyWorkflow, "0 6 * * 1", "*/5 * * * *", 1)
+	scheduledWorkflowChanged := strings.Replace(scheduledReadOnlyWorkflow, "go test ./...", "go test -race ./...", 1)
+	ambiguousScheduleWorkflow := strings.Replace(scheduledReadOnlyWorkflow, "  schedule:\n",
+		"  SCHEDULE:\n    - cron: '0 6 * * 1'\n  schedule:\n", 1)
 	criticalWithoutPrivilege := strings.ReplaceAll(criticalWorkflow, "  id-token: write\n", "")
 	criticalWithoutPrivilege = strings.Replace(criticalWithoutPrivilege, "${{ secrets.CUSTOM_AGENT_TOKEN }}", "${{ secrets.GITHUB_TOKEN }}", 1)
 	guardWeakened := strings.Replace(criticalWorkflow, `contains(fromJSON('["OWNER","MEMBER"]'), github.event.comment.author_association)`, "contains(github.event.comment.body, '@agent')", 1)
@@ -386,6 +461,11 @@ jobs:
 		{"reorder privileged matrix axes", new(orderedMatrix), new(reorderedMatrix), true},
 		{"reorder uppercase INCLUDE matrix axis", new(uppercaseIncludeAxisMatrix), new(reorderedUppercaseIncludeAxisMatrix), true},
 		{"relocate reserved matrix include", new(reservedMatrix), new(relocatedReservedMatrix), false},
+		{"add schedule to a read-only workflow", new(ordinaryReadOnlyWorkflow), new(scheduledReadOnlyWorkflow), true},
+		{"speed up an existing schedule", new(scheduledReadOnlyWorkflow), new(frequentScheduleWorkflow), true},
+		{"remove a schedule", new(scheduledReadOnlyWorkflow), new(ordinaryReadOnlyWorkflow), true},
+		{"edit a scheduled workflow without retiming it", new(scheduledReadOnlyWorkflow), new(scheduledWorkflowChanged), false},
+		{"duplicate case-fold schedule keys", new(scheduledReadOnlyWorkflow), new(ambiguousScheduleWorkflow), true},
 		{"malformed head", new(ordinaryReadOnlyWorkflow), new("on: [\n"), true},
 		{"oversize head", new(ordinaryReadOnlyWorkflow), new(strings.Repeat("#", maxWorkflowBlobBytes+1)), true},
 	}

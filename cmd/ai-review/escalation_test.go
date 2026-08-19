@@ -9,10 +9,18 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		want  bool
 	}{
 		{"ordinary workflow", []string{".github/workflows/structural-health.yml"}, false},
-		{"ordinary custom action", []string{".github/actions/setup-go/action.yml"}, false},
+		// A repository-local action executes inside its caller's privileged
+		// job, and no workflow path changes when only the action does.
+		{"local composite action", []string{".github/actions/setup-go/action.yml"}, true},
+		{"local composite action script", []string{".github/actions/setup-go/setup.sh"}, true},
+		{"local action outside .github", []string{"tools/deploy/action.yaml"}, true},
+		{"local action case-fold alias", []string{"tools/deploy/Action.YML"}, true},
 		{"authoritative review policy", []string{"REVIEW.md"}, true},
+		{"lowercase alias of review policy", []string{"review.md"}, true},
 		{"case-fold alias of review policy", []string{"Review.md"}, true},
 		{"trusted review workflow", []string{".github/workflows/review.yml"}, true},
+		{"lowercase alias of review workflow", []string{".github/workflows/review.yaml"}, false},
+		{"mixed-case alias of review workflow", []string{".github/workflows/Review.Yml"}, true},
 		{"case-fold alias of review workflow", []string{".GitHub/Workflows/Review.yml"}, true},
 		{"review gate implementation", []string{"cmd/ai-review/escalation.go"}, true},
 		{"review gate governance", []string{"cmd/ai-review/SPEC.md"}, true},
@@ -47,6 +55,13 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"AGM internal hook Unicode alias", []string{"agm/internal/hookſ/living_docs_check.go"}, true},
 		{"AGM internal hook descendant", []string{"agm/internal/hooks/living_docs_check.go"}, true},
 		{"AGM internal hook Go test", []string{"agm/internal/hooks/exit_gate_test.go"}, false},
+		// The Go-test carveout is owned by the rule that granted it, so an
+		// independent trigger under the same owner still fires.
+		{"hook migration Go test keeps independent trigger", []string{"agm/internal/hooks/migrations/schema_test.go"}, true},
+		{"hook permission Go test keeps independent trigger", []string{"agm/internal/hooks/permissions/policy_test.go"}, true},
+		{"hook launchd Go test keeps independent trigger", []string{"agm/internal/hooks/launchd/plan_test.go"}, true},
+		{"review permission Go test keeps independent trigger", []string{"cmd/ai-review/permission_test.go"}, true},
+		{"review migration Go test keeps independent trigger", []string{"cmd/ai-review/migrations/apply_test.go"}, true},
 		{"OpenCode hook contract", []string{".opencode/hooks/SPEC.md"}, false},
 		{"Pi guardrail contract", []string{".pi/guardrails/SPEC.md"}, false},
 		{"AGM Git hook contract", []string{"agm/.githooks/SPEC.md"}, false},

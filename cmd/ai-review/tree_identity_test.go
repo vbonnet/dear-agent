@@ -542,6 +542,7 @@ func TestParseTreeIdentityIndexRejectsMalformedAndBoundedEvidence(t *testing.T) 
 		{name: "entry bound", input: entry("100644", "blob", "one") + entry("100644", "blob", "two"), limits: treeIdentityLimits{entries: 1, peers: 4, components: 8}},
 		{name: "peer bound", input: entry("100644", "blob", "alias") + entry("100644", "blob", "ALIAS"), limits: treeIdentityLimits{entries: 4, peers: 1, components: 8}},
 		{name: "component bound", input: entry("040000", "tree", "dir") + entry("100644", "blob", "dir/file"), limits: treeIdentityLimits{entries: 4, peers: 4, components: 1}},
+		{name: "record bound", input: entry("100644", "blob", strings.Repeat("p", maxTreeIdentityRecordBytes)), limits: defaults},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -555,6 +556,32 @@ func TestParseTreeIdentityIndexRejectsMalformedAndBoundedEvidence(t *testing.T) 
 	cancel()
 	if _, err := parseTreeIdentityIndex(ctx, []byte(entry("100644", "blob", "file")), defaults); err == nil {
 		t.Fatal("canceled tree identity parsing was accepted")
+	}
+}
+
+// TestTreeIdentityInventoryBoundIsDerivedFromEntryLimit keeps the byte bound a
+// consequence of the declared entry limit. A whole-repository `ls-tree -r -t`
+// inventory is not a diff, so reusing the diff-sized maxGitMetadataBytes made
+// an undeclared byte cap bind first and would have failed every review once
+// the repository outgrew it.
+func TestTreeIdentityInventoryBoundIsDerivedFromEntryLimit(t *testing.T) {
+	if maxTreeIdentityBytes <= maxGitMetadataBytes {
+		t.Errorf("inventory bound %d is not larger than the diff-sized metadata bound %d",
+			maxTreeIdentityBytes, maxGitMetadataBytes)
+	}
+	// Every record the parser accepts fits in maxTreeIdentityRecordBytes, so
+	// the byte bound admits at least this many entries no matter how the
+	// repository is shaped.
+	guaranteedEntries := maxTreeIdentityBytes / maxTreeIdentityRecordBytes
+	if guaranteedEntries < 64*1024 {
+		t.Errorf("inventory bound guarantees only %d entries at the worst permitted record size", guaranteedEntries)
+	}
+	// A 256-component path at one byte per component must still fit one
+	// record, or the two declared limits would contradict each other.
+	const worstCasePathBytes = maxTreeIdentityPathComponents*2 - 1
+	const recordMetadataBytes = len("100644 blob ") + 40 + len("\t") + len("\x00")
+	if worstCasePathBytes+recordMetadataBytes > maxTreeIdentityRecordBytes {
+		t.Errorf("record bound %d cannot hold a %d-component path", maxTreeIdentityRecordBytes, maxTreeIdentityPathComponents)
 	}
 }
 
