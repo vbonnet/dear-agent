@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -63,31 +64,30 @@ type QuotaDecision struct {
 
 // EvaluateProviderQuota reduces a quota snapshot to a per-provider routing
 // decision. The most constrained active window wins.
-func EvaluateProviderQuota(snapshot *QuotaSnapshot, family string, now time.Time, policy QuotaPolicy) QuotaDecision {
+//
+// account scopes evaluation to the ProviderQuota whose Account matches when
+// non-empty, so an exhausted inactive account under the same family cannot
+// make the router avoid the healthy account it is actually about to use.
+// Pass "" to aggregate across every account CodexBar reports for the family
+// (only safe when the caller has not yet chosen a specific account).
+func EvaluateProviderQuota(snapshot *QuotaSnapshot, family, account string, now time.Time, policy QuotaPolicy) QuotaDecision {
 	decision := QuotaDecision{Family: family}
 	if snapshot == nil {
 		decision.Reason = "quota snapshot unavailable"
 		return decision
 	}
-	if policy.MaxSnapshotAge > 0 && !snapshot.Generated.IsZero() && now.Sub(snapshot.Generated) > policy.MaxSnapshotAge {
-		decision.SnapshotStale = true
-		decision.Reason = "quota snapshot stale"
-		return decision
+	if policy.MaxSnapshotAge > 0 {
+		// A zero Generated timestamp means the snapshot's age cannot be
+		// established at all; treat that as stale rather than letting it
+		// bypass freshness enforcement and influence routing indefinitely.
+		if snapshot.Generated.IsZero() || now.Sub(snapshot.Generated) > policy.MaxSnapshotAge {
+			decision.SnapshotStale = true
+			decision.Reason = "quota snapshot stale"
+			return decision
+		}
 	}
 
-	found := false
-	minRemaining := 100.0
-	for _, provider := range snapshot.Providers {
-		if provider.Family != family {
-			continue
-		}
-		for _, window := range provider.Windows {
-			found = true
-			if window.RemainingPercent < minRemaining {
-				minRemaining = window.RemainingPercent
-			}
-		}
-	}
+	minRemaining, found := minActiveRemainingPercent(snapshot.Providers, family, account, now)
 	if !found {
 		decision.Reason = "provider quota unavailable"
 		return decision
@@ -105,6 +105,35 @@ func EvaluateProviderQuota(snapshot *QuotaSnapshot, family string, now time.Time
 		decision.Reason = "quota available"
 	}
 	return decision
+}
+
+// minActiveRemainingPercent scans snapshot providers matching family (and
+// account, when non-empty) and returns the lowest RemainingPercent among
+// their currently-active windows. found is false when no matching window
+// was seen at all. A window whose ResetAt has already passed is skipped: it
+// no longer reflects the active quota period, so counting its old usage
+// toward the minimum could avoid/deprioritize a provider that has actually
+// reset.
+func minActiveRemainingPercent(providers []ProviderQuota, family, account string, now time.Time) (minRemaining float64, found bool) {
+	minRemaining = 100.0
+	for _, provider := range providers {
+		if provider.Family != family {
+			continue
+		}
+		if account != "" && provider.Account != account {
+			continue
+		}
+		for _, window := range provider.Windows {
+			if !window.ResetAt.IsZero() && !now.Before(window.ResetAt) {
+				continue
+			}
+			found = true
+			if window.RemainingPercent < minRemaining {
+				minRemaining = window.RemainingPercent
+			}
+		}
+	}
+	return minRemaining, found
 }
 
 // CommandRunner is the execution seam used by CodexBarQuotaReader tests.
@@ -156,6 +185,27 @@ func (r CodexBarQuotaReader) ReadQuota(ctx context.Context) (*QuotaSnapshot, err
 	return snapshot, nil
 }
 
+// codexBarFamilyAliases maps identifiers CodexBar uses for a provider to the
+// router's canonical family name (pkg/llm/provider.Resolve), per the default
+// alias table in ADR-038. Without this, EvaluateProviderQuota's exact-string
+// family match silently misses a snapshot that only carries CodexBar's own
+// "claude"/"codex"/"google" labels instead of "anthropic"/"openai"/"gemini".
+var codexBarFamilyAliases = map[string]string{
+	"claude": "anthropic",
+	"codex":  "openai",
+	"google": "gemini",
+}
+
+// canonicalFamily maps a CodexBar provider identifier to the router's
+// canonical family name when it is a known alias, and returns it unchanged
+// otherwise.
+func canonicalFamily(alias string) string {
+	if canonical, ok := codexBarFamilyAliases[strings.ToLower(alias)]; ok {
+		return canonical
+	}
+	return alias
+}
+
 // ParseCodexBarDashboard parses CodexBar dashboard v1 JSON into the generic
 // quota snapshot used by router policy.
 func ParseCodexBarDashboard(data []byte, fallbackGenerated time.Time) (*QuotaSnapshot, error) {
@@ -166,10 +216,10 @@ func ParseCodexBarDashboard(data []byte, fallbackGenerated time.Time) (*QuotaSna
 			Family  string `json:"family"`
 			Account string `json:"account"`
 			Windows []struct {
-				Name             string  `json:"name"`
-				RemainingPercent float64 `json:"remainingPercent"`
-				UsedPercent      float64 `json:"usedPercent"`
-				ResetAt          string  `json:"resetAt"`
+				Name             string   `json:"name"`
+				RemainingPercent *float64 `json:"remainingPercent"`
+				UsedPercent      float64  `json:"usedPercent"`
+				ResetAt          string   `json:"resetAt"`
 			} `json:"windows"`
 		} `json:"providers"`
 	}
@@ -196,12 +246,20 @@ func ParseCodexBarDashboard(data []byte, fallbackGenerated time.Time) (*QuotaSna
 		if family == "" {
 			family = provider.ID
 		}
+		family = canonicalFamily(family)
 		quota := ProviderQuota{
 			Family:  family,
 			Account: provider.Account,
 			Windows: make([]QuotaWindow, 0, len(provider.Windows)),
 		}
 		for _, window := range provider.Windows {
+			if window.RemainingPercent == nil {
+				// CodexBar omitted, nulled, or regressed this field. Skip
+				// the window rather than let a silent zero-value read as
+				// exhausted quota (ADR-038: unavailable data must not
+				// affect availability).
+				continue
+			}
 			var resetAt time.Time
 			if window.ResetAt != "" {
 				parsed, err := time.Parse(time.RFC3339, window.ResetAt)
@@ -212,7 +270,7 @@ func ParseCodexBarDashboard(data []byte, fallbackGenerated time.Time) (*QuotaSna
 			}
 			quota.Windows = append(quota.Windows, QuotaWindow{
 				Name:             window.Name,
-				RemainingPercent: window.RemainingPercent,
+				RemainingPercent: *window.RemainingPercent,
 				UsedPercent:      window.UsedPercent,
 				ResetAt:          resetAt,
 			})
