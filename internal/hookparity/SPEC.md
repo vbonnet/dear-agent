@@ -1,17 +1,18 @@
 # Hook Harness Parity Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-08-13 -->
 
-**Version:** 1.0
+**Version:** 1.7
 **Status:** Baseline
 **Scope:** Repository-scoped hook manifests and shared guardrail hook scripts.
 
 ## Overview
 
-Hook parity means each active interactive harness receives the same repository
-guardrails through that harness's native hook configuration surface. Claude Code
-uses `.claude/settings.json`; Codex CLI uses `.codex/hooks.json`; AGY uses
-`.agents/hooks.json`; OpenCode uses `.opencode/hooks.json`; Pi uses native
+Hook parity means each active interactive harness receives equivalent governed
+outcomes through capabilities that its native surface actually exposes. Claude Code
+uses `.claude/settings.json`; Codex CLI uses `.codex/hooks.json`; AGY uses a
+named `.agents/hooks.json` map; OpenCode uses a `.opencode/plugins/` plugin;
+Pi uses native
 extension events projected through `.pi/hooks.json`.
 
 ## EARS Requirements
@@ -20,7 +21,7 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-02** When a hook-capable active harness configures `PreToolUse`, the system shall include spawn-routing, bead-close, bypass, and PR-lifecycle guardrails.
 
-**HHP-03** When a hook-capable active harness configures stop events, the system shall include guardrail feedback on `Stop` and `SubagentStop`.
+**HHP-03** When a harness supports terminal events, the system shall configure only its native terminal capability: Claude, Codex, and Pi expose Stop and SubagentStop; AGY exposes Stop only; OpenCode uses bounded `session.idle` follow-up rather than a stop hook.
 
 **HHP-04** When a hook manifest references a local hook script, the system shall keep the referenced script present and executable in the matching harness directory.
 
@@ -34,14 +35,49 @@ extension events projected through `.pi/hooks.json`.
 
 **HHP-09** While Beads lacks a native `pi-hook` command, the system shall use the behaviorally equivalent `codex-hook` lifecycle adapter and shall keep that compatibility boundary explicit in Pi's co-located specification.
 
+**HHP-10** When a harness reaches its supported terminal capability, the system shall invoke one provider-neutral staged SPEC contract adapter through a provider-specific transport with bounded continuation or follow-up feedback and no claim that a mutable source transport is installed or runtime-loaded; a successful staged-change reminder shall direct every provider projection to `docs/spec-authoring.md` and the single-source `spec-governance/skills/write-spec/SKILL.md` workflow without copying that skill or claiming native discovery.
+
+**HHP-11** When a harness lacks a lifecycle event or a neutral pre-tool decision that preserves its ordinary permission flow, the system shall omit the active projection and shall record the capability boundary rather than translate success into automatic approval or unconditional prompting; a governance-required legacy path may remain only as exact inert retirement metadata with no hook payload or runtime claim.
+
+**HHP-12** Where a harness can surface remediation only as an idle-session follow-up, when the neutral guard returns feedback after a distinct user turn, the harness shall issue no more than one follow-up for that turn, shall not treat its own or repeated message updates as new turns, shall cease follow-ups safely after its bounded turn-history capacity is reached, shall cap globally retained session state by yielding untracked sessions rather than evicting continuation state, and shall admit a yielded session after explicit deletion frees capacity; when that transport launches the neutral adapter asynchronously, it shall isolate the complete adapter tree in a POSIX process group, pin a trusted group-leader identity through cleanup, capture stdout and stderr incrementally within one combined 64 KiB budget, obtain bounded adapter status through a supervisor-owned channel not inherited by the adapter, drain retained output within fixed bounds, request identity-relative cleanup through a separate supervisor-owned channel whose closure independently cleans up after parent loss rather than use parent-side numeric process signaling, terminate contained descendants and await the direct supervisor on completion, output exhaustion, or timeout, accept completion only after the expected supervisor-owned group termination is observed, fail conservatively where process-group termination is unavailable, and preserve the single-attempt state before awaiting it.
+
+**HHP-13** When AGY configures its bounded SPEC review, its source manifest shall name the absolute operator-owned adapter and that adapter shall select exactly one valid absolute Git workspace supplied by the native hook input rather than rely on the hook process current directory; the Git query that validates that workspace shall have a fixed timeout, isolate and cancel its process group where the platform supports it, and bound output-pipe draining when a descendant retains a descriptor.
+
+**HHP-14** When AGY supplies an invalid, missing, or ambiguous workspace root, the adapter shall bound remediation to one continuation per stable conversation and failure identity without assuming whether the native execution sequence starts at zero or one; a repeated or missing identity, or unavailable private claim state, shall allow termination.
+
+**HHP-15** When Pi projects Stop or SubagentStop through multiple matching handlers, the Pi adapter shall execute every matching handler admitted by its total count and execution-deadline budgets before returning bounded aggregate blocking reasons and advisory contexts; it shall honor each validated manifest timeout up to 120 seconds without silently shortening the canonical 60-second and 120-second terminal chain, cap captured output, bound feedback while collecting it, and fail closed when a count or aggregate deadline budget is exhausted; on POSIX, each handler shall run beneath a trusted pinned group leader whose authenticated control channel is not inherited by the handler, that leader shall tear down its own process group after normal completion, output exhaustion, or timeout, real handler status and bounded output shall survive a fixed drain window, and the parent shall issue no numeric process signal after launch, shall require both a token-bound cleanup acknowledgement and an observed supervisor `SIGKILL` exit before accepting cleanup, and shall hard-settle and fail closed within a fixed bound after any other exit or loss of the control channel or leader identity.
+
 **HHP-16** When an operator audits the installed SPEC helper, the status surface shall remain read-only while separately reporting the stable cooperative leaf and the digest-derived content-addressed leaf, and it shall report aggregate current success only when both required identities are current; for each identity it shall report missing or stale bytes and reject any leaf or trusted ancestor that is not owned by UID 0, non-writable by group and world, a non-symlink of the required kind, searchable by unprivileged launchers at every ancestor, and readable and executable without set-user-ID, set-group-ID, or other special mode bits at the leaf; before reporting a missing leaf it shall still validate the complete existing trusted ancestry, inaccessible or unsafe trusted ancestry shall be reported as untrusted rather than an inspection failure, and after hashing the surface shall revalidate both the open descriptor and deployed pathname against the admitted identity before reporting the digest.
+
+**HHP-17** When AGM launches unattended Codex with a recognizable terminal SPEC adapter, the system shall replace that source adapter only after the governed installer has published a trusted no-clobber content-addressed helper whose bytes match the revision-matched expected artifact digest embedded by the governed AGM build, bind the canonical repository root, disable the mutable project copy, execute that exact digest path, and revalidate both the invocation path and expected digest immediately before every adapter execution; a later activation of the stable cooperative helper path shall not change the executable inode used by the existing session; when the deployed helper has changed, the adapter shall validate the bounded native envelope without evaluating mutable checkout state, shall block once per native session and turn identity, shall yield a repeated identity, and when private claim state is unavailable shall fail closed for an ordinary first stop while yielding an active continuation to avoid an unbounded retry.
+
+**HHP-18** When Claude or Codex terminal feedback runs, the adapter shall bind its attempt to the native session and deterministic feedback identity, shall include Codex's bounded native turn identity in the Codex attempt, shall clear Claude's prior session claim on the native `UserPromptSubmit` boundary, shall allow at most one blocker among concurrent invocations of the same attempt, shall block once for a fresh identity even when a sibling hook caused the provider-global active continuation, shall yield a repeated identity without claiming compliance, and shall use the provider-global flag only as a liveness fallback when private claim state is unavailable.
 
 **HHP-19** When the installed SPEC helper status surface rebuilds its expected artifact from unchanged source and provenance, the build shall use stable source-derived stamp input, path-independent compilation, disabled ambient Go workspace mode, and disabled implicit VCS stamping so separate invocations produce comparable bytes instead of wall-clock drift.
 
-**HHP-22** When automation needs the installed-helper status exit contract, the system shall provide a directly runnable built status artifact that emits one aggregate JSON result with separate stable and content-addressed details and preserves exit 0 only when both identities are current, 1 when either is missing, stale, or untrusted, and 2 for inspection or usage failure; a Make convenience target may expose Make's documented recipe-failure translation.
+**HHP-20** Where a cooperative terminal adapter cannot establish a stable retry identity because its invocation or bounded input is invalid, the adapter shall yield termination with advisory feedback instead of creating an unbounded fail-closed loop, without weakening the separately enforced changed-SPEC CI decision.
+
+**HHP-21** When a plain Codex source hook runs without an AGM or Claude repository-root environment variable, the adapter command shall resolve the canonical Git worktree root from the native session working directory before invoking repository source.
 
 **HHP-26** When a helper verifies its own revision-bound digest, the system shall require the running executable to be the digest-derived content-addressed path, shall authenticate that path's bytes and trusted identity, and on a platform that exposes a handle on the running image shall additionally require that image to be the same file whose bytes were hashed, so an atomic replacement between exec and verification cannot leave an older image running against newer expected bytes. Where no such handle exists the content-addressed pathname is the only available binding, and that residual shall be recorded rather than reported as proof.
+
+**HHP-22** When automation needs the installed-helper status exit contract, the system shall provide a directly runnable built status artifact that emits one aggregate JSON result with separate stable and content-addressed details and preserves exit 0 only when both identities are current, 1 when either is missing, stale, or untrusted, and 2 for inspection or usage failure; a Make convenience target may expose Make's documented recipe-failure translation.
+
+**HHP-23** When Pi aggregates terminal handlers, the SPEC adapter shall return a bounded deterministic feedback identity and the persistent Pi extension shall allow one follow-up for each fresh identity despite sibling continuation state, suppress repeats, retain a finite per-turn continuation budget, and reset that budget on a real interactive or RPC turn.
+
+**HHP-24** When a provider-native hook response exceeds the serialized output limit, the adapter shall emit a complete compact response without changing the terminal outcome: a block remains a block, an AGY continuation remains a continuation, and a top-level or hook-specific yield remains non-blocking while preserving its native event and valid deterministic feedback identity.
+
+**HHP-25** When OpenCode invokes its native `tool.execute.before` plugin hook for Bash or the scheduled-task creation tool, the plugin shall translate the native tool arguments to the repository PreToolUse envelope and execute only the applicable routing, bead-close, bypass, and PR-lifecycle scripts from the project worktree with fixed per-script deadlines and a per-script incrementally enforced shared stdout-plus-stderr 64 KiB budget; each script shall run under the same isolated trusted-supervisor, supervisor-owned cleanup, bounded drain, and validated group-reap invariants as the OpenCode terminal adapter; a denial, timeout, malformed response, execution failure, or unverified cleanup shall block before the tool runs, an advisory result shall use non-blocking native toast feedback without mutating the tool arguments, unrelated tools shall not run Bash-only scripts, and the legacy JSON projection shall remain exact inert retirement metadata.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/hook_parity.feature`
+
+## Package Test Traceability
+
+- `internal/hookparity/hookparity_test.go`
+- `internal/hookparity/opencode_plugin_test.go`
+- `cmd/spec-contract-hook/main_test.go`
+- `cmd/spec-contract-hook/reminder_state_test.go`
+- `cmd/spec-contract-hook-status/main_test.go`
+- `tests/buildstamp/buildstamp_test.go`

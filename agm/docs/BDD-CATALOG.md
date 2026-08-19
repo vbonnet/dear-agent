@@ -9,9 +9,12 @@ AGM's SPEC invariants executable: each one is driven directly against the real
 ## Overview
 
 Scenarios are written in Gherkin and executed by `godog` via `TestFeatures`.
-There is **no tag filter**: every `.feature` file under `test/bdd/features/`
-runs on every build. A scenario whose steps are not implemented fails as
-`undefined` rather than being skipped — so this catalog can never drift back
+There is **no tag filter**: every direct-child `.feature` file in
+`test/bdd/features/` runs on every build. Nested files and basenames outside
+the shared ASCII letter, digit, dot, underscore, and hyphen grammar are rejected
+because Godog would execute them outside this flat parseable catalog and the
+shared governance registries. A scenario whose steps are not implemented fails
+as `undefined` rather than being skipped — so this catalog can never drift back
 into listing tests that do not actually run.
 
 **Location:** [`test/bdd/features/`](../test/bdd/features/)
@@ -537,11 +540,23 @@ entrypoints should only add model/harness-specific guidance.
 **Drives:** repository hook manifests and `internal/hookparity`.
 
 **Key scenarios:**
-- Claude Code, Codex CLI, AGY, OpenCode, and Pi expose the required PreToolUse
-  guardrails.
-- Stop and SubagentStop feedback hooks are configured.
-- Non-Claude harnesses expose Beads lifecycle hooks through their native hook
+- Claude Code, Codex CLI, and Pi expose the shared guardrails through native
+  hook manifests; OpenCode exposes the same pre-tool outcomes through its
+  native project plugin while its unsupported legacy JSON projection remains
+  inert, and AGY omits unsupported legacy pre-tool projections.
+- Every active harness exposes bounded SPEC review through its available native
+  capability, including terminal feedback or an idle-session fallback.
+- Codex CLI and Pi expose Beads lifecycle hooks through their native hook
   manifests.
+- Every projected staged-SPEC reminder routes agents to `docs/spec-authoring.md`
+  and the single-source `spec-governance/skills/write-spec/SKILL.md` workflow
+  without claiming native skill discovery.
+- Idle-session fallback feedback remains one attempt per distinct real turn,
+  yields safely at bounded message and global-session limits, ignores recursive
+  synthetic updates, and admits yielded sessions after tracked state is deleted.
+- Pi terminal aggregation applies handler-count, per-handler runtime/output,
+  total-deadline, and aggregate-feedback bounds while preserving admitted
+  multi-handler feedback and failing closed on exhaustion.
 - The repository post-merge hook exposes its lifecycle safeguards.
 
 **Why this matters:** Safety and dogfooding guardrails must travel with every
@@ -1402,10 +1417,13 @@ or unredacted trace content would break parity or privacy for every caller.
 - Every parity BDD feature references its governing `SPEC.md`.
 - Every registered parity `SPEC.md` has a completed audit marker.
 - Every `*_parity.feature` file is registered in the coverage matrix.
-- Changed production Go package directories carry a co-located `SPEC.md`.
-- Changed production Go package `SPEC.md` files pass strict EARS lint.
-- The actual checkout gives every implementation directory strict co-located
-  SPEC and reciprocal executable BDD coverage across supported source formats.
+- Changed production Go package directories declare exactly one governed
+  contract through a local `SPEC.md` or checked `SPEC.owner` edge.
+- Changed production Go packages resolve a canonical `SPEC.md` that passes
+  strict EARS lint.
+- The actual checkout gives every implementation directory exactly one strict
+  local or shared SPEC owner with reciprocal executable BDD coverage across
+  supported source formats.
 - Every SPEC artifact, including doc-only and hidden policy contracts, retains
   strict EARS and reciprocal executable BDD traceability.
 

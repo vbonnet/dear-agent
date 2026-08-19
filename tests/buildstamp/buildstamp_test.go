@@ -2,6 +2,7 @@ package buildstamp_test
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -518,6 +519,102 @@ func TestGovernedBuildRecipesUseSharedStampSeam(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "go run ./internal/buildstamp git-commit") {
 		t.Error("default Git commit does not use the internal shell-free provenance adapter")
+	}
+	for _, required := range []string{
+		`source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"`,
+		`export _BUILD_STAMP_DATE="$$source_date"`,
+		`mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_ARTIFACT))"`,
+		`CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)"`,
+		`status-spec-contract-hook: build-spec-contract-hook build-spec-contract-hook-status`,
+		`build-agm: build-spec-contract-hook`,
+		`-X github.com/vbonnet/dear-agent/agm/internal/codexhooks.expectedSpecContractHookSHA256=$$expected_spec_hook_hash`,
+	} {
+		if !strings.Contains(string(data), required) {
+			t.Errorf("SPEC helper expected-artifact build omits reproducibility seam %q", required)
+		}
+	}
+}
+
+func TestSpecContractHookExpectedArtifactIsReproducible(t *testing.T) {
+	requireMake(t)
+	root := sourceRoot(t)
+	first := filepath.Join(t.TempDir(), "first", "spec-contract-hook")
+	second := filepath.Join(t.TempDir(), "second", "spec-contract-hook")
+	build := func(artifact, wallClockDate string) [sha256.Size]byte {
+		t.Helper()
+		output, err := runMakeAt(t, root, nil,
+			"build-spec-contract-hook",
+			"SPEC_CONTRACT_HOOK_ARTIFACT="+artifact,
+			"VERSION="+testBuildVersion,
+			"GIT_COMMIT="+testBuildCommit,
+			"BUILD_DATE="+wallClockDate,
+			"GOFLAGS=-p=2",
+		)
+		if err != nil {
+			t.Fatalf("build reproducible SPEC helper: %v\n%s", err, output)
+		}
+		body, err := os.ReadFile(artifact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sha256.Sum256(body)
+	}
+	firstDigest := build(first, "2026-01-01T00:00:00Z")
+	secondDigest := build(second, "2026-12-31T23:59:59Z")
+	if firstDigest != secondDigest {
+		t.Fatalf("source-identical SPEC helper digests differ: %x != %x", firstDigest, secondDigest)
+	}
+}
+
+func TestSpecContractHookStatusArtifactPreservesDirectExitContract(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("operator-owned SPEC helper auditing requires Unix ownership and mode semantics")
+	}
+	requireMake(t)
+	root := sourceRoot(t)
+	directory := t.TempDir()
+	expected := filepath.Join(directory, "spec-contract-hook")
+	statusArtifact := filepath.Join(directory, "spec-contract-hook-status")
+	missing := filepath.Join(directory, "missing-deployment")
+	output, err := runMakeAt(t, root, nil,
+		"build-spec-contract-hook",
+		"build-spec-contract-hook-status",
+		"SPEC_CONTRACT_HOOK_ARTIFACT="+expected,
+		"SPEC_CONTRACT_HOOK_STATUS_ARTIFACT="+statusArtifact,
+		"VERSION="+testBuildVersion,
+		"GIT_COMMIT="+testBuildCommit,
+		"BUILD_DATE="+testBuildDate,
+		"GOFLAGS=-p=2",
+	)
+	if err != nil {
+		t.Fatalf("build SPEC helper status artifacts: %v\n%s", err, output)
+	}
+
+	command := exec.Command(statusArtifact, "--artifact", expected, "--deployed", missing)
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	stdout, runErr := command.Output()
+	var exitErr *exec.ExitError
+	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("direct missing-helper status error = %v, want exit 1; stdout=%s stderr=%s", runErr, stdout, stderr.String())
+	}
+	if stderr.Len() != 0 || strings.Contains(string(stdout), "exit status 1") || strings.Count(string(stdout), "\n") != 1 {
+		t.Fatalf("direct status transport was not one clean JSON line: stdout=%q stderr=%q", stdout, stderr.String())
+	}
+	var status struct {
+		Status string `json:"status"`
+		Stable struct {
+			Status string `json:"status"`
+		} `json:"stable"`
+		ContentAddressed struct {
+			Status string `json:"status"`
+		} `json:"content_addressed"`
+	}
+	if err := json.Unmarshal(stdout, &status); err != nil ||
+		status.Status != "untrusted" ||
+		status.Stable.Status != "untrusted" ||
+		status.ContentAddressed.Status != "untrusted" {
+		t.Fatalf("direct composite status output = %q, status=%#v, error=%v", stdout, status, err)
 	}
 }
 
