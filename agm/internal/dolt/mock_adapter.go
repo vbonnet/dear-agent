@@ -146,6 +146,42 @@ func (m *MockAdapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 	return m.copyManifest(session), nil
 }
 
+// ReactivateSession clears an archived session's Lifecycle after checking no
+// other non-archived session already holds its name, mirroring the real
+// adapter's atomic name-reservation semantics closely enough for tests.
+func (m *MockAdapter) ReactivateSession(session *manifest.Manifest) (ReactivateSessionResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return ReactivateSessionResult{}, fmt.Errorf("adapter is closed")
+	}
+	if session == nil {
+		return ReactivateSessionResult{}, fmt.Errorf("session cannot be nil")
+	}
+	if session.SessionID == "" {
+		return ReactivateSessionResult{}, fmt.Errorf("session_id cannot be empty")
+	}
+	existing, exists := m.sessions[session.SessionID]
+	if !exists {
+		return ReactivateSessionResult{}, fmt.Errorf("session not found: %s", session.SessionID)
+	}
+	if existing.Lifecycle != manifest.LifecycleArchived {
+		return ReactivateSessionResult{}, fmt.Errorf("session is not archived: %s", session.SessionID)
+	}
+	for id, other := range m.sessions {
+		if id == session.SessionID {
+			continue
+		}
+		if other.Name == session.Name && other.Lifecycle != manifest.LifecycleArchived {
+			return ReactivateSessionResult{}, fmt.Errorf("another non-archived session already uses name %q", session.Name)
+		}
+	}
+	session.Lifecycle = ""
+	m.sessions[session.SessionID] = m.copyManifest(session)
+	return ReactivateSessionResult{StorageCommitted: true}, nil
+}
+
 // UpdateSession updates an existing session in memory
 func (m *MockAdapter) UpdateSession(session *manifest.Manifest) error {
 	m.mu.Lock()

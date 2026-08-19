@@ -204,7 +204,7 @@ func TestSandboxGCCountsProbeFailuresSeparately(t *testing.T) {
 	base := sandboxTestBase(t)
 	mkSandbox(t, base, "deadbeef", 24*time.Hour)
 	checker := newTestChecker(base, map[string]bool{}, nil)
-	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+	checker.ListProcPaths = func(context.Context) ([]sandboxgc.ProcPath, error) {
 		return nil, errors.New("lsof: command not found")
 	}
 
@@ -229,7 +229,7 @@ func TestSandboxGCDryRunCountsProbeFailures(t *testing.T) {
 	base := sandboxTestBase(t)
 	mkSandbox(t, base, "deadbeef", 24*time.Hour)
 	checker := newTestChecker(base, map[string]bool{}, nil)
-	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+	checker.ListProcPaths = func(context.Context) ([]sandboxgc.ProcPath, error) {
 		return nil, errors.New("lsof: command not found")
 	}
 
