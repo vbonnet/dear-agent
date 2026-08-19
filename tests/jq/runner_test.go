@@ -12,7 +12,7 @@
 // (ci.yml already runs `go test`), no new shell under the 20-line policy, and
 // so a malformed fixture is a loud failure instead of a skipped case.
 //
-// A case is a directory under cases/<suite>/<name>/ holding:
+// A case is a directory under testdata/<suite>/<name>/ holding:
 //
 //	case.json           how to invoke jq (see caseSpec)
 //	input.json          the document piped to jq
@@ -68,7 +68,7 @@ func TestJQPrograms(t *testing.T) {
 	}
 
 	root := repoRoot(t)
-	cases := discoverCases(t, filepath.Join(root, "tests", "jq", "cases"))
+	cases := discoverCases(t, filepath.Join(root, "tests", "jq", "testdata"))
 	if len(cases) == 0 {
 		t.Fatal("no jq fixture cases found; the gate would pass vacuously")
 	}
@@ -86,7 +86,7 @@ func TestJQPrograms(t *testing.T) {
 	t.Run("every checked-in jq program has at least one case", func(t *testing.T) {
 		for _, program := range discoverPrograms(t, root) {
 			if !programs[program] {
-				t.Errorf("%s has no fixture case under tests/jq/cases/", program)
+				t.Errorf("%s has no fixture case under tests/jq/testdata/", program)
 			}
 		}
 	})
@@ -251,7 +251,7 @@ func repoRoot(t *testing.T) string {
 
 func caseName(t *testing.T, root, dir string) string {
 	t.Helper()
-	rel, err := filepath.Rel(filepath.Join(root, "tests", "jq", "cases"), dir)
+	rel, err := filepath.Rel(filepath.Join(root, "tests", "jq", "testdata"), dir)
 	if err != nil {
 		t.Fatalf("relativize %s: %v", dir, err)
 	}

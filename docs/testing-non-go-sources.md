@@ -96,7 +96,7 @@ and turns a malformed fixture into a loud failure instead of a skipped case.
 changes to the programs and records the jq version the fixtures were replayed
 against.
 
-A case is a directory under `tests/jq/cases/<suite>/<name>/`:
+A case is a directory under `tests/jq/testdata/<suite>/<name>/`:
 
 | File | Purpose |
 |---|---|
