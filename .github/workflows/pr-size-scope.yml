@@ -21,6 +21,9 @@ env:
   MAX_CHANGED_LINES: "1000"
   MAX_CHANGED_FILES: "50"
   MAX_TOP_LEVEL_AREAS: "4"
+  # Added non-test source lines that must accompany a pure source-file move
+  # before the diff counts as mixing a refactor with new logic.
+  MIN_NEW_LOGIC_LINES: "50"
 
 jobs:
   size-scope:
@@ -124,6 +127,26 @@ jobs:
             fi
           } >> "$GITHUB_OUTPUT"
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Shape, not size. The thresholds above cannot see a small PR that
+      # renames a source file AND builds new logic on the new names — the exact
+      # split CONTRIBUTING.md asks for. This reports that mix on its own.
+      # Advisory by construction: the command exits 0 either way, so it can
+      # never become the reason a PR cannot merge.
+      - name: Detect mixed refactor and new logic
+        id: concern
+        run: |
+          go run ./tools/pr-concern-lint \
+            -base "${{ github.event.pull_request.base.sha }}" \
+            -head "${{ github.event.pull_request.head.sha }}" \
+            -min-new-logic "$MIN_NEW_LOGIC_LINES" \
+            -github-output >> "$GITHUB_OUTPUT"
+
       - name: Comment with split suggestion
         # A pull_request run from a fork, or one opened by Dependabot (whose
         # workflow runs also get a read-only GITHUB_TOKEN even though the head
@@ -135,7 +158,7 @@ jobs:
         # PR flips actor to that human while the token stays read-only — the
         # step would then run and fail. The author is stable across every event
         # on the PR.
-        if: steps.scope.outputs.should_comment == 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: (steps.scope.outputs.should_comment == 'true' || steps.concern.outputs.mixed_concern == 'true') && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -144,6 +167,7 @@ jobs:
           CHANGED_FILES: ${{ steps.scope.outputs.changed_files }}
           TOP_LEVEL_AREAS: ${{ steps.scope.outputs.top_level_areas }}
           REASONS: ${{ steps.scope.outputs.reasons }}
+          CONCERN_REASON: ${{ steps.concern.outputs.reason }}
         run: |
           set -euo pipefail
           body=/tmp/pr-size-scope-comment.md
@@ -151,13 +175,14 @@ jobs:
             echo "<!-- pr-size-scope -->"
             echo "## PR size and scope signal"
             echo
-            echo "This PR crossed the deterministic split-suggestion threshold:"
+            echo "This PR tripped a deterministic split-suggestion signal:"
             echo
-            printf '%s\n' "$REASONS"
+            [ -n "$REASONS" ] && printf '%s\n' "$REASONS"
+            [ -n "$CONCERN_REASON" ] && printf '%s\n' "$CONCERN_REASON"
             echo
             echo "Current scope: ${CHANGED_LINES} changed lines, ${CHANGED_FILES} changed files, ${TOP_LEVEL_AREAS} top-level areas."
             echo
-            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently."
+            echo "Please consider splitting this into stacked PRs: mechanical refactors or renames first, then focused behavior changes that can be reviewed and tested independently. See [CONTRIBUTING.md — Small, stacked PRs](../blob/main/CONTRIBUTING.md#small-stacked-prs), which also covers restacking a descendant once its predecessor lands."
           } > "$body"
 
           # Edit the existing marker comment in place when there is one. The
@@ -185,7 +210,7 @@ jobs:
       - name: Remove stale split-suggestion comment
         # A later synchronize run can drop below every threshold; clear any
         # marker comment left by an earlier, larger revision of this PR.
-        if: steps.scope.outputs.should_comment == 'false' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: steps.scope.outputs.should_comment == 'false' && steps.concern.outputs.mixed_concern != 'true' && !github.event.pull_request.head.repo.fork && github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
