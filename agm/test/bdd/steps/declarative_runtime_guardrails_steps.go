@@ -55,6 +55,9 @@ type declarativeRuntimeRouteState struct {
 	terraformLint string
 	// jqLint is the jq fixture gate workflow.
 	jqLint string
+	// importScript is infra/import.sh, whose contract is that it decides
+	// nothing itself.
+	importScript string
 }
 
 // RegisterDeclarativeRuntimeGuardrailSteps registers runtime configuration coverage steps.
@@ -92,6 +95,109 @@ func RegisterDeclarativeRuntimeGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every checked-in jq program should have a fixture case$`, everyJQProgramHasAFixtureCase)
 	ctx.Step(`^jq fixtures should assert output and refusal alike$`, jqFixturesAssertOutputAndRefusal)
 	ctx.Step(`^the jq gate should fail rather than skip when jq is absent from CI$`, jqGateFailsWhenJQAbsentInCI)
+	ctx.Step(`^the OpenTofu importer is configured$`, openTofuImporterIsConfigured)
+	ctx.Step(`^AGM validates importer authority boundaries$`, agmValidatesImporterAuthorityBoundaries)
+	ctx.Step(`^the importer script should delegate every decision$`, importerScriptDelegatesEveryDecision)
+	ctx.Step(`^import identities should resolve before any state is mutated$`, importIdentitiesResolveBeforeMutation)
+	ctx.Step(`^an existing state address should be verified, not assumed$`, existingStateAddressIsVerified)
+	ctx.Step(`^an unrecognized provider failure should stop the run$`, unrecognizedProviderFailureStopsRun)
+}
+
+func openTofuImporterIsConfigured(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "infra", "import.sh"))
+	if err != nil {
+		return fmt.Errorf("read importer script: %w", err)
+	}
+	state.importScript = string(data)
+	return nil
+}
+
+func agmValidatesImporterAuthorityBoundaries(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.importScript == "" {
+		return fmt.Errorf("importer script was not loaded")
+	}
+	return nil
+}
+
+// importerScriptDelegatesEveryDecision holds the boundary this refactor
+// established: the script collects evidence and executes a plan, and every
+// fail-closed decision lives in a tested command instead.
+func importerScriptDelegatesEveryDecision(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.importScript, "$planner") {
+		return fmt.Errorf("importer script does not delegate to the planner command")
+	}
+	// The script must not re-grow its own policy. A jq filter with an error
+	// path here would mean a decision moved back out of Go, which is what the
+	// 20-line shell policy and this refactor exist to prevent.
+	for _, forbidden := range []string{"jq -e", "jq -er", "jq -ce"} {
+		if strings.Contains(state.importScript, forbidden) {
+			return fmt.Errorf("importer script re-implements a decision with %q", forbidden)
+		}
+	}
+	// It started at 103 lines and #1166 grew it to 300. The ceiling is what
+	// stops that happening again without anyone noticing.
+	if lines := strings.Count(state.importScript, "\n"); lines > 80 {
+		return fmt.Errorf("importer script has grown to %d lines; move logic into the planner", lines)
+	}
+	return nil
+}
+
+func importIdentitiesResolveBeforeMutation(ctx context.Context) error {
+	state, err := getDeclarativeRuntimeRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	// Planning must complete before the first `tofu import`, so an ambiguous
+	// listing cannot surface halfway through and leave a partial state.
+	planIndex := strings.Index(state.importScript, "\"$planner\" plan")
+	importIndex := strings.Index(state.importScript, "tofu import")
+	if planIndex < 0 || importIndex < 0 {
+		return fmt.Errorf("importer script does not both plan and import")
+	}
+	if planIndex > importIndex {
+		return fmt.Errorf("importer script mutates state before resolving every identity")
+	}
+	return nil
+}
+
+func existingStateAddressIsVerified(context.Context) error {
+	return requireImporterContract("TIP-08", "stale binding")
+}
+
+func unrecognizedProviderFailureStopsRun(context.Context) error {
+	return requireImporterContract("TIP-11", "recognized absent-object message")
+}
+
+// requireImporterContract asserts the named EARS requirement is still recorded
+// in the importer's SPEC. The behavior itself is proved by the package tests
+// and by tests/bats/infra-import.bats; this keeps the contract from being
+// deleted while those tests are quietly weakened.
+func requireImporterContract(id, phrase string) error {
+	specPath := filepath.Join(packageSpecBDDRepoRoot(), "internal", "tofuimport", "SPEC.md")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("read importer SPEC: %w", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "**"+id+"**") {
+		return fmt.Errorf("importer SPEC no longer records %s", id)
+	}
+	if !strings.Contains(text, phrase) {
+		return fmt.Errorf("importer SPEC %s no longer states %q", id, phrase)
+	}
+	return nil
 }
 
 func jqPolicyGateIsConfigured(ctx context.Context) error {
