@@ -36,10 +36,23 @@ makes no commits for too long, or loops on the same error. The plist therefore
 uses KeepAlive (restart on crash) rather than StartInterval, with RunAtLoad so
 the monitor comes up at login and after a reboot.
 
-Alert routing: by default the daemon leaves --orchestrator empty, so each alert
-discovers a live Dispatch/orchestrator/supervisor session at runtime and falls
-back to the durable alert queue if none is reachable. Passing --orchestrator
-pins routing to a specific live session.
+Completion watching is on by default, so the installed daemon is not stall-only.
+It also emits one {"event_type":"completion"} object per session that finishes a
+unit of work, delivers each to the notify dispatchers (~/.agm/notify.yaml, or
+the stderr log dispatcher when that file is absent), and relays the result tail
+to a live supervisor. Sessions whose names contain orchestrator, overseer, or
+meta- are excluded by default, as is whichever session routing has currently
+selected, so a supervisor's own completion is never relayed back into itself.
+
+Alert routing: by default the daemon leaves --orchestrator empty, so every
+recovery action (permission-prompt alerts, no-commit nudges, error-loop
+diagnostics, and max-retry escalations) plus every surfaced completion
+discovers a live Dispatch/orchestrator/supervisor session at run time and is
+tried against each in preference order. Passing --orchestrator names a
+preferred first candidate rather than pinning routing to it. An alert no live
+session accepts is written durably to ~/.agm/alerts/queue.jsonl with status
+"queued" and re-attempted on later scans, so a supervisor outage delays a
+stall alert rather than losing it ('agm alerts list --status queued').
 
 The plist is written to ~/Library/LaunchAgents/ and loaded immediately with
 'launchctl load'. Output (one JSON object per event) is logged to

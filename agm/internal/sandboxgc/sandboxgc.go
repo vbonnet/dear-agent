@@ -60,6 +60,14 @@ type RefusalError struct {
 	Path   string
 	Reason string // one of the Reason* constants
 	Detail string
+	// ProbeFailure is true when this refusal came from being UNABLE to run a
+	// safety check (lsof timed out, the mount table was unreadable, the
+	// session store was unreachable) rather than from the check actually
+	// detecting a live session/process/mount. Both fail closed and refuse
+	// identically, but callers that report sweep health must be able to tell
+	// them apart: a probe failure means the sweep could not evaluate this
+	// sandbox at all, not that it correctly found the sandbox in use.
+	ProbeFailure bool
 }
 
 func (e *RefusalError) Error() string {
@@ -192,7 +200,8 @@ func (c *Checker) CheckReapable(dir string) error {
 			// Fail CLOSED: if we cannot enumerate live sessions we must
 			// assume the sandbox is referenced.
 			return &RefusalError{Path: dir, Reason: ReasonLiveSession,
-				Detail: fmt.Sprintf("cannot enumerate live sessions: %v", err)}
+				Detail:       fmt.Sprintf("cannot enumerate live sessions: %v", err),
+				ProbeFailure: true}
 		}
 		if live[filepath.Base(dir)] {
 			return &RefusalError{Path: dir, Reason: ReasonLiveSession,
@@ -204,7 +213,8 @@ func (c *Checker) CheckReapable(dir string) error {
 	if err != nil {
 		// Fail CLOSED: unknown process state means the dir may be in use.
 		return &RefusalError{Path: dir, Reason: ReasonLiveProcess,
-			Detail: fmt.Sprintf("cannot enumerate process paths: %v", err)}
+			Detail:       fmt.Sprintf("cannot enumerate process paths: %v", err),
+			ProbeFailure: true}
 	}
 	if pp, found := ProcessInside(procs, dir); found {
 		return &RefusalError{Path: dir, Reason: ReasonLiveProcess,
@@ -215,13 +225,16 @@ func (c *Checker) CheckReapable(dir string) error {
 }
 
 // MountedInside reports whether the mount table currently shows a mount point
-// at or under dir. Fails closed: an unreadable mount table reports mounted.
-func (c *Checker) MountedInside(dir string) (string, bool) {
+// at or under dir. Fails closed: an unreadable mount table reports mounted,
+// with probeFailure=true so callers can tell "table unreadable" apart from
+// "table read fine and a mount was actually found".
+func (c *Checker) MountedInside(dir string) (mountPoint string, mounted bool, probeFailure bool) {
 	mounts, err := c.ListMounts()
 	if err != nil {
-		return fmt.Sprintf("unreadable mount table: %v", err), true
+		return fmt.Sprintf("unreadable mount table: %v", err), true, true
 	}
-	return MountInside(mounts, dir)
+	mp, found := MountInside(mounts, dir)
+	return mp, found, false
 }
 
 // Reap deletes the sandbox at dir after all safety gates pass. Sequence:
@@ -253,9 +266,10 @@ func (c *Checker) Reap(dir string) error {
 	// still mounted at or under dir, refuse — deleting through a live mount
 	// can destroy the mount's source (per ~/.agm/cleanup-runbook.md).
 	// MountedInside fails closed on an unreadable mount table.
-	if m, mounted := c.MountedInside(dir); mounted {
+	if m, mounted, probeFailure := c.MountedInside(dir); mounted {
 		return &RefusalError{Path: dir, Reason: ReasonMountInside,
-			Detail: fmt.Sprintf("mount survived unmount: %s", m)}
+			Detail:       fmt.Sprintf("mount survived unmount: %s", m),
+			ProbeFailure: probeFailure}
 	}
 
 	if err := c.Remove(dir); err != nil {

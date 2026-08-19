@@ -11,8 +11,23 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 )
 
+func clearConfigLoadEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	for _, key := range []string{
+		"AGM_SESSIONS_DIR",
+		"AGM_LOG_LEVEL",
+		"AGM_LOG_FILE",
+		"OPENCODE_SERVER_URL",
+		"OPENCODE_ADAPTER_ENABLED",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 // TestConfig_ValidParsing tests loading a valid config file
 func TestConfig_ValidParsing(t *testing.T) {
+	clearConfigLoadEnv(t)
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.yaml")
 
@@ -52,37 +67,29 @@ health_check:
 	assert.Equal(t, 2*time.Second, cfg.HealthCheck.ProbeTimeout)
 }
 
-// TestConfig_MissingRequiredFields tests that missing fields get default values
-func TestConfig_MissingRequiredFields(t *testing.T) {
+// TestConfig_CommentsOnlyRejected proves an existing selected source must
+// contain one non-empty mapping rather than silently selecting defaults.
+func TestConfig_CommentsOnlyRejected(t *testing.T) {
+	clearConfigLoadEnv(t)
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.yaml")
 
-	// Write minimal config (no required fields specified)
-	// All fields should get default values
+	// A comments-only file is an existing but empty selected document.
 	configContent := `# Empty config - test defaults
 `
 	err := os.WriteFile(configFile, []byte(configContent), 0644)
 	require.NoError(t, err)
 
-	// Load config
+	// Load must fail closed rather than return a usable default policy.
 	cfg, err := config.Load(configFile)
-	require.NoError(t, err)
-	require.NotNil(t, cfg)
-
-	// Verify default values are applied
-	assert.NotEmpty(t, cfg.SessionsDir, "SessionsDir should have default value")
-	assert.Equal(t, "info", cfg.LogLevel, "LogLevel should default to 'info'")
-	assert.Equal(t, 5*time.Second, cfg.Timeout.TmuxCommands, "Timeout should default to 5s")
-	assert.True(t, cfg.Timeout.Enabled, "Timeout should be enabled by default")
-	assert.True(t, cfg.Lock.Enabled, "Lock should be enabled by default")
-	assert.NotEmpty(t, cfg.Lock.Path, "Lock path should have default value")
-	assert.True(t, cfg.HealthCheck.Enabled, "HealthCheck should be enabled by default")
-	assert.Equal(t, 5*time.Second, cfg.HealthCheck.CacheDuration)
-	assert.Equal(t, 2*time.Second, cfg.HealthCheck.ProbeTimeout)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "configuration file is empty")
 }
 
 // TestConfig_InvalidFieldValues tests handling of invalid YAML values
 func TestConfig_InvalidFieldValues(t *testing.T) {
+	clearConfigLoadEnv(t)
 	t.Run("invalid timeout duration", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
@@ -138,6 +145,7 @@ log_level: debug
 
 // TestConfig_DefaultValueHandling tests default value precedence
 func TestConfig_DefaultValueHandling(t *testing.T) {
+	clearConfigLoadEnv(t)
 	t.Run("partial config inherits defaults", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
@@ -189,9 +197,9 @@ log_level: debug
 		assert.Equal(t, "warn", cfg.LogLevel)
 	})
 
-	t.Run("missing config file uses defaults", func(t *testing.T) {
-		// Load non-existent file
-		cfg, err := config.Load("/nonexistent/path/config.yaml")
+	t.Run("missing implicit canonical config uses defaults", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		cfg, err := config.Load("")
 		require.NoError(t, err)
 
 		// Should have all default values
@@ -206,6 +214,7 @@ log_level: debug
 
 // TestConfig_HomeExpansion tests ~ expansion in paths
 func TestConfig_HomeExpansion(t *testing.T) {
+	clearConfigLoadEnv(t)
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.yaml")
 
@@ -222,6 +231,7 @@ lock:
 	require.NoError(t, err)
 
 	homeDir, _ := os.UserHomeDir()
+	homeDir, _ = filepath.EvalSymlinks(homeDir)
 
 	// Verify ~ was expanded
 	assert.Equal(t, filepath.Join(homeDir, "my-sessions"), cfg.SessionsDir)
@@ -234,6 +244,7 @@ lock:
 
 // TestConfig_IsolatedEnvironment tests that config loading doesn't affect global state
 func TestConfig_IsolatedEnvironment(t *testing.T) {
+	clearConfigLoadEnv(t)
 	// Save original environment
 	origSessionsDir := os.Getenv("AGM_SESSIONS_DIR")
 	origLogLevel := os.Getenv("AGM_LOG_LEVEL")
@@ -254,7 +265,7 @@ func TestConfig_IsolatedEnvironment(t *testing.T) {
 	t.Setenv("AGM_SESSIONS_DIR", "/tmp/test1")
 	t.Setenv("AGM_LOG_LEVEL", "debug")
 
-	cfg1, err := config.Load("/nonexistent")
+	cfg1, err := config.Load("")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test1", cfg1.SessionsDir)
 
@@ -262,7 +273,7 @@ func TestConfig_IsolatedEnvironment(t *testing.T) {
 	t.Setenv("AGM_SESSIONS_DIR", "/tmp/test2")
 	t.Setenv("AGM_LOG_LEVEL", "info")
 
-	cfg2, err := config.Load("/nonexistent")
+	cfg2, err := config.Load("")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test2", cfg2.SessionsDir)
 

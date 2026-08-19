@@ -482,6 +482,13 @@ func (r *AlertRouter) recentDelivered(fp string, occurredAt time.Time) (AlertRec
 // not delivery, and nothing else reads the queue. Callers run it whenever
 // a supervisor may have become available, and it reports how many alerts
 // it managed to deliver.
+//
+// One bound worth stating rather than hiding: the drain considers the most
+// recent 500 records, so an alert queued behind more than that many later
+// records is not retried here. It is not stranded, because dedupe no
+// longer suppresses against a queued record, so the next occurrence of
+// that alert delivers it; and `agm alerts list --status queued` still
+// shows it.
 func (r *AlertRouter) DrainQueued(ctx context.Context) (int, error) {
 	release := r.lockQueue()
 	defer release()

@@ -193,33 +193,46 @@ func existenceForStatus(tmux any, plain interface {
 	return plain.HasSession(tmuxName)
 }
 
-func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
+func computeSessionStatus(m *manifest.Manifest, tmux any) string {
+	status, observeErr := computeSessionStatusObserved(m, tmux)
+	if observeErr != nil {
+		// Callers of this form have no way to act on the cause, and an
+		// unobservable backend established neither "active" nor "stopped".
+		return "unknown"
+	}
+	return status
+}
+
+// computeSessionStatusObserved is computeSessionStatus plus the observation
+// error it otherwise swallows. "unknown" has two very different causes — no
+// tmux capability to ask at all, and a backend that was asked and failed to
+// answer — and a caller that must not invent a verdict from silence needs to
+// tell them apart. A non-nil error means the backend was unobservable, so
+// neither "active" nor "stopped" was ever established.
+func computeSessionStatusObserved(m *manifest.Manifest, tmux any) (string, error) {
 	if m.Lifecycle == "archived" {
-		return "archived"
+		return "archived", nil
 	}
 
 	if tmux == nil {
-		return "unknown"
+		return "unknown", nil
 	}
 
 	ti, ok := tmux.(interface {
 		HasSession(name string) (bool, error)
 	})
 	if !ok {
-		return "unknown"
+		return "unknown", nil
 	}
 
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
-	}
+	tmuxName := session.TmuxSessionName(m)
 
 	has, err := existenceForStatus(tmux, ti, tmuxName)
 	if err != nil {
-		return "unknown"
+		return "unknown", err
 	}
 	if !has {
-		return "stopped"
+		return "stopped", nil
 	}
 	// The tmux session exists — but existence alone is a false-green liveness
 	// signal (ce-axsr): the session survives the harness exiting and the pane
@@ -227,8 +240,8 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 	// liveness, a dead-harness session reports "zombie" instead of "active".
 	if checker, ok := tmux.(session.HarnessLivenessChecker); ok {
 		if info, lerr := checker.HarnessLiveness(tmuxName); lerr == nil && info.SessionExists && !info.HarnessAlive {
-			return "zombie"
+			return "zombie", nil
 		}
 	}
-	return "active"
+	return "active", nil
 }

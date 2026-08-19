@@ -1,131 +1,56 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestGetStoragePath(t *testing.T) {
-	tests := []struct {
-		name          string
-		config        *Config
-		expectedMode  string
-		expectError   bool
-		skipOnWindows bool
-	}{
-		{
-			name: "dotfile mode",
-			config: &Config{
-				Storage: StorageConfig{
-					Mode:         "dotfile",
-					Workspace:    "",
-					RelativePath: ".agm",
-				},
-			},
-			expectedMode: "dotfile",
-			expectError:  false,
-		},
-		{
-			name: "default mode (empty = dotfile)",
-			config: &Config{
-				Storage: StorageConfig{
-					Mode:         "",
-					Workspace:    "",
-					RelativePath: ".agm",
-				},
-			},
-			expectedMode: "dotfile",
-			expectError:  false,
-		},
-		{
-			name: "centralized mode with absolute path",
-			config: &Config{
-				Storage: StorageConfig{
-					Mode:         "centralized",
-					Workspace:    "/tmp/test-workspace",
-					RelativePath: ".agm",
-				},
-			},
-			expectedMode: "centralized",
-			expectError:  false,
-		},
-		{
-			name: "centralized mode with test env var",
-			config: &Config{
-				Storage: StorageConfig{
-					Mode:         "centralized",
-					Workspace:    "test-workspace",
-					RelativePath: ".agm",
-				},
-			},
-			expectedMode: "centralized",
-			expectError:  false,
-		},
-		{
-			name: "invalid mode",
-			config: &Config{
-				Storage: StorageConfig{
-					Mode:         "invalid",
-					Workspace:    "",
-					RelativePath: ".agm",
-				},
-			},
-			expectError: true,
-		},
-	}
+	t.Run("loaded dotfile authority", func(t *testing.T) {
+		home := physicalPath(t, t.TempDir())
+		t.Setenv("HOME", home)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := GetStoragePath(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(home, ".agm"); got != want {
+			t.Fatalf("GetStoragePath() = %q, want %q", got, want)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.skipOnWindows && os.Getenv("OS") == "Windows_NT" {
-				t.Skip("Skipping on Windows")
-			}
+	t.Run("loaded centralized authority", func(t *testing.T) {
+		root := t.TempDir()
+		home := makeAuthorityDir(t, filepath.Join(root, "home"))
+		workspace := makeAuthorityDir(t, filepath.Join(root, "workspace"))
+		t.Setenv("HOME", home)
+		clearWorkspaceDiscoveryEnv(t)
+		cfg, err := Load(writeRuntimeAuthorityConfig(t, root, workspace, ".agm-work"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := GetStoragePath(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(workspace, ".agm-work"); got != want {
+			t.Fatalf("GetStoragePath() = %q, want %q", got, want)
+		}
+	})
 
-			// Setup test environment for centralized mode tests
-			if tt.expectedMode == "centralized" {
-				t.Setenv("ENGRAM_TEST_MODE", "1")
-				t.Setenv("ENGRAM_TEST_WORKSPACE", "/tmp/test-workspace")
-				defer os.Unsetenv("ENGRAM_TEST_MODE")
-				defer os.Unsetenv("ENGRAM_TEST_WORKSPACE")
-
-				// Create the test workspace directory if using absolute path
-				if tt.config.Storage.Workspace == "/tmp/test-workspace" {
-					os.MkdirAll("/tmp/test-workspace", 0755)
-					defer os.RemoveAll("/tmp/test-workspace")
-				}
-			}
-
-			storagePath, err := GetStoragePath(tt.config)
-
-			if tt.expectError {
-				if err == nil {
-					t.Errorf("expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-				return
-			}
-
-			// Verify path format
-			if storagePath == "" {
-				t.Errorf("storage path is empty")
-			}
-
-			if tt.expectedMode == "dotfile" {
-				homeDir, _ := os.UserHomeDir()
-				expected := filepath.Join(homeDir, ".agm")
-				if storagePath != expected {
-					t.Errorf("expected dotfile path %s, got %s", expected, storagePath)
-				}
-			}
-
-			if tt.expectedMode == "centralized" {
-				if !filepath.IsAbs(storagePath) {
-					t.Errorf("centralized path should be absolute, got: %s", storagePath)
-				}
+	for name, cfg := range map[string]*Config{
+		"direct":  {},
+		"invalid": {Storage: StorageConfig{Mode: "invalid"}},
+	} {
+		t.Run(name+" config has no authority", func(t *testing.T) {
+			if _, err := GetStoragePath(cfg); !errors.Is(err, ErrRuntimeAuthorityUnavailable) {
+				t.Fatalf("GetStoragePath() error = %v, want ErrRuntimeAuthorityUnavailable", err)
 			}
 		})
 	}
@@ -249,78 +174,214 @@ func TestHasWorkspaceMarker(t *testing.T) {
 }
 
 func TestEnsureSymlinkBootstrap(t *testing.T) {
-	// These tests require filesystem manipulation and are integration tests
-	// They should be run in a test environment with proper cleanup
-
-	t.Run("dotfile mode does nothing", func(t *testing.T) {
-		cfg := &Config{
-			Storage: StorageConfig{
-				Mode:         "dotfile",
-				Workspace:    "",
-				RelativePath: ".agm",
-			},
-		}
-
-		err := EnsureSymlinkBootstrap(cfg)
+	t.Run("loaded dotfile mode does nothing", func(t *testing.T) {
+		home := physicalPath(t, t.TempDir())
+		t.Setenv("HOME", home)
+		cfg, err := Load("")
 		if err != nil {
-			t.Errorf("unexpected error in dotfile mode: %v", err)
+			t.Fatal(err)
+		}
+		if err := EnsureSymlinkBootstrap(cfg); err != nil {
+			t.Fatalf("EnsureSymlinkBootstrap() error = %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(home, ".agm")); !os.IsNotExist(err) {
+			t.Fatalf("dotfile bootstrap unexpectedly mutated HOME: %v", err)
 		}
 	})
 
-	t.Run("centralized mode requires valid workspace", func(t *testing.T) {
-		cfg := &Config{
-			Storage: StorageConfig{
-				Mode:         "centralized",
-				Workspace:    "nonexistent-workspace-12345",
-				RelativePath: ".agm",
-			},
-		}
-
-		err := EnsureSymlinkBootstrap(cfg)
-		if err == nil {
-			t.Errorf("expected error for nonexistent workspace")
+	t.Run("unloaded config fails closed", func(t *testing.T) {
+		cfg := &Config{Storage: StorageConfig{Mode: "centralized"}}
+		if err := EnsureSymlinkBootstrap(cfg); !errors.Is(err, ErrRuntimeAuthorityUnavailable) {
+			t.Fatalf("EnsureSymlinkBootstrap() error = %v, want ErrRuntimeAuthorityUnavailable", err)
 		}
 	})
 }
 
-func TestVerifyStorageIntegrity(t *testing.T) {
-	t.Run("dotfile mode with existing directory", func(t *testing.T) {
-		// Create temporary .agm directory
-		homeDir, _ := os.UserHomeDir()
-		testDir := filepath.Join(homeDir, ".agm-test-verify")
-		os.MkdirAll(testDir, 0755)
-		defer os.RemoveAll(testDir)
+func TestCentralizedStorageBootstrapUsesCapturedAuthority(t *testing.T) {
+	clearWorkspaceDiscoveryEnv(t)
+	root := t.TempDir()
+	physicalHome := makeAuthorityDir(t, filepath.Join(root, "physical-home"))
+	driftHome := makeAuthorityDir(t, filepath.Join(root, "drift-home"))
+	logicalHome := filepath.Join(root, "logical-home")
+	symlinkOrSkip(t, physicalHome, logicalHome)
+	selectedWorkspace := makeAuthorityDir(t, filepath.Join(root, "selected-workspace"))
+	driftWorkspace := makeAuthorityDir(t, filepath.Join(root, "drift-workspace"))
+	t.Setenv("HOME", logicalHome)
+	t.Setenv("ENGRAM_WORKSPACE", selectedWorkspace)
 
-		cfg := &Config{
-			Storage: StorageConfig{
-				Mode:         "dotfile",
-				Workspace:    "",
-				RelativePath: ".agm-test-verify",
-			},
-		}
+	cfg, err := Load(writeRuntimeAuthorityConfig(t, root, "selected", ".agm-work"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	retargetSymlink(t, logicalHome, driftHome)
+	t.Setenv("HOME", driftHome)
+	t.Setenv("ENGRAM_WORKSPACE", driftWorkspace)
+	t.Chdir(driftWorkspace)
+	cfg.Storage = StorageConfig{Mode: "dotfile", Workspace: driftWorkspace, RelativePath: ".drift"}
 
-		// Override GetStoragePath to use test directory
-		// This is a simplified test - real implementation would mock GetStoragePath
-		err := VerifyStorageIntegrity(cfg)
-		if err != nil {
-			t.Logf("Storage verification: %v (expected for test environment)", err)
-		}
-	})
+	sentinel := filepath.Join(driftHome, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSymlinkBootstrap(cfg); err != nil {
+		t.Fatalf("EnsureSymlinkBootstrap() error = %v", err)
+	}
+	if err := VerifyStorageIntegrity(cfg); err != nil {
+		t.Fatalf("VerifyStorageIntegrity() error = %v", err)
+	}
 
-	t.Run("centralized mode requires workspace", func(t *testing.T) {
-		cfg := &Config{
-			Storage: StorageConfig{
-				Mode:         "centralized",
-				Workspace:    "nonexistent-workspace-12345",
-				RelativePath: ".agm",
-			},
-		}
+	dotfileLink := filepath.Join(physicalHome, ".agm")
+	info, err := os.Lstat(dotfileLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%s is not a symlink", dotfileLink)
+	}
+	if got, err := filepath.EvalSymlinks(dotfileLink); err != nil {
+		t.Fatal(err)
+	} else if want := filepath.Join(selectedWorkspace, ".agm-work"); got != want {
+		t.Fatalf("bootstrap target = %q, want retained %q", got, want)
+	}
+	assertFileContents(t, sentinel, "preserve")
+	if _, err := os.Lstat(filepath.Join(driftHome, ".agm")); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap mutated drift HOME: %v", err)
+	}
+}
 
-		err := VerifyStorageIntegrity(cfg)
-		if err == nil {
-			t.Errorf("expected error for nonexistent workspace")
-		}
-	})
+func TestEnsureSymlinkBootstrapRepairsExistingCompatibilityLinks(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dangling bool
+	}{
+		{name: "wrong existing target"},
+		{name: "dangling wrong target", dangling: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearWorkspaceDiscoveryEnv(t)
+			root := t.TempDir()
+			home := makeAuthorityDir(t, filepath.Join(root, "home"))
+			workspace := makeAuthorityDir(t, filepath.Join(root, "workspace"))
+			t.Setenv("HOME", home)
+			cfg, err := Load(writeRuntimeAuthorityConfig(t, root, workspace, ".agm-work"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			wrongTarget := filepath.Join(root, "wrong-target")
+			if !tc.dangling {
+				if err := os.Mkdir(wrongTarget, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(wrongTarget, "sentinel"), []byte("preserve"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			compatibilityLink := filepath.Join(home, ".agm")
+			symlinkOrSkip(t, wrongTarget, compatibilityLink)
+
+			if err := EnsureSymlinkBootstrap(cfg); err != nil {
+				t.Fatalf("EnsureSymlinkBootstrap() error = %v", err)
+			}
+			resolved, err := filepath.EvalSymlinks(compatibilityLink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := filepath.Join(workspace, ".agm-work"); resolved != want {
+				t.Fatalf("compatibility link = %q, want retained storage %q", resolved, want)
+			}
+			if tc.dangling {
+				if _, err := os.Lstat(wrongTarget); !os.IsNotExist(err) {
+					t.Fatalf("bootstrap created dangling wrong target: %v", err)
+				}
+			} else {
+				assertFileContents(t, filepath.Join(wrongTarget, "sentinel"), "preserve")
+			}
+		})
+	}
+}
+
+func TestEnsureSymlinkBootstrapHealsCorrectDanglingCompatibilityLink(t *testing.T) {
+	clearWorkspaceDiscoveryEnv(t)
+	root := t.TempDir()
+	home := makeAuthorityDir(t, filepath.Join(root, "home"))
+	workspace := makeAuthorityDir(t, filepath.Join(root, "workspace"))
+	storagePath := filepath.Join(workspace, ".agm-work")
+	t.Setenv("HOME", home)
+	cfg, err := Load(writeRuntimeAuthorityConfig(t, root, workspace, ".agm-work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	compatibilityLink := filepath.Join(home, ".agm")
+	symlinkOrSkip(t, storagePath, compatibilityLink)
+	if _, err := os.Stat(storagePath); !os.IsNotExist(err) {
+		t.Fatalf("precondition: storage target exists before bootstrap: %v", err)
+	}
+
+	if err := EnsureSymlinkBootstrap(cfg); err != nil {
+		t.Fatalf("EnsureSymlinkBootstrap() error = %v", err)
+	}
+	if info, err := os.Stat(storagePath); err != nil {
+		t.Fatalf("storage target was not healed: %v", err)
+	} else if !info.IsDir() {
+		t.Fatalf("storage target mode = %v, want directory", info.Mode())
+	}
+	if resolved, err := filepath.EvalSymlinks(compatibilityLink); err != nil {
+		t.Fatal(err)
+	} else if resolved != storagePath {
+		t.Fatalf("compatibility link = %q, want retained storage %q", resolved, storagePath)
+	}
+	if err := VerifyStorageIntegrity(cfg); err != nil {
+		t.Fatalf("VerifyStorageIntegrity() error = %v", err)
+	}
+}
+
+func TestVerifyStorageIntegrityRejectsRetargetedCompatibilityLink(t *testing.T) {
+	clearWorkspaceDiscoveryEnv(t)
+	root := t.TempDir()
+	home := makeAuthorityDir(t, filepath.Join(root, "home"))
+	workspace := makeAuthorityDir(t, filepath.Join(root, "workspace"))
+	wrongTarget := makeAuthorityDir(t, filepath.Join(root, "wrong-target"))
+	sentinel := filepath.Join(wrongTarget, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	cfg, err := Load(writeRuntimeAuthorityConfig(t, root, workspace, ".agm-work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSymlinkBootstrap(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	compatibilityLink := filepath.Join(home, ".agm")
+	if err := os.Remove(compatibilityLink); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, wrongTarget, compatibilityLink)
+	if err := VerifyStorageIntegrity(cfg); err == nil {
+		t.Fatal("VerifyStorageIntegrity() error = nil, want wrong-target rejection")
+	} else if !strings.Contains(err.Error(), "symlink points to wrong location") {
+		t.Fatalf("VerifyStorageIntegrity() error = %v, want wrong-location context", err)
+	}
+	assertFileContents(t, sentinel, "preserve")
+}
+
+func TestVerifyStorageIntegrityUsesLoadedDotfileAuthority(t *testing.T) {
+	home := physicalPath(t, t.TempDir())
+	t.Setenv("HOME", home)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(home, ".agm"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyStorageIntegrity(cfg); err != nil {
+		t.Fatalf("VerifyStorageIntegrity() error = %v", err)
+	}
 }
 
 func TestCopyDir(t *testing.T) {

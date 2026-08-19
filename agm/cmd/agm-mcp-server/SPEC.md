@@ -4,7 +4,7 @@
 
 ## Overview
 
-The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations without accessing conversation content.
+The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations. Every tool exposes metadata only, with one deliberate exception: `agm_get_session_output` returns captured pane content and is therefore the single conversation-content surface (see Privacy & Security).
 
 One private production registration seam owns the exact compiled tool set.
 The logical-registry-to-compiled-wire relationship and its finite compatibility
@@ -15,7 +15,7 @@ actual SDK registration path.
 
 1. **Discoverability**: Enable MCP clients to discover and query AGM sessions
 2. **Performance**: Achieve p99 <100ms response times for 1000+ sessions
-3. **Privacy**: Expose only metadata, never conversation content
+3. **Privacy**: Expose only metadata, with the single audited exception of `agm_get_session_output`, whose captured pane content may include prompts, responses, file paths, and rendered credentials. No other tool returns conversation content.
 4. **Integration**: Seamless integration with supported harness clients via MCP protocol
 
 ## EARS Requirements
@@ -367,19 +367,45 @@ mcp_server:
 - Agent type
 - Tmux session name
 
+### Terminal Output (Exposed Only Through `agm_get_session_output`)
+
+`agm_get_session_output` is a deliberate, bounded exception to the rules below,
+not an oversight. Rendered terminal panes routinely contain prompts, model
+responses, and file paths, so the guarantees in this section are scoped rather
+than absolute. The exception's boundary:
+
+- **Opt-in per call.** Output is returned only when a caller names a session and
+  explicitly invokes `agm_get_session_output`. No metadata, list, or search tool
+  returns it — `agm_get_session_metadata` exposes only `final_output_at`, the
+  timestamp proving a capture exists, never its contents.
+- **Rendered pane only.** The source is the tmux pane (live) or the ≤16 KiB tail
+  captured at completion. Conversation history files, transcripts, and provider
+  API state are never read — principle 2 below is unchanged.
+- **Why it exists.** Without it an orchestrator cannot collect a worker's result
+  without attaching to its pane, which is what forced result-polling (ce-0zng9).
+
 ### Protected Data (Never Exposed)
+
+Except through `agm_get_session_output` as scoped above, where the value appears
+in rendered terminal output:
 
 - Conversation turns
 - User prompts
 - Agent responses
-- API keys
-- Credentials
 - File paths from conversation
 - Any conversation content
+- API keys and credentials, to the extent a harness rendered them into its pane
+
+The server never *reads* credential stores, config, or history files. But it
+cannot sanitize a pane: anything a harness printed to the terminal — including a
+secret it echoed — is inside the rendered capture. Treat
+`agm_get_session_output` results with the same care as the terminal itself.
 
 ### Security Principles
 
-1. **Metadata and Lifecycle Only**: Expose session metadata and explicit lifecycle operations, never conversation content
+1. **Metadata, Lifecycle, and Explicitly Requested Output**: Expose session
+   metadata and lifecycle operations freely; expose terminal output only through
+   the dedicated opt-in tool above
 2. **No Content Access**: Never read conversation history files
 3. **Local Only**: Server runs locally, no network exposure
 4. **Shared Mutation Boundary**: Lifecycle mutations delegate to `internal/ops` validation and rollback

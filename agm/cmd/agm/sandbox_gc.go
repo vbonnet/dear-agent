@@ -93,7 +93,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 	liveSessionIDs, warnings, err := sandboxGCLiveSessionIDs()
 	if err != nil {
 		for _, warning := range warnings {
-			logSandboxGCEntry(gclog.Entry{
+			logSandboxGCEntryTagged(gclog.Entry{
 				Operation: "sandbox_gc_warning",
 				Reason:    "workspace_store_skipped",
 				Error:     warning,
@@ -103,7 +103,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 				ui.PrintWarning(warning)
 			}
 		}
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "live_session_inventory_failed",
 			Error:     err.Error(),
@@ -112,7 +112,7 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build live-session inventory: %w", err)
 	}
 	for _, warning := range warnings {
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_warning",
 			Reason:    "workspace_store_skipped",
 			Error:     warning,
@@ -120,14 +120,35 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Never reap on partial knowledge. A skipped workspace contributes none of
+	// its live session IDs to the inventory, so every sandbox owned by that
+	// workspace looks unowned and can pass the remaining gates — deleting a
+	// live session's sandbox because we could not read the store that proves
+	// it is live. Downgrade the run to a scan and say so loudly; the operator
+	// fixes the topology, and the next tick reaps normally.
+	reap, notice := effectiveSandboxGCReap(sandboxGCReap, warnings)
+	if notice != "" {
+		logSandboxGCEntryTagged(gclog.Entry{
+			Operation: "sandbox_gc_warning",
+			Reason:    "partial_inventory_reap_refused",
+			Error:     notice,
+			DryRun:    true,
+		})
+		if !sandboxGCJSON {
+			ui.PrintWarning(notice)
+		} else {
+			fmt.Fprintln(os.Stderr, "agm sandbox gc: "+notice)
+		}
+	}
+
 	result, err := ops.SandboxGC(&ops.OpContext{}, &ops.SandboxGCRequest{
-		Reap:           sandboxGCReap,
+		Reap:           reap,
 		MinAge:         minAge,
 		LiveSessionIDs: constantLiveSessionIDs(liveSessionIDs),
 		Warnings:       warnings,
 	})
 	if err != nil {
-		logSandboxGCEntry(gclog.Entry{
+		logSandboxGCEntryTagged(gclog.Entry{
 			Operation: "sandbox_gc_error",
 			Reason:    "sweep_failed",
 			Error:     err.Error(),
@@ -135,6 +156,35 @@ func runSandboxGC(cmd *cobra.Command, args []string) error {
 		})
 		return handleError(err)
 	}
+
+	// Carry the refusal into the machine-readable result. `dry_run: true` alone
+	// is ambiguous — it is the ordinary shape of a preview run — so an automated
+	// caller that asked for --reap and got a scan would otherwise read a refusal
+	// as a successful no-op sweep, and its `reaped` count (which now means
+	// would-reap) as deleted sandboxes.
+	result.ReapRefused = notice
+
+	// Heartbeat: a sweep that reaps nothing is still a healthy sweep, and until
+	// now it left no trace at all. Without a record for the reap-nothing case,
+	// "the reaper last ran at T" is indistinguishable from "the reaper has been
+	// dead since T" — which is exactly how the hourly sandbox GC stayed broken
+	// from 2026-07-05 to 2026-08-07 while ~/.agm/sandboxes grew to 239 GB.
+	// disk-watchdog consumes this entry to alarm on a stale reaper.
+	logSandboxGCEntryTagged(gclog.Entry{
+		Operation: "sandbox_gc_completed",
+		Reason: fmt.Sprintf("scanned=%d reaped=%d kept=%d errors=%d probe_failures=%d",
+			result.Scanned, result.Reaped, result.Kept, result.Errors, result.ProbeFailures),
+		// DryRun, Errors, and ProbeFailures are load-bearing for the reader,
+		// not decoration. A dry run proves nothing was reclaimed, a sweep
+		// whose deletions all failed is not a healthy sweep, and a sweep that
+		// could not evaluate its safety gates (lsof/mount table/session store
+		// unreadable) proves nothing was correctly evaluated either — even
+		// though every entry reports "kept", not "error". disk-watchdog
+		// refuses to count any of the three as a liveness heartbeat.
+		DryRun:        result.DryRun,
+		Errors:        result.Errors,
+		ProbeFailures: result.ProbeFailures,
+	})
 
 	if sandboxGCJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -172,6 +222,9 @@ func printSandboxGCText(result *ops.SandboxGCResult) {
 	if result.Errors > 0 {
 		summary += fmt.Sprintf(", errors %d", result.Errors)
 	}
+	if result.ProbeFailures > 0 {
+		summary += fmt.Sprintf(", probe failures %d", result.ProbeFailures)
+	}
 	switch {
 	case result.DryRun:
 		ui.PrintSuccess(fmt.Sprintf("Dry run: %s", summary))
@@ -182,6 +235,9 @@ func printSandboxGCText(result *ops.SandboxGCResult) {
 	}
 	if result.Errors > 0 {
 		ui.PrintWarning(fmt.Sprintf("%d sandbox(es) failed to remove — check ~/.agm/logs/gc.jsonl", result.Errors))
+	}
+	if result.ProbeFailures > 0 {
+		ui.PrintWarning(fmt.Sprintf("%d sandbox(es) could not be evaluated (lsof/mount/session-store probe failed) — check ~/.agm/logs/gc.jsonl", result.ProbeFailures))
 	}
 }
 
@@ -290,12 +346,58 @@ func isMissingDoltDatabaseError(err error, database string) bool {
 		strings.Contains(msg, "unknown database \""+db+"\"")
 }
 
+// logSandboxGCEntryDefault appends one record to the shared GC log.
+//
+// A write failure is reported on stderr rather than swallowed. The completion
+// record is the watchdog's only proof of life: if it never lands, the command
+// still exits zero while disk-watchdog raises a dead-reaper alarm six hours
+// later, and nothing anywhere says the observation channel itself broke.
+// effectiveSandboxGCReap decides whether a requested reap may actually delete.
+//
+// Never reap on partial knowledge. A skipped workspace contributes none of its
+// live session IDs to the inventory, so every sandbox owned by that workspace
+// looks unowned and can pass the remaining gates — deleting a live session's
+// sandbox because we could not read the store that proves it is live. A
+// partial inventory downgrades the run to a scan and returns the notice
+// explaining why; a complete inventory reaps as requested. A dry run is
+// already non-destructive and needs no notice.
+func effectiveSandboxGCReap(requested bool, warnings []string) (bool, string) {
+	if !requested || len(warnings) == 0 {
+		return requested, ""
+	}
+	return false, fmt.Sprintf(
+		"refusing to reap: live-session inventory is partial (%d workspace store(s) skipped); "+
+			"scanning only. Fix the workspace Dolt endpoints, then re-run.", len(warnings))
+}
+
+// sandboxGCSourceEnv names the environment variable a scheduler sets to declare
+// itself in every record this sweep writes.
+//
+// It is an environment variable rather than a flag deliberately: an older `agm`
+// on the host ignores an unknown variable, whereas an unknown flag would turn
+// an automated caller's remediation into a hard "unknown flag" failure the
+// moment the caller was upgraded first.
+const sandboxGCSourceEnv = "AGM_GC_SOURCE"
+
+// logSandboxGCEntryTagged stamps the declared runner onto an entry before it is
+// written. Readers use it to tell a scheduled sweep from one that some other
+// component triggered on its own behalf; see gclog.Entry.Source.
+func logSandboxGCEntryTagged(entry gclog.Entry) {
+	if entry.Source == "" {
+		entry.Source = strings.TrimSpace(os.Getenv(sandboxGCSourceEnv))
+	}
+	logSandboxGCEntry(entry)
+}
+
 func logSandboxGCEntryDefault(entry gclog.Entry) {
 	logger, err := gclog.NewDefault()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "agm sandbox gc: WARNING: cannot open the GC log to record %q: %v\n", entry.Operation, err)
 		return
 	}
-	_ = logger.Log(entry)
+	if err := logger.Log(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "agm sandbox gc: WARNING: cannot record %q in the GC log: %v\n", entry.Operation, err)
+	}
 }
 
 func init() {
