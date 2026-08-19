@@ -37,10 +37,7 @@ bypassed.
 
 ## BDD Traceability
 
-- No BDD change, with reason: this package is a pure text-detection library with
-  no user-visible workflow of its own. Its observable behaviour reaches users
-  only through `safe-pr` and `safe-push`, whose refusals are covered by the
-  deterministic unit consequences below.
+- Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 
 ## Test Traceability
 
