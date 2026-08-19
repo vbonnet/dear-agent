@@ -29,9 +29,6 @@ type DefaultsConfig = config.DefaultsConfig
 // UIConfig aliases the shared presentation settings.
 type UIConfig = config.UIConfig
 
-// AdvancedConfig aliases the shared advanced UI settings.
-type AdvancedConfig = config.AdvancedConfig
-
 // DefaultConfig returns the shared UI defaults.
 func DefaultConfig() *Config {
 	settings := config.DefaultUISettings()

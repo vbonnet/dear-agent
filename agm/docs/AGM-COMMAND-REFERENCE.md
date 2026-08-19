@@ -1363,11 +1363,11 @@ ui:
   show_tags: true                # Show session tags
   fuzzy_search: true             # Enable fuzzy matching
 
-advanced:
-  tmux_timeout: "5s"             # Tmux command timeout
-  health_check_cache: "5s"       # Health check cache duration
-  lock_timeout: "30s"            # Lock acquisition timeout
-  uuid_detection_window: "5m"    # UUID detection time window
+timeout:
+  tmux_commands: "5s"             # Tmux command timeout
+
+health_check:
+  cache_duration: "5s"             # Health check cache duration
 ```
 
 **Available Themes**:

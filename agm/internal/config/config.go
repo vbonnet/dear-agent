@@ -23,7 +23,7 @@ type Config struct {
 	LogFile     string `yaml:"log_file"`
 
 	// UISettings is named in Go but inline in the shared YAML document, keeping
-	// the existing defaults/ui/advanced root namespaces in the strict schema.
+	// the existing defaults/ui root namespaces in the strict schema.
 	UISettings UISettings `yaml:",inline" json:"-"`
 
 	// Workspace configuration
@@ -397,6 +397,20 @@ func Load(cfgFile string) (*Config, error) {
 		cfg.Sandbox.WritableDirs[i] = expandHomeAt(dir, homeDir)
 	}
 
+	// Refuse a sandbox root that is the home directory itself. Expansion turns
+	// a bare "~" into an absolute path that passes every remaining check, and
+	// resolveSandboxLowerDirs returns configured repos directly — it never
+	// reaches the $HOME refusal that guards only the scan fallback. A provider
+	// such as OverlayFS would then publish the entire home directory as a
+	// readable lower layer, exposing credentials far outside the requested
+	// repository.
+	if err := rejectUnsafeSandboxRoots(cfg.Sandbox.Repos, homeDir, "sandbox.repos"); err != nil {
+		return nil, err
+	}
+	if err := rejectUnsafeSandboxRoots(cfg.Sandbox.WritableDirs, homeDir, "sandbox.writable_dirs"); err != nil {
+		return nil, err
+	}
+
 	// Validate configuration
 	if err := validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -720,4 +734,34 @@ func expandHomeAt(path, homeDir string) string {
 	}
 
 	return filepath.Join(homeDir, path[2:])
+}
+
+// rejectUnsafeSandboxRoots refuses sandbox roots that are too broad to clone:
+// the home directory itself, the filesystem root, or an empty entry. Each is
+// checked both literally and through symlinks, so "~", "$HOME", and a symlink
+// pointing at either are all refused.
+func rejectUnsafeSandboxRoots(dirs []string, homeDir, field string) error {
+	resolvedHome := homeDir
+	if r, err := filepath.EvalSymlinks(homeDir); err == nil {
+		resolvedHome = r
+	}
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir) == "" {
+			return fmt.Errorf("%s contains an empty entry", field)
+		}
+		candidates := []string{filepath.Clean(dir)}
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			candidates = append(candidates, filepath.Clean(r))
+		}
+		for _, candidate := range candidates {
+			if candidate == "/" {
+				return fmt.Errorf("%s entry %q is the filesystem root; name the repository directory instead", field, dir)
+			}
+			if homeDir != "" && (candidate == filepath.Clean(homeDir) || candidate == filepath.Clean(resolvedHome)) {
+				return fmt.Errorf("%s entry %q resolves to the home directory; a sandbox lower layer must be a repository, "+
+					"not $HOME — every file under it, including credentials, would be readable inside the sandbox", field, dir)
+			}
+		}
+	}
+	return nil
 }
