@@ -2,23 +2,32 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/reaper"
+	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/reaper"
-	"github.com/vbonnet/dear-agent/agm/internal/ui"
-	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
 
 // spawnReaper spawns a detached agm-reaper process for async archival.
 // The reaper waits for the harness prompt, sends its native graceful-exit
 // command, and archives the session.
+// revisionCheckTimeout bounds the pre-spawn agm-reaper revision probe.
+const revisionCheckTimeout = 5 * time.Second
+
+// maxStartupAckBytes caps the startup handshake read. The acknowledgement is
+// the literal "ready\n"; anything larger is a misbehaving peer, not a longer
+// answer.
+const maxStartupAckBytes = 1024
+
 func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.SessionOutcome, allowSupervisorReap bool) error {
 	// Find agm-reaper binary (should be in same directory as agm)
 	agmPath, err := os.Executable()
@@ -52,13 +61,16 @@ func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.Sessio
 	if expectedRevision == "" || expectedRevision == "unknown" || expectedRevision == "unknown-dirty" {
 		return fmt.Errorf("cannot verify agm-reaper revision: agm has no embedded VCS revision")
 	}
-	check := exec.Command(reaperPath, "--check-revision", expectedRevision)
+	// Bounded: a revision probe that hangs blocks the archive with no signal,
+	// and this one runs before the reaper is even started.
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), revisionCheckTimeout)
+	defer cancelCheck()
+	check := exec.CommandContext(checkCtx, reaperPath, "--check-revision", expectedRevision)
 	if out, err := check.CombinedOutput(); err != nil {
-		detail := strings.TrimSpace(string(out))
-		if detail == "" {
-			detail = err.Error()
+		if detail := strings.TrimSpace(string(out)); detail != "" {
+			return fmt.Errorf("agm-reaper revision mismatch: %s: %w", detail, err)
 		}
-		return fmt.Errorf("agm-reaper revision mismatch: %s", detail)
+		return fmt.Errorf("agm-reaper revision mismatch: %w", err)
 	}
 
 	// Get sessions directory from config
@@ -171,7 +183,7 @@ func buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevis
 	return args
 }
 
-func awaitReaperStartup(reader *os.File, timeout time.Duration) error {
+func awaitReaperStartup(reader io.Reader, timeout time.Duration) error {
 	result := make(chan error, 1)
 	go func() {
 		// A panic on this reader goroutine would take down the whole agm
@@ -183,7 +195,9 @@ func awaitReaperStartup(reader *os.File, timeout time.Duration) error {
 				result <- fmt.Errorf("startup acknowledgement reader panicked: %v", r)
 			}
 		}()
-		line, err := bufio.NewReader(reader).ReadString('\n')
+		// Bounded: the acknowledgement is a single short line, so a peer
+		// writing without a newline must not be able to grow this buffer.
+		line, err := bufio.NewReader(io.LimitReader(reader, maxStartupAckBytes)).ReadString('\n')
 		if err != nil {
 			result <- fmt.Errorf("startup acknowledgement closed before readiness: %w", err)
 			return
