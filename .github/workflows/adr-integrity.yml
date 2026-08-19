@@ -37,7 +37,10 @@ jobs:
     # Scope of the scan itself is unchanged: still whole-repo. The repo is
     # clean today, so a whole-repo pass costs the same as a diff-scoped one and
     # catches strictly more — diff-scoping here would be a weakening, not a fix.
-    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.global == 'true'
+    if: >-
+      !cancelled() && (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs == 'true' ||
+      needs.changes.outputs.global == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

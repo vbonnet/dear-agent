@@ -41,7 +41,10 @@ jobs:
     # whole-repo pass costs the same as a changed-files pass while catching
     # strictly more (e.g. a violation introduced by a file rename). Diff-scoping
     # a check with no backlog trades coverage away for nothing.
-    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.global == 'true'
+    if: >-
+      !cancelled() && (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs == 'true' ||
+      needs.changes.outputs.global == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
