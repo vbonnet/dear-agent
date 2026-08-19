@@ -210,22 +210,24 @@ teardown() {
     : >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT"
     assert_success
-    assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "3"
-    # We expect at least agm, wayfinder, youtube.
+    assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "4"
+    # The declared inventory includes agm, wayfinder, youtube, and research-pipeline.
     run grep -F "plugin install agm@dear-agent" "$CLAUDE_LOG"
     assert_success
     run grep -F "plugin install wayfinder@dear-agent" "$CLAUDE_LOG"
     assert_success
     run grep -F "plugin install youtube@dear-agent" "$CLAUDE_LOG"
     assert_success
+    run grep -F "plugin install research-pipeline@dear-agent" "$CLAUDE_LOG"
+    assert_success
 }
 
 @test "already-installed plugin uses 'plugin update' instead of install" {
-    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\n' >"$CLAUDE_PLUGINS"
+    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\nresearch-pipeline@dear-agent\n' >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT"
     assert_success
     assert_equal "$(grep -c "^plugin install " "$CLAUDE_LOG")" "0"
-    assert_equal "$(grep -c "^plugin update " "$CLAUDE_LOG")" "3"
+    assert_equal "$(grep -c "^plugin update " "$CLAUDE_LOG")" "4"
 }
 
 @test "--scope user is forwarded to plugin install" {
@@ -237,7 +239,7 @@ teardown() {
 }
 
 @test "--uninstall removes every declared plugin" {
-    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\n' >"$CLAUDE_PLUGINS"
+    printf 'agm@dear-agent\nwayfinder@dear-agent\nyoutube@dear-agent\nresearch-pipeline@dear-agent\n' >"$CLAUDE_PLUGINS"
     run "$INSTALL_SCRIPT" --uninstall
     assert_success
     run grep -F "plugin uninstall agm@dear-agent" "$CLAUDE_LOG"
@@ -245,6 +247,8 @@ teardown() {
     run grep -F "plugin uninstall wayfinder@dear-agent" "$CLAUDE_LOG"
     assert_success
     run grep -F "plugin uninstall youtube@dear-agent" "$CLAUDE_LOG"
+    assert_success
+    run grep -F "plugin uninstall research-pipeline@dear-agent" "$CLAUDE_LOG"
     assert_success
 }
 

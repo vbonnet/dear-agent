@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-07-28 -->
+<!-- Last audited at: 2026-07-29 -->
 
 # Skill Placement — which repo owns a skill, and how it reaches a session
 
@@ -6,9 +6,9 @@ Companion to `docs/skill-tiers.md` (model/effort contract) and
 `docs/skill-verification-criteria.md` (exit-condition contract). Those two say
 what a skill must *declare*. This one says where it must *live*.
 
-Derived from a cross-model pass (synthesis + adversarial review) on a real
-case: a `research-pipeline` orchestrator skill proposed in a private,
-single-operator dotfiles repo.
+Derived from a cross-model pass (synthesis + adversarial review) that moved the
+`research-pipeline` orchestrator out of a private, single-operator dotfiles repo
+and published it as a standalone dear-agent plugin.
 
 ---
 
@@ -79,16 +79,17 @@ skill actually discovers and triggers.
 | Surface | Reaches | Mechanism |
 |---|---|---|
 | `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
-| `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
-| `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
+| `agm/plugins/`, `.agents/skills/` | Pi | `.pi/settings.json`; the AGM root supplies its lifecycle skill and the shared tree supplies portable skills |
+| `.agents/skills/` | Codex CLI and AGY | single AGENTS-compatible repository discovery tree; published entrypoints point to their canonical source |
+| `.opencode/skills/` | OpenCode | native repository skill discovery; published skills point to their canonical source |
 | `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
 
-`.dear-agent/marketplace.json` is the neutral catalog: it declares
-`native-claude-plugin-marketplace` for Claude Code and `agents-md-skill-fallback`
-for Codex, AGY, and OpenCode. Pi instead loads only the paths declared in
-`.pi/settings.json`.
+`.dear-agent/marketplace.json` is the neutral catalog: it names each executable
+discovery surface—Claude's plugin marketplace, the shared `.agents/skills`
+tree for Codex and AGY, OpenCode's native skill directory, and Pi's configured
+skill paths.
 
 ### The canonical packaging pattern
 
@@ -121,7 +122,7 @@ followed by a discovery smoke test in each claimed consumer.
 
 | Skill | Rule it enforces | Owner |
 |---|---|---|
-| `research-pipeline` (a candidate skill proposed in a private dotfiles repo) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
+| `research-pipeline` (published standalone plugin) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
 | writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
 | a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |

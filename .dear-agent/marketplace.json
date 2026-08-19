@@ -27,6 +27,13 @@
       "description": "Extract transcripts and metadata from YouTube videos",
       "version": "0.1.0",
       "capabilities": ["commands"]
+    },
+    {
+      "name": "research-pipeline",
+      "source": "./research-pipeline",
+      "description": "Provider-routed research pipeline: ingest, cited research, independent cross-model verification/planning, beads decomposition, execution",
+      "version": "0.1.0",
+      "capabilities": ["skills"]
     }
   ],
   "harnesses": [
@@ -37,8 +44,8 @@
     },
     {
       "name": "codex-cli",
-      "mode": "agents-md-skill-fallback",
-      "catalog": ".dear-agent/marketplace.json"
+      "mode": "native-codex-skill",
+      "catalog": ".agents/skills"
     },
     {
       "name": "agy",
@@ -47,13 +54,13 @@
     },
     {
       "name": "opencode-cli",
-      "mode": "agents-md-skill-fallback",
-      "catalog": ".dear-agent/marketplace.json"
+      "mode": "native-opencode-skill",
+      "catalog": ".opencode/skills"
     },
     {
       "name": "pi-cli",
-      "mode": "agents-md-skill-fallback",
-      "catalog": ".dear-agent/marketplace.json"
+      "mode": "native-pi-skill-path",
+      "catalog": ".pi/settings.json"
     }
   ]
 }

@@ -1,0 +1,1 @@
+../../../agm/agm-plugin/skills/scan-health/SKILL.md
