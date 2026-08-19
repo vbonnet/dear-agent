@@ -1,0 +1,13 @@
+---
+schema_version: "2.0"
+project_name: split-1133
+project_type: refactor
+risk_level: M
+current_waypoint: CHARTER
+status: planning
+created_at: 2026-08-19T13:08:22.661509-07:00
+updated_at: 2026-08-19T13:08:22.661509-07:00
+waypoint_history: []
+roadmap:
+    phases: []
+---
