@@ -5,19 +5,19 @@ import (
 	"testing"
 )
 
-func summary(id int, name string) RulesetSummary {
-	return RulesetSummary{ID: &id, Name: &name}
+func ruleset(id int, name string) Ruleset {
+	return Ruleset{ID: id, Name: name}
 }
 
 const canonicalName = "main-zero-bypass"
 
 func TestParseRulesetPagesFlattensAndProvesIdentity(t *testing.T) {
-	summaries, err := ParseRulesetPages([]byte(`[[{"id":1,"name":"a"}],[{"id":2,"name":"b"}]]`))
+	rulesets, err := ParseRulesetPages([]byte(`[[{"id":1,"name":"a"}],[{"id":2,"name":"b"}]]`))
 	if err != nil {
 		t.Fatalf("ParseRulesetPages: %v", err)
 	}
-	if len(summaries) != 2 || *summaries[1].Name != "b" {
-		t.Fatalf("pages were not flattened in order: %+v", summaries)
+	if len(rulesets) != 2 || rulesets[1].Name != "b" {
+		t.Fatalf("pages were not flattened in order: %+v", rulesets)
 	}
 }
 
@@ -66,45 +66,45 @@ func TestParseRulesetPagesRejectsEvidenceThatCannotProveAbsence(t *testing.T) {
 func TestSelectRulesetIDForCanonicalRepository(t *testing.T) {
 	tests := []struct {
 		name      string
-		summaries []RulesetSummary
+		rulesets  []Ruleset
 		wantID    int
 		wantFound bool
 		wantErr   string
 	}{
 		{
 			name:      "the canonical id under its canonical name is selected",
-			summaries: []RulesetSummary{summary(CanonicalRulesetID, canonicalName), summary(42, "unrelated")},
+			rulesets:  []Ruleset{ruleset(CanonicalRulesetID, canonicalName), ruleset(42, "unrelated")},
 			wantID:    CanonicalRulesetID,
 			wantFound: true,
 		},
 		{
 			// The importer has to run before as well as after the rename.
 			name:      "the canonical id under its pre-rename name is selected",
-			summaries: []RulesetSummary{summary(CanonicalRulesetID, LegacyRulesetName)},
+			rulesets:  []Ruleset{ruleset(CanonicalRulesetID, LegacyRulesetName)},
 			wantID:    CanonicalRulesetID,
 			wantFound: true,
 		},
 		{
-			name:      "a second ruleset carrying the canonical name is ambiguous",
-			summaries: []RulesetSummary{summary(CanonicalRulesetID, canonicalName), summary(999, canonicalName)},
-			wantErr:   "found 2",
+			name:     "a second ruleset carrying the canonical name is ambiguous",
+			rulesets: []Ruleset{ruleset(CanonicalRulesetID, canonicalName), ruleset(999, canonicalName)},
+			wantErr:  "found 2",
 		},
 		{
 			// A replacement ID means the ruleset was deleted and recreated.
 			// Importing it would bind state to an object no one reviewed.
-			name:      "a replacement id fails closed rather than importing the new object",
-			summaries: []RulesetSummary{summary(999, canonicalName)},
-			wantErr:   "replacement ID 999",
+			name:     "a replacement id fails closed rather than importing the new object",
+			rulesets: []Ruleset{ruleset(999, canonicalName)},
+			wantErr:  "replacement ID 999",
 		},
 		{
-			name:      "no matching ruleset at all is an error, not an absence",
-			summaries: []RulesetSummary{summary(42, "unrelated")},
-			wantErr:   "found 0",
+			name:     "no matching ruleset at all is an error, not an absence",
+			rulesets: []Ruleset{ruleset(42, "unrelated")},
+			wantErr:  "found 0",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, found, err := SelectRulesetID("dear-agent", canonicalName, tt.summaries)
+			id, found, err := SelectRulesetID("dear-agent", canonicalName, tt.rulesets)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("SelectRulesetID unexpectedly succeeded with %d", id)
@@ -127,14 +127,14 @@ func TestSelectRulesetIDForCanonicalRepository(t *testing.T) {
 func TestSelectRulesetIDForFleetRepositories(t *testing.T) {
 	t.Run("a single legacy-named ruleset is selected", func(t *testing.T) {
 		id, found, err := SelectRulesetID("engram-research", canonicalName,
-			[]RulesetSummary{summary(77, LegacyRulesetName), summary(1, "other")})
+			[]Ruleset{ruleset(77, LegacyRulesetName), ruleset(1, "other")})
 		if err != nil || !found || id != 77 {
 			t.Fatalf("got (%d, %t, %v), want (77, true, nil)", id, found, err)
 		}
 	})
 
 	t.Run("no ruleset is a provable absence, not an error", func(t *testing.T) {
-		id, found, err := SelectRulesetID("engram-research", canonicalName, []RulesetSummary{summary(1, "other")})
+		id, found, err := SelectRulesetID("engram-research", canonicalName, []Ruleset{ruleset(1, "other")})
 		if err != nil || found || id != 0 {
 			t.Fatalf("got (%d, %t, %v), want (0, false, nil)", id, found, err)
 		}
@@ -142,7 +142,7 @@ func TestSelectRulesetIDForFleetRepositories(t *testing.T) {
 
 	t.Run("duplicates refuse an ambiguous import", func(t *testing.T) {
 		_, _, err := SelectRulesetID("engram-research", canonicalName,
-			[]RulesetSummary{summary(1, LegacyRulesetName), summary(2, LegacyRulesetName)})
+			[]Ruleset{ruleset(1, LegacyRulesetName), ruleset(2, LegacyRulesetName)})
 		if err == nil || !strings.Contains(err.Error(), "refusing an ambiguous import") {
 			t.Fatalf("expected an ambiguity error, got %v", err)
 		}

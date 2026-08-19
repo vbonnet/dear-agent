@@ -15,6 +15,7 @@
 package tofuimport
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -52,7 +53,7 @@ type Inventory struct {
 // It rejects anything it cannot act on safely rather than importing a subset.
 func ParseInventory(raw []byte) (Inventory, error) {
 	var inventory Inventory
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&inventory); err != nil {
 		return Inventory{}, fmt.Errorf("evaluated OpenTofu inventory is not the expected {active, archived} object: %w", err)

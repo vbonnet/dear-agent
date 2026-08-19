@@ -19,7 +19,7 @@ therefore fails closed on ambiguous evidence.
 
 **TIP-03** When the inventory omits the repository whose checked-in ruleset is canonical, the package shall reject it.
 
-**TIP-04** When a ruleset listing contains an entry without a positive numeric id or a non-empty name, the package shall reject the listing rather than treat it as proof that no ruleset exists.
+**TIP-04** When a ruleset listing contains an entry without a positive numeric id or a non-empty name, the package shall reject the listing rather than treat it as proof that no ruleset exists, and shall expose only validated rulesets so that selection cannot observe a partially-parsed entry.
 
 **TIP-05** When more than one ruleset matches the name sought for a repository, the package shall refuse the import rather than select one.
 

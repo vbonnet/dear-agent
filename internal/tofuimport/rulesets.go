@@ -18,8 +18,20 @@ const CanonicalRulesetID = 18061003
 // for dear-agent lets the importer run before or after the rename.
 const LegacyRulesetName = "branch-protection"
 
-// RulesetSummary is one entry of GET /repos/{owner}/{repo}/rulesets.
-type RulesetSummary struct {
+// Ruleset is one validated entry of GET /repos/{owner}/{repo}/rulesets.
+//
+// The fields are values, not pointers, because a Ruleset only exists once
+// ParseRulesetPages has proved both are present and usable. Selection then
+// cannot nil-dereference, and no caller can construct a half-valid one.
+type Ruleset struct {
+	ID   int
+	Name string
+}
+
+// rulesetSummary is the wire shape. Its pointers exist to tell "absent" from
+// "zero": a ruleset with `"id": 0` and one with no id at all are different
+// kinds of broken, and both must be rejected rather than defaulted.
+type rulesetSummary struct {
 	ID   *int    `json:"id"`
 	Name *string `json:"name"`
 }
@@ -32,13 +44,13 @@ type RulesetSummary struct {
 // let the next plan create a second active ruleset beside the real one. A
 // matching object with a null id would import the literal string "null" as a
 // provider ID.
-func ParseRulesetPages(raw []byte) ([]RulesetSummary, error) {
-	var pages [][]RulesetSummary
+func ParseRulesetPages(raw []byte) ([]Ruleset, error) {
+	var pages [][]rulesetSummary
 	if err := json.Unmarshal(raw, &pages); err != nil {
 		return nil, fmt.Errorf("ruleset listing is not a paginated array of arrays: %w", err)
 	}
 
-	var summaries []RulesetSummary
+	var rulesets []Ruleset
 	for _, page := range pages {
 		for _, summary := range page {
 			if summary.ID == nil || summary.Name == nil {
@@ -50,10 +62,10 @@ func ParseRulesetPages(raw []byte) ([]RulesetSummary, error) {
 			if *summary.Name == "" {
 				return nil, fmt.Errorf("ruleset listing contains a ruleset with an empty name")
 			}
-			summaries = append(summaries, summary)
+			rulesets = append(rulesets, Ruleset{ID: *summary.ID, Name: *summary.Name})
 		}
 	}
-	return summaries, nil
+	return rulesets, nil
 }
 
 // SelectRulesetID picks the one ruleset it is safe to import for a repository.
@@ -62,25 +74,25 @@ func ParseRulesetPages(raw []byte) ([]RulesetSummary, error) {
 // (0, false, nil) when the repository provably has none yet, and an error
 // whenever the evidence is ambiguous. An ambiguous lookup is never evidence
 // that creating another ruleset is safe.
-func SelectRulesetID(repo, canonicalName string, summaries []RulesetSummary) (int, bool, error) {
+func SelectRulesetID(repo, canonicalName string, rulesets []Ruleset) (int, bool, error) {
 	if canonicalName == "" {
 		return 0, false, fmt.Errorf("canonical ruleset name is empty")
 	}
 	if repo == canonicalRepository {
-		return selectCanonicalRulesetID(canonicalName, summaries)
+		return selectCanonicalRulesetID(canonicalName, rulesets)
 	}
 
-	var matches []RulesetSummary
-	for _, summary := range summaries {
-		if *summary.Name == LegacyRulesetName {
-			matches = append(matches, summary)
+	var matches []Ruleset
+	for _, ruleset := range rulesets {
+		if ruleset.Name == LegacyRulesetName {
+			matches = append(matches, ruleset)
 		}
 	}
 	switch len(matches) {
 	case 0:
 		return 0, false, nil
 	case 1:
-		return *matches[0].ID, true, nil
+		return matches[0].ID, true, nil
 	default:
 		return 0, false, fmt.Errorf(
 			"found %d rulesets named %s on %s; refusing an ambiguous import", len(matches), LegacyRulesetName, repo)
@@ -91,11 +103,11 @@ func SelectRulesetID(repo, canonicalName string, summaries []RulesetSummary) (in
 // its immutable provider ID. A duplicate, a replacement ID, or an unexpected
 // rename all fail closed, so a recovery run can never turn an uncertain lookup
 // into a second active ruleset.
-func selectCanonicalRulesetID(canonicalName string, summaries []RulesetSummary) (int, bool, error) {
-	var matches []RulesetSummary
-	for _, summary := range summaries {
-		if *summary.ID == CanonicalRulesetID || *summary.Name == canonicalName || *summary.Name == LegacyRulesetName {
-			matches = append(matches, summary)
+func selectCanonicalRulesetID(canonicalName string, rulesets []Ruleset) (int, bool, error) {
+	var matches []Ruleset
+	for _, ruleset := range rulesets {
+		if ruleset.ID == CanonicalRulesetID || ruleset.Name == canonicalName || ruleset.Name == LegacyRulesetName {
+			matches = append(matches, ruleset)
 		}
 	}
 	if len(matches) != 1 {
@@ -105,16 +117,16 @@ func selectCanonicalRulesetID(canonicalName string, summaries []RulesetSummary) 
 	}
 
 	selected := matches[0]
-	if *selected.ID != CanonicalRulesetID {
+	if selected.ID != CanonicalRulesetID {
 		return 0, false, fmt.Errorf(
 			"%s ruleset %s has replacement ID %d; expected canonical ID %d",
-			canonicalRepository, *selected.Name, *selected.ID, CanonicalRulesetID)
+			canonicalRepository, selected.Name, selected.ID, CanonicalRulesetID)
 	}
-	if *selected.Name != canonicalName && *selected.Name != LegacyRulesetName {
+	if selected.Name != canonicalName && selected.Name != LegacyRulesetName {
 		return 0, false, fmt.Errorf(
-			"%s ruleset ID %d has unexpected name %s", canonicalRepository, CanonicalRulesetID, *selected.Name)
+			"%s ruleset ID %d has unexpected name %s", canonicalRepository, CanonicalRulesetID, selected.Name)
 	}
-	return *selected.ID, true, nil
+	return selected.ID, true, nil
 }
 
 // CanonicalRulesetName reads the ruleset name out of .github/rulesets/main.json,
