@@ -164,11 +164,11 @@ func printErrorAuditText(entries []ops.ErrorEntry, since time.Time) {
 
 // errorReport is the JSON representation of the audit errors output.
 type errorReport struct {
-	TotalErrors int              `json:"total_errors"`
-	Since       string           `json:"since,omitempty"`
-	ByCategory  map[string]int   `json:"by_category"`
-	Entries     []ops.ErrorEntry `json:"entries"`
-	TopSources  []sourceCount    `json:"top_sources"`
+	TotalErrors int                      `json:"total_errors"`
+	Since       string                   `json:"since,omitempty"`
+	ByCategory  map[string]int           `json:"by_category"`
+	Entries     []ops.ErrorEntry         `json:"entries"`
+	TopSources  []sourceCount            `json:"top_sources"`
 }
 
 type sourceCount struct {

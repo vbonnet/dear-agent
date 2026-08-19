@@ -18,9 +18,9 @@ const dearAgentConfigFile = ".dear-agent-workspace.yaml"
 // for dear-agent orchestration. This file lives at the workspace root
 // alongside .agm/ and defines repos, goals, and review gates.
 type DearAgentWorkspaceConfig struct {
-	Version     int                         `yaml:"version"`
-	Repos       []string                    `yaml:"repos"`
-	Goals       map[string]string           `yaml:"goals,omitempty"`
+	Version     int                        `yaml:"version"`
+	Repos       []string                   `yaml:"repos"`
+	Goals       map[string]string          `yaml:"goals,omitempty"`
 	ReviewGates map[string]ReviewGateConfig `yaml:"review_gates,omitempty"`
 }
 

@@ -9,11 +9,11 @@ import (
 
 // Source constants for error memory records originating from AGM ops.
 const (
-	SourceAGMStall       = "agm-stall-detector"
+	SourceAGMStall      = "agm-stall-detector"
 	SourceAGMQualityGate = "agm-quality-gate"
-	SourceAGMTrust       = "agm-trust"
-	SourceAGMArchive     = "agm-archive"
-	SourceAGMCrossCheck  = "agm-cross-check"
+	SourceAGMTrust      = "agm-trust"
+	SourceAGMArchive    = "agm-archive"
+	SourceAGMCrossCheck = "agm-cross-check"
 )
 
 // ErrorMemoryCategory constants for AGM-originated error patterns.

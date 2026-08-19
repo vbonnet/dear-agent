@@ -20,15 +20,15 @@ type MetricsRequest struct {
 
 // MetricsResult is the full metrics payload.
 type MetricsResult struct {
-	Operation  string            `json:"operation"`
-	Timestamp  string            `json:"timestamp"`
-	Sessions   SessionMetrics    `json:"sessions"`
+	Operation  string           `json:"operation"`
+	Timestamp  string           `json:"timestamp"`
+	Sessions   SessionMetrics   `json:"sessions"`
 	Throughput ThroughputMetrics `json:"throughput"`
-	Cost       CostMetrics       `json:"cost"`
-	Resources  ResourceMetrics   `json:"resources"`
-	Alerts     []Alert           `json:"alerts"`
-	Workflow   *WorkflowMetrics  `json:"workflow,omitempty"`
-	Batch      *BatchMetrics     `json:"batch,omitempty"`
+	Cost       CostMetrics      `json:"cost"`
+	Resources  ResourceMetrics  `json:"resources"`
+	Alerts     []Alert          `json:"alerts"`
+	Workflow   *WorkflowMetrics `json:"workflow,omitempty"`
+	Batch      *BatchMetrics    `json:"batch,omitempty"`
 }
 
 // CostMetrics tracks aggregate spending across sessions.
@@ -89,8 +89,8 @@ type DiskMetrics struct {
 
 // Alert represents a threshold violation.
 type Alert struct {
-	Level   string `json:"level"` // "warning", "critical"
-	Type    string `json:"type"`  // "load", "memory", "disk", "throughput"
+	Level   string `json:"level"`   // "warning", "critical"
+	Type    string `json:"type"`    // "load", "memory", "disk", "throughput"
 	Message string `json:"message"`
 	Value   string `json:"value"`
 }

@@ -77,8 +77,8 @@ var (
 	intentListIncludeAll  bool
 	intentListOverlapping bool
 
-	intentBoardDir   string
-	intentOutputForm string
+	intentBoardDir    string
+	intentOutputForm  string
 )
 
 func init() {

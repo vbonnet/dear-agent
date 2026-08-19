@@ -11,14 +11,14 @@ import (
 )
 
 var (
-	selfImproveSuiteFlag     string
-	selfImproveModeFlag      string
-	selfImproveModelFlag     string
-	selfImproveBudgetFlag    float64
-	selfImproveMaxCyclesFlag int
-	selfImproveLimitFlag     int
-	selfImproveProposersFlag []string
-	selfImproveNoGateFlag    bool
+	selfImproveSuiteFlag      string
+	selfImproveModeFlag       string
+	selfImproveModelFlag      string
+	selfImproveBudgetFlag     float64
+	selfImproveMaxCyclesFlag  int
+	selfImproveLimitFlag      int
+	selfImproveProposersFlag  []string
+	selfImproveNoGateFlag     bool
 )
 
 var selfImproveCmd = &cobra.Command{

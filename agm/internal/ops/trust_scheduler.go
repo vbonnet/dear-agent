@@ -27,15 +27,15 @@ const (
 
 // AgentCandidate represents an available agent for work dispatch.
 type AgentCandidate struct {
-	SessionName string    `json:"session_name"`
-	TrustScore  int       `json:"trust_score"`
+	SessionName string `json:"session_name"`
+	TrustScore  int    `json:"trust_score"`
 	TrustTier   TrustTier `json:"trust_tier"`
 }
 
 // DispatchResult is the output of TrustAwareDispatch.
 type DispatchResult struct {
-	Ranked  []AgentCandidate `json:"ranked"`
-	Blocked []AgentCandidate `json:"blocked,omitempty"`
+	Ranked   []AgentCandidate `json:"ranked"`
+	Blocked  []AgentCandidate `json:"blocked,omitempty"`
 }
 
 // TrustThresholds returns the current scheduling thresholds from contracts.
