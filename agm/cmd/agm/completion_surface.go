@@ -106,26 +106,80 @@ func loadDispatchers(path string) ([]notify.Dispatcher, error) {
 	return built, nil
 }
 
-// shouldSurface filters out the orchestrator session itself (a relay into it
-// would re-trigger a completion, looping forever) and any name matching the
-// configured exclude substrings.
-func (cs *completionSurfacer) shouldSurface(event ops.CompletionEvent) bool {
-	if target := cs.relayTarget(); target != "" && event.SessionName == target {
-		return false
+// relayPlan is one completion event's routing decision, taken from a single
+// read of the live relay target.
+//
+// Resolving once per event is what makes the self-filter sound. The target
+// is live state that Dispatch can rewrite at any moment, so filtering
+// against one read and then delivering against a second leaves a window:
+// if the target changes to the very session being reported, the event
+// passes the filter (old target) and is then relayed into that session
+// (new target), waking it up so it completes again and relays again. One
+// snapshot per event closes that window by construction.
+type relayPlan struct {
+	// surface reports whether this event should be delivered at all.
+	surface bool
+	// target is the relay recipient this event was filtered against, and
+	// the only one it may be delivered to.
+	target string
+}
+
+// planFor decides how one completion event is routed. It filters out the
+// relay target itself (a relay into it would re-trigger a completion,
+// looping forever) and any name matching the configured exclude
+// substrings.
+func (cs *completionSurfacer) planFor(event ops.CompletionEvent) relayPlan {
+	target := cs.relayTarget()
+	if target != "" && eventIsSession(event, target) {
+		return relayPlan{surface: false, target: target}
 	}
 	lowerName := strings.ToLower(event.SessionName)
 	for _, exclude := range cs.excludes {
 		if strings.Contains(lowerName, exclude) {
-			return false
+			return relayPlan{surface: false, target: target}
 		}
 	}
-	return true
+	return relayPlan{surface: true, target: target}
 }
 
-// Surface delivers one completion event. Best-effort per channel: a failed
-// dispatcher or relay never blocks the watch loop, and errors are returned
-// joined for logging only.
-func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionEvent) []error {
+// minIDPrefixMatch is the shortest UUID prefix the self-filter will treat
+// as naming a session. Both directions of a wrong answer hurt, but not
+// equally: failing to match relays a session's completion into itself and
+// loops, while matching too eagerly silently drops an unrelated worker's
+// result. A short prefix is the only case where over-matching is
+// plausible, so prefixes below this length are not matched at all, and 8
+// hex characters make a collision with an unrelated session negligible.
+const minIDPrefixMatch = 8
+
+// eventIsSession reports whether target names event's session. The relay
+// target may be set to any of the three identifiers AGM accepts for a
+// session (see ops.SendMessageRequest.Recipient): its name, its full
+// session ID, or a UUID prefix of that ID. Comparing only the name, as
+// this filter first did, let every ID-shaped target slip past.
+func eventIsSession(event ops.CompletionEvent, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(event.SessionName), target) {
+		return true
+	}
+	id := strings.TrimSpace(event.SessionID)
+	if id == "" {
+		return false
+	}
+	if strings.EqualFold(id, target) {
+		return true
+	}
+	return len(target) >= minIDPrefixMatch &&
+		len(target) < len(id) &&
+		strings.EqualFold(id[:len(target)], target)
+}
+
+// Surface delivers one completion event using the plan planFor produced for
+// it. Best-effort per channel: a failed dispatcher or relay never blocks the
+// watch loop, and errors are returned joined for logging only.
+func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionEvent, plan relayPlan) []error {
 	var errs []error
 
 	n := &notify.Notification{
@@ -148,7 +202,10 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 		}
 	}
 
-	if target := cs.relayTarget(); target != "" {
+	// plan.target, not a fresh resolve: this event was filtered against
+	// that snapshot, and re-reading here would reopen the self-relay window
+	// planFor exists to close.
+	if target := plan.target; target != "" {
 		message := fmt.Sprintf(
 			"[completion-watcher] Session %q (%s) %s. Result tail:\n%s\n(Full output: %s)",
 			event.SessionName, event.Harness, describeTransition(event.TransitionType),

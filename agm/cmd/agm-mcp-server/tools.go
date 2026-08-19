@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -649,6 +650,53 @@ func addSendMessageToolWithFactory(server *mcp.Server, newOpContext mcpOpContext
 }
 
 func addCompletionRelayTargetTools(server *mcp.Server, _ *Config) {
+	addCompletionRelayTargetToolsWithFactory(server, newMCPOpContext)
+}
+
+// relayTargetSetResult is what the setter returns: the persisted state plus
+// whether the identifier was checked against the session store.
+type relayTargetSetResult struct {
+	dispatchstate.RelayTargetResult
+	// Verified is true when the identifier resolved to a known session.
+	Verified bool `json:"verified"`
+	// Warning explains an unverified write; empty when Verified is true.
+	Warning string `json:"warning,omitempty"`
+}
+
+// checkRelayTarget reports whether identifier names a session AGM knows.
+//
+// An unresolvable target is rejected rather than persisted, because the
+// setter's whole purpose is to stop losing notifications: a typo, an
+// expired ID, or a session from another workspace would otherwise be
+// accepted with a success response and then send every subsequent
+// completion and stall alert into "Session not found".
+//
+// A session store that cannot be opened is deliberately not a rejection.
+// This state lives outside that store precisely so relay can be retargeted
+// while it is unreachable, so the write proceeds and the caller is told
+// the target went unverified. The returned error means "definitely not a
+// session"; a returned warning means "could not check".
+func checkRelayTarget(ctx context.Context, newOpContext mcpOpContextFactory, identifier string) (string, error) {
+	opCtx, cleanup, err := newOpContext()
+	if err != nil {
+		return "target not verified: session store unavailable (" + err.Error() + ")", nil
+	}
+	defer cleanup()
+	opCtx.Context = ctx
+	if _, err := ops.GetSession(opCtx, &ops.GetSessionRequest{Identifier: identifier}); err != nil {
+		// Only a definitive "no such session" rejects the write. Any other
+		// failure (store down, lock timeout) is a check we could not run,
+		// and must not block retargeting.
+		var opErr *ops.OpError
+		if errors.As(err, &opErr) && opErr.Code == ops.ErrCodeSessionNotFound {
+			return "", err
+		}
+		return "target not verified: session lookup failed (" + err.Error() + ")", nil
+	}
+	return "", nil
+}
+
+func addCompletionRelayTargetToolsWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_get_completion_relay_target",
 		Description: "Read the live AGM completion relay target. Use before relying on completion notifications from AGM-created sessions.",
@@ -657,23 +705,35 @@ func addCompletionRelayTargetTools(server *mcp.Server, _ *Config) {
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
-		result := dispatchstate.ResolveRelayTarget(home, "", os.Getenv)
+		// Resolve against the installed default so this reports the
+		// recipient a running watcher would actually use, not just whether
+		// an override happens to be set.
+		result := dispatchstate.ResolveRelayTarget(home, dispatchstate.DefaultRelayFallback, os.Getenv)
 		return mcpSuccess(result), result, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_set_completion_relay_target",
 		Description: "Set the live Dispatch/AGM session that receives completion relays from the watcher. Takes effect without restarting the watcher.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input SetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
-		if input.SessionID == "" {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SetCompletionRelayTargetInput) (*mcp.CallToolResult, any, error) {
+		if strings.TrimSpace(input.SessionID) == "" {
 			return mcpError(ops.ErrInvalidInput("session_id", "Session identifier is required.")), nil, nil
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
-		result, err := dispatchstate.SetRelayTarget(home, input.SessionID)
+		warning, notFound := checkRelayTarget(ctx, newOpContext, input.SessionID)
+		if notFound != nil {
+			return mcpError(notFound), nil, nil
+		}
+		persisted, err := dispatchstate.SetRelayTarget(home, input.SessionID)
 		if err != nil {
 			return mcpError(err), nil, nil
+		}
+		result := relayTargetSetResult{
+			RelayTargetResult: persisted,
+			Verified:          warning == "",
+			Warning:           warning,
 		}
 		return mcpSuccess(result), result, nil
 	})
