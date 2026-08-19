@@ -1,6 +1,8 @@
 package githooks_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +23,7 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func pairProvenanceAt(t *testing.T, repo, ref string) (string, string) {
+func pairProvenanceAt(t *testing.T, repo, ref, expectedHelperHash string) (string, string) {
 	t.Helper()
 	commit := gitOutput(t, repo, "rev-parse", ref)
 	if len(commit) < 12 {
@@ -39,8 +41,24 @@ func pairProvenanceAt(t *testing.T, repo, ref string) (string, string) {
 		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=" + revision,
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuildDate=" + buildDate,
 		"-X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=post-merge-hook",
+		"-X github.com/vbonnet/dear-agent/agm/internal/codexhooks.expectedSpecContractHookSHA256=" + expectedHelperHash,
 	}, " ")
 	return commit, ldflags
+}
+
+func helperProvenanceAt(t *testing.T, repo, ref string) string {
+	t.Helper()
+	commit := gitOutput(t, repo, "rev-parse", "--short=12", ref)
+	if len(commit) != 12 {
+		t.Fatalf("helper commit %q is not the governed 12-character revision", commit)
+	}
+	buildDate := gitOutput(t, repo, "show", "-s", "--format=%cI", ref)
+	return strings.Join([]string{
+		"-X github.com/vbonnet/dear-agent/pkg/version.Version=dev",
+		"-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=" + commit,
+		"-X github.com/vbonnet/dear-agent/pkg/version.BuildDate=" + buildDate,
+		"-X github.com/vbonnet/dear-agent/pkg/version.BuiltBy=makefile",
+	}, " ")
 }
 
 func stubGitArgumentFailure(t *testing.T) string {
@@ -63,7 +81,9 @@ exec "$REAL_GIT" "$@"
 
 func TestRebuild_AGMPairBuildsWithCompletePinnedProvenance(t *testing.T) {
 	origin := newRebuildRepo(t)
-	wantCommit, wantFlags := pairProvenanceAt(t, origin, "HEAD")
+	helperDigest := sha256.Sum256([]byte("fakebin\n"))
+	wantCommit, wantFlags := pairProvenanceAt(t, origin, "HEAD", hex.EncodeToString(helperDigest[:]))
+	wantHelperFlags := helperProvenanceAt(t, origin, "HEAD")
 	local := cloneRepo(t, origin)
 	mergeBranchChanging(t, local, map[string]string{
 		"agm/internal/tmux/prompt.go": "package tmux // divergent local provenance\n",
@@ -74,11 +94,23 @@ func TestRebuild_AGMPairBuildsWithCompletePinnedProvenance(t *testing.T) {
 	}
 
 	records := installRecords(t, runRebuildRecord(t, local))
-	if len(records) != 2 {
-		t.Fatalf("pair rebuild recorded %d builds, want exactly two: %+v", len(records), records)
+	if len(records) != 3 {
+		t.Fatalf("pair rebuild recorded %d builds, want helper plus exactly two pair builds: %+v", len(records), records)
+	}
+	if records[0].pkg != "./cmd/spec-contract-hook" {
+		t.Fatalf("first pair rebuild build = %s, want revision-matched helper", records[0].pkg)
+	}
+	if records[0].commit != wantCommit {
+		t.Fatalf("helper built from %s, want origin trunk %s; local HEAD was %s", records[0].commit, wantCommit, localHead)
+	}
+	if records[0].ldflags != wantHelperFlags {
+		t.Fatalf("helper ldflags = %q, want default governed helper profile %q", records[0].ldflags, wantHelperFlags)
 	}
 	seenPackages := make(map[string]bool, len(records))
 	for _, record := range records {
+		if record.pkg == "./cmd/spec-contract-hook" {
+			continue
+		}
 		if record.pkg != "./agm/cmd/agm" && record.pkg != "./agm/cmd/agm-reaper" {
 			t.Errorf("unexpected package in pair rebuild: %+v", record)
 		}
@@ -96,7 +128,7 @@ func TestRebuild_AGMPairBuildsWithCompletePinnedProvenance(t *testing.T) {
 			t.Errorf("pair rebuild did not record %s: %+v", pkg, records)
 		}
 	}
-	if records[0].ldflags != records[1].ldflags {
+	if records[1].ldflags != records[2].ldflags {
 		t.Errorf("pair builds received different provenance profiles: %+v", records)
 	}
 }

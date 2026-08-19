@@ -59,6 +59,12 @@ jobs:
           cache: true
           cache-dependency-path: "go.sum"
 
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+
       - name: Install tmux (macOS)
         if: matrix.os == 'macos-latest'
         run: brew install tmux
@@ -96,8 +102,10 @@ jobs:
       - name: Validate tracked AI skills
         run: go run ./tools/skill-lint -repo .
 
-      - name: Verify AGM plugin hashes
-        run: make plugin-verify-hashes
+      - name: Verify generated AGM surfaces and plugin hashes
+        run: |
+          make verify-surface-codegen
+          make plugin-verify-hashes
 
       - name: Test
         run: go test ${{ matrix.race }} -count=1 -timeout=20m ./...

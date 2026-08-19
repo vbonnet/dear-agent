@@ -1,4 +1,5 @@
-# SPEC: .agents/SPEC.md
+# SPEC: agm/internal/agent/SPEC.md
+# RELATED-SPEC: .agents/SPEC.md
 # RELATED-SPEC: .claude/SPEC.md
 # RELATED-SPEC: .codex/SPEC.md
 # RELATED-SPEC: .gemini/SPEC.md

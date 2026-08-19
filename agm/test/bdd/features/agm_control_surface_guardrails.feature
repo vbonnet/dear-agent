@@ -1,4 +1,5 @@
-# SPEC: agm/internal/api/SPEC.md
+# SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/internal/api/SPEC.md
 # RELATED-SPEC: agm/internal/cli/SPEC.md
 # RELATED-SPEC: agm/internal/delegation/SPEC.md
 # RELATED-SPEC: agm/internal/discovery/SPEC.md
@@ -6,7 +7,6 @@
 # RELATED-SPEC: agm/internal/shellquote/SPEC.md
 # RELATED-SPEC: agm/internal/terminal/SPEC.md
 # RELATED-SPEC: agm/internal/validate/SPEC.md
-# RELATED-SPEC: agm/cmd/agm/SPEC.md
 Feature: AGM control surface guardrails
   AGM control-plane packages should carry executable SPEC traceability so CLI,
   MCP, tmux, and validation behavior do not drift across harnesses.

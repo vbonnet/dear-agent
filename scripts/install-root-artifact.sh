@@ -1,20 +1,21 @@
 #!/bin/sh
-set -eu
-test "$#" = 4 && test "$0" = dear-agent-root-artifact-installer || exit 2
-IFS= read -r mode; case "$mode" in PROBE|INSTALL) ;; *) exit 2;; esac
-test "$mode" != PROBE || exit 42
-test "$(/usr/bin/id -u)" = 0 || exit 2
-artifact=$1; expected_hash=$2; root_gid=$3; destination=$4
-case "$destination" in /usr/local/libexec/dear-agent-codex-hook-json|/usr/local/libexec/dear-agent-bead-close-guard) ;; *) exit 2;; esac
-staging=
-cleanup() { status=$?; trap - EXIT HUP INT TERM; test -z "$staging" || /bin/rm -f "$staging"; exit "$status"; }
-trap 'cleanup' EXIT HUP INT TERM
-platform=$(/usr/bin/uname -s); case "$platform" in Darwin) trusted_parent=/private/var/root; trusted_chain="/private /private/var $trusted_parent";; Linux) trusted_parent=/root; trusted_chain="/ $trusted_parent";; *) exit 2;; esac
-trusted() { test -d "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits & 0022))" -eq 0; }
-for dir in $trusted_chain; do trusted "$dir" || exit 2; done
-trusted_dir=$trusted_parent/.dear-agent-root-artifact; /usr/bin/install -d -o root -g "$root_gid" -m 0700 "$trusted_dir"
-staging=$(/usr/bin/mktemp "$trusted_dir/.artifact.XXXXXX"); /usr/bin/install -o root -g "$root_gid" -m 0755 "$artifact" "$staging"
-staged_hash=$(/usr/bin/openssl dgst -sha256 -r "$staging"); staged_hash=${staged_hash%% *}; test "$staged_hash" = "$expected_hash"
+set -eu; test "$#" = 4 && test "$0" = dear-agent-root-artifact-installer || exit 2
+IFS= read -r mode; case "$mode" in PROBE|INSTALL) ;; *) exit 2;; esac; test "$mode" != PROBE || exit 42
+test "$(/usr/bin/id -u)" = 0 || exit 2; artifact=$1; expected_hash=$2; root_gid=$3; destination=$4
+case "$destination" in /usr/local/libexec/dear-agent-codex-hook-json|/usr/local/libexec/dear-agent-spec-contract-hook|/usr/local/libexec/dear-agent-bead-close-guard) ;; *) exit 2;; esac
+test "${#expected_hash}" = 64 || exit 2; case "$expected_hash" in *[!0-9a-f]*) exit 2;; esac
+pinned_destination=; test "$destination" != /usr/local/libexec/dear-agent-spec-contract-hook || pinned_destination="$destination.$expected_hash"
+staging=; cleanup() { status=$?; trap - EXIT HUP INT TERM; test -z "$staging" || /bin/rm -f "$staging"; exit "$status"; }; trap 'cleanup' EXIT HUP INT TERM
+platform=$(/usr/bin/uname -s); case "$platform" in Darwin|Linux) :;; *) exit 2;; esac
+trusted() { test -d "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits & 0022))" -eq 0 && test "$((0$mode_bits & 0001))" -ne 0; }
+trusted_file() { test -f "$1" && test ! -L "$1" || return 1; case "$platform" in Darwin) uid=$(/usr/bin/stat -f '%u' "$1"); mode_bits=$(/usr/bin/stat -f '%Lp' "$1");; Linux) uid=$(/usr/bin/stat -c '%u' "$1"); mode_bits=$(/usr/bin/stat -c '%a' "$1");; esac; test "$uid" = 0 && test "$((0$mode_bits))" -eq "$((0755))"; }
+file_identity() { case "$platform" in Darwin) /usr/bin/stat -f '%d:%i' "$1";; Linux) /usr/bin/stat -c '%d:%i' "$1";; esac; }
+reuse_pinned() { trusted_file "$pinned_destination" || exit 2; pinned_hash=$(/usr/bin/openssl dgst -sha256 -r "$pinned_destination"); pinned_hash=${pinned_hash%% *}; test "$pinned_hash" = "$expected_hash"; /bin/rm -f "$staging"; staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-root-artifact.XXXXXX); /bin/rm -f "$staging"; /bin/ln "$pinned_destination" "$staging"; }
 for dir in / /usr /usr/local; do trusted "$dir" || exit 2; done
 if test -e /usr/local/libexec || test -L /usr/local/libexec; then trusted /usr/local/libexec || exit 2; else /usr/bin/install -d -o root -g "$root_gid" -m 0755 /usr/local/libexec; trusted /usr/local/libexec || exit 2; fi
-/bin/mv -f "$staging" "$destination"; staging=; trap - EXIT HUP INT TERM
+if test -e "$destination" || test -L "$destination"; then trusted_file "$destination" || exit 2; fi
+staging=$(/usr/bin/mktemp /usr/local/libexec/.dear-agent-root-artifact.XXXXXX); /usr/bin/install -o root -g "$root_gid" -m 0755 "$artifact" "$staging"
+staged_hash=$(/usr/bin/openssl dgst -sha256 -r "$staging"); staged_hash=${staged_hash%% *}; test "$staged_hash" = "$expected_hash"; staged_identity=$(file_identity "$staging")
+if test -n "$pinned_destination"; then if test -e "$pinned_destination" || test -L "$pinned_destination"; then reuse_pinned; elif /bin/ln "$staging" "$pinned_destination"; then :; else reuse_pinned; fi; trusted_file "$pinned_destination" || exit 2; staged_identity=$(file_identity "$staging"); test "$(file_identity "$pinned_destination")" = "$staged_identity" || exit 2; pinned_hash=$(/usr/bin/openssl dgst -sha256 -r "$staging"); pinned_hash=${pinned_hash%% *}; test "$pinned_hash" = "$expected_hash"; fi
+if test -n "$pinned_destination" && test -e "$destination" && test "$(file_identity "$destination")" = "$staged_identity"; then /bin/rm -f "$staging"; elif /bin/mv -f "$staging" "$destination"; then test ! -e "$staging" && test ! -L "$staging" || /bin/rm -f "$staging"; else trusted_file "$destination" || exit 2; test "$(file_identity "$destination")" = "$staged_identity" || exit 2; /bin/rm -f "$staging"; fi; staging=; trusted_file "$destination" || exit 2; test "$(file_identity "$destination")" = "$staged_identity" || exit 2; activated_hash=$(/usr/bin/openssl dgst -sha256 -r "$destination"); activated_hash=${activated_hash%% *}; test "$activated_hash" = "$expected_hash"; if test -n "$pinned_destination"; then trusted_file "$pinned_destination" || exit 2; test "$(file_identity "$pinned_destination")" = "$staged_identity" || exit 2; fi
+staging=; trap - EXIT HUP INT TERM

@@ -61,6 +61,12 @@
       {
         "hooks": [
           {
+            "command": "root=\"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-}}\"; if test -z \"$root\"; then root=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || exit 0; fi; case \"$root\" in /*) ;; *) exit 0;; esac; exec go run \"$root/cmd/spec-contract-hook\" --root \"$root\" --provider codex --event Stop",
+            "statusMessage": "Checking staged SPEC contracts",
+            "timeout": 60,
+            "type": "command"
+          },
+          {
             "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",
             "timeout": 120,
@@ -72,6 +78,12 @@
     "SubagentStop": [
       {
         "hooks": [
+          {
+            "command": "root=\"${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-}}\"; if test -z \"$root\"; then root=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || exit 0; fi; case \"$root\" in /*) ;; *) exit 0;; esac; exec go run \"$root/cmd/spec-contract-hook\" --root \"$root\" --provider codex --event SubagentStop",
+            "statusMessage": "Checking staged SPEC contracts",
+            "timeout": 60,
+            "type": "command"
+          },
           {
             "command": "${AGM_CODEX_HOOK_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",

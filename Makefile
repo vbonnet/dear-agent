@@ -80,6 +80,8 @@ override _GOVERNED_BUILD_TARGETS := \
 	build-otel-local \
 	build-bead-pr-sync \
 	build-bead-pr-guard \
+	build-spec-contract-hook \
+	build-spec-contract-hook-status \
 	build-codex-hook-json \
 	build-bead-close-guard \
 	build-drift-check \
@@ -115,6 +117,7 @@ override _GOVERNED_BUILD_TARGETS := \
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   lint-skills             Validate every tracked skill and command prompt
+#   verify-surface-codegen  Regenerate ignored AGM surface artifacts and fail on drift
 #   plugin-verify-hashes    Verify AGM plugin command and skill content hashes
 #   preflight               Fast local CI-parity gates: vet + build + AI skills + lint (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
@@ -148,6 +151,10 @@ override _GOVERNED_BUILD_TARGETS := \
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-spec-contract-hook Build the portable terminal SPEC contract helper
+#   build-spec-contract-hook-status Build the read-only dual-identity helper auditor
+#   install-spec-contract-hook Operator-install the digest-bound SPEC contract helper
+#   status-spec-contract-hook Read-only audit of both installed SPEC helper identities
 #   build-codex-hook-json    Build the fixed JSON helper for attested Codex hooks
 #   install-codex-hook-json  Operator-install the digest-bound JSON helper
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
@@ -209,8 +216,9 @@ override _GOVERNED_BUILD_TARGETS := \
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-external-pr-reviewer install-external-pr-reviewer build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-pr-blockers install-pr-blockers build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-codex-hook-json install-codex-hook-json build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-external-pr-reviewer install-external-pr-reviewer build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent uninstall-sandbox-gc-launchagent install-sandbox-gc-launchagent build-disk-watchdog install-disk-watchdog install-disk-watchdog-launchagent uninstall-disk-watchdog-launchagent build-override-audit-launchdaemon-installer install-override-audit-launchdaemon uninstall-override-audit-launchdaemon build-override-audit-systemd-installer install-override-audit-systemd uninstall-override-audit-systemd install-gobin-guard install-gobin-guard-launchagent uninstall-gobin-guard-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-pr-blockers install-pr-blockers build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server build-engram-mcp install-engram-mcp build-spec-contract-hook install-spec-contract-hook
 .PHONY: build-session-skill-extractor install-session-skill-extractor
+.PHONY: build-spec-contract-hook-status status-spec-contract-hook
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
@@ -250,6 +258,14 @@ lint-headers:
 # the repository contract in .dear-agent.yml.
 lint-adrs:
 	@go run ./tools/adr-lint -repo .
+
+verify-surface-codegen:
+	@set -e; \
+		before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
+		cd agm && go run ./internal/surface/cmd/generate; \
+		cd ..; \
+		after="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
+		test "$$before" = "$$after" || { echo "generated AGM surface artifacts are stale" >&2; exit 1; }
 
 plugin-verify-hashes:
 	@cd agm && go run ./cmd/plugin-hash -check
@@ -431,8 +447,7 @@ install-configure-settings: build-configure-settings
 
 # Build safe-push: a git-push wrapper that resets the credential helper chain
 # to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
-# refuses force-pushes to protected branches. See internal/safegit and
-# vbonnet/engram-research
+# never force-pushes. See internal/safegit and vbonnet/engram-research
 # retrospectives/2026-06-08-git-push-credential-hang.md.
 build-safe-push:
 	@echo "Building safe-push..."
@@ -643,9 +658,73 @@ build-bead-pr-guard:
 install-bead-pr-guard: build-bead-pr-guard
 	$(call install-go-bin,bin/bead-pr-guard)
 
-# Supplies only the fixed JSON filters used by attested Codex hook scripts as a
-# static Go binary. The privileged install is digest-confirmed and root-staged
-# so the unattended agent cannot replace either the executable or its runtime.
+# Builds the provider-neutral staged SPEC adapter as a static Go binary. The
+# privileged install is digest-confirmed and root-staged so an unattended agent
+# cannot replace either the executable or its runtime.
+SPEC_CONTRACT_HOOK_ARTIFACT ?= bin/spec-contract-hook
+SPEC_CONTRACT_HOOK_STATUS_ARTIFACT ?= bin/spec-contract-hook-status
+SPEC_CONTRACT_HOOK_DEPLOYED ?= /usr/local/libexec/dear-agent-spec-contract-hook
+build-spec-contract-hook:
+	@echo "Building spec-contract-hook..."
+	@mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_ARTIFACT))"
+	@source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"; \
+		export _BUILD_STAMP_DATE="$$source_date"; \
+		CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_ARTIFACT)" ./cmd/spec-contract-hook/
+	@echo "Built: $(SPEC_CONTRACT_HOOK_ARTIFACT)"
+
+build-spec-contract-hook-status:
+	@echo "Building spec-contract-hook-status..."
+	@mkdir -p "$(dir $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT))"
+	@source_date="$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown)"; \
+		export _BUILD_STAMP_DATE="$$source_date"; \
+		CGO_ENABLED=0 GOWORK=off go build -trimpath -buildvcs=false $(BUILD_STAMP_FLAGS) -o "$(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT)" ./cmd/spec-contract-hook-status/
+	@echo "Built: $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT)"
+
+# GNU Make intentionally maps any failed recipe to its own exit status 2. Run
+# the built status artifact directly when automation needs the CLI's exact
+# 0=both-current, 1=either-missing/stale/untrusted, 2=inspection-error contract.
+status-spec-contract-hook: build-spec-contract-hook build-spec-contract-hook-status
+	@"$(abspath $(SPEC_CONTRACT_HOOK_STATUS_ARTIFACT))" --artifact "$(abspath $(SPEC_CONTRACT_HOOK_ARTIFACT))" --deployed "$(SPEC_CONTRACT_HOOK_DEPLOYED)"
+
+# Antigravity source invokes the stable OS-owned helper. The same transaction
+# publishes a no-clobber digest path that AGM invokes for unattended Codex so a
+# later stable-path activation cannot change a running session's executable.
+# Source wiring remains cooperative; this target does not claim installation
+# or runtime loading until an operator completes review.
+install-spec-contract-hook: build-spec-contract-hook
+	@set -eu; \
+		test -t 0 || { echo "refusing non-interactive privileged Antigravity hook helper installation" >&2; exit 2; }; \
+		root_gid="$$(/usr/bin/id -g 0)"; \
+		repo_root="$$(pwd -P)"; \
+		artifact="$(abspath $(SPEC_CONTRACT_HOOK_ARTIFACT))"; \
+		helper="/usr/local/libexec/dear-agent-spec-contract-hook"; \
+		root_installer_path="$$repo_root/scripts/install-root-artifact.sh"; \
+		root_installer="$$(/bin/cat "$$root_installer_path")"; \
+		test -n "$$root_installer" || { echo "fixed privileged installer is empty" >&2; exit 2; }; \
+		expected_hash="$$(/usr/bin/openssl dgst -sha256 -r "$$artifact")"; \
+		expected_hash="$${expected_hash%% *}"; \
+		expected_installer_hash="$$(printf '%s' "$$root_installer" | /usr/bin/openssl dgst -sha256 -r)"; \
+		expected_installer_hash="$${expected_installer_hash%% *}"; \
+		printf 'Reviewed Antigravity SPEC contract helper SHA-256: %s\n' "$$expected_hash"; \
+		printf 'Type that complete SHA-256 to approve these exact bytes: '; \
+		IFS= read -r confirmed_hash; \
+		printf 'Reviewed fixed privileged bootstrap SHA-256: %s\n' "$$expected_installer_hash"; \
+		printf 'Type that complete SHA-256 to approve the fixed privileged command: '; \
+		IFS= read -r confirmed_installer_hash; \
+		test "$$confirmed_hash" = "$$expected_hash" || { echo "Antigravity SPEC contract helper digest confirmation did not match" >&2; exit 2; }; \
+		test "$$confirmed_installer_hash" = "$$expected_installer_hash" || { echo "privileged bootstrap digest confirmation did not match" >&2; exit 2; }; \
+		privileged_child=""; \
+		forward_privileged() { signal=$$1; status=$$2; trap - HUP INT TERM; test -z "$$privileged_child" || { /bin/kill "-$$signal" "$$privileged_child" 2>/dev/null || :; wait "$$privileged_child" || :; }; exit "$$status"; }; \
+		trap 'forward_privileged HUP 129' HUP; trap 'forward_privileged INT 130' INT; trap 'forward_privileged TERM 143' TERM; \
+		set +e; printf 'PROBE\n' | /usr/bin/sudo -k -n /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" >/dev/null 2>&1 & privileged_child=$$!; \
+		wait "$$privileged_child"; probe_status=$$?; privileged_child=""; set -e; \
+		if test "$$probe_status" = 42; then echo "refusing passwordless sudo installer; fresh human authentication is required" >&2; exit 2; fi; \
+		test "$$probe_status" = 1 || { echo "privileged installer probe failed unexpectedly (status $$probe_status)" >&2; exit 2; }; \
+		printf 'INSTALL\n' | /usr/bin/sudo -k /bin/sh -c "$$root_installer" dear-agent-root-artifact-installer "$$artifact" "$$expected_hash" "$$root_gid" "$$helper" & privileged_child=$$!; \
+		wait "$$privileged_child"; privileged_child=""; trap - HUP INT TERM; \
+		echo "Installed operator-owned SPEC contract helper: $$helper"; \
+		echo "Pinned unattended Codex helper: $$helper.$$expected_hash"
+
 build-codex-hook-json:
 	@echo "Building codex-hook-json..."
 	@mkdir -p bin
@@ -1508,13 +1587,20 @@ install-vroom-governor: build-vroom-governor
 	$(call install-go-bin,bin/vroom-governor)
 
 # Build the AGM CLI and its detached archive companion with one version stamp.
-# A standalone `go install ./agm/cmd/agm` omits both the stamp and companion;
-# prefer `make install-agm` so async archive compatibility remains coherent.
-build-agm:
+# The governed build also pins the exact revision-matched SPEC helper artifact
+# into AGM's unattended Codex launch boundary. A standalone
+# `go install ./agm/cmd/agm` omits that pin, the stamp, and the companion;
+# prefer `make install-agm` so launch and async archive compatibility remain
+# coherent.
+build-agm: build-spec-contract-hook
 	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
-	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm ./agm/cmd/agm/
-	CGO_ENABLED=0 go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	@expected_spec_hook_hash="$$(/usr/bin/openssl dgst -sha256 -r "$(SPEC_CONTRACT_HOOK_ARTIFACT)")"; \
+		expected_spec_hook_hash="$${expected_spec_hook_hash%% *}"; \
+		test "$${#expected_spec_hook_hash}" -eq 64; \
+		export _BUILD_STAMP_EXTRA_LDFLAGS="$${_BUILD_STAMP_EXTRA_LDFLAGS} -X github.com/vbonnet/dear-agent/agm/internal/codexhooks.expectedSpecContractHookSHA256=$$expected_spec_hook_hash"; \
+		CGO_ENABLED=0 GOWORK=off go build $(BUILD_STAMP_FLAGS) -o bin/agm ./agm/cmd/agm/
+	CGO_ENABLED=0 GOWORK=off go build $(BUILD_STAMP_FLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
 	@echo "Built: bin/agm bin/agm-reaper"
 
 # Binaries the reaper E2E compose stack mounts. The seeder is a test fixture,

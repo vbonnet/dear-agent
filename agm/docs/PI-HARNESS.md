@@ -112,7 +112,10 @@ Every invocation receives the shared event name, native Pi session ID, approved
 working directory, loop state, and native event payload. Structured hook
 decisions are honored even when the command exits successfully. A hook
 execution error, timeout, signal, or nonzero exit status takes precedence over
-partial stderr and advisory context in its fail-closed diagnostic. In
+partial stderr and advisory context in its fail-closed diagnostic. Successful
+advisory `PreToolUse` context is surfaced before the independent Pi permission
+decision. Parseable manifests still fail closed when their group, command, or
+bounded timeout schema is invalid. In
 particular,
 a blocked `UserPromptSubmit` is consumed before the model sees it, a blocked
 `PreCompact` cancels compaction, and a blocking `Stop` result is delivered back
@@ -122,7 +125,9 @@ tool projects `SubagentStop`; because the tool runs isolated child Pi processes,
 blocking remediation returns to the parent turn. Until Beads exposes a
 Pi-specific hook entrypoint, lifecycle events use its
 behaviorally equivalent `codex-hook` adapter with Dolt auto-commit enabled,
-matching the other non-Claude hook manifests.
+matching the Codex lifecycle contract. The extension-created follow-up is not
+re-projected through `UserPromptSubmit` and does not reset the terminal
+continuation budget; only a real interactive or RPC user turn does.
 
 Wayfinder is available through Pi's native skill discovery and the
 `wayfinder-session` CLI. Its status and temporal artifacts remain
