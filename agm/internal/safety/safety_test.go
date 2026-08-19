@@ -1,7 +1,9 @@
 package safety
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestDetectHumanTyping(t *testing.T) {
@@ -115,6 +117,65 @@ func TestDetectHumanTyping(t *testing.T) {
 			paneContent:   "some output\n❯ Use arrows to select",
 			wantViolation: false,
 		},
+		// Allowlist inversion (ce-py3x): unrecognized non-word pane chrome
+		// defaults to NOT typing instead of firing. Each of these previously
+		// tripped the denylist as "a human is typing".
+		{
+			name:          "separator chrome after prompt - not human typing",
+			paneContent:   "some output\n❯ ────────────────────",
+			wantViolation: false,
+		},
+		{
+			name:          "braille spinner glyph leaked after prompt - not human typing",
+			paneContent:   "some output\n❯ ⣾",
+			wantViolation: false,
+		},
+		{
+			name:          "box-drawing border after prompt - not human typing",
+			paneContent:   "some output\n❯ ╭──────────╮",
+			wantViolation: false,
+		},
+		{
+			name:          "arrow/symbol-only UI chrome after prompt - not human typing",
+			paneContent:   "some output\n❯ ⏵⏵ »",
+			wantViolation: false,
+		},
+		{
+			name:          "punctuation-only after prompt - not human typing",
+			paneContent:   "some output\n❯ ...",
+			wantViolation: false,
+		},
+		// The positive human-input signature still fires, including non-ASCII
+		// input (Unicode-aware letters/digits), so the guard stays useful.
+		{
+			name:          "digits-only human input - typing",
+			paneContent:   "some output\n❯ 42",
+			wantViolation: true,
+		},
+		{
+			name:          "non-ASCII human input - typing",
+			paneContent:   "some output\n❯ 修复这个错误",
+			wantViolation: true,
+		},
+		// Symbol/emoji-only drafts are not on the UI chrome allowlist, so they
+		// still fire as human typing rather than being waved through as
+		// unrecognized chrome (codex review on ce-py3x: "👍"/"&&"/"???" bypassed
+		// the previous "any non-letter/digit == chrome" default).
+		{
+			name:          "emoji-only human input - typing",
+			paneContent:   "some output\n❯ 👍",
+			wantViolation: true,
+		},
+		{
+			name:          "ampersand-only human input - typing",
+			paneContent:   "some output\n❯ &&",
+			wantViolation: true,
+		},
+		{
+			name:          "question-marks-only human input - typing",
+			paneContent:   "some output\n❯ ???",
+			wantViolation: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -130,6 +191,27 @@ func TestDetectHumanTyping(t *testing.T) {
 				t.Errorf("expected guard %s, got %s", ViolationHumanTyping, v.Guard)
 			}
 		})
+	}
+}
+
+// TestDetectHumanTypingUnicodeEvidenceTruncation guards against truncating
+// evidence mid-rune. Byte-slicing at index 50 can land inside a multi-byte
+// UTF-8 character and produce malformed UTF-8 (gemini review on ce-py3x); the
+// fix truncates by rune instead.
+func TestDetectHumanTypingUnicodeEvidenceTruncation(t *testing.T) {
+	// 60 non-ASCII (3-byte UTF-8) runes: a byte-index cut at 50 would land
+	// mid-character, since 50 is not a multiple of 3.
+	longInput := strings.Repeat("修", 60)
+	v := detectHumanTyping("some output\n❯ " + longInput)
+	if v == nil {
+		t.Fatal("expected violation but got nil")
+	}
+	if !utf8.ValidString(v.Evidence) {
+		t.Errorf("evidence is not valid UTF-8: %q", v.Evidence)
+	}
+	wantEvidence := strings.Repeat("修", 50) + "..."
+	if v.Evidence != wantEvidence {
+		t.Errorf("evidence = %q, want %q", v.Evidence, wantEvidence)
 	}
 }
 
