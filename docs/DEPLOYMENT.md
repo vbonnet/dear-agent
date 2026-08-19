@@ -133,21 +133,33 @@ AGM sandbox uses zero-configuration by default:
 
 ```yaml
 sandbox:
+  # Sandbox is on by default. Set false to opt every session out; a single
+  # session opts out with `agm session new <name> --no-sandbox`.
+  enabled: true
+
   # Force specific provider (usually not needed)
   provider: auto  # auto | bubblewrap | overlayfs | mock
 
-  # Enable sandbox by default for all sessions
-  enabled_by_default: false  # true | false
+  # Repositories exposed to every sandbox as lower dirs. Empty means AGM
+  # discovers repos under $HOME/src/ws/oss/repos and otherwise falls back to
+  # the Git repository containing the session's working directory.
+  repos: []
 
-  # Workspace base directory
-  workspace_dir: ~/.agm/sandboxes
-
-  # Cleanup policy
-  cleanup:
-    on_exit: true          # Clean up on normal exit
-    on_crash: true         # Clean up on crash
-    orphaned_max_age: 24h  # Clean orphaned sandboxes older than 24h
+  # Host paths a sandboxed session may write outside its workspace. These stay
+  # real host paths — they are NOT copied into the sandbox.
+  writable_dirs: []
 ```
+
+AGM rejects unknown configuration keys, so a stale or invented key fails every
+command rather than being silently ignored. Keep this file to the keys listed
+in [agm/config.example.yaml](../agm/config.example.yaml).
+
+The sandbox workspace root is **not** separately configurable: it is derived
+from the storage root that configuration load resolves, at
+`<storage root>/sandboxes/<session-id>` (`~/.agm/sandboxes/<session-id>` in
+dotfile mode). Change it through the `storage:` block — see
+[agm/CENTRALIZED-STORAGE.md](../agm/CENTRALIZED-STORAGE.md). Orphaned sandboxes
+are reclaimed by `agm sandbox gc --reap`, not by a cleanup policy key.
 
 **Status**: ✅ COMPLETE (zero-config deployment)
 
@@ -266,9 +278,15 @@ echo "✓ Health check complete"
 **Rollback Steps**:
 
 ```bash
-# 1. Disable sandbox feature immediately
-echo "sandbox:" >> ~/.config/agm/config.yaml
-echo "  enabled_by_default: false" >> ~/.config/agm/config.yaml
+# 1. Disable sandbox feature immediately, without touching the config file:
+#    every new session opts out at the flag.
+agm session new <name> --no-sandbox
+
+# 1b. To disable it for every session, EDIT the sandbox block in
+#     ~/.config/agm/config.yaml so it reads `enabled: false`.
+#     Do NOT append a second `sandbox:` block with `echo >>`: a duplicate key
+#     makes the file unparseable and AGM fails closed on every command.
+$EDITOR ~/.config/agm/config.yaml
 
 # 2. Kill all sandboxed sessions
 agm session list | grep '\[sandbox\]' | awk '{print $1}' | xargs -I {} agm session kill {}
@@ -299,19 +317,21 @@ agm session kill rollback-test
 **Mitigation Steps**:
 
 ```bash
-# 1. Reduce concurrent sandbox limit
-echo "sandbox:" >> ~/.config/agm/config.yaml
-echo "  max_concurrent: 10" >> ~/.config/agm/config.yaml
+# 1. Reclaim orphaned sandbox trees left by earlier runs
+agm sandbox gc            # report only
+agm sandbox gc --reap     # actually remove the safe ones
 
-# 2. Enable aggressive cleanup
-echo "  cleanup:" >> ~/.config/agm/config.yaml
-echo "    orphaned_max_age: 1h" >> ~/.config/agm/config.yaml
+# 2. Reduce the sandbox lower-dir surface: pin `sandbox.repos` in
+#    ~/.config/agm/config.yaml to the repositories you actually need instead of
+#    letting AGM discover every repo under $HOME/src/ws/oss/repos.
+$EDITOR ~/.config/agm/config.yaml
 
-# 3. Force mock provider (testing only)
-echo "  provider: mock" >> ~/.config/agm/config.yaml
+# 3. Force mock provider (testing only) — edit the same `sandbox:` block so it
+#    reads `provider: mock`. Appending with `echo >>` duplicates the key and
+#    breaks config load.
 
 # 4. Monitor improvement
-agm session new perf-test --sandbox
+agm session new perf-test
 # Measure creation time
 ```
 
