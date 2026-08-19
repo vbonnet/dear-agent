@@ -149,8 +149,6 @@ instruction-policy:
       owner: repository-skill-agents
     - match: agm/**/SKILL.md
       owner: agm-skills
-    - match: research-pipeline/skills/research-pipeline/SKILL.md
-      owner: research-pipeline
     - match: agm/agm-plugin/commands/*.md
       owner: agm-commands
     - match: agm/youtube-plugin/commands/*.md
