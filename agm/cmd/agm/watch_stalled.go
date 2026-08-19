@@ -123,8 +123,11 @@ func emitCompletions(ctx context.Context, watcher *ops.CompletionWatcher, surfac
 			TransitionType: event.TransitionType,
 			OutputBytes:    len(event.Output),
 		}
-		if !dryRun && surfacer.shouldSurface(event) {
-			if errs := surfacer.Surface(ctx, event); len(errs) > 0 {
+		// One plan per event: it carries the single target resolution this
+		// event is both filtered against and delivered to.
+		plan := surfacer.planFor(event)
+		if !dryRun && plan.surface {
+			if errs := surfacer.Surface(ctx, event, plan); len(errs) > 0 {
 				parts := make([]string, len(errs))
 				for i, surfaceErr := range errs {
 					parts[i] = surfaceErr.Error()

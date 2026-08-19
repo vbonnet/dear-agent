@@ -311,6 +311,22 @@ func (r *AlertRouter) dispatchToAgent(ctx context.Context, rec *AlertRecord, exp
 	rec.Error = "all candidates failed: " + strings.Join(failures, "; ")
 }
 
+// ResolveTarget reports the recipient an agent-actionable alert would be
+// delivered to right now, or "" if none is reachable.
+//
+// Callers that must filter an event against its own routing destination
+// use this to take one snapshot, then pass that snapshot back as the
+// request Target. Filtering against a separately discovered target and
+// then letting Route rediscover its own would reopen the window where an
+// event is relayed into the very session it reports.
+func (r *AlertRouter) ResolveTarget(explicit string) string {
+	candidates := r.deliveryCandidates(explicit)
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0]
+}
+
 // deliveryCandidates lists recipients to try, in order.
 //
 // An explicitly configured target is checked for liveness only. The

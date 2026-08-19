@@ -22,6 +22,13 @@ type completionSurfacer struct {
 	opCtx        *ops.OpContext
 	orchestrator string
 	excludes     []string
+	// router routes completions to a live supervisor. Held rather than
+	// built per event so one dedupe/queue configuration governs the run.
+	router *ops.AlertRouter
+	// notificationsDisabled records that an explicitly loaded config
+	// resolved to zero dispatchers, which is the documented way to turn
+	// completion notifications off.
+	notificationsDisabled bool
 }
 
 // defaultNotifyConfigPath is where the watcher looks for dispatcher config
@@ -88,6 +95,13 @@ func newCompletionSurfacer(opCtx *ops.OpContext, configPath, orchestrator, exclu
 		opCtx:        opCtx,
 		orchestrator: orchestrator,
 		excludes:     excludes,
+		router:       ops.NewAlertRouter(opCtx),
+		// An explicit config that resolves to zero dispatchers means the
+		// operator turned completion notifications off. Routing has to
+		// honor that too: otherwise the alert route would discover a
+		// supervisor and deliver (or durably record) every completion
+		// anyway, making the documented off switch unexpressible.
+		notificationsDisabled: explicitConfigLoaded && len(dispatchers) == 0,
 	}, nil
 }
 
@@ -106,26 +120,86 @@ func loadDispatchers(path string) ([]notify.Dispatcher, error) {
 	return built, nil
 }
 
-// shouldSurface filters out the orchestrator session itself (a relay into it
-// would re-trigger a completion, looping forever) and any name matching the
-// configured exclude substrings.
-func (cs *completionSurfacer) shouldSurface(event ops.CompletionEvent) bool {
-	if cs.orchestrator != "" && event.SessionName == cs.orchestrator {
-		return false
+// relayPlan is one completion event's routing decision, taken from a single
+// resolution of the alert router's target.
+//
+// The self-filter is only sound if the target it filters against is the
+// target delivery uses. --orchestrator now defaults to empty and routing
+// discovers a live supervisor, so filtering on cs.orchestrator alone could
+// not recognize the discovered session: a completion from Dispatch would
+// pass the filter and then be routed straight back into Dispatch, waking
+// it so it completes again. Resolving once per event and passing that
+// snapshot to Route as the explicit target closes the loop by
+// construction.
+type relayPlan struct {
+	// surface reports whether this event should be delivered at all.
+	surface bool
+	// target is the recipient this event was filtered against, and the
+	// only one it may be delivered to.
+	target string
+}
+
+// planFor decides how one completion event is routed. It filters out the
+// routing target itself and any name matching the configured excludes.
+func (cs *completionSurfacer) planFor(event ops.CompletionEvent) relayPlan {
+	if cs.notificationsDisabled {
+		return relayPlan{surface: false}
+	}
+	target := cs.router.ResolveTarget(cs.orchestrator)
+	if target != "" && eventIsSession(event, target) {
+		return relayPlan{surface: false, target: target}
 	}
 	lowerName := strings.ToLower(event.SessionName)
 	for _, exclude := range cs.excludes {
 		if strings.Contains(lowerName, exclude) {
-			return false
+			return relayPlan{surface: false, target: target}
 		}
 	}
-	return true
+	return relayPlan{surface: true, target: target}
+}
+
+// minIDPrefixMatch is the shortest UUID prefix the self-filter will treat
+// as naming a session. The two ways to be wrong are not symmetric: failing
+// to match relays a session's completion into itself and loops, while
+// matching too eagerly silently drops an unrelated worker's result. Short
+// prefixes are the only plausible over-match, so they are not matched, and
+// 8 hex characters make an accidental collision negligible.
+const minIDPrefixMatch = 8
+
+// eventIsSession reports whether target names event's session, across every
+// identifier AGM accepts for one (see ops.SendMessageRequest.Recipient):
+// its name, its full session ID, or a UUID prefix of that ID.
+func eventIsSession(event ops.CompletionEvent, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(event.SessionName), target) {
+		return true
+	}
+	id := strings.TrimSpace(event.SessionID)
+	if id == "" {
+		return false
+	}
+	if strings.EqualFold(id, target) {
+		return true
+	}
+	return len(target) >= minIDPrefixMatch &&
+		len(target) < len(id) &&
+		strings.EqualFold(id[:len(target)], target)
 }
 
 // Surface delivers one completion event. Best-effort per channel: a failed
 // dispatcher or relay never blocks the watch loop, and errors are returned
 // joined for logging only.
-func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionEvent) []error {
+func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionEvent, plan relayPlan) []error {
+	// Defense in depth: never deliver an event its own plan rejected. The
+	// caller checks plan.surface, but this is the guard against relaying a
+	// session's completion into itself, so it is re-asserted at delivery.
+	if !plan.surface {
+		return nil
+	}
+
 	var errs []error
 
 	n := &notify.Notification{
@@ -148,8 +222,7 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 		}
 	}
 
-	router := ops.NewAlertRouter(cs.opCtx)
-	if _, err := router.Route(ctx, ops.AlertRequest{
+	if _, err := cs.router.Route(ctx, ops.AlertRequest{
 		Kind:          "completion",
 		Source:        "agm-completion-watcher",
 		Title:         fmt.Sprintf("AGM session %s: %s", event.TransitionType, event.SessionName),
@@ -157,8 +230,15 @@ func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionE
 		Subject:       event.SessionName,
 		Severity:      ops.AlertSeverityInfo,
 		Actionability: ops.AlertAgentActionable,
-		Target:        cs.orchestrator,
-		OccurredAt:    event.DetectedAt,
+		// plan.target, not a fresh resolve: this event was filtered
+		// against that snapshot, and letting Route rediscover its own
+		// would reopen the self-relay window planFor exists to close.
+		Target:     plan.target,
+		OccurredAt: event.DetectedAt,
+		// Two completions from one long-lived session share every other
+		// dedupe field, so without an occurrence identity the second
+		// result would be discarded as a duplicate and never relayed.
+		DedupeKey: fmt.Sprintf("%s:%d", event.SessionID, event.DetectedAt.UnixNano()),
 		Meta: map[string]any{
 			"session_id":   event.SessionID,
 			"session_name": event.SessionName,
