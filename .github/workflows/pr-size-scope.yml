@@ -30,6 +30,9 @@ jobs:
     name: Size and scope signal
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      should_comment: ${{ steps.scope.outputs.should_comment }}
+      mixed_concern: ${{ steps.concern.outputs.mixed_concern }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -223,3 +226,80 @@ jobs:
               [ -n "$comment_id" ] || continue
               gh api --method DELETE "repos/$REPO/issues/comments/$comment_id"
             done
+
+  # ---------------------------------------------------------------------------
+  # The deterministic job above states THAT a PR is too big. It cannot say what
+  # to do about it, and two days of evidence say a bare threshold report changes
+  # nothing: every oversized PR merged after that job shipped got its comment and
+  # merged unsplit anyway (5 of 5 — see the 2026-08-19 retro).
+  #
+  # This job answers the question the comment left open: given THIS diff, where
+  # are the seams? It runs ONLY when the deterministic gate already tripped, so
+  # the model is never spent on a PR that is within budget, and its verdict is
+  # advisory — the job cannot fail the check, because size is explicitly not a
+  # REVIEW.md §3 blocking trigger.
+  #
+  # It is also allowed to conclude the change is genuinely atomic. That is the
+  # point: declining to split should be a stated, recorded reason rather than
+  # silence.
+  # ---------------------------------------------------------------------------
+  split-request:
+    name: Split request
+    needs: size-scope
+    if: |
+      (needs.size-scope.outputs.should_comment == 'true' ||
+       needs.size-scope.outputs.mixed_concern == 'true') &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Ask for a concrete split
+        uses: anthropics/claude-code-action@459ad358ae43fea66bfefd0a1f8d840b4b9791fb  # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            PR ${{ github.repository }}#${{ github.event.pull_request.number }} tripped the
+            deterministic size/scope gate. Read its diff and propose how to break it up.
+
+            The repository budget is at most 400 changed lines and at most 15 changed files
+            per PR; CONTRIBUTING.md section "Small, stacked PRs" and the .claude/skills/split-prs
+            skill hold the full rule. The CI thresholds are ceilings, not targets.
+
+            Produce ONE of two verdicts.
+
+            SPLITTABLE — the normal case. Propose a concrete stacked series in the required
+            order: mechanical (renames, moves, generated output, formatting) first, then the
+            enabling refactor (new seams, extracted interfaces, signature changes, no behavior
+            change), then behavior last. For each proposed PR give a title, the specific files
+            or hunks it carries, and a rough changed-line count. Name real paths from this
+            diff, never placeholders. Say explicitly that each step must land on main before
+            the next opens, so every PR gets the five-dimension review.
+
+            ATOMIC — only when the change genuinely cannot be split: a mechanical rename across
+            many call sites, a generated-file refresh, a vendored dependency update, or a change
+            where any smaller step would leave main broken. State which of those it is and why.
+            "It was all one task" and "the parts are related" are NOT atomic; discovering two
+            problems in one session does not make them one change. If you claim ATOMIC, say
+            whether the mechanical bulk is at least isolated in its own commit so a reviewer can
+            skip it.
+
+            Be specific and short. No preamble, no restating the diff back.
+
+            Then post your verdict as a single PR comment whose FIRST line is exactly the
+            marker `<!-- pr-split-request -->`. Before posting, list existing comments and if
+            one already starts with that marker, EDIT it in place instead of adding another
+            (`gh api --method PATCH repos/OWNER/REPO/issues/comments/ID`). Editing notifies
+            nobody; re-posting on every push trains people to mute the thread, which is how the
+            deterministic comment came to be ignored.
