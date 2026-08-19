@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A duplicated required-check identity would make a count-based comparison pass while the real set differs."
+}

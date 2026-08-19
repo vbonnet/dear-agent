@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "Two rules of the same type make the effective policy ambiguous."
+}

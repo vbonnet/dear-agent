@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "Rule order and required-check order are provider-chosen, so normalization sorts both; a reordered response must not read as drift."
+}

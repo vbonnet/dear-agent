@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "A check posted by a different GitHub App is a different check: any app could otherwise satisfy a required context by posting that name."
+}

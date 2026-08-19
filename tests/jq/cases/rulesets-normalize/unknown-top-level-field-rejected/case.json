@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "An unrecognized top-level field means the document expresses policy this projection would silently drop."
+}

@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/missing-required-checks.jq",
+  "description": "An expectation that names no app is satisfied by that context from any app; this is the migration path for legacy context-only requirements."
+}

@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "full_name and owner.login must agree; a mismatch means the response was assembled from more than one account.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

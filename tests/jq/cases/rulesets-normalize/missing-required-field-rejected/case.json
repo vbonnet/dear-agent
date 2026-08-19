@@ -1,0 +1,4 @@
+{
+  "program": ".github/rulesets/normalize.jq",
+  "description": "A document without bypass_actors cannot prove the zero-bypass invariant, so it is rejected rather than defaulted."
+}

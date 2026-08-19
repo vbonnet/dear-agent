@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/owned-repositories.jq",
+  "description": "The consumer passes --slurp, so the response is an array of pages; a flat array means the request shape changed.",
+  "raw": true,
+  "args": {
+    "owner": "vbonnet"
+  }
+}

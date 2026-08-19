@@ -83,6 +83,41 @@ rulesets, so it would add an unpinned dependency for no coverage.
 
 ## jq
 
-There is no jq gate yet. When the first `.jq` program lands, it gets a fixture
-directory of input and expected-output cases run from CI, and this section
-gains its description.
+The jq programs under `.github/` encode policy decisions: which ruleset
+documents are well formed, which required checks are missing, which repository
+inventories are safe to act on. They run inside workflows and inside
+`infra/import.sh`, where a silent behavior change surfaces as a mis-audited
+ruleset rather than as a test failure.
+
+[`tests/jq`](../tests/jq) is the gate. It is a Go test rather than a shell
+runner, so it needs no new CI wiring, adds no shell under the 20-line policy,
+and turns a malformed fixture into a loud failure instead of a skipped case.
+[`.github/workflows/jq-lint.yml`](../.github/workflows/jq-lint.yml) runs it on
+changes to the programs and records the jq version the fixtures were replayed
+against.
+
+A case is a directory under `tests/jq/cases/<suite>/<name>/`:
+
+| File | Purpose |
+|---|---|
+| `case.json` | which program to run, its `--arg`/`--argjson` values, `-L` include paths, and a required `description` |
+| `input.json` | the document piped to jq |
+| `expected.json` | expected output, compared as JSON so key order does not matter |
+| `expected.txt` | expected output, compared as raw text (for `-r` programs) |
+| `expected-error.txt` | a substring jq's stderr must contain |
+
+Exactly one `expected-*` file is present. The runner discovers suites by
+walking the tree, so adding a program means adding a directory, not editing Go.
+
+Two properties make the gate hard to hollow out:
+
+- Every checked-in `.jq` file must have at least one case. A new program with
+  no fixture fails the run.
+- `case.json` must name a program that exists and carry a non-empty
+  `description`. A typo would otherwise exempt a real file from the coverage
+  check while its own case still passed.
+
+A library of bare `def`s cannot be run with `jq -f`, since it has no final
+expression. Such a case sets `filter` to an inline expression that `include`s
+the library, and still names the library in `program` so it counts for
+coverage.

@@ -1,0 +1,8 @@
+{
+  "program": ".github/infra/managed-repositories.jq",
+  "description": "The owner is lowercased too, so an inventory written with different capitalization compares equal to the GitHub API's answer.",
+  "library_paths": [
+    ".github/infra"
+  ],
+  "raw": true
+}
