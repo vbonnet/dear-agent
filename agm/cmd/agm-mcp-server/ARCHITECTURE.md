@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-08-01 ce-1hu9.5 -->
+<!-- Last audited at: 2026-06-12 ce-dn72 -->
 
 # AGM MCP Server — Architecture
 
