@@ -5,6 +5,7 @@
 # RELATED-SPEC: tools/ci-drift-guard/SPEC.md
 # RELATED-SPEC: tools/dead-links/SPEC.md
 # RELATED-SPEC: tools/instruction-lint/SPEC.md
+# RELATED-SPEC: tools/language-policy/SPEC.md
 # RELATED-SPEC: tools/header-lint/SPEC.md
 # RELATED-SPEC: tools/devlog/cmd/devlog/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/config/SPEC.md
