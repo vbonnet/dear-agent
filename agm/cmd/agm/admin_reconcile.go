@@ -266,6 +266,9 @@ func reconcileLifecycleMismatchWithLocker(
 	withLock reconcileSessionLocker,
 	hasSession reconcileTmuxSessionCheck,
 ) (bool, error) {
+	if withLock == nil || hasSession == nil {
+		return false, fmt.Errorf("reconcile lock or tmux-check dependency is missing")
+	}
 	if mm.SessionID == "" {
 		return false, fmt.Errorf("session ID is required")
 	}
