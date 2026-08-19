@@ -90,6 +90,8 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterLegacyNFREARSGuardrailSteps(ctx)
 	steps.RegisterLegacySpecBDDLinkageGuardrailSteps(ctx)
 	steps.RegisterLocalDevelopmentGuardrailSteps(ctx)
+	steps.RegisterCIHealthEscapeAnalysisSteps(ctx)
+	steps.RegisterDocRefLintSteps(ctx)
 	steps.RegisterModelFamilyParitySteps(ctx)
 	steps.RegisterMCPCommandGuardrailSteps(ctx)
 	steps.RegisterObservabilityPackageGuardrailSteps(ctx)

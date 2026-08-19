@@ -17,9 +17,9 @@
 //  2. open PRs (the bead is already in flight — its id appears in a PR branch/title)
 //  3. the human-gated skip list (beads a human must drive, never an autonomous worker)
 //
-// Capacity is controlled by real spawn backpressure. This dispatcher does not
-// impose a hard worker-count cap; it dispatches eligible beads until the
-// candidate list is exhausted or `agm session new` refuses a spawn.
+// Capacity is controlled by real spawn backpressure: it dispatches eligible
+// beads until the list is exhausted or a spawn is refused. -max-dispatch opts
+// into a per-run cap on top of that (see cap.go).
 //
 // Exit status is 0 on success even when zero beads are dispatched — "nothing new
 // to dispatch" (backlog drained, at capacity, or all in flight) is a normal
@@ -70,6 +70,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/vroomgate"
 )
 
 // subprocessTimeout bounds every bd/gh/agm child so a hung subprocess cannot
@@ -86,25 +88,10 @@ const subprocessTimeout = 60 * time.Second
 // for a healthy boot while still bounding a truly hung spawn.
 const sessionSpawnTimeout = 180 * time.Second
 
-// humanGated lists beads that must never be auto-dispatched to a worker: they
-// require a human in the loop (credential rotation, backups, repointing live
-// skills, destructive ops) or are otherwise gated by operator decision. Kept in
-// sync with vroom-prompt-gen and the orchestrator skill's skip list (ce-5z0o).
-var humanGated = map[string]bool{
-	"ce-pqha":    true,
-	"ce-8qi":     true,
-	"ce-kgd":     true,
-	"ce-9uo":     true,
-	"ce-xulg.14": true,
-	"ce-126c":    true,
-	"ce-cd14":    true,
-	"ce-cd14.2":  true,
-	"ce-cd14.1":  true,
-	"ce-rrry":    true,
-	"ce-clm6":    true,
-	"ce-6as.10":  true, // interactive Gmail OAuth re-consent — HUMAN-ACTION, needs a human at the browser
-}
-
+// Worker spawn defaults. opus-200k → claude-opus-4-8: design-phase work needs
+// Opus, and the 200k variant dodges the 1M credit gate the bare opus/sonnet
+// aliases trip on this Max-plan auth (ce-84l2). The human-gated skip list now
+// lives in internal/vroomgate so it cannot drift between dispatch binaries.
 const (
 	defaultHarness   = "claude-code"
 	defaultModel     = "opus-200k"
@@ -520,7 +507,7 @@ func selectCandidates(beads []bead, occupiedWorkers map[string]bool, prs []pullR
 		if b.Priority > maxPriority {
 			continue
 		}
-		if humanGated[b.ID] {
+		if vroomgate.IsHumanGated(b.ID) {
 			continue
 		}
 		// Worker-name dedup compares normalized ids: occupiedWorkerIDs normalizes
@@ -971,10 +958,15 @@ func main() {
 	workerGuard := flag.String("worker-guard", "/etc/codex/hooks/pretool-worker-write-boundary", "system-managed Codex worker apply_patch guard")
 	prepareWorker := flag.String("prepare-worker", "", "pre-create one bead's worker workspaces and print its trusted add-directory handoff as JSON, without dispatching")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
+	maxDispatch := flag.Int("max-dispatch", 0, "cap on beads dispatched in this run (0 = unlimited); bounds blast radius for an unattended/scheduled run")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	heartbeatFile := flag.String("heartbeat-file", "~/.agm/vroom/heartbeat/dispatch-direct.json", "path to the persisted control-plane health state (consecutive fail-closed streak, last error)")
 	ledgerPath := flag.String("ledger", "~/.agm/vroom/dispatch-ledger.json", "path to the dispatch ledger used to reconcile bead closure across runs")
 	flag.Parse()
+
+	if err := validateMaxDispatch(*maxDispatch); err != nil {
+		fatal("%v", err)
+	}
 
 	// Cancel in-flight subprocesses if the dispatcher is interrupted (SIGINT/
 	// SIGTERM) so a killed run does not leave orphaned bd/gh/agm children.
@@ -1084,9 +1076,10 @@ func main() {
 	}
 	beads = excludeReconciled(beads, reconciled)
 
+	// The full eligible list goes into the loop, never a pre-truncated slice.
 	candidates := selectCandidates(beads, occupied, prs, *maxPriority)
 
-	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *dryRun, os.Stdout, os.Stderr, ledger)
+	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *maxDispatch, *dryRun, os.Stdout, os.Stderr, ledger)
 
 	if !*dryRun {
 		if err := saveLedger(ledgerFilePath, ledger); err != nil {
@@ -1101,16 +1094,23 @@ func main() {
 		len(beads), len(occupied), len(candidates), dispatched, len(reconciled))
 }
 
-// dispatchCandidates spawns a worker for each candidate in order. When ledger
-// is non-nil and dryRun is false, every successful dispatch is recorded in
-// it so a later run's reconcile pass can tell "we dispatched a worker for
-// this bead and it's now gone" apart from "this bead was never touched" —
-// the ledger entry is what makes deterministic bead-closure reconciliation
-// possible across the tool's one-shot-per-tick invocations.
-func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, dryRun bool, out, errOut io.Writer, ledger *dispatchLedger) int {
+// dispatchCandidates spawns a worker for each candidate in order and returns
+// how many beads it actually dispatched. When ledger is non-nil and dryRun is
+// false, every successful dispatch is recorded in it so a later run's reconcile
+// pass can tell "we dispatched a worker for this bead and it's now gone" apart
+// from "this bead was never touched" — the ledger entry is what makes
+// deterministic bead-closure reconciliation possible across the tool's
+// one-shot-per-tick invocations.
+//
+// maxDispatch (0 or negative = unlimited) bounds successful dispatches, not list
+// positions — cap.go explains why that distinction matters.
+func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, maxDispatch int, dryRun bool, out, errOut io.Writer, ledger *dispatchLedger) int {
 	dispatched := 0
-	for _, b := range candidates {
+	for i, b := range candidates {
 		if ctx.Err() != nil {
+			break
+		}
+		if dispatchCapReached(maxDispatch, dispatched, len(candidates)-i, errOut) {
 			break
 		}
 		if dryRun {

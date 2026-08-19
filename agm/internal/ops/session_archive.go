@@ -581,17 +581,52 @@ func ownedSandboxPathForArchive(m *manifest.Manifest) string {
 		return ""
 	}
 	sandboxDir := filepath.Dir(m.Sandbox.MergedPath)
-	if sandboxDir != filepath.Join(base, m.SessionID) {
-		slog.Warn("Ignoring sandbox ownership outside the current host cleanup base",
-			"session", m.SessionID, "path", m.Sandbox.MergedPath)
-		return ""
+	expectedDir := filepath.Join(base, m.SessionID)
+	if sandboxDir != expectedDir {
+		// Creation records the physical spelling of the sandbox root, which is
+		// not the spelling host cleanup addresses: centralized storage reaches
+		// the same directory through the ~/.agm symlink, and a symlinked HOME
+		// diverges even in dotfile mode. Two spellings of one directory is not
+		// foreign ownership — prove they are the same directory, then continue
+		// in the cleanup base's spelling so the allowlist gates and the reaper
+		// operate on paths they can validate.
+		if !sameHostDirectory(sandboxDir, expectedDir) {
+			slog.Warn("Ignoring sandbox ownership outside the current host cleanup base",
+				"session", m.SessionID, "path", m.Sandbox.MergedPath)
+			return ""
+		}
+		sandboxDir = expectedDir
 	}
 	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
 		slog.Warn("Ignoring sandbox ownership outside the allowlisted cleanup base",
 			"session", m.SessionID, "error", err)
 		return ""
 	}
-	return m.Sandbox.MergedPath
+	return filepath.Join(sandboxDir, "merged")
+}
+
+// sameHostDirectory reports whether two path spellings name one existing
+// directory. It is deliberately conservative: anything it cannot resolve and
+// stat as a directory is treated as a different location, so an unresolvable
+// path never widens what archive cleanup is willing to delete.
+func sameHostDirectory(left, right string) bool {
+	leftInfo, ok := statDirectory(left)
+	if !ok {
+		return false
+	}
+	rightInfo, ok := statDirectory(right)
+	if !ok {
+		return false
+	}
+	return os.SameFile(leftInfo, rightInfo)
+}
+
+func statDirectory(path string) (os.FileInfo, bool) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return nil, false
+	}
+	return info, true
 }
 
 // preserveSettingsFromUpper copies .claude/settings.local.json from the sandbox

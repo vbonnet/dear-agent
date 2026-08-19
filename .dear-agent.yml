@@ -245,6 +245,10 @@ forbidden-paths:
     - "**/docs/**/*-[Pp][Ll][Aa][Nn].*"
     - "**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
     - "**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
+    # A roadmap renamed to PRIORITIES is the same artifact under another
+    # token; the policy follows the content, not the filename.
+    - "**/[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Ii][Ee][Ss].*"
+    - "**/*-[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Ii][Ee][Ss].*"
     - "**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
     - "**/*-[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
     - "**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
@@ -269,6 +273,10 @@ forbidden-paths:
     - "**/*_[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
     - "**/*_[Rr][Oo][Aa][Dd][Mm][Aa][Pp]_*.*"
     - "**/*[a-z]Roadmap*.*"
+    - "**/[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Ii][Ee][Ss][_A-Z]*.*"
+    - "**/*_[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Ii][Ee][Ss].*"
+    - "**/*_[Pp][Rr][Ii][Oo][Rr][Ii][Tt][Ii][Ee][Ss]_*.*"
+    - "**/*[a-z]Priorities*.*"
     - "**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg][_A-Z]*.*"
     - "**/*_[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
     - "**/*_[Bb][Aa][Cc][Kk][Ll][Oo][Gg]_*.*"

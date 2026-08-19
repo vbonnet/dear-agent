@@ -23,9 +23,9 @@ var prScanNoChecksCmd = &cobra.Command{
 
 This closes the inverse-direction process gap to scan-orphaned. A push-then-PR-open
 race can drop the CI trigger, leaving a PR's head SHA with zero check-runs. The
-required checks never report, so the auto-merge that safe-pr arms waits forever and
-the safe-merge babysit loop skips the PR as "pending" on every pass — no red, no
-green, no signal. That stranded PRs #579/#581/#582 for 8+ hours with no CI.
+required checks never report, so the safe-merge babysit loop skips the PR as
+"pending" on every pass — no red, no green, no signal. That stranded PRs
+#579/#581/#582 for 8+ hours with no CI.
 
 For each open, non-draft PR it reads the check-runs on the head SHA and compares
 them against the branch-protection required set. A PR is flagged only when NONE of

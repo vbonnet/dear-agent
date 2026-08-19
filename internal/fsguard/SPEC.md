@@ -101,9 +101,9 @@ state why.
 
 **FSG-28** When a git subcommand that is read-only (`log`, `diff`, `status`, `show`, `blame`, `describe`, `rev-parse`, `rev-list`, `cat-file`, `ls-files`, `ls-tree`, `shortlog`, `stash list`, `tag`, `fetch`, `remote`, `submodule`) is invoked within `~/src/`, the system shall allow it.
 
-**FSG-29** When `git push` is invoked within `~/src/` without `--force`, `-f`, or `--force-with-lease`, the system shall allow it.
+**FSG-29** When `git push` is invoked within `~/src/` without a force flag, the system shall allow it.
 
-**FSG-30** When `git push` is invoked with `--force`, `-f`, or `--force-with-lease`, the system shall block it regardless of working directory.
+**FSG-30** When `git push` is invoked with a force flag, the system shall block it regardless of working directory. Force classification is delegated to `safegit.ForceFlag`, so this guard and `safe-push` share one definition: `--force`, `-f`, any short-option cluster containing `f` (`-uf`), `--force-with-lease[=<ref>]`, `--force-if-includes`, `--mirror`, and a leading-`+` force refspec, with tokens after a bare `--` treated as repository/refspec rather than flags.
 
 **FSG-31** When `git merge`, `git pull`, `git fetch`, `git clone`, or `git worktree` is invoked within `~/src/`, the system shall allow it.
 
