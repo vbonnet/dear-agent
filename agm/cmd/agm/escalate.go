@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/internal/safegit"
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
@@ -123,7 +124,9 @@ func init() {
 	escalateAskCmd.Flags().StringVar(&escSession, "session", "", "acting session id/name (default: current)")
 	escalateAskCmd.Flags().StringVar(&escRole, "role", "", "acting session role label")
 	escalateAskCmd.Flags().DurationVar(&escTimeout, "timeout", 10*time.Minute, "blocking-mode wait timeout")
-	escalateAskCmd.Flags().StringVar(&escVROOM, "vroom-entry", "", "session to route orphan chains into (default: discover live Dispatch/orchestrator; \"\" after discovery disables)")
+	escalateAskCmd.Flags().StringVar(&escVROOM, "vroom-entry", "",
+		"session to route orphan chains into. Omit to discover a live VROOM node; "+
+			"pass an empty value, \"none\", or \"off\" to keep orphan chains local")
 
 	escalateAnswerCmd.Flags().StringVar(&escBy, "by", "", "answering session id/name (use 'human' for the human; default: current)")
 	escalateAnswerCmd.Flags().StringVar(&escRole, "role", "", "answering session role label")
@@ -154,7 +157,7 @@ type escalationEnv struct {
 	logger  *escalation.Logger
 }
 
-func newEscalationEnv(vroomEntry string) (*escalationEnv, func(), error) {
+func newEscalationEnv(vroomEntry vroomEntrySpec) (*escalationEnv, func(), error) {
 	adapter, err := getStorage()
 	if err != nil {
 		return nil, nil, fmt.Errorf("escalate needs the session store: %w", err)
@@ -179,11 +182,14 @@ func newEscalationEnv(vroomEntry string) (*escalationEnv, func(), error) {
 	logger := escalation.NewLogger(sink)
 
 	var entry *escalation.ParentRef
-	if strings.TrimSpace(vroomEntry) == "" {
+	switch {
+	case vroomEntry.discover:
 		entry = discoverEscalationEntry(adapter)
-	} else if m, err := adapter.ResolveIdentifier(vroomEntry); err == nil && m != nil {
-		entry = &escalation.ParentRef{
-			SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m),
+	case vroomEntry.name != "":
+		if m, err := adapter.ResolveIdentifier(vroomEntry.name); err == nil && m != nil {
+			entry = &escalation.ParentRef{
+				SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m),
+			}
 		}
 	}
 
@@ -256,14 +262,49 @@ func nodeKindFor(m *manifest.Manifest) escalation.NodeKind {
 	}
 }
 
+// vroomEntrySpec says how the orphan escalation entry is chosen. It is a
+// type rather than a magic string because "not requested here", "discover
+// one", and "explicitly disabled" are three different intents that an empty
+// string cannot tell apart.
+type vroomEntrySpec struct {
+	discover bool
+	name     string
+}
+
+// vroomEntryDisabled keeps orphan chains local: no entry is resolved.
+var vroomEntryDisabled = vroomEntrySpec{}
+
+// vroomEntryFromFlag reads --vroom-entry. An omitted flag discovers a live
+// VROOM node; an explicitly empty value, or the "none"/"off" sentinels,
+// disable orphan routing, which is the behavior the flag help has always
+// advertised and which scripts rely on to keep chains local.
+func vroomEntryFromFlag(cmd *cobra.Command, value string) vroomEntrySpec {
+	if !cmd.Flags().Changed("vroom-entry") {
+		return vroomEntrySpec{discover: true}
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "off":
+		return vroomEntryDisabled
+	}
+	return vroomEntrySpec{name: strings.TrimSpace(value)}
+}
+
+// discoverEscalationEntry finds a live VROOM node to enter an orphan chain
+// at.
+//
+// It considers only the VROOM trio. Any other live supervisor, Dispatch
+// included, is classified NodeSupervisor by nodeKindFor, which bypasses the
+// programmatic trio confer this command contracts for and forwards straight
+// to the human. Discovering no VROOM node therefore leaves the chain local,
+// exactly as a dead pinned vroom-orchestrator used to.
 func discoverEscalationEntry(adapter *dolt.Adapter) *escalation.ParentRef {
 	sessions, err := adapter.ListSessions(&dolt.SessionFilter{ExcludeArchived: true, Limit: 1000})
 	if err != nil {
 		return nil
 	}
-	for _, preferred := range []string{"dispatch", "orchestrator", "overseer", "supervisor", "meta-"} {
+	for _, preferred := range vroomEntryPreference {
 		for _, m := range sessions {
-			if !isLiveEscalationEntry(m) || !strings.Contains(strings.ToLower(m.Name), preferred) {
+			if m == nil || m.Name != preferred || !ops.SessionIsLive(m) {
 				continue
 			}
 			return &escalation.ParentRef{SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m)}
@@ -272,28 +313,10 @@ func discoverEscalationEntry(adapter *dolt.Adapter) *escalation.ParentRef {
 	return nil
 }
 
-func isLiveEscalationEntry(m *manifest.Manifest) bool {
-	if m == nil {
-		return false
-	}
-	state := strings.ToUpper(strings.TrimSpace(m.State))
-	if state == manifest.StateOffline || state == manifest.StateDone || m.Lifecycle == manifest.LifecycleArchived {
-		return false
-	}
-	name := strings.ToLower(m.Name)
-	if strings.Contains(name, "dispatch") || strings.Contains(name, "orchestrator") ||
-		strings.Contains(name, "overseer") || strings.Contains(name, "supervisor") ||
-		strings.Contains(name, "meta-") {
-		return true
-	}
-	for _, tag := range m.Context.Tags {
-		lower := strings.ToLower(tag)
-		if strings.Contains(lower, "role:orchestrator") || strings.Contains(lower, "role:overseer") ||
-			strings.Contains(lower, "role:supervisor") || strings.Contains(lower, "role:meta-orchestrator") {
-			return true
-		}
-	}
-	return false
+// vroomEntryPreference ranks the VROOM trio for orphan entry, highest
+// authority first.
+var vroomEntryPreference = []string{
+	"vroom-meta-orchestrator", "vroom-orchestrator", "vroom-overseer",
 }
 
 // doltGraph implements escalation.SessionGraph over AGM's Dolt hierarchy.
@@ -414,7 +437,7 @@ func (h *dispatchHuman) ToHuman(ctx context.Context, e *escalation.Escalation) e
 
 func runEscalateAsk(cmd *cobra.Command, args []string) error {
 	question := joinArgs(args)
-	env, cleanup, err := newEscalationEnv(escVROOM)
+	env, cleanup, err := newEscalationEnv(vroomEntryFromFlag(cmd, escVROOM))
 	if err != nil {
 		return err
 	}
@@ -462,7 +485,7 @@ func runEscalateAsk(cmd *cobra.Command, args []string) error {
 func runEscalateAnswer(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	answer := joinArgs(args[1:])
-	env, cleanup, err := newEscalationEnv("")
+	env, cleanup, err := newEscalationEnv(vroomEntryDisabled)
 	if err != nil {
 		return err
 	}
@@ -485,7 +508,7 @@ func runEscalateAnswer(cmd *cobra.Command, args []string) error {
 
 func runEscalateForward(cmd *cobra.Command, args []string) error {
 	id := args[0]
-	env, cleanup, err := newEscalationEnv(escVROOM)
+	env, cleanup, err := newEscalationEnv(vroomEntryFromFlag(cmd, escVROOM))
 	if err != nil {
 		return err
 	}
@@ -515,7 +538,7 @@ func runEscalateForward(cmd *cobra.Command, args []string) error {
 func runEscalateVote(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	vote := escalation.Vote(args[1])
-	env, cleanup, err := newEscalationEnv("")
+	env, cleanup, err := newEscalationEnv(vroomEntryDisabled)
 	if err != nil {
 		return err
 	}
@@ -553,7 +576,7 @@ func runEscalateVote(cmd *cobra.Command, args []string) error {
 }
 
 func runEscalateList(cmd *cobra.Command, _ []string) error {
-	env, cleanup, err := newEscalationEnv("")
+	env, cleanup, err := newEscalationEnv(vroomEntryDisabled)
 	if err != nil {
 		return err
 	}
@@ -584,7 +607,7 @@ func runEscalateList(cmd *cobra.Command, _ []string) error {
 }
 
 func runEscalateShow(cmd *cobra.Command, args []string) error {
-	env, cleanup, err := newEscalationEnv("")
+	env, cleanup, err := newEscalationEnv(vroomEntryDisabled)
 	if err != nil {
 		return err
 	}

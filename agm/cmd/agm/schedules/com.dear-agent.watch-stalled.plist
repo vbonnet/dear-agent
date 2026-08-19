@@ -21,11 +21,15 @@
   KeepAlive (restart on crash) rather than StartInterval, with RunAtLoad so the
   monitor comes up at login and after a reboot.
 
-  Alert routing: --orchestrator __ORCHESTRATOR__ routes every recovery action
-  (permission-prompt alerts, no-commit nudges, error-loop diagnostics, and
-  max-retry escalations) into the VROOM mesh by sending an agm message to the
-  orchestrator supervisor session. The orchestrator (COO of the mesh) owns
-  worker monitoring, so stall alerts land where work is steered.
+  Alert routing: --orchestrator __ORCHESTRATOR__ names the preferred recipient
+  for every recovery action (permission-prompt alerts, no-commit nudges,
+  error-loop diagnostics, and max-retry escalations); it is the first
+  candidate, not a pin. The installed default is empty, so the alert router
+  discovers a live Dispatch/orchestrator/supervisor session at run time and
+  tries each in preference order. An alert no live session accepts is written
+  durably to the alert queue (~/.agm/alerts/queue.jsonl) with status "queued"
+  and re-attempted on later scans, so a supervisor outage delays a stall alert
+  rather than losing it. Inspect with `agm alerts list --status queued`.
 
   Logs:   <home>/Library/Logs/dear-agent/watch-stalled.log
           (one JSON object per detected stall / recovery action — pipe to jq)

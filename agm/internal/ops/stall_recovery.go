@@ -24,6 +24,7 @@ type StallRecovery struct {
 	autoApprovePatterns []string             // Safe patterns to auto-approve
 	retryTracker        *RetryTracker        // Tracks retry attempts with bounded retries
 	bus                 eventbus.Broadcaster // Optional: publishes StallRecovered/StallEscalated events
+	router              *AlertRouter         // Optional: nil builds the default router lazily
 }
 
 // NewStallRecovery creates a new stall recovery handler with retry tracking.
@@ -102,8 +103,7 @@ func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event
 
 	msg := fmt.Sprintf("⚠️ PERMISSION_PROMPT stall detected: %s has been stuck for %v%s",
 		event.SessionName, formatDuration(event.Duration), errorContext)
-	router := NewAlertRouter(sr.ctx)
-	rec, err := router.Route(ctx, AlertRequest{
+	rec, err := sr.alertRouter().Route(ctx, AlertRequest{
 		Kind:          "stall.permission_prompt",
 		Source:        "agm-watch-stalled",
 		Title:         "Permission prompt stall",
@@ -125,10 +125,13 @@ func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event
 		return action, err
 	}
 
-	action.Sent = rec.Status == AlertStatusDispatched || rec.Status == AlertStatusSuppressed
+	// A queued alert reached nobody, and a suppressed duplicate of a queued
+	// alert reached nobody either. Reporting either as sent would let
+	// Recover publish StallRecovered over an unresolved critical stall.
+	action.Sent = rec.Delivered()
 	action.Description = fmt.Sprintf("Alert status %s target %s", rec.Status, rec.Target)
-	if rec.Error != "" && rec.Status == AlertStatusQueued {
-		return action, fmt.Errorf("%s", rec.Error)
+	if !action.Sent {
+		return action, fmt.Errorf("permission-prompt alert not delivered (status %s): %s", rec.Status, alertFailureReason(rec))
 	}
 	return action, nil
 }
@@ -166,8 +169,7 @@ func (sr *StallRecovery) recoverErrorLoopStall(ctx context.Context, event StallE
 	}
 
 	msg := fmt.Sprintf("🔄 ERROR_LOOP detected in %s:\n%s%s", event.SessionName, event.Evidence, errorContext)
-	router := NewAlertRouter(sr.ctx)
-	rec, err := router.Route(ctx, AlertRequest{
+	rec, err := sr.alertRouter().Route(ctx, AlertRequest{
 		Kind:          "stall.error_loop",
 		Source:        "agm-watch-stalled",
 		Title:         "Error loop diagnostic",
@@ -188,8 +190,14 @@ func (sr *StallRecovery) recoverErrorLoopStall(ctx context.Context, event StallE
 		return action, err
 	}
 
-	action.Sent = rec.Status == AlertStatusDispatched || rec.Status == AlertStatusSuppressed || rec.Status == AlertStatusQueued
+	// Queued is the router's word for "delivery failed"; counting it as
+	// sent would mark the recovery successful and stop the retry tracker
+	// from ever advancing toward max-retry escalation.
+	action.Sent = rec.Delivered()
 	action.Description = fmt.Sprintf("Diagnostic status %s target %s", rec.Status, rec.Target)
+	if !action.Sent {
+		return action, fmt.Errorf("error-loop diagnostic not delivered (status %s): %s", rec.Status, alertFailureReason(rec))
+	}
 	return action, nil
 }
 
@@ -248,8 +256,7 @@ func (sr *StallRecovery) escalateFailure(ctx context.Context, event StallEvent, 
 		retryState.LastAttempt,
 	)
 
-	router := NewAlertRouter(sr.ctx)
-	rec, err := router.Route(ctx, AlertRequest{
+	rec, err := sr.alertRouter().Route(ctx, AlertRequest{
 		Kind:          "stall.escalation",
 		Source:        "agm-watch-stalled",
 		Title:         "Stall recovery escalation",
@@ -266,10 +273,10 @@ func (sr *StallRecovery) escalateFailure(ctx context.Context, event StallEvent, 
 		return action, err
 	}
 
-	action.Sent = rec.Status == AlertStatusDispatched || rec.Status == AlertStatusSuppressed
+	action.Sent = rec.Delivered()
 	action.Description = fmt.Sprintf("Escalated status %s target %s after %d failed attempts", rec.Status, rec.Target, retryState.AttemptCount)
-	if rec.Error != "" && rec.Status == AlertStatusQueued {
-		return action, fmt.Errorf("%s", rec.Error)
+	if !action.Sent {
+		return action, fmt.Errorf("escalation not delivered (status %s): %s", rec.Status, alertFailureReason(rec))
 	}
 
 	sr.publishEscalated(event, retryState.AttemptCount)
@@ -314,4 +321,31 @@ func (sr *StallRecovery) publishEscalated(event StallEvent, attemptCount int) {
 		return
 	}
 	sr.bus.Broadcast(busEvent)
+}
+
+// alertFailureReason renders why an alert did not reach a recipient.
+func alertFailureReason(rec AlertRecord) string {
+	if rec.Error != "" {
+		return rec.Error
+	}
+	return "no reason recorded"
+}
+
+// SetAlertRouter overrides the router stall recovery delivers through.
+//
+// Tests must set it. The default router writes to the host-wide
+// ~/.agm/alerts/queue.jsonl, so without injection `go test ./agm/internal/ops`
+// appends synthetic alerts to the developer's real queue, and tests
+// suppress one another through that shared persisted state.
+func (sr *StallRecovery) SetAlertRouter(router *AlertRouter) {
+	sr.router = router
+}
+
+// alertRouter returns the injected router, or builds the default one.
+func (sr *StallRecovery) alertRouter() *AlertRouter {
+	if sr.router != nil {
+		return sr.router
+	}
+	sr.router = NewAlertRouter(sr.ctx)
+	return sr.router
 }
