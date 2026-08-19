@@ -1,0 +1,1 @@
+../../../research-pipeline/skills/research-pipeline/SKILL.md

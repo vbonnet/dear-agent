@@ -117,6 +117,8 @@ instruction-policy:
       owner: wayfinder
     - match: wayfinder/skills/wayfinder/SKILL.md
       owner: wayfinder-plugin
+    - match: research-pipeline/skills/research-pipeline/SKILL.md
+      owner: research-pipeline-plugin
     - match: spec-governance/skills/write-spec/SKILL.md
       owner: spec-governance
     - match: spec-governance/skills/write-spec/references/contract-model.md
