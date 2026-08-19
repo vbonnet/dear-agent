@@ -35,8 +35,13 @@ permissions:
 jobs:
   structural-health:
     name: Structural Health (baselined)
-    # Run on every declared main PR and main push. This check is not yet
-    # provider-required, but the workflow must expose setup and scan failures.
+    # Run on every declared main PR and main push. This check IS
+    # provider-required on the default branch: the context
+    # `Structural Health (baselined)` (this job's name, pinned by
+    # cmd/structural-health/workflow_contract_test.go) sits in the
+    # branch-protection ruleset, so a regression blocks the merge rather
+    # than landing and reddening main. Renaming this job silently
+    # unsatisfies the gate; see docs/branch-protection.md.
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
