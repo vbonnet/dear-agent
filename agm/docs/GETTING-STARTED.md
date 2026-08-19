@@ -205,10 +205,8 @@ ui:
   show_project_paths: true
   fuzzy_search: true
 
-advanced:
-  tmux_timeout: "5s"
-  health_check_cache: "5s"
-  lock_timeout: "30s"
+timeout:
+  tmux_commands: "5s"
 EOF
 ```
 

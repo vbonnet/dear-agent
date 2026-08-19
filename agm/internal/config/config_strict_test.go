@@ -167,8 +167,6 @@ ui:
   theme: agm-light
   picker_height: 20
   show_tags: false
-advanced:
-  tmux_timeout: 9s
 sandbox:
   enabled: false
   provider: mock
@@ -185,7 +183,7 @@ sandbox:
 	if got.LogLevel != "debug" || got.UISettings.UI.Theme != "agm-light" ||
 		got.UISettings.UI.PickerHeight != 20 || got.UISettings.Defaults.Interactive ||
 		got.UISettings.Defaults.CleanupThresholdDays != 60 || got.UISettings.UI.ShowTags ||
-		got.UISettings.Advanced.TmuxTimeout != "9s" || got.Sandbox.Enabled ||
+		got.Sandbox.Enabled ||
 		got.Sandbox.Provider != "mock" {
 		t.Fatalf("mixed snapshot = %#v", got)
 	}

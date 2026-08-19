@@ -179,13 +179,6 @@ ui:
   no_color: false                  # Disable colored output (accessibility)
   screen_reader: false             # Use text symbols instead of Unicode
 
-# === Advanced Settings ===
-advanced:
-  tmux_timeout: "5s"               # Tmux command timeout
-  health_check_cache: "5s"         # Health check cache duration
-  lock_timeout: "30s"              # Lock acquisition timeout
-  uuid_detection_window: "5m"      # UUID detection time window
-
 # === Core Configuration ===
 sessions_dir: "~/.config/agm/sessions"  # Session manifests directory
 log_level: "info"                       # Logging: debug, info, warn, error
@@ -657,9 +650,8 @@ defaults:
   cleanup_threshold_days: 90       # Longer retention
   archive_threshold_days: 180
 
-advanced:
-  tmux_timeout: "10s"              # Longer timeout for slow systems
-  lock_timeout: "60s"              # Longer lock timeout
+timeout:
+  tmux_commands: "10s"             # Longer timeout for slow systems
 
 log_level: "warn"                  # Less verbose logging
 log_file: "/var/log/agm/agm.log"  # Log to file
@@ -677,8 +669,8 @@ ui:
   theme: "dracula"                 # Personal preference
   picker_height: 25                # More visible
 
-advanced:
-  tmux_timeout: "30s"              # Generous timeout for debugging
+timeout:
+  tmux_commands: "30s"             # Generous timeout for debugging
 
 log_level: "debug"                 # Verbose logging
 ```
