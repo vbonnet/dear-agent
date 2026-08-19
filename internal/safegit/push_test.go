@@ -182,3 +182,35 @@ func TestForcePushViolation_BlocksProtectedBranches(t *testing.T) {
 		})
 	}
 }
+
+// TestForceFlag_AbbreviatedLongOptionWithValue pins the behaviour an
+// abbreviation carrying its optional value depends on: git accepts
+// `--force-with-l=main`, and matching the whole token against the full option
+// name would never match because of the `=main` suffix.
+func TestForceFlag_AbbreviatedLongOptionWithValue(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"abbreviated lease with value", []string{"--force-with-l=main", "origin", "topic"}, true},
+		{"abbreviated lease bare", []string{"--force-with-l", "origin", "topic"}, true},
+		{"full lease with value", []string{"--force-with-lease=main", "origin", "topic"}, true},
+		{"abbreviated force", []string{"--forc", "origin", "topic"}, true},
+		{"abbreviated mirror", []string{"--mirr", "origin"}, true},
+		{"abbreviated if-includes with value", []string{"--force-if-inc=x", "origin"}, true},
+		{"unrelated option with value", []string{"--repo=origin", "origin", "topic"}, false},
+		{"negated force", []string{"--no-force-with-lease", "origin", "topic"}, false},
+		{"plain push", []string{"origin", "topic"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			flag, got := ForceFlag(tc.args)
+			if got != tc.want {
+				t.Fatalf("ForceFlag(%v) = (%q, %v), want %v", tc.args, flag, got, tc.want)
+			}
+		})
+	}
+}

@@ -79,6 +79,7 @@ func TestInspectCommand(t *testing.T) {
 	t.Parallel()
 	g := testGuard()
 	home := "/home/tester"
+	wt := home + "/worktrees/dear-agent/feat"
 
 	tests := []struct {
 		name        string
@@ -152,6 +153,148 @@ func TestInspectCommand(t *testing.T) {
 		{"git force refspec blocked", "git -C ~/src/dear-agent push origin +main", home, false,
 			"force-push"},
 		{"git commit in worktree allowed", "git -C ~/worktrees/x commit -m y", home, true, ""},
+
+		// Destructive push forms the weaker local parser missed — now via
+		// safegit.ForceFlag (ce-3knl.3).
+		{"git push --mirror blocked", "git -C ~/src/dear-agent push --mirror", home, false, "force-push"},
+		{"git push --force-if-includes blocked", "git -C ~/src/dear-agent push --force-if-includes origin main",
+			home, false, "force-push"},
+		{"git push +refspec blocked", "git -C ~/src/dear-agent push origin +main", home, false, "force-push"},
+		{"git push --force-with-lease=ref blocked", "git -C ~/src/dear-agent push --force-with-lease=main origin main",
+			home, false, "force-push"},
+		{"git push normal refspec allowed", "git -C ~/src/dear-agent push origin main", home, true, ""},
+
+		// Absolute / PATH-qualified executables must normalize to their basename
+		// so they cannot bypass the per-command analysis (ce-3knl.3).
+		{"absolute rm src blocked", "/bin/rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"usr-bin rm src blocked", "/usr/bin/rm -rf ~/src/dear-agent/d", home, false, "~/src"},
+		{"absolute git commit blocked", "/usr/bin/git -C ~/src/dear-agent commit -m x", home, false,
+			"git commit` in ~/src"},
+		{"absolute sudo rm src blocked", "/usr/bin/sudo rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"absolute rm worktree allowed", "/bin/rm ~/worktrees/x/f", home, true, ""},
+
+		// Bare relative targets resolve against cwd: destructive within ~/src,
+		// harmless within a worktree (ce-3knl.3).
+		{"bare rm in src cwd blocked", "rm AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare rm nested in src cwd blocked", "rm -f docs/AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare redirect in src cwd blocked", "echo x > README.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare redirect append in src cwd blocked", "echo x >> README.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare mv in src cwd blocked", "mv README.md OTHER.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare touch in src cwd blocked", "touch NEWFILE", home + "/src/dear-agent", false, "~/src"},
+		{"bare rm in worktree cwd allowed", "rm main.go", home + "/worktrees/dear-agent/feat", true, ""},
+		{"bare redirect in worktree cwd allowed", "echo x > out.txt", home + "/worktrees/dear-agent/feat", true, ""},
+		{"bare chmod mode not target in worktree", "chmod 755 build.sh", home + "/worktrees/dear-agent/feat", true, ""},
+		{"bare chmod in src cwd blocked", "chmod 644 AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+
+		// `--` ends option parsing: it is not itself a target, and a target
+		// after it is classified even when it starts with '-' (ce-3knl.3).
+		{"dashdash is not a target", "rm -- file.txt", wt, true, ""},
+		{"dashdash hyphen target in src blocked", "rm -- -logfile", home + "/src/dear-agent", false, "~/src"},
+		{"dashdash src target blocked", "rm -- ~/src/dear-agent/AGENTS.md", home, false, "~/src"},
+		{"dashdash worktree target allowed", "rm -- main.go", wt, true, ""},
+
+		// Redirection syntax must not be mistaken for command operands, or the
+		// `1` of `2>&1` displaces the real destination (ce-3knl.3).
+		{"cp with 2>&1 still sees dest", "cp /tmp/a ~/src/dear-agent/f 2>&1", home, false, "~/src"},
+		{"cp with stdout redirect still sees dest", "cp /tmp/a ~/src/dear-agent/f >out.txt", wt, false, "~/src"},
+		{"cp benign with 2>&1 allowed", "cp /tmp/a /tmp/b 2>&1", wt, true, ""},
+
+		// chmod/chown/chgrp --reference replaces the leading spec operand, so
+		// the first positional is already a target (ce-3knl.3).
+		{"chmod --reference= keeps target", "chmod --reference=/tmp/ref ~/src/dear-agent/AGENTS.md", home, false, "~/src"},
+		{"chmod --reference spaced keeps target", "chmod --reference /tmp/ref ~/src/dear-agent/AGENTS.md",
+			home, false, "~/src"},
+		{"chown --reference keeps target", "chown --reference=/tmp/ref ~/src/dear-agent/AGENTS.md", home, false, "~/src"},
+
+		// Value-taking options may trail the operands, so their value must be
+		// consumed or it becomes the "last" operand (ce-3knl.3).
+		{"cp --suffix after operands", "cp /tmp/a ~/src/dear-agent/f --suffix bak", home, false, "~/src"},
+		{"cp -S after operands", "cp /tmp/a ~/src/dear-agent/f -S bak", home, false, "~/src"},
+
+		// -t/--target-directory names the destination; every positional is a
+		// read-only source (ce-3knl.3).
+		{"cp -t dest blocked", "cp -t ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp --target-directory= blocked", "cp --target-directory=~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp --target-directory spaced blocked", "cp --target-directory ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -tDIR glued blocked", "cp -t~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -rt cluster blocked", "cp -rt ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"install -t dest blocked", "install -t ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"mv -t dest blocked", "mv -t ~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -t benign allowed", "cp -t /tmp/dir /tmp/a", wt, true, ""},
+
+		// A remote may legally be named +prod; only refspecs carry force
+		// semantics in a leading '+' (ce-3knl.3).
+		{"git push +remote is not a force push", "git -C ~/src/dear-agent push +prod main", home, true, ""},
+		{"git push clustered -uf blocked", "git -C ~/src/dear-agent push -uf origin main", home, false, "force-push"},
+
+		// Redirect targets resolve against the directory `cd` tracking has
+		// reached, not the original cwd (ce-3knl.3).
+		{"cd then bare redirect blocked", "cd ~/src/dear-agent && echo x > README.md", wt, false, "~/src"},
+
+		// A '#' opening a word starts a comment, so its words are not operands;
+		// inside a word it is an ordinary character (ce-3knl.3).
+		{"comment does not displace destination", "cp /tmp/a ~/src/dear-agent/f # backup", "/tmp", false, "~/src"},
+		{"hash inside a word is not a comment", "rm file#1", wt, true, ""},
+
+		// touch's -d/-t/-r take values that are not paths (ce-3knl.3).
+		{"touch -d value not a target", "touch -d yesterday /tmp/out", home + "/src/dear-agent", true, ""},
+		{"touch -t stamp not a target", "touch -t 202601010000 /tmp/out", home + "/src/dear-agent", true, ""},
+		{"touch real target still blocked", "touch NEWFILE", home + "/src/dear-agent", false, "~/src"},
+
+		// A `cd` inside a subshell does not outlive it (ce-3knl.3).
+		{"subshell cd is restored", "(cd /tmp); rm AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"subshell interior still checked", "(cd ~/src/dear-agent; rm AGENTS.md)", wt, false, "~/src"},
+
+		// Only the shell builtin `cd` moves the shell; an external program that
+		// merely has that basename does not (ce-3knl.3).
+		{"external cd does not move tracking", "/tmp/cd /tmp; rm AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"builtin cd still tracked", "cd /tmp; rm AGENTS.md", home + "/src/dear-agent", true, ""},
+
+		// -t inside a short-option cluster with its directory glued on
+		// (ce-3knl.3).
+		{"cp -atDIR cluster blocked", "cp -at~/src/dear-agent /tmp/a", home, false, "~/src"},
+		{"cp -at spaced cluster blocked", "cp -at ~/src/dear-agent /tmp/a", home, false, "~/src"},
+
+		// rsync value-taking options must be consumed, and its auxiliary output
+		// directories are themselves write targets (ce-3knl.3).
+		{"rsync --exclude after operands", "rsync /tmp/a ~/src/dear-agent/d --exclude foo", "/tmp", false, "~/src"},
+		{"rsync --backup-dir is a target", "rsync /tmp/a /tmp/b --backup-dir ~/src/dear-agent", "/tmp", false, "~/src"},
+		{"rsync benign allowed", "rsync /tmp/a /tmp/b --exclude foo", "/tmp", true, ""},
+
+		// A digit is a file descriptor only when glued to the operator; with
+		// whitespace it is an ordinary operand (ce-3knl.3).
+		{"whitespace digit is an operand", "rm 2 > /tmp/log", home + "/src/dear-agent", false, "~/src"},
+		{"glued fd is still stripped", "cp /tmp/a ~/src/dear-agent/f 2>&1", wt, false, "~/src"},
+
+		// A value-taking short option swallows the rest of its cluster, so the
+		// `t` in `-Stext` is suffix text and not --target-directory (ce-3knl.3).
+		{"cp -Stext is not a target dir", "cp -Stext /tmp/a ~/src/dear-agent/f", "/tmp", false, "~/src"},
+
+		// Input redirections are read-only but must still leave the operand
+		// list, or their target displaces the destination (ce-3knl.3).
+		{"input redirect does not displace dest", "cp /tmp/a ~/src/dear-agent/f < in", "/tmp", false, "~/src"},
+		{"herestring does not displace dest", "cp /tmp/a ~/src/dear-agent/f <<< x", "/tmp", false, "~/src"},
+
+		// rsync's auxiliary output dirs supplement its positional destination
+		// rather than replacing it; its basis dirs are read-only (ce-3knl.3).
+		{"rsync aux keeps primary dest", "rsync /tmp/a ~/src/dear-agent/d --backup-dir /tmp/bk", "/tmp", false, "~/src"},
+		{"rsync --max-delete value consumed", "rsync /tmp/a ~/src/dear-agent/d --max-delete 1", "/tmp", false, "~/src"},
+		{"rsync --compare-dest is read-only", "rsync --compare-dest ~/src/dear-agent/b /tmp/a /tmp/b", "/tmp", true, ""},
+
+		// A chmod symbolic mode is option-shaped and must not be filtered out as
+		// a flag, or the real target is dropped as the leading spec (ce-3knl.3).
+		{"chmod -w symbolic mode blocked", "chmod -w ~/src/dear-agent/AGENTS.md", wt, false, "~/src"},
+		{"chmod -R is a flag not a mode", "chmod -R 755 ~/src/dear-agent", wt, false, "~/src"},
+		{"chmod -w benign allowed", "chmod -w /tmp/f", wt, true, ""},
+
+		// A digit target is a descriptor only for a dup operator (ce-3knl.3).
+		{"numeric redirect target blocked", "echo x > 2", home + "/src/dear-agent", false, "~/src"},
+		{"fd dup target still skipped", "echo x 2>&1", home + "/src/dear-agent", true, ""},
+
+		// mktemp's -p/--tmpdir relocates the template out of the cwd
+		// (ce-3knl.3).
+		{"mktemp -p escapes protected cwd", "mktemp -p /tmp scratch.XXXXXX", home + "/src/dear-agent", true, ""},
+		{"mktemp bare template still blocked", "mktemp scratch.XXXXXX", home + "/src/dear-agent", false, "~/src"},
 
 		// cd tracking for git.
 		{"cd then git commit blocked", "cd ~/src/dear-agent && git commit -m x", home, false,
@@ -332,6 +475,112 @@ func TestInspectCommand_ForcePushToPRBranchInSrc(t *testing.T) {
 			if allowed != tc.wantAllowed {
 				t.Fatalf("InspectCommand(%q) allowed=%v, want %v (msg=%q)",
 					tc.command, allowed, tc.wantAllowed, msg)
+			}
+		})
+	}
+}
+
+// TestInspectCommand_HardeningRound2 covers the classification holes found in
+// review after the first hardening round. Each case is a command a shell
+// accepts and that reaches a protected path, which the guard previously
+// allowed because it mis-parsed the operands.
+func TestInspectCommand_HardeningRound2(t *testing.T) {
+	t.Parallel()
+	g := testGuard()
+	src := "/home/tester/src/dear-agent"
+	wt := "/home/tester/worktrees/dear-agent/feat"
+
+	tests := []struct {
+		name        string
+		command     string
+		cwd         string
+		wantAllowed bool
+		wantSubstr  string
+	}{
+		{
+			// The cd is conditional, so bash may leave the shell in ~/src and
+			// remove the protected relative file. Tracking only the post-cd
+			// directory classified the removal against /tmp.
+			name:    "conditional cd keeps the prior directory in play",
+			command: "false && cd /tmp; rm AGENTS.md",
+			cwd:     src, wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "cd in a pipeline does not move the parent shell",
+			command: "cd /tmp | true; rm AGENTS.md",
+			cwd:     src, wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			// An unconditional cd definitely ran, so the earlier directory is
+			// no longer a candidate and this must stay allowed.
+			name:    "unconditional cd resolves the uncertainty",
+			command: "cd /tmp; rm scratch.txt",
+			cwd:     src, wantAllowed: true,
+		},
+		{
+			name:    "conditional cd into a safe dir still allows safe targets",
+			command: "true && cd " + wt + "; rm main.go",
+			cwd:     wt, wantAllowed: true,
+		},
+		{
+			// The tokenizer keeps `3<` as one token; matching only bare `<`
+			// left `in` as cp's apparent destination.
+			name:    "descriptor-prefixed input redirect is stripped",
+			command: "cp /tmp/a ~/src/dear-agent/f 3< in",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "plain input redirect is stripped",
+			command: "cp /tmp/a ~/src/dear-agent/f < in",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			// GNU accepts a value-taking short option as the last letter of a
+			// cluster; `bak` is its value, not the final operand.
+			name:    "clustered cp option consumes its separate value",
+			command: "cp /tmp/a ~/src/dear-agent/f -aS bak",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "glued cluster value is still not an operand",
+			command: "cp /tmp/a ~/src/dear-agent/f -aSbak",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			name:    "rsync consumes its rsync-path value",
+			command: "rsync /tmp/a ~/src/dear-agent/d --rsync-path false",
+			cwd:     "/tmp", wantAllowed: false, wantSubstr: "protected",
+		},
+		{
+			// --tmpdir's value is optional and only ever glued with '='. The
+			// template is not its value, so this safe command must not be
+			// blocked when run from a protected checkout.
+			name:    "valueless mktemp --tmpdir keeps its template",
+			command: "mktemp --tmpdir scratch.XXXXXX",
+			cwd:     src, wantAllowed: true,
+		},
+		{
+			name:    "mktemp --tmpdir=DIR still selects the directory",
+			command: "mktemp --tmpdir=/tmp scratch.XXXXXX",
+			cwd:     src, wantAllowed: true,
+		},
+		{
+			name:    "mktemp -p still consumes its required value",
+			command: "mktemp -p /tmp scratch.XXXXXX",
+			cwd:     src, wantAllowed: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			allowed, msg := g.InspectCommand(tc.command, tc.cwd)
+			if allowed != tc.wantAllowed {
+				t.Fatalf("InspectCommand(%q, %q) allowed=%v, want %v (msg=%q)",
+					tc.command, tc.cwd, allowed, tc.wantAllowed, msg)
+			}
+			if tc.wantSubstr != "" && !strings.Contains(msg, tc.wantSubstr) {
+				t.Errorf("message %q does not contain %q", msg, tc.wantSubstr)
 			}
 		})
 	}

@@ -87,8 +87,14 @@ func CredentialResetArgs(ghPath string) []string {
 // the end-of-options separator as a repository or refspec, so `git push origin
 // -- -f` pushes a branch named "-f" and is not a force push — while a `+ref`
 // after `--` still forces that ref and is still rejected.
+//
+// The leading-plus test applies only to refspecs. `git push` is
+// `git push [options] [repository [refspec...]]`, so the first positional names
+// the remote, and a remote may legally be called `+prod`; testing it as a
+// refspec would reject the entirely non-destructive `git push +prod main`.
 func ForceFlag(args []string) (string, bool) {
 	endOfOptions := false
+	sawRepository := false
 	for _, a := range args {
 		if !endOfOptions {
 			if a == "--" {
@@ -102,7 +108,11 @@ func ForceFlag(args []string) (string, bool) {
 				continue
 			}
 		}
-		// A repository or refspec. A '+' prefix on a refspec forces that ref.
+		if !sawRepository {
+			sawRepository = true // the repository operand, not a refspec
+			continue
+		}
+		// A refspec. A '+' prefix on a refspec forces that ref.
 		if strings.HasPrefix(a, "+") {
 			return a, true
 		}

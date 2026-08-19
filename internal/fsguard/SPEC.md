@@ -59,7 +59,9 @@ state why.
 
 #### Command-runner stripping
 
-**FSG-13** When a command is prefixed by any runner (`env`, `sudo`, `doas`, `nohup`, `setsid`, `exec`, `time`, `nice`, `ionice`, `stdbuf`, `command`, `builtin`) including their option values (e.g. `sudo -u root`), the system shall strip the runner prefix before classifying the underlying command.
+**FSG-13** When a command is prefixed by any runner (`env`, `sudo`, `doas`, `nohup`, `setsid`, `exec`, `time`, `nice`, `ionice`, `stdbuf`, `command`, `builtin`) including their option values (e.g. `sudo -u root`), the system shall strip the runner prefix before classifying the underlying command. The runner is matched by the command word's basename, so an absolute or PATH-qualified runner (e.g. `/usr/bin/sudo`) is stripped identically.
+
+**FSG-42** When a command word is an absolute or PATH-qualified path (e.g. `/bin/rm`, `/usr/bin/git`), the system shall classify it by its basename so it cannot bypass the per-command write, git, gh, or runner analysis.
 
 #### Shell nesting
 
@@ -69,13 +71,51 @@ state why.
 
 #### Write-target detection
 
-**FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all path-shaped positional arguments as write targets.
+**FSG-43** When a write command's positional argument is a bare relative name (e.g. the `AGENTS.md` in `rm AGENTS.md`) rather than a path-shaped one (absolute, `~`, `$HOME`, `.`/`..`), the system shall resolve it against the current working directory and classify it as a write target.
 
-**FSG-17** When the command is `tee`, the system shall classify all path-shaped positional arguments as write targets (file arguments, not stdin).
+**FSG-44** The system shall not treat the value of a value-taking option (e.g. the `755` in `mkdir -m 755 d`) or a leading non-path spec operand (the mode/owner/group in `chmod 755 f`, `chown user f`, `chgrp grp f`) as a write target. Because GNU coreutils also accept value-taking options after the operands (e.g. `cp SRC DEST --suffix bak`), the value shall be consumed wherever the option appears, so it never displaces the trailing destination of FSG-18.
 
-**FSG-18** When the command is `cp`, `rsync`, `install`, `ln`, or `link`, the system shall classify only the last path-shaped positional argument (the destination) as a write target.
+**FSG-45** When a write command contains the end-of-options separator `--`, the system shall treat every later token as a positional operand even when it begins with `-`, and shall not classify the `--` token itself as a write target.
 
-**FSG-19** When the command is `chmod`, `chown`, `chgrp`, or `truncate`, the system shall classify all path-shaped positional arguments as write targets.
+**FSG-46** When a simple command contains redirection syntax (the operator, its target, and any leading file-descriptor digit such as the `2` of `2>&1`), the system shall exclude those tokens from the command's operands before selecting write targets, so a redirection cannot displace the destination of FSG-18. The redirect target itself remains classified under FSG-23 through FSG-26.
+
+**FSG-47** When `chmod`, `chown`, or `chgrp` takes its mode/owner/group from `--reference` (e.g. `chmod --reference=RFILE FILE...`), the system shall not drop the leading positional as a spec operand, because in that form the first positional is already a mutation target.
+
+**FSG-48** When `cp`, `mv`, `ln`, or `install` names its destination with `-t`/`--target-directory` (including the `--target-directory=DIR`, `-tDIR`, and clustered `-at DIR`/`-atDIR` forms), the system shall classify that option's value as the write target and treat every positional operand as a read-only source.
+
+**FSG-50** When a word begins with `#`, the system shall treat it as the start of a shell comment and ignore the remainder of the line, so commented words never become operands; a `#` inside a word (e.g. `file#1`) shall remain an ordinary character.
+
+**FSG-51** When a digit is lexically adjacent to a redirection operator (e.g. the `2` of `2>&1`), the system shall treat it as a file descriptor and strip it with the redirection; when whitespace separates them (e.g. `rm 2 > log`), the system shall keep the digit as an ordinary write-target operand.
+
+**FSG-52** When an option value names an auxiliary output location rather than an inert scalar (e.g. `rsync --backup-dir DIR`, `--temp-dir`, `--partial-dir`, `--log-file`, `--write-batch`), the system shall classify that value as a write target *in addition to* the command's positional destination, because such options supplement rather than replace it. Read-only basis directories (`--compare-dest`, `--copy-dest`, `--link-dest`) shall be consumed as ordinary option values and not classified as targets.
+
+**FSG-57** When a short-option cluster contains a letter that consumes a value (e.g. the `-S` of `cp -Stext`), the system shall stop interpreting later letters in that word as options, because they are that option's value; only a `t` reached before any such letter names a target directory.
+
+**FSG-58** When a command contains an input redirection (`<`, `<<`, `<<<`), with or without a file-descriptor prefix (`3<`), the system shall exclude the operator and its target from the command's operands without classifying that target as a write target, since input redirections only read.
+
+**FSG-60** When a short-option cluster ends on a letter that takes a value (e.g. the `-aS` of `cp SRC DEST -aS bak`), the system shall consume the following token as that option's value rather than as an operand, so the value cannot displace the real destination. When the value-taking letter is not last, the remainder of the same word is its value and no further token is consumed.
+
+**FSG-61** When an option's value is optional and therefore only supplied glued with `=` (mktemp's `--tmpdir[=DIR]`), the system shall not consume the following token as its value. A valueless `--tmpdir` shall resolve to `$TMPDIR`, or the platform temporary directory when unset, and shall still replace the positional template as the write target.
+
+**FSG-59** When a `chmod` mode is symbolic and begins with an operator (e.g. the `-w` of `chmod -w FILE`), the system shall treat it as the leading spec operand rather than as an option, so the following positional remains a write target.
+
+**FSG-60** When a redirection target consists only of digits, the system shall treat it as a file descriptor only for a descriptor-duplicating operator (e.g. `2>&1`); for a plain `>` or `>>` it shall classify it as the relative filename it is (`echo x > 2`).
+
+**FSG-61** When `mktemp` selects its directory with `-p`/`--tmpdir`, the system shall classify that directory as the write target and shall not classify the template against the current working directory, because the template is created under the selected directory.
+
+**FSG-53** When a `cd` occurs inside a subshell (`( … )`), the system shall restore the enclosing working directory once the subshell closes, because the shell does not carry that `cd` past `)`.
+
+**FSG-54** When the command word merely has the basename `cd` but is not the shell builtin (e.g. `/tmp/cd`), the system shall not update the tracked working directory, because an external process cannot change its parent's directory.
+
+**FSG-55** The system shall classify redirect targets against the working directory that `cd` tracking has reached at that point in the command, so `cd ~/src/<repo> && echo x > README.md` resolves the bare target inside the protected checkout.
+
+**FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all positional target arguments (see FSG-43, FSG-44) as write targets.
+
+**FSG-17** When the command is `tee`, the system shall classify all positional target arguments (see FSG-43, FSG-44) as write targets (file arguments, not stdin).
+
+**FSG-18** When the command is `cp`, `rsync`, `install`, `ln`, or `link`, the system shall classify only the last positional target argument (see FSG-43, FSG-44; the destination) as a write target.
+
+**FSG-19** When the command is `chmod`, `chown`, `chgrp`, or `truncate`, the system shall classify all positional target arguments (see FSG-43, FSG-44; the leading mode/owner/group spec is not a target) as write targets.
 
 **FSG-20** When the command is `dd`, the system shall classify only the `of=` argument as a write target.
 
@@ -91,7 +131,7 @@ state why.
 
 **FSG-25** When a command contains a `&>` redirection, the system shall classify the redirect target as a write target.
 
-**FSG-26** When a redirection token is an fd-dup (e.g. `2>&1`) or a bare digit, the system shall not classify it as a write target.
+**FSG-26** When a redirection token is an fd-dup (e.g. `2>&1`) or a bare digit, the system shall not classify it as a write target. Any other redirect target, including a bare relative name (e.g. `> README.md`), is classified against the current working directory.
 
 #### `cd` tracking
 
@@ -108,6 +148,10 @@ state why.
 **FSG-30a** When `git push` is invoked with `--force`, `-f`, or `--force-with-lease` to a non-default PR branch, the system shall allow it. `--force-with-lease` is preferred.
 
 **FSG-65** When a `git push` inside `~/src/` carries a force form, the system shall block it only when the resolved destination is a protected branch, and shall refuse when the destination cannot be resolved or the repository's default branch cannot be established. Resolution is delegated to `safegit.ForcePushViolation`, so this guard, `safe-push`, and the PreToolUse bypass hooks share one decision.
+
+**FSG-56** When a `git push` short-option cluster contains an `f` (e.g. `-uf`), the system shall treat it as a force push, because `-f` is push's only short option spelled with an `f`. Where a value-taking short option precedes it (e.g. `-ofoo`), the system shall stop scanning at that option, because the remainder of the word is its value.
+
+**FSG-62** When a `git push` long option is an abbreviation of a destructive option (e.g. `--mir` for `--mirror`, `--forc` for `--force`), the system shall treat it as that option, because Git itself accepts unambiguous abbreviations; `--no-`-prefixed forms shall be excluded.
 
 **FSG-31** When `git merge`, `git pull`, `git fetch`, `git clone`, or `git worktree` is invoked within `~/src/`, the system shall allow it.
 
