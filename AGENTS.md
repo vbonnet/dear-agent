@@ -25,8 +25,9 @@ older subsystem documentation:
 - [Wayfinder canonical workflow](docs/policies/wayfinder-v2-canonical.ai.md):
   the nine-phase workflow is the only active Wayfinder model.
 - [Autonomous merge](docs/policies/autonomous-merge.ai.md): routine changes may
-  merge after all gates pass; security, product-behavior, and money changes
-  require a human merge.
+  be marked ready and merged by the agent that owns them once all gates pass;
+  security, product-behavior, money, and agent-governance/control-surface
+  changes require a human merge.
 
 Repository policy never overrides system, user, or orchestrator instructions.
 When two repository documents disagree, stop relying on the example, verify the
@@ -128,10 +129,16 @@ example, `agm --help`, `agm session --help`, `agm acceptance show`,
   non-merging PR with `pr-blockers <number>` before other investigation; never
   guess at a merge blocker. Resolve review threads with
   `resolve-review-threads` after addressing the underlying issue.
-- Merge eligible routine PRs with `safe-merge`. Create the human-required
-  categories named by the autonomous-merge policy with `safe-pr create --draft`;
-  do not mark them ready or arm auto-merge. A human owns that transition and
-  the merge.
+- Merge eligible routine PRs with `safe-merge`. For an ordinary draft you
+  opened, you may mark it ready for review yourself once it is otherwise
+  mergeable — the draft→ready transition is agent-owned for routine PRs, not
+  human-only. Create the human-required categories with `safe-pr create
+  --draft`; for those, do not mark them ready or arm auto-merge. A human owns
+  that transition and the merge for the carve-out categories only.
+  [autonomous-merge](docs/policies/autonomous-merge.ai.md) is the single
+  normative list of those categories — do not restate it here, or the two
+  copies will drift and agents reading this entrypoint will act on the stale
+  one. `internal/mergeloop.DefaultSensitiveGlobs` is its executable form.
 - Keep the Bead `in_progress` while its PR is open. Close it only after the
   merged commit is deployed where applicable and verified against the real
   surface.

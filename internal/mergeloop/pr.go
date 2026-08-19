@@ -58,6 +58,13 @@ type PR struct {
 	// later tick; other independent PRs continue through the same listing pass.
 	CheckProjectionError string
 	ChangedFiles         []string // best-effort; empty if not fetched
+	// ChangedFilesTruncated marks a changed-file list the provider capped.
+	// `gh pr list --json files` emits a `files(first: 100)` connection with no
+	// pagination, so a sensitive path beyond the cap is simply absent — and a
+	// carve-out that is absent from the list cannot be matched. Classification
+	// fails closed on a truncated list rather than clearing a PR it could not
+	// fully inspect.
+	ChangedFilesTruncated bool
 
 	UpdatedAt time.Time
 }
