@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -184,5 +185,17 @@ func TestPlanForNeverRoutesAnEventIntoItsOwnSession(t *testing.T) {
 
 	for msg := range bad {
 		t.Fatalf("self-relay window observed: %s", msg)
+	}
+}
+
+// Surface must refuse a plan its own filter rejected, so a future caller
+// that forgets to check plan.surface cannot reintroduce the self-relay.
+func TestSurfaceRefusesARejectedPlan(t *testing.T) {
+	cs := &completionSurfacer{}
+	errs := cs.Surface(context.Background(),
+		ops.CompletionEvent{SessionName: "dispatch", SessionID: "id-1"},
+		relayPlan{surface: false, target: "dispatch"})
+	if errs != nil {
+		t.Fatalf("Surface() = %v, want no delivery for a rejected plan", errs)
 	}
 }

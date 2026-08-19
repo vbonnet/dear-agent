@@ -180,6 +180,14 @@ func eventIsSession(event ops.CompletionEvent, target string) bool {
 // it. Best-effort per channel: a failed dispatcher or relay never blocks the
 // watch loop, and errors are returned joined for logging only.
 func (cs *completionSurfacer) Surface(ctx context.Context, event ops.CompletionEvent, plan relayPlan) []error {
+	// Defense in depth. The caller checks plan.surface before calling, but
+	// the self-filter is the guard against relaying a session's completion
+	// into itself, so it is re-asserted where delivery happens rather than
+	// trusted to stay correct at every future call site.
+	if !plan.surface {
+		return nil
+	}
+
 	var errs []error
 
 	n := &notify.Notification{
