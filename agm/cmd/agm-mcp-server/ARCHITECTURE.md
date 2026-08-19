@@ -7,10 +7,11 @@
 The AGM MCP Server (`agm-mcp-server`) is a lightweight MCP (Model Context
 Protocol) server that bridges Claude Code (and other MCP clients) with AGM
 session management and Wayfinder project tracking. It runs as a single
-stdio process and provides eleven tools across three domains:
+stdio process and provides fourteen tools across four domains:
 
 - **AGM session tools** — list, search, get, create, message, archive, and kill sessions
 - **Schema tool** — introspect available ops at runtime
+- **Dispatch routing tools** — read/set the completion relay target and read provider quota status
 - **Wayfinder tools** — list and get Wayfinder sessions from the local filesystem
 
 The server delegates all AGM session logic to `agm/internal/ops` (which owns
@@ -21,6 +22,16 @@ The running artifact's implementation identity comes from the shared
 `pkg/version` package and is exposed consistently in the process header,
 startup log, and MCP initialization response. This build identity is distinct
 from the wire protocol version, which the MCP SDK negotiates independently.
+
+## MCP contract ownership
+
+`registerMCPTools` in `main.go` and the typed request handlers in `tools.go`
+own the provider-visible tool names and schemas. `surface.Registry` supplies
+only the logical side of the compiled-contract comparator; it does not generate
+or register MCP handlers. `ops.ListOps` owns the `agm_list_ops` discovery
+catalog, which tests require to project the compiled logical tool names exactly.
+Changing a public tool therefore updates registration, typed handler schema,
+contract tests, this inventory, and the local ADR together.
 
 ## Source Files
 
@@ -45,8 +56,16 @@ from the wire protocol version, which the MCP SDK negotiates independently.
 | `agm_create_session` | `tools.go` | Create an AGM-managed session |
 | `agm_send_message` | `tools.go` | Send a message to an AGM-managed session |
 | `agm_list_ops` | `tools.go` | List all available ops (schema discovery) |
+| `agm_get_quota_status` | `tools.go` | Read the recorded provider quota status for routing decisions |
+| `agm_get_completion_relay_target` | `tools.go` | Read the Dispatch session completions are currently relayed to |
+| `agm_set_completion_relay_target` | `tools.go` | Point completion relay at a live Dispatch session (rejects an identifier that resolves to no session) |
 | `engram_list_wayfinder_sessions` | `tools.go` + `wayfinder.go` | List Wayfinder sessions from `wf/` directory |
 | `engram_get_wayfinder_session` | `tools.go` + `wayfinder.go` | Get full frontmatter for one Wayfinder session |
+
+Every row above names the file the running server actually executes.
+`codegen_mcp.go` carries a `//go:build ignore` tag: it is generated
+reference output for surface-parity checking and never reaches the
+production binary, so it is not a place to change tool behavior.
 
 ## Configuration (`Config` struct)
 

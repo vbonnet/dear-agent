@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MCP discovery now excludes uncallable entries** (2026-08-01):
+  `agm_list_ops` no longer advertises `get_status` or `list_workspaces`.
+  Neither entry was callable through MCP `tools/list`; clients should use
+  `tools/list` for callable-tool discovery. The ten public MCP tool names and
+  schemas are unchanged.
+
 - **Moved `select-option` from the `session` group to the `send` group** (2026-05-17):
   Programmatic AskUserQuestion answering is now `agm send select-option <session> <N>`
   instead of `agm session select-option <session> <N>`. This co-locates it with the

@@ -126,6 +126,7 @@ func TestStallDetector_NoStalls_NoEvents(t *testing.T) {
 func TestStallRecovery_PublishesRecovered(t *testing.T) {
 	setupTestRetryDir(t)
 	recovery := NewStallRecovery(&OpContext{}, "")
+	injectDeliverableRouter(t, recovery)
 
 	bus := &captureBus{}
 	recovery.SetBus(bus)
@@ -136,7 +137,7 @@ func TestStallRecovery_PublishesRecovered(t *testing.T) {
 		Evidence:    "Error: timeout appears 5 times",
 	}
 
-	// error_loop without orchestrator logs locally and succeeds
+	// error_loop reaches the discovered supervisor and succeeds
 	action, err := recovery.Recover(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Recover() error = %v", err)
@@ -170,6 +171,9 @@ func TestStallRecovery_PublishesRecovered(t *testing.T) {
 func TestStallRecovery_NoPublishOnFailure(t *testing.T) {
 	setupTestRetryDir(t)
 	recovery := NewStallRecovery(&OpContext{}, "")
+	// Isolated queue but no reachable recipient: this test is about the
+	// failure path staying a failure.
+	injectIsolatedRouter(t, recovery)
 
 	bus := &captureBus{}
 	recovery.SetBus(bus)
@@ -180,7 +184,7 @@ func TestStallRecovery_NoPublishOnFailure(t *testing.T) {
 		Duration:    10 * time.Minute,
 	}
 
-	// permission_prompt without orchestrator fails
+	// permission_prompt with no reachable supervisor fails
 	_, err := recovery.Recover(context.Background(), event)
 	if err == nil {
 		t.Fatal("Expected error for permission_prompt without orchestrator")
@@ -195,6 +199,7 @@ func TestStallRecovery_NoPublishOnFailure(t *testing.T) {
 func TestStallRecovery_NoBus_NoPublish(t *testing.T) {
 	setupTestRetryDir(t)
 	recovery := NewStallRecovery(&OpContext{}, "")
+	injectDeliverableRouter(t, recovery)
 	// Don't set bus — should not panic
 
 	event := StallEvent{

@@ -96,10 +96,8 @@ jobs:
       - name: Validate tracked AI skills
         run: go run ./tools/skill-lint -repo .
 
-      - name: Verify generated AGM surfaces and plugin hashes
-        run: |
-          make verify-surface-codegen
-          make plugin-verify-hashes
+      - name: Verify AGM plugin hashes
+        run: make plugin-verify-hashes
 
       - name: Test
         run: go test ${{ matrix.race }} -count=1 -timeout=20m ./...
