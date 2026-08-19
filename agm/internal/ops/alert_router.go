@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -171,19 +172,34 @@ func NewAlertRouter(ctx *OpContext) *AlertRouter {
 	}
 }
 
-// workspaceIdentity names the workspace an alert came from. The default
-// queue lives under the user's home directory and is shared by every
-// workspace on the host, so without this two workspaces running watchers
-// with the same session and checker names would suppress each other's
-// alerts, and the record would not say which one produced it.
+// workspaceIdentity names the workspace an alert came from.
+//
+// The default queue lives under the user's home directory and is shared by
+// every workspace on the host, so without this, two workspaces running
+// watchers with the same session and checker names would suppress each
+// other's alerts, and the record would not say which one produced it.
+//
+// Most callers build an OpContext without a Config (see
+// newOpContextWithStorage), so relying on that alone would leave every
+// alert unscoped and the fix inert. Falling back to config.DetectWorkspace
+// resolves the same workspace the session store itself resolved, which is
+// the identity that actually distinguishes two concurrent meshes.
 func workspaceIdentity(ctx *OpContext) string {
-	if ctx == nil || ctx.Config == nil {
+	if ctx != nil && ctx.Config != nil {
+		if ws := strings.TrimSpace(ctx.Config.Storage.Workspace); ws != "" {
+			return ws
+		}
+		if ws := strings.TrimSpace(ctx.Config.Workspace); ws != "" {
+			return ws
+		}
+	}
+	// A host with no detectable workspace gets an empty scope, which is the
+	// pre-existing single-scope behavior rather than a failure.
+	ws, err := config.DetectWorkspace("")
+	if err != nil {
 		return ""
 	}
-	if ws := strings.TrimSpace(ctx.Config.Storage.Workspace); ws != "" {
-		return ws
-	}
-	return strings.TrimSpace(ctx.Config.Workspace)
+	return strings.TrimSpace(ws)
 }
 
 // DefaultAlertQueuePath returns the default alert queue file path.

@@ -515,3 +515,13 @@ func jsonLine(rec AlertRecord) ([]byte, error) {
 	}
 	return append(data, '\n'), nil
 }
+
+// The real watcher builds an OpContext with no Config, so workspace scoping
+// has to work without one or the dedupe fix is inert in production.
+func TestAlertRouterDerivesWorkspaceWithoutAConfig(t *testing.T) {
+	t.Setenv("ENGRAM_WORKSPACE", "/tmp/workspace-alpha")
+	router := NewAlertRouter(&OpContext{})
+	if router.workspace != "/tmp/workspace-alpha" {
+		t.Fatalf("workspace = %q, want the detected workspace", router.workspace)
+	}
+}
