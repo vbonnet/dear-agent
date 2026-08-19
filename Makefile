@@ -440,7 +440,8 @@ install-configure-settings: build-configure-settings
 
 # Build safe-push: a git-push wrapper that resets the credential helper chain
 # to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
-# never force-pushes. See internal/safegit and vbonnet/engram-research
+# refuses force-pushes to protected branches. See internal/safegit and
+# vbonnet/engram-research
 # retrospectives/2026-06-08-git-push-credential-hang.md.
 build-safe-push:
 	@echo "Building safe-push..."

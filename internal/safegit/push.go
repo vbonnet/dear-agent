@@ -1,5 +1,5 @@
 // Package safegit builds and runs git pushes that cannot hang on the macOS
-// keychain credential helper, and cannot force-push.
+// keychain credential helper, and only force-push non-protected branches.
 //
 // # The hang it prevents
 //
@@ -76,8 +76,6 @@ func CredentialResetArgs(ghPath string) []string {
 }
 
 // ForceFlag reports the first force-push flag or force refspec in args, if any.
-// Force-push is rejected by construction: a wrapper that can clobber shared
-// history is not a wrapper worth allow-listing.
 //
 // Detected forms:
 //   - -f / --force / --force-with-lease / --force-if-includes (flags)
@@ -181,6 +179,81 @@ var forcingLongOpts = []string{
 	"--mirror",
 }
 
+// ProtectedBranches returns the branch names that must not be force-pushed.
+//
+// Deprecated: use ProtectedTargets, which also reports whether the
+// repository's default branch could be established. This wrapper drops that
+// signal and is kept only for callers that predate it.
+func ProtectedBranches(repoDir string) map[string]bool {
+	protected, _ := ProtectedTargets(repoDir)
+	return protected
+}
+
+// ForcePushViolation reports whether pushArgs force-push to a branch the
+// policy protects. Force-pushing a PR branch is allowed; every other outcome
+// is a refusal.
+//
+// The check fails closed in three ways, each of which was a live bypass:
+//
+//   - The whole-repository forms (--mirror, --all, --tags) are refused
+//     outright, because what they update is not knowable from the operands.
+//   - A destination set that cannot be positively enumerated is refused. A
+//     wildcard refspec, a configured remote.<name>.push, push.default=matching,
+//     or an unknown current branch all land here. Assuming "it must be the
+//     current branch" is what allowed `safe-push -f origin` to rewrite main
+//     from a feature branch tracking origin/main.
+//   - A repository whose default branch cannot be established is refused,
+//     because a default of `trunk` or `develop` would otherwise be protected
+//     only by the conventional-name list.
+//
+// The returned string names what blocked the push, so the caller can say so.
+func ForcePushViolation(repoDir, currentBranch string, pushArgs []string) (string, bool) {
+	for _, a := range pushArgs {
+		name, _, _ := strings.Cut(a, "=")
+		if wholeRepoPushOptions[name] {
+			return name, true
+		}
+	}
+	flag, ok := ForceFlag(pushArgs)
+	if !ok {
+		return "", false
+	}
+	if currentBranch == "" {
+		currentBranch = currentPushBranch(repoDir)
+	}
+	protected, defaultKnown := ProtectedTargets(repoDir)
+	if !defaultKnown {
+		return "the repository default branch is unknown " +
+			"(run `git remote set-head origin --auto`)", true
+	}
+	targets, resolved := pushDestinations(repoDir, currentBranch, pushArgs)
+	if !resolved {
+		return "the push destination could not be determined from " + flag, true
+	}
+	// A `--force-with-lease=<ref>` names the ref the caller intends to force,
+	// which is a destination in its own right even when the operands do not
+	// repeat it.
+	targets = append(targets, leaseRefs(pushArgs)...)
+	for _, branch := range targets {
+		if protected[branch] {
+			return branch, true
+		}
+	}
+	return flag, false
+}
+
+func currentPushBranch(repoDir string) string {
+	out, err := gitQuery(repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(out)
+	if branch == "HEAD" {
+		return ""
+	}
+	return branch
+}
+
 // PushArgs assembles the full git argv for a safe push: an optional `-C
 // repoDir`, the credential reset, `push`, and the caller's push arguments.
 func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
@@ -195,14 +268,15 @@ func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
 }
 
 // Push runs a safe push, streaming git's output to the caller's stdout/stderr.
-// It rejects force-push, bounds the run by timeout (DefaultTimeout if zero),
-// and sets GIT_TERMINAL_PROMPT=0 so git never falls back to an interactive
-// prompt. A timeout is reported as a credential-helper hang, the failure this
-// package exists to convert from "hang forever" into "fail in seconds".
+// It rejects force-pushes to protected branches, bounds the run by timeout
+// (DefaultTimeout if zero), and sets GIT_TERMINAL_PROMPT=0 so git never falls
+// back to an interactive prompt. A timeout is reported as a credential-helper
+// hang, the failure this package exists to convert from "hang forever" into
+// "fail in seconds".
 func Push(repoDir string, pushArgs []string, timeout time.Duration) error {
-	if flag, ok := ForceFlag(pushArgs); ok {
-		return fmt.Errorf("refusing %q: safe-push blocks force-pushes, --mirror, and +refspec "+
-			"(any of these can overwrite remote history) — remove the flag/refspec to proceed", flag)
+	if target, blocked := ForcePushViolation(repoDir, currentPushBranch(repoDir), pushArgs); blocked {
+		return fmt.Errorf("refusing %q: safe-push blocks force-pushes to protected/default branches "+
+			"(main, master, and the repository default); use --force-with-lease only for non-default PR branches", target)
 	}
 	gh, err := ResolveGh()
 	if err != nil {

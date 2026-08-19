@@ -13,15 +13,15 @@ func TestIsProtectedBranch(t *testing.T) {
 	}{
 		{"main", true},
 		{"master", true},
-		{"develop", true},
-		{"release", true},
+		{"develop", false},
+		{"release", false},
 		{"feature/add-login", false},
 		{"fix-safety-regressions", false},
 		{"hotfix-123", false},
 		{"", false},
 	}
 	for _, tc := range cases {
-		if got := IsProtectedBranch(tc.name); got != tc.want {
+		if got := IsProtectedBranch("", tc.name); got != tc.want {
 			t.Errorf("IsProtectedBranch(%q) = %v, want %v", tc.name, got, tc.want)
 		}
 	}
