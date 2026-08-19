@@ -40,6 +40,12 @@ however many dispatched completions were recorded after it.`,
 		if err != nil {
 			return err
 		}
+		// Encode an empty result as [] rather than null: this is a list
+		// endpoint, and a consumer iterating the output should not have to
+		// special-case "no alerts" as a different JSON type.
+		if records == nil {
+			records = []ops.AlertRecord{}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(records); err != nil {
