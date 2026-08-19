@@ -198,7 +198,7 @@ func archiveResolvedSession(ctx *OpContext, m *manifest.Manifest, req *ArchiveSe
 		return nil, ErrStorageError("archive_session", err)
 	}
 
-	mcpKilled, postCleanup, sessionCleanup, legacyArchivePath := runArchiveCleanup(ctx, m, req)
+	mcpKilled, postCleanup, sessionCleanup, legacyArchivePath := runArchiveCleanup(ctx, m, req, verification.HasOpenPR)
 	externalArchives := archiveExternalForContext(ctx, m)
 	for _, outcome := range externalArchives {
 		if outcome.Status == ExternalArchiveFailed {
@@ -236,7 +236,12 @@ func normalizeArchiveOutcome(outcome manifest.SessionOutcome) (manifest.SessionO
 // runArchiveCleanup performs the post-update cleanup steps (trust event,
 // monitor deregister, MCP processes, tmux process group, worktree/sandbox
 // cleanup, additionalDirectories removal). Returns (mcpKilled, postCleanup).
-func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSessionRequest) (int, *CleanupResult, *cleanup.Result, string) {
+//
+// hasOpenPR is the verification result's PR-awareness signal (fix for
+// ce-93lw.27 gap #4): it gates whether the local session branch is
+// force-deleted, so a branch with a confirmed open PR survives cleanup
+// instead of being stripped out from under in-flight work.
+func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSessionRequest, hasOpenPR bool) (int, *CleanupResult, *cleanup.Result, string) {
 	legacyManifestPath := ""
 	if req.LegacySessionsDir != "" {
 		legacyManifestPath = filepath.Join(req.LegacySessionsDir, m.SessionID, "manifest.yaml")
@@ -270,7 +275,7 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 	postCleanup := cleanupAfterArchive(
 		m.SessionID, m.Name,
 		m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
-		req.KeepSandbox, cleanSandbox,
+		req.KeepSandbox, hasOpenPR, cleanSandbox,
 	)
 	sessionCleanup := cleanupTrackedSessionResources(ctx, m.Name)
 	cleanupPendingDir(m.Name)
@@ -506,7 +511,6 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 }
 
 // cleanupSandboxDir unmounts and removes the sandbox directory for a session.
-// Returns true if a sandbox directory was found and removed.
 // Preserves .claude/settings.local.json from the overlay upper layer before
 // removal, as it contains RBAC permission rules that should not be lost.
 //
@@ -517,33 +521,43 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 // intentionally nil here: the caller archived this session immediately before
 // invoking cleanup. A refused reap keeps the sandbox for the periodic
 // `agm sandbox gc` sweep to retry once the blocker is gone.
-func cleanupSandboxDir(sessionID, mergedPath string) bool {
+//
+// Returns (removed, existed, reason): existed is false only when there was
+// no sandbox directory to remove in the first place (not a failure); every
+// other refusal or removal failure reports existed=true so callers can
+// distinguish "nothing to do" from a real, worth-surfacing failure. reason
+// carries the underlying refusal so the cleanup audit log records what
+// actually blocked the reap, rather than a generic line that sends the
+// operator to a log file with no detail in it.
+func cleanupSandboxDir(sessionID, mergedPath string) (removed bool, existed bool, reason string) {
 	base, err := sandboxgc.DefaultBase()
 	if err != nil {
 		slog.Warn("Failed to get home dir for sandbox cleanup", "error", err)
-		return false
+		// We cannot even determine whether a sandbox exists — treat as a
+		// real failure rather than silently reporting "nothing to remove".
+		return false, true, fmt.Sprintf("cannot resolve the sandbox base directory: %v", err)
 	}
 	return cleanupSandboxDirWithChecker(sessionID, mergedPath, base, sandboxgc.NewChecker(base, nil))
 }
 
-func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) bool {
+func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) (removed bool, existed bool, reason string) {
 	sandboxDir := filepath.Join(base, sessionID)
 	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
 		slog.Warn("Refusing sandbox cleanup with a mismatched safety checker", "session", sessionID)
-		return false
+		return false, true, "safety checker base does not match the cleanup base"
 	}
 	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
 		slog.Warn("Refusing sandbox cleanup outside the allowlisted base", "session", sessionID, "error", err)
-		return false
+		return false, true, fmt.Sprintf("sandbox path is outside the allowlisted base: %v", err)
 	}
 	expectedMergedPath := filepath.Join(sandboxDir, "merged")
 	if mergedPath != expectedMergedPath {
 		slog.Warn("Refusing sandbox cleanup with an unattributed merged path",
 			"session", sessionID, "path", mergedPath, "expected", expectedMergedPath)
-		return false
+		return false, true, fmt.Sprintf("merged path %s is not the expected %s", mergedPath, expectedMergedPath)
 	}
 	if _, err := os.Lstat(sandboxDir); os.IsNotExist(err) {
-		return false
+		return false, false, ""
 	}
 
 	// Preserve .claude/settings.local.json from the upper layer before removal.
@@ -558,11 +572,11 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 	if err := checker.Reap(sandboxDir); err != nil {
 		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
 			"session", sessionID, "path", sandboxDir, "error", err)
-		return false
+		return false, true, err.Error()
 	}
 
 	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
-	return true
+	return true, true, ""
 }
 
 func ownedSandboxPathForArchive(m *manifest.Manifest) string {
