@@ -1,23 +1,29 @@
-// Command cleanup-worktrees finds and removes stale git worktrees.
+// Command cleanup-worktrees reports stale git worktrees for one repository
+// and, with --fix, removes only those that positively prove reapable.
+//
+// The safety model is an allowlist, inherited from the canonical sweep in
+// agm/internal/ops/worktree_sweep.go: a worktree is removed only when it is
+// clean, unowned by any live session, unlocked, and carries no commits
+// beyond the target ref. Every other verdict, including every failed probe,
+// keeps the checkout. Remote branches are never deleted.
 package main
 
 import (
-	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func main() {
-	os.Setenv("GIT_TERMINAL_PROMPT", "0")
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(context.Background(), os.Args[1:]); err != nil {
 		var exit exitError
-		fmt.Fprintln(os.Stderr, err)
+		if msg := err.Error(); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+		}
 		if errors.As(err, &exit) {
 			os.Exit(exit.code)
 		}
@@ -25,12 +31,16 @@ func main() {
 	}
 }
 
+// errNoTargetRef reports that neither origin/HEAD nor origin/main resolves.
+var errNoTargetRef = errors.New("error: target ref not found: origin/main")
+
 type exitError struct {
 	code int
 	err  error
 }
 
 func (e exitError) Error() string { return e.err.Error() }
+func (e exitError) Unwrap() error { return e.err }
 
 type preserveFlag map[string]bool
 
@@ -50,57 +60,107 @@ type config struct {
 	preserve preserveFlag
 }
 
-type worktree struct {
-	path     string
-	branch   string
-	head     string
-	bare     bool
-	detached bool
-}
-
-func run(args []string) error {
+func run(ctx context.Context, args []string) error {
 	cfg, err := parse(args)
 	if err != nil {
 		return err
 	}
-	if err := gitOK(cfg.repo, "rev-parse", "--git-dir"); err != nil {
+	if err := gitOK(ctx, cfg.repo, "rev-parse", "--git-dir"); err != nil {
 		return exitError{2, fmt.Errorf("error: not a git directory: %s", cfg.repo)}
 	}
-	target, err := targetRef(cfg.repo)
+	// Resolve the supplied path to its checkout root before any comparison
+	// with porcelain output, which is always absolute.
+	repoRoot, err := topLevel(ctx, cfg.repo)
+	if err != nil {
+		return exitError{2, fmt.Errorf("error: cannot resolve worktree root for %s: %w", cfg.repo, err)}
+	}
+	cfg.repo = repoRoot
+
+	// Fetch before resolving the target: a fresh clone that has never
+	// fetched has no origin/HEAD or origin/main to resolve, and refusing
+	// there would reject a repository a single fetch makes workable.
+	if err := gitOK(ctx, cfg.repo, "fetch", "--quiet", "origin"); err != nil {
+		logf("warning: fetch failed; using cached refs")
+	}
+	target, err := targetRef(ctx, cfg.repo)
 	if err != nil {
 		return exitError{2, err}
 	}
+	env := newScanEnv(ctx, cfg, target)
+	banner(cfg, env)
+
+	worktrees, err := listWorktrees(ctx, cfg.repo)
+	if err != nil {
+		return exitError{2, err}
+	}
+	return report(tally(ctx, cfg, env, worktrees))
+}
+
+// newScanEnv resolves the run-wide facts every classification depends on.
+func newScanEnv(ctx context.Context, cfg config, target string) scanEnv {
+	active, activeKnown := activeSessions(ctx)
+	env := scanEnv{
+		target:       target,
+		targetBranch: strings.TrimPrefix(target, "origin/"),
+		now:          time.Now(),
+		active:       active,
+		activeKnown:  activeKnown,
+		protected:    map[string]bool{canonical(cfg.repo): true},
+	}
+	// The caller's own checkout is protected independently of --repo. Git
+	// will happily unlink a worktree containing the caller's cwd, which
+	// leaves the invoking shell in a directory that no longer exists.
+	if cwd, err := os.Getwd(); err == nil {
+		if root, err := topLevel(ctx, cwd); err == nil {
+			env.protected[root] = true
+		}
+	}
+	return env
+}
+
+func banner(cfg config, env scanEnv) {
 	logf("repo: %s", cfg.repo)
-	logf("target ref: %s", target)
-	logf("max-age: %d days", cfg.maxAge)
+	logf("target ref: %s", env.target)
+	logf("max-age: %d days (report-only)", cfg.maxAge)
 	if cfg.fix {
-		logf("mode: FIX")
+		logf("mode: FIX (removes MERGED worktrees only)")
 	} else {
 		logf("mode: DRY-RUN")
 	}
-	if err := gitOK(cfg.repo, "fetch", "--quiet", "origin"); err != nil {
-		logf("warning: fetch failed; using cached refs")
+	if !env.activeKnown {
+		logf("warning: active-session probe failed; no worktree will be removed this run")
 	}
-	worktrees, err := listWorktrees(cfg.repo)
-	if err != nil {
-		return err
-	}
-	failed := 0
-	stale, kept, preserved := 0, 0, 0
-	now := time.Now()
+}
+
+// counts is the per-class tally reported at the end of a scan.
+type counts struct {
+	byClass map[classification]int
+	removed int
+	failed  int
+}
+
+func tally(ctx context.Context, cfg config, env scanEnv, worktrees []worktree) counts {
+	c := counts{byClass: map[classification]int{}}
 	for _, wt := range worktrees {
-		if samePath(wt.path, cfg.repo) {
-			continue
+		v := inspect(ctx, cfg, env, wt)
+		c.byClass[v.class]++
+		if v.removed {
+			c.removed++
 		}
-		outcome := inspect(cfg, target, now, wt)
-		stale += outcome.stale
-		kept += outcome.kept
-		preserved += outcome.preserved
-		failed += outcome.failed
+		if v.failed {
+			c.failed++
+		}
 	}
-	logf("summary: stale=%d kept=%d preserved=%d failed=%d", stale, kept, preserved, failed)
-	if failed > 0 {
-		return exitError{3, fmt.Errorf("cleanup-worktrees: %d removal(s) failed", failed)}
+	return c
+}
+
+func report(c counts) error {
+	logf("summary: merged=%d orphaned=%d dirty=%d active=%d protected=%d unknown=%d removed=%d failed=%d",
+		c.byClass[classMerged], c.byClass[classOrphaned], c.byClass[classDirty],
+		c.byClass[classActive], c.byClass[classProtected], c.byClass[classUnknown],
+		c.removed, c.failed)
+	if c.failed > 0 {
+		return exitError{3, fmt.Errorf("cleanup-worktrees: %d removal(s) failed", c.failed)}
 	}
 	return nil
 }
@@ -111,12 +171,12 @@ func parse(args []string) (config, error) {
 		switch args[i] {
 		case "-h", "--help":
 			usage()
-			return cfg, exitError{0, fmt.Errorf("")}
+			return cfg, exitError{0, errors.New("")}
 		case "--fix":
 			cfg.fix = true
 		case "--max-age":
 			if i+1 >= len(args) {
-				return cfg, exitError{1, fmt.Errorf("error: --max-age needs a value")}
+				return cfg, exitError{1, errors.New("error: --max-age needs a value")}
 			}
 			n, err := strconv.Atoi(args[i+1])
 			if err != nil {
@@ -126,7 +186,7 @@ func parse(args []string) (config, error) {
 			i++
 		case "--preserve":
 			if i+1 >= len(args) {
-				return cfg, exitError{1, fmt.Errorf("error: --preserve needs a value")}
+				return cfg, exitError{1, errors.New("error: --preserve needs a value")}
 			}
 			cfg.preserve[args[i+1]] = true
 			i++
@@ -143,7 +203,7 @@ func parse(args []string) (config, error) {
 	}
 	if cfg.repo == "" {
 		usage()
-		return cfg, exitError{1, fmt.Errorf("error: expected one repo path")}
+		return cfg, exitError{1, errors.New("error: expected one repo path")}
 	}
 	return cfg, nil
 }
@@ -152,155 +212,6 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "Usage: cleanup-worktrees <repo-path> [--fix] [--max-age DAYS] [--preserve NAME ...]")
 }
 
-type outcome struct{ stale, kept, preserved, failed int }
-
-func inspect(cfg config, target string, now time.Time, wt worktree) outcome {
-	if wt.bare || wt.detached {
-		return outcome{}
-	}
-	name := filepath.Base(wt.path)
-	if cfg.preserve[name] {
-		logf("preserve: %s (--preserve)", name)
-		return outcome{preserved: 1}
-	}
-	ahead := gitInt(cfg.repo, "rev-list", "--count", target+".."+wt.head)
-	last := gitInt(cfg.repo, "log", "-1", "--format=%ct", wt.head)
-	ageDays := int(now.Sub(time.Unix(int64(last), 0)).Hours() / 24)
-	reason := ""
-	if ahead == 0 {
-		reason = fmt.Sprintf("merged-or-empty (0 commits ahead of %s)", target)
-	} else if ageDays >= cfg.maxAge {
-		reason = fmt.Sprintf("idle (%d days since last commit, ahead=%d)", ageDays, ahead)
-	}
-	if reason == "" {
-		return outcome{kept: 1}
-	}
-	logf("stale: %s [%s] - %s", name, wt.branch, reason)
-	if !cfg.fix {
-		logf("  would: git -C %s worktree remove --force %s", cfg.repo, wt.path)
-		logf("  would: git -C %s branch -D %s", cfg.repo, wt.branch)
-		logf("  would: git -C %s push origin --delete %s", cfg.repo, wt.branch)
-		return outcome{stale: 1}
-	}
-	if err := runGitPassthrough(cfg.repo, "worktree", "remove", "--force", wt.path); err != nil {
-		logf("  FAILED: worktree remove %s", wt.path)
-		logf("  skipped branch cleanup for %s because worktree removal failed", strings.TrimPrefix(wt.branch, "refs/heads/"))
-		return outcome{stale: 1, failed: 1}
-	}
-	branch := strings.TrimPrefix(wt.branch, "refs/heads/")
-	if branch != "" && gitOK(cfg.repo, "rev-parse", "--verify", "--quiet", branch) == nil {
-		if err := runGitPassthrough(cfg.repo, "branch", "-D", branch); err != nil {
-			logf("  FAILED: branch -D %s", branch)
-			return outcome{stale: 1, failed: 1}
-		}
-	}
-	if branch != "" {
-		if err := runGitPassthrough(cfg.repo, "push", "origin", "--delete", branch); err != nil {
-			logf("  note: remote branch %s already gone or push failed", branch)
-		}
-	}
-	return outcome{stale: 1}
-}
-
-func targetRef(repo string) (string, error) {
-	if gitOK(repo, "rev-parse", "--verify", "--quiet", "origin/HEAD") == nil {
-		if out, err := git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && strings.TrimSpace(out) != "" {
-			return strings.TrimSpace(out), nil
-		}
-	}
-	if gitOK(repo, "rev-parse", "--verify", "--quiet", "origin/main") != nil {
-		return "", fmt.Errorf("error: target ref not found: origin/main")
-	}
-	return "origin/main", nil
-}
-
-func listWorktrees(repo string) ([]worktree, error) {
-	out, err := git(repo, "worktree", "list", "--porcelain")
-	if err != nil {
-		return nil, err
-	}
-	var result []worktree
-	var cur worktree
-	flush := func() {
-		if cur.path != "" {
-			result = append(result, cur)
-			cur = worktree{}
-		}
-	}
-	for line := range strings.SplitSeq(out, "\n") {
-		if line == "" {
-			flush()
-			continue
-		}
-		key, val, _ := strings.Cut(line, " ")
-		switch key {
-		case "worktree":
-			flush()
-			cur.path = val
-		case "HEAD":
-			cur.head = val
-		case "branch":
-			cur.branch = val
-		case "bare":
-			cur.bare = true
-		case "detached":
-			cur.detached = true
-		}
-	}
-	flush()
-	return result, nil
-}
-
-func gitInt(repo string, args ...string) int {
-	out, err := git(repo, args...)
-	if err != nil {
-		return 0
-	}
-	n, _ := strconv.Atoi(strings.TrimSpace(out))
-	return n
-}
-
-func gitOK(repo string, args ...string) error {
-	_, err := git(repo, args...)
-	return err
-}
-
-func git(repo string, args ...string) (string, error) {
-	all := append([]string{"-C", repo}, args...)
-	cmd := exec.Command("git", all...)
-	var out, errb bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(errb.String())
-		if msg != "" {
-			return out.String(), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
-		}
-		return out.String(), err
-	}
-	return out.String(), nil
-}
-
-func runGitPassthrough(repo string, args ...string) error {
-	all := append([]string{"-C", repo}, args...)
-	cmd := exec.Command("git", all...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 func logf(format string, args ...any) {
 	fmt.Printf("[cleanup-worktrees] "+format+"\n", args...)
-}
-
-func samePath(a, b string) bool {
-	aa, errA := filepath.EvalSymlinks(a)
-	bb, errB := filepath.EvalSymlinks(b)
-	if errA == nil {
-		a = aa
-	}
-	if errB == nil {
-		b = bb
-	}
-	return filepath.Clean(a) == filepath.Clean(b)
 }

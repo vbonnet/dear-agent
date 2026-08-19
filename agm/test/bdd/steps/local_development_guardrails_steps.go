@@ -108,7 +108,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
 	ctx.Step(`^AGM runs the protected cleanup regressions$`, agmRunsProtectedCleanupRegressions)
 	ctx.Step(`^AGM runs the cleanup-worktrees classification regressions$`, agmRunsCleanupWorktreesRegressions)
-	ctx.Step(`^stale-worktree cleanup should classify, preserve, and remove as specified$`, cleanupWorktreesShouldClassifyPreserveAndRemove)
+	ctx.Step(`^stale-worktree cleanup should refuse dirty and active worktrees and fail closed on probe errors$`, cleanupWorktreesShouldClassifyPreserveAndRemove)
 	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
 	registerSafePRRegressionGuardrailSteps(ctx)
 	ctx.Step(`^AGM runs the affected runner process-tree regressions$`, agmRunsAffectedRunnerProcessTreeRegressions)
@@ -249,8 +249,15 @@ func agmRunsCleanupWorktreesRegressions(ctx context.Context) error {
 		"./cmd/cleanup-worktrees",
 		"TestParse",
 		"TestInspectClassification",
+		"TestInspectRefusesDirtyWorktree",
+		"TestInspectRefusesActiveSessionWorktree",
+		"TestInspectFailsClosedOnProbeFailure",
 		"TestInspectFixRemovesStaleWorktreeAndBranch",
+		"TestGitIntReportsFailureInsteadOfZero",
+		"TestGitEnvScrubsAmbientRepositorySelectors",
 		"TestListWorktreesParsesPorcelain",
+		"TestParseWorktreesKeepsNewlineBearingPaths",
+		"TestParseWorktreesMarksLocked",
 		"TestTargetRefPrefersOriginMain",
 		"TestRunRejectsNonGitDirectory",
 	)

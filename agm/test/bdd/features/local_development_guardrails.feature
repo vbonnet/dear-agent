@@ -109,9 +109,9 @@ Feature: Local development guardrails
     Then Wayfinder should preserve the protected worktree and reject cleanup
     And Wayfinder should remove the worktree after the safe-pr transaction
 
-  Scenario: Stale-worktree cleanup classification is regression covered
+  Scenario: Stale-worktree cleanup never reaps dirty or session-owned checkouts
     When AGM runs the cleanup-worktrees classification regressions
-    Then stale-worktree cleanup should classify, preserve, and remove as specified
+    Then stale-worktree cleanup should refuse dirty and active worktrees and fail closed on probe errors
 
   Scenario: Automated cleanup preserves active Git worktree locks
     When AGM runs the protected cleanup regressions

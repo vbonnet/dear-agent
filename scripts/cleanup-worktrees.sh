@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Thin shim for cmd/cleanup-worktrees. Prefers a prebuilt binary and
+# otherwise builds one from the module root, so an absolute invocation from
+# any working directory still resolves this repository's go.mod.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,7 +11,8 @@ if [[ -x "$ROOT/bin/cleanup-worktrees" ]]; then
   exec "$ROOT/bin/cleanup-worktrees" "$@"
 fi
 
-TMP="${TMPDIR:-/tmp}/cleanup-worktrees.$$"
-trap 'rm -f "$TMP"' EXIT
-go build -o "$TMP" "$ROOT/cmd/cleanup-worktrees"
-exec "$TMP" "$@"
+# Not exec: the EXIT trap must run so the temporary build is not leaked.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+(cd -- "$ROOT" && go build -o "$TMP/cleanup-worktrees" ./cmd/cleanup-worktrees)
+"$TMP/cleanup-worktrees" "$@"
