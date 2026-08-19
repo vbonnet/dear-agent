@@ -74,7 +74,7 @@ func SafeRebase(cfg RebaseConfig) (*RebaseResult, error) {
 	if branch == "HEAD" {
 		return nil, fmt.Errorf("refusing to rebase: repository is in a detached HEAD state")
 	}
-	if IsProtectedBranch(branch) {
+	if IsProtectedBranch(dir, branch) {
 		return nil, fmt.Errorf("refusing to rebase %q — safe-rebase only operates on feature branches, "+
 			"never on protected branches (main, master). Check out your feature branch first", branch)
 	}
@@ -149,12 +149,8 @@ func SafeRebase(cfg RebaseConfig) (*RebaseResult, error) {
 }
 
 // IsProtectedBranch returns true for branches that must never be force-pushed or rebased.
-func IsProtectedBranch(name string) bool {
-	switch name {
-	case "main", "master", "develop", "release":
-		return true
-	}
-	return false
+func IsProtectedBranch(repoDir, name string) bool {
+	return ProtectedBranches(repoDir)[name]
 }
 
 func currentBranch(dir string) (string, error) {
@@ -225,7 +221,7 @@ func parseConflicts(dir string) []string {
 }
 
 func forcePushFeatureBranch(dir, branch string, timeout time.Duration) error {
-	if IsProtectedBranch(branch) {
+	if IsProtectedBranch(dir, branch) {
 		return fmt.Errorf("refusing to force-push protected branch %q", branch)
 	}
 
